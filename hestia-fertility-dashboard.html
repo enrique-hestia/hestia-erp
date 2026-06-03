@@ -279,9 +279,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
     <div class="filter-group">
       <span class="filter-label">Periodo:</span>
       <select class="select-pill" id="periodoSelect" onchange="updatePeriod(this.value)">
-        <option value="2026-Q1">Q1 2026</option>
-        <option value="2026-Q2" selected>Q2 2026</option>
-        <option value="2025-anual">2025 Anual</option>
+        <option value="">Cargando…</option>
       </select>
     </div>
     <div class="filter-group">
@@ -663,18 +661,19 @@ function setStatus(msg, type='ok'){
 /* ══════════════════════════════════════════════════════
    CARGA DE DATOS DESDE SHEETS
    ══════════════════════════════════════════════════════ */
-async function loadData(){
-  if(APPS_SCRIPT_URL === 'REEMPLAZA_CON_TU_URL'){
-    setStatus('⚠ Configura la URL del Apps Script', 'err');
-    renderAll(getFallbackData());
-    return;
-  }
+let currentPeriodo = '';
+
+async function loadData(periodo){
   setStatus('Actualizando…');
+  var url = APPS_SCRIPT_URL + (periodo ? '?periodo=' + encodeURIComponent(periodo) : '');
   try{
-    const res  = await fetch(APPS_SCRIPT_URL);
+    const res  = await fetch(url);
     const json = await res.json();
     if(json.error) throw new Error(json.error);
     sheetsData = json;
+    currentPeriodo = json.periodo;
+    // Poblar dropdown con los periodos disponibles en Sheets
+    poblarPeriodos(json.periodos, json.periodo);
     renderAll(json);
     const hora = new Date(json.updated).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
     setStatus('Actualizado ' + hora);
@@ -683,6 +682,21 @@ async function loadData(){
     console.error('Sheets fetch error:', e);
     if(!sheetsData) renderAll(getFallbackData());
   }
+}
+
+function poblarPeriodos(periodos, seleccionado) {
+  const sel = document.getElementById('periodoSelect');
+  // Solo actualizar si cambiaron los periodos
+  if(sel.dataset.loaded === JSON.stringify(periodos.map(function(p){return p.id;}).join())) return;
+  sel.innerHTML = '';
+  periodos.forEach(function(p){
+    var opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.label;
+    if(p.id === seleccionado) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  sel.dataset.loaded = JSON.stringify(periodos.map(function(p){return p.id;}).join());
 }
 
 /* ── Datos de respaldo (igual que antes, por si no hay conexión) ─── */
@@ -885,7 +899,7 @@ function updateSegment(val){
   initSparks(d);
   buildIngresoChart(d);
 }
-function updatePeriod(val){ loadData(); }
+function updatePeriod(val){ loadData(val); }
 
 /* ── EXPORT CSV ─── */
 function exportCSV(){
