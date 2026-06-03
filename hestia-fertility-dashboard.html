@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hestia Fertility — Dashboard Financiero</title>
+<meta name="description" content="Dashboard financiero de Hestia Fertility: seguimiento de ingresos, gastos y métricas clave de la clínica.">
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lucide@latest"></script>
+<style>
+/* ── DESIGN TOKENS ───────────────────────────────────── */
+:root, [data-theme="light"] {
+  --text-xs:   clamp(0.75rem, 0.7rem + 0.25vw, 0.875rem);
+  --text-sm:   clamp(0.875rem, 0.8rem + 0.35vw, 1rem);
+  --text-base: clamp(1rem, 0.95rem + 0.25vw, 1.125rem);
+  --text-lg:   clamp(1.125rem, 1rem + 0.75vw, 1.5rem);
+  --text-xl:   clamp(1.5rem, 1.2rem + 1.25vw, 2.25rem);
+
+  --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem;
+  --space-4: 1rem;    --space-5: 1.25rem; --space-6: 1.5rem;
+  --space-8: 2rem;    --space-10: 2.5rem; --space-12: 3rem;
+
+  --color-bg:             #f7f5f2;
+  --color-surface:        #faf9f7;
+  --color-surface-2:      #ffffff;
+  --color-surface-offset: #f0ede9;
+  --color-divider:        #e5e2dc;
+  --color-border:         #d8d4cd;
+  --color-text:           #28251d;
+  --color-text-muted:     #7a7670;
+  --color-text-faint:     #b8b4ae;
+  --color-text-inverse:   #faf9f6;
+
+  /* Brand — dusty rose / blossom */
+  --color-primary:        #c46a7a;
+  --color-primary-hover:  #a8505f;
+  --color-primary-active: #8c3848;
+  --color-primary-hl:     #f2dfe3;
+
+  --color-teal:   #3d8f8f;
+  --color-amber:  #c47a1e;
+  --color-purple: #7a52b0;
+  --color-green:  #4d8c5a;
+  --color-blue:   #3a72a8;
+
+  --radius-sm: 0.375rem; --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;  --radius-xl: 1rem;
+  --radius-full: 9999px;
+
+  --shadow-sm: 0 1px 3px oklch(0.2 0.01 80 / 0.06);
+  --shadow-md: 0 4px 14px oklch(0.2 0.01 80 / 0.08);
+  --transition: 180ms cubic-bezier(0.16, 1, 0.3, 1);
+
+  --sidebar-w: 230px;
+  --header-h: 56px;
+  --font-body: 'Satoshi', 'Helvetica Neue', sans-serif;
+}
+[data-theme="dark"] {
+  --color-bg:             #161412;
+  --color-surface:        #1c1917;
+  --color-surface-2:      #22201e;
+  --color-surface-offset: #1a1815;
+  --color-divider:        #2e2b27;
+  --color-border:         #3a3632;
+  --color-text:           #d4d0cc;
+  --color-text-muted:     #807c78;
+  --color-text-faint:     #58554f;
+  --color-text-inverse:   #28251d;
+  --color-primary:        #e08898;
+  --color-primary-hover:  #c86a7a;
+  --color-primary-active: #aa5060;
+  --color-primary-hl:     #4a3038;
+  --color-teal:   #4fb3b3;
+  --color-amber:  #e09a38;
+  --color-green:  #6db884;
+  --color-blue:   #5a92c8;
+  --color-purple: #9a72d0;
+  --shadow-sm: 0 1px 3px oklch(0 0 0 / 0.25);
+  --shadow-md: 0 4px 14px oklch(0 0 0 / 0.35);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme]) {
+  --color-bg:#161412;--color-surface:#1c1917;--color-surface-2:#22201e;
+  --color-surface-offset:#1a1815;--color-divider:#2e2b27;--color-border:#3a3632;
+  --color-text:#d4d0cc;--color-text-muted:#807c78;--color-text-faint:#58554f;
+  --color-text-inverse:#28251d;--color-primary:#e08898;--color-primary-hl:#4a3038;
+  --color-teal:#4fb3b3;--color-amber:#e09a38;--color-green:#6db884;
+  --color-blue:#5a92c8;--color-purple:#9a72d0;
+  --shadow-sm:0 1px 3px oklch(0 0 0/0.25);--shadow-md:0 4px 14px oklch(0 0 0/0.35);
+}}
+
+/* ── BASE ─────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;font-family:var(--font-body);font-size:var(--text-sm);color:var(--color-text);background:var(--color-bg);-webkit-font-smoothing:antialiased}
+img,svg{display:block;max-width:100%}
+button{cursor:pointer;background:none;border:none;font:inherit;color:inherit}
+a,button,[role="button"]{transition:color var(--transition),background var(--transition),box-shadow var(--transition),opacity var(--transition)}
+
+/* ── LAYOUT ─────────────────────────────────────────────── */
+.app{display:grid;grid-template-columns:var(--sidebar-w) 1fr;grid-template-rows:var(--header-h) 1fr;height:100dvh}
+
+/* SIDEBAR */
+.sidebar{grid-row:1/-1;background:var(--color-surface);border-right:1px solid var(--color-divider);overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;padding:0}
+.sidebar-logo{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-4) var(--space-5);height:var(--header-h);border-bottom:1px solid var(--color-divider)}
+.logo-mark{width:32px;height:32px;flex-shrink:0}
+.logo-text{font-size:var(--text-base);font-weight:700;color:var(--color-text);line-height:1.1}
+.logo-sub{font-size:var(--text-xs);color:var(--color-text-muted)}
+.sidebar-section{padding:var(--space-4) var(--space-3) var(--space-2)}
+.sidebar-label{font-size:var(--text-xs);font-weight:600;color:var(--color-text-faint);text-transform:uppercase;letter-spacing:.08em;padding:0 var(--space-2) var(--space-2)}
+.nav-item{display:flex;align-items:center;gap:var(--space-3);padding:var(--space-2) var(--space-3);border-radius:var(--radius-md);font-size:var(--text-sm);color:var(--color-text-muted);text-decoration:none;cursor:pointer;border:none;background:none;font:inherit;width:100%;text-align:left}
+.nav-item:hover{background:var(--color-surface-offset);color:var(--color-text)}
+.nav-item.active{background:var(--color-primary-hl);color:var(--color-primary);font-weight:600}
+.nav-item svg{width:16px;height:16px;flex-shrink:0}
+.sidebar-spacer{flex:1}
+.sidebar-footer{padding:var(--space-4) var(--space-3);border-top:1px solid var(--color-divider)}
+.user-row{display:flex;align-items:center;gap:var(--space-3)}
+.avatar{width:32px;height:32px;border-radius:var(--radius-full);background:var(--color-primary-hl);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:var(--text-xs);color:var(--color-primary)}
+
+/* TOPBAR */
+.topbar{grid-column:2;background:var(--color-surface);border-bottom:1px solid var(--color-divider);display:flex;align-items:center;justify-content:space-between;padding:0 var(--space-6);gap:var(--space-4);position:sticky;top:0;z-index:10}
+.topbar-title{font-size:var(--text-base);font-weight:600}
+.topbar-right{display:flex;align-items:center;gap:var(--space-3)}
+.filter-group{display:flex;align-items:center;gap:var(--space-2)}
+.filter-label{font-size:var(--text-xs);color:var(--color-text-muted)}
+.select-pill{background:var(--color-surface-offset);border:1px solid var(--color-border);border-radius:var(--radius-full);padding:var(--space-1) var(--space-3);font-size:var(--text-xs);color:var(--color-text);cursor:pointer;font-family:inherit}
+.icon-btn{width:32px;height:32px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;color:var(--color-text-muted)}
+.icon-btn:hover{background:var(--color-surface-offset);color:var(--color-text)}
+.icon-btn svg{width:16px;height:16px}
+
+/* MAIN */
+.main{grid-column:2;overflow-y:auto;overscroll-behavior:contain;padding:var(--space-6);display:flex;flex-direction:column;gap:var(--space-6)}
+
+/* KPI CARDS */
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-4)}
+.kpi-card{background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-lg);padding:var(--space-5);box-shadow:var(--shadow-sm);display:flex;flex-direction:column;gap:var(--space-3)}
+.kpi-header{display:flex;align-items:center;justify-content:space-between}
+.kpi-icon{width:36px;height:36px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center}
+.kpi-icon svg{width:18px;height:18px}
+.kpi-badge{font-size:var(--text-xs);font-weight:600;padding:2px 8px;border-radius:var(--radius-full)}
+.badge-up{background:#e6f4ea;color:#2d7a40}
+.badge-down{background:#fce8ea;color:#c0303b}
+[data-theme="dark"] .badge-up{background:#1e3a27;color:#6db884}
+[data-theme="dark"] .badge-down{background:#3a1e20;color:#e08898}
+.kpi-value{font-size:var(--text-xl);font-weight:700;line-height:1;font-variant-numeric:tabular-nums lining-nums}
+.kpi-label{font-size:var(--text-xs);color:var(--color-text-muted)}
+.kpi-spark{height:36px;width:100%}
+
+/* SECTION ROW */
+.row-2{display:grid;grid-template-columns:1.5fr 1fr;gap:var(--space-4)}
+.row-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--space-4)}
+
+/* CARDS */
+.card{background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-lg);padding:var(--space-5);box-shadow:var(--shadow-sm)}
+.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--space-4)}
+.card-title{font-size:var(--text-base);font-weight:600}
+.card-sub{font-size:var(--text-xs);color:var(--color-text-muted);margin-top:2px}
+.chart-wrap{position:relative;width:100%;height:200px}
+.chart-wrap-tall{position:relative;width:100%;height:260px}
+
+/* TABLA SERVICIOS */
+.services-table{width:100%;border-collapse:collapse}
+.services-table th{font-size:var(--text-xs);font-weight:600;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.06em;padding:var(--space-2) var(--space-3);text-align:left;border-bottom:1px solid var(--color-divider)}
+.services-table td{font-size:var(--text-sm);padding:var(--space-3) var(--space-3);border-bottom:1px solid var(--color-divider);font-variant-numeric:tabular-nums lining-nums}
+.services-table tr:last-child td{border-bottom:none}
+.services-table tr:hover td{background:var(--color-surface-offset)}
+.service-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px}
+.progress-bar{height:6px;border-radius:var(--radius-full);background:var(--color-surface-offset);overflow:hidden;min-width:80px}
+.progress-fill{height:100%;border-radius:var(--radius-full);transition:width .6s cubic-bezier(.16,1,.3,1)}
+
+/* FUNNEL */
+.funnel-list{display:flex;flex-direction:column;gap:var(--space-3)}
+.funnel-step{display:flex;align-items:center;gap:var(--space-3)}
+.funnel-bar-wrap{flex:1;height:24px;border-radius:var(--radius-sm);background:var(--color-surface-offset);overflow:hidden;position:relative}
+.funnel-fill{height:100%;border-radius:var(--radius-sm);transition:width .8s cubic-bezier(.16,1,.3,1);display:flex;align-items:center;padding-left:8px}
+.funnel-label{font-size:var(--text-xs);color:var(--color-text-muted);width:90px;flex-shrink:0}
+.funnel-val{font-size:var(--text-xs);font-weight:600;color:var(--color-text);width:40px;text-align:right;flex-shrink:0}
+
+/* DONUT LEGEND */
+.donut-legend{display:flex;flex-direction:column;gap:var(--space-2);margin-top:var(--space-3)}
+.legend-row{display:flex;align-items:center;justify-content:space-between;font-size:var(--text-xs)}
+.legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.legend-name{color:var(--color-text-muted);flex:1;margin-left:var(--space-2)}
+.legend-pct{font-weight:600}
+
+/* CHIP ROW */
+.chip-row{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-bottom:var(--space-3)}
+.chip{font-size:var(--text-xs);padding:3px 10px;border-radius:var(--radius-full);border:1px solid var(--color-border);color:var(--color-text-muted);cursor:pointer;transition:all var(--transition)}
+.chip.active{background:var(--color-primary-hl);border-color:var(--color-primary);color:var(--color-primary);font-weight:600}
+
+/* TOOLTIP-LIKE STAT ROW */
+.stat-row{display:flex;gap:var(--space-6);padding:var(--space-4) 0;border-bottom:1px solid var(--color-divider)}
+.stat-row:last-child{border-bottom:none}
+.stat-item{display:flex;flex-direction:column;gap:2px}
+.stat-val{font-size:var(--text-lg);font-weight:700;font-variant-numeric:tabular-nums lining-nums}
+.stat-lbl{font-size:var(--text-xs);color:var(--color-text-muted)}
+
+/* ALERT ROW */
+.alert-list{display:flex;flex-direction:column;gap:var(--space-3)}
+.alert-item{display:flex;align-items:flex-start;gap:var(--space-3);padding:var(--space-3) var(--space-4);border-radius:var(--radius-md);background:var(--color-surface-offset)}
+.alert-icon{width:20px;height:20px;flex-shrink:0;margin-top:1px}
+.alert-icon svg{width:16px;height:16px}
+.alert-body{flex:1}
+.alert-title{font-size:var(--text-sm);font-weight:600}
+.alert-desc{font-size:var(--text-xs);color:var(--color-text-muted);margin-top:2px}
+.alert-warn .alert-icon{color:var(--color-amber)}
+.alert-ok .alert-icon{color:var(--color-green)}
+.alert-info .alert-icon{color:var(--color-blue)}
+
+/* MOBILE */
+@media (max-width:900px) {
+  :root{--sidebar-w:0px}
+  .sidebar{display:none}
+  .app{grid-template-columns:1fr}
+  .topbar{grid-column:1}
+  .main{grid-column:1;padding:var(--space-4)}
+  .kpi-grid{grid-template-columns:repeat(2,1fr)}
+  .row-2,.row-3{grid-template-columns:1fr}
+}
+@media (max-width:480px) {
+  .kpi-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- SIDEBAR -->
+<nav class="sidebar" aria-label="Navegación principal">
+  <div class="sidebar-logo">
+    <svg class="logo-mark" viewBox="0 0 32 32" fill="none" aria-label="Hestia Fertility">
+      <circle cx="16" cy="16" r="15" fill="#c46a7a" opacity=".12"/>
+      <ellipse cx="16" cy="20" rx="7" ry="5" fill="#c46a7a" opacity=".25"/>
+      <path d="M16 6 C10 6 8 11 8 14 C8 18.5 11.5 21 16 21 C20.5 21 24 18.5 24 14 C24 11 22 6 16 6Z" fill="#c46a7a" opacity=".7"/>
+      <path d="M13 8 Q16 5 19 8" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+      <circle cx="16" cy="14" r="3" fill="#ffffff" opacity=".9"/>
+    </svg>
+    <div>
+      <div class="logo-text">Hestia</div>
+      <div class="logo-sub">Fertility · Finanzas</div>
+    </div>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="sidebar-label">Panel</div>
+    <button class="nav-item active"><i data-lucide="layout-dashboard"></i> Resumen General</button>
+    <button class="nav-item"><i data-lucide="trending-up"></i> Ingresos</button>
+    <button class="nav-item"><i data-lucide="receipt"></i> Gastos Operativos</button>
+    <button class="nav-item"><i data-lucide="users"></i> Pacientes</button>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-label">Análisis</div>
+    <button class="nav-item"><i data-lucide="flask-conical"></i> Servicios</button>
+    <button class="nav-item"><i data-lucide="plane"></i> Turismo Médico</button>
+    <button class="nav-item"><i data-lucide="bar-chart-2"></i> Rentabilidad</button>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-label">Config</div>
+    <button class="nav-item"><i data-lucide="settings"></i> Ajustes</button>
+  </div>
+  <div class="sidebar-spacer"></div>
+  <div class="sidebar-footer">
+    <div class="user-row">
+      <div class="avatar">HF</div>
+      <div>
+        <div style="font-size:var(--text-xs);font-weight:600">Hestia Admin</div>
+        <div style="font-size:var(--text-xs);color:var(--color-text-muted)">May 2026</div>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- TOPBAR -->
+<header class="topbar" role="banner">
+  <div>
+    <div class="topbar-title">Resumen Financiero</div>
+  </div>
+  <div class="topbar-right">
+    <div class="filter-group">
+      <span class="filter-label">Periodo:</span>
+      <select class="select-pill" id="periodoSelect" onchange="updatePeriod(this.value)">
+        <option value="2026-Q1">Q1 2026</option>
+        <option value="2026-Q2" selected>Q2 2026</option>
+        <option value="2025-anual">2025 Anual</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Segmento:</span>
+      <select class="select-pill" id="segmentoSelect" onchange="updateSegment(this.value)">
+        <option value="todos">Todos</option>
+        <option value="local">Local MX</option>
+        <option value="internacional">Internacional</option>
+      </select>
+    </div>
+    <button class="icon-btn" aria-label="Exportar CSV" onclick="exportCSV()" title="Exportar">
+      <i data-lucide="download"></i>
+    </button>
+    <button class="icon-btn" data-theme-toggle aria-label="Cambiar tema">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
+  </div>
+</header>
+
+<!-- MAIN CONTENT -->
+<main class="main" role="main">
+
+  <!-- KPIs -->
+  <section class="kpi-grid" aria-label="Indicadores clave">
+
+    <div class="kpi-card">
+      <div class="kpi-header">
+        <div class="kpi-icon" style="background:#fce8f0"><svg viewBox="0 0 24 24" fill="none" stroke="#c46a7a" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+        <span class="kpi-badge badge-up" id="kpi0-badge">+14%</span>
+      </div>
+      <div class="kpi-value" id="kpi0-val">$2.4M</div>
+      <div class="kpi-label">Ingresos Brutos (MXN)</div>
+      <canvas class="kpi-spark" id="spark0"></canvas>
+    </div>
+
+    <div class="kpi-card">
+      <div class="kpi-header">
+        <div class="kpi-icon" style="background:#e6f4ea"><svg viewBox="0 0 24 24" fill="none" stroke="#4d8c5a" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div>
+        <span class="kpi-badge badge-up" id="kpi1-badge">+8%</span>
+      </div>
+      <div class="kpi-value" id="kpi1-val">38%</div>
+      <div class="kpi-label">Margen Bruto</div>
+      <canvas class="kpi-spark" id="spark1"></canvas>
+    </div>
+
+    <div class="kpi-card">
+      <div class="kpi-header">
+        <div class="kpi-icon" style="background:#e8f0fb"><svg viewBox="0 0 24 24" fill="none" stroke="#3a72a8" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg></div>
+        <span class="kpi-badge badge-up" id="kpi2-badge">+22%</span>
+      </div>
+      <div class="kpi-value" id="kpi2-val">47</div>
+      <div class="kpi-label">Ciclos Iniciados (mes)</div>
+      <canvas class="kpi-spark" id="spark2"></canvas>
+    </div>
+
+    <div class="kpi-card">
+      <div class="kpi-header">
+        <div class="kpi-icon" style="background:#f5ede0"><svg viewBox="0 0 24 24" fill="none" stroke="#c47a1e" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+        <span class="kpi-badge badge-down" id="kpi3-badge">-3%</span>
+      </div>
+      <div class="kpi-value" id="kpi3-val">$51K</div>
+      <div class="kpi-label">CAC Promedio (MXN)</div>
+      <canvas class="kpi-spark" id="spark3"></canvas>
+    </div>
+
+  </section>
+
+  <!-- FILA: Ingresos por mes + Donut servicios -->
+  <div class="row-2">
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Ingresos vs Gastos</div>
+          <div class="card-sub">Últimos 6 meses · MXN</div>
+        </div>
+        <div class="chip-row" style="margin:0">
+          <span class="chip active" onclick="toggleSeries(this,'ingresos')">Ingresos</span>
+          <span class="chip active" onclick="toggleSeries(this,'gastos')">Gastos</span>
+          <span class="chip active" onclick="toggleSeries(this,'utilidad')">Utilidad</span>
+        </div>
+      </div>
+      <div class="chart-wrap-tall"><canvas id="ingresoChart"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Mix de Servicios</div>
+          <div class="card-sub">% ingresos por tratamiento</div>
+        </div>
+      </div>
+      <div class="chart-wrap" style="height:160px"><canvas id="donutChart"></canvas></div>
+      <div class="donut-legend" id="donutLegend"></div>
+    </div>
+  </div>
+
+  <!-- FILA: Tabla servicios + Funnel + Alertas -->
+  <div class="row-2">
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Rentabilidad por Servicio</div>
+          <div class="card-sub">Ingresos, margen y volumen</div>
+        </div>
+      </div>
+      <table class="services-table" aria-label="Rentabilidad por servicio">
+        <thead>
+          <tr>
+            <th>Servicio</th>
+            <th>Ingresos MXN</th>
+            <th>Margen</th>
+            <th>Meta</th>
+          </tr>
+        </thead>
+        <tbody id="servicesBody"></tbody>
+      </table>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:var(--space-4)">
+      <div class="card" style="flex:1">
+        <div class="card-header" style="margin-bottom:var(--space-3)">
+          <div>
+            <div class="card-title">Embudo de Conversión</div>
+            <div class="card-sub">Prospecto → Ciclo activo</div>
+          </div>
+        </div>
+        <div class="funnel-list" id="funnelList"></div>
+      </div>
+      <div class="card">
+        <div class="card-header" style="margin-bottom:var(--space-3)">
+          <div class="card-title">Alertas del Periodo</div>
+        </div>
+        <div class="alert-list" id="alertList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FILA: Comparativa Segmentos -->
+  <div class="row-3">
+    <div class="card">
+      <div class="card-header" style="margin-bottom:var(--space-3)">
+        <div>
+          <div class="card-title">Ticket Promedio (LTV)</div>
+          <div class="card-sub">MXN por paciente</div>
+        </div>
+      </div>
+      <div class="stat-row">
+        <div class="stat-item"><div class="stat-val" style="color:var(--color-primary)">$187K</div><div class="stat-lbl">Local MX</div></div>
+        <div class="stat-item"><div class="stat-val" style="color:var(--color-teal)">$312K</div><div class="stat-lbl">Internacional</div></div>
+      </div>
+      <div class="stat-row">
+        <div class="stat-item"><div class="stat-val">62</div><div class="stat-lbl">Días CPP avg</div></div>
+        <div class="stat-item"><div class="stat-val">$48K</div><div class="stat-lbl">Run Rate / mes</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" style="margin-bottom:var(--space-3)">
+        <div>
+          <div class="card-title">Flujo de Caja</div>
+          <div class="card-sub">Balance mensual MXN</div>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="cashChart"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header" style="margin-bottom:var(--space-3)">
+        <div>
+          <div class="card-title">Distribución Costos</div>
+          <div class="card-sub">Operativos fijos</div>
+        </div>
+      </div>
+      <div class="chart-wrap"><canvas id="costChart"></canvas></div>
+    </div>
+  </div>
+
+</main>
+</div>
+
+<script>
+/* ── THEME TOGGLE ─── */
+(function(){
+  const t=document.querySelector('[data-theme-toggle]'),r=document.documentElement;
+  let d=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';
+  r.setAttribute('data-theme',d);
+  t&&t.addEventListener('click',()=>{
+    d=d==='dark'?'light':'dark';
+    r.setAttribute('data-theme',d);
+    t.innerHTML=d==='dark'
+      ?'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>'
+      :'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+    setTimeout(refreshChartColors,50);
+  });
+})();
+
+/* ── DATA ─── */
+const MONTHS=['Nov','Dic','Ene','Feb','Mar','Abr'];
+const DATA={
+  'todos':{
+    ingresos:[1800,1950,2100,2250,2180,2400],
+    gastos:  [1150,1200,1280,1350,1330,1490],
+    ciclos:  [38,41,43,45,44,47],
+    cac:     [54,53,52,51,52,51],
+    margen:  [36,38,39,38,39,38],
+  },
+  'local':{
+    ingresos:[1100,1200,1250,1380,1320,1470],
+    gastos:  [730,750,800,850,820,920],
+    ciclos:  [26,28,29,31,30,32],
+    cac:     [42,41,40,40,41,40],
+    margen:  [34,37,36,38,38,37],
+  },
+  'internacional':{
+    ingresos:[700,750,850,870,860,930],
+    gastos:  [420,450,480,500,510,570],
+    ciclos:  [12,13,14,14,14,15],
+    cac:     [72,70,68,68,70,69],
+    margen:  [40,40,43,43,41,39],
+  }
+};
+let currentSegment='todos';
+
+function getCS(){return getComputedStyle(document.documentElement);}
+function cssVar(v){return getCS().getPropertyValue(v).trim();}
+
+/* ── SPARKLINES ─── */
+function drawSpark(id,data,color){
+  const ctx=document.getElementById(id).getContext('2d');
+  new Chart(ctx,{
+    type:'line',
+    data:{labels:MONTHS,datasets:[{data,borderColor:color,borderWidth:1.5,pointRadius:0,fill:true,backgroundColor:color.replace(')',',0.12)').replace('rgb','rgba')||color+'22',tension:.4}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{enabled:false}},scales:{x:{display:false},y:{display:false}},animation:{duration:600}}
+  });
+}
+
+/* ── INGRESO CHART ─── */
+let ingresoChart;
+const seriesVisible={ingresos:true,gastos:true,utilidad:true};
+function buildIngresoChart(){
+  const d=DATA[currentSegment];
+  const util=d.ingresos.map((v,i)=>v-d.gastos[i]);
+  const ctx=document.getElementById('ingresoChart').getContext('2d');
+  const p=cssVar('--color-primary')||'#c46a7a';
+  const t=cssVar('--color-teal')||'#3d8f8f';
+  const a=cssVar('--color-amber')||'#c47a1e';
+  ingresoChart=new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels:MONTHS,
+      datasets:[
+        {label:'Ingresos',data:d.ingresos,backgroundColor:p+'55',borderColor:p,borderWidth:1.5,borderRadius:4,order:1},
+        {label:'Gastos',data:d.gastos,backgroundColor:t+'44',borderColor:t,borderWidth:1.5,borderRadius:4,order:2},
+        {label:'Utilidad',data:util,type:'line',borderColor:a,borderWidth:2,pointRadius:3,pointBackgroundColor:a,fill:false,tension:.4,order:0,yAxisID:'y'},
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+c.dataset.label+': $'+c.parsed.y.toLocaleString('es-MX')+'K'}}},
+      scales:{
+        x:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),font:{size:11}}},
+        y:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),font:{size:11},callback:v=>'$'+v+'K'}}
+      }
+    }
+  });
+}
+function toggleSeries(chip,key){
+  chip.classList.toggle('active');
+  seriesVisible[key]=chip.classList.contains('active');
+  const idxMap={ingresos:0,gastos:1,utilidad:2};
+  const ds=ingresoChart.data.datasets[idxMap[key]];
+  ds.hidden=!seriesVisible[key];
+  ingresoChart.update();
+}
+
+/* ── DONUT CHART ─── */
+const donutData={
+  labels:['FIV / ICSI','Congelamiento','Inseminación','Estudios (PGTa)','Consultas'],
+  data:[45,22,14,11,8],
+  colors:['#c46a7a','#3d8f8f','#c47a1e','#7a52b0','#3a72a8']
+};
+function buildDonutChart(){
+  const ctx=document.getElementById('donutChart').getContext('2d');
+  new Chart(ctx,{
+    type:'doughnut',
+    data:{labels:donutData.labels,datasets:[{data:donutData.data,backgroundColor:donutData.colors.map(c=>c+'cc'),borderColor:donutData.colors,borderWidth:2,hoverOffset:6}]},
+    options:{
+      responsive:true,maintainAspectRatio:false,cutout:'68%',
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.label+': '+c.parsed+'%'}}}
+    }
+  });
+  const leg=document.getElementById('donutLegend');
+  leg.innerHTML='';
+  donutData.labels.forEach((l,i)=>{
+    leg.innerHTML+=`<div class="legend-row"><span class="legend-dot" style="background:${donutData.colors[i]}"></span><span class="legend-name">${l}</span><span class="legend-pct" style="color:${donutData.colors[i]}">${donutData.data[i]}%</span></div>`;
+  });
+}
+
+/* ── SERVICES TABLE ─── */
+const services=[
+  {name:'FIV / ICSI',color:'#c46a7a',ingresos:'$1,080K',margen:42,meta:80},
+  {name:'Congelamiento',color:'#3d8f8f',ingresos:'$528K',margen:38,meta:75},
+  {name:'Inseminación',color:'#c47a1e',ingresos:'$336K',margen:29,meta:60},
+  {name:'Estudios PGTa',color:'#7a52b0',ingresos:'$264K',margen:55,meta:90},
+  {name:'Consultas',color:'#3a72a8',ingresos:'$192K',margen:72,meta:100},
+];
+function buildServicesTable(){
+  const tb=document.getElementById('servicesBody');
+  tb.innerHTML='';
+  services.forEach(s=>{
+    const pct=Math.round(s.meta*0.82);
+    tb.innerHTML+=`<tr>
+      <td><span class="service-dot" style="background:${s.color}"></span>${s.name}</td>
+      <td>${s.ingresos}</td>
+      <td style="color:${s.margen>40?'var(--color-green)':'var(--color-text-muted)'}"><b>${s.margen}%</b></td>
+      <td><div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${s.color}"></div></div></td>
+    </tr>`;
+  });
+}
+
+/* ── FUNNEL ─── */
+const funnelSteps=[
+  {label:'Prospectos',val:310,pct:100,color:'#c46a7a'},
+  {label:'1a Consulta',val:190,pct:61,color:'#3d8f8f'},
+  {label:'Diagnóstico',val:120,pct:39,color:'#c47a1e'},
+  {label:'Cotización',val:85,pct:27,color:'#7a52b0'},
+  {label:'Ciclo activo',val:47,pct:15,color:'#3a72a8'},
+];
+function buildFunnel(){
+  const el=document.getElementById('funnelList');
+  el.innerHTML='';
+  funnelSteps.forEach(s=>{
+    el.innerHTML+=`<div class="funnel-step">
+      <span class="funnel-label">${s.label}</span>
+      <div class="funnel-bar-wrap"><div class="funnel-fill" style="width:${s.pct}%;background:${s.color}44;border-left:3px solid ${s.color}"></div></div>
+      <span class="funnel-val">${s.val}</span>
+    </div>`;
+  });
+}
+
+/* ── ALERTS ─── */
+const alerts=[
+  {type:'warn',icon:'alert-triangle',title:'CPP alto en FIV',desc:'62 días promedio — meta: < 50 días'},
+  {type:'ok',icon:'check-circle',title:'Margen PGTa óptimo',desc:'55% este mes, supera meta del 50%'},
+  {type:'info',icon:'info',title:'12 ciclos internacionales',desc:'Record histórico Q2 — turismo médico'},
+];
+function buildAlerts(){
+  const el=document.getElementById('alertList');
+  el.innerHTML='';
+  alerts.forEach(a=>{
+    el.innerHTML+=`<div class="alert-item alert-${a.type}">
+      <div class="alert-icon"><i data-lucide="${a.icon}"></i></div>
+      <div class="alert-body"><div class="alert-title">${a.title}</div><div class="alert-desc">${a.desc}</div></div>
+    </div>`;
+  });
+  lucide.createIcons();
+}
+
+/* ── CASH FLOW CHART ─── */
+function buildCashChart(){
+  const ctx=document.getElementById('cashChart').getContext('2d');
+  const cash=[420,580,650,720,680,740];
+  new Chart(ctx,{
+    type:'line',
+    data:{labels:MONTHS,datasets:[{label:'Flujo MXN K',data:cash,borderColor:'#3d8f8f',borderWidth:2,pointRadius:3,pointBackgroundColor:'#3d8f8f',fill:true,backgroundColor:'#3d8f8f22',tension:.4}]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'$'+c.parsed.y+'K'}}},
+      scales:{
+        x:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),font:{size:10}}},
+        y:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),font:{size:10},callback:v=>'$'+v+'K'}}
+      }
+    }
+  });
+}
+
+/* ── COST CHART ─── */
+function buildCostChart(){
+  const ctx=document.getElementById('costChart').getContext('2d');
+  new Chart(ctx,{
+    type:'doughnut',
+    data:{
+      labels:['Nómina','Renta','Medicamentos','Equipos','Marketing','Otros'],
+      datasets:[{
+        data:[38,15,20,10,11,6],
+        backgroundColor:['#c46a7a99','#3d8f8f99','#c47a1e99','#7a52b099','#3a72a899','#b8b4ae99'],
+        borderWidth:2,hoverOffset:4
+      }]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,cutout:'60%',
+      plugins:{legend:{display:true,position:'right',labels:{font:{size:10},boxWidth:10,color:cssVar('--color-text-muted')}},tooltip:{callbacks:{label:c=>c.label+': '+c.parsed+'%'}}}
+    }
+  });
+}
+
+/* ── KPI UPDATE ─── */
+function updateKPIs(seg){
+  const d=DATA[seg];
+  const last=d.ingresos[d.ingresos.length-1];
+  const prev=d.ingresos[d.ingresos.length-2];
+  const pct=Math.round((last-prev)/prev*100);
+  document.getElementById('kpi0-val').textContent='$'+last/100+'M';
+  document.getElementById('kpi0-badge').textContent=(pct>=0?'+':'')+pct+'%';
+  document.getElementById('kpi0-badge').className='kpi-badge '+(pct>=0?'badge-up':'badge-down');
+  const lm=d.margen[d.margen.length-1];
+  const pm=d.margen[d.margen.length-2];
+  document.getElementById('kpi1-val').textContent=lm+'%';
+  const dm=lm-pm;
+  document.getElementById('kpi1-badge').textContent=(dm>=0?'+':'')+dm+'%';
+  document.getElementById('kpi1-badge').className='kpi-badge '+(dm>=0?'badge-up':'badge-down');
+  document.getElementById('kpi2-val').textContent=d.ciclos[d.ciclos.length-1];
+  document.getElementById('kpi3-val').textContent='$'+d.cac[d.cac.length-1]+'K';
+}
+
+/* ── SPARKLINES INIT ─── */
+function initSparks(seg){
+  const d=DATA[seg];
+  drawSpark('spark0',d.ingresos,'rgb(196,106,122)');
+  drawSpark('spark1',d.margen,'rgb(77,140,90)');
+  drawSpark('spark2',d.ciclos,'rgb(58,114,168)');
+  drawSpark('spark3',d.cac,'rgb(196,122,30)');
+}
+
+/* ── SEGMENT CHANGE ─── */
+function updateSegment(val){
+  currentSegment=val;
+  updateKPIs(val);
+  // Rebuild ingreso chart
+  ingresoChart.destroy();
+  buildIngresoChart();
+}
+function updatePeriod(val){ /* placeholder for real data */ }
+
+/* ── EXPORT CSV ─── */
+function exportCSV(){
+  const d=DATA[currentSegment];
+  let csv='Mes,Ingresos,Gastos,Utilidad,Ciclos,CAC,Margen
+';
+  MONTHS.forEach((m,i)=>{
+    csv+=`${m},${d.ingresos[i]},${d.gastos[i]},${d.ingresos[i]-d.gastos[i]},${d.ciclos[i]},${d.cac[i]},${d.margen[i]}
+`;
+  });
+  const a=document.createElement('a');
+  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+  a.download='hestia-fertility-financiero.csv';
+  a.click();
+}
+
+/* ── REFRESH CHART COLORS (DARK MODE) ─── */
+function refreshChartColors(){
+  Chart.helpers.each(Chart.instances,(chart)=>{
+    if(chart.options.scales){
+      ['x','y'].forEach(ax=>{
+        if(chart.options.scales[ax]){
+          chart.options.scales[ax].grid={color:cssVar('--color-divider')};
+          chart.options.scales[ax].ticks={...chart.options.scales[ax].ticks,color:cssVar('--color-text-muted')};
+        }
+      });
+    }
+    chart.update();
+  });
+}
+
+/* ── INIT ─── */
+window.addEventListener('DOMContentLoaded',()=>{
+  lucide.createIcons();
+  updateKPIs(currentSegment);
+  initSparks(currentSegment);
+  buildIngresoChart();
+  buildDonutChart();
+  buildServicesTable();
+  buildFunnel();
+  buildAlerts();
+  buildCashChart();
+  buildCostChart();
+});
+</script>
+</body>
+</html>
