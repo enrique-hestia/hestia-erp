@@ -26,6 +26,8 @@ function doGet(e) {
       donut:         readDonut(ss),
       cashflow:      readCashFlow(ss, periodo),
       costos:        readCostos(ss),
+      inventarios:   readHojaCaptura(ss, 'Inventarios', periodo, ['producto','categoria','stock_actual','stock_minimo','costo_unitario','proveedor','ultima_compra']),
+      laboratorios:  readHojaCaptura(ss, 'Laboratorios', periodo, ['fecha','estudio','paciente_id','tecnico','resultado','costo','estado']),
       updated:       new Date().toISOString()
     };
 
@@ -106,6 +108,21 @@ function readDonut(ss) {
     colors: data.map(function(r) { return String(r[2]); }),
   };
 }
+/* ── Lee cualquier hoja de Captura filtrada por periodo ─── */
+function readHojaCaptura(ss, nombreHoja, periodo, campos) {
+  var hoja = ss.getSheetByName(nombreHoja);
+  if (!hoja) return [];  // Si la hoja no existe aún, devuelve vacío
+  var rows = hoja.getDataRange().getValues();
+  // Columna 0 = Periodo, resto = campos
+  return rows.slice(1)
+    .filter(function(r) { return String(r[0]) === periodo; })
+    .map(function(r) {
+      var obj = {};
+      campos.forEach(function(campo, i) { obj[campo] = r[i + 1]; });
+      return obj;
+    });
+}
+
 function readCostos(ss) {
   var rows = ss.getSheetByName('DistribucionCostos').getDataRange().getValues();
   var data = rows.slice(1);
