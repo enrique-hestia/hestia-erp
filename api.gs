@@ -9,7 +9,7 @@
  */
 function doGet(e) {
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = SpreadsheetApp.openById('1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4');
     const result = {
       todos:         readMensual(ss, 'Mensual_Todos'),
       local:         readMensual(ss, 'Mensual_Local'),
