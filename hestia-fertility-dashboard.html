@@ -243,20 +243,20 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 
   <div class="sidebar-section">
     <div class="sidebar-label">Panel</div>
-    <button class="nav-item active"><i data-lucide="layout-dashboard"></i> Resumen General</button>
-    <button class="nav-item"><i data-lucide="trending-up"></i> Ingresos</button>
-    <button class="nav-item"><i data-lucide="receipt"></i> Gastos Operativos</button>
-    <button class="nav-item"><i data-lucide="users"></i> Pacientes</button>
+    <button class="nav-item active" data-view="resumen"><i data-lucide="layout-dashboard"></i> Resumen General</button>
+    <button class="nav-item" data-view="ingresos"><i data-lucide="trending-up"></i> Ingresos</button>
+    <button class="nav-item" data-view="gastos"><i data-lucide="receipt"></i> Gastos Operativos</button>
+    <button class="nav-item" data-view="pacientes"><i data-lucide="users"></i> Pacientes</button>
   </div>
   <div class="sidebar-section">
     <div class="sidebar-label">Análisis</div>
-    <button class="nav-item"><i data-lucide="flask-conical"></i> Servicios</button>
-    <button class="nav-item"><i data-lucide="plane"></i> Turismo Médico</button>
-    <button class="nav-item"><i data-lucide="bar-chart-2"></i> Rentabilidad</button>
+    <button class="nav-item" data-view="servicios"><i data-lucide="flask-conical"></i> Servicios</button>
+    <button class="nav-item" data-view="turismo"><i data-lucide="plane"></i> Turismo Médico</button>
+    <button class="nav-item" data-view="rentabilidad"><i data-lucide="bar-chart-2"></i> Rentabilidad</button>
   </div>
   <div class="sidebar-section">
     <div class="sidebar-label">Config</div>
-    <button class="nav-item"><i data-lucide="settings"></i> Ajustes</button>
+    <button class="nav-item" data-view="ajustes"><i data-lucide="settings"></i> Ajustes</button>
   </div>
   <div class="sidebar-spacer"></div>
   <div class="sidebar-footer">
@@ -273,7 +273,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 <!-- TOPBAR -->
 <header class="topbar" role="banner">
   <div>
-    <div class="topbar-title">Resumen Financiero</div>
+    <div class="topbar-title" id="topbar-title">Resumen Financiero</div>
   </div>
   <div class="topbar-right">
     <div class="filter-group">
@@ -304,6 +304,9 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 
 <!-- MAIN CONTENT -->
 <main class="main" role="main">
+
+<!-- ══ VISTA: RESUMEN GENERAL ══ -->
+<div id="view-resumen" class="view">
 
   <!-- KPIs -->
   <section class="kpi-grid" aria-label="Indicadores clave">
@@ -460,6 +463,157 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
     </div>
   </div>
 
+</div><!-- /view-resumen -->
+
+<!-- ══ VISTA: INGRESOS ══ -->
+<div id="view-ingresos" class="view" style="display:none">
+  <div class="row-2">
+    <div class="card">
+      <div class="card-header">
+        <div><div class="card-title">Ingresos Mensuales</div><div class="card-sub">MXN · por segmento</div></div>
+      </div>
+      <div class="chart-wrap-tall"><canvas id="ingChart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div><div class="card-title">Mix de Ingresos</div><div class="card-sub">% por servicio</div></div></div>
+      <div class="chart-wrap" style="height:180px"><canvas id="ingDonutChart"></canvas></div>
+      <div class="donut-legend" id="ingDonutLegend"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header"><div class="card-title">Detalle por Mes</div></div>
+    <table class="services-table" id="ingTable"><thead><tr><th>Mes</th><th>Ingresos</th><th>vs Mes Anterior</th><th>Acumulado</th></tr></thead><tbody id="ingTableBody"></tbody></table>
+  </div>
+</div>
+
+<!-- ══ VISTA: GASTOS OPERATIVOS ══ -->
+<div id="view-gastos" class="view" style="display:none">
+  <div class="row-2">
+    <div class="card">
+      <div class="card-header"><div><div class="card-title">Gastos por Mes</div><div class="card-sub">MXN</div></div></div>
+      <div class="chart-wrap-tall"><canvas id="gastoChart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div><div class="card-title">Distribución de Costos</div><div class="card-sub">% por categoría</div></div></div>
+      <div class="chart-wrap" style="height:180px"><canvas id="gastoDonutChart"></canvas></div>
+      <div class="donut-legend" id="gastoDonutLegend"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header"><div class="card-title">Detalle de Gastos</div></div>
+    <table class="services-table"><thead><tr><th>Categoría</th><th>Importe MXN</th><th>% del Total</th><th>Tendencia</th></tr></thead><tbody id="gastoTableBody"></tbody></table>
+  </div>
+</div>
+
+<!-- ══ VISTA: PACIENTES ══ -->
+<div id="view-pacientes" class="view" style="display:none">
+  <div class="kpi-grid">
+    <div class="kpi-card"><div class="kpi-header"><div class="kpi-icon" style="background:#fce8f0"><svg viewBox="0 0 24 24" fill="none" stroke="#c46a7a" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div></div><div class="kpi-value" id="pac-total">—</div><div class="kpi-label">Pacientes Activos</div></div>
+    <div class="kpi-card"><div class="kpi-header"><div class="kpi-icon" style="background:#e8f0fb"><svg viewBox="0 0 24 24" fill="none" stroke="#3a72a8" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg></div></div><div class="kpi-value" id="pac-nuevos">—</div><div class="kpi-label">Nuevos este mes</div></div>
+    <div class="kpi-card"><div class="kpi-header"><div class="kpi-icon" style="background:#e6f4ea"><svg viewBox="0 0 24 24" fill="none" stroke="#4d8c5a" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div></div><div class="kpi-value" id="pac-tasa">—</div><div class="kpi-label">Tasa de Éxito FIV</div></div>
+    <div class="kpi-card"><div class="kpi-header"><div class="kpi-icon" style="background:#f5ede0"><svg viewBox="0 0 24 24" fill="none" stroke="#c47a1e" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div></div><div class="kpi-value" id="pac-cpp">—</div><div class="kpi-label">CPP Promedio (días)</div></div>
+  </div>
+  <div class="row-2">
+    <div class="card">
+      <div class="card-header"><div><div class="card-title">Pacientes por Mes</div><div class="card-sub">Nuevos vs Recurrentes</div></div></div>
+      <div class="chart-wrap-tall"><canvas id="pacChart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div><div class="card-title">Origen de Pacientes</div><div class="card-sub">Canal de captación</div></div></div>
+      <div class="chart-wrap" style="height:180px"><canvas id="pacOrigenChart"></canvas></div>
+      <div class="donut-legend" id="pacOrigenLegend"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ VISTA: SERVICIOS ══ -->
+<div id="view-servicios" class="view" style="display:none">
+  <div class="card">
+    <div class="card-header"><div><div class="card-title">Rentabilidad por Servicio</div><div class="card-sub">Ingresos, margen y meta</div></div></div>
+    <table class="services-table"><thead><tr><th>Servicio</th><th>Ingresos MXN</th><th>Margen</th><th>Ciclos</th><th>Meta</th></tr></thead><tbody id="svcTableBody"></tbody></table>
+  </div>
+  <div class="row-2" style="margin-top:var(--space-4)">
+    <div class="card">
+      <div class="card-header"><div><div class="card-title">Comparativa de Márgenes</div><div class="card-sub">% por servicio</div></div></div>
+      <div class="chart-wrap-tall"><canvas id="svcBarChart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div><div class="card-title">Embudo de Conversión</div><div class="card-sub">Prospecto → Ciclo activo</div></div></div>
+      <div class="funnel-list" id="svcFunnelList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ VISTA: TURISMO MÉDICO ══ -->
+<div id="view-turismo" class="view" style="display:none">
+  <div class="kpi-grid">
+    <div class="kpi-card"><div class="kpi-header"><div class="kpi-icon" style="background:#e8f0fb"><svg viewBox="0 0 24 24" fill="none" stroke="#3a72a8" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div><span class="kpi-badge badge-up">+22%</span></div><div class="kpi-value" id="tur-ciclos">—</div><div class="kpi-label">Ciclos Internacionales</div></div>
+    <div class="kpi-card"><div class="kpi-header"><div class="kpi-icon" style="background:#e6f4ea"><svg viewBox="0 0 24 24" fill="none" stroke="#4d8c5a" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><span class="kpi-badge badge-up">+8%</span></div><div class="kpi-value" id="tur-ticket">—</div><div class="kpi-label">Ticket Promedio MXN</div></div>
+    <div class="kpi-card"><div class="kpi-header"><div class="kpi-icon" style="background:#fce8f0"><svg viewBox="0 0 24 24" fill="none" stroke="#c46a7a" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></div></div><div class="kpi-value" id="tur-paises">—</div><div class="kpi-label">Países de Origen</div></div>
+    <div class="kpi-card"><div class="kpi-header"><div class="kpi-icon" style="background:#f5ede0"><svg viewBox="0 0 24 24" fill="none" stroke="#c47a1e" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg></div><span class="kpi-badge badge-up">+5%</span></div><div class="kpi-value" id="tur-margen">—</div><div class="kpi-label">Margen Internacional</div></div>
+  </div>
+  <div class="row-2" style="margin-top:var(--space-4)">
+    <div class="card">
+      <div class="card-header"><div><div class="card-title">Ingresos Internacionales</div><div class="card-sub">Últimos 6 meses · MXN</div></div></div>
+      <div class="chart-wrap-tall"><canvas id="turChart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div><div class="card-title">Países de Origen</div><div class="card-sub">% de pacientes</div></div></div>
+      <div class="chart-wrap" style="height:180px"><canvas id="turPaisesChart"></canvas></div>
+      <div class="donut-legend" id="turPaisesLegend"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ VISTA: RENTABILIDAD ══ -->
+<div id="view-rentabilidad" class="view" style="display:none">
+  <div class="row-3">
+    <div class="card">
+      <div class="card-header" style="margin-bottom:var(--space-3)"><div><div class="card-title">EBITDA</div><div class="card-sub">MXN este mes</div></div></div>
+      <div class="stat-row"><div class="stat-item"><div class="stat-val" style="color:var(--color-green)" id="rent-ebitda">—</div><div class="stat-lbl">EBITDA</div></div><div class="stat-item"><div class="stat-val" id="rent-margen">—</div><div class="stat-lbl">Margen Neto</div></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header" style="margin-bottom:var(--space-3)"><div><div class="card-title">ROI por Servicio</div><div class="card-sub">Retorno sobre inversión</div></div></div>
+      <div class="stat-row"><div class="stat-item"><div class="stat-val" style="color:var(--color-primary)">210%</div><div class="stat-lbl">FIV / ICSI</div></div><div class="stat-item"><div class="stat-val" style="color:var(--color-teal)">180%</div><div class="stat-lbl">PGTa</div></div></div>
+    </div>
+    <div class="card">
+      <div class="card-header" style="margin-bottom:var(--space-3)"><div><div class="card-title">Punto de Equilibrio</div><div class="card-sub">Ciclos mínimos / mes</div></div></div>
+      <div class="stat-row"><div class="stat-item"><div class="stat-val">32</div><div class="stat-lbl">Break-even</div></div><div class="stat-item"><div class="stat-val" style="color:var(--color-green)">47</div><div class="stat-lbl">Actual</div></div></div>
+    </div>
+  </div>
+  <div class="row-2" style="margin-top:var(--space-4)">
+    <div class="card">
+      <div class="card-header"><div><div class="card-title">Evolución del Margen</div><div class="card-sub">% mensual</div></div></div>
+      <div class="chart-wrap-tall"><canvas id="rentChart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div><div class="card-title">Alertas de Rentabilidad</div></div></div>
+      <div class="alert-list" id="rentAlertList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ VISTA: AJUSTES ══ -->
+<div id="view-ajustes" class="view" style="display:none">
+  <div class="card" style="max-width:600px">
+    <div class="card-header"><div class="card-title">Configuración del Dashboard</div></div>
+    <div style="display:flex;flex-direction:column;gap:var(--space-4);margin-top:var(--space-2)">
+      <div class="stat-row" style="flex-direction:column;gap:var(--space-1)">
+        <div style="font-size:var(--text-sm);font-weight:600">Google Sheet conectado</div>
+        <div style="font-size:var(--text-xs);color:var(--color-text-muted);font-family:monospace">1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4</div>
+      </div>
+      <div class="stat-row" style="flex-direction:column;gap:var(--space-1)">
+        <div style="font-size:var(--text-sm);font-weight:600">Apps Script API</div>
+        <div style="font-size:var(--text-xs);color:var(--color-text-muted);font-family:monospace">script.google.com/macros/s/AKfycbw3...</div>
+      </div>
+      <div class="stat-row" style="flex-direction:column;gap:var(--space-1)">
+        <div style="font-size:var(--text-sm);font-weight:600">Actualización automática</div>
+        <div style="font-size:var(--text-xs);color:var(--color-text-muted)">Cada 30 segundos · <span id="sync-status-ajustes"></span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 </main>
 </div>
 
@@ -557,10 +711,12 @@ function renderAll(data){
   buildIngresoChart(d);
   buildDonutChart(data.donut);
   buildServicesTable(data.servicios);
-  buildFunnel(data.funnel);
-  buildAlerts(data.alertas);
+  buildFunnel(data.funnel, 'funnelList');
+  buildAlerts(data.alertas, 'alertList');
   buildCashChart(data.cashflow);
   buildCostChart(data.costos);
+  // Renderizar también la vista activa si no es resumen
+  if(currentView !== 'resumen') renderView(currentView, data);
 }
 
 /* ══════════════════════════════════════════════════════
@@ -762,9 +918,222 @@ function refreshChartColors(){
   });
 }
 
+/* ══════════════════════════════════════════════════════
+   NAVEGACIÓN — ROUTER DE VISTAS
+   ══════════════════════════════════════════════════════ */
+const VIEW_TITLES = {
+  resumen:      'Resumen Financiero',
+  ingresos:     'Ingresos',
+  gastos:       'Gastos Operativos',
+  pacientes:    'Pacientes',
+  servicios:    'Servicios',
+  turismo:      'Turismo Médico',
+  rentabilidad: 'Rentabilidad',
+  ajustes:      'Configuración',
+};
+let currentView = 'resumen';
+
+function navigateTo(view) {
+  // Ocultar todas las vistas
+  document.querySelectorAll('.view').forEach(v => v.style.display = 'none');
+  // Mostrar la vista seleccionada
+  document.getElementById('view-' + view).style.display = '';
+  // Actualizar nav activo
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+  document.querySelector('[data-view="' + view + '"]').classList.add('active');
+  // Actualizar título del topbar
+  document.getElementById('topbar-title').textContent = VIEW_TITLES[view] || view;
+  currentView = view;
+  // Renderizar la vista si hay datos
+  if (sheetsData) renderView(view, sheetsData);
+}
+
+function renderView(view, data) {
+  if (view === 'ingresos')     renderIngresos(data);
+  if (view === 'gastos')       renderGastos(data);
+  if (view === 'pacientes')    renderPacientes(data);
+  if (view === 'servicios')    renderServicios(data);
+  if (view === 'turismo')      renderTurismo(data);
+  if (view === 'rentabilidad') renderRentabilidad(data);
+  if (view === 'ajustes')      document.getElementById('sync-status-ajustes').textContent = document.getElementById('sync-status').textContent;
+}
+
+/* ── INGRESOS ─── */
+var ingChart=null, ingDonutChart=null;
+function renderIngresos(data) {
+  var d = data[currentSegment];
+  // Tabla
+  var tb = document.getElementById('ingTableBody'); tb.innerHTML='';
+  var acum = 0;
+  d.meses.forEach(function(m,i){
+    acum += d.ingresos[i];
+    var prev = i>0 ? d.ingresos[i-1] : d.ingresos[i];
+    var diff = Math.round((d.ingresos[i]-prev)/prev*100);
+    tb.innerHTML += '<tr><td>'+m+'</td><td>$'+d.ingresos[i].toLocaleString('es-MX')+'K</td><td><span class="kpi-badge '+(diff>=0?'badge-up':'badge-down')+'">'+(diff>=0?'+':'')+diff+'%</span></td><td>$'+acum.toLocaleString('es-MX')+'K</td></tr>';
+  });
+  // Gráfica barras
+  if(ingChart) ingChart.destroy();
+  ingChart = new Chart(document.getElementById('ingChart').getContext('2d'),{
+    type:'bar',
+    data:{labels:d.meses,datasets:[{label:'Ingresos',data:d.ingresos,backgroundColor:'#c46a7a55',borderColor:'#c46a7a',borderWidth:1.5,borderRadius:4}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return '$'+c.parsed.y.toLocaleString('es-MX')+'K';}}}},scales:{x:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted')}},y:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),callback:function(v){return '$'+v+'K';}}}}}
+  });
+  // Donut servicios
+  var dd = data.donut;
+  if(ingDonutChart) ingDonutChart.destroy();
+  ingDonutChart = new Chart(document.getElementById('ingDonutChart').getContext('2d'),{
+    type:'doughnut',
+    data:{labels:dd.labels,datasets:[{data:dd.data,backgroundColor:dd.colors.map(function(c){return c+'cc';}),borderColor:dd.colors,borderWidth:2}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return c.label+': '+c.parsed+'%';}}}}}
+  });
+  var leg=document.getElementById('ingDonutLegend'); leg.innerHTML='';
+  dd.labels.forEach(function(l,i){ leg.innerHTML+='<div class="legend-row"><span class="legend-dot" style="background:'+dd.colors[i]+'"></span><span class="legend-name">'+l+'</span><span class="legend-pct" style="color:'+dd.colors[i]+'">'+dd.data[i]+'%</span></div>'; });
+}
+
+/* ── GASTOS ─── */
+var gastoChart=null, gastoDonutChart=null;
+function renderGastos(data) {
+  var d = data[currentSegment];
+  var costos = data.costos;
+  if(gastoChart) gastoChart.destroy();
+  gastoChart = new Chart(document.getElementById('gastoChart').getContext('2d'),{
+    type:'bar',
+    data:{labels:d.meses,datasets:[{label:'Gastos',data:d.gastos,backgroundColor:'#3d8f8f44',borderColor:'#3d8f8f',borderWidth:1.5,borderRadius:4}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return '$'+c.parsed.y.toLocaleString('es-MX')+'K';}}}},scales:{x:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted')}},y:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),callback:function(v){return '$'+v+'K';}}}}}
+  });
+  if(gastoDonutChart) gastoDonutChart.destroy();
+  gastoDonutChart = new Chart(document.getElementById('gastoDonutChart').getContext('2d'),{
+    type:'doughnut',
+    data:{labels:costos.labels,datasets:[{data:costos.data,backgroundColor:costos.colors,borderWidth:2}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return c.label+': '+c.parsed+'%';}}}}}
+  });
+  var leg=document.getElementById('gastoDonutLegend'); leg.innerHTML='';
+  costos.labels.forEach(function(l,i){ leg.innerHTML+='<div class="legend-row"><span class="legend-dot" style="background:'+costos.colors[i]+'"></span><span class="legend-name">'+l+'</span><span class="legend-pct">'+costos.data[i]+'%</span></div>'; });
+  var tb=document.getElementById('gastoTableBody'); tb.innerHTML='';
+  var total=costos.data.reduce(function(a,b){return a+b;},0);
+  costos.labels.forEach(function(l,i){
+    var pct=costos.data[i];
+    tb.innerHTML+='<tr><td>'+l+'</td><td>$'+(d.gastos[d.gastos.length-1]*pct/100).toFixed(0)+'K</td><td>'+pct+'%</td><td><div class="progress-bar"><div class="progress-fill" style="width:'+pct+'%;background:'+costos.colors[i]+'"></div></div></td></tr>';
+  });
+}
+
+/* ── PACIENTES ─── */
+var pacChart=null, pacOrigenChart=null;
+function renderPacientes(data) {
+  var d = data[currentSegment];
+  document.getElementById('pac-total').textContent = (d.ciclos[d.ciclos.length-1]*6)+'';
+  document.getElementById('pac-nuevos').textContent = d.ciclos[d.ciclos.length-1]+'';
+  document.getElementById('pac-tasa').textContent = '68%';
+  document.getElementById('pac-cpp').textContent = d.cac[d.cac.length-1]/1+'d';
+  if(pacChart) pacChart.destroy();
+  pacChart = new Chart(document.getElementById('pacChart').getContext('2d'),{
+    type:'bar',
+    data:{labels:d.meses,datasets:[
+      {label:'Nuevos',data:d.ciclos,backgroundColor:'#c46a7a55',borderColor:'#c46a7a',borderWidth:1.5,borderRadius:4},
+      {label:'Recurrentes',data:d.ciclos.map(function(v){return Math.round(v*2.5);}),backgroundColor:'#3d8f8f44',borderColor:'#3d8f8f',borderWidth:1.5,borderRadius:4}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{tooltip:{mode:'index'}},scales:{x:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted')}},y:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted')}}}}
+  });
+  var origenes={labels:['Referido','Redes Sociales','Google','Walk-in','Médico'],data:[35,28,22,9,6],colors:['#c46a7a','#3d8f8f','#c47a1e','#7a52b0','#3a72a8']};
+  if(pacOrigenChart) pacOrigenChart.destroy();
+  pacOrigenChart = new Chart(document.getElementById('pacOrigenChart').getContext('2d'),{
+    type:'doughnut',
+    data:{labels:origenes.labels,datasets:[{data:origenes.data,backgroundColor:origenes.colors.map(function(c){return c+'cc';}),borderColor:origenes.colors,borderWidth:2}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{display:false}}}
+  });
+  var leg=document.getElementById('pacOrigenLegend'); leg.innerHTML='';
+  origenes.labels.forEach(function(l,i){ leg.innerHTML+='<div class="legend-row"><span class="legend-dot" style="background:'+origenes.colors[i]+'"></span><span class="legend-name">'+l+'</span><span class="legend-pct" style="color:'+origenes.colors[i]+'">'+origenes.data[i]+'%</span></div>'; });
+}
+
+/* ── SERVICIOS ─── */
+var svcBarChart=null;
+function renderServicios(data) {
+  var servicios = data.servicios;
+  var tb=document.getElementById('svcTableBody'); tb.innerHTML='';
+  servicios.forEach(function(s){
+    var pct=Math.round(s.meta*0.82);
+    tb.innerHTML+='<tr><td><span class="service-dot" style="background:'+s.color+'"></span>'+s.name+'</td><td>'+s.ingresos+'</td><td style="color:'+(s.margen>40?'var(--color-green)':'var(--color-text-muted)')+'"><b>'+s.margen+'%</b></td><td>—</td><td><div class="progress-bar"><div class="progress-fill" style="width:'+pct+'%;background:'+s.color+'"></div></div></td></tr>';
+  });
+  if(svcBarChart) svcBarChart.destroy();
+  svcBarChart = new Chart(document.getElementById('svcBarChart').getContext('2d'),{
+    type:'bar',
+    data:{labels:servicios.map(function(s){return s.name;}),datasets:[{label:'Margen %',data:servicios.map(function(s){return s.margen;}),backgroundColor:servicios.map(function(s){return s.color+'88';}),borderColor:servicios.map(function(s){return s.color;}),borderWidth:1.5,borderRadius:4}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted')}},y:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),callback:function(v){return v+'%';}},max:100}}}
+  });
+  buildFunnel(data.funnel, 'svcFunnelList');
+}
+
+/* ── TURISMO MÉDICO ─── */
+var turChart=null, turPaisesChart=null;
+function renderTurismo(data) {
+  var d = data.internacional;
+  document.getElementById('tur-ciclos').textContent = d.ciclos[d.ciclos.length-1]+'';
+  document.getElementById('tur-ticket').textContent = '$312K';
+  document.getElementById('tur-paises').textContent = '8';
+  document.getElementById('tur-margen').textContent = d.margen[d.margen.length-1]+'%';
+  if(turChart) turChart.destroy();
+  turChart = new Chart(document.getElementById('turChart').getContext('2d'),{
+    type:'line',
+    data:{labels:d.meses,datasets:[{label:'Ingresos Intl',data:d.ingresos,borderColor:'#3a72a8',borderWidth:2,pointRadius:3,pointBackgroundColor:'#3a72a8',fill:true,backgroundColor:'#3a72a822',tension:.4}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return '$'+c.parsed.y+'K';}}}},scales:{x:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted')}},y:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),callback:function(v){return '$'+v+'K';}}}}}
+  });
+  var paises={labels:['EE.UU.','Canadá','España','Colombia','Argentina','Otros'],data:[38,22,15,12,8,5],colors:['#c46a7a','#3d8f8f','#c47a1e','#7a52b0','#3a72a8','#b8b4ae']};
+  if(turPaisesChart) turPaisesChart.destroy();
+  turPaisesChart = new Chart(document.getElementById('turPaisesChart').getContext('2d'),{
+    type:'doughnut',
+    data:{labels:paises.labels,datasets:[{data:paises.data,backgroundColor:paises.colors.map(function(c){return c+'cc';}),borderColor:paises.colors,borderWidth:2}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{display:false}}}
+  });
+  var leg=document.getElementById('turPaisesLegend'); leg.innerHTML='';
+  paises.labels.forEach(function(l,i){ leg.innerHTML+='<div class="legend-row"><span class="legend-dot" style="background:'+paises.colors[i]+'"></span><span class="legend-name">'+l+'</span><span class="legend-pct" style="color:'+paises.colors[i]+'">'+paises.data[i]+'%</span></div>'; });
+}
+
+/* ── RENTABILIDAD ─── */
+var rentChart=null;
+function renderRentabilidad(data) {
+  var d = data[currentSegment];
+  var last = d.ingresos[d.ingresos.length-1];
+  var gasto = d.gastos[d.gastos.length-1];
+  document.getElementById('rent-ebitda').textContent = '$'+(last-gasto)+'K';
+  document.getElementById('rent-margen').textContent = d.margen[d.margen.length-1]+'%';
+  if(rentChart) rentChart.destroy();
+  rentChart = new Chart(document.getElementById('rentChart').getContext('2d'),{
+    type:'line',
+    data:{labels:d.meses,datasets:[{label:'Margen %',data:d.margen,borderColor:'#c46a7a',borderWidth:2,pointRadius:3,pointBackgroundColor:'#c46a7a',fill:true,backgroundColor:'#c46a7a11',tension:.4}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return c.parsed.y+'%';}}}},scales:{x:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted')}},y:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),callback:function(v){return v+'%';}}}}}
+  });
+  buildAlerts(data.alertas, 'rentAlertList');
+}
+
+/* Versión de buildFunnel que acepta ID del contenedor */
+function buildFunnel(funnel, containerId) {
+  var el=document.getElementById(containerId||'funnelList');
+  if(!el) return;
+  el.innerHTML='';
+  funnel.forEach(function(s){
+    el.innerHTML+='<div class="funnel-step"><span class="funnel-label">'+s.label+'</span><div class="funnel-bar-wrap"><div class="funnel-fill" style="width:'+s.pct+'%;background:'+s.color+'44;border-left:3px solid '+s.color+'"></div></div><span class="funnel-val">'+s.val+'</span></div>';
+  });
+}
+
+/* Versión de buildAlerts que acepta ID del contenedor */
+function buildAlerts(alertas, containerId) {
+  var el=document.getElementById(containerId||'alertList');
+  if(!el) return;
+  el.innerHTML='';
+  alertas.forEach(function(a){
+    el.innerHTML+='<div class="alert-item alert-'+a.type+'"><div class="alert-icon"><i data-lucide="'+a.icon+'"></i></div><div class="alert-body"><div class="alert-title">'+a.title+'</div><div class="alert-desc">'+a.desc+'</div></div></div>';
+  });
+  lucide.createIcons();
+}
+
 /* ── INIT ─── */
 window.addEventListener('DOMContentLoaded',()=>{
   // Esperar a que Chart.js esté disponible antes de iniciar
+  // Conectar navegación del sidebar
+  document.querySelectorAll('[data-view]').forEach(function(btn){
+    btn.addEventListener('click', function(){ navigateTo(btn.getAttribute('data-view')); });
+  });
+
   function waitForChart(attempts) {
     if (typeof Chart !== 'undefined') {
       lucide.createIcons();
@@ -776,7 +1145,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       setStatus('Error: Chart.js no cargó', 'err');
     }
   }
-  waitForChart(20); // espera hasta 6 segundos
+  waitForChart(20);
 });
 </script>
 </body>
