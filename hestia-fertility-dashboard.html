@@ -736,9 +736,8 @@ function renderAll(data){
 /* ══════════════════════════════════════════════════════
    KPIs
    ══════════════════════════════════════════════════════ */
-function fmtMXN(miles){
-  // Convierte miles a pesos completos con formato $1,630,000
-  return '$' + (miles * 1000).toLocaleString('es-MX', {minimumFractionDigits:0, maximumFractionDigits:2});
+function fmtMXN(val){
+  return '$' + Number(val).toLocaleString('es-MX', {minimumFractionDigits:0, maximumFractionDigits:2});
 }
 function updateKPIs(d){
   const last=d.ingresos[d.ingresos.length-1], prev=d.ingresos[d.ingresos.length-2];
@@ -751,7 +750,7 @@ function updateKPIs(d){
   document.getElementById('kpi1-badge').textContent=(dm>=0?'+':'')+dm+'%';
   document.getElementById('kpi1-badge').className='kpi-badge '+(dm>=0?'badge-up':'badge-down');
   document.getElementById('kpi2-val').textContent=d.ciclos[d.ciclos.length-1];
-  document.getElementById('kpi3-val').textContent=fmtMXN(d.cac[d.cac.length-1]/1000);
+  document.getElementById('kpi3-val').textContent=fmtMXN(d.cac[d.cac.length-1]);
 }
 
 /* ── SPARKLINES ─── */
@@ -792,10 +791,10 @@ function buildIngresoChart(d){
     options:{
       responsive:true,maintainAspectRatio:false,
       interaction:{mode:'index',intersect:false},
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+c.dataset.label+': $'+(c.parsed.y*1000).toLocaleString('es-MX')}}},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+c.dataset.label+': '+fmtMXN(c.parsed.y)}}},
       scales:{
         x:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),font:{size:11}}},
-        y:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),font:{size:11},callback:v=>'$'+(v*1000).toLocaleString('es-MX')}}
+        y:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),font:{size:11},callback:v=>fmtMXN(v)}}
       }
     }
   });
