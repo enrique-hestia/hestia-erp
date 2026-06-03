@@ -6,8 +6,8 @@
 <title>Hestia Fertility — Dashboard Financiero</title>
 <meta name="description" content="Dashboard financiero de Hestia Fertility: seguimiento de ingresos, gastos y métricas clave de la clínica.">
 <link href="https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/lucide@latest"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 <style>
 /* ── DESIGN TOKENS ───────────────────────────────────── */
 :root, [data-theme="light"] {
@@ -524,7 +524,8 @@ async function loadData(){
     const hora = new Date(json.updated).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
     setStatus('Actualizado ' + hora);
   } catch(e){
-    setStatus('Sin conexión — mostrando datos locales', 'err');
+    setStatus('Error: ' + e.message, 'err');
+    console.error('Sheets fetch error:', e);
     if(!sheetsData) renderAll(getFallbackData());
   }
 }
