@@ -746,25 +746,36 @@ function exportCSV(){
 
 /* ── REFRESH CHART COLORS (DARK MODE) ─── */
 function refreshChartColors(){
-  Chart.helpers.each(Chart.instances,(chart)=>{
-    if(chart.options.scales){
-      ['x','y'].forEach(ax=>{
+  // Compatible con Chart.js v3 y v4
+  var instances = typeof Chart.instances === 'object' ? Object.values(Chart.instances) : [];
+  instances.forEach(function(chart){
+    if(chart && chart.options && chart.options.scales){
+      ['x','y'].forEach(function(ax){
         if(chart.options.scales[ax]){
           chart.options.scales[ax].grid={color:cssVar('--color-divider')};
-          chart.options.scales[ax].ticks={...chart.options.scales[ax].ticks,color:cssVar('--color-text-muted')};
+          chart.options.scales[ax].ticks=Object.assign({},chart.options.scales[ax].ticks,{color:cssVar('--color-text-muted')});
         }
       });
+      chart.update();
     }
-    chart.update();
   });
 }
 
 /* ── INIT ─── */
 window.addEventListener('DOMContentLoaded',()=>{
-  lucide.createIcons();
-  loadData();
-  // Refresca datos cada 30 segundos
-  setInterval(loadData, 30000);
+  // Esperar a que Chart.js esté disponible antes de iniciar
+  function waitForChart(attempts) {
+    if (typeof Chart !== 'undefined') {
+      lucide.createIcons();
+      loadData();
+      setInterval(loadData, 30000);
+    } else if (attempts > 0) {
+      setTimeout(function(){ waitForChart(attempts - 1); }, 300);
+    } else {
+      setStatus('Error: Chart.js no cargó', 'err');
+    }
+  }
+  waitForChart(20); // espera hasta 6 segundos
 });
 </script>
 </body>
