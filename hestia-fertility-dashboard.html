@@ -736,10 +736,14 @@ function renderAll(data){
 /* ══════════════════════════════════════════════════════
    KPIs
    ══════════════════════════════════════════════════════ */
+function fmtMXN(miles){
+  // Convierte miles a pesos completos con formato $1,630,000
+  return '$' + (miles * 1000).toLocaleString('es-MX', {minimumFractionDigits:0, maximumFractionDigits:2});
+}
 function updateKPIs(d){
   const last=d.ingresos[d.ingresos.length-1], prev=d.ingresos[d.ingresos.length-2];
   const pct=Math.round((last-prev)/prev*100);
-  document.getElementById('kpi0-val').textContent='$'+(last/100).toFixed(1)+'M';
+  document.getElementById('kpi0-val').textContent=fmtMXN(last);
   document.getElementById('kpi0-badge').textContent=(pct>=0?'+':'')+pct+'%';
   document.getElementById('kpi0-badge').className='kpi-badge '+(pct>=0?'badge-up':'badge-down');
   const lm=d.margen[d.margen.length-1], pm=d.margen[d.margen.length-2], dm=lm-pm;
@@ -747,7 +751,7 @@ function updateKPIs(d){
   document.getElementById('kpi1-badge').textContent=(dm>=0?'+':'')+dm+'%';
   document.getElementById('kpi1-badge').className='kpi-badge '+(dm>=0?'badge-up':'badge-down');
   document.getElementById('kpi2-val').textContent=d.ciclos[d.ciclos.length-1];
-  document.getElementById('kpi3-val').textContent='$'+d.cac[d.cac.length-1]+'K';
+  document.getElementById('kpi3-val').textContent=fmtMXN(d.cac[d.cac.length-1]/1000);
 }
 
 /* ── SPARKLINES ─── */
@@ -788,10 +792,10 @@ function buildIngresoChart(d){
     options:{
       responsive:true,maintainAspectRatio:false,
       interaction:{mode:'index',intersect:false},
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+c.dataset.label+': $'+c.parsed.y.toLocaleString('es-MX')+'K'}}},
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>' '+c.dataset.label+': $'+(c.parsed.y*1000).toLocaleString('es-MX')}}},
       scales:{
         x:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),font:{size:11}}},
-        y:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),font:{size:11},callback:v=>'$'+v+'K'}}
+        y:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),font:{size:11},callback:v=>'$'+(v*1000).toLocaleString('es-MX')}}
       }
     }
   });
