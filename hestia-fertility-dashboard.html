@@ -294,6 +294,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
     <button class="icon-btn" aria-label="Exportar CSV" onclick="exportCSV()" title="Exportar">
       <i data-lucide="download"></i>
     </button>
+    <span id="sync-status" style="font-size:var(--text-xs);color:var(--color-text-faint)">Cargando…</span>
     <button class="icon-btn" data-theme-toggle aria-label="Cambiar tema">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
     </button>
@@ -462,6 +463,13 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 </div>
 
 <script>
+/* ════════════════════════════════════════════════════════════════
+   HESTIA FERTILITY — Dashboard conectado a Google Sheets
+   Reemplaza APPS_SCRIPT_URL con la URL de tu Web App
+   ════════════════════════════════════════════════════════════════ */
+
+const APPS_SCRIPT_URL = 'REEMPLAZA_CON_TU_URL';  // ← pega aquí tu URL
+
 /* ── THEME TOGGLE ─── */
 (function(){
   const t=document.querySelector('[data-theme-toggle]'),r=document.documentElement;
@@ -477,63 +485,131 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
   });
 })();
 
-/* ── DATA ─── */
-const MONTHS=['Nov','Dic','Ene','Feb','Mar','Abr'];
-const DATA={
-  'todos':{
-    ingresos:[1800,1950,2100,2250,2180,2400],
-    gastos:  [1150,1200,1280,1350,1330,1490],
-    ciclos:  [38,41,43,45,44,47],
-    cac:     [54,53,52,51,52,51],
-    margen:  [36,38,39,38,39,38],
-  },
-  'local':{
-    ingresos:[1100,1200,1250,1380,1320,1470],
-    gastos:  [730,750,800,850,820,920],
-    ciclos:  [26,28,29,31,30,32],
-    cac:     [42,41,40,40,41,40],
-    margen:  [34,37,36,38,38,37],
-  },
-  'internacional':{
-    ingresos:[700,750,850,870,860,930],
-    gastos:  [420,450,480,500,510,570],
-    ciclos:  [12,13,14,14,14,15],
-    cac:     [72,70,68,68,70,69],
-    margen:  [40,40,43,43,41,39],
-  }
-};
-let currentSegment='todos';
+/* ── ESTADO GLOBAL ─── */
+let currentSegment = 'todos';
+let sheetsData     = null;   // datos cacheados desde Sheets
+let ingresoChart   = null;
+let donutChart     = null;
+let cashChart      = null;
+let costChart      = null;
+const seriesVisible = {ingresos:true, gastos:true, utilidad:true};
 
 function getCS(){return getComputedStyle(document.documentElement);}
 function cssVar(v){return getCS().getPropertyValue(v).trim();}
 
+/* ── INDICADOR DE ESTADO ─── */
+function setStatus(msg, type='ok'){
+  const el = document.getElementById('sync-status');
+  if(!el) return;
+  el.textContent = msg;
+  el.style.color = type==='err' ? 'var(--color-amber)' : 'var(--color-text-faint)';
+}
+
+/* ══════════════════════════════════════════════════════
+   CARGA DE DATOS DESDE SHEETS
+   ══════════════════════════════════════════════════════ */
+async function loadData(){
+  if(APPS_SCRIPT_URL === 'REEMPLAZA_CON_TU_URL'){
+    setStatus('⚠ Configura la URL del Apps Script', 'err');
+    renderAll(getFallbackData());
+    return;
+  }
+  setStatus('Actualizando…');
+  try{
+    const res  = await fetch(APPS_SCRIPT_URL);
+    const json = await res.json();
+    if(json.error) throw new Error(json.error);
+    sheetsData = json;
+    renderAll(json);
+    const hora = new Date(json.updated).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+    setStatus('Actualizado ' + hora);
+  } catch(e){
+    setStatus('Sin conexión — mostrando datos locales', 'err');
+    if(!sheetsData) renderAll(getFallbackData());
+  }
+}
+
+/* ── Datos de respaldo (igual que antes, por si no hay conexión) ─── */
+function getFallbackData(){
+  return {
+    todos:{ meses:['Nov','Dic','Ene','Feb','Mar','Abr'], ingresos:[1800,1950,2100,2250,2180,2400], gastos:[1150,1200,1280,1350,1330,1490], ciclos:[38,41,43,45,44,47], cac:[54,53,52,51,52,51], margen:[36,38,39,38,39,38] },
+    local:{ meses:['Nov','Dic','Ene','Feb','Mar','Abr'], ingresos:[1100,1200,1250,1380,1320,1470], gastos:[730,750,800,850,820,920], ciclos:[26,28,29,31,30,32], cac:[42,41,40,40,41,40], margen:[34,37,36,38,38,37] },
+    internacional:{ meses:['Nov','Dic','Ene','Feb','Mar','Abr'], ingresos:[700,750,850,870,860,930], gastos:[420,450,480,500,510,570], ciclos:[12,13,14,14,14,15], cac:[72,70,68,68,70,69], margen:[40,40,43,43,41,39] },
+    servicios:[ {name:'FIV / ICSI',color:'#c46a7a',ingresos:'$1,080K',margen:42,meta:80}, {name:'Congelamiento',color:'#3d8f8f',ingresos:'$528K',margen:38,meta:75}, {name:'Inseminación',color:'#c47a1e',ingresos:'$336K',margen:29,meta:60}, {name:'Estudios PGTa',color:'#7a52b0',ingresos:'$264K',margen:55,meta:90}, {name:'Consultas',color:'#3a72a8',ingresos:'$192K',margen:72,meta:100} ],
+    funnel:[ {label:'Prospectos',val:310,pct:100,color:'#c46a7a'}, {label:'1a Consulta',val:190,pct:61,color:'#3d8f8f'}, {label:'Diagnóstico',val:120,pct:39,color:'#c47a1e'}, {label:'Cotización',val:85,pct:27,color:'#7a52b0'}, {label:'Ciclo activo',val:47,pct:15,color:'#3a72a8'} ],
+    alertas:[ {type:'warn',icon:'alert-triangle',title:'CPP alto en FIV',desc:'62 días promedio — meta: < 50 días'}, {type:'ok',icon:'check-circle',title:'Margen PGTa óptimo',desc:'55% este mes, supera meta del 50%'}, {type:'info',icon:'info',title:'12 ciclos internacionales',desc:'Record histórico Q2 — turismo médico'} ],
+    donut:{ labels:['FIV / ICSI','Congelamiento','Inseminación','Estudios (PGTa)','Consultas'], data:[45,22,14,11,8], colors:['#c46a7a','#3d8f8f','#c47a1e','#7a52b0','#3a72a8'] },
+    cashflow:{ meses:['Nov','Dic','Ene','Feb','Mar','Abr'], flujo:[420,580,650,720,680,740] },
+    costos:{ labels:['Nómina','Renta','Medicamentos','Equipos','Marketing','Otros'], data:[38,15,20,10,11,6], colors:['#c46a7a99','#3d8f8f99','#c47a1e99','#7a52b099','#3a72a899','#b8b4ae99'] },
+    updated: new Date().toISOString()
+  };
+}
+
+/* ══════════════════════════════════════════════════════
+   RENDER COMPLETO
+   ══════════════════════════════════════════════════════ */
+function renderAll(data){
+  const d = data[currentSegment];
+  updateKPIs(d);
+  initSparks(d);
+  buildIngresoChart(d);
+  buildDonutChart(data.donut);
+  buildServicesTable(data.servicios);
+  buildFunnel(data.funnel);
+  buildAlerts(data.alertas);
+  buildCashChart(data.cashflow);
+  buildCostChart(data.costos);
+}
+
+/* ══════════════════════════════════════════════════════
+   KPIs
+   ══════════════════════════════════════════════════════ */
+function updateKPIs(d){
+  const last=d.ingresos[d.ingresos.length-1], prev=d.ingresos[d.ingresos.length-2];
+  const pct=Math.round((last-prev)/prev*100);
+  document.getElementById('kpi0-val').textContent='$'+(last/100).toFixed(1)+'M';
+  document.getElementById('kpi0-badge').textContent=(pct>=0?'+':'')+pct+'%';
+  document.getElementById('kpi0-badge').className='kpi-badge '+(pct>=0?'badge-up':'badge-down');
+  const lm=d.margen[d.margen.length-1], pm=d.margen[d.margen.length-2], dm=lm-pm;
+  document.getElementById('kpi1-val').textContent=lm+'%';
+  document.getElementById('kpi1-badge').textContent=(dm>=0?'+':'')+dm+'%';
+  document.getElementById('kpi1-badge').className='kpi-badge '+(dm>=0?'badge-up':'badge-down');
+  document.getElementById('kpi2-val').textContent=d.ciclos[d.ciclos.length-1];
+  document.getElementById('kpi3-val').textContent='$'+d.cac[d.cac.length-1]+'K';
+}
+
 /* ── SPARKLINES ─── */
 function drawSpark(id,data,color){
-  const ctx=document.getElementById(id).getContext('2d');
-  new Chart(ctx,{
+  const el=document.getElementById(id);
+  if(el._chart){el._chart.destroy();}
+  const ctx=el.getContext('2d');
+  el._chart=new Chart(ctx,{
     type:'line',
-    data:{labels:MONTHS,datasets:[{data,borderColor:color,borderWidth:1.5,pointRadius:0,fill:true,backgroundColor:color.replace(')',',0.12)').replace('rgb','rgba')||color+'22',tension:.4}]},
+    data:{labels:data.map((_,i)=>i),datasets:[{data,borderColor:color,borderWidth:1.5,pointRadius:0,fill:true,backgroundColor:color.replace(')',',0.12)').replace('rgb','rgba'),tension:.4}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{enabled:false}},scales:{x:{display:false},y:{display:false}},animation:{duration:600}}
   });
 }
+function initSparks(d){
+  drawSpark('spark0',d.ingresos,'rgb(196,106,122)');
+  drawSpark('spark1',d.margen,'rgb(77,140,90)');
+  drawSpark('spark2',d.ciclos,'rgb(58,114,168)');
+  drawSpark('spark3',d.cac,'rgb(196,122,30)');
+}
 
 /* ── INGRESO CHART ─── */
-let ingresoChart;
-const seriesVisible={ingresos:true,gastos:true,utilidad:true};
-function buildIngresoChart(){
-  const d=DATA[currentSegment];
+function buildIngresoChart(d){
+  if(ingresoChart){ingresoChart.destroy();}
   const util=d.ingresos.map((v,i)=>v-d.gastos[i]);
-  const ctx=document.getElementById('ingresoChart').getContext('2d');
   const p=cssVar('--color-primary')||'#c46a7a';
   const t=cssVar('--color-teal')||'#3d8f8f';
   const a=cssVar('--color-amber')||'#c47a1e';
-  ingresoChart=new Chart(ctx,{
+  ingresoChart=new Chart(document.getElementById('ingresoChart').getContext('2d'),{
     type:'bar',
     data:{
-      labels:MONTHS,
+      labels: d.meses,
       datasets:[
         {label:'Ingresos',data:d.ingresos,backgroundColor:p+'55',borderColor:p,borderWidth:1.5,borderRadius:4,order:1},
-        {label:'Gastos',data:d.gastos,backgroundColor:t+'44',borderColor:t,borderWidth:1.5,borderRadius:4,order:2},
+        {label:'Gastos',  data:d.gastos,  backgroundColor:t+'44',borderColor:t,borderWidth:1.5,borderRadius:4,order:2},
         {label:'Utilidad',data:util,type:'line',borderColor:a,borderWidth:2,pointRadius:3,pointBackgroundColor:a,fill:false,tension:.4,order:0,yAxisID:'y'},
       ]
     },
@@ -552,46 +628,30 @@ function toggleSeries(chip,key){
   chip.classList.toggle('active');
   seriesVisible[key]=chip.classList.contains('active');
   const idxMap={ingresos:0,gastos:1,utilidad:2};
-  const ds=ingresoChart.data.datasets[idxMap[key]];
-  ds.hidden=!seriesVisible[key];
+  ingresoChart.data.datasets[idxMap[key]].hidden=!seriesVisible[key];
   ingresoChart.update();
 }
 
 /* ── DONUT CHART ─── */
-const donutData={
-  labels:['FIV / ICSI','Congelamiento','Inseminación','Estudios (PGTa)','Consultas'],
-  data:[45,22,14,11,8],
-  colors:['#c46a7a','#3d8f8f','#c47a1e','#7a52b0','#3a72a8']
-};
-function buildDonutChart(){
-  const ctx=document.getElementById('donutChart').getContext('2d');
-  new Chart(ctx,{
+function buildDonutChart(dd){
+  if(donutChart){donutChart.destroy();}
+  donutChart=new Chart(document.getElementById('donutChart').getContext('2d'),{
     type:'doughnut',
-    data:{labels:donutData.labels,datasets:[{data:donutData.data,backgroundColor:donutData.colors.map(c=>c+'cc'),borderColor:donutData.colors,borderWidth:2,hoverOffset:6}]},
-    options:{
-      responsive:true,maintainAspectRatio:false,cutout:'68%',
-      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.label+': '+c.parsed+'%'}}}
-    }
+    data:{labels:dd.labels,datasets:[{data:dd.data,backgroundColor:dd.colors.map(c=>c+'cc'),borderColor:dd.colors,borderWidth:2,hoverOffset:6}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'68%',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.label+': '+c.parsed+'%'}}}}
   });
   const leg=document.getElementById('donutLegend');
   leg.innerHTML='';
-  donutData.labels.forEach((l,i)=>{
-    leg.innerHTML+=`<div class="legend-row"><span class="legend-dot" style="background:${donutData.colors[i]}"></span><span class="legend-name">${l}</span><span class="legend-pct" style="color:${donutData.colors[i]}">${donutData.data[i]}%</span></div>`;
+  dd.labels.forEach((l,i)=>{
+    leg.innerHTML+=`<div class="legend-row"><span class="legend-dot" style="background:${dd.colors[i]}"></span><span class="legend-name">${l}</span><span class="legend-pct" style="color:${dd.colors[i]}">${dd.data[i]}%</span></div>`;
   });
 }
 
 /* ── SERVICES TABLE ─── */
-const services=[
-  {name:'FIV / ICSI',color:'#c46a7a',ingresos:'$1,080K',margen:42,meta:80},
-  {name:'Congelamiento',color:'#3d8f8f',ingresos:'$528K',margen:38,meta:75},
-  {name:'Inseminación',color:'#c47a1e',ingresos:'$336K',margen:29,meta:60},
-  {name:'Estudios PGTa',color:'#7a52b0',ingresos:'$264K',margen:55,meta:90},
-  {name:'Consultas',color:'#3a72a8',ingresos:'$192K',margen:72,meta:100},
-];
-function buildServicesTable(){
+function buildServicesTable(servicios){
   const tb=document.getElementById('servicesBody');
   tb.innerHTML='';
-  services.forEach(s=>{
+  servicios.forEach(s=>{
     const pct=Math.round(s.meta*0.82);
     tb.innerHTML+=`<tr>
       <td><span class="service-dot" style="background:${s.color}"></span>${s.name}</td>
@@ -603,17 +663,10 @@ function buildServicesTable(){
 }
 
 /* ── FUNNEL ─── */
-const funnelSteps=[
-  {label:'Prospectos',val:310,pct:100,color:'#c46a7a'},
-  {label:'1a Consulta',val:190,pct:61,color:'#3d8f8f'},
-  {label:'Diagnóstico',val:120,pct:39,color:'#c47a1e'},
-  {label:'Cotización',val:85,pct:27,color:'#7a52b0'},
-  {label:'Ciclo activo',val:47,pct:15,color:'#3a72a8'},
-];
-function buildFunnel(){
+function buildFunnel(funnel){
   const el=document.getElementById('funnelList');
   el.innerHTML='';
-  funnelSteps.forEach(s=>{
+  funnel.forEach(s=>{
     el.innerHTML+=`<div class="funnel-step">
       <span class="funnel-label">${s.label}</span>
       <div class="funnel-bar-wrap"><div class="funnel-fill" style="width:${s.pct}%;background:${s.color}44;border-left:3px solid ${s.color}"></div></div>
@@ -623,15 +676,10 @@ function buildFunnel(){
 }
 
 /* ── ALERTS ─── */
-const alerts=[
-  {type:'warn',icon:'alert-triangle',title:'CPP alto en FIV',desc:'62 días promedio — meta: < 50 días'},
-  {type:'ok',icon:'check-circle',title:'Margen PGTa óptimo',desc:'55% este mes, supera meta del 50%'},
-  {type:'info',icon:'info',title:'12 ciclos internacionales',desc:'Record histórico Q2 — turismo médico'},
-];
-function buildAlerts(){
+function buildAlerts(alertas){
   const el=document.getElementById('alertList');
   el.innerHTML='';
-  alerts.forEach(a=>{
+  alertas.forEach(a=>{
     el.innerHTML+=`<div class="alert-item alert-${a.type}">
       <div class="alert-icon"><i data-lucide="${a.icon}"></i></div>
       <div class="alert-body"><div class="alert-title">${a.title}</div><div class="alert-desc">${a.desc}</div></div>
@@ -641,12 +689,11 @@ function buildAlerts(){
 }
 
 /* ── CASH FLOW CHART ─── */
-function buildCashChart(){
-  const ctx=document.getElementById('cashChart').getContext('2d');
-  const cash=[420,580,650,720,680,740];
-  new Chart(ctx,{
+function buildCashChart(cf){
+  if(cashChart){cashChart.destroy();}
+  cashChart=new Chart(document.getElementById('cashChart').getContext('2d'),{
     type:'line',
-    data:{labels:MONTHS,datasets:[{label:'Flujo MXN K',data:cash,borderColor:'#3d8f8f',borderWidth:2,pointRadius:3,pointBackgroundColor:'#3d8f8f',fill:true,backgroundColor:'#3d8f8f22',tension:.4}]},
+    data:{labels:cf.meses,datasets:[{label:'Flujo MXN K',data:cf.flujo,borderColor:'#3d8f8f',borderWidth:2,pointRadius:3,pointBackgroundColor:'#3d8f8f',fill:true,backgroundColor:'#3d8f8f22',tension:.4}]},
     options:{
       responsive:true,maintainAspectRatio:false,
       plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'$'+c.parsed.y+'K'}}},
@@ -659,18 +706,11 @@ function buildCashChart(){
 }
 
 /* ── COST CHART ─── */
-function buildCostChart(){
-  const ctx=document.getElementById('costChart').getContext('2d');
-  new Chart(ctx,{
+function buildCostChart(costos){
+  if(costChart){costChart.destroy();}
+  costChart=new Chart(document.getElementById('costChart').getContext('2d'),{
     type:'doughnut',
-    data:{
-      labels:['Nómina','Renta','Medicamentos','Equipos','Marketing','Otros'],
-      datasets:[{
-        data:[38,15,20,10,11,6],
-        backgroundColor:['#c46a7a99','#3d8f8f99','#c47a1e99','#7a52b099','#3a72a899','#b8b4ae99'],
-        borderWidth:2,hoverOffset:4
-      }]
-    },
+    data:{labels:costos.labels,datasets:[{data:costos.data,backgroundColor:costos.colors,borderWidth:2,hoverOffset:4}]},
     options:{
       responsive:true,maintainAspectRatio:false,cutout:'60%',
       plugins:{legend:{display:true,position:'right',labels:{font:{size:10},boxWidth:10,color:cssVar('--color-text-muted')}},tooltip:{callbacks:{label:c=>c.label+': '+c.parsed+'%'}}}
@@ -678,52 +718,24 @@ function buildCostChart(){
   });
 }
 
-/* ── KPI UPDATE ─── */
-function updateKPIs(seg){
-  const d=DATA[seg];
-  const last=d.ingresos[d.ingresos.length-1];
-  const prev=d.ingresos[d.ingresos.length-2];
-  const pct=Math.round((last-prev)/prev*100);
-  document.getElementById('kpi0-val').textContent='$'+last/100+'M';
-  document.getElementById('kpi0-badge').textContent=(pct>=0?'+':'')+pct+'%';
-  document.getElementById('kpi0-badge').className='kpi-badge '+(pct>=0?'badge-up':'badge-down');
-  const lm=d.margen[d.margen.length-1];
-  const pm=d.margen[d.margen.length-2];
-  document.getElementById('kpi1-val').textContent=lm+'%';
-  const dm=lm-pm;
-  document.getElementById('kpi1-badge').textContent=(dm>=0?'+':'')+dm+'%';
-  document.getElementById('kpi1-badge').className='kpi-badge '+(dm>=0?'badge-up':'badge-down');
-  document.getElementById('kpi2-val').textContent=d.ciclos[d.ciclos.length-1];
-  document.getElementById('kpi3-val').textContent='$'+d.cac[d.cac.length-1]+'K';
-}
-
-/* ── SPARKLINES INIT ─── */
-function initSparks(seg){
-  const d=DATA[seg];
-  drawSpark('spark0',d.ingresos,'rgb(196,106,122)');
-  drawSpark('spark1',d.margen,'rgb(77,140,90)');
-  drawSpark('spark2',d.ciclos,'rgb(58,114,168)');
-  drawSpark('spark3',d.cac,'rgb(196,122,30)');
-}
-
-/* ── SEGMENT CHANGE ─── */
+/* ── SEGMENT / PERIOD CHANGE ─── */
 function updateSegment(val){
   currentSegment=val;
-  updateKPIs(val);
-  // Rebuild ingreso chart
-  ingresoChart.destroy();
-  buildIngresoChart();
+  const data = sheetsData || getFallbackData();
+  const d = data[val];
+  updateKPIs(d);
+  initSparks(d);
+  buildIngresoChart(d);
 }
-function updatePeriod(val){ /* placeholder for real data */ }
+function updatePeriod(val){ loadData(); }
 
 /* ── EXPORT CSV ─── */
 function exportCSV(){
-  const d=DATA[currentSegment];
-  let csv='Mes,Ingresos,Gastos,Utilidad,Ciclos,CAC,Margen
-';
-  MONTHS.forEach((m,i)=>{
-    csv+=`${m},${d.ingresos[i]},${d.gastos[i]},${d.ingresos[i]-d.gastos[i]},${d.ciclos[i]},${d.cac[i]},${d.margen[i]}
-`;
+  const data = sheetsData || getFallbackData();
+  const d = data[currentSegment];
+  let csv='Mes,Ingresos,Gastos,Utilidad,Ciclos,CAC,Margen\n';
+  d.meses.forEach((m,i)=>{
+    csv+=`${m},${d.ingresos[i]},${d.gastos[i]},${d.ingresos[i]-d.gastos[i]},${d.ciclos[i]},${d.cac[i]},${d.margen[i]}\n`;
   });
   const a=document.createElement('a');
   a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
@@ -749,15 +761,9 @@ function refreshChartColors(){
 /* ── INIT ─── */
 window.addEventListener('DOMContentLoaded',()=>{
   lucide.createIcons();
-  updateKPIs(currentSegment);
-  initSparks(currentSegment);
-  buildIngresoChart();
-  buildDonutChart();
-  buildServicesTable();
-  buildFunnel();
-  buildAlerts();
-  buildCashChart();
-  buildCostChart();
+  loadData();
+  // Refresca datos cada 30 segundos
+  setInterval(loadData, 30000);
 });
 </script>
 </body>
