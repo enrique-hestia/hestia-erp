@@ -102,6 +102,7 @@ function readMensualData(ss, periodo, viewId) {
     donut:         readDonut(ss),
     cashflow:      readCashFlow(ss, periodo),
     costos:        readCostos(ss),
+    paisesOrigen:  readPaisesOrigen(ss, periodo),
     updated:       new Date().toISOString()
   };
 }
@@ -201,6 +202,18 @@ function readDonut(ss) {
     labels: data.map(function(r) { return String(r[0]); }),
     data:   data.map(function(r) { return Number(r[1]); }),
     colors: data.map(function(r) { return String(r[2]); })
+  };
+}
+
+function readPaisesOrigen(ss, periodo) {
+  var hoja = ss.getSheetByName('PaisesOrigen');
+  if (!hoja) return { labels: [], data: [], colors: [] };
+  var rows = hoja.getDataRange().getValues();
+  var data = rows.slice(1).filter(function(r) { return String(r[0]) === periodo; });
+  return {
+    labels: data.map(function(r) { return String(r[1]); }),
+    data:   data.map(function(r) { return Number(r[2]); }),
+    colors: data.map(function(r) { return String(r[3]); })
   };
 }
 
