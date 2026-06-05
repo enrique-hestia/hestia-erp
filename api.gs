@@ -11,21 +11,28 @@ var CAPTURA_SHEET_ID_DEFAULT = SHEET_ID;
 
 /* ══════════════════════════════════════════════════════════════
    doGet — Enrutador principal
-   ?action=menu              → menú + periodos (carga inicial, ligero)
-   ?action=view&view=X&periodo=Y → datos de esa vista específica
+   ?action=menu                              → menú (carga inicial)
+   ?action=view&view=X&fechaInicio=Y&fechaFin=Z → datos de la vista
+   ?action=insert&sheet=X&...campos          → inserta fila
    ══════════════════════════════════════════════════════════════ */
 function doGet(e) {
   try {
-    var ss      = SpreadsheetApp.openById(SHEET_ID);
-    var action  = (e && e.parameter.action)  || 'menu';
-    var periodo = (e && e.parameter.periodo) || getDefaultPeriodo(ss);
-    var view    = (e && e.parameter.view)    || 'resumen';
+    var ss     = SpreadsheetApp.openById(SHEET_ID);
+    var action = (e && e.parameter.action) || 'menu';
+    var view   = (e && e.parameter.view)   || 'resumen';
+
+    // Rango de fechas — default: últimos 6 meses
+    var hoy        = new Date();
+    var defInicio  = new Date(hoy.getFullYear(), hoy.getMonth() - 5, 1);
+    var defFin     = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
+    var fechaInicio = (e && e.parameter.fechaInicio) || fmtDate(defInicio);
+    var fechaFin    = (e && e.parameter.fechaFin)    || fmtDate(defFin);
 
     if (action === 'menu') {
       return jsonResponse({
-        menu:     readMenu(ss),
-        periodos: readPeriodos(ss),
-        periodo:  periodo
+        menu:        readMenu(ss),
+        fechaInicio: fechaInicio,
+        fechaFin:    fechaFin
       });
     }
 
@@ -34,11 +41,18 @@ function doGet(e) {
     }
 
     // action === 'view'
-    return jsonResponse(readViewData(ss, view, periodo));
+    return jsonResponse(readViewData(ss, view, fechaInicio, fechaFin));
 
   } catch(err) {
     return jsonResponse({ error: err.message });
   }
+}
+
+/* Formatea Date como YYYY-MM-DD */
+function fmtDate(d) {
+  var mm = String(d.getMonth() + 1).padStart(2, '0');
+  var dd = String(d.getDate()).padStart(2, '0');
+  return d.getFullYear() + '-' + mm + '-' + dd;
 }
 
 function jsonResponse(obj) {
@@ -47,11 +61,8 @@ function jsonResponse(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-/* ── Periodo por defecto: el primero de la hoja Periodos ─── */
-function getDefaultPeriodo(ss) {
-  var periodos = readPeriodos(ss);
-  return periodos.length ? periodos[0].id : '2026-Q2';
-}
+/* ── getDefaultPeriodo mantenido por compatibilidad (ya no se usa) ─── */
+function getDefaultPeriodo(ss) { return ''; }
 
 /* ══════════════════════════════════════════════════════════════
    LEE LA HOJA Menu
@@ -82,83 +93,70 @@ function readMenu(ss) {
 
 /* ══════════════════════════════════════════════════════════════
    ENRUTADOR DE DATOS POR VISTA
-   fuente = 'mensual' → datos financieros filtrados por periodo
-   fuente = NombreHoja → lee esa hoja como tabla de captura
+   fuente = 'mensual' → datos financieros filtrados por rango de fechas
+   fuente = NombreHoja → lee esa hoja como tabla de captura (sin filtro)
    ══════════════════════════════════════════════════════════════ */
-function readViewData(ss, viewId, periodo) {
-  var menu   = readMenu(ss);
-  var item   = null;
+function readViewData(ss, viewId, fechaInicio, fechaFin) {
+  var menu = readMenu(ss);
+  var item = null;
   for (var i = 0; i < menu.length; i++) {
     if (menu[i].id === viewId) { item = menu[i]; break; }
   }
   var fuente = item ? item.fuente : 'mensual';
 
   if (!fuente || fuente === 'mensual') {
-    return readMensualData(ss, periodo, viewId);
+    return readMensualData(ss, fechaInicio, fechaFin, viewId);
   }
 
-  // Captura dinámica: lee la hoja por nombre
-  return readCapturaData(ss, fuente, periodo, viewId);
+  return readCapturaData(ss, fuente, viewId);
 }
 
-/* ── Datos financieros completos ─── */
-function readMensualData(ss, periodo, viewId) {
+/* ── Datos financieros completos (filtrados por rango de fechas) ─── */
+function readMensualData(ss, fechaInicio, fechaFin, viewId) {
+  var label = fechaInicio.slice(0,7) + ' → ' + fechaFin.slice(0,7);
   return {
     view:          viewId,
-    periodo:       periodo,
-    todos:         readMensual(ss, 'Mensual_Todos', periodo),
-    local:         readMensual(ss, 'Mensual_Local', periodo),
-    internacional: readMensual(ss, 'Mensual_Internacional', periodo),
+    periodo:       label,          // string descriptivo para subtítulos
+    fechaInicio:   fechaInicio,
+    fechaFin:      fechaFin,
+    todos:         readMensual(ss, 'Mensual_Todos',         fechaInicio, fechaFin),
+    local:         readMensual(ss, 'Mensual_Local',         fechaInicio, fechaFin),
+    internacional: readMensual(ss, 'Mensual_Internacional', fechaInicio, fechaFin),
     servicios:     readServicios(ss),
     funnel:        readFunnel(ss),
     alertas:       readAlertas(ss),
     donut:         readDonut(ss),
-    cashflow:      readCashFlow(ss, periodo),
+    cashflow:      readCashFlow(ss, fechaInicio, fechaFin),
     costos:        readCostos(ss),
-    paisesOrigen:  readPaisesOrigen(ss, periodo),
+    paisesOrigen:  readPaisesOrigen(ss, fechaInicio, fechaFin),
     updated:       new Date().toISOString()
   };
 }
 
-/* ── Datos de una hoja de captura genérica ─── */
-function readCapturaData(ss, nombreHoja, periodo, viewId) {
-  // Abrir el spreadsheet correcto según el mapeo
+/* ── Datos de una hoja de captura genérica (sin filtro de fecha) ─── */
+function readCapturaData(ss, nombreHoja, viewId) {
   var capturaId = CAPTURA_SHEETS[nombreHoja] || CAPTURA_SHEET_ID_DEFAULT;
   var ssCap = SpreadsheetApp.openById(capturaId);
-  var hoja = ssCap.getSheetByName(nombreHoja);
+  var hoja  = ssCap.getSheetByName(nombreHoja);
   if (!hoja) {
-    return { view: viewId, periodo: periodo, headers: [], rows: [],
-             error: 'Hoja "' + nombreHoja + '" no encontrada en el Spreadsheet.' };
+    return { view: viewId, headers: [], rows: [],
+             error: 'Hoja "' + nombreHoja + '" no encontrada.' };
   }
   var allRows = hoja.getDataRange().getValues();
-  if (allRows.length < 1) return { view: viewId, periodo: periodo, headers: [], rows: [] };
+  if (allRows.length < 1) return { view: viewId, headers: [], rows: [] };
 
-  // Cabecera: row 0, columnas desde B (índice 1 en adelante)
-  var headers = allRows[0].slice(1).map(function(h) {
-    return String(h).trim();
+  var headers = allRows[0].slice(1).map(function(h) { return String(h).trim(); });
+  var rows = allRows.slice(1).map(function(r) {
+    var obj = { _periodo: String(r[0]) };
+    headers.forEach(function(h, i) {
+      obj[h] = r[i + 1];
+      obj[h.toLowerCase()] = r[i + 1];
+    });
+    return obj;
   });
 
-  // Filas filtradas por periodo (columna A)
-  var rows = allRows.slice(1)
-    .filter(function(r) { return String(r[0]).trim() === periodo; })
-    .map(function(r) {
-      var obj = { _periodo: String(r[0]) };
-      // Guardamos con la clave original Y en minúsculas para compatibilidad con render
-      headers.forEach(function(h, i) {
-        obj[h] = r[i + 1];
-        obj[h.toLowerCase()] = r[i + 1];
-      });
-      return obj;
-    });
-
-  return {
-    view:    viewId,
-    periodo: periodo,
-    fuente:  nombreHoja,
-    headers: headers,
-    rows:    rows,
-    updated: new Date().toISOString()
-  };
+  return { view: viewId, fuente: nombreHoja, headers: headers, rows: rows,
+           updated: new Date().toISOString() };
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -171,25 +169,37 @@ function readPeriodos(ss) {
   });
 }
 
-function readMensual(ss, sheetName, periodo) {
+/* Columnas esperadas (con la nueva col Fecha en B):
+   A=Periodo | B=Fecha(YYYY-MM-DD) | C=Mes | D=Ingresos | E=Gastos | F=Ciclos | G=CAC | H=Margen */
+function readMensual(ss, sheetName, fechaInicio, fechaFin) {
   var rows = ss.getSheetByName(sheetName).getDataRange().getValues();
-  var data = rows.slice(1).filter(function(r) { return String(r[0]) === periodo; });
+  var data = rows.slice(1).filter(function(r) {
+    var f = String(r[1]).trim(); // col B = Fecha
+    return f >= fechaInicio && f <= fechaFin;
+  });
+  // Ordenar por fecha ascendente
+  data.sort(function(a, b) { return String(a[1]) < String(b[1]) ? -1 : 1; });
   return {
-    meses:    data.map(function(r) { return String(r[1]); }),
-    ingresos: data.map(function(r) { return Number(r[2]); }),
-    gastos:   data.map(function(r) { return Number(r[3]); }),
-    ciclos:   data.map(function(r) { return Number(r[4]); }),
-    cac:      data.map(function(r) { return Number(r[5]); }),
-    margen:   data.map(function(r) { return Number(r[6]); })
+    meses:    data.map(function(r) { return String(r[2]); }),  // col C
+    ingresos: data.map(function(r) { return Number(r[3]); }),  // col D
+    gastos:   data.map(function(r) { return Number(r[4]); }),  // col E
+    ciclos:   data.map(function(r) { return Number(r[5]); }),  // col F
+    cac:      data.map(function(r) { return Number(r[6]); }),  // col G
+    margen:   data.map(function(r) { return Number(r[7]); })   // col H
   };
 }
 
-function readCashFlow(ss, periodo) {
+/* Columnas CashFlow: A=Periodo | B=Fecha | C=Mes | D=Flujo_MXN */
+function readCashFlow(ss, fechaInicio, fechaFin) {
   var rows = ss.getSheetByName('CashFlow').getDataRange().getValues();
-  var data = rows.slice(1).filter(function(r) { return String(r[0]) === periodo; });
+  var data = rows.slice(1).filter(function(r) {
+    var f = String(r[1]).trim();
+    return f >= fechaInicio && f <= fechaFin;
+  });
+  data.sort(function(a, b) { return String(a[1]) < String(b[1]) ? -1 : 1; });
   return {
-    meses: data.map(function(r) { return String(r[1]); }),
-    flujo: data.map(function(r) { return Number(r[2]); })
+    meses: data.map(function(r) { return String(r[2]); }),
+    flujo: data.map(function(r) { return Number(r[3]); })
   };
 }
 
@@ -225,15 +235,19 @@ function readDonut(ss) {
   };
 }
 
-function readPaisesOrigen(ss, periodo) {
+/* PaisesOrigen: A=Periodo | B=Fecha | C=Pais | D=Porcentaje | E=Color */
+function readPaisesOrigen(ss, fechaInicio, fechaFin) {
   var hoja = ss.getSheetByName('PaisesOrigen');
   if (!hoja) return { labels: [], data: [], colors: [] };
   var rows = hoja.getDataRange().getValues();
-  var data = rows.slice(1).filter(function(r) { return String(r[0]) === periodo; });
+  var data = rows.slice(1).filter(function(r) {
+    var f = String(r[1]).trim();
+    return f >= fechaInicio && f <= fechaFin;
+  });
   return {
-    labels: data.map(function(r) { return String(r[1]); }),
-    data:   data.map(function(r) { return Number(r[2]); }),
-    colors: data.map(function(r) { return String(r[3]); })
+    labels: data.map(function(r) { return String(r[2]); }),
+    data:   data.map(function(r) { return Number(r[3]); }),
+    colors: data.map(function(r) { return String(r[4]); })
   };
 }
 

@@ -298,11 +298,12 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
     <div class="topbar-title" id="topbar-title">Resumen Financiero</div>
   </div>
   <div class="topbar-right">
-    <div class="filter-group">
-      <span class="filter-label">Periodo:</span>
-      <select class="select-pill" id="periodoSelect" onchange="updatePeriod(this.value)">
-        <option value="">Cargando…</option>
-      </select>
+    <div class="filter-group" style="gap:6px">
+      <span class="filter-label">Del</span>
+      <input type="date" class="select-pill" id="fechaInicioInput" style="padding:4px 10px;cursor:pointer">
+      <span class="filter-label">al</span>
+      <input type="date" class="select-pill" id="fechaFinInput" style="padding:4px 10px;cursor:pointer">
+      <button onclick="applyDateRange()" class="btn btn-primary" style="padding:5px 14px;font-size:var(--text-xs);border-radius:var(--radius-full)">Aplicar</button>
     </div>
     <div class="filter-group">
       <span class="filter-label">Segmento:</span>
@@ -891,7 +892,7 @@ function buildCostChart(costos){
 
 /* ── EXPORT CSV ─── */
 function exportCSV(){
-  var cached = viewCache[currentView + '_' + currentPeriodo];
+  var cached = viewCache[currentView + '_' + currentFechaInicio + '_' + currentFechaFin];
   if(!cached) return;
   const data = cached;
   const d = data[currentSegment] || data.todos;
@@ -1180,8 +1181,10 @@ function renderLaboratorios(data) {
 
 /* ── ESTADO GLOBAL ─── */
 let currentSegment = 'todos';
-let currentPeriodo = '';
-let currentView    = 'resumen';
+let currentPeriodo    = '';   // string descriptivo para subtítulos (ej. "2026-01 → 2026-06")
+let currentFechaInicio = '';
+let currentFechaFin    = '';
+let currentView        = 'resumen';
 let sheetsData     = null;
 let ingresoChart   = null, donutChart = null, cashChart = null, costChart = null;
 const seriesVisible = {ingresos:true, gastos:true, utilidad:true};
@@ -1196,17 +1199,11 @@ function setStatus(msg, type) {
   });
 }
 
-function poblarPeriodos(periodos, seleccionado) {
-  var sel = document.getElementById('periodoSelect');
-  if(!sel || !periodos || !periodos.length) return;
-  sel.innerHTML = '';
-  periodos.forEach(function(p){
-    var opt = document.createElement('option');
-    opt.value = p.id;
-    opt.textContent = p.label;
-    if(p.id === seleccionado) opt.selected = true;
-    sel.appendChild(opt);
-  });
+function setDateInputs(fi, ff) {
+  var elI = document.getElementById('fechaInicioInput');
+  var elF = document.getElementById('fechaFinInput');
+  if (elI) elI.value = fi;
+  if (elF) elF.value = ff;
 }
 
 /* ══════════════════════════════════════════════════════
@@ -1223,15 +1220,17 @@ const VIEW_TITLES = {
   inventarios:'Inventarios', laboratorios:'Laboratorios', ajustes:'Configuración'
 };
 
-/* ── Carga menú y periodos (llamada ligera al arrancar) ─── */
+/* ── Carga menú y rango de fechas por defecto ─── */
 async function loadMenu() {
   try {
     var res  = await fetch(APPS_SCRIPT_URL + '?action=menu');
     var json = await res.json();
     if (json.error) throw new Error(json.error);
-    menuItems    = json.menu    || [];
-    currentPeriodo = json.periodo || '';
-    poblarPeriodos(json.periodos || [], json.periodo);
+    menuItems = json.menu || [];
+    currentFechaInicio = json.fechaInicio || '';
+    currentFechaFin    = json.fechaFin    || '';
+    currentPeriodo     = currentFechaInicio.slice(0,7) + ' → ' + currentFechaFin.slice(0,7);
+    setDateInputs(currentFechaInicio, currentFechaFin);
     buildSidebar(menuItems);
     lucide.createIcons();
   } catch(e) {
@@ -1344,12 +1343,11 @@ function setActiveNav(viewId) {
 /* ══════════════════════════════════════════════════════
    CARGA LAZY DE VISTAS (con caché de 30 segundos)
    ══════════════════════════════════════════════════════ */
-async function loadView(viewId, periodo, force) {
-  var cacheKey = viewId + '_' + periodo;
+async function loadView(viewId, fechaInicio, fechaFin, force) {
+  var cacheKey = viewId + '_' + fechaInicio + '_' + fechaFin;
   var now = Date.now();
   var cached = viewCache[cacheKey];
 
-  // Usar caché si tiene menos de 30 segundos
   if (!force && cached && (now - cached._ts) < 30000) {
     renderViewData(viewId, cached);
     return;
@@ -1358,8 +1356,9 @@ async function loadView(viewId, periodo, force) {
   setStatus('Actualizando…');
   try {
     var url = APPS_SCRIPT_URL +
-      '?action=view&view=' + encodeURIComponent(viewId) +
-      '&periodo='          + encodeURIComponent(periodo);
+      '?action=view&view='         + encodeURIComponent(viewId) +
+      '&fechaInicio='              + encodeURIComponent(fechaInicio) +
+      '&fechaFin='                 + encodeURIComponent(fechaFin);
     var res  = await fetch(url);
     var data = await res.json();
     if (data.error) throw new Error(data.error);
@@ -1425,7 +1424,7 @@ function navigateTo(viewId) {
   setActiveNav(viewId);
 
   // Cargar datos (lazy)
-  loadView(viewId, currentPeriodo);
+  loadView(viewId, currentFechaInicio, currentFechaFin);
 }
 
 /* ── Crea un div genérico para vistas no predefinidas ─── */
@@ -1505,15 +1504,21 @@ function renderResumen(data) {
   buildCostChart(data.costos);
 }
 
-/* ── Segment / Period controls ─── */
+/* ── Segment / Date controls ─── */
 function updateSegment(val) {
   currentSegment = val;
-  var cached = viewCache[currentView + '_' + currentPeriodo];
+  var cached = viewCache[currentView + '_' + currentFechaInicio + '_' + currentFechaFin];
   if (cached) renderViewData(currentView, cached);
 }
-function updatePeriod(val) {
-  currentPeriodo = val;
-  loadView(currentView, val, true);
+function applyDateRange() {
+  var fi = document.getElementById('fechaInicioInput').value;
+  var ff = document.getElementById('fechaFinInput').value;
+  if (!fi || !ff) { alert('Selecciona ambas fechas'); return; }
+  if (fi > ff)    { alert('La fecha inicial debe ser anterior a la final'); return; }
+  currentFechaInicio = fi;
+  currentFechaFin    = ff;
+  currentPeriodo     = fi.slice(0,7) + ' → ' + ff.slice(0,7);
+  loadView(currentView, fi, ff, true);
 }
 
 /* ── INIT ─── */
@@ -1534,7 +1539,7 @@ window.addEventListener('DOMContentLoaded', function() {
     await loadMenu();                          // 1. Menú ligero
     navigateTo('resumen');                     // 2. Vista por defecto
     setInterval(function() {                   // 3. Refresco automático
-      loadView(currentView, currentPeriodo, true);
+      loadView(currentView, currentFechaInicio, currentFechaFin, true);
     }, 30000);
   }
 
@@ -1684,7 +1689,11 @@ var CAPTURA_CONFIG = {
 
 function openModal(tipo) {
   var cfg = CAPTURA_CONFIG[tipo];
-  document.getElementById(cfg.periodoField).value = currentPeriodo || '';
+  // Mostrar rango de fechas como referencia en el modal
+  document.getElementById(cfg.periodoField).value =
+    currentFechaInicio && currentFechaFin
+      ? currentFechaInicio + ' / ' + currentFechaFin
+      : (currentPeriodo || '');
   // Pre-llenar fecha de hoy en modales que la tengan
   var fechaFields = {'laboratorio':'lab-f-fecha','medicamentos':'med-f-ultima_compra'};
   if (fechaFields[tipo]) {
@@ -1715,8 +1724,10 @@ function submitCaptura(tipo) {
   btn.disabled = true;
   btn.textContent = 'Guardando…';
 
+  // Enviar periodo como YYYY-MM de la fecha inicio del rango seleccionado
+  var periodoRef = currentFechaInicio ? currentFechaInicio.slice(0, 7) : (currentPeriodo || '');
   var params = 'action=insert&sheet=' + encodeURIComponent(cfg.sheet) +
-               '&periodo=' + encodeURIComponent(currentPeriodo || '');
+               '&periodo=' + encodeURIComponent(periodoRef);
   cfg.fields.forEach(function(id, i) {
     var el = document.getElementById(id);
     params += '&' + encodeURIComponent(cfg.keys[i]) + '=' + encodeURIComponent(el ? el.value : '');
@@ -1736,7 +1747,7 @@ function submitCaptura(tipo) {
         // Recargar tabla después de 1.5s
         setTimeout(function() {
           closeModal(tipo);
-          loadView(currentView, currentPeriodo, true);
+          loadView(currentView, currentFechaInicio, currentFechaFin, true);
         }, 1500);
       } else {
         showModalMsg(cfg.msgEl, 'err', 'Error: ' + (res.error || 'No se pudo guardar.'));
