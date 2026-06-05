@@ -1,8 +1,13 @@
 var SHEET_ID = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
 
-// Sheet externo para todas las hojas de captura (Inventarios, Laboratorios, etc.)
-// Cambiar este ID para apuntar a otro spreadsheet sin tocar nada más
-var CAPTURA_SHEET_ID = '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM';
+// Mapeo: nombre de pestaña → ID del spreadsheet externo donde se lee/escribe
+// Agregar aquí cualquier hoja de captura futura
+var CAPTURA_SHEETS = {
+  'Medicamentos': '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
+  'Insumos':      '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ'
+};
+// Fallback si la hoja no está en el mapeo (usa el sheet principal de Hestia ERP)
+var CAPTURA_SHEET_ID_DEFAULT = SHEET_ID;
 
 /* ══════════════════════════════════════════════════════════════
    doGet — Enrutador principal
@@ -117,8 +122,9 @@ function readMensualData(ss, periodo, viewId) {
 
 /* ── Datos de una hoja de captura genérica ─── */
 function readCapturaData(ss, nombreHoja, periodo, viewId) {
-  // Siempre leer del sheet externo de captura
-  var ssCap = SpreadsheetApp.openById(CAPTURA_SHEET_ID);
+  // Abrir el spreadsheet correcto según el mapeo
+  var capturaId = CAPTURA_SHEETS[nombreHoja] || CAPTURA_SHEET_ID_DEFAULT;
+  var ssCap = SpreadsheetApp.openById(capturaId);
   var hoja = ssCap.getSheetByName(nombreHoja);
   if (!hoja) {
     return { view: viewId, periodo: periodo, headers: [], rows: [],
@@ -237,10 +243,11 @@ function readPaisesOrigen(ss, periodo) {
    ══════════════════════════════════════════════════════════════ */
 function insertRow(ss, e) {
   var sheetName = (e && e.parameter.sheet) || '';
-  // Escribir siempre en el sheet externo de captura
-  var ssCap = SpreadsheetApp.openById(CAPTURA_SHEET_ID);
+  // Abrir el spreadsheet correcto según el mapeo
+  var capturaId = CAPTURA_SHEETS[sheetName] || CAPTURA_SHEET_ID_DEFAULT;
+  var ssCap = SpreadsheetApp.openById(capturaId);
   var hoja = ssCap.getSheetByName(sheetName);
-  if (!hoja) return { error: 'Hoja "' + sheetName + '" no encontrada en el Sheet de captura.' };
+  if (!hoja) return { error: 'Hoja "' + sheetName + '" no encontrada.' };
 
   var headers = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0];
   var row = headers.map(function(h, i) {
