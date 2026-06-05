@@ -1003,26 +1003,42 @@ function renderServicios(data) {
 /* ── TURISMO MÉDICO ─── */
 var turChart=null, turPaisesChart=null;
 function renderTurismo(data) {
-  var d = data.internacional;
-  document.getElementById('tur-ciclos').textContent = d.ciclos[d.ciclos.length-1]+'';
-  document.getElementById('tur-ticket').textContent = '$312K';
-  document.getElementById('tur-paises').textContent = '8';
-  document.getElementById('tur-margen').textContent = d.margen[d.margen.length-1]+'%';
+  var d      = data.internacional;
+  var paises = data.paisesOrigen || { labels: [], data: [], colors: [] };
+
+  // KPIs
+  document.getElementById('tur-ciclos').textContent  = d.ciclos[d.ciclos.length-1] || '—';
+  document.getElementById('tur-ticket').textContent  = fmtMXN(d.ingresos[d.ingresos.length-1] / (d.ciclos[d.ciclos.length-1] || 1));
+  document.getElementById('tur-paises').textContent  = paises.labels.length || '—';
+  document.getElementById('tur-margen').textContent  = (d.margen[d.margen.length-1] || '—') + '%';
+
+  // Gráfica línea ingresos
   if(turChart) turChart.destroy();
   turChart = new Chart(document.getElementById('turChart').getContext('2d'),{
     type:'line',
-    data:{labels:d.meses,datasets:[{label:'Ingresos Intl',data:d.ingresos,borderColor:'#3a72a8',borderWidth:2,pointRadius:3,pointBackgroundColor:'#3a72a8',fill:true,backgroundColor:'#3a72a822',tension:.4}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return '$'+c.parsed.y+'K';}}}},scales:{x:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted')}},y:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),callback:function(v){return '$'+v+'K';}}}}}
+    data:{labels:d.meses,datasets:[{label:'Ingresos',data:d.ingresos,borderColor:'#3a72a8',borderWidth:2,pointRadius:3,pointBackgroundColor:'#3a72a8',fill:true,backgroundColor:'#3a72a822',tension:.4}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return fmtMXN(c.parsed.y);}}}},
+      scales:{x:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted')}},
+              y:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),callback:function(v){return fmtMXN(v);}}}}}
   });
-  var paises={labels:['EE.UU.','Canadá','España','Colombia','Argentina','Otros'],data:[38,22,15,12,8,5],colors:['#c46a7a','#3d8f8f','#c47a1e','#7a52b0','#3a72a8','#b8b4ae']};
+
+  // Donut países de origen (desde Sheets)
   if(turPaisesChart) turPaisesChart.destroy();
-  turPaisesChart = new Chart(document.getElementById('turPaisesChart').getContext('2d'),{
-    type:'doughnut',
-    data:{labels:paises.labels,datasets:[{data:paises.data,backgroundColor:paises.colors.map(function(c){return c+'cc';}),borderColor:paises.colors,borderWidth:2}]},
-    options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{display:false}}}
-  });
-  var leg=document.getElementById('turPaisesLegend'); leg.innerHTML='';
-  paises.labels.forEach(function(l,i){ leg.innerHTML+='<div class="legend-row"><span class="legend-dot" style="background:'+paises.colors[i]+'"></span><span class="legend-name">'+l+'</span><span class="legend-pct" style="color:'+paises.colors[i]+'">'+paises.data[i]+'%</span></div>'; });
+  if(paises.labels.length) {
+    turPaisesChart = new Chart(document.getElementById('turPaisesChart').getContext('2d'),{
+      type:'doughnut',
+      data:{labels:paises.labels,datasets:[{data:paises.data,backgroundColor:paises.colors.map(function(c){return c+'cc';}),borderColor:paises.colors,borderWidth:2}]},
+      options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return c.label+': '+c.parsed+'%';}}}}}
+    });
+    var leg=document.getElementById('turPaisesLegend'); leg.innerHTML='';
+    paises.labels.forEach(function(l,i){
+      leg.innerHTML+='<div class="legend-row"><span class="legend-dot" style="background:'+paises.colors[i]+'"></span><span class="legend-name">'+l+'</span><span class="legend-pct" style="color:'+paises.colors[i]+'">'+paises.data[i]+'%</span></div>';
+    });
+  } else {
+    document.getElementById('turPaisesLegend').innerHTML =
+      '<div style="color:var(--color-text-muted);font-size:var(--text-xs);padding:var(--space-3)">Sin datos — agrega registros en la hoja <b>PaisesOrigen</b></div>';
+  }
 }
 
 /* ── RENTABILIDAD ─── */
