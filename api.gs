@@ -20,6 +20,10 @@ function doGet(e) {
       });
     }
 
+    if (action === 'insert') {
+      return jsonResponse(insertRow(ss, e));
+    }
+
     // action === 'view'
     return jsonResponse(readViewData(ss, view, periodo));
 
@@ -215,6 +219,26 @@ function readPaisesOrigen(ss, periodo) {
     data:   data.map(function(r) { return Number(r[2]); }),
     colors: data.map(function(r) { return String(r[3]); })
   };
+}
+
+/* ══════════════════════════════════════════════════════════════
+   INSERT ROW — agrega una fila al final de la hoja indicada
+   Params: sheet, periodo, + una clave por columna (según cabecera)
+   ══════════════════════════════════════════════════════════════ */
+function insertRow(ss, e) {
+  var sheetName = (e && e.parameter.sheet) || '';
+  var hoja = ss.getSheetByName(sheetName);
+  if (!hoja) return { error: 'Hoja "' + sheetName + '" no encontrada.' };
+
+  var headers = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0];
+  var row = headers.map(function(h, i) {
+    if (i === 0) return (e && e.parameter.periodo) || '';
+    var key = String(h).trim();
+    return (e && e.parameter[key] !== undefined) ? e.parameter[key] : '';
+  });
+
+  hoja.appendRow(row);
+  return { success: true };
 }
 
 function readCostos(ss) {
