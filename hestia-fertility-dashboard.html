@@ -662,66 +662,9 @@ const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw3pPDLfDFVmb2V
 
 /* Theme se inicializa en initTheme() al arrancar */
 
-/* ── ESTADO GLOBAL ─── */
-let currentSegment = 'todos';
-let sheetsData     = null;   // datos cacheados desde Sheets
-let ingresoChart   = null;
-let donutChart     = null;
-let cashChart      = null;
-let costChart      = null;
-const seriesVisible = {ingresos:true, gastos:true, utilidad:true};
+/* Variables globales → declaradas en bloque nuevo más abajo */
 
-function getCS(){return getComputedStyle(document.documentElement);}
-function cssVar(v){return getCS().getPropertyValue(v).trim();}
-
-/* ── INDICADOR DE ESTADO ─── */
-function setStatus(msg, type='ok'){
-  const el = document.getElementById('sync-status');
-  if(!el) return;
-  el.textContent = msg;
-  el.style.color = type==='err' ? 'var(--color-amber)' : 'var(--color-text-faint)';
-}
-
-/* ══════════════════════════════════════════════════════
-   CARGA DE DATOS DESDE SHEETS
-   ══════════════════════════════════════════════════════ */
-let currentPeriodo = '';
-
-async function loadData(periodo){
-  setStatus('Actualizando…');
-  var url = APPS_SCRIPT_URL + (periodo ? '?periodo=' + encodeURIComponent(periodo) : '');
-  try{
-    const res  = await fetch(url);
-    const json = await res.json();
-    if(json.error) throw new Error(json.error);
-    sheetsData = json;
-    currentPeriodo = json.periodo;
-    // Poblar dropdown con los periodos disponibles en Sheets
-    poblarPeriodos(json.periodos, json.periodo);
-    renderAll(json);
-    const hora = new Date(json.updated).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
-    setStatus('Actualizado ' + hora);
-  } catch(e){
-    setStatus('Error: ' + e.message, 'err');
-    console.error('Sheets fetch error:', e);
-    if(!sheetsData) renderAll(getFallbackData());
-  }
-}
-
-function poblarPeriodos(periodos, seleccionado) {
-  const sel = document.getElementById('periodoSelect');
-  // Solo actualizar si cambiaron los periodos
-  if(sel.dataset.loaded === JSON.stringify(periodos.map(function(p){return p.id;}).join())) return;
-  sel.innerHTML = '';
-  periodos.forEach(function(p){
-    var opt = document.createElement('option');
-    opt.value = p.id;
-    opt.textContent = p.label;
-    if(p.id === seleccionado) opt.selected = true;
-    sel.appendChild(opt);
-  });
-  sel.dataset.loaded = JSON.stringify(periodos.map(function(p){return p.id;}).join());
-}
+/* ── setStatus, loadData, poblarPeriodos → movidos al bloque nuevo ─── */
 
 /* ── Datos de respaldo (igual que antes, por si no hay conexión) ─── */
 function getFallbackData(){
@@ -739,23 +682,7 @@ function getFallbackData(){
   };
 }
 
-/* ══════════════════════════════════════════════════════
-   RENDER COMPLETO
-   ══════════════════════════════════════════════════════ */
-function renderAll(data){
-  const d = data[currentSegment];
-  updateKPIs(d);
-  initSparks(d);
-  buildIngresoChart(d);
-  buildDonutChart(data.donut);
-  buildServicesTable(data.servicios);
-  buildFunnel(data.funnel, 'funnelList');
-  buildAlerts(data.alertas, 'alertList');
-  buildCashChart(data.cashflow);
-  buildCostChart(data.costos);
-  // Renderizar también la vista activa si no es resumen
-  if(currentView !== 'resumen') renderView(currentView, data);
-}
+/* ── renderAll → reemplazado por renderResumen en bloque nuevo ─── */
 
 /* ══════════════════════════════════════════════════════
    KPIs
@@ -862,27 +789,29 @@ function buildServicesTable(servicios){
 }
 
 /* ── FUNNEL ─── */
-function buildFunnel(funnel){
-  const el=document.getElementById('funnelList');
+function buildFunnel(funnel, containerId){
+  var el = document.getElementById(containerId || 'funnelList');
+  if(!el) return;
   el.innerHTML='';
-  funnel.forEach(s=>{
-    el.innerHTML+=`<div class="funnel-step">
-      <span class="funnel-label">${s.label}</span>
-      <div class="funnel-bar-wrap"><div class="funnel-fill" style="width:${s.pct}%;background:${s.color}44;border-left:3px solid ${s.color}"></div></div>
-      <span class="funnel-val">${s.val}</span>
-    </div>`;
+  funnel.forEach(function(s){
+    el.innerHTML+='<div class="funnel-step">'+
+      '<span class="funnel-label">'+s.label+'</span>'+
+      '<div class="funnel-bar-wrap"><div class="funnel-fill" style="width:'+s.pct+'%;background:'+s.color+'44;border-left:3px solid '+s.color+'"></div></div>'+
+      '<span class="funnel-val">'+s.val+'</span>'+
+    '</div>';
   });
 }
 
 /* ── ALERTS ─── */
-function buildAlerts(alertas){
-  const el=document.getElementById('alertList');
+function buildAlerts(alertas, containerId){
+  var el = document.getElementById(containerId || 'alertList');
+  if(!el) return;
   el.innerHTML='';
-  alertas.forEach(a=>{
-    el.innerHTML+=`<div class="alert-item alert-${a.type}">
-      <div class="alert-icon"><i data-lucide="${a.icon}"></i></div>
-      <div class="alert-body"><div class="alert-title">${a.title}</div><div class="alert-desc">${a.desc}</div></div>
-    </div>`;
+  alertas.forEach(function(a){
+    el.innerHTML+='<div class="alert-item alert-'+a.type+'">'+
+      '<div class="alert-icon"><i data-lucide="'+a.icon+'"></i></div>'+
+      '<div class="alert-body"><div class="alert-title">'+a.title+'</div><div class="alert-desc">'+a.desc+'</div></div>'+
+    '</div>';
   });
   lucide.createIcons();
 }
@@ -917,21 +846,14 @@ function buildCostChart(costos){
   });
 }
 
-/* ── SEGMENT / PERIOD CHANGE ─── */
-function updateSegment(val){
-  currentSegment=val;
-  const data = sheetsData || getFallbackData();
-  const d = data[val];
-  updateKPIs(d);
-  initSparks(d);
-  buildIngresoChart(d);
-}
-function updatePeriod(val){ loadData(val); }
+/* ── updateSegment, updatePeriod → movidos al bloque nuevo ─── */
 
 /* ── EXPORT CSV ─── */
 function exportCSV(){
-  const data = sheetsData || getFallbackData();
-  const d = data[currentSegment];
+  var cached = viewCache[currentView + '_' + currentPeriodo];
+  if(!cached) return;
+  const data = cached;
+  const d = data[currentSegment] || data.todos;
   let csv='Mes,Ingresos,Gastos,Utilidad,Ciclos,CAC,Margen\n';
   d.meses.forEach((m,i)=>{
     csv+=`${m},${d.ingresos[i]},${d.gastos[i]},${d.ingresos[i]-d.gastos[i]},${d.ciclos[i]},${d.cac[i]},${d.margen[i]}\n`;
@@ -959,37 +881,7 @@ function refreshChartColors(){
   });
 }
 
-/* ══════════════════════════════════════════════════════
-   NAVEGACIÓN — ROUTER DE VISTAS
-   ══════════════════════════════════════════════════════ */
-const VIEW_TITLES = {
-  resumen:      'Resumen Financiero',
-  ingresos:     'Ingresos',
-  gastos:       'Gastos Operativos',
-  pacientes:    'Pacientes',
-  servicios:    'Servicios',
-  turismo:      'Turismo Médico',
-  rentabilidad: 'Rentabilidad',
-  inventarios:  'Inventarios',
-  laboratorios: 'Laboratorios',
-  ajustes:      'Configuración',
-};
-let currentView = 'resumen';
-
-function navigateTo(view) {
-  // Ocultar todas las vistas
-  document.querySelectorAll('.view').forEach(v => v.style.display = 'none');
-  // Mostrar la vista seleccionada
-  document.getElementById('view-' + view).style.display = '';
-  // Actualizar nav activo
-  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
-  document.querySelector('[data-view="' + view + '"]').classList.add('active');
-  // Actualizar título del topbar
-  document.getElementById('topbar-title').textContent = VIEW_TITLES[view] || view;
-  currentView = view;
-  // Renderizar la vista si hay datos
-  if (sheetsData) renderView(view, sheetsData);
-}
+/* ── VIEW_TITLES, currentView, navigateTo → movidos al bloque nuevo ─── */
 
 function renderView(view, data) {
   if (view === 'inventarios')  renderInventarios(data);
@@ -1225,6 +1117,37 @@ function renderLaboratorios(data) {
       '<td>' + fmtMXN(r.costo) + '</td>' +
       '<td><span class="kpi-badge ' + (ok ? 'badge-up' : 'badge-down') + '">' + r.estado + '</span></td>' +
       '</tr>';
+  });
+}
+
+/* ── ESTADO GLOBAL ─── */
+let currentSegment = 'todos';
+let currentPeriodo = '';
+let currentView    = 'resumen';
+let sheetsData     = null;
+let ingresoChart   = null, donutChart = null, cashChart = null, costChart = null;
+const seriesVisible = {ingresos:true, gastos:true, utilidad:true};
+
+function getCS(){ return getComputedStyle(document.documentElement); }
+function cssVar(v){ return getCS().getPropertyValue(v).trim(); }
+
+function setStatus(msg, type) {
+  ['sync-status','sync-status-ajustes'].forEach(function(id){
+    var el = document.getElementById(id);
+    if(el){ el.textContent = msg; el.style.color = type==='err' ? 'var(--color-amber)' : 'var(--color-text-faint)'; }
+  });
+}
+
+function poblarPeriodos(periodos, seleccionado) {
+  var sel = document.getElementById('periodoSelect');
+  if(!sel || !periodos || !periodos.length) return;
+  sel.innerHTML = '';
+  periodos.forEach(function(p){
+    var opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.label;
+    if(p.id === seleccionado) opt.selected = true;
+    sel.appendChild(opt);
   });
 }
 
