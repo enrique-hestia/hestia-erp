@@ -335,7 +335,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
         <span class="kpi-badge badge-up" id="kpi2-badge">+22%</span>
       </div>
       <div class="kpi-value" id="kpi2-val">47</div>
-      <div class="kpi-label">Ciclos Iniciados (mes)</div>
+      <div class="kpi-label">Ciclos del Periodo</div>
       <div class="kpi-spark-wrap"><canvas class="kpi-spark" id="spark2"></canvas></div>
     </div>
 
@@ -690,18 +690,25 @@ function getFallbackData(){
 function fmtMXN(val){
   return '$' + Number(val).toLocaleString('es-MX', {minimumFractionDigits:0, maximumFractionDigits:2});
 }
+function sumArr(arr){return arr.reduce(function(a,b){return a+b;},0);}
+function avgArr(arr){return arr.length?sumArr(arr)/arr.length:0;}
 function updateKPIs(d){
-  const last=d.ingresos[d.ingresos.length-1], prev=d.ingresos[d.ingresos.length-2];
-  const pct=Math.round((last-prev)/prev*100);
-  document.getElementById('kpi0-val').textContent=fmtMXN(last);
+  // Ingresos totales del periodo (suma de todos los meses)
+  var totalIng=sumArr(d.ingresos);
+  var last=d.ingresos[d.ingresos.length-1], prev=d.ingresos[d.ingresos.length-2]||last;
+  var pct=Math.round((last-prev)/(prev||1)*100);
+  document.getElementById('kpi0-val').textContent=fmtMXN(totalIng);
   document.getElementById('kpi0-badge').textContent=(pct>=0?'+':'')+pct+'%';
   document.getElementById('kpi0-badge').className='kpi-badge '+(pct>=0?'badge-up':'badge-down');
-  const lm=d.margen[d.margen.length-1], pm=d.margen[d.margen.length-2], dm=lm-pm;
-  document.getElementById('kpi1-val').textContent=lm+'%';
+  // Margen promedio del periodo
+  var avgM=Math.round(avgArr(d.margen)), lm=d.margen[d.margen.length-1], pm=d.margen[d.margen.length-2]||lm, dm=lm-pm;
+  document.getElementById('kpi1-val').textContent=avgM+'%';
   document.getElementById('kpi1-badge').textContent=(dm>=0?'+':'')+dm+'%';
   document.getElementById('kpi1-badge').className='kpi-badge '+(dm>=0?'badge-up':'badge-down');
-  document.getElementById('kpi2-val').textContent=d.ciclos[d.ciclos.length-1];
-  document.getElementById('kpi3-val').textContent=fmtMXN(d.cac[d.cac.length-1]);
+  // Ciclos totales del periodo
+  document.getElementById('kpi2-val').textContent=sumArr(d.ciclos);
+  // CAC promedio del periodo
+  document.getElementById('kpi3-val').textContent=fmtMXN(Math.round(avgArr(d.cac)));
 }
 
 /* ── SPARKLINES ─── */
@@ -950,7 +957,7 @@ function renderGastos(data) {
   var total=costos.data.reduce(function(a,b){return a+b;},0);
   costos.labels.forEach(function(l,i){
     var pct=costos.data[i];
-    tb.innerHTML+='<tr><td>'+l+'</td><td>$'+(d.gastos[d.gastos.length-1]*pct/100).toFixed(0)+'K</td><td>'+pct+'%</td><td><div class="progress-bar"><div class="progress-fill" style="width:'+pct+'%;background:'+costos.colors[i]+'"></div></div></td></tr>';
+    tb.innerHTML+='<tr><td>'+l+'</td><td>'+fmtMXN(Math.round(sumArr(d.gastos)*pct/100))+'</td><td>'+pct+'%</td><td><div class="progress-bar"><div class="progress-fill" style="width:'+pct+'%;background:'+costos.colors[i]+'"></div></div></td></tr>';
   });
 }
 
@@ -958,10 +965,11 @@ function renderGastos(data) {
 var pacChart=null, pacOrigenChart=null;
 function renderPacientes(data) {
   var d = data[currentSegment];
-  document.getElementById('pac-total').textContent = (d.ciclos[d.ciclos.length-1]*6)+'';
-  document.getElementById('pac-nuevos').textContent = d.ciclos[d.ciclos.length-1]+'';
+  var totalCiclos=sumArr(d.ciclos), avgCac=Math.round(avgArr(d.cac));
+  document.getElementById('pac-total').textContent = (totalCiclos*6)+'';
+  document.getElementById('pac-nuevos').textContent = totalCiclos+'';
   document.getElementById('pac-tasa').textContent = '68%';
-  document.getElementById('pac-cpp').textContent = d.cac[d.cac.length-1]/1+'d';
+  document.getElementById('pac-cpp').textContent = avgCac+'d';
   if(pacChart) pacChart.destroy();
   pacChart = new Chart(document.getElementById('pacChart').getContext('2d'),{
     type:'bar',
@@ -1007,10 +1015,11 @@ function renderTurismo(data) {
   var paises = data.paisesOrigen || { labels: [], data: [], colors: [] };
 
   // KPIs
-  document.getElementById('tur-ciclos').textContent  = d.ciclos[d.ciclos.length-1] || '—';
-  document.getElementById('tur-ticket').textContent  = fmtMXN(d.ingresos[d.ingresos.length-1] / (d.ciclos[d.ciclos.length-1] || 1));
+  var turTotalCiclos=sumArr(d.ciclos), turTotalIng=sumArr(d.ingresos);
+  document.getElementById('tur-ciclos').textContent  = turTotalCiclos || '—';
+  document.getElementById('tur-ticket').textContent  = fmtMXN(Math.round(turTotalIng / (turTotalCiclos || 1)));
   document.getElementById('tur-paises').textContent  = paises.labels.length || '—';
-  document.getElementById('tur-margen').textContent  = (d.margen[d.margen.length-1] || '—') + '%';
+  document.getElementById('tur-margen').textContent  = Math.round(avgArr(d.margen)) + '%';
 
   // Gráfica línea ingresos
   if(turChart) turChart.destroy();
@@ -1045,10 +1054,10 @@ function renderTurismo(data) {
 var rentChart=null;
 function renderRentabilidad(data) {
   var d = data[currentSegment];
-  var last = d.ingresos[d.ingresos.length-1];
-  var gasto = d.gastos[d.gastos.length-1];
-  document.getElementById('rent-ebitda').textContent = '$'+(last-gasto)+'K';
-  document.getElementById('rent-margen').textContent = d.margen[d.margen.length-1]+'%';
+  var last = sumArr(d.ingresos);
+  var gasto = sumArr(d.gastos);
+  document.getElementById('rent-ebitda').textContent = fmtMXN(last-gasto);
+  document.getElementById('rent-margen').textContent = Math.round(avgArr(d.margen))+'%';
   if(rentChart) rentChart.destroy();
   rentChart = new Chart(document.getElementById('rentChart').getContext('2d'),{
     type:'line',
