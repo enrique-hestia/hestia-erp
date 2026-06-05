@@ -108,7 +108,7 @@ function readViewData(ss, viewId, fechaInicio, fechaFin) {
     return readMensualData(ss, fechaInicio, fechaFin, viewId);
   }
 
-  return readCapturaData(ss, fuente, viewId);
+  return readCapturaData(ss, fuente, viewId, fechaInicio, fechaFin);
 }
 
 /* ── Datos financieros completos (filtrados por rango de fechas) ─── */
@@ -133,8 +133,11 @@ function readMensualData(ss, fechaInicio, fechaFin, viewId) {
   };
 }
 
-/* ── Datos de una hoja de captura genérica (sin filtro de fecha) ─── */
-function readCapturaData(ss, nombreHoja, viewId) {
+/* ── Datos de hoja de captura filtrados por rango de fechas ─────────
+   Espera col A = Periodo, col B = Fecha (YYYY-MM-DD), resto = datos.
+   Si fechaInicio/fechaFin están vacíos devuelve todas las filas.
+   ──────────────────────────────────────────────────────────────── */
+function readCapturaData(ss, nombreHoja, viewId, fechaInicio, fechaFin) {
   var capturaId = CAPTURA_SHEETS[nombreHoja] || CAPTURA_SHEET_ID_DEFAULT;
   var ssCap = SpreadsheetApp.openById(capturaId);
   var hoja  = ssCap.getSheetByName(nombreHoja);
@@ -145,12 +148,31 @@ function readCapturaData(ss, nombreHoja, viewId) {
   var allRows = hoja.getDataRange().getValues();
   if (allRows.length < 1) return { view: viewId, headers: [], rows: [] };
 
-  var headers = allRows[0].slice(1).map(function(h) { return String(h).trim(); });
-  var rows = allRows.slice(1).map(function(r) {
-    var obj = { _periodo: String(r[0]) };
+  var headerRow = allRows[0];
+  // Detectar si la hoja tiene columna Fecha (col B con valor 'Fecha')
+  var tieneFecha = String(headerRow[1]).trim().toLowerCase() === 'fecha';
+
+  // Cabeceras desde col B (o C si tiene Fecha, para no mostrar col Fecha en tabla)
+  var colStart = tieneFecha ? 2 : 1;
+  var headers = headerRow.slice(colStart).map(function(h) { return String(h).trim(); });
+
+  var dataRows = allRows.slice(1);
+
+  // Filtrar por fecha si la hoja tiene columna Fecha y se pasó rango
+  if (tieneFecha && fechaInicio && fechaFin) {
+    dataRows = dataRows.filter(function(r) {
+      var f = String(r[1]).trim(); // col B = Fecha
+      return f >= fechaInicio && f <= fechaFin;
+    });
+    // Ordenar por fecha ascendente
+    dataRows.sort(function(a, b) { return String(a[1]) < String(b[1]) ? -1 : 1; });
+  }
+
+  var rows = dataRows.map(function(r) {
+    var obj = { _periodo: String(r[0]), _fecha: tieneFecha ? String(r[1]) : '' };
     headers.forEach(function(h, i) {
-      obj[h] = r[i + 1];
-      obj[h.toLowerCase()] = r[i + 1];
+      obj[h] = r[colStart + i];
+      obj[h.toLowerCase()] = r[colStart + i];
     });
     return obj;
   });
