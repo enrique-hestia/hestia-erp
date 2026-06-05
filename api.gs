@@ -1,5 +1,9 @@
 var SHEET_ID = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
 
+// Sheet externo para todas las hojas de captura (Inventarios, Laboratorios, etc.)
+// Cambiar este ID para apuntar a otro spreadsheet sin tocar nada más
+var CAPTURA_SHEET_ID = '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM';
+
 /* ══════════════════════════════════════════════════════════════
    doGet — Enrutador principal
    ?action=menu              → menú + periodos (carga inicial, ligero)
@@ -113,7 +117,9 @@ function readMensualData(ss, periodo, viewId) {
 
 /* ── Datos de una hoja de captura genérica ─── */
 function readCapturaData(ss, nombreHoja, periodo, viewId) {
-  var hoja = ss.getSheetByName(nombreHoja);
+  // Siempre leer del sheet externo de captura
+  var ssCap = SpreadsheetApp.openById(CAPTURA_SHEET_ID);
+  var hoja = ssCap.getSheetByName(nombreHoja);
   if (!hoja) {
     return { view: viewId, periodo: periodo, headers: [], rows: [],
              error: 'Hoja "' + nombreHoja + '" no encontrada en el Spreadsheet.' };
@@ -231,8 +237,10 @@ function readPaisesOrigen(ss, periodo) {
    ══════════════════════════════════════════════════════════════ */
 function insertRow(ss, e) {
   var sheetName = (e && e.parameter.sheet) || '';
-  var hoja = ss.getSheetByName(sheetName);
-  if (!hoja) return { error: 'Hoja "' + sheetName + '" no encontrada.' };
+  // Escribir siempre en el sheet externo de captura
+  var ssCap = SpreadsheetApp.openById(CAPTURA_SHEET_ID);
+  var hoja = ssCap.getSheetByName(sheetName);
+  if (!hoja) return { error: 'Hoja "' + sheetName + '" no encontrada en el Sheet de captura.' };
 
   var headers = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0];
   var row = headers.map(function(h, i) {
