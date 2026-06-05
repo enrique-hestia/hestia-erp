@@ -131,7 +131,11 @@ function readCapturaData(ss, nombreHoja, periodo, viewId) {
     .filter(function(r) { return String(r[0]).trim() === periodo; })
     .map(function(r) {
       var obj = { _periodo: String(r[0]) };
-      headers.forEach(function(h, i) { obj[h] = r[i + 1]; });
+      // Guardamos con la clave original Y en minúsculas para compatibilidad con render
+      headers.forEach(function(h, i) {
+        obj[h] = r[i + 1];
+        obj[h.toLowerCase()] = r[i + 1];
+      });
       return obj;
     });
 
