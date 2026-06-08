@@ -1,5 +1,5 @@
 var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
-var API_VERSION   = 'v2026-06-08-N';
+var API_VERSION   = 'v2026-06-08-O';
 var AUTH_SECRET   = 'hestia2026erp-secret'; // Cambia esto por algo único
 
 /* ── Autenticación: helpers ──────────────────────────────────── */
@@ -492,9 +492,9 @@ function readMensualData(ss, fechaInicio, fechaFin, viewId) {
   };
 }
 
-/* ── Datos de hoja de captura filtrados por rango de fechas ─────────
-   Espera col A = Periodo, col B = Fecha (YYYY-MM-DD), resto = datos.
-   Si fechaInicio/fechaFin están vacíos devuelve todas las filas.
+/* ── Datos de hoja de captura — devuelve TODAS las filas (sin filtro de fechas)
+   Las hojas de captura (Pacientes, Productos, Ent. Med, Estimulacion, etc.)
+   muestran su contenido completo; el filtro de fechas aplica solo a datos financieros.
    ──────────────────────────────────────────────────────────────── */
 function readCapturaData(ss, nombreHoja, viewId, fechaInicio, fechaFin) {
   var capturaId = CAPTURA_SHEETS[nombreHoja] || CAPTURA_SHEET_ID_DEFAULT;
@@ -508,48 +508,23 @@ function readCapturaData(ss, nombreHoja, viewId, fechaInicio, fechaFin) {
   if (allRows.length < 1) return { view: viewId, headers: [], rows: [] };
 
   var headerRow = allRows[0];
-  // Detectar si la hoja tiene estructura Periodo en col A
+  // Detectar columna Periodo oculta en col A (se excluye de la vista)
   var tienePeriodo = String(headerRow[0]).trim().toLowerCase() === 'periodo';
-  // Detectar si además tiene Fecha en col B (solo si tiene Periodo)
-  var tieneFecha   = tienePeriodo && String(headerRow[1]).trim().toLowerCase() === 'fecha';
-  // colStart: desde dónde empiezan las columnas visibles en la tabla
-  // - Con Periodo+Fecha: desde col C (índice 2)
-  // - Con solo Periodo:  desde col B (índice 1)
-  // - Sin Periodo:       desde col A (índice 0) — incluye todo
-  var colStart = tieneFecha ? 2 : (tienePeriodo ? 1 : 0);
-  var headers = headerRow.slice(colStart).map(function(h) { return String(h).trim(); });
+  var colStart = tienePeriodo ? 1 : 0;
+  var headers = headerRow.slice(colStart)
+    .map(function(h) { return String(h).trim(); })
+    .filter(function(h) { return h !== ''; });
 
-  var dataRows = allRows.slice(1);
-
-  // Filtrar por fecha si la hoja tiene columna Fecha y se pasó rango
-  if (tieneFecha && fechaInicio && fechaFin) {
-    dataRows = dataRows.filter(function(r) {
-      var f = String(r[1]).trim(); // col B = Fecha
-      return f >= fechaInicio && f <= fechaFin;
-    });
-    // Ordenar por fecha ascendente
-    dataRows.sort(function(a, b) { return String(a[1]) < String(b[1]) ? -1 : 1; });
-  }
-
-  // Guardar número de fila original antes de filtrar (para edición posterior)
-  var dataRowsWithNum = allRows.slice(1).map(function(r, i) {
-    return { data: r, rowNum: i + 2 };
-  });
-  if (tieneFecha && fechaInicio && fechaFin) {
-    dataRowsWithNum = dataRowsWithNum.filter(function(item) {
-      var f = String(item.data[1]).trim();
-      return f >= fechaInicio && f <= fechaFin;
-    });
-    dataRowsWithNum.sort(function(a, b) { return String(a.data[1]) < String(b.data[1]) ? -1 : 1; });
-  } else if (!tieneFecha) {
-    dataRowsWithNum = dataRowsWithNum.filter(function(item) {
+  // Incluir todas las filas no vacías (sin filtro de fechas)
+  var dataRowsWithNum = allRows.slice(1)
+    .map(function(r, i) { return { data: r, rowNum: i + 2 }; })
+    .filter(function(item) {
       return item.data.some(function(c) { return String(c).trim() !== ''; });
     });
-  }
 
   var rows = dataRowsWithNum.map(function(item) {
     var r = item.data;
-    var obj = { _rowNum: item.rowNum, _periodo: String(r[0]), _fecha: tieneFecha ? String(r[1]) : '' };
+    var obj = { _rowNum: item.rowNum, _periodo: tienePeriodo ? String(r[0]) : '' };
     headers.forEach(function(h, i) {
       obj[h] = r[colStart + i];
       obj[h.toLowerCase()] = r[colStart + i];
