@@ -1,5 +1,5 @@
 var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
-var API_VERSION   = 'v2026-06-08-D';  // Actualizar al redesplegar para verificar versión
+var API_VERSION   = 'v2026-06-08-F';  // Actualizar al redesplegar para verificar versión
 
 // Mapeo: nombre de pestaña → ID del spreadsheet externo donde se lee/escribe
 // Agregar aquí cualquier hoja de captura futura
@@ -69,23 +69,22 @@ function doGet(e) {
         var headers  = shOpt.getRange(1, 1, 1, lastCol).getValues()[0];
         var targets  = ['Origen', 'Canal', 'Médico Tratante', 'País'];
         var options  = {};
-        targets.forEach(function(colName) {
-          var idx = -1;
-          for (var i = 0; i < headers.length; i++) {
-            if (String(headers[i]).trim() === colName) { idx = i; break; }
-          }
-          if (idx === -1) { options[colName] = []; return; }
-          try {
-            var rule = shOpt.getRange(2, idx + 1).getDataValidation();
-            if (rule) {
-              var vals = rule.getCriteriaValues();
-              // VALUE_IN_LIST devuelve el array directamente como primer elemento
-              options[colName] = Array.isArray(vals[0]) ? vals[0] : vals;
-            } else {
-              options[colName] = [];
+        // Leer opciones desde pestaña "Opciones" (una columna por campo dropdown)
+        var shOpciones = ssOpt.getSheetByName('Opciones');
+        if (shOpciones) {
+          var optHeaders = shOpciones.getRange(1, 1, 1, shOpciones.getLastColumn()).getValues()[0];
+          var optData    = shOpciones.getRange(2, 1, Math.max(shOpciones.getLastRow() - 1, 1), shOpciones.getLastColumn()).getValues();
+          targets.forEach(function(colName) {
+            var colIdx = -1;
+            for (var i = 0; i < optHeaders.length; i++) {
+              if (String(optHeaders[i]).trim() === colName) { colIdx = i; break; }
             }
-          } catch(ex2) { options[colName] = []; }
-        });
+            if (colIdx === -1) { options[colName] = []; return; }
+            options[colName] = optData
+              .map(function(row) { return String(row[colIdx]).trim(); })
+              .filter(function(v) { return v && v !== '' && v !== 'undefined'; });
+          });
+        }
         return jsonResponse({ options: options });
       } catch(ex) {
         return jsonResponse({ error: ex.message });
