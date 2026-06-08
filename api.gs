@@ -1,5 +1,5 @@
 var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
-var API_VERSION   = 'v2026-06-08-M';
+var API_VERSION   = 'v2026-06-08-N';
 var AUTH_SECRET   = 'hestia2026erp-secret'; // Cambia esto por algo único
 
 /* ── Autenticación: helpers ──────────────────────────────────── */
@@ -60,12 +60,16 @@ function getRolConfig(ss, rol) {
 // Agregar aquí cualquier hoja de captura futura
 var CAPTURA_SHEETS = {
   'Medicamentos': '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
-  'Orden_Compra': '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',  // alias legacy
+  'Orden_Compra': '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
   'Ent. Med':     '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
   'Estimulacion': '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
   'Insumos':      '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ',
   'Pacientes':    '1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio',
   'Productos':    '1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY'
+};
+// Aliases: si el menú usa un nombre alternativo, se traduce al nombre real de la pestaña
+var SHEET_ALIASES = {
+  'Orden_Compra': 'Ent. Med'
 };
 // Fallback si la hoja no está en el mapeo (usa el sheet principal de Hestia ERP)
 var CAPTURA_SHEET_ID_DEFAULT = SHEET_ID;
@@ -335,6 +339,8 @@ function readViewData(ss, viewId, fechaInicio, fechaFin) {
     if (menu[i].id === viewId) { item = menu[i]; break; }
   }
   var fuente = item ? item.fuente : 'mensual';
+  // Traducir alias (ej: Orden_Compra → Ent. Med)
+  if (fuente && SHEET_ALIASES[fuente]) fuente = SHEET_ALIASES[fuente];
 
   if (!fuente || fuente === 'mensual') {
     return readMensualData(ss, fechaInicio, fechaFin, viewId);
