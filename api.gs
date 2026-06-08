@@ -1,5 +1,60 @@
 var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
-var API_VERSION   = 'v2026-06-08-G';  // Actualizar al redesplegar para verificar versión
+var API_VERSION   = 'v2026-06-08-H';
+var AUTH_SECRET   = 'hestia2026erp-secret'; // Cambia esto por algo único
+
+/* ── Autenticación: helpers ──────────────────────────────────── */
+function sha256Hex(str) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, str)
+    .map(function(b){ return ('0'+(b&0xFF).toString(16)).slice(-2); }).join('');
+}
+function generateToken(email, day) {
+  day = day || fmtDate(new Date());
+  return Utilities.base64Encode(email+'|'+day+'|'+sha256Hex(email+'|'+day+'|'+AUTH_SECRET));
+}
+function verifyToken(token) {
+  if (!token) return null;
+  try {
+    var dec   = Utilities.newBlob(Utilities.base64Decode(token)).getDataAsString();
+    var parts = dec.split('|');
+    if (parts.length < 3) return null;
+    var email = parts[0], day = parts[1];
+    var diff  = (new Date() - new Date(day)) / 86400000;
+    if (diff > 7 || diff < -1) return null;
+    return (generateToken(email, day) === token) ? email : null;
+  } catch(ex){ return null; }
+}
+function getUserRow(ss, email) {
+  var sh = ss.getSheetByName('Usuarios');
+  if (!sh) return null;
+  var data = sh.getDataRange().getValues();
+  var h    = data[0].map(function(c){ return String(c).trim().toLowerCase(); });
+  var eI=h.indexOf('email'), nI=h.indexOf('nombre'), pI=h.indexOf('contraseña'),
+      rI=h.indexOf('rol'),   aI=h.indexOf('activo');
+  for (var i=1; i<data.length; i++) {
+    if (String(data[i][eI]).trim().toLowerCase() === email.toLowerCase()) {
+      return { email: String(data[i][eI]).trim(), nombre: String(data[i][nI>-1?nI:0]).trim(),
+               password: pI>-1?String(data[i][pI]).trim():'',
+               rol: rI>-1?String(data[i][rI]).trim():'viewer',
+               activo: aI>-1?data[i][aI]:true, rowNum: i+1 };
+    }
+  }
+  return null;
+}
+function getRolConfig(ss, rol) {
+  var sh  = ss.getSheetByName('Roles');
+  var def = { vistasBloqueadas:[], soloLectura:false };
+  if (!sh) return def;
+  var data = sh.getDataRange().getValues();
+  var h    = data[0].map(function(c){ return String(c).trim().toLowerCase(); });
+  var rI=h.indexOf('rol'), bI=h.indexOf('vistas_bloqueadas'), lI=h.indexOf('solo_lectura');
+  for (var i=1; i<data.length; i++) {
+    if (String(data[i][rI]).trim().toLowerCase() === rol.toLowerCase()) {
+      var bloq = bI>-1 ? String(data[i][bI]).split(',').map(function(v){return v.trim();}).filter(Boolean) : [];
+      return { vistasBloqueadas: bloq, soloLectura: lI>-1 ? !!data[i][lI] : false };
+    }
+  }
+  return def;
+}
 
 // Mapeo: nombre de pestaña → ID del spreadsheet externo donde se lee/escribe
 // Agregar aquí cualquier hoja de captura futura
@@ -29,6 +84,81 @@ function doGet(e) {
     var defFin     = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
     var fechaInicio = (e && e.parameter.fechaInicio) || fmtDate(defInicio);
     var fechaFin    = (e && e.parameter.fechaFin)    || fmtDate(defFin);
+
+    // ── LOGIN: valida credenciales y devuelve token + permisos ──
+    if (action === 'login') {
+      var email    = (e && e.parameter.email)    || '';
+      var password = (e && e.parameter.password) || '';
+      if (!email) return jsonResponse({ error: 'Email requerido.' });
+      var shU = ss.getSheetByName('Usuarios');
+      if (!shU) return jsonResponse({ error: 'Módulo de usuarios no configurado.' });
+      var user = getUserRow(ss, email);
+      if (!user)        return jsonResponse({ error: 'Usuario no encontrado.' });
+      if (!user.activo) return jsonResponse({ error: 'Usuario inactivo. Contacta al administrador.' });
+      if (user.password && user.password !== password)
+                        return jsonResponse({ error: 'Contraseña incorrecta.' });
+      var rolCfg = getRolConfig(ss, user.rol);
+      return jsonResponse({
+        success: true, token: generateToken(user.email),
+        email: user.email, nombre: user.nombre, rol: user.rol,
+        vistasBloqueadas: rolCfg.vistasBloqueadas,
+        soloLectura:      rolCfg.soloLectura
+      });
+    }
+
+    // ── VALIDAR TOKEN en todas las acciones (si la hoja Usuarios existe) ──
+    var currentUser = null;
+    var shUsuariosExiste = !!ss.getSheetByName('Usuarios');
+    if (shUsuariosExiste) {
+      var tkn = (e && e.parameter.token) || '';
+      var tkEmail = verifyToken(tkn);
+      if (!tkEmail) return jsonResponse({ error: 'Sesión inválida. Inicia sesión nuevamente.', code: 401 });
+      currentUser = getUserRow(ss, tkEmail);
+      if (!currentUser || !currentUser.activo) return jsonResponse({ error: 'Usuario no autorizado.', code: 403 });
+    }
+
+    // ── USUARIOS: listado para admin ──
+    if (action === 'usuarios') {
+      if (!currentUser || currentUser.rol !== 'admin')
+        return jsonResponse({ error: 'Sin permisos de administrador.' });
+      var shU2 = ss.getSheetByName('Usuarios');
+      var rowsU = shU2.getDataRange().getValues();
+      var hdrsU = rowsU[0];
+      var pIdx  = hdrsU.map(function(h){ return String(h).toLowerCase(); }).indexOf('contraseña');
+      var usuarios = rowsU.slice(1).map(function(r, i) {
+        var obj = { _rowNum: i+2 };
+        hdrsU.forEach(function(h, j) {
+          if (j !== pIdx) obj[String(h).trim()] = r[j]; // no devolver contraseña
+        });
+        return obj;
+      }).filter(function(u){ return u['Email'] || u['email']; });
+      var shRol = ss.getSheetByName('Roles');
+      var roles = [];
+      if (shRol) {
+        var rowsR = shRol.getDataRange().getValues();
+        roles = rowsR.slice(1).map(function(r){ return String(r[0]).trim(); }).filter(Boolean);
+      }
+      return jsonResponse({ usuarios: usuarios, roles: roles });
+    }
+
+    // ── SAVEUSER: crear/actualizar usuario (solo admin) ──
+    if (action === 'saveuser') {
+      if (!currentUser || currentUser.rol !== 'admin')
+        return jsonResponse({ error: 'Sin permisos de administrador.' });
+      var shU3   = ss.getSheetByName('Usuarios');
+      var hdrs3  = shU3.getRange(1,1,1,shU3.getLastColumn()).getValues()[0];
+      var rowNum3= parseInt((e && e.parameter.rowNum) || '0');
+      var newRow = hdrs3.map(function(h) {
+        var key = String(h).trim();
+        return (e.parameter[key] !== undefined) ? e.parameter[key] : '';
+      });
+      if (rowNum3 > 1) {
+        shU3.getRange(rowNum3, 1, 1, hdrs3.length).setValues([newRow]);
+      } else {
+        shU3.appendRow(newRow);
+      }
+      return jsonResponse({ success: true });
+    }
 
     if (action === 'menu') {
       return jsonResponse({
