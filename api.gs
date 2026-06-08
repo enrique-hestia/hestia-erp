@@ -4,7 +4,8 @@ var SHEET_ID = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
 // Agregar aquí cualquier hoja de captura futura
 var CAPTURA_SHEETS = {
   'Medicamentos': '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
-  'Insumos':      '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ'
+  'Insumos':      '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ',
+  'Pacientes':    '1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio'
 };
 // Fallback si la hoja no está en el mapeo (usa el sheet principal de Hestia ERP)
 var CAPTURA_SHEET_ID_DEFAULT = SHEET_ID;
@@ -149,11 +150,15 @@ function readCapturaData(ss, nombreHoja, viewId, fechaInicio, fechaFin) {
   if (allRows.length < 1) return { view: viewId, headers: [], rows: [] };
 
   var headerRow = allRows[0];
-  // Detectar si la hoja tiene columna Fecha (col B con valor 'Fecha')
-  var tieneFecha = String(headerRow[1]).trim().toLowerCase() === 'fecha';
-
-  // Cabeceras desde col B (o C si tiene Fecha, para no mostrar col Fecha en tabla)
-  var colStart = tieneFecha ? 2 : 1;
+  // Detectar si la hoja tiene estructura Periodo en col A
+  var tienePeriodo = String(headerRow[0]).trim().toLowerCase() === 'periodo';
+  // Detectar si además tiene Fecha en col B (solo si tiene Periodo)
+  var tieneFecha   = tienePeriodo && String(headerRow[1]).trim().toLowerCase() === 'fecha';
+  // colStart: desde dónde empiezan las columnas visibles en la tabla
+  // - Con Periodo+Fecha: desde col C (índice 2)
+  // - Con solo Periodo:  desde col B (índice 1)
+  // - Sin Periodo:       desde col A (índice 0) — incluye todo
+  var colStart = tieneFecha ? 2 : (tienePeriodo ? 1 : 0);
   var headers = headerRow.slice(colStart).map(function(h) { return String(h).trim(); });
 
   var dataRows = allRows.slice(1);
@@ -287,8 +292,9 @@ function insertRow(ss, e) {
 
   var headers = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0];
   var row = headers.map(function(h, i) {
-    if (i === 0) return (e && e.parameter.periodo) || '';
     var key = String(h).trim();
+    // Si col A se llama 'Periodo', llenarlo con el param periodo automáticamente
+    if (i === 0 && key === 'Periodo') return (e && e.parameter.periodo) || '';
     return (e && e.parameter[key] !== undefined) ? e.parameter[key] : '';
   });
 
