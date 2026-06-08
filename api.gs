@@ -1,5 +1,5 @@
 var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
-var API_VERSION   = 'v2026-06-08-F';  // Actualizar al redesplegar para verificar versión
+var API_VERSION   = 'v2026-06-08-G';  // Actualizar al redesplegar para verificar versión
 
 // Mapeo: nombre de pestaña → ID del spreadsheet externo donde se lee/escribe
 // Agregar aquí cualquier hoja de captura futura
@@ -86,6 +86,53 @@ function doGet(e) {
           });
         }
         return jsonResponse({ options: options });
+      } catch(ex) {
+        return jsonResponse({ error: ex.message });
+      }
+    }
+
+    // nextid: ?action=nextid&sheet=Pacientes&prefix=HEC → siguiente ID disponible
+    if (action === 'nextid') {
+      var sheetName = (e && e.parameter.sheet)  || 'Pacientes';
+      var prefix    = (e && e.parameter.prefix) || 'HEC';
+      var capturaId = CAPTURA_SHEETS[sheetName] || CAPTURA_SHEET_ID_DEFAULT;
+      try {
+        var ssNid = SpreadsheetApp.openById(capturaId);
+        var shNid = ssNid.getSheetByName(sheetName);
+        if (!shNid || shNid.getLastRow() < 2) {
+          return jsonResponse({ nextId: prefix + '-001' });
+        }
+        var ids = shNid.getRange(2, 1, shNid.getLastRow() - 1, 1).getValues()
+          .map(function(r) { return String(r[0]); });
+        var maxNum = 0;
+        ids.forEach(function(id) {
+          var m = id.match(/(\d+)$/);
+          if (m) maxNum = Math.max(maxNum, parseInt(m[1]));
+        });
+        return jsonResponse({ nextId: prefix + '-' + String(maxNum + 1).padStart(3, '0') });
+      } catch(ex) {
+        return jsonResponse({ nextId: prefix + '-001', error: ex.message });
+      }
+    }
+
+    // update: ?action=update&sheet=X&rowNum=N&Campo=valor → actualiza fila en Sheets
+    if (action === 'update') {
+      var sheetName = (e && e.parameter.sheet)  || '';
+      var rowNum    = parseInt((e && e.parameter.rowNum) || '0');
+      if (!sheetName || !rowNum) return jsonResponse({ error: 'sheet y rowNum son requeridos' });
+      var capturaId = CAPTURA_SHEETS[sheetName] || CAPTURA_SHEET_ID_DEFAULT;
+      try {
+        var ssUpd = SpreadsheetApp.openById(capturaId);
+        var shUpd = ssUpd.getSheetByName(sheetName);
+        if (!shUpd) return jsonResponse({ error: 'Hoja no encontrada: ' + sheetName });
+        var hdrs = shUpd.getRange(1, 1, 1, shUpd.getLastColumn()).getValues()[0];
+        var cur  = shUpd.getRange(rowNum, 1, 1, hdrs.length).getValues()[0];
+        var newRow = hdrs.map(function(h, i) {
+          var key = String(h).trim();
+          return (e.parameter[key] !== undefined) ? e.parameter[key] : cur[i];
+        });
+        shUpd.getRange(rowNum, 1, 1, hdrs.length).setValues([newRow]);
+        return jsonResponse({ success: true, rowNum: rowNum });
       } catch(ex) {
         return jsonResponse({ error: ex.message });
       }
@@ -223,8 +270,25 @@ function readCapturaData(ss, nombreHoja, viewId, fechaInicio, fechaFin) {
     dataRows.sort(function(a, b) { return String(a[1]) < String(b[1]) ? -1 : 1; });
   }
 
-  var rows = dataRows.map(function(r) {
-    var obj = { _periodo: String(r[0]), _fecha: tieneFecha ? String(r[1]) : '' };
+  // Guardar número de fila original antes de filtrar (para edición posterior)
+  var dataRowsWithNum = allRows.slice(1).map(function(r, i) {
+    return { data: r, rowNum: i + 2 };
+  });
+  if (tieneFecha && fechaInicio && fechaFin) {
+    dataRowsWithNum = dataRowsWithNum.filter(function(item) {
+      var f = String(item.data[1]).trim();
+      return f >= fechaInicio && f <= fechaFin;
+    });
+    dataRowsWithNum.sort(function(a, b) { return String(a.data[1]) < String(b.data[1]) ? -1 : 1; });
+  } else if (!tieneFecha) {
+    dataRowsWithNum = dataRowsWithNum.filter(function(item) {
+      return item.data.some(function(c) { return String(c).trim() !== ''; });
+    });
+  }
+
+  var rows = dataRowsWithNum.map(function(item) {
+    var r = item.data;
+    var obj = { _rowNum: item.rowNum, _periodo: String(r[0]), _fecha: tieneFecha ? String(r[1]) : '' };
     headers.forEach(function(h, i) {
       obj[h] = r[colStart + i];
       obj[h.toLowerCase()] = r[colStart + i];

@@ -1470,6 +1470,9 @@ function ensureGenericView(viewId) {
   document.querySelector('.main').appendChild(div);
 }
 
+/* ── Almacén de filas para edición ─── */
+var _capturaRows = {};
+
 /* ── Render genérico para hojas de captura ─── */
 function renderCaptura(viewId, data) {
   ensureGenericView(viewId);
@@ -1481,14 +1484,17 @@ function renderCaptura(viewId, data) {
   if (titleEl) titleEl.textContent = title;
   var subTxt = (data.periodo ? data.periodo + ' · ' : '') + data.rows.length + ' registros';
   if (subEl) subEl.textContent = subTxt;
-  // Mostrar botón "Nueva entrada" si hay config de modal para esta vista
   var newBtn = document.getElementById('cap-new-btn-' + viewId);
   if (newBtn) newBtn.style.display = CAPTURA_CONFIG[viewId] ? 'flex' : 'none';
+
+  var hasEdit = !!CAPTURA_CONFIG[viewId];
+  _capturaRows[viewId] = data.rows;
 
   // Cabecera de tabla
   var thead = document.getElementById('cap-thead-' + viewId);
   if (thead) {
-    thead.innerHTML = '<tr>' +
+    var editTh = hasEdit ? '<th style="width:40px"></th>' : '';
+    thead.innerHTML = '<tr>' + editTh +
       data.headers.map(function(h) { return '<th>' + h + '</th>'; }).join('') +
     '</tr>';
   }
@@ -1497,21 +1503,29 @@ function renderCaptura(viewId, data) {
   var tbody = document.getElementById('cap-tbody-' + viewId);
   if (!tbody) return;
   if (!data.rows.length) {
-    tbody.innerHTML = '<tr><td colspan="' + data.headers.length + '" ' +
+    var cols = data.headers.length + (hasEdit ? 1 : 0);
+    tbody.innerHTML = '<tr><td colspan="' + cols + '" ' +
       'style="text-align:center;color:var(--color-text-muted);padding:var(--space-6)">' +
       'Sin datos — agrega registros en la hoja <b>' + data.fuente + '</b> de Google Sheets' +
       '</td></tr>';
     return;
   }
-  tbody.innerHTML = data.rows.map(function(row) {
+  var svgEdit = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+  tbody.innerHTML = data.rows.map(function(row, idx) {
     var cells = data.headers.map(function(h) {
       return '<td>' + (row[h] !== undefined ? row[h] : '') + '</td>';
     }).join('');
     var searchText = data.headers.map(function(h){ return row[h] || ''; }).join(' ').toLowerCase();
-    return '<tr data-search="' + searchText.replace(/"/g,'') + '">' + cells + '</tr>';
+    var editTd = hasEdit
+      ? '<td><button onclick="openEditModal(\'' + viewId + '\',' + idx + ')" ' +
+        'title="Editar" style="background:none;border:none;cursor:pointer;padding:4px 6px;' +
+        'color:var(--color-primary);border-radius:4px" ' +
+        'onmouseover="this.style.background=\'var(--color-surface-hover)\'" ' +
+        'onmouseout="this.style.background=\'none\'">' + svgEdit + '</button></td>'
+      : '';
+    return '<tr data-search="' + searchText.replace(/"/g,'') + '">' + editTd + cells + '</tr>';
   }).join('');
 
-  // Mostrar buscador solo para cap-pacientes (o cualquier vista con muchos registros)
   var searchWrap = document.getElementById('cap-search-wrap-' + viewId);
   if (searchWrap) searchWrap.style.display = (viewId === 'cap-pacientes') ? 'block' : 'none';
 }
@@ -1804,25 +1818,112 @@ var CAPTURA_CONFIG = {
   }
 };
 
+var _pacEditRowNum = null;
+
 function openModal(tipo) {
   var cfg = CAPTURA_CONFIG[tipo];
-  // Mostrar rango de fechas como referencia en el modal (si tiene campo periodo)
+  _pacEditRowNum = null;
+  // Limpiar campos
+  cfg.fields.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (el.tagName === 'SELECT') el.selectedIndex = 0;
+    else el.value = '';
+  });
   if (cfg.periodoField) {
     var pfEl = document.getElementById(cfg.periodoField);
     if (pfEl) pfEl.value = currentFechaInicio && currentFechaFin
       ? currentFechaInicio + ' / ' + currentFechaFin
       : (currentPeriodo || '');
   }
-  // Pre-llenar fecha de hoy en modales que la tengan
   var fechaFields = {'laboratorio':'lab-f-fecha','medicamentos':'med-f-ultima_compra','cap-pacientes':'pac-f-fecha_cita'};
   if (fechaFields[tipo]) {
-    var hoy = new Date().toISOString().split('T')[0];
-    document.getElementById(fechaFields[tipo]).value = hoy;
+    document.getElementById(fechaFields[tipo]).value = new Date().toISOString().split('T')[0];
+  }
+  // Modal título y botón en modo "nueva entrada"
+  var modalTitleEl = document.querySelector('#modal-' + tipo + ' .modal-title');
+  if (modalTitleEl) modalTitleEl.textContent = tipo === 'cap-pacientes' ? 'Nuevo Paciente' : 'Nueva entrada';
+  var submitBtn = document.getElementById(cfg.submitBtn);
+  if (submitBtn) { submitBtn.textContent = 'Guardar'; submitBtn.onclick = function(){ submitCaptura(tipo); }; }
+  // ID auto para cap-pacientes (readonly siempre)
+  if (tipo === 'cap-pacientes') {
+    var idEl = document.getElementById('pac-f-id');
+    if (idEl) { idEl.readOnly = true; idEl.value = 'Generando…'; }
+    fetch(APPS_SCRIPT_URL + '?action=nextid&sheet=Pacientes&prefix=HEC')
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if (idEl) idEl.value = d.nextId || 'HEC-001'; })
+      .catch(function(){ if (idEl) idEl.value = 'HEC-001'; });
+    loadPacientesOptions();
   }
   document.getElementById('modal-' + tipo).style.display = 'flex';
   document.getElementById(cfg.msgEl).className = 'modal-msg';
   document.getElementById(cfg.msgEl).textContent = '';
-  if (tipo === 'cap-pacientes') loadPacientesOptions();
+}
+
+function openEditModal(viewId, rowIdx) {
+  var cfg = CAPTURA_CONFIG[viewId];
+  if (!cfg) return;
+  var row = (_capturaRows[viewId] || [])[rowIdx];
+  if (!row) return;
+  _pacEditRowNum = row._rowNum;
+  // Pre-llenar todos los campos con los datos de la fila
+  cfg.fields.forEach(function(fieldId, i) {
+    var el  = document.getElementById(fieldId);
+    var key = cfg.keys[i];
+    if (!el) return;
+    var val = (row[key] !== undefined ? row[key] : (row[key.toLowerCase()] !== undefined ? row[key.toLowerCase()] : ''));
+    el.value = String(val === null || val === undefined ? '' : val);
+  });
+  // ID siempre readonly en edición
+  var idEl = document.getElementById('pac-f-id');
+  if (idEl) idEl.readOnly = true;
+  // Cambiar título y botón a modo edición
+  var modalTitleEl = document.querySelector('#modal-' + viewId + ' .modal-title');
+  if (modalTitleEl) modalTitleEl.textContent = 'Editar Paciente';
+  var submitBtn = document.getElementById(cfg.submitBtn);
+  if (submitBtn) { submitBtn.textContent = 'Guardar cambios'; submitBtn.onclick = function(){ submitEditCaptura(viewId); }; }
+  if (viewId === 'cap-pacientes') loadPacientesOptions();
+  document.getElementById('modal-' + viewId).style.display = 'flex';
+  document.getElementById(cfg.msgEl).className = 'modal-msg';
+  document.getElementById(cfg.msgEl).textContent = '';
+  // Esperar a que opciones carguen para setear el valor del select
+  setTimeout(function() {
+    ['pac-f-origen','pac-f-canal','pac-f-medico','pac-f-pais'].forEach(function(selId, i) {
+      var keys = ['Origen','Canal','Médico Tratante','País'];
+      var sel = document.getElementById(selId);
+      if (!sel) return;
+      var val = row[keys[i]] || row[keys[i].toLowerCase()] || '';
+      sel.value = val;
+    });
+  }, 600);
+}
+
+function submitEditCaptura(viewId) {
+  var cfg    = CAPTURA_CONFIG[viewId];
+  var rowNum = _pacEditRowNum;
+  if (!rowNum) { showModalMsg(cfg.msgEl, 'err', 'Error: fila no identificada.'); return; }
+  var btn = document.getElementById(cfg.submitBtn);
+  btn.disabled = true; btn.textContent = 'Guardando…';
+  var params = 'action=update&sheet=' + encodeURIComponent(cfg.sheet) + '&rowNum=' + rowNum;
+  cfg.fields.forEach(function(id, i) {
+    var el = document.getElementById(id);
+    params += '&' + encodeURIComponent(cfg.keys[i]) + '=' + encodeURIComponent(el ? el.value : '');
+  });
+  fetch(APPS_SCRIPT_URL + '?' + params)
+    .then(function(r){ return r.json(); })
+    .then(function(res) {
+      if (res.success) {
+        showModalMsg(cfg.msgEl, 'ok', '✓ Registro actualizado correctamente.');
+        setTimeout(function() {
+          closeModal(viewId);
+          loadView(currentView, currentFechaInicio, currentFechaFin, true);
+        }, 1500);
+      } else {
+        showModalMsg(cfg.msgEl, 'err', 'Error: ' + (res.error || 'No se pudo actualizar.'));
+      }
+    })
+    .catch(function() { showModalMsg(cfg.msgEl, 'err', 'Error de conexión. Intenta de nuevo.'); })
+    .finally(function() { btn.disabled = false; btn.textContent = 'Guardar cambios'; });
 }
 
 var _pacOptLoaded = false;
