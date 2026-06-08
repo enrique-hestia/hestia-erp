@@ -1500,7 +1500,7 @@ function ensureGenericView(viewId) {
       '</div>' +
       '<div id="cap-alerts-' + viewId + '"></div>' +
       '<div id="cap-search-wrap-' + viewId + '" style="display:none;margin-bottom:12px">' +
-        '<input type="text" id="cap-search-' + viewId + '" placeholder="Buscar paciente…" ' +
+        '<input type="text" id="cap-search-' + viewId + '" placeholder="Buscar…" ' +
         'oninput="filterCaptura(\'' + viewId + '\')" ' +
         'style="width:100%;max-width:320px;padding:7px 12px;border:1px solid var(--color-border);border-radius:var(--radius-full);font-size:var(--text-sm);background:var(--color-surface);color:var(--color-text)">' +
       '</div>' +
@@ -1553,9 +1553,14 @@ function renderCaptura(viewId, data) {
     return;
   }
   var svgEdit = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+  var currencyCols = ['PRECIO','Precio','precio','Costo','costo','COSTO','Precio_Unitario'];
   tbody.innerHTML = data.rows.map(function(row, idx) {
     var cells = data.headers.map(function(h) {
-      return '<td>' + (row[h] !== undefined ? row[h] : '') + '</td>';
+      var val = row[h] !== undefined ? row[h] : '';
+      if (currencyCols.indexOf(h) !== -1 && val !== '' && !isNaN(parseFloat(val))) {
+        val = '$' + parseFloat(val).toLocaleString('es-MX', {minimumFractionDigits:2, maximumFractionDigits:2});
+      }
+      return '<td>' + val + '</td>';
     }).join('');
     var searchText = data.headers.map(function(h){ return row[h] || ''; }).join(' ').toLowerCase();
     var editTd = hasEdit
@@ -1569,7 +1574,8 @@ function renderCaptura(viewId, data) {
   }).join('');
 
   var searchWrap = document.getElementById('cap-search-wrap-' + viewId);
-  if (searchWrap) searchWrap.style.display = (viewId === 'cap-pacientes') ? 'block' : 'none';
+  var showSearch = ['cap-pacientes','productos'].indexOf(viewId) !== -1;
+  if (searchWrap) searchWrap.style.display = showSearch ? 'block' : 'none';
 }
 
 function filterCaptura(viewId) {
