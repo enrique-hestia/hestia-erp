@@ -1,5 +1,5 @@
 var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
-var API_VERSION   = 'v2026-06-08-K';
+var API_VERSION   = 'v2026-06-08-L';
 var AUTH_SECRET   = 'hestia2026erp-secret'; // Cambia esto por algo único
 
 /* ── Autenticación: helpers ──────────────────────────────────── */
@@ -393,14 +393,16 @@ function readMedDashboard(ss, fechaInicio, fechaFin) {
     if (mes) comprasPorMes[mes] = (comprasPorMes[mes] || 0) + cant;
   });
 
-  // ── Agregaciones estimulación (formato ancho: cada med = columna) ──
-  var MED_COLS = [
-    'Pergoveris 300 UI','Pergoveris 450 UI','Pergoveris 900 UI',
-    'Gonal 300 UI','Gonal 450 UI','Gonal 900 UI','Gonal 75 UI',
-    'Merapur 1200 UI','Merapur 600 UI','Merapur 75 UI',
-    'Cetrotide','Ovidrel','Gonapeptyl Daily .2 mg','Choriomon',
-    'Letrozol','Geslutin 400 mg','Lectrum','Provera','Primogyn','Gestageno 200 mg'
-  ];
+  // ── Columnas de medicamentos: todo lo que viene DESPUÉS de "Cancelado" ──
+  // Al agregar nuevas columnas en Sheets después de Cancelado se incluyen automáticamente
+  var estimHeaders = estimData.headers || [];
+  var canceladoIdx = -1;
+  for (var ci = 0; ci < estimHeaders.length; ci++) {
+    if (estimHeaders[ci].trim().toLowerCase() === 'cancelado') { canceladoIdx = ci; break; }
+  }
+  var MED_COLS = canceladoIdx >= 0
+    ? estimHeaders.slice(canceladoIdx + 1).filter(function(h){ return h.trim() !== ''; })
+    : [];
   var usosPorMed = {}, usosPorMes = {}, pacientesSet = {};
   estims.forEach(function(r) {
     var pac = String(r['Paciente'] || '').trim();
