@@ -41,6 +41,20 @@ function doGet(e) {
       return jsonResponse(insertRow(ss, e));
     }
 
+    // Debug: ?action=debug&sheet=NombreHoja
+    if (action === 'debug') {
+      var sheetName = (e && e.parameter.sheet) || '';
+      var capturaId = CAPTURA_SHEETS[sheetName] || CAPTURA_SHEET_ID_DEFAULT;
+      try {
+        var ssDeb = SpreadsheetApp.openById(capturaId);
+        var tabs  = ssDeb.getSheets().map(function(s){ return s.getName(); });
+        return jsonResponse({ sheetName: sheetName, spreadsheetId: capturaId,
+                              tabsFound: tabs, capturaSheets: CAPTURA_SHEETS });
+      } catch(ex) {
+        return jsonResponse({ error: ex.message, sheetName: sheetName, spreadsheetId: capturaId });
+      }
+    }
+
     // action === 'view'
     return jsonResponse(readViewData(ss, view, fechaInicio, fechaFin));
 
