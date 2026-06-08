@@ -1157,6 +1157,91 @@ function buildAlerts(alertas, containerId) {
 }
 
 /* ── MEDICAMENTOS (Compras) ─── */
+
+/* ══ DASHBOARD MEDICAMENTOS ══════════════════════════════════ */
+var medTopComprasChart, medTopUsosChart, medEvoChart;
+
+function renderMedDashboard(data) {
+  if (!data || !data.kpis) return;
+  var k = data.kpis;
+  var fmt = function(n){ return Number(n).toLocaleString('es-MX'); };
+  var fmtMXN = function(n){ return '$' + Number(n).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+
+  document.getElementById('mk-compras').textContent = fmt(k.totalCompras);
+  document.getElementById('mk-compras-sub').textContent = 'unidades en el periodo';
+  document.getElementById('mk-usos').textContent = fmt(k.totalUsos);
+  document.getElementById('mk-usos-sub').textContent = 'unidades aplicadas';
+  document.getElementById('mk-gasto').textContent = fmtMXN(k.gastoTotal);
+  document.getElementById('mk-gasto-sub').textContent = 'en órdenes de compra';
+  document.getElementById('mk-meds').textContent = fmt(k.medsDistintos);
+  document.getElementById('mk-pacs').textContent = fmt(k.pacientesAtendidos);
+  if (data.periodo) document.getElementById('med-evo-sub').textContent = data.periodo + ' · Compras vs Usos';
+
+  var primary = '#c46a7a', secondary = '#3d8f8f';
+  var textColor = getComputedStyle(document.documentElement).getPropertyValue('--color-text-muted').trim() || '#888';
+  var gridColor = getComputedStyle(document.documentElement).getPropertyValue('--color-border').trim() || '#eee';
+
+  // ── Top Compras (barras horizontales) ───────────────────────
+  if (medTopComprasChart) medTopComprasChart.destroy();
+  var ctxC = document.getElementById('medTopComprasChart');
+  if (ctxC && data.topCompras && data.topCompras.length) {
+    medTopComprasChart = new Chart(ctxC, {
+      type: 'bar',
+      data: {
+        labels: data.topCompras.map(function(d){ return d.label; }),
+        datasets: [{ label: 'Unidades', data: data.topCompras.map(function(d){ return d.value; }),
+          backgroundColor: primary + 'bb', borderColor: primary, borderWidth: 1, borderRadius: 4 }]
+      },
+      options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } },
+        scales: { x: { grid: { color: gridColor }, ticks: { color: textColor } },
+                  y: { grid: { display: false }, ticks: { color: textColor } } } }
+    });
+  } else if (ctxC) {
+    var p = ctxC.parentElement; p.innerHTML = '<div style="text-align:center;padding:40px;color:var(--color-text-muted);font-size:var(--text-sm)">Sin datos de Orden de Compra aún</div>';
+  }
+
+  // ── Top Usos (barras horizontales) ──────────────────────────
+  if (medTopUsosChart) medTopUsosChart.destroy();
+  var ctxU = document.getElementById('medTopUsosChart');
+  if (ctxU && data.topUsos && data.topUsos.length) {
+    medTopUsosChart = new Chart(ctxU, {
+      type: 'bar',
+      data: {
+        labels: data.topUsos.map(function(d){ return d.label; }),
+        datasets: [{ label: 'Unidades', data: data.topUsos.map(function(d){ return d.value; }),
+          backgroundColor: secondary + 'bb', borderColor: secondary, borderWidth: 1, borderRadius: 4 }]
+      },
+      options: { indexAxis: 'y', responsive: true, plugins: { legend: { display: false } },
+        scales: { x: { grid: { color: gridColor }, ticks: { color: textColor } },
+                  y: { grid: { display: false }, ticks: { color: textColor } } } }
+    });
+  } else if (ctxU) {
+    var p2 = ctxU.parentElement; p2.innerHTML = '<div style="text-align:center;padding:40px;color:var(--color-text-muted);font-size:var(--text-sm)">Sin datos de Estimulación aún</div>';
+  }
+
+  // ── Evolución mensual (líneas) ───────────────────────────────
+  if (medEvoChart) medEvoChart.destroy();
+  var ctxE = document.getElementById('medEvoChart');
+  if (ctxE && data.evolucion && data.evolucion.meses.length) {
+    medEvoChart = new Chart(ctxE, {
+      type: 'line',
+      data: {
+        labels: data.evolucion.meses,
+        datasets: [
+          { label: 'Compras', data: data.evolucion.compras, borderColor: primary, backgroundColor: primary+'22',
+            fill: true, tension: 0.3, pointRadius: 4 },
+          { label: 'Usos', data: data.evolucion.usos, borderColor: secondary, backgroundColor: secondary+'22',
+            fill: true, tension: 0.3, pointRadius: 4 }
+        ]
+      },
+      options: { responsive: true, plugins: { legend: { labels: { color: textColor } } },
+        scales: { x: { grid: { color: gridColor }, ticks: { color: textColor } },
+                  y: { grid: { color: gridColor }, ticks: { color: textColor }, beginAtZero: true } } }
+    });
+  } else if (ctxE) {
+    ctxE.parentElement.innerHTML = '<div style="text-align:center;padding:40px;color:var(--color-text-muted);font-size:var(--text-sm)">Agrega datos para ver la evolución mensual</div>';
+  }
+}
 function renderMedicamentos(data) {
   var inv = data.rows || data.inventarios || [];
   var periodo = data.periodo || '';
@@ -1427,6 +1512,7 @@ function renderViewData(viewId, data) {
     turismo:      function(d) { renderTurismo(d); },
     rentabilidad: function(d) { renderRentabilidad(d); },
     medicamentos: function(d) { renderMedicamentos(d); },
+    'med-resumen': function(d) { renderMedDashboard(d); },
     laboratorios: function(d) { renderLaboratorios(d); },
     ajustes:      function()  {
       var el = document.getElementById('sync-status-ajustes');
@@ -1739,6 +1825,31 @@ function initTheme() {
 }
 </script>
 
+
+<!-- ══ VISTA: DASHBOARD MEDICAMENTOS ══ -->
+<div id="view-med-resumen" class="view" style="display:none">
+  <div class="kpi-grid" id="med-kpi-grid" style="margin-bottom:var(--space-6)">
+    <div class="kpi-card"><div class="kpi-label">Unidades compradas</div><div class="kpi-value" id="mk-compras">—</div><div class="kpi-sub" id="mk-compras-sub"></div></div>
+    <div class="kpi-card"><div class="kpi-label">Unidades utilizadas</div><div class="kpi-value" id="mk-usos">—</div><div class="kpi-sub" id="mk-usos-sub"></div></div>
+    <div class="kpi-card"><div class="kpi-label">Gasto total compras</div><div class="kpi-value" id="mk-gasto">—</div><div class="kpi-sub" id="mk-gasto-sub"></div></div>
+    <div class="kpi-card"><div class="kpi-label">Medicamentos distintos</div><div class="kpi-value" id="mk-meds">—</div><div class="kpi-sub">en órdenes de compra</div></div>
+    <div class="kpi-card"><div class="kpi-label">Pacientes estimulados</div><div class="kpi-value" id="mk-pacs">—</div><div class="kpi-sub">en el periodo</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4);margin-bottom:var(--space-4)">
+    <div class="card">
+      <div class="card-header"><div><div class="card-title">Top compras</div><div class="card-sub">Medicamentos con mayor volumen de entrada</div></div></div>
+      <div style="padding:var(--space-4)"><canvas id="medTopComprasChart" height="260"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><div><div class="card-title">Top uso en estimulación</div><div class="card-sub">Medicamentos más aplicados a pacientes</div></div></div>
+      <div style="padding:var(--space-4)"><canvas id="medTopUsosChart" height="260"></canvas></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header"><div><div class="card-title">Evolución mensual</div><div class="card-sub" id="med-evo-sub">Unidades compradas vs utilizadas por mes</div></div></div>
+    <div style="padding:var(--space-4)"><canvas id="medEvoChart" height="120"></canvas></div>
+  </div>
+</div>
 <!-- ══ MODAL: NUEVA ENTRADA PACIENTES ══ -->
 <div id="modal-cap-pacientes" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal('cap-pacientes')">
   <div class="modal">
