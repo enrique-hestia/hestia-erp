@@ -1,5 +1,5 @@
 var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
-var API_VERSION   = 'v2026-06-08-E';  // Actualizar al redesplegar para verificar versión
+var API_VERSION   = 'v2026-06-08-F';  // Actualizar al redesplegar para verificar versión
 
 // Mapeo: nombre de pestaña → ID del spreadsheet externo donde se lee/escribe
 // Agregar aquí cualquier hoja de captura futura
@@ -69,46 +69,23 @@ function doGet(e) {
         var headers  = shOpt.getRange(1, 1, 1, lastCol).getValues()[0];
         var targets  = ['Origen', 'Canal', 'Médico Tratante', 'País'];
         var options  = {};
-        targets.forEach(function(colName) {
-          var idx = -1;
-          for (var i = 0; i < headers.length; i++) {
-            if (String(headers[i]).trim() === colName) { idx = i; break; }
-          }
-          if (idx === -1) { options[colName] = []; return; }
-          try {
-            // Escanear hasta 20 filas para encontrar la primera celda con validación
-            var lastRow = Math.max(shOpt.getLastRow(), 20);
-            var colVals = shOpt.getRange(1, idx + 1, lastRow, 1).getDataValidations();
-            var rule = null;
-            for (var ri = 0; ri < colVals.length; ri++) {
-              if (colVals[ri][0]) { rule = colVals[ri][0]; break; }
+        // Leer opciones desde pestaña "Opciones" (una columna por campo dropdown)
+        var shOpciones = ssOpt.getSheetByName('Opciones');
+        if (shOpciones) {
+          var optHeaders = shOpciones.getRange(1, 1, 1, shOpciones.getLastColumn()).getValues()[0];
+          var optData    = shOpciones.getRange(2, 1, Math.max(shOpciones.getLastRow() - 1, 1), shOpciones.getLastColumn()).getValues();
+          targets.forEach(function(colName) {
+            var colIdx = -1;
+            for (var i = 0; i < optHeaders.length; i++) {
+              if (String(optHeaders[i]).trim() === colName) { colIdx = i; break; }
             }
-            if (rule) {
-              var crit = rule.getCriteriaType().toString();
-              var vals = rule.getCriteriaValues();
-              // VALUE_IN_LIST: vals[0] es el array de opciones, vals[1] es showDropdown boolean
-              if (Array.isArray(vals[0])) {
-                options[colName] = vals[0];
-              } else if (Array.isArray(vals)) {
-                options[colName] = vals.filter(function(v){ return typeof v === 'string'; });
-              } else {
-                options[colName] = [];
-              }
-            } else {
-              options[colName] = [];
-            }
-          } catch(ex2) { options[colName] = []; }
-        });
-        // _debug: info para diagnóstico si las opciones salen vacías
-        var debugInfo = {};
-        targets.forEach(function(col) {
-          var idx2 = -1;
-          for (var j = 0; j < headers.length; j++) {
-            if (String(headers[j]).trim() === col) { idx2 = j; break; }
-          }
-          debugInfo[col] = { colIndex: idx2, headerFound: String(headers[idx2] || '') };
-        });
-        return jsonResponse({ options: options, _debug: debugInfo, _headers: headers });
+            if (colIdx === -1) { options[colName] = []; return; }
+            options[colName] = optData
+              .map(function(row) { return String(row[colIdx]).trim(); })
+              .filter(function(v) { return v && v !== '' && v !== 'undefined'; });
+          });
+        }
+        return jsonResponse({ options: options });
       } catch(ex) {
         return jsonResponse({ error: ex.message });
       }
