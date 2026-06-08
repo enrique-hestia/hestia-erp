@@ -1,5 +1,5 @@
 var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
-var API_VERSION   = 'v2026-06-08-L';
+var API_VERSION   = 'v2026-06-08-M';
 var AUTH_SECRET   = 'hestia2026erp-secret'; // Cambia esto por algo único
 
 /* ── Autenticación: helpers ──────────────────────────────────── */
@@ -60,7 +60,8 @@ function getRolConfig(ss, rol) {
 // Agregar aquí cualquier hoja de captura futura
 var CAPTURA_SHEETS = {
   'Medicamentos': '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
-  'Orden_Compra': '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
+  'Orden_Compra': '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',  // alias legacy
+  'Ent. Med':     '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
   'Estimulacion': '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
   'Insumos':      '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ',
   'Pacientes':    '1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio',
@@ -374,7 +375,7 @@ function readMedDashboard(ss, fechaInicio, fechaFin) {
     return { headers: hdrs, rows: rows };
   }
 
-  var compraData = readSheet('Orden_Compra');
+  var compraData = readSheet('Ent. Med');
   var estimData  = readSheet('Estimulacion');
   var compras    = compraData.rows;
   var estims     = estimData.rows;
