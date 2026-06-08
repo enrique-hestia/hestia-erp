@@ -320,8 +320,39 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
     <button class="icon-btn" data-theme-toggle aria-label="Cambiar tema">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
     </button>
+    <!-- Usuario actual + logout -->
+    <div id="user-chip" style="display:none;align-items:center;gap:8px;padding:4px 10px;background:var(--color-surface-offset);border-radius:var(--radius-full);font-size:var(--text-xs)">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span id="user-name" style="font-weight:600;color:var(--color-text)"></span>
+      <span id="user-rol" style="color:var(--color-text-muted)"></span>
+      <button onclick="logout()" title="Cerrar sesión" style="background:none;border:none;cursor:pointer;padding:2px 4px;color:var(--color-text-muted);display:flex;align-items:center" onmouseover="this.style.color='var(--color-primary)'" onmouseout="this.style.color='var(--color-text-muted)'">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </button>
+    </div>
   </div>
 </header>
+
+<!-- ══ PANTALLA DE LOGIN ══ -->
+<div id="login-screen" style="position:fixed;inset:0;background:var(--color-bg);display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column;gap:24px">
+  <div style="text-align:center;margin-bottom:8px">
+    <div style="font-size:1.6rem;font-weight:700;color:var(--color-primary);letter-spacing:-0.5px">Hestia ERP</div>
+    <div style="font-size:var(--text-sm);color:var(--color-text-muted);margin-top:4px">Acceso al panel financiero</div>
+  </div>
+  <div style="background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:32px 36px;width:100%;max-width:360px;box-shadow:0 8px 32px rgba(0,0,0,.1)">
+    <div class="form-group" style="margin-bottom:16px">
+      <label class="form-label">Correo electrónico</label>
+      <input class="form-input" type="email" id="login-email" placeholder="usuario@hestiafertility.com" style="width:100%"
+        onkeydown="if(event.key==='Enter')document.getElementById('login-password').focus()">
+    </div>
+    <div class="form-group" style="margin-bottom:24px">
+      <label class="form-label">Contraseña</label>
+      <input class="form-input" type="password" id="login-password" placeholder="••••••••" style="width:100%"
+        onkeydown="if(event.key==='Enter')handleLogin()">
+    </div>
+    <button onclick="handleLogin()" id="login-btn" class="btn btn-primary" style="width:100%;padding:10px;font-size:var(--text-sm)">Iniciar sesión</button>
+    <div id="login-msg" style="margin-top:12px;font-size:var(--text-xs);text-align:center;color:var(--color-danger);min-height:16px"></div>
+  </div>
+</div>
 
 <!-- MAIN CONTENT -->
 <main class="main" role="main">
@@ -1223,10 +1254,16 @@ const VIEW_TITLES = {
 /* ── Carga menú y rango de fechas por defecto ─── */
 async function loadMenu() {
   try {
-    var res  = await fetch(APPS_SCRIPT_URL + '?action=menu');
+    var res  = await fetch(APPS_SCRIPT_URL + '?action=menu&token=' + encodeURIComponent(getToken()));
     var json = await res.json();
+    if (handleApiError(json)) return;
     if (json.error) throw new Error(json.error);
-    menuItems = json.menu || [];
+    // Filtrar vistas según permisos del usuario actual
+    var session = getSession();
+    var bloqueadas = (session && session.vistasBloqueadas) || [];
+    menuItems = (json.menu || []).filter(function(item) {
+      return bloqueadas.indexOf(item.id) === -1;
+    });
     currentFechaInicio = json.fechaInicio || '';
     currentFechaFin    = json.fechaFin    || '';
     currentPeriodo     = currentFechaInicio.slice(0,7) + ' → ' + currentFechaFin.slice(0,7);
@@ -1358,9 +1395,11 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     var url = APPS_SCRIPT_URL +
       '?action=view&view='         + encodeURIComponent(viewId) +
       '&fechaInicio='              + encodeURIComponent(fechaInicio) +
-      '&fechaFin='                 + encodeURIComponent(fechaFin);
+      '&fechaFin='                 + encodeURIComponent(fechaFin) +
+      '&token='                    + encodeURIComponent(getToken());
     var res  = await fetch(url);
     var data = await res.json();
+    if (handleApiError(data)) return;
     if (data.error) throw new Error(data.error);
     data._ts = now;
     viewCache[cacheKey] = data;
@@ -1485,9 +1524,9 @@ function renderCaptura(viewId, data) {
   var subTxt = (data.periodo ? data.periodo + ' · ' : '') + data.rows.length + ' registros';
   if (subEl) subEl.textContent = subTxt;
   var newBtn = document.getElementById('cap-new-btn-' + viewId);
-  if (newBtn) newBtn.style.display = CAPTURA_CONFIG[viewId] ? 'flex' : 'none';
+  if (newBtn) newBtn.style.display = (CAPTURA_CONFIG[viewId] && canEdit()) ? 'flex' : 'none';
 
-  var hasEdit = !!CAPTURA_CONFIG[viewId];
+  var hasEdit = !!CAPTURA_CONFIG[viewId] && canEdit();
   _capturaRows[viewId] = data.rows;
 
   // Cabecera de tabla
@@ -1575,12 +1614,75 @@ function applyDateRange() {
 }
 
 /* ── INIT ─── */
+/* ══ SESIÓN ══════════════════════════════════════════════════ */
+var SESSION_KEY = 'hestia_session';
+function getSession() {
+  try { return JSON.parse(sessionStorage.getItem(SESSION_KEY)); } catch(e) { return null; }
+}
+function setSession(data) { sessionStorage.setItem(SESSION_KEY, JSON.stringify(data)); }
+function clearSession()   { sessionStorage.removeItem(SESSION_KEY); }
+
+function getToken() { var s = getSession(); return s ? s.token : ''; }
+function canEdit()  { var s = getSession(); return s ? !s.soloLectura : true; }
+function isAdmin()  { var s = getSession(); return s ? s.rol === 'admin' : false; }
+
+function showUserChip(session) {
+  var chip = document.getElementById('user-chip');
+  if (!chip) return;
+  chip.style.display = 'flex';
+  document.getElementById('user-name').textContent = session.nombre || session.email;
+  document.getElementById('user-rol').textContent  = '(' + (session.rol || '') + ')';
+}
+
+function logout() {
+  clearSession();
+  document.getElementById('user-chip').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('login-password').value = '';
+  document.getElementById('login-msg').textContent = '';
+}
+
+async function handleLogin() {
+  var email    = document.getElementById('login-email').value.trim();
+  var password = document.getElementById('login-password').value;
+  var msg      = document.getElementById('login-msg');
+  var btn      = document.getElementById('login-btn');
+  if (!email || !password) { msg.textContent = 'Ingresa tu correo y contraseña.'; return; }
+  btn.disabled = true; btn.textContent = 'Verificando…';
+  msg.textContent = '';
+  try {
+    var res  = await fetch(APPS_SCRIPT_URL + '?action=login&email=' + encodeURIComponent(email) + '&password=' + encodeURIComponent(password));
+    var data = await res.json();
+    if (data.error) { msg.textContent = data.error; return; }
+    setSession(data);
+    document.getElementById('login-screen').style.display = 'none';
+    showUserChip(data);
+    await initApp();
+  } catch(e) {
+    msg.textContent = 'Error de conexión. Intenta de nuevo.';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Iniciar sesión';
+  }
+}
+
+function handleApiError(data) {
+  if (data && data.code === 401) { logout(); return true; }
+  return false;
+}
+
+/* ══ INIT ════════════════════════════════════════════════════ */
 window.addEventListener('DOMContentLoaded', function() {
   initTheme();
 
   function waitForChart(attempts) {
     if (typeof Chart !== 'undefined' && typeof lucide !== 'undefined') {
-      init();
+      var session = getSession();
+      if (session && session.token) {
+        document.getElementById('login-screen').style.display = 'none';
+        showUserChip(session);
+        initApp();
+      }
+      // Si no hay sesión, la pantalla de login ya está visible
     } else if (attempts > 0) {
       setTimeout(function() { waitForChart(attempts - 1); }, 300);
     } else {
@@ -1588,16 +1690,16 @@ window.addEventListener('DOMContentLoaded', function() {
     }
   }
 
-  async function init() {
-    await loadMenu();                          // 1. Menú ligero
-    navigateTo('resumen');                     // 2. Vista por defecto
-    setInterval(function() {                   // 3. Refresco automático
-      loadView(currentView, currentFechaInicio, currentFechaFin, true);
-    }, 30000);
-  }
-
   waitForChart(20);
 });
+
+async function initApp() {
+  await loadMenu();
+  navigateTo('resumen');
+  setInterval(function() {
+    loadView(currentView, currentFechaInicio, currentFechaFin, true);
+  }, 30000);
+}
 
 function initTheme() {
   var t = document.querySelector('[data-theme-toggle]');
@@ -1849,7 +1951,7 @@ function openModal(tipo) {
   if (tipo === 'cap-pacientes') {
     var idEl = document.getElementById('pac-f-id');
     if (idEl) { idEl.readOnly = true; idEl.value = 'Generando…'; }
-    fetch(APPS_SCRIPT_URL + '?action=nextid&sheet=Pacientes&prefix=HEC')
+    fetch(APPS_SCRIPT_URL + '?action=nextid&sheet=Pacientes&prefix=HEC&token=' + encodeURIComponent(getToken()))
       .then(function(r){ return r.json(); })
       .then(function(d){ if (idEl) idEl.value = d.nextId || 'HEC-001'; })
       .catch(function(){ if (idEl) idEl.value = 'HEC-001'; });
@@ -1904,7 +2006,7 @@ function submitEditCaptura(viewId) {
   if (!rowNum) { showModalMsg(cfg.msgEl, 'err', 'Error: fila no identificada.'); return; }
   var btn = document.getElementById(cfg.submitBtn);
   btn.disabled = true; btn.textContent = 'Guardando…';
-  var params = 'action=update&sheet=' + encodeURIComponent(cfg.sheet) + '&rowNum=' + rowNum;
+  var params = 'action=update&sheet=' + encodeURIComponent(cfg.sheet) + '&rowNum=' + rowNum + '&token=' + encodeURIComponent(getToken());
   cfg.fields.forEach(function(id, i) {
     var el = document.getElementById(id);
     params += '&' + encodeURIComponent(cfg.keys[i]) + '=' + encodeURIComponent(el ? el.value : '');
@@ -1929,7 +2031,7 @@ function submitEditCaptura(viewId) {
 var _pacOptLoaded = false;
 function loadPacientesOptions() {
   if (_pacOptLoaded) return;
-  var url = APPS_SCRIPT_URL + '?action=options&sheet=Pacientes';
+  var url = APPS_SCRIPT_URL + '?action=options&sheet=Pacientes&token=' + encodeURIComponent(getToken());
   fetch(url).then(function(r){ return r.json(); }).then(function(d) {
     if (!d.options) return;
     var map = {
@@ -1976,7 +2078,8 @@ function submitCaptura(tipo) {
   // Enviar periodo como YYYY-MM de la fecha inicio del rango seleccionado
   var periodoRef = currentFechaInicio ? currentFechaInicio.slice(0, 7) : (currentPeriodo || '');
   var params = 'action=insert&sheet=' + encodeURIComponent(cfg.sheet) +
-               '&periodo=' + encodeURIComponent(periodoRef);
+               '&periodo=' + encodeURIComponent(periodoRef) +
+               '&token='   + encodeURIComponent(getToken());
   cfg.fields.forEach(function(id, i) {
     var el = document.getElementById(id);
     params += '&' + encodeURIComponent(cfg.keys[i]) + '=' + encodeURIComponent(el ? el.value : '');
