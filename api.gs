@@ -1,5 +1,5 @@
 var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
-var API_VERSION   = 'v2026-06-08-J';
+var API_VERSION   = 'v2026-06-08-K';
 var AUTH_SECRET   = 'hestia2026erp-secret'; // Cambia esto por algo único
 
 /* ── Autenticación: helpers ──────────────────────────────────── */
@@ -393,16 +393,28 @@ function readMedDashboard(ss, fechaInicio, fechaFin) {
     if (mes) comprasPorMes[mes] = (comprasPorMes[mes] || 0) + cant;
   });
 
-  // ── Agregaciones estimulación ─────────────────────────────────
+  // ── Agregaciones estimulación (formato ancho: cada med = columna) ──
+  var MED_COLS = [
+    'Pergoveris 300 UI','Pergoveris 450 UI','Pergoveris 900 UI',
+    'Gonal 300 UI','Gonal 450 UI','Gonal 900 UI','Gonal 75 UI',
+    'Merapur 1200 UI','Merapur 600 UI','Merapur 75 UI',
+    'Cetrotide','Ovidrel','Gonapeptyl Daily .2 mg','Choriomon',
+    'Letrozol','Geslutin 400 mg','Lectrum','Provera','Primogyn','Gestageno 200 mg'
+  ];
   var usosPorMed = {}, usosPorMes = {}, pacientesSet = {};
   estims.forEach(function(r) {
-    var med = String(r['Medicamento'] || '').trim();
-    var cant = Number(r['Cantidad']) || 0;
-    var mes  = String(r['Fecha'] || '').slice(0, 7);
-    var pac  = String(r['Paciente'] || '').trim();
-    if (med) usosPorMed[med] = (usosPorMed[med] || 0) + cant;
-    if (mes) usosPorMes[mes] = (usosPorMes[mes] || 0) + cant;
+    var pac = String(r['Paciente'] || '').trim();
+    var mes = String(r['Fecha']    || '').slice(0, 7);
     if (pac) pacientesSet[pac] = 1;
+    var totalFila = 0;
+    MED_COLS.forEach(function(col) {
+      var cant = Number(r[col]) || 0;
+      if (cant > 0) {
+        usosPorMed[col] = (usosPorMed[col] || 0) + cant;
+        totalFila += cant;
+      }
+    });
+    if (mes && totalFila > 0) usosPorMes[mes] = (usosPorMes[mes] || 0) + totalFila;
   });
 
   // ── Top 8 ─────────────────────────────────────────────────────
@@ -422,8 +434,10 @@ function readMedDashboard(ss, fechaInicio, fechaFin) {
 
   // ── KPIs ──────────────────────────────────────────────────────
   var totalCompras = compras.reduce(function(s,r){ return s+(Number(r['Cantidad'])||0); }, 0);
-  var totalUsos    = estims.reduce(function(s,r){ return s+(Number(r['Cantidad'])||0); }, 0);
-  var gastoTotal   = compras.reduce(function(s,r){
+  var totalUsos    = Object.values ? Object.values(usosPorMed).reduce(function(s,v){ return s+v; }, 0)
+                    : Object.keys(usosPorMed).reduce(function(s,k){ return s+usosPorMed[k]; }, 0);
+  var gastoTotal   = estims.reduce(function(s,r){ return s+(Number(r['Costo Meds'])||0); }, 0)
+                    + compras.reduce(function(s,r){
     return s + (Number(r['Total']) || (Number(r['Cantidad'])||0)*(Number(r['Precio_Unitario'])||0));
   }, 0);
 
