@@ -1,5 +1,5 @@
 var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
-var API_VERSION   = 'v2026-06-08-I';
+var API_VERSION   = 'v2026-06-08-J';
 var AUTH_SECRET   = 'hestia2026erp-secret'; // Cambia esto por algo único
 
 /* ── Autenticación: helpers ──────────────────────────────────── */
@@ -60,6 +60,8 @@ function getRolConfig(ss, rol) {
 // Agregar aquí cualquier hoja de captura futura
 var CAPTURA_SHEETS = {
   'Medicamentos': '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
+  'Orden_Compra': '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
+  'Estimulacion': '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
   'Insumos':      '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ',
   'Pacientes':    '1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio',
   'Productos':    '1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY'
@@ -337,7 +339,112 @@ function readViewData(ss, viewId, fechaInicio, fechaFin) {
     return readMensualData(ss, fechaInicio, fechaFin, viewId);
   }
 
+  if (fuente === 'med-dashboard') {
+    return readMedDashboard(ss, fechaInicio, fechaFin);
+  }
+
   return readCapturaData(ss, fuente, viewId, fechaInicio, fechaFin);
+}
+
+/* ══ DASHBOARD MEDICAMENTOS ════════════════════════════════════ */
+function readMedDashboard(ss, fechaInicio, fechaFin) {
+  var medId = CAPTURA_SHEETS['Medicamentos'] || CAPTURA_SHEET_ID_DEFAULT;
+  var ssMed = SpreadsheetApp.openById(medId);
+
+  function readSheet(nombre) {
+    var sh = ssMed.getSheetByName(nombre);
+    if (!sh || sh.getLastRow() < 2) return { headers: [], rows: [] };
+    var vals = sh.getDataRange().getValues();
+    var hdrs = vals[0].map(function(h){ return String(h).trim(); });
+    var rows = vals.slice(1).filter(function(r){
+      return r.some(function(c){ return String(c).trim() !== ''; });
+    }).map(function(r){
+      var obj = {};
+      hdrs.forEach(function(h, i){ obj[h] = r[i]; });
+      return obj;
+    });
+    // Filtrar por fecha si existe columna Fecha
+    var tieneFecha = hdrs.indexOf('Fecha') !== -1;
+    if (tieneFecha && fechaInicio && fechaFin) {
+      rows = rows.filter(function(r){
+        var f = String(r['Fecha'] || '').slice(0, 10);
+        return f >= fechaInicio && f <= fechaFin;
+      });
+    }
+    return { headers: hdrs, rows: rows };
+  }
+
+  var compraData = readSheet('Orden_Compra');
+  var estimData  = readSheet('Estimulacion');
+  var compras    = compraData.rows;
+  var estims     = estimData.rows;
+
+  // ── Agregaciones compras ──────────────────────────────────────
+  var comprasPorMed = {}, gastosPorMed = {}, comprasPorMes = {};
+  compras.forEach(function(r) {
+    var med = String(r['Medicamento'] || '').trim();
+    var cant = Number(r['Cantidad']) || 0;
+    var total = Number(r['Total']) || (cant * (Number(r['Precio_Unitario']) || 0));
+    var mes = String(r['Fecha'] || '').slice(0, 7);
+    if (med) {
+      comprasPorMed[med] = (comprasPorMed[med] || 0) + cant;
+      gastosPorMed[med]  = (gastosPorMed[med]  || 0) + total;
+    }
+    if (mes) comprasPorMes[mes] = (comprasPorMes[mes] || 0) + cant;
+  });
+
+  // ── Agregaciones estimulación ─────────────────────────────────
+  var usosPorMed = {}, usosPorMes = {}, pacientesSet = {};
+  estims.forEach(function(r) {
+    var med = String(r['Medicamento'] || '').trim();
+    var cant = Number(r['Cantidad']) || 0;
+    var mes  = String(r['Fecha'] || '').slice(0, 7);
+    var pac  = String(r['Paciente'] || '').trim();
+    if (med) usosPorMed[med] = (usosPorMed[med] || 0) + cant;
+    if (mes) usosPorMes[mes] = (usosPorMes[mes] || 0) + cant;
+    if (pac) pacientesSet[pac] = 1;
+  });
+
+  // ── Top 8 ─────────────────────────────────────────────────────
+  function top8(obj) {
+    return Object.keys(obj).map(function(k){ return { label: k, value: obj[k] }; })
+      .sort(function(a,b){ return b.value - a.value; }).slice(0, 8);
+  }
+
+  var topCompras = top8(comprasPorMed);
+  var topUsos    = top8(usosPorMed);
+
+  // ── Evolución mensual ─────────────────────────────────────────
+  var mesesSet = {};
+  Object.keys(comprasPorMes).forEach(function(m){ mesesSet[m]=1; });
+  Object.keys(usosPorMes).forEach(function(m){ mesesSet[m]=1; });
+  var meses = Object.keys(mesesSet).sort();
+
+  // ── KPIs ──────────────────────────────────────────────────────
+  var totalCompras = compras.reduce(function(s,r){ return s+(Number(r['Cantidad'])||0); }, 0);
+  var totalUsos    = estims.reduce(function(s,r){ return s+(Number(r['Cantidad'])||0); }, 0);
+  var gastoTotal   = compras.reduce(function(s,r){
+    return s + (Number(r['Total']) || (Number(r['Cantidad'])||0)*(Number(r['Precio_Unitario'])||0));
+  }, 0);
+
+  return {
+    view:   'med-resumen',
+    periodo: fechaInicio.slice(0,7) + ' → ' + fechaFin.slice(0,7),
+    kpis: {
+      totalCompras:       totalCompras,
+      totalUsos:          totalUsos,
+      gastoTotal:         gastoTotal,
+      medsDistintos:      Object.keys(comprasPorMed).length,
+      pacientesAtendidos: Object.keys(pacientesSet).length
+    },
+    topCompras: topCompras,
+    topUsos:    topUsos,
+    evolucion: {
+      meses:   meses,
+      compras: meses.map(function(m){ return comprasPorMes[m] || 0; }),
+      usos:    meses.map(function(m){ return usosPorMes[m]    || 0; })
+    }
+  };
 }
 
 /* ── Datos financieros completos (filtrados por rango de fechas) ─── */
