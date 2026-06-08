@@ -1564,8 +1564,11 @@ var CAPTURA_SHEET_LINKS_FUENTE = {
   'Pacientes':    'https://docs.google.com/spreadsheets/d/1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio/edit#gid=0',
   'Productos':    'https://docs.google.com/spreadsheets/d/1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY/edit?gid=402386399#gid=402386399',
   'Medicamentos': 'https://docs.google.com/spreadsheets/d/1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM/edit',
+  'Ent. Med':     'https://docs.google.com/spreadsheets/d/1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM/edit?gid=1186938986#gid=1186938986',
   'Insumos':      'https://docs.google.com/spreadsheets/d/1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ/edit'
 };
+// viewId → fuente: se llena cuando renderCaptura carga una vista
+var _viewFuente = {};
 
 /* ── Crea un div genérico para vistas no predefinidas ─── */
 function ensureGenericView(viewId) {
@@ -1622,8 +1625,14 @@ function renderCaptura(viewId, data) {
   if (titleEl) titleEl.textContent = title;
   var subTxt = (data.periodo ? data.periodo + ' · ' : '') + data.rows.length + ' registros';
   if (subEl) subEl.textContent = subTxt;
+  // Guardar la fuente de este viewId para que openModal pueda resolverla
+  if (data.fuente) _viewFuente[viewId] = data.fuente;
+
   var newBtn = document.getElementById('cap-new-btn-' + viewId);
-  if (newBtn) newBtn.style.display = (CAPTURA_CONFIG[viewId] && canEdit()) ? 'flex' : 'none';
+  var hasCfg = !!(CAPTURA_CONFIG[viewId] || CAPTURA_CONFIG[data.fuente] || data.fuente === 'Ent. Med');
+  if (newBtn) newBtn.style.display = (hasCfg && canEdit()) ? 'flex' : 'none';
+  // Actualizar label del botón según fuente
+  if (newBtn && data.fuente === 'Ent. Med') newBtn.innerHTML = svgPlus + 'Agregar';
   // Actualizar link "Ver en Sheets" usando fuente del dato
   var linkEl = document.getElementById('cap-link-' + viewId);
   if (linkEl && data.fuente) {
@@ -1631,7 +1640,7 @@ function renderCaptura(viewId, data) {
     if (url) linkEl.href = url;
   }
 
-  var hasEdit = !!CAPTURA_CONFIG[viewId] && canEdit();
+  var hasEdit = !!(CAPTURA_CONFIG[viewId] || CAPTURA_CONFIG[data.fuente]) && canEdit();
   _capturaRows[viewId] = data.rows;
 
   // Cabecera de tabla
@@ -2013,6 +2022,57 @@ function initTheme() {
   </div>
 </div>
 
+<!-- ══ MODAL: NUEVA ENTRADA MEDICAMENTOS (ENT. MED) ══ -->
+<div id="modal-entmed" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal('entmed')">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <span class="modal-title" id="entmed-modal-title">Nueva Entrada — Medicamentos</span>
+      <button class="modal-close" onclick="closeModal('entmed')"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Fecha <span style="color:var(--color-primary)">*</span></label>
+        <input class="form-input" type="date" id="entmed-f-fecha">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Cantidad <span style="color:var(--color-primary)">*</span></label>
+        <input class="form-input" type="number" id="entmed-f-cantidad" placeholder="0" min="1" step="1" oninput="calcEntmedTotal()">
+      </div>
+      <div class="form-group full">
+        <label class="form-label">Medicamento <span style="color:var(--color-primary)">*</span></label>
+        <select class="form-input" id="entmed-f-medicamento" onchange="onEntmedMedChange()">
+          <option value="">— Selecciona un medicamento —</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Precio Unitario (MXN)</label>
+        <input class="form-input" id="entmed-f-precio" readonly placeholder="Auto" style="background:var(--color-surface-2,#f5f5f5);cursor:not-allowed">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Total (MXN)</label>
+        <input class="form-input" id="entmed-f-total" readonly placeholder="Auto" style="background:var(--color-surface-2,#f5f5f5);cursor:not-allowed">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Proveedor</label>
+        <input class="form-input" id="entmed-f-proveedor" placeholder="Nombre del proveedor">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Categoría</label>
+        <input class="form-input" id="entmed-f-categoria" placeholder="Ej. Hormonal">
+      </div>
+      <div class="form-group full">
+        <label class="form-label">Notas</label>
+        <input class="form-input" id="entmed-f-notas" placeholder="Observaciones opcionales">
+      </div>
+    </div>
+    <div id="entmed-modal-msg" class="modal-msg"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('entmed')">Cancelar</button>
+      <button class="btn btn-primary" id="entmed-submit-btn" onclick="submitEntmed()">Guardar</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ══ CAPTURA MODAL ══ */
 var CAPTURA_CONFIG = {
@@ -2056,7 +2116,12 @@ var CAPTURA_CONFIG = {
 var _pacEditRowNum = null;
 
 function openModal(tipo) {
-  var cfg = CAPTURA_CONFIG[tipo];
+  // Si la vista tiene fuente 'Ent. Med', abrir modal especializado
+  var fuente = _viewFuente[tipo] || tipo;
+  if (fuente === 'Ent. Med') { openEntmedModal(); return; }
+
+  var cfg = CAPTURA_CONFIG[tipo] || CAPTURA_CONFIG[fuente];
+  if (!cfg) return;
   _pacEditRowNum = null;
   // Limpiar campos
   cfg.fields.forEach(function(id) {
@@ -2251,6 +2316,142 @@ function showModalMsg(elId, type, text) {
   var el = document.getElementById(elId);
   el.textContent = text;
   el.className = 'modal-msg ' + type;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MODAL ENTRADA MEDICAMENTOS (Ent. Med)
+   ══════════════════════════════════════════════════════════════ */
+var _entmedMeds = [];       // [{nombre, costo}] — catálogo cargado una vez
+var _entmedOptLoaded = false;
+// viewId activo de la vista Ent. Med (para recargar después de guardar)
+var _entmedViewId = null;
+
+// Carga el catálogo desde Lista Med una sola vez
+function loadEntmedOptions(cb) {
+  if (_entmedOptLoaded) { if (cb) cb(); return; }
+  fetch(APPS_SCRIPT_URL + '?action=listamedoptions&token=' + encodeURIComponent(getToken()))
+    .then(function(r){ return r.json(); })
+    .then(function(data) {
+      if (data.meds && data.meds.length) {
+        _entmedMeds = data.meds;
+        var sel = document.getElementById('entmed-f-medicamento');
+        if (sel) {
+          sel.innerHTML = '<option value="">— Selecciona un medicamento —</option>';
+          _entmedMeds.forEach(function(m) {
+            var opt = document.createElement('option');
+            opt.value = m.nombre;
+            opt.textContent = m.nombre;
+            opt.dataset.costo = m.costo;
+            sel.appendChild(opt);
+          });
+        }
+        _entmedOptLoaded = true;
+      }
+      if (cb) cb();
+    })
+    .catch(function() { if (cb) cb(); });
+}
+
+// Cuando cambia el medicamento seleccionado → auto-llena precio y recalcula total
+function onEntmedMedChange() {
+  var sel = document.getElementById('entmed-f-medicamento');
+  var opt = sel && sel.options[sel.selectedIndex];
+  var costo = (opt && opt.dataset.costo) ? parseFloat(opt.dataset.costo) : 0;
+  var precioEl = document.getElementById('entmed-f-precio');
+  if (precioEl) precioEl.value = costo > 0 ? costo.toFixed(2) : '';
+  calcEntmedTotal();
+}
+
+// Calcula Total = Cantidad × Precio Unitario
+function calcEntmedTotal() {
+  var qty   = parseFloat(document.getElementById('entmed-f-cantidad').value) || 0;
+  var precio = parseFloat(document.getElementById('entmed-f-precio').value)  || 0;
+  var totalEl = document.getElementById('entmed-f-total');
+  if (totalEl) totalEl.value = (qty * precio > 0) ? (qty * precio).toFixed(2) : '';
+}
+
+// Abre el modal de Ent. Med y guarda el viewId activo
+function openEntmedModal() {
+  // Guardar el viewId actual para recargar al guardar
+  _entmedViewId = currentView;
+  // Limpiar campos
+  ['entmed-f-fecha','entmed-f-cantidad','entmed-f-proveedor','entmed-f-categoria','entmed-f-notas'].forEach(function(id) {
+    var el = document.getElementById(id); if (el) el.value = '';
+  });
+  var medSel = document.getElementById('entmed-f-medicamento');
+  if (medSel) medSel.selectedIndex = 0;
+  var precioEl = document.getElementById('entmed-f-precio');
+  if (precioEl) precioEl.value = '';
+  var totalEl = document.getElementById('entmed-f-total');
+  if (totalEl) totalEl.value = '';
+  // Fecha de hoy por defecto
+  var fechaEl = document.getElementById('entmed-f-fecha');
+  if (fechaEl) fechaEl.value = new Date().toISOString().split('T')[0];
+  // Limpiar mensaje
+  var msgEl = document.getElementById('entmed-modal-msg');
+  if (msgEl) { msgEl.textContent = ''; msgEl.className = 'modal-msg'; }
+  // Cargar catálogo si aún no está cargado
+  loadEntmedOptions(function() {
+    document.getElementById('modal-entmed').style.display = 'flex';
+  });
+}
+
+function closeModal_entmed() {
+  document.getElementById('modal-entmed').style.display = 'none';
+}
+// Alias para el onclick del overlay y botón Cancelar
+document.addEventListener('DOMContentLoaded', function() {});
+
+// Guarda la entrada en Ent. Med
+function submitEntmed() {
+  var fecha     = document.getElementById('entmed-f-fecha').value.trim();
+  var med       = document.getElementById('entmed-f-medicamento').value.trim();
+  var cantidad  = document.getElementById('entmed-f-cantidad').value.trim();
+  var precio    = document.getElementById('entmed-f-precio').value.trim();
+  var total     = document.getElementById('entmed-f-total').value.trim();
+  var proveedor = document.getElementById('entmed-f-proveedor').value.trim();
+  var categoria = document.getElementById('entmed-f-categoria').value.trim();
+  var notas     = document.getElementById('entmed-f-notas').value.trim();
+
+  var msgEl = document.getElementById('entmed-modal-msg');
+
+  if (!fecha)    { showModalMsg('entmed-modal-msg','err','La fecha es obligatoria.'); return; }
+  if (!med)      { showModalMsg('entmed-modal-msg','err','Selecciona un medicamento.'); return; }
+  if (!cantidad) { showModalMsg('entmed-modal-msg','err','La cantidad es obligatoria.'); return; }
+
+  var btn = document.getElementById('entmed-submit-btn');
+  btn.disabled = true; btn.textContent = 'Guardando…';
+
+  var params = 'action=insert&sheet=' + encodeURIComponent('Ent. Med') +
+    '&token='      + encodeURIComponent(getToken()) +
+    '&Fecha='      + encodeURIComponent(fecha) +
+    '&Medicamento='+ encodeURIComponent(med) +
+    '&Cantidad='   + encodeURIComponent(cantidad) +
+    '&Precio='     + encodeURIComponent(precio) +
+    '&Total='      + encodeURIComponent(total) +
+    '&Proveedor='  + encodeURIComponent(proveedor) +
+    '&Categoría='  + encodeURIComponent(categoria) +
+    '&Notas='      + encodeURIComponent(notas);
+
+  fetch(APPS_SCRIPT_URL + '?' + params)
+    .then(function(r){ return r.json(); })
+    .then(function(res) {
+      if (res.success) {
+        showModalMsg('entmed-modal-msg', 'ok', '✓ Entrada guardada en Google Sheets.');
+        setTimeout(function() {
+          document.getElementById('modal-entmed').style.display = 'none';
+          if (_entmedViewId) loadView(_entmedViewId, currentFechaInicio, currentFechaFin, true);
+        }, 1500);
+      } else {
+        showModalMsg('entmed-modal-msg', 'err', 'Error: ' + (res.error || 'No se pudo guardar.'));
+      }
+    })
+    .catch(function() {
+      showModalMsg('entmed-modal-msg', 'err', 'Error de conexión. Intenta de nuevo.');
+    })
+    .finally(function() {
+      btn.disabled = false; btn.textContent = 'Guardar';
+    });
 }
 </script>
 </body>

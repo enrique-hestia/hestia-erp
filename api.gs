@@ -1,5 +1,5 @@
 var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
-var API_VERSION   = 'v2026-06-08-O';
+var API_VERSION   = 'v2026-06-08-P';
 var AUTH_SECRET   = 'hestia2026erp-secret'; // Cambia esto por algo único
 
 /* ── Autenticación: helpers ──────────────────────────────────── */
@@ -62,6 +62,7 @@ var CAPTURA_SHEETS = {
   'Medicamentos': '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
   'Orden_Compra': '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
   'Ent. Med':     '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
+  'Lista Med':    '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
   'Estimulacion': '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
   'Insumos':      '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ',
   'Pacientes':    '1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio',
@@ -224,6 +225,27 @@ function doGet(e) {
           });
         }
         return jsonResponse({ options: options });
+      } catch(ex) {
+        return jsonResponse({ error: ex.message });
+      }
+    }
+
+    // listamedoptions: ?action=listamedoptions → catálogo de medicamentos con costo
+    // Lee "Lista Med" del spreadsheet de Medicamentos y devuelve [{nombre, costo}]
+    if (action === 'listamedoptions') {
+      try {
+        var ssLm   = SpreadsheetApp.openById(CAPTURA_SHEETS['Lista Med']);
+        var shLm   = ssLm.getSheetByName('Lista Med');
+        if (!shLm) return jsonResponse({ error: 'Hoja Lista Med no encontrada.' });
+        var lmData = shLm.getDataRange().getValues();
+        // Fila 0 = encabezados, col 0 = nombre, col 1 = costo
+        var meds = lmData.slice(1)
+          .filter(function(r) { return String(r[0]).trim() !== ''; })
+          .map(function(r) {
+            var costoRaw = String(r[1]).replace(/[$,\s]/g, '');
+            return { nombre: String(r[0]).trim(), costo: parseFloat(costoRaw) || 0 };
+          });
+        return jsonResponse({ meds: meds });
       } catch(ex) {
         return jsonResponse({ error: ex.message });
       }
