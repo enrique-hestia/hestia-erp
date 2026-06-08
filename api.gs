@@ -1,4 +1,5 @@
-var SHEET_ID = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
+var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
+var API_VERSION   = 'v2026-06-08-C';  // Actualizar al redesplegar para verificar versión
 
 // Mapeo: nombre de pestaña → ID del spreadsheet externo donde se lee/escribe
 // Agregar aquí cualquier hoja de captura futura
@@ -33,7 +34,8 @@ function doGet(e) {
       return jsonResponse({
         menu:        readMenu(ss),
         fechaInicio: fechaInicio,
-        fechaFin:    fechaFin
+        fechaFin:    fechaFin,
+        version:     API_VERSION
       });
     }
 
