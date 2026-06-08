@@ -1473,6 +1473,13 @@ var CAPTURA_SHEET_LINKS = {
   'cap-pacientes': 'https://docs.google.com/spreadsheets/d/1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio/edit#gid=0',
   'productos':     'https://docs.google.com/spreadsheets/d/1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY/edit#gid=402386399'
 };
+// Mapa por nombre de fuente (para vistas cuyo viewId no coincide con la clave)
+var CAPTURA_SHEET_LINKS_FUENTE = {
+  'Pacientes':    'https://docs.google.com/spreadsheets/d/1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio/edit#gid=0',
+  'Productos':    'https://docs.google.com/spreadsheets/d/1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY/edit#gid=402386399',
+  'Medicamentos': 'https://docs.google.com/spreadsheets/d/1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM/edit',
+  'Insumos':      'https://docs.google.com/spreadsheets/d/1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ/edit'
+};
 
 /* ── Crea un div genérico para vistas no predefinidas ─── */
 function ensureGenericView(viewId) {
@@ -1531,6 +1538,12 @@ function renderCaptura(viewId, data) {
   if (subEl) subEl.textContent = subTxt;
   var newBtn = document.getElementById('cap-new-btn-' + viewId);
   if (newBtn) newBtn.style.display = (CAPTURA_CONFIG[viewId] && canEdit()) ? 'flex' : 'none';
+  // Actualizar link "Ver en Sheets" usando fuente del dato
+  var linkEl = document.getElementById('cap-link-' + viewId);
+  if (linkEl && data.fuente) {
+    var url = CAPTURA_SHEET_LINKS_FUENTE[data.fuente] || CAPTURA_SHEET_LINKS[viewId];
+    if (url) linkEl.href = url;
+  }
 
   var hasEdit = !!CAPTURA_CONFIG[viewId] && canEdit();
   _capturaRows[viewId] = data.rows;
