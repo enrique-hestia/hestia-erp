@@ -1457,6 +1457,11 @@ function ensureGenericView(viewId) {
         '</div>' +
       '</div>' +
       '<div id="cap-alerts-' + viewId + '"></div>' +
+      '<div id="cap-search-wrap-' + viewId + '" style="display:none;margin-bottom:12px">' +
+        '<input type="text" id="cap-search-' + viewId + '" placeholder="Buscar paciente…" ' +
+        'oninput="filterCaptura(\'' + viewId + '\')" ' +
+        'style="width:100%;max-width:320px;padding:7px 12px;border:1px solid var(--color-border);border-radius:var(--radius-full);font-size:var(--text-sm);background:var(--color-surface);color:var(--color-text)">' +
+      '</div>' +
       '<div style="overflow-x:auto"><table class="services-table">' +
         '<thead id="cap-thead-' + viewId + '"></thead>' +
         '<tbody id="cap-tbody-' + viewId + '"></tbody>' +
@@ -1499,10 +1504,28 @@ function renderCaptura(viewId, data) {
     return;
   }
   tbody.innerHTML = data.rows.map(function(row) {
-    return '<tr>' + data.headers.map(function(h) {
+    var cells = data.headers.map(function(h) {
       return '<td>' + (row[h] !== undefined ? row[h] : '') + '</td>';
-    }).join('') + '</tr>';
+    }).join('');
+    var searchText = data.headers.map(function(h){ return row[h] || ''; }).join(' ').toLowerCase();
+    return '<tr data-search="' + searchText.replace(/"/g,'') + '">' + cells + '</tr>';
   }).join('');
+
+  // Mostrar buscador solo para cap-pacientes (o cualquier vista con muchos registros)
+  var searchWrap = document.getElementById('cap-search-wrap-' + viewId);
+  if (searchWrap) searchWrap.style.display = (viewId === 'cap-pacientes') ? 'block' : 'none';
+}
+
+function filterCaptura(viewId) {
+  var input = document.getElementById('cap-search-' + viewId);
+  if (!input) return;
+  var q = input.value.toLowerCase();
+  var tbody = document.getElementById('cap-tbody-' + viewId);
+  if (!tbody) return;
+  Array.from(tbody.querySelectorAll('tr')).forEach(function(tr) {
+    var text = tr.getAttribute('data-search') || '';
+    tr.style.display = text.includes(q) ? '' : 'none';
+  });
 }
 
 /* ── Render completo del Resumen (primera vista) ─── */
@@ -1612,19 +1635,19 @@ function initTheme() {
       </div>
       <div class="form-group">
         <label class="form-label">Origen</label>
-        <input class="form-input" id="pac-f-origen" placeholder="Ej. Referido, Web">
+        <select class="form-input" id="pac-f-origen"><option value="">— Selecciona —</option></select>
       </div>
       <div class="form-group">
         <label class="form-label">Canal</label>
-        <input class="form-input" id="pac-f-canal" placeholder="Ej. Instagram, Google">
+        <select class="form-input" id="pac-f-canal"><option value="">— Selecciona —</option></select>
       </div>
       <div class="form-group">
         <label class="form-label">Médico Tratante</label>
-        <input class="form-input" id="pac-f-medico" placeholder="Nombre del médico">
+        <select class="form-input" id="pac-f-medico"><option value="">— Selecciona —</option></select>
       </div>
       <div class="form-group">
         <label class="form-label">País</label>
-        <input class="form-input" id="pac-f-pais" placeholder="Ej. México, USA">
+        <select class="form-input" id="pac-f-pais"><option value="">— Selecciona —</option></select>
       </div>
       <div class="form-group">
         <label class="form-label">Pago Crio</label>
@@ -1799,6 +1822,35 @@ function openModal(tipo) {
   document.getElementById('modal-' + tipo).style.display = 'flex';
   document.getElementById(cfg.msgEl).className = 'modal-msg';
   document.getElementById(cfg.msgEl).textContent = '';
+  if (tipo === 'cap-pacientes') loadPacientesOptions();
+}
+
+var _pacOptLoaded = false;
+function loadPacientesOptions() {
+  if (_pacOptLoaded) return;
+  var url = APPS_SCRIPT_URL + '?action=options&sheet=Pacientes';
+  fetch(url).then(function(r){ return r.json(); }).then(function(d) {
+    if (!d.options) return;
+    var map = {
+      'Origen':          'pac-f-origen',
+      'Canal':           'pac-f-canal',
+      'Médico Tratante': 'pac-f-medico',
+      'País':            'pac-f-pais'
+    };
+    Object.keys(map).forEach(function(col) {
+      var sel = document.getElementById(map[col]);
+      if (!sel || !d.options[col]) return;
+      var current = sel.value;
+      sel.innerHTML = '<option value="">— Selecciona —</option>';
+      d.options[col].forEach(function(opt) {
+        var o = document.createElement('option');
+        o.value = opt; o.textContent = opt;
+        sel.appendChild(o);
+      });
+      sel.value = current;
+    });
+    _pacOptLoaded = true;
+  }).catch(function(){});
 }
 
 function closeModal(tipo) {

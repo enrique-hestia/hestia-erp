@@ -1,5 +1,5 @@
 var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
-var API_VERSION   = 'v2026-06-08-C';  // Actualizar al redesplegar para verificar versión
+var API_VERSION   = 'v2026-06-08-D';  // Actualizar al redesplegar para verificar versión
 
 // Mapeo: nombre de pestaña → ID del spreadsheet externo donde se lee/escribe
 // Agregar aquí cualquier hoja de captura futura
@@ -54,6 +54,41 @@ function doGet(e) {
                               tabsFound: tabs, capturaSheets: CAPTURA_SHEETS });
       } catch(ex) {
         return jsonResponse({ error: ex.message, sheetName: sheetName, spreadsheetId: capturaId });
+      }
+    }
+
+    // options: ?action=options&sheet=NombreHoja → lee validaciones dropdown de la hoja
+    if (action === 'options') {
+      var sheetName = (e && e.parameter.sheet) || 'Pacientes';
+      var capturaId = CAPTURA_SHEETS[sheetName] || CAPTURA_SHEET_ID_DEFAULT;
+      try {
+        var ssOpt  = SpreadsheetApp.openById(capturaId);
+        var shOpt  = ssOpt.getSheetByName(sheetName);
+        if (!shOpt) return jsonResponse({ error: 'Hoja no encontrada: ' + sheetName });
+        var lastCol  = shOpt.getLastColumn();
+        var headers  = shOpt.getRange(1, 1, 1, lastCol).getValues()[0];
+        var targets  = ['Origen', 'Canal', 'Médico Tratante', 'País'];
+        var options  = {};
+        targets.forEach(function(colName) {
+          var idx = -1;
+          for (var i = 0; i < headers.length; i++) {
+            if (String(headers[i]).trim() === colName) { idx = i; break; }
+          }
+          if (idx === -1) { options[colName] = []; return; }
+          try {
+            var rule = shOpt.getRange(2, idx + 1).getDataValidation();
+            if (rule) {
+              var vals = rule.getCriteriaValues();
+              // VALUE_IN_LIST devuelve el array directamente como primer elemento
+              options[colName] = Array.isArray(vals[0]) ? vals[0] : vals;
+            } else {
+              options[colName] = [];
+            }
+          } catch(ex2) { options[colName] = []; }
+        });
+        return jsonResponse({ options: options });
+      } catch(ex) {
+        return jsonResponse({ error: ex.message });
       }
     }
 
