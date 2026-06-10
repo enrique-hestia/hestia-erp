@@ -1,5 +1,5 @@
 var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
-var API_VERSION   = 'v2026-06-08-R';
+var API_VERSION   = 'v2026-06-08-S';
 var AUTH_SECRET   = 'hestia2026erp-secret'; // Cambia esto por algo único
 
 /* ── Autenticación: helpers ──────────────────────────────────── */
@@ -188,7 +188,7 @@ function doGet(e) {
     // Debug: ?action=debug&sheet=NombreHoja
     if (action === 'debug') {
       var sheetName = (e && e.parameter.sheet) || '';
-      var capturaId = CAPTURA_SHEETS[sheetName] || CAPTURA_SHEET_ID_DEFAULT;
+      var capturaId = getCapturaId(sheetName);
       try {
         var ssDeb = SpreadsheetApp.openById(capturaId);
         var tabs  = ssDeb.getSheets().map(function(s){ return s.getName(); });
@@ -202,7 +202,7 @@ function doGet(e) {
     // options: ?action=options&sheet=NombreHoja → lee validaciones dropdown de la hoja
     if (action === 'options') {
       var sheetName = (e && e.parameter.sheet) || 'Pacientes';
-      var capturaId = CAPTURA_SHEETS[sheetName] || CAPTURA_SHEET_ID_DEFAULT;
+      var capturaId = getCapturaId(sheetName);
       try {
         var ssOpt  = SpreadsheetApp.openById(capturaId);
         var shOpt  = ssOpt.getSheetByName(sheetName);
@@ -258,7 +258,7 @@ function doGet(e) {
     if (action === 'nextid') {
       var sheetName = (e && e.parameter.sheet)  || 'Pacientes';
       var prefix    = (e && e.parameter.prefix) || 'HEC';
-      var capturaId = CAPTURA_SHEETS[sheetName] || CAPTURA_SHEET_ID_DEFAULT;
+      var capturaId = getCapturaId(sheetName);
       try {
         var ssNid = SpreadsheetApp.openById(capturaId);
         var shNid = ssNid.getSheetByName(sheetName);
@@ -284,7 +284,7 @@ function doGet(e) {
       if (SHEET_ALIASES[sheetName]) sheetName = SHEET_ALIASES[sheetName];
       var rowNum    = parseInt((e && e.parameter.rowNum) || '0');
       if (!sheetName || !rowNum) return jsonResponse({ error: 'sheet y rowNum son requeridos' });
-      var capturaId = CAPTURA_SHEETS[sheetName] || CAPTURA_SHEET_ID_DEFAULT;
+      var capturaId = getCapturaId(sheetName);
       try {
         var ssUpd = SpreadsheetApp.openById(capturaId);
         var shUpd = findSheet(ssUpd, sheetName);
@@ -541,8 +541,25 @@ function findSheet(ssCap, nombreHoja) {
   return null;
 }
 
+function getCapturaId(nombreHoja) {
+  if (CAPTURA_SHEETS[nombreHoja]) return CAPTURA_SHEETS[nombreHoja];
+  // Búsqueda tolerante a tildes
+  var normalize = function(s) {
+    return s.toLowerCase()
+      .replace(/[áàäã]/g,'a').replace(/[éèë]/g,'e')
+      .replace(/[íìï]/g,'i').replace(/[óòö]/g,'o')
+      .replace(/[úùü]/g,'u').replace(/ñ/g,'n');
+  };
+  var target = normalize(nombreHoja);
+  var keys = Object.keys(CAPTURA_SHEETS);
+  for (var i = 0; i < keys.length; i++) {
+    if (normalize(keys[i]) === target) return CAPTURA_SHEETS[keys[i]];
+  }
+  return CAPTURA_SHEET_ID_DEFAULT;
+}
+
 function readCapturaData(ss, nombreHoja, viewId, fechaInicio, fechaFin) {
-  var capturaId = CAPTURA_SHEETS[nombreHoja] || CAPTURA_SHEET_ID_DEFAULT;
+  var capturaId = getCapturaId(nombreHoja);
   var ssCap = SpreadsheetApp.openById(capturaId);
   var hoja  = findSheet(ssCap, nombreHoja);
   if (!hoja) {
@@ -682,7 +699,7 @@ function insertRow(ss, e) {
   // Resolver alias (ej. Estimulacion → Estimulación)
   if (SHEET_ALIASES[sheetName]) sheetName = SHEET_ALIASES[sheetName];
   // Abrir el spreadsheet correcto según el mapeo
-  var capturaId = CAPTURA_SHEETS[sheetName] || CAPTURA_SHEET_ID_DEFAULT;
+  var capturaId = getCapturaId(sheetName);
   var ssCap = SpreadsheetApp.openById(capturaId);
   var hoja = findSheet(ssCap, sheetName);
   if (!hoja) return { error: 'Hoja "' + sheetName + '" no encontrada.' };
