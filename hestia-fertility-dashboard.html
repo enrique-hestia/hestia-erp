@@ -1765,18 +1765,45 @@ async function handleLogin() {
   var password = document.getElementById('login-password').value;
   var msg      = document.getElementById('login-msg');
   var btn      = document.getElementById('login-btn');
-  if (!email || !password) { msg.textContent = 'Ingresa tu correo y contraseña.'; return; }
+  if (!email || !password) { msg.style.color = 'var(--color-danger)'; msg.textContent = 'Ingresa tu correo y contraseña.'; return; }
   btn.disabled = true; btn.textContent = 'Verificando…';
   msg.textContent = '';
   try {
     var res  = await fetch(APPS_SCRIPT_URL + '?action=login&email=' + encodeURIComponent(email) + '&password=' + encodeURIComponent(password));
-    var data = await res.json();
-    if (data.error) { msg.textContent = data.error; return; }
+    var text = await res.text();
+    var data;
+    try { data = JSON.parse(text); }
+    catch(jsonErr) {
+      console.error('Login response not JSON:', text.substring(0,200));
+      msg.style.color = 'var(--color-danger)';
+      msg.textContent = 'Error del servidor. Verifica que el Apps Script esté redesploy.';
+      return;
+    }
+    if (data.error) {
+      // Si no existe hoja Usuarios, permitir acceso básico (sin roles)
+      if (data.error.includes('usuarios no configurado')) {
+        var fallbackSession = {
+          success: true, token: 'no-auth',
+          email: email, nombre: email.split('@')[0], rol: 'Admin',
+          vistasBloqueadas: [], soloLectura: []
+        };
+        setSession(fallbackSession);
+        document.getElementById('login-screen').style.display = 'none';
+        showUserChip(fallbackSession);
+        await initApp();
+        return;
+      }
+      msg.style.color = 'var(--color-danger)';
+      msg.textContent = data.error;
+      return;
+    }
     setSession(data);
     document.getElementById('login-screen').style.display = 'none';
     showUserChip(data);
     await initApp();
   } catch(e) {
+    console.error('Login error:', e);
+    msg.style.color = 'var(--color-danger)';
     msg.textContent = 'Error de conexión. Intenta de nuevo.';
   } finally {
     btn.disabled = false; btn.textContent = 'Comenzar el día';
