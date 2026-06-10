@@ -1,5 +1,5 @@
 var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
-var API_VERSION   = 'v2026-06-08-Q';
+var API_VERSION   = 'v2026-06-08-R';
 var AUTH_SECRET   = 'hestia2026erp-secret'; // Cambia esto por algo único
 
 /* ── Autenticación: helpers ──────────────────────────────────── */
@@ -287,7 +287,7 @@ function doGet(e) {
       var capturaId = CAPTURA_SHEETS[sheetName] || CAPTURA_SHEET_ID_DEFAULT;
       try {
         var ssUpd = SpreadsheetApp.openById(capturaId);
-        var shUpd = ssUpd.getSheetByName(sheetName);
+        var shUpd = findSheet(ssUpd, sheetName);
         if (!shUpd) return jsonResponse({ error: 'Hoja no encontrada: ' + sheetName });
         var hdrs = shUpd.getRange(1, 1, 1, shUpd.getLastColumn()).getValues()[0];
         var cur  = shUpd.getRange(rowNum, 1, 1, hdrs.length).getValues()[0];
@@ -385,7 +385,7 @@ function readMedDashboard(ss, fechaInicio, fechaFin) {
   var ssMed = SpreadsheetApp.openById(medId);
 
   function readSheet(nombre) {
-    var sh = ssMed.getSheetByName(nombre);
+    var sh = findSheet(ssMed, nombre);
     if (!sh || sh.getLastRow() < 2) return { headers: [], rows: [] };
     var vals = sh.getDataRange().getValues();
     var hdrs = vals[0].map(function(h){ return String(h).trim(); });
@@ -522,10 +522,29 @@ function readMensualData(ss, fechaInicio, fechaFin, viewId) {
    Las hojas de captura (Pacientes, Productos, Ent. Med, Estimulacion, etc.)
    muestran su contenido completo; el filtro de fechas aplica solo a datos financieros.
    ──────────────────────────────────────────────────────────────── */
+function findSheet(ssCap, nombreHoja) {
+  // 1. Nombre exacto
+  var h = ssCap.getSheetByName(nombreHoja);
+  if (h) return h;
+  // 2. Búsqueda insensible a tildes y mayúsculas
+  var normalize = function(s) {
+    return s.toLowerCase()
+      .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e')
+      .replace(/[íìï]/g,'i').replace(/[óòö]/g,'o')
+      .replace(/[úùü]/g,'u').replace(/ñ/g,'n');
+  };
+  var target = normalize(nombreHoja);
+  var sheets = ssCap.getSheets();
+  for (var i = 0; i < sheets.length; i++) {
+    if (normalize(sheets[i].getName()) === target) return sheets[i];
+  }
+  return null;
+}
+
 function readCapturaData(ss, nombreHoja, viewId, fechaInicio, fechaFin) {
   var capturaId = CAPTURA_SHEETS[nombreHoja] || CAPTURA_SHEET_ID_DEFAULT;
   var ssCap = SpreadsheetApp.openById(capturaId);
-  var hoja  = ssCap.getSheetByName(nombreHoja);
+  var hoja  = findSheet(ssCap, nombreHoja);
   if (!hoja) {
     return { view: viewId, headers: [], rows: [],
              error: 'Hoja "' + nombreHoja + '" no encontrada.' };
@@ -665,7 +684,7 @@ function insertRow(ss, e) {
   // Abrir el spreadsheet correcto según el mapeo
   var capturaId = CAPTURA_SHEETS[sheetName] || CAPTURA_SHEET_ID_DEFAULT;
   var ssCap = SpreadsheetApp.openById(capturaId);
-  var hoja = ssCap.getSheetByName(sheetName);
+  var hoja = findSheet(ssCap, sheetName);
   if (!hoja) return { error: 'Hoja "' + sheetName + '" no encontrada.' };
 
   var headers = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0];
