@@ -1560,6 +1560,7 @@ var CAPTURA_SHEET_LINKS_FUENTE = {
   'Productos':    'https://docs.google.com/spreadsheets/d/1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY/edit?gid=402386399#gid=402386399',
   'Medicamentos': 'https://docs.google.com/spreadsheets/d/1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM/edit',
   'Ent. Med':     'https://docs.google.com/spreadsheets/d/1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM/edit?gid=1186938986#gid=1186938986',
+  'Estimulacion': 'https://docs.google.com/spreadsheets/d/1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM/edit?gid=1764434974#gid=1764434974',
   'Insumos':      'https://docs.google.com/spreadsheets/d/1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ/edit'
 };
 // viewId → fuente: se llena cuando renderCaptura carga una vista
@@ -1610,6 +1611,8 @@ var _capturaRows = {};
 function renderCaptura(viewId, data) {
   // Vista especial para Ent. Med: tabla agrupada por No. Orden
   if (data.fuente === 'Ent. Med') { renderEntMedOrders(viewId, data); return; }
+  // Vista Estimulación: tabla con scroll + modal dinámico
+  if (data.fuente === 'Estimulacion') { _estimHeaders = data.headers || []; }
   ensureGenericView(viewId);
   // Mostrar buscador siempre en vistas genéricas
   var searchWrap = document.getElementById('cap-search-wrap-' + viewId);
@@ -1626,10 +1629,11 @@ function renderCaptura(viewId, data) {
   if (data.fuente) _viewFuente[viewId] = data.fuente;
 
   var newBtn = document.getElementById('cap-new-btn-' + viewId);
-  var hasCfg = !!(CAPTURA_CONFIG[viewId] || CAPTURA_CONFIG[data.fuente] || data.fuente === 'Ent. Med');
+  var specialFuentes = ['Ent. Med', 'Estimulacion'];
+  var hasCfg = !!(CAPTURA_CONFIG[viewId] || CAPTURA_CONFIG[data.fuente] || specialFuentes.indexOf(data.fuente) >= 0);
   if (newBtn) newBtn.style.display = (hasCfg && canEdit()) ? 'flex' : 'none';
   // Actualizar label del botón según fuente
-  if (newBtn && data.fuente === 'Ent. Med') newBtn.innerHTML = svgPlus + 'Agregar';
+  if (newBtn && specialFuentes.indexOf(data.fuente) >= 0) newBtn.innerHTML = svgPlus + 'Agregar';
   // Actualizar link "Ver en Sheets" usando fuente del dato
   var linkEl = document.getElementById('cap-link-' + viewId);
   if (linkEl && data.fuente) {
@@ -1637,7 +1641,7 @@ function renderCaptura(viewId, data) {
     if (url) linkEl.href = url;
   }
 
-  var hasEdit = !!(CAPTURA_CONFIG[viewId] || CAPTURA_CONFIG[data.fuente]) && canEdit();
+  var hasEdit = !!(CAPTURA_CONFIG[viewId] || CAPTURA_CONFIG[data.fuente] || specialFuentes.indexOf(data.fuente) >= 0) && canEdit();
   _capturaRows[viewId] = data.rows;
 
   // Cabecera de tabla
@@ -2007,6 +2011,29 @@ function initTheme() {
   </div>
 </div>
 
+<!-- ══ MODAL: ESTIMULACIÓN (dinámico, se construye desde headers de la hoja) ══ -->
+<div id="modal-estimulacion" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeEstimModal()">
+  <div class="modal" style="max-width:680px;max-height:88vh;display:flex;flex-direction:column">
+    <div class="modal-header">
+      <span class="modal-title" id="estim-modal-title">Nueva Entrada — Estimulación</span>
+      <button class="modal-close" onclick="closeEstimModal()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <!-- Sección: datos generales -->
+    <div style="overflow-y:auto;flex:1;padding-right:2px">
+      <div style="font-size:var(--text-xs);font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.06em;margin:0 0 8px">Datos generales</div>
+      <div class="form-grid" id="estim-fields-general"></div>
+      <!-- Sección: medicamentos -->
+      <div style="font-size:var(--text-xs);font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.06em;margin:16px 0 8px" id="estim-meds-label">Medicamentos (unidades)</div>
+      <div class="form-grid" id="estim-fields-meds"></div>
+    </div>
+    <div id="estim-modal-msg" class="modal-msg"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeEstimModal()">Cancelar</button>
+      <button class="btn btn-primary" id="estim-submit-btn" onclick="submitEstim()">Guardar</button>
+    </div>
+  </div>
+</div>
+
 <!-- ══ MODAL: DETALLE DE ORDEN DE COMPRA ══ -->
 <div id="modal-oc-detalle" class="modal-overlay" style="display:none" onclick="if(event.target===this)document.getElementById('modal-oc-detalle').style.display='none'">
   <div class="modal" style="max-width:680px">
@@ -2132,9 +2159,10 @@ var CAPTURA_CONFIG = {
 var _pacEditRowNum = null;
 
 function openModal(tipo) {
-  // Si la vista tiene fuente 'Ent. Med', abrir modal especializado
+  // Si la vista tiene fuente especializada, abrir su modal propio
   var fuente = _viewFuente[tipo] || tipo;
-  if (fuente === 'Ent. Med') { openEntmedModal(); return; }
+  if (fuente === 'Ent. Med')     { openEntmedModal(); return; }
+  if (fuente === 'Estimulacion') { openEstimModal(tipo); return; }
 
   var cfg = CAPTURA_CONFIG[tipo] || CAPTURA_CONFIG[fuente];
   if (!cfg) return;
@@ -2177,6 +2205,13 @@ function openModal(tipo) {
 }
 
 function openEditModal(viewId, rowIdx) {
+  // Vista Estimulación: redirigir al modal dinámico con datos de la fila
+  var fuente = _viewFuente[viewId] || viewId;
+  if (fuente === 'Estimulacion') {
+    var row = (_capturaRows[viewId] || [])[rowIdx];
+    if (row) openEstimModal(viewId, row);
+    return;
+  }
   var cfg = CAPTURA_CONFIG[viewId];
   if (!cfg) return;
   var row = (_capturaRows[viewId] || [])[rowIdx];
@@ -2325,6 +2360,173 @@ function submitCaptura(tipo) {
     .finally(function() {
       btn.disabled = false;
       btn.textContent = 'Guardar';
+    });
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MODAL DINÁMICO — ESTIMULACIÓN
+   Construye el formulario desde los headers de la hoja.
+   Columnas fórmula (no se capturan): Costo Meds, Costo Total.
+   Columnas antes de "Cancelado" → datos generales.
+   Columnas después de "Cancelado" → medicamentos (número).
+   ══════════════════════════════════════════════════════════════ */
+var _estimHeaders   = [];   // headers actuales de la hoja Estimulacion
+var _estimViewId    = null; // viewId de la vista Estimulacion activa
+var _estimEditRow   = null; // fila en edición (null = nueva entrada)
+
+// Columnas que tienen fórmula en Sheets → se omiten del formulario
+var ESTIM_FORMULA_COLS = ['Costo Meds', 'Costo Total'];
+
+function openEstimModal(viewId, editRowData) {
+  _estimViewId  = viewId || _estimViewId;
+  _estimEditRow = editRowData || null;
+
+  var headers = _estimHeaders;
+  if (!headers || headers.length === 0) {
+    alert('Carga la vista primero para detectar los encabezados.');
+    return;
+  }
+
+  // Separar columnas en: generales vs medicamentos (post-Cancelado)
+  var canceladoIdx = -1;
+  headers.forEach(function(h, i) {
+    if (h.trim().toLowerCase() === 'cancelado') canceladoIdx = i;
+  });
+
+  var generalCols = headers.slice(0, canceladoIdx >= 0 ? canceladoIdx + 1 : headers.length)
+    .filter(function(h) { return ESTIM_FORMULA_COLS.indexOf(h) < 0 && h.trim() !== ''; });
+
+  var medCols = canceladoIdx >= 0
+    ? headers.slice(canceladoIdx + 1).filter(function(h) { return h.trim() !== ''; })
+    : [];
+
+  // Construir campos generales
+  var genGrid = document.getElementById('estim-fields-general');
+  genGrid.innerHTML = '';
+  generalCols.forEach(function(col) {
+    var id  = 'estim-f-' + col.replace(/[^a-zA-Z0-9]/g, '_');
+    var val = editRowData ? (editRowData[col] !== undefined ? editRowData[col] : '') : '';
+    var inputHtml;
+    var isFecha    = col.toLowerCase().includes('fecha');
+    var isCancelado = col.toLowerCase() === 'cancelado';
+    var isNumber   = /^\$|costo|precio|monto/i.test(col);
+
+    if (isCancelado) {
+      inputHtml = '<select class="form-input" id="' + id + '">' +
+        '<option value="">—</option><option value="No"' + (String(val)==='No'?' selected':'') + '>No</option>' +
+        '<option value="Sí"' + (String(val)==='Sí'?' selected':'') + '>Sí</option>' +
+        '</select>';
+    } else if (isFecha) {
+      var dateVal = val ? String(val).split('T')[0] : '';
+      inputHtml = '<input class="form-input" type="date" id="' + id + '" value="' + dateVal + '">';
+    } else if (isNumber) {
+      inputHtml = '<input class="form-input" type="number" id="' + id + '" placeholder="0.00" step="0.01" value="' + val + '">';
+    } else {
+      inputHtml = '<input class="form-input" id="' + id + '" placeholder="' + col + '" value="' + String(val).replace(/"/g,'&quot;') + '">';
+    }
+
+    var isRequired = col === 'Fecha' || col === 'Paciente';
+    var div = document.createElement('div');
+    div.className = 'form-group' + (col === 'Paciente' ? ' full' : '');
+    div.innerHTML = '<label class="form-label">' + col +
+      (isRequired ? ' <span style="color:var(--color-primary)">*</span>' : '') +
+      '</label>' + inputHtml;
+    genGrid.appendChild(div);
+  });
+
+  // Construir campos de medicamentos
+  var medGrid = document.getElementById('estim-fields-meds');
+  var medsLabel = document.getElementById('estim-meds-label');
+  medGrid.innerHTML = '';
+  medsLabel.style.display = medCols.length ? '' : 'none';
+  medCols.forEach(function(col) {
+    var id  = 'estim-f-' + col.replace(/[^a-zA-Z0-9]/g, '_');
+    var val = editRowData ? (editRowData[col] || '') : '';
+    var div = document.createElement('div');
+    div.className = 'form-group';
+    div.innerHTML = '<label class="form-label" style="font-size:var(--text-xs)">' + col + '</label>' +
+      '<input class="form-input" type="number" id="' + id + '" placeholder="0" min="0" step="1" value="' + val + '">';
+    medGrid.appendChild(div);
+  });
+
+  // Título y botón
+  var titleEl = document.getElementById('estim-modal-title');
+  if (titleEl) titleEl.textContent = editRowData ? 'Editar — Estimulación' : 'Nueva Entrada — Estimulación';
+  var msgEl = document.getElementById('estim-modal-msg');
+  if (msgEl) { msgEl.textContent = ''; msgEl.className = 'modal-msg'; }
+  var btn = document.getElementById('estim-submit-btn');
+  if (btn) { btn.disabled = false; btn.textContent = 'Guardar'; }
+
+  // Si es nueva entrada, poner fecha de hoy en el campo Fecha
+  if (!editRowData) {
+    var fechaEl = document.getElementById('estim-f-Fecha');
+    if (fechaEl && !fechaEl.value) fechaEl.value = new Date().toISOString().split('T')[0];
+  }
+
+  document.getElementById('modal-estimulacion').style.display = 'flex';
+}
+
+function closeEstimModal() {
+  document.getElementById('modal-estimulacion').style.display = 'none';
+}
+
+function submitEstim() {
+  var headers = _estimHeaders.filter(function(h) {
+    return ESTIM_FORMULA_COLS.indexOf(h) < 0 && h.trim() !== '';
+  });
+
+  // Validar requeridos
+  var fechaEl    = document.getElementById('estim-f-Fecha');
+  var pacienteEl = document.getElementById('estim-f-Paciente');
+  if (fechaEl && !fechaEl.value.trim())    { showModalMsg('estim-modal-msg','err','La fecha es obligatoria.'); return; }
+  if (pacienteEl && !pacienteEl.value.trim()) { showModalMsg('estim-modal-msg','err','El paciente es obligatorio.'); return; }
+
+  var btn = document.getElementById('estim-submit-btn');
+  btn.disabled = true; btn.textContent = 'Guardando…';
+
+  // Si es edición, usar action=update
+  if (_estimEditRow && _estimEditRow._rowNum) {
+    var params = 'action=update&sheet=Estimulacion&rowNum=' + _estimEditRow._rowNum +
+      '&token=' + encodeURIComponent(getToken());
+    headers.forEach(function(col) {
+      var id  = 'estim-f-' + col.replace(/[^a-zA-Z0-9]/g, '_');
+      var el  = document.getElementById(id);
+      var val = el ? el.value : '';
+      params += '&' + encodeURIComponent(col) + '=' + encodeURIComponent(val);
+    });
+    _doEstimFetch(params, btn);
+    return;
+  }
+
+  // Nueva entrada: action=insert
+  var params = 'action=insert&sheet=Estimulacion&token=' + encodeURIComponent(getToken());
+  headers.forEach(function(col) {
+    var id  = 'estim-f-' + col.replace(/[^a-zA-Z0-9]/g, '_');
+    var el  = document.getElementById(id);
+    var val = el ? el.value : '';
+    params += '&' + encodeURIComponent(col) + '=' + encodeURIComponent(val);
+  });
+  _doEstimFetch(params, btn);
+}
+
+function _doEstimFetch(params, btn) {
+  fetch(APPS_SCRIPT_URL + '?' + params)
+    .then(function(r){ return r.json(); })
+    .then(function(res) {
+      if (res.success) {
+        showModalMsg('estim-modal-msg', 'ok', '✓ Registro guardado en Google Sheets.');
+        setTimeout(function() {
+          closeEstimModal();
+          if (_estimViewId) loadView(_estimViewId, currentFechaInicio, currentFechaFin, true);
+        }, 1500);
+      } else {
+        showModalMsg('estim-modal-msg', 'err', 'Error: ' + (res.error || 'No se pudo guardar.'));
+        btn.disabled = false; btn.textContent = 'Guardar';
+      }
+    })
+    .catch(function() {
+      showModalMsg('estim-modal-msg', 'err', 'Error de conexión. Intenta de nuevo.');
+      btn.disabled = false; btn.textContent = 'Guardar';
     });
 }
 
