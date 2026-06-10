@@ -1,5 +1,5 @@
 var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
-var API_VERSION   = 'v2026-06-08-T';
+var API_VERSION   = 'v2026-06-08-U';
 var AUTH_SECRET   = 'hestia2026erp-secret'; // Cambia esto por algo único
 
 /* ── Autenticación: helpers ──────────────────────────────────── */
@@ -538,8 +538,8 @@ function findSheet(ssCap, nombreHoja) {
   if (h) return h;
   // 2. Búsqueda insensible a tildes y mayúsculas
   var normalize = function(s) {
-    return s.toLowerCase()
-      .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e')
+    return s.trim().toLowerCase()
+      .replace(/[áàäã]/g,'a').replace(/[éèë]/g,'e')
       .replace(/[íìï]/g,'i').replace(/[óòö]/g,'o')
       .replace(/[úùü]/g,'u').replace(/ñ/g,'n');
   };
@@ -555,7 +555,7 @@ function getCapturaId(nombreHoja) {
   if (CAPTURA_SHEETS[nombreHoja]) return CAPTURA_SHEETS[nombreHoja];
   // Búsqueda tolerante a tildes
   var normalize = function(s) {
-    return s.toLowerCase()
+    return s.trim().toLowerCase()
       .replace(/[áàäã]/g,'a').replace(/[éèë]/g,'e')
       .replace(/[íìï]/g,'i').replace(/[óòö]/g,'o')
       .replace(/[úùü]/g,'u').replace(/ñ/g,'n');
