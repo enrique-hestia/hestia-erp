@@ -1,5 +1,5 @@
 var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
-var API_VERSION   = 'v2026-06-08-S';
+var API_VERSION   = 'v2026-06-08-T';
 var AUTH_SECRET   = 'hestia2026erp-secret'; // Cambia esto por algo único
 
 /* ── Autenticación: helpers ──────────────────────────────────── */
@@ -89,6 +89,16 @@ function doGet(e) {
     var ss     = SpreadsheetApp.openById(SHEET_ID);
     var action = (e && e.parameter.action) || 'menu';
     var view   = (e && e.parameter.view)   || 'resumen';
+
+    // tabs: muestra pestañas de cualquier spreadsheet (sin auth, solo para debug)
+    if (action === 'tabs') {
+      var sid = (e && e.parameter.sid) || CAPTURA_SHEETS['Medicamentos'];
+      try {
+        var ssTabs = SpreadsheetApp.openById(sid);
+        var tabs   = ssTabs.getSheets().map(function(s){ return s.getName(); });
+        return jsonResponse({ spreadsheetId: sid, tabs: tabs });
+      } catch(ex) { return jsonResponse({ error: ex.message }); }
+    }
 
     // Rango de fechas — default: últimos 6 meses
     var hoy        = new Date();
