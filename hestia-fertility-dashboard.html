@@ -150,6 +150,33 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 .lr-kpi--warn .kpi-value{color:#e65100}
 .lr-ins-critico td{color:#c62828}
 .lr-ins-critico td:last-child{font-weight:700}
+/* ── LAB EDIT PANEL (drawer derecho) ── */
+#lab-panel-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:2000;display:none;justify-content:flex-end}
+#lab-panel-overlay.lp-open{display:flex}
+.lab-panel{width:520px;max-width:97vw;height:100vh;background:var(--color-surface);display:flex;flex-direction:column;box-shadow:-6px 0 32px rgba(0,0,0,.18);transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1)}
+#lab-panel-overlay.lp-open .lab-panel{transform:translateX(0)}
+.lp-header{padding:20px 24px 16px;border-bottom:1px solid var(--color-divider);display:flex;align-items:flex-start;gap:12px;flex-shrink:0;background:var(--color-surface-2)}
+.lp-icon{width:40px;height:40px;border-radius:10px;background:var(--color-primary-hl,rgba(196,106,122,.12));display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--color-primary)}
+.lp-hinfo{flex:1;min-width:0}
+.lp-hinfo h3{font-size:var(--text-base);font-weight:700;margin:0 0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lp-hinfo p{font-size:var(--text-xs);color:var(--color-text-muted);margin:0}
+.lp-close{background:none;border:none;cursor:pointer;padding:6px;border-radius:6px;color:var(--color-text-muted);line-height:0;flex-shrink:0}
+.lp-close:hover{background:var(--color-surface-offset,rgba(0,0,0,.06))}
+.lp-body{flex:1;overflow-y:auto;padding:24px}
+.lp-section{margin-bottom:22px}
+.lp-section-title{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--color-text-faint,var(--color-text-muted));margin:0 0 12px;padding-bottom:6px;border-bottom:1px solid var(--color-divider)}
+.lp-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.lp-field{display:flex;flex-direction:column;gap:4px}
+.lp-field.lp-full{grid-column:1/-1}
+.lp-field label{font-size:10.5px;font-weight:600;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.055em}
+.lp-field input,.lp-field select,.lp-field textarea{width:100%;padding:8px 10px;border:1.5px solid var(--color-border,var(--color-divider));border-radius:var(--radius-md);font-size:var(--text-sm);background:var(--color-surface);color:var(--color-text);font-family:inherit;box-sizing:border-box;transition:border-color .15s}
+.lp-field input:focus,.lp-field select:focus,.lp-field textarea:focus{outline:none;border-color:var(--color-primary)}
+.lp-field input[readonly]{background:var(--color-surface-2,#f5f5f5);color:var(--color-text-muted);cursor:default}
+.lp-field textarea{resize:vertical;min-height:70px}
+.lp-msg{font-size:var(--text-xs);padding:9px 12px;border-radius:7px;margin-bottom:14px;display:none}
+.lp-msg.lp-err{display:block;background:#fdecea;color:#c62828;border:1px solid #f5c6c6}
+.lp-msg.lp-ok{display:block;background:#e8f5e9;color:#2e7d32;border:1px solid #c8e6c9}
+.lp-footer{padding:14px 24px;border-top:1px solid var(--color-divider);display:flex;gap:10px;justify-content:flex-end;flex-shrink:0;background:var(--color-surface-2)}
 .kpi-card{background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-lg);padding:var(--space-5);box-shadow:var(--shadow-sm);display:flex;flex-direction:column;gap:var(--space-3)}
 .kpi-header{display:flex;align-items:center;justify-content:space-between}
 .kpi-icon{width:36px;height:36px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center}
@@ -1865,10 +1892,10 @@ function renderCaptura(viewId, data) {
 
   var newBtn = document.getElementById('cap-new-btn-' + viewId);
   var specialFuentes = ['Ent. Med', 'Estimulacion', 'Estimulaci\u00f3n'];
-  var hasCfg = !!(CAPTURA_CONFIG[viewId] || CAPTURA_CONFIG[data.fuente] || specialFuentes.indexOf(data.fuente) >= 0);
+  var hasCfg = !!(CAPTURA_CONFIG[viewId] || CAPTURA_CONFIG[data.fuente] || specialFuentes.indexOf(data.fuente) >= 0 || isLabFuente(data.fuente));
   if (newBtn) newBtn.style.display = (hasCfg && canEdit()) ? 'flex' : 'none';
   // Actualizar label del botón según fuente
-  if (newBtn && specialFuentes.indexOf(data.fuente) >= 0) newBtn.innerHTML = svgPlus + 'Agregar';
+  if (newBtn && (specialFuentes.indexOf(data.fuente) >= 0 || isLabFuente(data.fuente))) newBtn.innerHTML = svgPlus + 'Agregar';
   // Actualizar link "Ver en Sheets" usando fuente del dato
   var linkEl = document.getElementById('cap-link-' + viewId);
   if (linkEl && data.fuente) {
@@ -1876,7 +1903,9 @@ function renderCaptura(viewId, data) {
     if (url) linkEl.href = url;
   }
 
-  var hasEdit = !!(CAPTURA_CONFIG[viewId] || CAPTURA_CONFIG[data.fuente] || specialFuentes.indexOf(data.fuente) >= 0) && canEdit();
+  // Guardar headers para que el panel de edición los use dinámicamente
+  if (data.headers) _capturaHeaders[viewId] = data.headers;
+  var hasEdit = !!(CAPTURA_CONFIG[viewId] || CAPTURA_CONFIG[data.fuente] || specialFuentes.indexOf(data.fuente) >= 0 || isLabFuente(data.fuente)) && canEdit();
   _capturaRows[viewId] = data.rows;
 
   // Cabecera de tabla
@@ -2428,6 +2457,7 @@ function openModal(tipo) {
   var fuente = _viewFuente[tipo] || tipo;
   if (fuente === 'Ent. Med')     { openEntmedModal(); return; }
   if ((fuente === 'Estimulacion' || fuente === 'Estimulaci\u00f3n')) { openEstimModal(tipo); return; }
+  if (isLabFuente(fuente)) { openLabPanel(tipo, null); return; }
 
   var cfg = CAPTURA_CONFIG[tipo] || CAPTURA_CONFIG[fuente];
   if (!cfg) return;
@@ -2477,6 +2507,7 @@ function openEditModal(viewId, rowIdx) {
     if (row) openEstimModal(viewId, row);
     return;
   }
+  if (isLabFuente(fuente)) { openLabPanel(viewId, rowIdx); return; }
   var cfg = CAPTURA_CONFIG[viewId];
   if (!cfg) return;
   var row = (_capturaRows[viewId] || [])[rowIdx];
@@ -2635,6 +2666,198 @@ function submitCaptura(tipo) {
    Columnas antes de "Cancelado" → datos generales.
    Columnas después de "Cancelado" → medicamentos (número).
    ══════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════
+   LAB EDIT PANEL — panel deslizante para editar registros de lab
+   ══════════════════════════════════════════════════════════════ */
+var _labPanelViewId  = null;
+var _labPanelRowIdx  = null;
+var _capturaHeaders  = {};   // viewId → headers[]  (guardado al renderizar)
+
+function isLabFuente(f) {
+  var n = (f||'').toLowerCase()
+    .replace(/[áàä]/g,'a').replace(/[éè]/g,'e')
+    .replace(/[íì]/g,'i').replace(/[óòö]/g,'o').replace(/[úù]/g,'u');
+  return ['art lab','fet','androlog','inventario crio','insumos'].some(function(k){ return n.indexOf(k) >= 0; });
+}
+
+function lpFieldType(h, val) {
+  var hl = (h||'').toLowerCase();
+  if (/fecha|date|mes.a/.test(hl)) return 'date';
+  if (/#|cantidad|volumen|motil|pct|%|precio|costo|total|oov|emb|sac|hr\s/.test(hl)) return 'number';
+  if (val instanceof Date) return 'date';
+  if (typeof val === 'number' && !isNaN(val)) return 'number';
+  if (/survived|preg|pgt|cancelado/i.test(hl)) return 'select-yn';
+  return 'text';
+}
+
+function lpFormatVal(h, val) {
+  if (val === null || val === undefined) return '';
+  if (lpFieldType(h, val) === 'date') {
+    var s = String(val);
+    var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? m[1]+'-'+m[2]+'-'+m[3] : s;
+  }
+  return String(val);
+}
+
+function lpIsFull(h) {
+  return /nombre|name|paciente|procedimiento|observ|comment|nota/i.test(h||'');
+}
+
+function lpSectionFor(fuente, h, idx) {
+  var hl = (h||'').toLowerCase();
+  var f = (fuente||'').toLowerCase();
+  if (f.indexOf('art lab') >= 0) {
+    if (idx < 4) return 'Identificación';
+    if (/follicle|oocyte|oov|emb|2pn|blasto/.test(hl)) return 'Resultados';
+    return 'Ciclo';
+  }
+  if (f === 'fet') {
+    if (/fecha|paciente|embri/.test(hl)) return 'Identificación';
+    if (/survi|beta|preg|sac|hr/.test(hl)) return 'Resultados';
+    return 'Procedimiento';
+  }
+  if (/androlog/.test(f)) {
+    if (idx < 4) return 'Identificación';
+    return 'Parámetros de muestra';
+  }
+  if (/inventario/.test(f)) {
+    if (/nombre|fecha/.test(hl)) return 'Paciente';
+    return 'Inventario';
+  }
+  if (f === 'insumos') {
+    if (/fecha|mes|insumo|prov/.test(hl)) return 'Suministro';
+    return 'Precios';
+  }
+  return 'Datos';
+}
+
+function buildLabPanelFields(viewId, fuente, headers, row) {
+  if (!headers || headers.length === 0) return '<p style="color:var(--color-text-muted);font-size:var(--text-sm)">Sin encabezados disponibles.</p>';
+  var sections = {};
+  var sectionOrder = [];
+  headers.forEach(function(h, idx) {
+    if (!h || !h.trim()) return;
+    var sec = lpSectionFor(fuente, h, idx);
+    if (!sections[sec]) { sections[sec] = []; sectionOrder.push(sec); }
+    sections[sec].push({h:h, idx:idx});
+  });
+  var html = '';
+  sectionOrder.forEach(function(sec) {
+    html += '<div class="lp-section"><div class="lp-section-title">'+sec+'</div><div class="lp-grid">';
+    sections[sec].forEach(function(f) {
+      var val = row ? (row[f.h] !== undefined ? row[f.h] : (row[f.h.toLowerCase()] !== undefined ? row[f.h.toLowerCase()] : '')) : '';
+      var fmtVal = lpFormatVal(f.h, val);
+      var typ = lpFieldType(f.h, val);
+      var fullClass = lpIsFull(f.h) ? ' lp-full' : '';
+      var safeName = 'lp_f_' + f.idx;
+      var inputHtml;
+      if (typ === 'select-yn') {
+        var optSi = fmtVal === 'Si' || fmtVal === 'si' || fmtVal === 'SI' || fmtVal === 'true' ? ' selected' : '';
+        var optNo = fmtVal === 'No' || fmtVal === 'no' || fmtVal === 'NO' || fmtVal === 'false' ? ' selected' : '';
+        inputHtml = '<select id="'+safeName+'"><option value="">—</option><option value="Si"'+optSi+'>Sí</option><option value="No"'+optNo+'>No</option></select>';
+      } else if (typ === 'date') {
+        inputHtml = '<input type="date" id="'+safeName+'" value="'+fmtVal+'">';
+      } else if (typ === 'number') {
+        inputHtml = '<input type="number" id="'+safeName+'" value="'+fmtVal+'" step="any">';
+      } else {
+        inputHtml = '<input type="text" id="'+safeName+'" value="'+escHtml(fmtVal)+'">';
+      }
+      html += '<div class="lp-field'+fullClass+'"><label>'+escHtml(f.h)+'</label>'+inputHtml+'</div>';
+    });
+    html += '</div></div>';
+  });
+  return html;
+}
+
+function escHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function openLabPanel(viewId, rowIdx) {
+  _labPanelViewId = viewId;
+  _labPanelRowIdx = rowIdx;
+  var fuente = _viewFuente[viewId] || viewId;
+  var headers = _capturaHeaders[viewId] || [];
+  var rows    = _capturaRows[viewId] || [];
+  var row     = (rowIdx !== null && rowIdx !== undefined) ? rows[rowIdx] : null;
+  var isEdit  = row !== null;
+  document.getElementById('lp-title').textContent    = isEdit ? 'Editar registro' : 'Nuevo registro';
+  document.getElementById('lp-subtitle').textContent = fuente + (isEdit && row && row._rowNum ? ' · Fila ' + row._rowNum : '');
+  document.getElementById('lp-save-btn').textContent = isEdit ? 'Guardar cambios' : 'Crear registro';
+  var msgEl = document.getElementById('lp-msg');
+  msgEl.className = 'lp-msg'; msgEl.textContent = '';
+  document.getElementById('lp-form-content').innerHTML = buildLabPanelFields(viewId, fuente, headers, row);
+  var overlay = document.getElementById('lab-panel-overlay');
+  overlay.classList.add('lp-open');
+  var firstInput = document.querySelector('#lp-form-content input:not([readonly]),#lp-form-content select');
+  if (firstInput) setTimeout(function(){ firstInput.focus(); }, 310);
+}
+
+function closeLabPanel() {
+  var overlay = document.getElementById('lab-panel-overlay');
+  overlay.classList.remove('lp-open');
+}
+
+function submitLabPanel() {
+  var viewId  = _labPanelViewId;
+  var rowIdx  = _labPanelRowIdx;
+  var fuente  = _viewFuente[viewId] || viewId;
+  var headers = _capturaHeaders[viewId] || [];
+  var rows    = _capturaRows[viewId] || [];
+  var row     = (rowIdx !== null && rowIdx !== undefined) ? rows[rowIdx] : null;
+  var rowNum  = row ? row._rowNum : null;
+  var msgEl   = document.getElementById('lp-msg');
+  var btn     = document.getElementById('lp-save-btn');
+  // Recolectar valores
+  var values = {};
+  headers.forEach(function(h, idx) {
+    if (!h || !h.trim()) return;
+    var el = document.getElementById('lp_f_' + idx);
+    if (el) values[h] = el.value;
+  });
+  // Validación básica
+  var firstKey = headers.find(function(h){ return h && h.trim(); });
+  if (firstKey && !values[firstKey]) {
+    msgEl.className = 'lp-msg lp-err';
+    msgEl.textContent = 'El primer campo (' + firstKey + ') es requerido.';
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Guardando…';
+  msgEl.className = 'lp-msg'; msgEl.textContent = '';
+  var action = rowNum ? 'update' : 'append';
+  var payload = { action: action, sheet: fuente, values: values, token: getToken() };
+  if (rowNum) payload.rowNum = rowNum;
+  fetch(APPS_SCRIPT_URL, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    btn.disabled = false;
+    btn.textContent = rowNum ? 'Guardar cambios' : 'Crear registro';
+    if (d.ok) {
+      msgEl.className = 'lp-msg lp-ok';
+      msgEl.textContent = rowNum ? 'Registro actualizado.' : 'Registro creado.';
+      setTimeout(function(){
+        closeLabPanel();
+        loadView(viewId, currentFechaInicio, currentFechaFin, true);
+      }, 900);
+    } else {
+      msgEl.className = 'lp-msg lp-err';
+      msgEl.textContent = 'Error: ' + (d.error || 'respuesta inesperada');
+    }
+  })
+  .catch(function(e){
+    btn.disabled = false;
+    btn.textContent = rowNum ? 'Guardar cambios' : 'Crear registro';
+    msgEl.className = 'lp-msg lp-err';
+    msgEl.textContent = 'Error de red: ' + e.message;
+  });
+}
+
 var _estimHeaders   = [];   // headers actuales de la hoja Estimulacion
 var _estimViewId    = null; // viewId de la vista Estimulacion activa
 var _estimEditRow   = null; // fila en edición (null = nueva entrada)
@@ -3111,5 +3334,31 @@ function submitEntmed() {
     });
 }
 </script>
+
+<!-- ══ LAB EDIT PANEL (drawer deslizante desde la derecha) ══ -->
+<div id="lab-panel-overlay" onclick="if(event.target===this)closeLabPanel()">
+  <div class="lab-panel">
+    <div class="lp-header">
+      <div class="lp-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      </div>
+      <div class="lp-hinfo">
+        <h3 id="lp-title">Editar registro</h3>
+        <p id="lp-subtitle"></p>
+      </div>
+      <button class="lp-close" onclick="closeLabPanel()" title="Cerrar">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="lp-body">
+      <div id="lp-msg" class="lp-msg"></div>
+      <div id="lp-form-content"></div>
+    </div>
+    <div class="lp-footer">
+      <button class="btn btn-secondary" onclick="closeLabPanel()">Cancelar</button>
+      <button class="btn btn-primary" id="lp-save-btn" onclick="submitLabPanel()">Guardar cambios</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
