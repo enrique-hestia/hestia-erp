@@ -2960,11 +2960,89 @@ function closeLabPanel() {
 
 /* ── PANEL MULTI-PRODUCTO PARA INSUMOS ── */
 var _insumosProductoCount = 0;
+var _insumosCatalog = { proveedores: [], byProv: {} };
+
+function buildInsumosCatalog(viewId) {
+  var rows = _capturaRows[viewId] || [];
+  var catalog = {};
+  var provSet = {};
+  var colNamesProv   = ['Proveedor','proveedor','PROVEEDOR','Supplier'];
+  var colNamesInsumo = ['Insumo','Articulo','Articulo','Descripcion','Producto'];
+  var colNamesCosto  = ['Costo','costo','Precio','precio','Importe','importe'];
+  var colNamesUnidad = ['Unidad','unidad','Unidades','UDM','UM'];
+  function findVal(row, names) {
+    for (var i = 0; i < names.length; i++) {
+      var v = row[names[i]];
+      if (v !== undefined && String(v).trim() !== '') return String(v).trim();
+    }
+    return '';
+  }
+  rows.forEach(function(row) {
+    var prov   = findVal(row, colNamesProv);
+    var insumo = findVal(row, colNamesInsumo);
+    var costo  = findVal(row, colNamesCosto);
+    var unidad = findVal(row, colNamesUnidad);
+    if (!prov || !insumo) return;
+    provSet[prov] = true;
+    if (!catalog[prov]) catalog[prov] = {};
+    if (!catalog[prov][insumo]) catalog[prov][insumo] = { costo: costo, unidad: unidad };
+  });
+  _insumosCatalog = { proveedores: Object.keys(provSet).sort(), byProv: catalog };
+}
+
+function buildInsumosArticulosOpts(prov) {
+  var items;
+  if (prov && _insumosCatalog.byProv[prov]) {
+    items = Object.keys(_insumosCatalog.byProv[prov]).sort();
+  } else {
+    var all = {};
+    Object.keys(_insumosCatalog.byProv).forEach(function(p) {
+      Object.keys(_insumosCatalog.byProv[p]).forEach(function(a){ all[a] = true; });
+    });
+    items = Object.keys(all).sort();
+  }
+  var opts = '<option value="">— Seleccionar artículo —</option>';
+  items.forEach(function(a) { opts += '<option value="' + escHtml(a) + '">' + escHtml(a) + '</option>'; });
+  return opts;
+}
+
+function updateInsumosDropdowns() {
+  var prov = (document.getElementById('ins_proveedor') || {}).value || '';
+  var tbody = document.getElementById('ins-productos-tbody');
+  if (!tbody) return;
+  tbody.querySelectorAll('tr[id^="ins-prod-row-"]').forEach(function(tr) {
+    var n = tr.id.replace('ins-prod-row-', '');
+    var sel = document.getElementById('ins_insumo_' + n);
+    if (!sel) return;
+    var cur = sel.value;
+    sel.innerHTML = buildInsumosArticulosOpts(prov);
+    if (cur) sel.value = cur;
+  });
+}
+
+function onInsumosArticuloChange(n) {
+  var prov   = (document.getElementById('ins_proveedor') || {}).value || '';
+  var insumo = (document.getElementById('ins_insumo_' + n) || {}).value || '';
+  if (!insumo) return;
+  var data = prov && _insumosCatalog.byProv[prov] && _insumosCatalog.byProv[prov][insumo];
+  if (!data) {
+    Object.keys(_insumosCatalog.byProv).forEach(function(p) {
+      if (!data && _insumosCatalog.byProv[p][insumo]) data = _insumosCatalog.byProv[p][insumo];
+    });
+  }
+  if (data) {
+    var costoEl  = document.getElementById('ins_costo_'  + n);
+    var unidadEl = document.getElementById('ins_unidad_' + n);
+    if (costoEl  && data.costo)  costoEl.value  = data.costo;
+    if (unidadEl && data.unidad) unidadEl.value = data.unidad;
+  }
+}
 
 function openInsumosOrdenPanel(viewId) {
   _labPanelViewId = viewId;
   _labPanelRowIdx = null;
   _insumosProductoCount = 0;
+  buildInsumosCatalog(viewId);
 
   var maxNum = 0;
   if (typeof _insumosOrdenes !== 'undefined') {
@@ -2983,6 +3061,11 @@ function openInsumosOrdenPanel(viewId) {
   var msgEl = document.getElementById('lp-msg');
   msgEl.className = 'lp-msg'; msgEl.textContent = '';
 
+  var provOpts = '<option value="">— Seleccionar proveedor —</option>';
+  _insumosCatalog.proveedores.forEach(function(p) {
+    provOpts += '<option value="' + escHtml(p) + '">' + escHtml(p) + '</option>';
+  });
+
   document.getElementById('lp-form-content').innerHTML =
     '<div class="lp-section"><div class="lp-section-title">Encabezado</div><div class="lp-grid">' +
       '<div class="lp-field"><label>No. Orden</label>' +
@@ -2990,13 +3073,13 @@ function openInsumosOrdenPanel(viewId) {
       '<div class="lp-field"><label>Fecha</label>' +
         '<input type="date" id="ins_fecha" value="' + today + '"></div>' +
       '<div class="lp-field lp-full"><label>Proveedor</label>' +
-        '<input type="text" id="ins_proveedor" placeholder="Nombre del proveedor"></div>' +
+        '<select id="ins_proveedor" onchange="updateInsumosDropdowns()">' + provOpts + '</select></div>' +
     '</div></div>' +
     '<div class="lp-section"><div class="lp-section-title">Productos</div>' +
       '<div style="overflow-x:auto">' +
         '<table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">' +
           '<thead><tr style="border-bottom:2px solid var(--color-border)">' +
-            '<th style="text-align:left;padding:6px 8px;font-weight:600;color:var(--color-text-muted)">Insumo</th>' +
+            '<th style="text-align:left;padding:6px 8px;font-weight:600;color:var(--color-text-muted)">Artículo</th>' +
             '<th style="text-align:right;padding:6px 8px;font-weight:600;color:var(--color-text-muted);width:90px">Cantidad</th>' +
             '<th style="text-align:left;padding:6px 8px;font-weight:600;color:var(--color-text-muted);width:90px">Unidad</th>' +
             '<th style="text-align:right;padding:6px 8px;font-weight:600;color:var(--color-text-muted);width:110px">Costo Unit.</th>' +
@@ -3011,7 +3094,6 @@ function openInsumosOrdenPanel(viewId) {
     '</div>';
 
   addInsumosProductoRow();
-
   document.getElementById('lab-panel-overlay').classList.add('lp-open');
   setTimeout(function(){ var f = document.getElementById('ins_proveedor'); if(f) f.focus(); }, 310);
 }
@@ -3019,22 +3101,23 @@ function openInsumosOrdenPanel(viewId) {
 function addInsumosProductoRow() {
   _insumosProductoCount++;
   var n = _insumosProductoCount;
+  var prov = (document.getElementById('ins_proveedor') || {}).value || '';
   var tbody = document.getElementById('ins-productos-tbody');
   if (!tbody) return;
   var tr = document.createElement('tr');
   tr.id = 'ins-prod-row-' + n;
   tr.style.borderBottom = '1px solid var(--color-border)';
   var delBtn = n > 1
-    ? '<button type="button" onclick="removeInsumosProductoRow(' + n + ')" title="Quitar" style="background:none;border:none;cursor:pointer;color:var(--color-text-muted);font-size:18px;padding:0 6px;line-height:1">×</button>'
+    ? '<button type="button" onclick="removeInsumosProductoRow(' + n + ')" title="Quitar" style="background:none;border:none;cursor:pointer;color:var(--color-text-muted);font-size:18px;padding:0 6px;line-height:1">\xd7</button>'
     : '';
   tr.innerHTML =
-    '<td style="padding:4px 6px"><input type="text" id="ins_insumo_' + n + '" placeholder="Descripción del insumo" style="width:100%;min-width:150px"></td>' +
+    '<td style="padding:4px 6px"><select id="ins_insumo_' + n + '" onchange="onInsumosArticuloChange(' + n + ')" style="width:100%;min-width:160px">' +
+      buildInsumosArticulosOpts(prov) + '</select></td>' +
     '<td style="padding:4px 6px"><input type="number" id="ins_cantidad_' + n + '" placeholder="0" step="any" min="0" style="width:100%;text-align:right"></td>' +
-    '<td style="padding:4px 6px"><input type="text" id="ins_unidad_' + n + '" placeholder="pz, caja…" style="width:100%"></td>' +
+    '<td style="padding:4px 6px"><input type="text" id="ins_unidad_' + n + '" placeholder="pz…" style="width:100%"></td>' +
     '<td style="padding:4px 6px"><input type="number" id="ins_costo_' + n + '" placeholder="0.00" step="any" min="0" style="width:100%;text-align:right"></td>' +
     '<td style="padding:4px 2px;text-align:center">' + delBtn + '</td>';
   tbody.appendChild(tr);
-  setTimeout(function(){ var f = document.getElementById('ins_insumo_' + n); if(f) f.focus(); }, 40);
 }
 
 function removeInsumosProductoRow(n) {
@@ -3069,7 +3152,7 @@ function submitInsumosOrden() {
     });
   }
 
-  if (productos.length === 0) { msgEl.className='lp-msg lp-err'; msgEl.textContent='Añade al menos un producto.'; return; }
+  if (productos.length === 0) { msgEl.className='lp-msg lp-err'; msgEl.textContent='Selecciona al menos un artículo.'; return; }
 
   btn.disabled = true;
   btn.textContent = 'Guardando…';
