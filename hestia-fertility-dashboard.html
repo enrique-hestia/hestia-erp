@@ -821,22 +821,103 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 
 <!-- ══ VISTA: AJUSTES ══ -->
 <div id="view-ajustes" class="view" style="display:none">
-  <div class="card" style="max-width:600px">
-    <div class="card-header"><div class="card-title">Configuración del Dashboard</div></div>
-    <div style="display:flex;flex-direction:column;gap:var(--space-4);margin-top:var(--space-2)">
-      <div class="stat-row" style="flex-direction:column;gap:var(--space-1)">
-        <div style="font-size:var(--text-sm);font-weight:600">Google Sheet conectado</div>
-        <div style="font-size:var(--text-xs);color:var(--color-text-muted);font-family:monospace">1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4</div>
+  <div style="max-width:720px;display:flex;flex-direction:column;gap:var(--space-5)">
+
+    <!-- Encabezado de sección -->
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="width:40px;height:40px;border-radius:10px;background:var(--color-primary-hl,rgba(196,106,122,.12));display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--color-primary)">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/></svg>
       </div>
-      <div class="stat-row" style="flex-direction:column;gap:var(--space-1)">
-        <div style="font-size:var(--text-sm);font-weight:600">Apps Script API</div>
-        <div style="font-size:var(--text-xs);color:var(--color-text-muted);font-family:monospace">script.google.com/macros/s/AKfycbw3...</div>
-      </div>
-      <div class="stat-row" style="flex-direction:column;gap:var(--space-1)">
-        <div style="font-size:var(--text-sm);font-weight:600">Actualización automática</div>
-        <div style="font-size:var(--text-xs);color:var(--color-text-muted)">Cada 30 segundos · <span id="sync-status-ajustes"></span></div>
+      <div>
+        <div style="font-size:var(--text-lg);font-weight:700">Configuración del sistema</div>
+        <div style="font-size:var(--text-xs);color:var(--color-text-muted)" id="cfg-updated-label">Vista de solo lectura</div>
       </div>
     </div>
+
+    <!-- Tarjeta: Versiones -->
+    <div class="card">
+      <div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:14px">Versiones</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Frontend</div>
+          <div style="font-size:var(--text-sm);font-weight:700;font-family:monospace" id="cfg-fe-version">—</div>
+        </div>
+        <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">API (Apps Script)</div>
+          <div style="font-size:var(--text-sm);font-weight:700;font-family:monospace" id="cfg-api-version">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tarjeta: Conexiones -->
+    <div class="card">
+      <div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:14px">Conexiones</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;flex-direction:column;gap:3px;padding:12px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md)">
+          <div style="font-size:var(--text-xs);font-weight:600;color:var(--color-text-muted)">Apps Script URL</div>
+          <div style="font-size:11px;font-family:monospace;color:var(--color-text);word-break:break-all" id="cfg-api-url">—</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:3px;padding:12px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md)">
+          <div style="font-size:var(--text-xs);font-weight:600;color:var(--color-text-muted)">Spreadsheet principal (SHEET_ID)</div>
+          <div style="font-size:11px;font-family:monospace;color:var(--color-text)" id="cfg-sheet-id">—</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:3px;padding:12px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md)">
+          <div style="font-size:var(--text-xs);font-weight:600;color:var(--color-text-muted)">Spreadsheet Laboratorio (LAB_SS_ID)</div>
+          <div style="font-size:11px;font-family:monospace;color:var(--color-text)" id="cfg-lab-id">—</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:3px;padding:12px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md)">
+          <div style="font-size:var(--text-xs);font-weight:600;color:var(--color-text-muted)">Spreadsheet Medicamentos / Captura</div>
+          <div style="font-size:11px;font-family:monospace;color:var(--color-text)" id="cfg-med-id">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tarjeta: Comportamiento -->
+    <div class="card">
+      <div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:14px">Comportamiento</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Auto-refresh</div>
+          <div style="font-size:var(--text-sm);font-weight:700" id="cfg-refresh">—</div>
+        </div>
+        <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Caché frontend</div>
+          <div style="font-size:var(--text-sm);font-weight:700" id="cfg-cache">—</div>
+        </div>
+        <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Caché servidor</div>
+          <div style="font-size:var(--text-sm);font-weight:700">60 segundos</div>
+        </div>
+        <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Última sincronización</div>
+          <div style="font-size:var(--text-sm);font-weight:700"><span id="sync-status-ajustes">—</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tarjeta: Sesión activa -->
+    <div class="card">
+      <div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:14px">Sesión activa</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Usuario</div>
+          <div style="font-size:var(--text-sm);font-weight:700" id="cfg-user">—</div>
+        </div>
+        <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Rol</div>
+          <div style="font-size:var(--text-sm);font-weight:700" id="cfg-rol">—</div>
+        </div>
+        <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Periodo activo</div>
+          <div style="font-size:var(--text-sm);font-weight:700" id="cfg-periodo">—</div>
+        </div>
+        <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Vistas en caché</div>
+          <div style="font-size:var(--text-sm);font-weight:700" id="cfg-cache-count">—</div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -849,7 +930,15 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
    Reemplaza APPS_SCRIPT_URL con la URL de tu Web App
    ════════════════════════════════════════════════════════════════ */
 
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbw3pPDLfDFVmb2VF1FCGCTZGK8Ie1du7zUFyJPQT7Fwxi_ngsEmEL-o-ukv2QzqZ6Ro/exec';
+const APPS_SCRIPT_URL   = 'https://script.google.com/macros/s/AKfycbw3pPDLfDFVmb2VF1FCGCTZGK8Ie1du7zUFyJPQT7Fwxi_ngsEmEL-o-ukv2QzqZ6Ro/exec';
+const DASHBOARD_VERSION = '2026-06-11';
+const MAIN_SHEET_ID     = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
+const LAB_SS_ID_FE      = '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ';
+const MED_SS_ID_FE      = '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM';
+const AUTO_REFRESH_MS   = 120000;   // 2 minutos
+const FRONTEND_CACHE_MS = 120000;   // 2 minutos
+
+var _apiVersion = '—';  // se llena al recibir la respuesta del menu
 
 /* Theme se inicializa en initTheme() al arrancar */
 
@@ -1090,7 +1179,7 @@ function renderView(view, data) {
   if (view === 'servicios')    renderServicios(data);
   if (view === 'turismo')      renderTurismo(data);
   if (view === 'rentabilidad') renderRentabilidad(data);
-  if (view === 'ajustes')      document.getElementById('sync-status-ajustes').textContent = document.getElementById('sync-status').textContent;
+  if (view === 'ajustes')      renderAjustes();
 }
 
 /* ── INGRESOS ─── */
@@ -1610,6 +1699,7 @@ async function loadMenu() {
     currentFechaInicio = json.fechaInicio || '';
     currentFechaFin    = json.fechaFin    || '';
     currentPeriodo     = currentFechaInicio.slice(0,7) + ' → ' + currentFechaFin.slice(0,7);
+    if (json.version) _apiVersion = json.version;
     setDateInputs(currentFechaInicio, currentFechaFin);
     buildSidebar(menuItems);
     lucide.createIcons();
@@ -1723,12 +1813,39 @@ function setActiveNav(viewId) {
 /* ══════════════════════════════════════════════════════
    CARGA LAZY DE VISTAS (con caché de 30 segundos)
    ══════════════════════════════════════════════════════ */
+function renderAjustes() {
+  var s = getSession() || {};
+  var set = function(id, val) { var el = document.getElementById(id); if (el) el.textContent = val || '—'; };
+  set('cfg-fe-version',   DASHBOARD_VERSION);
+  set('cfg-api-version',  _apiVersion);
+  set('cfg-api-url',      APPS_SCRIPT_URL);
+  set('cfg-sheet-id',     MAIN_SHEET_ID);
+  set('cfg-lab-id',       LAB_SS_ID_FE);
+  set('cfg-med-id',       MED_SS_ID_FE);
+  set('cfg-refresh',      (AUTO_REFRESH_MS / 60000) + ' minutos');
+  set('cfg-cache',        (FRONTEND_CACHE_MS / 60000) + ' minutos');
+  set('cfg-user',         s.nombre || s.email || 'Invitado');
+  set('cfg-rol',          s.rol || '—');
+  set('cfg-periodo',      currentFechaInicio && currentFechaFin
+        ? fmtDisplayDate(currentFechaInicio) + ' – ' + fmtDisplayDate(currentFechaFin)
+        : currentPeriodo || '—');
+  set('cfg-cache-count',  Object.keys(viewCache).length + ' vistas');
+  var syncEl = document.getElementById('sync-status-ajustes');
+  var mainSync = document.getElementById('sync-status');
+  if (syncEl && mainSync) syncEl.textContent = mainSync.textContent;
+  var label = document.getElementById('cfg-updated-label');
+  if (label) label.textContent = 'Vista de solo lectura · actualizado ' + new Date().toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'});
+}
+
 async function loadView(viewId, fechaInicio, fechaFin, force) {
+  // Ajustes es local — no necesita fetch al API
+  if (viewId === 'ajustes') { renderAjustes(); return; }
+
   var cacheKey = viewId + '_' + fechaInicio + '_' + fechaFin;
   var now = Date.now();
   var cached = viewCache[cacheKey];
 
-  if (!force && cached && (now - cached._ts) < 120000) {
+  if (!force && cached && (now - cached._ts) < FRONTEND_CACHE_MS) {
     renderViewData(viewId, cached);
     return;
   }
@@ -1772,8 +1889,7 @@ function renderViewData(viewId, data) {
     'lab-resumen':  function(d) { renderLabResumen(d); },
     laboratorios:  function(d) { renderLaboratorios(d); },
     ajustes:      function()  {
-      var el = document.getElementById('sync-status-ajustes');
-      if (el) el.textContent = document.getElementById('sync-status').textContent;
+      renderAjustes();
     }
   };
 
@@ -2112,7 +2228,7 @@ async function initApp() {
   navigateTo('resumen');
   setInterval(function() {
     loadView(currentView, currentFechaInicio, currentFechaFin, true);
-  }, 120000);
+  }, AUTO_REFRESH_MS);
 }
 
 function initTheme() {
