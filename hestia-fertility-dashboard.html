@@ -2581,7 +2581,10 @@ function openModal(tipo) {
   var fuente = _viewFuente[tipo] || tipo;
   if (fuente === 'Ent. Med')     { openEntmedModal(); return; }
   if ((fuente === 'Estimulacion' || fuente === 'Estimulaci\u00f3n')) { openEstimModal(tipo); return; }
-  if (isLabFuente(fuente)) { openLabPanel(tipo, null); return; }
+  if (isLabFuente(fuente)) {
+    if (fuente === 'Insumos') { openInsumosOrdenPanel(tipo); return; }
+    openLabPanel(tipo, null); return;
+  }
 
   var cfg = CAPTURA_CONFIG[tipo] || CAPTURA_CONFIG[fuente];
   if (!cfg) return;
@@ -2953,6 +2956,166 @@ function openLabPanel(viewId, rowIdx) {
 function closeLabPanel() {
   var overlay = document.getElementById('lab-panel-overlay');
   overlay.classList.remove('lp-open');
+}
+
+/* ── PANEL MULTI-PRODUCTO PARA INSUMOS ── */
+var _insumosProductoCount = 0;
+
+function openInsumosOrdenPanel(viewId) {
+  _labPanelViewId = viewId;
+  _labPanelRowIdx = null;
+  _insumosProductoCount = 0;
+
+  var maxNum = 0;
+  if (typeof _insumosOrdenes !== 'undefined') {
+    _insumosOrdenes.forEach(function(o) {
+      var m = String(o.folio || '').match(/(\d+)$/);
+      if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
+    });
+  }
+  var nextFolio = 'L-' + String(maxNum + 1).padStart(3, '0');
+  var today = new Date().toISOString().slice(0, 10);
+
+  document.getElementById('lp-title').textContent = 'Nueva Orden de Insumos';
+  document.getElementById('lp-subtitle').textContent = nextFolio;
+  document.getElementById('lp-save-btn').textContent = 'Guardar Orden';
+  document.getElementById('lp-save-btn').onclick = submitInsumosOrden;
+  var msgEl = document.getElementById('lp-msg');
+  msgEl.className = 'lp-msg'; msgEl.textContent = '';
+
+  document.getElementById('lp-form-content').innerHTML =
+    '<div class="lp-section"><div class="lp-section-title">Encabezado</div><div class="lp-grid">' +
+      '<div class="lp-field"><label>No. Orden</label>' +
+        '<input type="text" id="ins_folio" value="' + escHtml(nextFolio) + '" readonly style="opacity:.7;cursor:default"></div>' +
+      '<div class="lp-field"><label>Fecha</label>' +
+        '<input type="date" id="ins_fecha" value="' + today + '"></div>' +
+      '<div class="lp-field lp-full"><label>Proveedor</label>' +
+        '<input type="text" id="ins_proveedor" placeholder="Nombre del proveedor"></div>' +
+    '</div></div>' +
+    '<div class="lp-section"><div class="lp-section-title">Productos</div>' +
+      '<div style="overflow-x:auto">' +
+        '<table style="width:100%;border-collapse:collapse;font-size:var(--text-sm)">' +
+          '<thead><tr style="border-bottom:2px solid var(--color-border)">' +
+            '<th style="text-align:left;padding:6px 8px;font-weight:600;color:var(--color-text-muted)">Insumo</th>' +
+            '<th style="text-align:right;padding:6px 8px;font-weight:600;color:var(--color-text-muted);width:90px">Cantidad</th>' +
+            '<th style="text-align:left;padding:6px 8px;font-weight:600;color:var(--color-text-muted);width:90px">Unidad</th>' +
+            '<th style="text-align:right;padding:6px 8px;font-weight:600;color:var(--color-text-muted);width:110px">Costo Unit.</th>' +
+            '<th style="width:32px"></th>' +
+          '</tr></thead>' +
+          '<tbody id="ins-productos-tbody"></tbody>' +
+        '</table>' +
+      '</div>' +
+      '<button type="button" onclick="addInsumosProductoRow()" style="margin-top:10px;display:flex;align-items:center;gap:6px;background:none;border:1.5px dashed var(--color-border);border-radius:8px;padding:7px 14px;color:var(--color-primary);cursor:pointer;font-size:var(--text-sm);font-weight:500;width:100%;justify-content:center;box-sizing:border-box">' +
+        svgPlus + ' Añadir producto' +
+      '</button>' +
+    '</div>';
+
+  addInsumosProductoRow();
+
+  document.getElementById('lab-panel-overlay').classList.add('lp-open');
+  setTimeout(function(){ var f = document.getElementById('ins_proveedor'); if(f) f.focus(); }, 310);
+}
+
+function addInsumosProductoRow() {
+  _insumosProductoCount++;
+  var n = _insumosProductoCount;
+  var tbody = document.getElementById('ins-productos-tbody');
+  if (!tbody) return;
+  var tr = document.createElement('tr');
+  tr.id = 'ins-prod-row-' + n;
+  tr.style.borderBottom = '1px solid var(--color-border)';
+  var delBtn = n > 1
+    ? '<button type="button" onclick="removeInsumosProductoRow(' + n + ')" title="Quitar" style="background:none;border:none;cursor:pointer;color:var(--color-text-muted);font-size:18px;padding:0 6px;line-height:1">×</button>'
+    : '';
+  tr.innerHTML =
+    '<td style="padding:4px 6px"><input type="text" id="ins_insumo_' + n + '" placeholder="Descripción del insumo" style="width:100%;min-width:150px"></td>' +
+    '<td style="padding:4px 6px"><input type="number" id="ins_cantidad_' + n + '" placeholder="0" step="any" min="0" style="width:100%;text-align:right"></td>' +
+    '<td style="padding:4px 6px"><input type="text" id="ins_unidad_' + n + '" placeholder="pz, caja…" style="width:100%"></td>' +
+    '<td style="padding:4px 6px"><input type="number" id="ins_costo_' + n + '" placeholder="0.00" step="any" min="0" style="width:100%;text-align:right"></td>' +
+    '<td style="padding:4px 2px;text-align:center">' + delBtn + '</td>';
+  tbody.appendChild(tr);
+  setTimeout(function(){ var f = document.getElementById('ins_insumo_' + n); if(f) f.focus(); }, 40);
+}
+
+function removeInsumosProductoRow(n) {
+  var row = document.getElementById('ins-prod-row-' + n);
+  if (row) row.remove();
+}
+
+function submitInsumosOrden() {
+  var viewId  = _labPanelViewId;
+  var folio   = (document.getElementById('ins_folio')     || {}).value || '';
+  var fecha   = (document.getElementById('ins_fecha')     || {}).value || '';
+  var prov    = (document.getElementById('ins_proveedor') || {}).value || '';
+  var msgEl   = document.getElementById('lp-msg');
+  var btn     = document.getElementById('lp-save-btn');
+
+  if (!fecha) { msgEl.className='lp-msg lp-err'; msgEl.textContent='La fecha es requerida.'; return; }
+  if (!prov.trim()) { msgEl.className='lp-msg lp-err'; msgEl.textContent='El proveedor es requerido.'; return; }
+
+  var productos = [];
+  var tbody = document.getElementById('ins-productos-tbody');
+  if (tbody) {
+    tbody.querySelectorAll('tr[id^="ins-prod-row-"]').forEach(function(tr) {
+      var n = tr.id.replace('ins-prod-row-', '');
+      var insumo = ((document.getElementById('ins_insumo_' + n) || {}).value || '').trim();
+      if (!insumo) return;
+      productos.push({
+        insumo:   insumo,
+        cantidad: (document.getElementById('ins_cantidad_' + n) || {}).value || '',
+        unidad:   (document.getElementById('ins_unidad_'  + n) || {}).value || '',
+        costo:    (document.getElementById('ins_costo_'   + n) || {}).value || ''
+      });
+    });
+  }
+
+  if (productos.length === 0) { msgEl.className='lp-msg lp-err'; msgEl.textContent='Añade al menos un producto.'; return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Guardando…';
+  msgEl.className = 'lp-msg'; msgEl.textContent = '';
+
+  var fuente  = _viewFuente[viewId] || 'Insumos';
+  var periodo = currentFechaInicio ? currentFechaInicio.slice(0, 7) : (currentPeriodo || '');
+
+  var promise = Promise.resolve();
+  productos.forEach(function(p) {
+    promise = promise.then(function() {
+      var params = 'action=insert' +
+        '&sheet='   + encodeURIComponent(fuente) +
+        '&token='   + encodeURIComponent(getToken()) +
+        '&periodo=' + encodeURIComponent(periodo) +
+        '&' + encodeURIComponent('No. Orden') + '=' + encodeURIComponent(folio) +
+        '&Fecha='     + encodeURIComponent(fecha) +
+        '&Proveedor=' + encodeURIComponent(prov) +
+        '&Insumo='    + encodeURIComponent(p.insumo) +
+        '&Cantidad='  + encodeURIComponent(p.cantidad) +
+        '&Unidad='    + encodeURIComponent(p.unidad) +
+        '&Costo='     + encodeURIComponent(p.costo);
+      return fetch(APPS_SCRIPT_URL + '?' + params).then(function(r){ return r.json(); });
+    });
+  });
+
+  promise.then(function(last) {
+    btn.disabled = false;
+    btn.textContent = 'Guardar Orden';
+    if (last && (last.success || last.ok)) {
+      msgEl.className = 'lp-msg lp-ok';
+      msgEl.textContent = productos.length + ' producto(s) guardado(s) en ' + folio + '.';
+      setTimeout(function(){
+        closeLabPanel();
+        loadView(viewId, currentFechaInicio, currentFechaFin, true);
+      }, 1200);
+    } else {
+      msgEl.className = 'lp-msg lp-err';
+      msgEl.textContent = 'Error: ' + ((last && last.error) || 'respuesta inesperada');
+    }
+  }).catch(function(e){
+    btn.disabled = false;
+    btn.textContent = 'Guardar Orden';
+    msgEl.className = 'lp-msg lp-err';
+    msgEl.textContent = 'Error de red: ' + e.message;
+  });
 }
 
 function submitLabPanel() {
