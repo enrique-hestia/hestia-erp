@@ -2829,16 +2829,19 @@ function submitLabPanel() {
   var action = rowNum ? 'update' : 'append';
   var payload = { action: action, sheet: fuente, values: values, token: getToken() };
   if (rowNum) payload.rowNum = rowNum;
-  fetch(APPS_SCRIPT_URL, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(payload)
-  })
+  var params = (rowNum ? 'action=update' : 'action=insert') +
+    '&sheet=' + encodeURIComponent(fuente) +
+    '&token=' + encodeURIComponent(getToken()) +
+    (rowNum ? '&rowNum=' + rowNum : '&periodo=' + encodeURIComponent(currentFechaInicio ? currentFechaInicio.slice(0,7) : (currentPeriodo||'')));
+  Object.keys(values).forEach(function(k) {
+    params += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(values[k]);
+  });
+  fetch(APPS_SCRIPT_URL + '?' + params)
   .then(function(r){ return r.json(); })
   .then(function(d){
     btn.disabled = false;
     btn.textContent = rowNum ? 'Guardar cambios' : 'Crear registro';
-    if (d.ok) {
+    if (d.success || d.ok) {
       msgEl.className = 'lp-msg lp-ok';
       msgEl.textContent = rowNum ? 'Registro actualizado.' : 'Registro creado.';
       setTimeout(function(){
