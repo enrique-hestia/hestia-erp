@@ -1821,7 +1821,7 @@ function isConfigFuente(id) {
 
 function renderAjustes() {
   var s = getSession() || {};
-  var set = function(id, val) { var el = document.getElementById(id); if (el) el.textContent = val || '—'; };
+  var set = function(id, val) { var el = document.getElementById(id); if (el) el.textContent = val || '-'; };
   set('cfg-fe-version',   DASHBOARD_VERSION);
   set('cfg-api-version',  _apiVersion);
   set('cfg-api-url',      APPS_SCRIPT_URL);
@@ -1833,7 +1833,7 @@ function renderAjustes() {
   set('cfg-user',         s.nombre || s.email || 'Invitado');
   set('cfg-rol',          s.rol || '—');
   set('cfg-periodo',      currentFechaInicio && currentFechaFin
-        ? fmtDisplayDate(currentFechaInicio) + ' – ' + fmtDisplayDate(currentFechaFin)
+        ? fmtDisplayDate(currentFechaInicio) + ' - ' + fmtDisplayDate(currentFechaFin)
         : currentPeriodo || '—');
   set('cfg-cache-count',  Object.keys(viewCache).length + ' vistas');
   var syncEl = document.getElementById('sync-status-configuracion');
@@ -1845,7 +1845,7 @@ function renderAjustes() {
 
 async function loadView(viewId, fechaInicio, fechaFin, force) {
   // Ajustes es local — no necesita fetch al API
-  if (/^(configuracion|ajustes|config)$/i.test(viewId) || isConfigFuente(viewId)) { renderAjustes(); navigateTo('configuracion'); return; }
+  if (/^(configuracion|ajustes|config)$/i.test(viewId) || isConfigFuente(viewId)) { renderAjustes(); return; }
 
   var cacheKey = viewId + '_' + fechaInicio + '_' + fechaFin;
   var now = Date.now();
