@@ -2875,6 +2875,20 @@ function buildLabPanelFields(viewId, fuente, headers, row) {
       var typ = lpFieldType(f.h, val);
       var fullClass = lpIsFull(f.h) ? ' lp-full' : '';
       var safeName = 'lp_f_' + f.idx;
+      // Auto-generar No. Orden para nuevos registros de Insumos
+      if (!row && fuente === 'Insumos' && /no\.?\s*orden|folio/i.test(f.h)) {
+        var maxNum = 0;
+        if (typeof _insumosOrdenes !== 'undefined') {
+          _insumosOrdenes.forEach(function(o) {
+            var m = String(o.folio || '').match(/(\d+)$/);
+            if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
+          });
+        }
+        var nextFolio = 'L-' + String(maxNum + 1).padStart(3, '0');
+        html += '<div class="lp-field'+fullClass+'"><label>'+escHtml(f.h)+'</label>'
+          + '<input type="text" id="'+safeName+'" value="'+escHtml(nextFolio)+'" readonly style="opacity:.7;cursor:default"></div>';
+        return;
+      }
       var inputHtml;
       if (typ === 'select-yn') {
         var optSi = fmtVal === 'Si' || fmtVal === 'si' || fmtVal === 'SI' || fmtVal === 'true' ? ' selected' : '';
