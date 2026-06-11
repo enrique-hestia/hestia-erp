@@ -1522,7 +1522,7 @@ function renderLabResumen(data) {
       tbody.innerHTML = insumos.map(function(ins) {
         var costo = ins.costo ? '$' + Number(ins.costo).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
         return '<tr><td>' + ins.item + '</td><td>' + (ins.proveedor||'—') + '</td>' +
-          '<td>' + (ins.fecha||'—') + '</td><td>' + costo + '</td></tr>';
+          '<td>' + (ins.fecha ? fmtDisplayDate(ins.fecha) : '—') + '</td><td>' + costo + '</td></tr>';
       }).join('');
       if (sub) sub.textContent = insumos.length + ' registros';
     }
@@ -1938,6 +1938,8 @@ function renderCaptura(viewId, data) {
       var isCurrency = currencyExact[h] || currencyRe.test(h);
       if (isCurrency && val !== '' && !isNaN(Number(val)) && String(val).trim() !== '') {
         val = '$' + Number(val).toLocaleString('es-MX', {minimumFractionDigits:2, maximumFractionDigits:2});
+      } else if (val instanceof Date || (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(val))) {
+        val = fmtDisplayDate(val);
       }
       return '<td>' + val + '</td>';
     }).join('');
@@ -2770,6 +2772,24 @@ function buildLabPanelFields(viewId, fuente, headers, row) {
   return html;
 }
 
+/* Convierte cualquier valor fecha a dd/mm/aaaa (sin hora) */
+function fmtDisplayDate(val) {
+  if (!val && val !== 0) return '';
+  // Date object
+  if (val instanceof Date) {
+    var d = val.getDate(), m = val.getMonth()+1, y = val.getFullYear();
+    return String(d).padStart(2,'0') + '/' + String(m).padStart(2,'0') + '/' + y;
+  }
+  var s = String(val).trim();
+  if (!s || s === '0') return '';
+  // ISO string: 2024-09-20T... or 2024-09-20
+  var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return iso[3] + '/' + iso[2] + '/' + iso[1];
+  // Already dd/mm/yyyy
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) return s;
+  return s;
+}
+
 function escHtml(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -3111,7 +3131,7 @@ function renderEntMedOrders(viewId, data) {
   var svgEye = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
   tbody.innerHTML = ordenes.map(function(o, idx) {
     var totalFmt = '$' + o.total.toLocaleString('es-MX', {minimumFractionDigits:2, maximumFractionDigits:2});
-    var fechaFmt = o.fecha ? o.fecha.split('T')[0] : '—';
+    var fechaFmt = o.fecha ? fmtDisplayDate(o.fecha) : '—';
     return '<tr style="cursor:pointer" onclick="openOCDetalle(' + idx + ')" title="Ver detalle de ' + o.folio + '">' +
       '<td><span style="font-weight:700;color:var(--color-primary)">' + o.folio + '</span></td>' +
       '<td>' + fechaFmt + '</td>' +
@@ -3136,7 +3156,7 @@ function openOCDetalle(idx) {
   if (!o) return;
 
   document.getElementById('oc-detalle-title').textContent = o.folio;
-  var fechaFmt = o.fecha ? o.fecha.split('T')[0] : '';
+  var fechaFmt = o.fecha ? fmtDisplayDate(o.fecha) : '';
   document.getElementById('oc-detalle-sub').textContent =
     (fechaFmt ? 'Fecha: ' + fechaFmt + '  ·  ' : '') +
     (o.proveedor ? 'Proveedor: ' + o.proveedor + '  ·  ' : '') +
