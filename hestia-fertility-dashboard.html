@@ -142,6 +142,14 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 
 /* KPI CARDS */
 .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-4)}
+/* LAB RESUMEN */
+.lr-badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;white-space:nowrap}
+.lr-badge--meta{background:#e8f5e9;color:#2e7d32}
+.lr-badge--limit{background:#fff3e0;color:#e65100}
+.lr-kpi--ok .kpi-value{color:#2e7d32}
+.lr-kpi--warn .kpi-value{color:#e65100}
+.lr-ins-critico td{color:#c62828}
+.lr-ins-critico td:last-child{font-weight:700}
 .kpi-card{background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-lg);padding:var(--space-5);box-shadow:var(--shadow-sm);display:flex;flex-direction:column;gap:var(--space-3)}
 .kpi-header{display:flex;align-items:center;justify-content:space-between}
 .kpi-icon{width:36px;height:36px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center}
@@ -666,6 +674,98 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
       <tbody id="medTableBody"></tbody>
     </table>
   </div>
+</div>
+
+<!-- ══ VISTA: RESUMEN LABORATORIO ══ -->
+<div id="view-lab-resumen" class="view" style="display:none">
+
+  <!-- Fila 1: KPIs -->
+  <div class="kpi-grid" id="lr-kpi-grid" style="margin-bottom:var(--space-5)">
+
+    <div class="kpi-card" id="lr-kpi-fec">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div class="kpi-label">Fecundación 2PN</div>
+        <span class="lr-badge lr-badge--meta" title="Consenso de Viena">Meta ≥ 65%</span>
+      </div>
+      <div class="kpi-value" id="lr-fec-val">—</div>
+      <div class="kpi-sub" id="lr-fec-sub"></div>
+    </div>
+
+    <div class="kpi-card" id="lr-kpi-bla">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div class="kpi-label">Blastocistos</div>
+        <span class="lr-badge lr-badge--meta">Meta &gt; 40%</span>
+      </div>
+      <div class="kpi-value" id="lr-bla-val">—</div>
+      <div class="kpi-sub" id="lr-bla-sub"></div>
+    </div>
+
+    <div class="kpi-card" id="lr-kpi-fet">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div class="kpi-label">Supervivencia FET</div>
+        <span class="lr-badge lr-badge--meta">Meta ≥ 95%</span>
+      </div>
+      <div class="kpi-value" id="lr-fet-val">—</div>
+      <div class="kpi-sub" id="lr-fet-sub"></div>
+    </div>
+
+    <div class="kpi-card" id="lr-kpi-icsi">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div class="kpi-label">Daño ICSI</div>
+        <span class="lr-badge lr-badge--limit">Límite &lt; 5%</span>
+      </div>
+      <div class="kpi-value" id="lr-icsi-val">—</div>
+      <div class="kpi-sub" id="lr-icsi-sub"></div>
+    </div>
+
+  </div>
+
+  <!-- Fila 2: Gráficas -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-5);margin-bottom:var(--space-5)">
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Tendencia de Calidad Embrionaria</div>
+          <div class="card-sub">Últimos 6 meses</div>
+        </div>
+      </div>
+      <div class="chart-wrap" style="height:220px"><canvas id="lr-trend-chart"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Capacidad Tanques Crió</div>
+          <div class="card-sub">% de ocupación</div>
+        </div>
+      </div>
+      <div class="chart-wrap" style="height:220px"><canvas id="lr-tanks-chart"></canvas></div>
+    </div>
+
+  </div>
+
+  <!-- Fila 3: Tabla de insumos -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">Control de Insumos Críticos</div>
+        <div class="card-sub" id="lr-ins-sub">Alertas de vencimiento</div>
+      </div>
+    </div>
+    <table class="services-table" id="lr-ins-table">
+      <thead>
+        <tr>
+          <th>Insumo</th>
+          <th>Lote</th>
+          <th>Vencimiento</th>
+          <th>Estado</th>
+        </tr>
+      </thead>
+      <tbody id="lr-ins-body"></tbody>
+    </table>
+  </div>
+
 </div>
 
 <!-- ══ VISTA: LABORATORIOS / INSUMOS ══ -->
@@ -1270,6 +1370,146 @@ function renderMedicamentos(data) {
   });
 }
 
+/* ── RESUMEN LABORATORIO ─── */
+var _lrTrendChart, _lrTanksChart;
+
+function renderLabResumen(data) {
+  if (data && data.error) {
+    setStatus('Lab Resumen: ' + data.error, 'err');
+  }
+
+  var kpis   = (data && data.kpis)      || {};
+  var trend  = (data && data.tendencia) || { meses:[], fecundacion:[], blastocistos:[] };
+  var tanques = (data && data.tanques)  || [];
+  var insumos = (data && data.insumos)  || [];
+
+  // ── Helpers ──
+  function fmt(v) { return (v !== undefined && v !== null && v !== '') ? v + '%' : '—'; }
+  function kpiStatus(card, val, metaOk, invert) {
+    var el = document.getElementById(card);
+    if (!el || val === undefined || val === '') return;
+    var ok = invert ? val < metaOk : val >= metaOk;
+    el.classList.remove('lr-kpi--ok', 'lr-kpi--warn');
+    el.classList.add(ok ? 'lr-kpi--ok' : 'lr-kpi--warn');
+  }
+
+  // ── KPI cards ──
+  var periodo = kpis.mesPeriodo || '';
+  [
+    { val: 'fec', key: 'fecundacion',     card: 'lr-kpi-fec',  meta: 65,  invert: false },
+    { val: 'bla', key: 'blastocistos',    card: 'lr-kpi-bla',  meta: 40,  invert: false },
+    { val: 'fet', key: 'fetSupervivencia',card: 'lr-kpi-fet',  meta: 95,  invert: false },
+    { val: 'icsi',key: 'icsiDano',        card: 'lr-kpi-icsi', meta: 5,   invert: true  }
+  ].forEach(function(cfg) {
+    var v = kpis[cfg.key];
+    var valEl = document.getElementById('lr-' + cfg.val + '-val');
+    var subEl = document.getElementById('lr-' + cfg.val + '-sub');
+    if (valEl) valEl.textContent = fmt(v);
+    if (subEl) subEl.textContent = periodo;
+    kpiStatus(cfg.card, v, cfg.meta, cfg.invert);
+  });
+
+  // ── Gráfica de tendencia (líneas) ──
+  var ctxT = document.getElementById('lr-trend-chart');
+  if (ctxT) {
+    if (_lrTrendChart) _lrTrendChart.destroy();
+    _lrTrendChart = new Chart(ctxT, {
+      type: 'line',
+      data: {
+        labels: trend.meses,
+        datasets: [
+          {
+            label: '% Fecundación',
+            data: trend.fecundacion,
+            borderColor: '#c46a7a',
+            backgroundColor: 'rgba(196,106,122,0.1)',
+            tension: 0.4, fill: true, pointRadius: 4
+          },
+          {
+            label: '% Blastocistos',
+            data: trend.blastocistos,
+            borderColor: '#7b9eb5',
+            backgroundColor: 'rgba(123,158,181,0.08)',
+            tension: 0.4, fill: true, pointRadius: 4
+          }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          y: { min: 0, max: 100, ticks: { callback: function(v){ return v + '%'; } },
+               grid: { color: 'rgba(0,0,0,0.05)' } },
+          x: { grid: { display: false } }
+        },
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+          tooltip: { callbacks: { label: function(c){ return c.dataset.label + ': ' + c.parsed.y + '%'; } } }
+        }
+      }
+    });
+  }
+
+  // ── Gráfica de tanques (barras horizontales) ──
+  var ctxK = document.getElementById('lr-tanks-chart');
+  if (ctxK) {
+    if (_lrTanksChart) _lrTanksChart.destroy();
+    var tankColors = tanques.map(function(t) {
+      return t.ocupacion >= 90 ? '#c62828' : t.ocupacion >= 75 ? '#e65100' : '#2e7d32';
+    });
+    _lrTanksChart = new Chart(ctxK, {
+      type: 'bar',
+      data: {
+        labels: tanques.map(function(t){ return t.nombre; }),
+        datasets: [{
+          label: '% Ocupación',
+          data: tanques.map(function(t){ return t.ocupacion; }),
+          backgroundColor: tankColors,
+          borderRadius: 4,
+          barThickness: 22
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          x: { min: 0, max: 100,
+               ticks: { callback: function(v){ return v + '%'; } },
+               grid: { color: 'rgba(0,0,0,0.05)' } },
+          y: { grid: { display: false } }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: function(c){ return c.parsed.x + '% ocupado'; } } }
+        }
+      }
+    });
+  }
+
+  // ── Tabla de insumos ──
+  var tbody = document.getElementById('lr-ins-body');
+  var sub   = document.getElementById('lr-ins-sub');
+  if (tbody) {
+    if (!insumos.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--color-text-muted);padding:var(--space-5)">Sin insumos registrados</td></tr>';
+    } else {
+      tbody.innerHTML = insumos.map(function(ins) {
+        var critico = ins.estado === 'critico' || ins.estado === 'crítico';
+        var estadoBadge = critico
+          ? '<span style="color:#c62828;font-weight:700">⚠ Crítico</span>'
+          : '<span style="color:#2e7d32">✓ OK</span>';
+        return '<tr class="' + (critico ? 'lr-ins-critico' : '') + '">' +
+          '<td>' + ins.item + '</td>' +
+          '<td>' + (ins.lote || '—') + '</td>' +
+          '<td>' + (ins.vencimiento || '—') + '</td>' +
+          '<td>' + estadoBadge + '</td>' +
+          '</tr>';
+      }).join('');
+      var criticos = insumos.filter(function(i){ return i.estado === 'critico' || i.estado === 'crítico'; }).length;
+      if (sub) sub.textContent = insumos.length + ' insumos · ' + criticos + ' crítico(s)';
+    }
+  }
+}
+
 /* ── LABORATORIOS / INSUMOS ─── */
 function renderLaboratorios(data) {
   var lab = data.rows || data.laboratorios || [];
@@ -1509,8 +1749,9 @@ function renderViewData(viewId, data) {
     turismo:      function(d) { renderTurismo(d); },
     rentabilidad: function(d) { renderRentabilidad(d); },
     medicamentos: function(d) { renderMedicamentos(d); },
-    'med-resumen': function(d) { renderMedDashboard(d); },
-    laboratorios: function(d) { renderLaboratorios(d); },
+    'med-resumen':  function(d) { renderMedDashboard(d); },
+    'lab-resumen':  function(d) { renderLabResumen(d); },
+    laboratorios:  function(d) { renderLaboratorios(d); },
     ajustes:      function()  {
       var el = document.getElementById('sync-status-ajustes');
       if (el) el.textContent = document.getElementById('sync-status').textContent;
