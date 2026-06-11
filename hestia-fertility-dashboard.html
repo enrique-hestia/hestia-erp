@@ -820,7 +820,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 </div>
 
 <!-- ══ VISTA: AJUSTES ══ -->
-<div id="view-ajustes" class="view" style="display:none">
+<div id="view-configuracion" class="view" style="display:none">
   <div style="max-width:720px;display:flex;flex-direction:column;gap:var(--space-5)">
 
     <!-- Encabezado de sección -->
@@ -890,7 +890,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
         </div>
         <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">
           <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Última sincronización</div>
-          <div style="font-size:var(--text-sm);font-weight:700"><span id="sync-status-ajustes">—</span></div>
+          <div style="font-size:var(--text-sm);font-weight:700"><span id="sync-status-configuracion">—</span></div>
         </div>
       </div>
     </div>
@@ -1179,7 +1179,7 @@ function renderView(view, data) {
   if (view === 'servicios')    renderServicios(data);
   if (view === 'turismo')      renderTurismo(data);
   if (view === 'rentabilidad') renderRentabilidad(data);
-  if (view === 'ajustes')      renderAjustes();
+  if (view === 'configuracion')      renderAjustes();
 }
 
 /* ── INGRESOS ─── */
@@ -1655,7 +1655,7 @@ function getCS(){ return getComputedStyle(document.documentElement); }
 function cssVar(v){ return getCS().getPropertyValue(v).trim(); }
 
 function setStatus(msg, type) {
-  ['sync-status','sync-status-ajustes'].forEach(function(id){
+  ['sync-status','sync-status-configuracion'].forEach(function(id){
     var el = document.getElementById(id);
     if(el){ el.textContent = msg; el.style.color = type==='err' ? 'var(--color-amber)' : 'var(--color-text-faint)'; }
   });
@@ -1680,7 +1680,7 @@ const VIEW_TITLES = {
   resumen:'Resumen Financiero', ingresos:'Ingresos', gastos:'Gastos Operativos',
   costos:'Costos', pacientes:'Pacientes', servicios:'Servicios',
   turismo:'Turismo Médico', rentabilidad:'Rentabilidad',
-  inventarios:'Inventarios', laboratorios:'Laboratorios', ajustes:'Configuración'
+  inventarios:'Inventarios', laboratorios:'Laboratorios', configuracion:'Configuración'
 };
 
 /* ── Carga menú y rango de fechas por defecto ─── */
@@ -1830,7 +1830,7 @@ function renderAjustes() {
         ? fmtDisplayDate(currentFechaInicio) + ' – ' + fmtDisplayDate(currentFechaFin)
         : currentPeriodo || '—');
   set('cfg-cache-count',  Object.keys(viewCache).length + ' vistas');
-  var syncEl = document.getElementById('sync-status-ajustes');
+  var syncEl = document.getElementById('sync-status-configuracion');
   var mainSync = document.getElementById('sync-status');
   if (syncEl && mainSync) syncEl.textContent = mainSync.textContent;
   var label = document.getElementById('cfg-updated-label');
@@ -1839,7 +1839,7 @@ function renderAjustes() {
 
 async function loadView(viewId, fechaInicio, fechaFin, force) {
   // Ajustes es local — no necesita fetch al API
-  if (viewId === 'ajustes') { renderAjustes(); return; }
+  if (viewId === 'configuracion') { renderAjustes(); return; }
 
   var cacheKey = viewId + '_' + fechaInicio + '_' + fechaFin;
   var now = Date.now();
@@ -1888,7 +1888,7 @@ function renderViewData(viewId, data) {
     'med-resumen':  function(d) { renderMedDashboard(d); },
     'lab-resumen':  function(d) { renderLabResumen(d); },
     laboratorios:  function(d) { renderLaboratorios(d); },
-    ajustes:      function()  {
+    configuracion:      function()  {
       renderAjustes();
     }
   };
