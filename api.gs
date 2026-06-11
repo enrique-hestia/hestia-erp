@@ -59,14 +59,19 @@ function getRolConfig(ss, rol) {
 // Mapeo: nombre de pestaña → ID del spreadsheet externo donde se lee/escribe
 // Agregar aquí cualquier hoja de captura futura
 var LAB_SS_ID = '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ';
+var MED_SS_ID = '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM';
+// ⚠️ Reemplaza con el ID real del spreadsheet de Quirofano cuando lo crees
+var QX_SS_ID  = LAB_SS_ID;  // placeholder — apunta al lab por ahora
 
 var CAPTURA_SHEETS = {
-  'Medicamentos':    '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
-  'Orden_Compra':    '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
-  'Ent. Med':        '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
-  'Lista Med':       '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
-  'Estimulacion':    '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
-  'Estimulación':    '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
+  // ── Medicamentos ─────────────────────────────────────────────
+  'Medicamentos':    MED_SS_ID,
+  'Orden_Compra':    MED_SS_ID,
+  'Ent. Med':        MED_SS_ID,
+  'Lista Med':       MED_SS_ID,
+  'Estimulacion':    MED_SS_ID,
+  'Estimulación':    MED_SS_ID,
+  'Salidas Med':     MED_SS_ID,
   // ── Laboratorio ──────────────────────────────────────────────
   'Resumen':         LAB_SS_ID,
   'ART Lab':         LAB_SS_ID,
@@ -76,15 +81,18 @@ var CAPTURA_SHEETS = {
   'Inventario Crío': LAB_SS_ID,
   'Inventario Crio': LAB_SS_ID,
   'Insumos':         LAB_SS_ID,
+  'Salidas Lab':     LAB_SS_ID,
+  // ── Quirofano ────────────────────────────────────────────────
+  'Insumos Qx':      QX_SS_ID,
+  'Salidas Qx':      QX_SS_ID,
   // ── Otras hojas ──────────────────────────────────────────────
   'Pacientes':       '1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio',
   'Productos':       '1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY'
 };
-// Aliases: si el menú usa un nombre alternativo, se traduce al nombre real de la pestaña
-// La clave es lo que viene del menú, el valor es el nombre exacto de la pestaña en Sheets
+// Aliases: nombre alternativo del menú → nombre exacto de la pestaña en Sheets
 var SHEET_ALIASES = {
   'Orden_Compra':  'Ent. Med',
-  'Estimulacion':  'Estimulación'   // sin acento → con acento (ajustar si es al revés)
+  'Estimulacion':  'Estimulación'
 };
 // Fallback si la hoja no está en el mapeo (usa el sheet principal de Hestia ERP)
 var CAPTURA_SHEET_ID_DEFAULT = SHEET_ID;
@@ -444,12 +452,16 @@ function readViewData(ss, viewId, fechaInicio, fechaFin) {
     return readMensualData(ss, fechaInicio, fechaFin, viewId);
   }
 
-  if (fuente === 'med-dashboard' || viewId === 'med-resumen') {
+  if (fuente === 'med-dashboard' || viewId === 'med-resumen' || viewId === 'prod-medicamentos') {
     return readMedDashboard(ss, fechaInicio, fechaFin);
   }
 
-  if (fuente === 'lab-resumen' || viewId === 'lab-resumen') {
+  if (fuente === 'lab-resumen' || viewId === 'lab-resumen' || viewId === 'lab-resumen-dash') {
     return readLabResumen(fechaInicio, fechaFin);
+  }
+
+  if (fuente === 'qx-resumen' || viewId === 'qx-resumen') {
+    return readQxResumen(fechaInicio, fechaFin);
   }
 
   return readCapturaData(ss, fuente, viewId, fechaInicio, fechaFin);
@@ -631,6 +643,39 @@ function readLabResumen(fechaInicio, fechaFin) {
     return { view: 'lab-resumen', fuente: 'lab-resumen', error: ex.message,
              kpis: {}, tendencia: { meses:[], ciclos:[], fecundacion:[], fetSupervivencia:[] },
              tanques: [], insumos: [] };
+  }
+}
+
+/* ══ DASHBOARD QUIROFANO ════════════════════════════════════════
+   Placeholder — ampliar cuando se cree el spreadsheet de Qx
+   ══════════════════════════════════════════════════════════════ */
+function readQxResumen(fechaInicio, fechaFin) {
+  try {
+    var ssQx = SpreadsheetApp.openById(QX_SS_ID);
+    // Intentar leer hoja "Insumos Qx" para conteos básicos
+    var insSheet = findSheet(ssQx, 'Insumos Qx');
+    var totalInsumos = 0, totalCosto = 0;
+    if (insSheet) {
+      var allRows = insSheet.getDataRange().getValues();
+      var hdrs = allRows[0];
+      var colCosto = hdrs.indexOf('Costo');
+      allRows.slice(1).forEach(function(r) {
+        if (r[0]) {
+          totalInsumos++;
+          if (colCosto >= 0 && r[colCosto]) totalCosto += parseFloat(r[colCosto]) || 0;
+        }
+      });
+    }
+    return {
+      view: 'qx-resumen', fuente: 'qx-resumen',
+      kpis: [
+        { label: 'Insumos registrados', value: totalInsumos, format: 'number', icon: 'package' },
+        { label: 'Costo total insumos', value: totalCosto,   format: 'currency', icon: 'dollar-sign' }
+      ],
+      rows: [], headers: []
+    };
+  } catch(ex) {
+    return { view: 'qx-resumen', fuente: 'qx-resumen', kpis: [], rows: [], headers: [], error: ex.message };
   }
 }
 
