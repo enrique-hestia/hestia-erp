@@ -58,16 +58,27 @@ function getRolConfig(ss, rol) {
 
 // Mapeo: nombre de pestaña → ID del spreadsheet externo donde se lee/escribe
 // Agregar aquí cualquier hoja de captura futura
+var LAB_SS_ID = '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ';
+
 var CAPTURA_SHEETS = {
-  'Medicamentos':  '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
-  'Orden_Compra':  '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
-  'Ent. Med':      '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
-  'Lista Med':     '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
-  'Estimulacion':  '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
-  'Estimulación':  '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
-  'Insumos':       '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ',
-  'Pacientes':     '1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio',
-  'Productos':     '1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY'
+  'Medicamentos':    '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
+  'Orden_Compra':    '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
+  'Ent. Med':        '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
+  'Lista Med':       '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
+  'Estimulacion':    '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
+  'Estimulación':    '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM',
+  // ── Laboratorio ──────────────────────────────────────────────
+  'Resumen':         LAB_SS_ID,
+  'ART Lab':         LAB_SS_ID,
+  'FET':             LAB_SS_ID,
+  'Andrología':      LAB_SS_ID,
+  'Andrologia':      LAB_SS_ID,
+  'Inventario Crío': LAB_SS_ID,
+  'Inventario Crio': LAB_SS_ID,
+  'Insumos':         LAB_SS_ID,
+  // ── Otras hojas ──────────────────────────────────────────────
+  'Pacientes':       '1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio',
+  'Productos':       '1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY'
 };
 // Aliases: si el menú usa un nombre alternativo, se traduce al nombre real de la pestaña
 // La clave es lo que viene del menú, el valor es el nombre exacto de la pestaña en Sheets
@@ -95,8 +106,23 @@ function doGet(e) {
       var sid = (e && e.parameter.sid) || CAPTURA_SHEETS['Medicamentos'];
       try {
         var ssTabs = SpreadsheetApp.openById(sid);
-        var tabs   = ssTabs.getSheets().map(function(s){ return s.getName(); });
+        var tabs   = ssTabs.getSheets().map(function(s){
+          return { name: s.getName(), gid: s.getSheetId() };
+        });
         return jsonResponse({ spreadsheetId: sid, tabs: tabs });
+      } catch(ex) { return jsonResponse({ error: ex.message }); }
+    }
+
+    // labinspect: lee las primeras filas del spreadsheet de Lab (sin auth, solo debug)
+    if (action === 'labinspect') {
+      try {
+        var ssLab   = SpreadsheetApp.openById('1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ');
+        var allShts = ssLab.getSheets();
+        var result  = allShts.map(function(sh) {
+          var preview = sh.getRange(1, 1, Math.min(3, sh.getLastRow()), Math.min(10, sh.getLastColumn())).getValues();
+          return { name: sh.getName(), gid: sh.getSheetId(), preview: preview };
+        });
+        return jsonResponse({ sheets: result });
       } catch(ex) { return jsonResponse({ error: ex.message }); }
     }
 
@@ -395,102 +421,179 @@ function readViewData(ss, viewId, fechaInicio, fechaFin) {
 
 /* ══════════════════════════════════════════════════════════════
    RESUMEN LABORATORIO — Dashboard clínico de calidad embrionaria
-   Spreadsheet: https://docs.google.com/spreadsheets/d/1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ
+   Fuente: spreadsheet Lab (LAB_SS_ID)
+   Hojas leídas: Resumen, ART Lab, FET, Inventario Crío, Insumos
    ══════════════════════════════════════════════════════════════ */
 function readLabResumen(fechaInicio, fechaFin) {
 
-  // ── CONFIGURACIÓN ─────────────────────────────────────────────
-  // Cambia solo estos valores si renombras pestañas o mueves columnas
-  var SS_ID         = '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ';
-  var HOJA_KPI      = 'KPI Lab';       // Pestaña con indicadores clínicos por mes
-  var HOJA_TANQUES  = 'Tanques Crio';  // Pestaña con capacidad de tanques criógenicos
-  var HOJA_INSUMOS  = 'Insumos';       // Pestaña con alertas de insumos críticos
+  // ── CONFIGURACIÓN DE COLUMNAS ──────────────────────────────────
+  // ART Lab: encabezados en fila 1 + fila 2 fusionadas (A=0, B=1…)
+  // Ajusta estos índices si agregas/mueves columnas en la hoja
+  var ART_COL_MES       = 0;   // A: Mes-Año
+  var ART_COL_FECHA     = 1;   // B: Date
+  var ART_COL_OOCITOS   = 9;   // J: # oocytes (recuperados)
+  // Cuando conozcas las columnas de 2PN y blastocistos, actualiza:
+  var ART_COL_2PN       = -1;  // -1 = no configurado aún
+  var ART_COL_BLASTO    = -1;  // -1 = no configurado aún
+  var ART_COL_ICSI_DANO = -1;  // -1 = no configurado aún
 
-  // Índices 0-based de columnas en HOJA_KPI (A=0, B=1, C=2…)
-  var KPI_COL_MES         = 0;  // A: Mes o periodo (ej. "2026-05")
-  var KPI_COL_FECUNDACION = 1;  // B: % Fecundación 2PN  (valor entre 0 y 1 o 0-100)
-  var KPI_COL_BLASTO      = 2;  // C: % Blastocistos
-  var KPI_COL_FET         = 3;  // D: % Supervivencia FET
-  var KPI_COL_ICSI        = 4;  // E: % Daño ICSI
+  // FET: encabezado en fila 2 (fila 1 vacía)
+  var FET_COL_FECHA    = 0;  // A: Fecha
+  var FET_COL_SURVIVED = 5;  // F: Survived ("Si"/"No")
+  var FET_COL_BETA     = 6;  // G: Beta
+  var FET_COL_PREG     = 7;  // H: Clinical Preg.
 
-  // Índices en HOJA_TANQUES
-  var TQ_COL_NOMBRE   = 0;  // A: Nombre del tanque
-  var TQ_COL_OCUPACION = 1; // B: % Ocupación (0-100)
+  // Inventario Crío: encabezado en fila 1
+  var CRIO_COL_NOMBRE  = 0;  // A: Nombre paciente
+  var CRIO_COL_FECHA   = 1;  // B: Fecha Crío
+  var CRIO_COL_OOV     = 2;  // C: Oov (ovocitos)
+  var CRIO_COL_EMB     = 3;  // D: Emb (embriones)
 
-  // Índices en HOJA_INSUMOS
-  var INS_COL_ITEM   = 0;  // A: Nombre del insumo
-  var INS_COL_LOTE   = 1;  // B: Número de lote
-  var INS_COL_VENCE  = 2;  // C: Fecha de vencimiento
-  var INS_COL_ESTADO = 3;  // D: Estado ("critico" u "ok")
+  // Insumos: encabezado en fila 2 (fila 1 vacía); col A vacía → datos desde col B
+  var INS_COL_INSUMO   = 3;  // D: Insumo
+  var INS_COL_PROV     = 4;  // E: Proveedor
+  var INS_COL_FECHA    = 2;  // C: Fecha
+  var INS_COL_COSTO    = 8;  // I: Costo
   // ─────────────────────────────────────────────────────────────
 
+  function pct(num, den) {
+    if (!den || den === 0) return null;
+    return Math.round((num / den) * 1000) / 10;
+  }
+  function fmtFecha(v) {
+    if (!v) return '';
+    if (v instanceof Date) return fmtDate(v);
+    var d = new Date(v);
+    return isNaN(d.getTime()) ? String(v) : fmtDate(d);
+  }
+  function mesLabel(v) {
+    if (!v) return '';
+    if (v instanceof Date) return (v.getFullYear() + '-' + String(v.getMonth()+1).padStart(2,'0'));
+    var s = String(v);
+    var m = s.match(/(\d{4})-(\d{2})/);
+    return m ? m[0] : s.slice(0,7);
+  }
+
   try {
-    var ss = SpreadsheetApp.openById(SS_ID);
+    var ssLab = SpreadsheetApp.openById(LAB_SS_ID);
 
-    // ── KPIs: leer historial y tomar último mes disponible ──
-    var shKpi   = ss.getSheetByName(HOJA_KPI);
-    var kpiData = shKpi ? shKpi.getDataRange().getValues().slice(1) : [];
-    // Filtrar filas no vacías
-    kpiData = kpiData.filter(function(r) { return String(r[KPI_COL_MES]).trim() !== ''; });
+    // ── 1. Leer ART Lab (encabezados fusionados fila 1+2, datos desde fila 3) ──
+    var shArt  = findSheet(ssLab, 'ART Lab');
+    var artRaw = shArt ? shArt.getDataRange().getValues() : [];
+    // Fusionar headers de fila 1 y fila 2
+    var artData = artRaw.slice(2).filter(function(r) {
+      return r.some(function(c) { return String(c).trim() !== ''; });
+    });
+    var totalCiclos = artData.length;
+    var totalOocitos = artData.reduce(function(s,r) { return s + (Number(r[ART_COL_OOCITOS])||0); }, 0);
 
-    var lastRow   = kpiData.length ? kpiData[kpiData.length - 1] : [];
-    var trend6    = kpiData.slice(-6); // Últimos 6 meses para la gráfica
+    // % Fecundación y Blastocistos: calcular si las columnas están configuradas
+    var total2PN   = ART_COL_2PN   > -1 ? artData.reduce(function(s,r){ return s+(Number(r[ART_COL_2PN])||0); },0) : null;
+    var totalBlasto= ART_COL_BLASTO > -1 ? artData.reduce(function(s,r){ return s+(Number(r[ART_COL_BLASTO])||0); },0) : null;
 
-    // Normalizar porcentaje: si viene como 0.72 lo convierte a 72
-    function pct(v) {
-      var n = parseFloat(v) || 0;
-      return n <= 1 ? Math.round(n * 1000) / 10 : Math.round(n * 10) / 10;
-    }
+    // Tendencia por mes desde ART Lab
+    var artPorMes = {};
+    artData.forEach(function(r) {
+      var mes = mesLabel(r[ART_COL_FECHA] || r[ART_COL_MES]);
+      if (!mes) return;
+      if (!artPorMes[mes]) artPorMes[mes] = { ciclos:0, oocitos:0, pn2:0, blasto:0 };
+      artPorMes[mes].ciclos++;
+      artPorMes[mes].oocitos += Number(r[ART_COL_OOCITOS]) || 0;
+      if (ART_COL_2PN    > -1) artPorMes[mes].pn2    += Number(r[ART_COL_2PN])    || 0;
+      if (ART_COL_BLASTO > -1) artPorMes[mes].blasto += Number(r[ART_COL_BLASTO]) || 0;
+    });
+    var mesesArt = Object.keys(artPorMes).sort().slice(-6);
 
-    // ── Tanques criógenicos ──
-    var shTq   = ss.getSheetByName(HOJA_TANQUES);
-    var tqData = shTq ? shTq.getDataRange().getValues().slice(1) : [];
+    // ── 2. Leer FET (encabezado en fila 2, datos desde fila 3) ──
+    var shFet  = findSheet(ssLab, 'FET');
+    var fetRaw = shFet ? shFet.getDataRange().getValues() : [];
+    var fetData = fetRaw.slice(2).filter(function(r) {
+      return r.some(function(c) { return String(c).trim() !== ''; });
+    });
+    var totalFet      = fetData.length;
+    var fetSurvividos = fetData.filter(function(r) {
+      return String(r[FET_COL_SURVIVED]).trim().toLowerCase() === 'si';
+    }).length;
+    var fetPregnancy  = fetData.filter(function(r) {
+      return String(r[FET_COL_PREG]).trim().toLowerCase() === 'si';
+    }).length;
 
-    // ── Insumos críticos ──
-    var shIns   = ss.getSheetByName(HOJA_INSUMOS);
-    var insData = shIns ? shIns.getDataRange().getValues().slice(1) : [];
+    // Tendencia FET por mes
+    var fetPorMes = {};
+    fetData.forEach(function(r) {
+      var mes = mesLabel(r[FET_COL_FECHA]);
+      if (!mes) return;
+      if (!fetPorMes[mes]) fetPorMes[mes] = { total:0, survived:0 };
+      fetPorMes[mes].total++;
+      if (String(r[FET_COL_SURVIVED]).trim().toLowerCase() === 'si') fetPorMes[mes].survived++;
+    });
+
+    // ── 3. Inventario Crío (encabezado fila 1, datos desde fila 2) ──
+    var shCrio  = findSheet(ssLab, 'Inventario Crío');
+    var crioRaw = shCrio ? shCrio.getDataRange().getValues() : [];
+    var crioData = crioRaw.slice(1).filter(function(r) {
+      return String(r[CRIO_COL_NOMBRE]).trim() !== '';
+    });
+    var totalOvCrio  = crioData.reduce(function(s,r){ return s+(Number(r[CRIO_COL_OOV])||0); },0);
+    var totalEmbCrio = crioData.reduce(function(s,r){ return s+(Number(r[CRIO_COL_EMB])||0); },0);
+
+    // ── 4. Insumos (encabezado fila 2, datos desde fila 3) ──
+    var shIns  = findSheet(ssLab, 'Insumos');
+    var insRaw = shIns ? shIns.getDataRange().getValues() : [];
+    var insData = insRaw.slice(2).filter(function(r) {
+      return String(r[INS_COL_INSUMO]).trim() !== '';
+    });
+
+    // ── Construir respuesta ──
+    var fetPct = pct(fetSurvividos, totalFet);
+    var fecPct = (ART_COL_2PN > -1) ? pct(total2PN, totalOocitos) : null;
+    var blaPct = (ART_COL_BLASTO > -1) ? pct(totalBlasto, total2PN) : null;
 
     return {
       view:   'lab-resumen',
       fuente: 'lab-resumen',
       kpis: {
-        fecundacion:    pct(lastRow[KPI_COL_FECUNDACION]),
-        blastocistos:   pct(lastRow[KPI_COL_BLASTO]),
-        fetSupervivencia: pct(lastRow[KPI_COL_FET]),
-        icsiDano:       pct(lastRow[KPI_COL_ICSI]),
-        mesPeriodo:     String(lastRow[KPI_COL_MES] || '')
+        fecundacion:      fecPct,
+        blastocistos:     blaPct,
+        fetSupervivencia: fetPct,
+        icsiDano:         null,           // configurar ART_COL_ICSI_DANO
+        totalCiclos:      totalCiclos,
+        totalFet:         totalFet,
+        fetPregnancy:     fetPregnancy,
+        totalOvCrio:      totalOvCrio,
+        totalEmbCrio:     totalEmbCrio,
+        mesPeriodo:       mesesArt.length ? mesesArt[mesesArt.length-1] : ''
       },
       tendencia: {
-        meses:       trend6.map(function(r) { return String(r[KPI_COL_MES]); }),
-        fecundacion: trend6.map(function(r) { return pct(r[KPI_COL_FECUNDACION]); }),
-        blastocistos: trend6.map(function(r) { return pct(r[KPI_COL_BLASTO]); })
-      },
-      tanques: tqData
-        .filter(function(r) { return String(r[TQ_COL_NOMBRE]).trim() !== ''; })
-        .map(function(r) {
-          return { nombre: String(r[TQ_COL_NOMBRE]), ocupacion: parseFloat(r[TQ_COL_OCUPACION]) || 0 };
+        meses:        mesesArt,
+        ciclos:       mesesArt.map(function(m){ return (artPorMes[m]||{}).ciclos||0; }),
+        fecundacion:  mesesArt.map(function(m){
+          var d = artPorMes[m]||{}; return ART_COL_2PN>-1 ? pct(d.pn2||0, d.oocitos||0) : null;
         }),
-      insumos: insData
-        .filter(function(r) { return String(r[INS_COL_ITEM]).trim() !== ''; })
-        .map(function(r) {
-          var raw = r[INS_COL_VENCE];
-          var fechaStr = '';
-          if (raw instanceof Date) {
-            fechaStr = fmtDate(raw);
-          } else if (raw) {
-            fechaStr = String(raw);
-          }
-          return {
-            item:        String(r[INS_COL_ITEM]),
-            lote:        String(r[INS_COL_LOTE] || ''),
-            vencimiento: fechaStr,
-            estado:      String(r[INS_COL_ESTADO] || 'ok').toLowerCase()
-          };
+        fetSupervivencia: mesesArt.map(function(m){
+          var d = fetPorMes[m]||{}; return pct(d.survived||0, d.total||0);
         })
+      },
+      tanques: crioData.slice(0,10).map(function(r) {
+        return {
+          nombre: String(r[CRIO_COL_NOMBRE]).split(' ').slice(0,2).join(' '),
+          oocitos: Number(r[CRIO_COL_OOV])||0,
+          embriones: Number(r[CRIO_COL_EMB])||0
+        };
+      }),
+      insumos: insData.map(function(r) {
+        return {
+          item:        String(r[INS_COL_INSUMO]),
+          proveedor:   String(r[INS_COL_PROV] || ''),
+          fecha:       fmtFecha(r[INS_COL_FECHA]),
+          costo:       Number(r[INS_COL_COSTO]) || 0,
+          estado:      'ok'
+        };
+      })
     };
   } catch(ex) {
     return { view: 'lab-resumen', fuente: 'lab-resumen', error: ex.message,
-             kpis: {}, tendencia: { meses:[], fecundacion:[], blastocistos:[] },
+             kpis: {}, tendencia: { meses:[], ciclos:[], fecundacion:[], fetSupervivencia:[] },
              tanques: [], insumos: [] };
   }
 }
@@ -685,7 +788,45 @@ function readCapturaData(ss, nombreHoja, viewId, fechaInicio, fechaFin) {
   var allRows = hoja.getDataRange().getValues();
   if (allRows.length < 1) return { view: viewId, headers: [], rows: [] };
 
-  var headerRow = allRows[0];
+  // ── Detección inteligente de fila de encabezado ────────────────
+  // Algunas hojas tienen fila 1 vacía (FET, Insumos) o encabezados
+  // divididos entre fila 1 y fila 2 (ART Lab). Se detecta automáticamente.
+  function countFilled(row) {
+    return row.filter(function(c) { return String(c).trim() !== ''; }).length;
+  }
+  var r0 = countFilled(allRows[0]);
+  var r1 = allRows.length > 1 ? countFilled(allRows[1]) : 0;
+  var headerRow, dataStart;
+
+  if (r0 === 0) {
+    // Fila 1 vacía → encabezado en fila 2 (FET, Insumos)
+    headerRow  = allRows[1] || [];
+    dataStart  = 2;
+  } else if (r0 > 0 && r1 > 0) {
+    // Ambas filas tienen datos → verificar si son encabezados complementarios
+    // (sin solapamiento de celdas llenas, patrón ART Lab)
+    var complementario = allRows[0].every(function(v, i) {
+      var v0 = String(v).trim();
+      var v1 = String((allRows[1][i] !== undefined ? allRows[1][i] : '')).trim();
+      return !(v0 && v1); // No hay posición donde ambas filas tengan valor
+    });
+    if (complementario) {
+      // Fusionar fila 1 y fila 2 como encabezado único (ART Lab)
+      headerRow = allRows[0].map(function(v, i) {
+        return String(v).trim() || String(allRows[1][i] !== undefined ? allRows[1][i] : '').trim();
+      });
+      dataStart = 2;
+    } else {
+      // Fila 1 tiene encabezados reales; fila 2 es la primera fila de datos
+      headerRow = allRows[0];
+      dataStart = 1;
+    }
+  } else {
+    // Caso normal: fila 1 = encabezados
+    headerRow = allRows[0];
+    dataStart = 1;
+  }
+
   // Detectar columna Periodo oculta en col A (se excluye de la vista)
   var tienePeriodo = String(headerRow[0]).trim().toLowerCase() === 'periodo';
   var colStart = tienePeriodo ? 1 : 0;
@@ -694,8 +835,8 @@ function readCapturaData(ss, nombreHoja, viewId, fechaInicio, fechaFin) {
     .filter(function(h) { return h !== ''; });
 
   // Incluir todas las filas no vacías (sin filtro de fechas)
-  var dataRowsWithNum = allRows.slice(1)
-    .map(function(r, i) { return { data: r, rowNum: i + 2 }; })
+  var dataRowsWithNum = allRows.slice(dataStart)
+    .map(function(r, i) { return { data: r, rowNum: i + dataStart + 1 }; })
     .filter(function(item) {
       return item.data.some(function(c) { return String(c).trim() !== ''; });
     });
