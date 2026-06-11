@@ -386,7 +386,113 @@ function readViewData(ss, viewId, fechaInicio, fechaFin) {
     return readMedDashboard(ss, fechaInicio, fechaFin);
   }
 
+  if (fuente === 'lab-resumen') {
+    return readLabResumen(fechaInicio, fechaFin);
+  }
+
   return readCapturaData(ss, fuente, viewId, fechaInicio, fechaFin);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   RESUMEN LABORATORIO — Dashboard clínico de calidad embrionaria
+   Spreadsheet: https://docs.google.com/spreadsheets/d/1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ
+   ══════════════════════════════════════════════════════════════ */
+function readLabResumen(fechaInicio, fechaFin) {
+
+  // ── CONFIGURACIÓN ─────────────────────────────────────────────
+  // Cambia solo estos valores si renombras pestañas o mueves columnas
+  var SS_ID         = '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ';
+  var HOJA_KPI      = 'KPI Lab';       // Pestaña con indicadores clínicos por mes
+  var HOJA_TANQUES  = 'Tanques Crio';  // Pestaña con capacidad de tanques criógenicos
+  var HOJA_INSUMOS  = 'Insumos';       // Pestaña con alertas de insumos críticos
+
+  // Índices 0-based de columnas en HOJA_KPI (A=0, B=1, C=2…)
+  var KPI_COL_MES         = 0;  // A: Mes o periodo (ej. "2026-05")
+  var KPI_COL_FECUNDACION = 1;  // B: % Fecundación 2PN  (valor entre 0 y 1 o 0-100)
+  var KPI_COL_BLASTO      = 2;  // C: % Blastocistos
+  var KPI_COL_FET         = 3;  // D: % Supervivencia FET
+  var KPI_COL_ICSI        = 4;  // E: % Daño ICSI
+
+  // Índices en HOJA_TANQUES
+  var TQ_COL_NOMBRE   = 0;  // A: Nombre del tanque
+  var TQ_COL_OCUPACION = 1; // B: % Ocupación (0-100)
+
+  // Índices en HOJA_INSUMOS
+  var INS_COL_ITEM   = 0;  // A: Nombre del insumo
+  var INS_COL_LOTE   = 1;  // B: Número de lote
+  var INS_COL_VENCE  = 2;  // C: Fecha de vencimiento
+  var INS_COL_ESTADO = 3;  // D: Estado ("critico" u "ok")
+  // ─────────────────────────────────────────────────────────────
+
+  try {
+    var ss = SpreadsheetApp.openById(SS_ID);
+
+    // ── KPIs: leer historial y tomar último mes disponible ──
+    var shKpi   = ss.getSheetByName(HOJA_KPI);
+    var kpiData = shKpi ? shKpi.getDataRange().getValues().slice(1) : [];
+    // Filtrar filas no vacías
+    kpiData = kpiData.filter(function(r) { return String(r[KPI_COL_MES]).trim() !== ''; });
+
+    var lastRow   = kpiData.length ? kpiData[kpiData.length - 1] : [];
+    var trend6    = kpiData.slice(-6); // Últimos 6 meses para la gráfica
+
+    // Normalizar porcentaje: si viene como 0.72 lo convierte a 72
+    function pct(v) {
+      var n = parseFloat(v) || 0;
+      return n <= 1 ? Math.round(n * 1000) / 10 : Math.round(n * 10) / 10;
+    }
+
+    // ── Tanques criógenicos ──
+    var shTq   = ss.getSheetByName(HOJA_TANQUES);
+    var tqData = shTq ? shTq.getDataRange().getValues().slice(1) : [];
+
+    // ── Insumos críticos ──
+    var shIns   = ss.getSheetByName(HOJA_INSUMOS);
+    var insData = shIns ? shIns.getDataRange().getValues().slice(1) : [];
+
+    return {
+      view:   'lab-resumen',
+      fuente: 'lab-resumen',
+      kpis: {
+        fecundacion:    pct(lastRow[KPI_COL_FECUNDACION]),
+        blastocistos:   pct(lastRow[KPI_COL_BLASTO]),
+        fetSupervivencia: pct(lastRow[KPI_COL_FET]),
+        icsiDano:       pct(lastRow[KPI_COL_ICSI]),
+        mesPeriodo:     String(lastRow[KPI_COL_MES] || '')
+      },
+      tendencia: {
+        meses:       trend6.map(function(r) { return String(r[KPI_COL_MES]); }),
+        fecundacion: trend6.map(function(r) { return pct(r[KPI_COL_FECUNDACION]); }),
+        blastocistos: trend6.map(function(r) { return pct(r[KPI_COL_BLASTO]); })
+      },
+      tanques: tqData
+        .filter(function(r) { return String(r[TQ_COL_NOMBRE]).trim() !== ''; })
+        .map(function(r) {
+          return { nombre: String(r[TQ_COL_NOMBRE]), ocupacion: parseFloat(r[TQ_COL_OCUPACION]) || 0 };
+        }),
+      insumos: insData
+        .filter(function(r) { return String(r[INS_COL_ITEM]).trim() !== ''; })
+        .map(function(r) {
+          var raw = r[INS_COL_VENCE];
+          var fechaStr = '';
+          if (raw instanceof Date) {
+            fechaStr = fmtDate(raw);
+          } else if (raw) {
+            fechaStr = String(raw);
+          }
+          return {
+            item:        String(r[INS_COL_ITEM]),
+            lote:        String(r[INS_COL_LOTE] || ''),
+            vencimiento: fechaStr,
+            estado:      String(r[INS_COL_ESTADO] || 'ok').toLowerCase()
+          };
+        })
+    };
+  } catch(ex) {
+    return { view: 'lab-resumen', fuente: 'lab-resumen', error: ex.message,
+             kpis: {}, tendencia: { meses:[], fecundacion:[], blastocistos:[] },
+             tanques: [], insumos: [] };
+  }
 }
 
 /* ══ DASHBOARD MEDICAMENTOS ════════════════════════════════════ */
