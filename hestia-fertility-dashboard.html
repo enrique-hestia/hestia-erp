@@ -1997,6 +1997,8 @@ var _capturaRows = {};
 function renderCaptura(viewId, data) {
   // Vista especial para Ent. Med: tabla agrupada por No. Orden
   if (data.fuente === 'Ent. Med') { renderEntMedOrders(viewId, data); return; }
+  // Vista Insumos Lab: tabla agrupada por Fecha+Proveedor con ID auto
+  if (data.fuente === 'Insumos') { renderInsumosOrders(viewId, data); return; }
   // Vista Estimulación: tabla con scroll + modal dinámico
   if (data.fuente === 'Estimulacion' || data.fuente === 'Estimulaci\u00f3n') { _estimHeaders = data.headers || []; }
   ensureGenericView(viewId);
@@ -3346,6 +3348,183 @@ function generateOC() {
       .catch(function(){ var el = document.getElementById('entmed-f-noorden'); if(el) el.value='OC-001'; })
       .finally(function(){ if(btn){ btn.disabled=false; btn.textContent='+ Nuevo folio'; } });
   }
+}
+
+/* ══ INSUMOS LAB — Órdenes agrupadas por Fecha+Proveedor ════════ */
+var _insumosOrdenes = [];
+
+function renderInsumosOrders(viewId, data) {
+  ensureGenericView(viewId);
+  _viewFuente[viewId] = data.fuente;
+  _capturaRows[viewId] = data.rows || [];
+
+  var searchWrap = document.getElementById('cap-search-wrap-' + viewId);
+  if (searchWrap) searchWrap.style.display = 'none';
+
+  var menuItem = menuItems.filter(function(i){ return i.id === viewId; })[0];
+  var title = (menuItem && menuItem.label) || 'Insumos de Laboratorio';
+  var titleEl = document.getElementById('cap-title-' + viewId);
+  var subEl   = document.getElementById('cap-sub-'   + viewId);
+  if (titleEl) titleEl.textContent = title;
+
+  var linkEl = document.getElementById('cap-link-' + viewId);
+  if (linkEl && CAPTURA_SHEET_LINKS_FUENTE['Insumos']) linkEl.href = CAPTURA_SHEET_LINKS_FUENTE['Insumos'];
+
+  var newBtn = document.getElementById('cap-new-btn-' + viewId);
+  if (newBtn) {
+    newBtn.style.display = canEdit() ? 'flex' : 'none';
+    newBtn.innerHTML = svgPlus + 'Agregar';
+  }
+
+  var rows = data.rows || [];
+  var hdrs = data.headers || [];
+
+  // Detectar columnas por nombre (flexible)
+  function colVal(row, names) {
+    for (var n = 0; n < names.length; n++) {
+      var v = row[names[n]];
+      if (v !== undefined && String(v).trim() !== '') return v;
+    }
+    return '';
+  }
+  function getDate(row) { return colVal(row, ['Fecha','fecha','FECHA','Date','date']); }
+  function getProv(row) { return String(colVal(row, ['Proveedor','proveedor','PROVEEDOR','Supplier','supplier'])).trim(); }
+  function getCosto(row) {
+    var v = colVal(row, ['Costo','costo','COSTO','Precio','precio','Total','total','Importe','importe']);
+    return parseFloat(String(v).replace(/[$,]/g,'')) || 0;
+  }
+  function getFolio(row) { return String(colVal(row, ['No. Orden','No Orden','Folio','folio','ID','id','NoOrden'])).trim(); }
+
+  // Verificar si ya hay columna de folio
+  var tieneNoOrden = hdrs.some(function(h){
+    return /no\.?\s*orden|folio|^id$/i.test(h);
+  });
+
+  // Agrupar
+  var grupos = {};
+  var grupoOrder = [];
+  rows.forEach(function(r) {
+    var key;
+    if (tieneNoOrden) {
+      key = getFolio(r) || 'Sin folio';
+    } else {
+      // Agrupar por Fecha+Proveedor
+      var rawFecha = getDate(r);
+      var fechaStr = (rawFecha instanceof Date)
+        ? (rawFecha.getFullYear() + '-' + String(rawFecha.getMonth()+1).padStart(2,'0') + '-' + String(rawFecha.getDate()).padStart(2,'0'))
+        : String(rawFecha).slice(0,10);
+      var prov = getProv(r) || 'Sin proveedor';
+      key = fechaStr + '||' + prov;
+    }
+    if (!grupos[key]) {
+      grupoOrder.push(key);
+      grupos[key] = { key: key, fecha: getDate(r), proveedor: getProv(r), items: [], total: 0 };
+    }
+    grupos[key].total += getCosto(r);
+    grupos[key].items.push(r);
+  });
+
+  // Ordenar por fecha asc para asignar IDs consecutivos
+  var ordenes = grupoOrder.map(function(k){ return grupos[k]; });
+  ordenes.sort(function(a, b) {
+    var fa = String(a.fecha), fb = String(b.fecha);
+    return fa < fb ? -1 : fa > fb ? 1 : 0;
+  });
+
+  // Asignar IDs: si ya tiene folio usar ese, sino OC-INS-001
+  ordenes.forEach(function(o, i) {
+    if (tieneNoOrden && o.key !== 'Sin folio') {
+      o.folio = o.key;
+    } else {
+      o.folio = 'OC-INS-' + String(i + 1).padStart(3, '0');
+    }
+  });
+
+  // Orden desc para mostrar más reciente primero
+  ordenes.sort(function(a, b) {
+    var fa = String(a.fecha), fb = String(b.fecha);
+    return fa > fb ? -1 : fa < fb ? 1 : 0;
+  });
+
+  _insumosOrdenes = ordenes;
+  if (subEl) subEl.textContent = ordenes.length + ' órdenes · ' + rows.length + ' líneas';
+
+  var thead = document.getElementById('cap-thead-' + viewId);
+  var tbody = document.getElementById('cap-tbody-' + viewId);
+  if (!thead || !tbody) return;
+
+  thead.innerHTML = '<tr>' +
+    '<th>No. Orden</th><th>Fecha</th><th>Proveedor</th>' +
+    '<th style="text-align:center">Insumos</th>' +
+    '<th style="text-align:right">Total</th>' +
+    '<th></th></tr>';
+
+  if (ordenes.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--color-text-muted);padding:32px">Sin órdenes registradas</td></tr>';
+    return;
+  }
+
+  var svgEye = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  tbody.innerHTML = ordenes.map(function(o, idx) {
+    var totalFmt = '$' + o.total.toLocaleString('es-MX', {minimumFractionDigits:2, maximumFractionDigits:2});
+    var fechaFmt = o.fecha ? fmtDisplayDate(o.fecha) : '—';
+    return '<tr style="cursor:pointer" onclick="openInsumosDetalle(' + idx + ')">' +
+      '<td><span style="font-weight:700;color:var(--color-primary)">' + o.folio + '</span></td>' +
+      '<td>' + fechaFmt + '</td>' +
+      '<td>' + (o.proveedor || '—') + '</td>' +
+      '<td style="text-align:center"><span style="background:rgba(196,106,122,.12);color:var(--color-primary);border-radius:999px;padding:2px 10px;font-weight:600">' + o.items.length + '</span></td>' +
+      '<td style="text-align:right;font-weight:600">' + totalFmt + '</td>' +
+      '<td style="text-align:center"><button class="btn btn-secondary" style="padding:4px 10px;font-size:var(--text-xs);gap:4px;display:inline-flex;align-items:center" onclick="event.stopPropagation();openInsumosDetalle(' + idx + ')">' + svgEye + 'Ver</button></td>' +
+      '</tr>';
+  }).join('');
+}
+
+function openInsumosDetalle(idx) {
+  var o = _insumosOrdenes && _insumosOrdenes[idx];
+  if (!o) return;
+
+  document.getElementById('oc-detalle-title').textContent = o.folio;
+  var fechaFmt = o.fecha ? fmtDisplayDate(o.fecha) : '';
+  document.getElementById('oc-detalle-sub').textContent =
+    (fechaFmt ? 'Fecha: ' + fechaFmt + '  ·  ' : '') +
+    (o.proveedor ? 'Proveedor: ' + o.proveedor + '  ·  ' : '') +
+    o.items.length + ' insumos';
+
+  // Columnas a mostrar (excluir internas)
+  var skip = ['_rownum','_periodo','no. orden','no_orden','folio'];
+  var cols = [];
+  if (o.items.length > 0) {
+    Object.keys(o.items[0]).forEach(function(k) {
+      if (k.startsWith('_')) return;
+      if (skip.indexOf(k.toLowerCase()) >= 0) return;
+      if (cols.indexOf(k) < 0 && !/^[a-z]/.test(k[0])) cols.push(k);
+    });
+  }
+  if (cols.length === 0) cols = ['Insumo','Cantidad','Costo','Proveedor'];
+
+  var thead = document.getElementById('oc-detalle-thead');
+  var tbody = document.getElementById('oc-detalle-tbody');
+  thead.innerHTML = '<tr>' + cols.map(function(c){ return '<th>' + c + '</th>'; }).join('') + '</tr>';
+
+  var moneyCols = ['costo','precio','total','importe'];
+  tbody.innerHTML = o.items.map(function(r) {
+    return '<tr>' + cols.map(function(c) {
+      var v = r[c] !== undefined ? r[c] : (r[c.toLowerCase()] !== undefined ? r[c.toLowerCase()] : '');
+      if (v instanceof Date) { v = fmtDisplayDate(v); }
+      else {
+        v = String(v).trim();
+        if (v && moneyCols.indexOf(c.toLowerCase()) >= 0) {
+          var n = parseFloat(v.replace(/[$,]/g,''));
+          if (!isNaN(n)) v = '$' + n.toLocaleString('es-MX', {minimumFractionDigits:2});
+        }
+      }
+      return '<td>' + (v || '—') + '</td>';
+    }).join('') + '</tr>';
+  }).join('');
+
+  var totalFmt = '$' + o.total.toLocaleString('es-MX', {minimumFractionDigits:2, maximumFractionDigits:2});
+  document.getElementById('oc-detalle-total').textContent = totalFmt;
+  document.getElementById('modal-oc-detalle').style.display = 'flex';
 }
 
 // Carga el catálogo desde Lista Med una sola vez
