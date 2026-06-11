@@ -325,20 +325,33 @@ function doGet(e) {
         var ssUpd = SpreadsheetApp.openById(capturaId);
         var shUpd = findSheet(ssUpd, sheetName);
         if (!shUpd) return jsonResponse({ error: 'Hoja no encontrada: ' + sheetName });
-        var hdrs = shUpd.getRange(1, 1, 1, shUpd.getLastColumn()).getValues()[0];
+        var hdrInfo = getSheetHeaders(shUpd);
+        var hdrs = hdrInfo.headers;
         var cur  = shUpd.getRange(rowNum, 1, 1, hdrs.length).getValues()[0];
         var newRow = hdrs.map(function(h, i) {
-          var key = String(h).trim();
-          return (e.parameter[key] !== undefined) ? e.parameter[key] : cur[i];
+          return (e.parameter[h] !== undefined) ? e.parameter[h] : cur[i];
         });
         shUpd.getRange(rowNum, 1, 1, hdrs.length).setValues([newRow]);
+        invalidateViewCache(sheetName);
         return jsonResponse({ success: true, rowNum: rowNum });
       } catch(ex) {
         return jsonResponse({ error: ex.message });
       }
     }
 
-    // action === 'view'
+    // action === 'view'  — con caché de 60 s para reducir lecturas a Sheets
+    if (action === 'view') {
+      var cache    = CacheService.getScriptCache();
+      var cacheKey = 'v2_' + view + '_' + fechaInicio + '_' + fechaFin;
+      var cached   = cache.get(cacheKey);
+      if (cached) {
+        return ContentService.createTextOutput(cached).setMimeType(ContentService.MimeType.JSON);
+      }
+      var result   = readViewData(ss, view, fechaInicio, fechaFin);
+      var json     = JSON.stringify(result);
+      try { cache.put(cacheKey, json, 60); } catch(ignored) {}
+      return ContentService.createTextOutput(json).setMimeType(ContentService.MimeType.JSON);
+    }
     return jsonResponse(readViewData(ss, view, fechaInicio, fechaFin));
 
   } catch(err) {
@@ -357,6 +370,24 @@ function jsonResponse(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+/* Borra todas las entradas de caché relacionadas con una hoja (fuente) */
+function invalidateViewCache(sheetName) {
+  try {
+    var cache = CacheService.getScriptCache();
+    // La clave incluye el viewId que puede ser el nombre de hoja directamente.
+    // Borramos con el nombre exacto y variantes comunes.
+    var keys = [];
+    // Generar keys para los últimos 12 meses como rango de fechas posible
+    var now = new Date();
+    for (var i = -1; i <= 12; i++) {
+      var d1 = new Date(now.getFullYear(), now.getMonth() - 6 + i, 1);
+      var d2 = new Date(now.getFullYear(), now.getMonth() - 6 + i + 7, 0);
+      keys.push('v2_' + sheetName + '_' + fmtDate(d1) + '_' + fmtDate(d2));
+    }
+    cache.removeAll(keys);
+  } catch(ignored) {}
 }
 
 /* ── getDefaultPeriodo mantenido por compatibilidad (ya no se usa) ─── */
@@ -951,25 +982,53 @@ function readPaisesOrigen(ss, fechaInicio, fechaFin) {
    INSERT ROW — agrega una fila al final de la hoja indicada
    Params: sheet, periodo, + una clave por columna (según cabecera)
    ══════════════════════════════════════════════════════════════ */
+/* Detecta la fila de encabezados real de una hoja (maneja row1-vacía y headers combinados row1+row2) */
+function getSheetHeaders(hoja) {
+  var numCols = hoja.getLastColumn();
+  var numRows = Math.min(hoja.getLastRow(), 3);
+  if (numRows === 0 || numCols === 0) return { headers: [], dataStart: 1 };
+  var allRows = hoja.getRange(1, 1, numRows, numCols).getValues();
+  function countFilled(row) {
+    return row.filter(function(c) { return String(c).trim() !== ''; }).length;
+  }
+  var r0 = countFilled(allRows[0]);
+  var r1 = allRows.length > 1 ? countFilled(allRows[1]) : 0;
+  var headers, dataStart;
+  if (r0 === 0) {
+    headers = allRows[1] || []; dataStart = 3;
+  } else if (r0 > 0 && r1 > 0) {
+    var complementario = allRows[0].every(function(v, i) {
+      var v0 = String(v).trim();
+      var v1 = String((allRows[1][i] !== undefined ? allRows[1][i] : '')).trim();
+      return !(v0 && v1);
+    });
+    if (complementario) {
+      headers = allRows[0].map(function(v, i) {
+        return String(v).trim() || String(allRows[1][i] !== undefined ? allRows[1][i] : '').trim();
+      });
+      dataStart = 3;
+    } else { headers = allRows[0]; dataStart = 2; }
+  } else { headers = allRows[0]; dataStart = 2; }
+  return { headers: headers.map(function(h){ return String(h).trim(); }), dataStart: dataStart };
+}
+
 function insertRow(ss, e) {
   var sheetName = (e && e.parameter.sheet) || '';
-  // Resolver alias (ej. Estimulacion → Estimulación)
   if (SHEET_ALIASES[sheetName]) sheetName = SHEET_ALIASES[sheetName];
-  // Abrir el spreadsheet correcto según el mapeo
   var capturaId = getCapturaId(sheetName);
   var ssCap = SpreadsheetApp.openById(capturaId);
   var hoja = findSheet(ssCap, sheetName);
   if (!hoja) return { error: 'Hoja "' + sheetName + '" no encontrada.' };
 
-  var headers = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0];
+  var hdrInfo = getSheetHeaders(hoja);
+  var headers = hdrInfo.headers;
   var row = headers.map(function(h, i) {
-    var key = String(h).trim();
-    // Si col A se llama 'Periodo', llenarlo con el param periodo automáticamente
-    if (i === 0 && key === 'Periodo') return (e && e.parameter.periodo) || '';
-    return (e && e.parameter[key] !== undefined) ? e.parameter[key] : '';
+    if (i === 0 && h === 'Periodo') return (e && e.parameter.periodo) || '';
+    return (e && e.parameter[h] !== undefined) ? e.parameter[h] : '';
   });
 
   hoja.appendRow(row);
+  invalidateViewCache(sheetName);
   return { success: true };
 }
 
