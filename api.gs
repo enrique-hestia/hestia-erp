@@ -435,6 +435,11 @@ function readViewData(ss, viewId, fechaInicio, fechaFin) {
   // Traducir alias (ej: Orden_Compra → Ent. Med)
   if (fuente && SHEET_ALIASES[fuente]) fuente = SHEET_ALIASES[fuente];
 
+  // Vistas de configuración local — no leen Sheets
+  if (/^(configuracion|ajustes|config)$/i.test(viewId) || /^(configuracion|ajustes|config)$/i.test(fuente||'')) {
+    return { viewId: viewId, fuente: fuente, rows: [], headers: [], _isConfig: true };
+  }
+
   if (!fuente || fuente === 'mensual') {
     return readMensualData(ss, fechaInicio, fechaFin, viewId);
   }

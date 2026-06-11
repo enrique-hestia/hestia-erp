@@ -1813,6 +1813,10 @@ function setActiveNav(viewId) {
 /* ══════════════════════════════════════════════════════
    CARGA LAZY DE VISTAS (con caché de 30 segundos)
    ══════════════════════════════════════════════════════ */
+function isConfigFuente(id) {
+  return /config|ajustes/i.test(id || '');
+}
+
 function renderAjustes() {
   var s = getSession() || {};
   var set = function(id, val) { var el = document.getElementById(id); if (el) el.textContent = val || '—'; };
@@ -1839,7 +1843,7 @@ function renderAjustes() {
 
 async function loadView(viewId, fechaInicio, fechaFin, force) {
   // Ajustes es local — no necesita fetch al API
-  if (viewId === 'configuracion') { renderAjustes(); return; }
+  if (/^(configuracion|ajustes|config)$/i.test(viewId) || isConfigFuente(viewId)) { renderAjustes(); navigateTo('configuracion'); return; }
 
   var cacheKey = viewId + '_' + fechaInicio + '_' + fechaFin;
   var now = Date.now();
@@ -1888,9 +1892,9 @@ function renderViewData(viewId, data) {
     'med-resumen':  function(d) { renderMedDashboard(d); },
     'lab-resumen':  function(d) { renderLabResumen(d); },
     laboratorios:  function(d) { renderLaboratorios(d); },
-    configuracion:      function()  {
-      renderAjustes();
-    }
+    configuracion: function(){ renderAjustes(); },
+    ajustes:        function(){ renderAjustes(); },
+    config:         function(){ renderAjustes(); }
   };
 
   if (knownViews[viewId]) {
@@ -1906,8 +1910,10 @@ function navigateTo(viewId) {
   // Ocultar todas
   document.querySelectorAll('.view').forEach(function(v) { v.style.display = 'none'; });
 
+  // Resolver alias: variantes de config siempre usan view-configuracion
+  var resolvedId = isConfigFuente(viewId) ? 'configuracion' : viewId;
   // Mostrar la vista (conocida o genérica)
-  var el = document.getElementById('view-' + viewId);
+  var el = document.getElementById('view-' + resolvedId);
   if (el) {
     el.style.display = '';
   } else {
