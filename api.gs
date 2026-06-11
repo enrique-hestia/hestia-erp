@@ -444,11 +444,11 @@ function readViewData(ss, viewId, fechaInicio, fechaFin) {
     return readMensualData(ss, fechaInicio, fechaFin, viewId);
   }
 
-  if (fuente === 'med-dashboard') {
+  if (fuente === 'med-dashboard' || viewId === 'med-resumen') {
     return readMedDashboard(ss, fechaInicio, fechaFin);
   }
 
-  if (fuente === 'lab-resumen') {
+  if (fuente === 'lab-resumen' || viewId === 'lab-resumen') {
     return readLabResumen(fechaInicio, fechaFin);
   }
 
@@ -655,7 +655,10 @@ function readMedDashboard(ss, fechaInicio, fechaFin) {
     var tieneFecha = hdrs.indexOf('Fecha') !== -1;
     if (tieneFecha && fechaInicio && fechaFin) {
       rows = rows.filter(function(r){
-        var f = String(r['Fecha'] || '').slice(0, 10);
+        var raw = r['Fecha'];
+        var f = (raw instanceof Date)
+          ? Utilities.formatDate(raw, Session.getScriptTimeZone(), 'yyyy-MM-dd')
+          : String(raw || '').slice(0, 10);
         return f >= fechaInicio && f <= fechaFin;
       });
     }
@@ -1070,6 +1073,8 @@ function setupSheets() {
     ['turismo',       'analisis',  'Turismo Médico',   '',         'plane',            2,       'vista', 'mensual',  true],
     ['rentabilidad',  'analisis',  'Rentabilidad',     '',         'percent',          3,       'vista', 'mensual',  true],
     // ── CAPTURA ──
+    ['medicamentos',  '',          'Medicamentos',     'PANEL',    'pill',             4,       'grupo', '',              true],
+    ['med-resumen',   'medicamentos','Resumen Med.',   '',         'bar-chart-2',      1,       'vista', 'med-dashboard', true],
     ['captura',       '',          'Captura',          'CAPTURA',  'database',         5,       'grupo', '',         true],
     ['inventarios',   'captura',   'Inventarios',      '',         'package',          1,       'vista', 'Inventarios',  true],
     ['laboratorios',  'captura',   'Laboratorios',     '',         'microscope',       2,       'vista', 'Laboratorios', true],
