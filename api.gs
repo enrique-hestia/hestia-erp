@@ -464,6 +464,10 @@ function readViewData(ss, viewId, fechaInicio, fechaFin) {
     return readQxResumen(fechaInicio, fechaFin);
   }
 
+  if (fuente === 'Rep Ejecutivo' || viewId === 'rep-ejecutivo') {
+    return readRepEjecutivo(ss, fechaInicio, fechaFin);
+  }
+
   return readCapturaData(ss, fuente, viewId, fechaInicio, fechaFin);
 }
 
@@ -677,6 +681,83 @@ function readQxResumen(fechaInicio, fechaFin) {
   } catch(ex) {
     return { view: 'qx-resumen', fuente: 'qx-resumen', kpis: [], rows: [], headers: [], error: ex.message };
   }
+}
+
+/* ══ REPORTE EJECUTIVO — Agrega KPIs de todas las secciones ═══ */
+function readRepEjecutivo(ss, fechaInicio, fechaFin) {
+  var result = {
+    view: 'rep-ejecutivo', fuente: 'Rep Ejecutivo',
+    periodo: (fechaInicio || '') + ' — ' + (fechaFin || ''),
+    sections: { financiero: {}, clinico: {}, operaciones: {} },
+    rows: [], headers: []
+  };
+
+  // ── FINANCIERO: leer Mensual_Todos filtrado por período ──────
+  try {
+    var mensualSheet = findSheet(ss, 'Mensual_Todos');
+    if (mensualSheet) {
+      var mRows = mensualSheet.getDataRange().getValues();
+      var mHdrs = mRows[0];
+      var colPeriodo  = mHdrs.indexOf('Periodo');
+      var colIngresos = mHdrs.indexOf('Ingresos');
+      var colGastos   = mHdrs.indexOf('Gastos');
+      var totIng = 0, totGas = 0, found = false;
+      mRows.slice(1).forEach(function(r) {
+        var p = colPeriodo >= 0 ? String(r[colPeriodo]) : '';
+        if (fechaInicio && p < fechaInicio.slice(0,7)) return;
+        if (fechaFin   && p > fechaFin.slice(0,7))   return;
+        if (colIngresos >= 0) totIng += parseFloat(r[colIngresos]) || 0;
+        if (colGastos   >= 0) totGas += parseFloat(r[colGastos])   || 0;
+        found = true;
+      });
+      if (found || totIng || totGas) {
+        result.sections.financiero.ingresos = totIng;
+        result.sections.financiero.gastos   = totGas;
+      }
+    }
+  } catch(e) {}
+
+  // ── CLÍNICO: leer Lab SS ──────────────────────────────────────
+  try {
+    var ssLab = SpreadsheetApp.openById(LAB_SS_ID);
+
+    var artSheet = findSheet(ssLab, 'ART Lab');
+    if (artSheet) {
+      var artRows = artSheet.getDataRange().getValues().slice(2);
+      result.sections.clinico.ciclosART = artRows.filter(function(r){ return r[0]; }).length;
+    }
+
+    var fetSheet = findSheet(ssLab, 'FET');
+    if (fetSheet) {
+      var fetRows = fetSheet.getDataRange().getValues().slice(2);
+      result.sections.clinico.fetRealizados = fetRows.filter(function(r){ return r[0]; }).length;
+    }
+
+    // Banco Crío
+    var crioSheet = findSheet(ssLab, 'Inventario Crío') || findSheet(ssLab, 'Inventario Crio');
+    if (crioSheet) {
+      var crioRows = crioSheet.getDataRange().getValues().slice(1);
+      result.sections.operaciones.bancoCrio = crioRows.filter(function(r){ return r[0]; }).length;
+    }
+
+    // Insumos activos (Lab)
+    var insSheet = findSheet(ssLab, 'Insumos');
+    if (insSheet) {
+      var insRows = insSheet.getDataRange().getValues().slice(1);
+      result.sections.operaciones.insumosActivos = insRows.filter(function(r){ return r[0]; }).length;
+    }
+  } catch(e) {}
+
+  // ── OPERACIONES: alertas de inventario desde hoja Alertas ────
+  try {
+    var alertSheet = findSheet(ss, 'Alertas');
+    if (alertSheet) {
+      var alertRows = alertSheet.getDataRange().getValues().slice(1);
+      result.sections.operaciones.alertasInventario = alertRows.filter(function(r){ return r[0]; }).length;
+    }
+  } catch(e) {}
+
+  return result;
 }
 
 /* ══ DASHBOARD MEDICAMENTOS ════════════════════════════════════ */
