@@ -1938,8 +1938,14 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     var hora = new Date().toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'});
     setStatus('Actualizado ' + hora);
   } catch(e) {
-    setStatus('Error: ' + e.message, 'err');
     console.error('loadView error:', e);
+    // Para vistas de reportes: mostrar placeholder en lugar de error
+    if (/^rep-/.test(viewId)) {
+      renderViewData(viewId, { rows: [], headers: [], sections: {} });
+      setStatus('Sin datos — redesplegar api.gs para conectar', 'err');
+    } else {
+      setStatus('Error: ' + e.message, 'err');
+    }
   }
 }
 
