@@ -2100,41 +2100,83 @@ async function grSaveRole() {
     if (!cb.checked) bloqueadas.push(cb.getAttribute('data-id'));
   });
   if (statusEl) statusEl.textContent = 'Guardando…';
-  // Buscar si el rol ya existe (para update vs insert)
+
   var existingRole = null;
   for (var ei = 0; ei < _grRoles.length; ei++) {
     if (_grRoles[ei].rol.toLowerCase() === rolName.toLowerCase()) { existingRole = _grRoles[ei]; break; }
   }
+
+  var tk      = getToken() || '';
+  var bloqStr = bloqueadas.join(',');
+
   try {
-    var tk = encodeURIComponent(getToken() || '');
-    var vb = encodeURIComponent(bloqueadas.join(','));
-    var sl = soloLectura ? 'TRUE' : 'FALSE';
-    var dc = encodeURIComponent(descripcion);
-    var url;
-    if (existingRole && existingRole._rowNum) {
-      url = APPS_SCRIPT_URL + '?action=update&sheet=Roles&rowNum=' + existingRole._rowNum
-        + '&token=' + tk + '&Rol=' + encodeURIComponent(rolName)
-        + '&Vistas_Bloqueadas=' + vb + '&Solo_Lectura=' + sl + '&Descripcion=' + dc;
-    } else {
-      url = APPS_SCRIPT_URL + '?action=insert&sheet=Roles'
-        + '&token=' + tk + '&Rol=' + encodeURIComponent(rolName)
-        + '&Vistas_Bloqueadas=' + vb + '&Solo_Lectura=' + sl + '&Descripcion=' + dc;
+    var saved = false, lastErr = '';
+
+    // ── Intento 1: action=saveRole (api.gs nuevo, requiere redespliegue) ──
+    try {
+      var u1 = APPS_SCRIPT_URL + '?action=saveRole'
+        + '&token='           + encodeURIComponent(tk)
+        + '&rol='             + encodeURIComponent(rolName)
+        + '&vistasBloqueadas='+ encodeURIComponent(bloqStr)
+        + '&soloLectura='     + (soloLectura ? 'true' : 'false')
+        + '&descripcion='     + encodeURIComponent(descripcion);
+      var r1 = await fetch(u1);
+      var d1 = await r1.json();
+      console.log('[grSaveRole] saveRole →', d1);
+      if (d1.success) { saved = true; }
+      else { lastErr = d1.error || 'saveRole no disponible'; }
+    } catch(ex1) { lastErr = ex1.message; }
+
+    // ── Intento 2: action=insert / action=update (api.gs actual) ──
+    if (!saved) {
+      var u2;
+      var cols = '&Rol=' + encodeURIComponent(rolName)
+               + '&Vistas_Bloqueadas=' + encodeURIComponent(bloqStr)
+               + '&Solo_Lectura='      + (soloLectura ? 'TRUE' : 'FALSE')
+               + '&Descripcion='       + encodeURIComponent(descripcion);
+      if (existingRole && existingRole._rowNum) {
+        u2 = APPS_SCRIPT_URL + '?action=update&sheet=Roles&rowNum=' + existingRole._rowNum
+           + '&token=' + encodeURIComponent(tk) + cols;
+      } else {
+        u2 = APPS_SCRIPT_URL + '?action=insert&sheet=Roles'
+           + '&token=' + encodeURIComponent(tk) + cols;
+      }
+      console.log('[grSaveRole] fallback →', u2);
+      var r2 = await fetch(u2);
+      var d2 = await r2.json();
+      console.log('[grSaveRole] respuesta →', d2);
+      if (d2 && !d2.error) { saved = true; }
+      else { lastErr = (d2 && d2.error) ? d2.error : 'Respuesta inesperada del API'; }
     }
-    var res = await fetch(url);
-    var json = await res.json();
-    if (json.error) { if(statusEl) statusEl.textContent='Error: '+json.error; setStatus('Error: '+json.error,'err'); return; }
-    if (statusEl) statusEl.textContent = 'Guardado ' + new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
-    setStatus('Rol guardado correctamente', 'ok');
+
+    if (!saved) {
+      alert('Error al guardar el rol:\n\n' + lastErr + '\n\nRevisa la consola del navegador (F12) para más detalles.\nSi el error dice "Sesión inválida", cierra sesión y vuelve a entrar.');
+      if (statusEl) statusEl.textContent = 'Error: ' + lastErr;
+      setStatus('Error: ' + lastErr, 'err');
+      return;
+    }
+
+    var hora = new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+    if (statusEl) statusEl.textContent = '✓ Guardado en Sheets ' + hora;
+    setStatus('Rol guardado en Sheets correctamente', 'ok');
+
     if (existingRole) {
-      existingRole.vistasBloqueadas = bloqueadas; existingRole.soloLectura = soloLectura; existingRole.descripcion = descripcion;
+      existingRole.vistasBloqueadas = bloqueadas;
+      existingRole.soloLectura      = soloLectura;
+      existingRole.descripcion      = descripcion;
     } else {
-      var newIdx = _grRoles.length + 2;
-      _grRoles.push({ rol: rolName, vistasBloqueadas: bloqueadas, soloLectura: soloLectura, descripcion: descripcion, _rowNum: newIdx });
+      _grRoles.push({ rol: rolName, vistasBloqueadas: bloqueadas, soloLectura: soloLectura, descripcion: descripcion, _rowNum: _grRoles.length + 2 });
     }
     _grSelected = rolName;
     if (nEl) nEl.disabled = true;
     grRenderList();
-  } catch(e) { if(statusEl) statusEl.textContent='Error de red'; setStatus('Error de red: '+e.message,'err'); }
+
+  } catch(e) {
+    console.error('[grSaveRole] excepción:', e);
+    alert('Error de red al guardar:\n\n' + e.message);
+    if (statusEl) statusEl.textContent = 'Error de red';
+    setStatus('Error de red: ' + e.message, 'err');
+  }
 }
 
 function grParseCaptura(data) {
