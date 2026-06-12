@@ -2060,25 +2060,54 @@ function grRenderCheckboxes(role) {
     el.innerHTML = '<div style="color:var(--color-text-muted);font-size:12px;grid-column:1/-1">El menú aún no ha cargado. Navega a cualquier otra vista y regresa.</div>';
     return;
   }
+
+  // Mapa id → item para navegación de árbol
+  var itemMap = {};
+  items.forEach(function(it) { itemMap[it.id] = it; });
+
+  // Resolver sección subiendo por la cadena de padres
+  function resolveSection(it) {
+    if (it.seccion) return it.seccion;
+    if (it.padre && itemMap[it.padre]) return resolveSection(itemMap[it.padre]);
+    return 'OTROS';
+  }
+
+  // Renderizar un item y sus hijos de forma recursiva
+  function renderItem(it, depth) {
+    var chk  = bloqueadas.indexOf(it.id) === -1;
+    var pad  = (depth * 14) + 'px';
+    var bold = (it.tipo === 'grupo' || depth === 0) ? 'font-weight:600' : 'font-weight:400';
+    var out  = '<label style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer;padding-left:' + pad + '">'
+      + '<input type="checkbox" ' + (chk ? 'checked' : '') + ' data-id="' + it.id
+      + '" style="width:13px;height:13px;cursor:pointer;flex-shrink:0;accent-color:var(--color-primary)">'
+      + '<span style="font-size:12px;color:var(--color-text);' + bold + '">' + (it.label || it.id) + '</span>'
+      + '</label>';
+    // Hijos ordenados por 'orden'
+    items
+      .filter(function(c) { return c.padre === it.id; })
+      .sort(function(a, b) { return (a.orden || 0) - (b.orden || 0); })
+      .forEach(function(c) { out += renderItem(c, depth + 1); });
+    return out;
+  }
+
+  // Items raíz (sin padre o cuyo padre no está en el menú), agrupados por sección
   var sections = {}, secOrder = [];
-  items.forEach(function(item) {
-    var sec = item.seccion || 'OTROS';
-    if (!sections[sec]) { sections[sec] = []; secOrder.push(sec); }
-    sections[sec].push(item);
-  });
+  items
+    .filter(function(it) { return !it.padre || !itemMap[it.padre]; })
+    .sort(function(a, b) { return (a.orden || 0) - (b.orden || 0); })
+    .forEach(function(it) {
+      var sec = resolveSection(it);
+      if (!sections[sec]) { sections[sec] = []; secOrder.push(sec); }
+      sections[sec].push(it);
+    });
+
   var html = '';
   secOrder.forEach(function(sec) {
-    html += '<div style="break-inside:avoid;margin-bottom:14px">'
-      +'<div style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--color-text-muted);padding-bottom:4px;border-bottom:1px solid var(--color-divider);margin-bottom:5px">' + sec + '</div>';
-    sections[sec].forEach(function(item) {
-      var chk = bloqueadas.indexOf(item.id) === -1;
-      var indent = item.padre ? 'padding-left:14px' : '';
-      var bold = (!item.padre) ? 'font-weight:600' : '';
-      html += '<label style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer;' + indent + '">'
-        +'<input type="checkbox" ' + (chk?'checked':'') + ' data-id="' + item.id + '" style="width:13px;height:13px;cursor:pointer;flex-shrink:0;accent-color:var(--color-primary)">'
-        +'<span style="font-size:12px;color:var(--color-text);' + bold + '">' + (item.label || item.id) + '</span>'
-        +'</label>';
-    });
+    html += '<div style="break-inside:avoid;margin-bottom:16px">'
+      + '<div style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;'
+      + 'color:var(--color-text-muted);padding-bottom:4px;border-bottom:1px solid var(--color-divider);margin-bottom:6px">'
+      + sec + '</div>';
+    sections[sec].forEach(function(it) { html += renderItem(it, 0); });
     html += '</div>';
   });
   el.innerHTML = html;
@@ -2169,8 +2198,7 @@ async function grSaveRole() {
     }
     _grSelected = rolName;
     if (nEl) nEl.disabled = true;
-    // Recargar desde Sheets para que _rowNum sea correcto
-    grLoadRoles();
+    grRenderList();
 
   } catch(e) {
     console.error('[grSaveRole] excepción:', e);
@@ -2211,27 +2239,37 @@ function grParseCaptura(data) {
 }
 
 async function grLoadRoles() {
-  // Buscar en el menú el item cuya fuente sea Roles, si no usar gestion-roles
+  // Buscar el item de menú con fuente=Roles
   var rolesItem = null;
   for (var mi = 0; mi < menuItems.length; mi++) {
     if (String(menuItems[mi].fuente || '').toLowerCase() === 'roles') { rolesItem = menuItems[mi]; break; }
   }
   var fetchId = rolesItem ? rolesItem.id : 'gestion-roles';
+  // Usar rango de fechas único para evitar caché de 60s del servidor
+  var fi = '2000-01-01', ff = '2099-12-31';
   try {
-    var url = APPS_SCRIPT_URL + '?action=view&view=' + encodeURIComponent(fetchId) + '&fechaInicio=2026-01-01&fechaFin=2026-12-31&token=' + encodeURIComponent(getToken() || '');
-    var res = await fetch(url);
+    var url = APPS_SCRIPT_URL + '?action=view&view=' + encodeURIComponent(fetchId)
+            + '&fechaInicio=' + fi + '&fechaFin=' + ff
+            + '&token=' + encodeURIComponent(getToken() || '');
+    var res  = await fetch(url);
     var data = await res.json();
     if (data.error) { setStatus('Error cargando roles: ' + data.error, 'err'); return; }
+    // Si el API devolvió mensual (api.gs sin redesplegar y sin item Roles en menú)
+    if (!data.fuente || (String(data.fuente).toLowerCase() !== 'roles' && !data.roles)) {
+      setStatus('Navegá a "Roles" en el menú lateral para cargar los roles existentes', 'warn');
+      return;
+    }
     renderGestionRoles(data);
     setStatus('Roles cargados', 'ok');
-  } catch(e) { setStatus('Error: ' + e.message, 'err'); }
+  } catch(e) { setStatus('Error cargando roles: ' + e.message, 'err'); }
 }
 
 async function loadView(viewId, fechaInicio, fechaFin, force) {
   // Ajustes es local — no necesita fetch al API
   if (/^(configuracion|ajustes|config)$/i.test(viewId) || isConfigFuente(viewId)) { renderAjustes(); return; }
-  // Gestión de roles — carga siempre fresco del API (sin caché)
+  // Gestión de roles (acceso directo desde Configuración): mostrar shell + cargar roles
   if (viewId === 'gestion-roles') { renderGestionRoles({}); grLoadRoles(); return; }
+  // Si el API devolverá fuente=Roles, renderViewData lo interceptará automáticamente
 
   var cacheKey = viewId + '_' + fechaInicio + '_' + fechaFin;
   var now = Date.now();
@@ -2303,7 +2341,12 @@ function renderViewData(viewId, data) {
 
   // Interceptar cualquier vista cuya fuente sea Roles → gestor de roles
   if (data && String(data.fuente || '').toLowerCase() === 'roles') {
-    renderGestionRoles(data); return;
+    // Asegurar que el div correcto esté visible
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _grEl = document.getElementById('view-gestion-roles');
+    if (_grEl) _grEl.style.display = '';
+    renderGestionRoles(data);
+    return;
   }
 
   if (knownViews[viewId]) {
@@ -2319,14 +2362,17 @@ function navigateTo(viewId) {
   // Ocultar todas
   document.querySelectorAll('.view').forEach(function(v) { v.style.display = 'none'; });
 
-  // Resolver alias: menú item apuntando a hoja Roles → gestor de roles
+  // displayId = qué div mostrar; viewId = qué datos pedir al API (siempre el original)
+  var displayId = viewId;
+  var _foundItem = null;
   for (var _mi = 0; _mi < menuItems.length; _mi++) {
-    if (menuItems[_mi].id === viewId && String(menuItems[_mi].fuente || '').toLowerCase() === 'roles') {
-      viewId = 'gestion-roles'; break;
-    }
+    if (menuItems[_mi].id === viewId) { _foundItem = menuItems[_mi]; break; }
+  }
+  if (_foundItem && String(_foundItem.fuente || '').toLowerCase() === 'roles') {
+    displayId = 'gestion-roles';
   }
   // Resolver alias: variantes de config siempre usan view-configuracion
-  var resolvedId = isConfigFuente(viewId) ? 'configuracion' : viewId;
+  var resolvedId = isConfigFuente(displayId) ? 'configuracion' : displayId;
   // Mostrar la vista (conocida o genérica)
   var el = document.getElementById('view-' + resolvedId);
   if (el) {
