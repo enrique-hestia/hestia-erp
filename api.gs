@@ -216,6 +216,42 @@ function doGet(e) {
       return jsonResponse({ success: true });
     }
 
+    // ── SAVEROLE: crea o actualiza un rol (solo admin) ──
+    if (action === 'saveRole') {
+      if (!currentUser || currentUser.rol.toLowerCase() !== 'admin')
+        return jsonResponse({ error: 'Sin permisos de administrador.' });
+      var rolName    = (e && e.parameter.rol)              || '';
+      var bloqueadas = (e && e.parameter.vistasBloqueadas) || '';
+      var soloLec    = (e && e.parameter.soloLectura)      === 'true';
+      var desc       = (e && e.parameter.descripcion)      || '';
+      if (!rolName) return jsonResponse({ error: 'Nombre de rol requerido.' });
+      var shR  = ss.getSheetByName('Roles');
+      if (!shR) return jsonResponse({ error: 'Hoja Roles no encontrada.' });
+      var rData = shR.getDataRange().getValues();
+      var rH    = rData[0].map(function(c){ return String(c).trim().toLowerCase(); });
+      var rI  = rH.indexOf('rol');
+      var bI  = rH.indexOf('vistas_bloqueadas');
+      var lI  = rH.indexOf('solo_lectura');
+      var dI  = rH.indexOf('descripcion');
+      var rowIdx = -1;
+      for (var ri = 1; ri < rData.length; ri++) {
+        if (String(rData[ri][rI]).trim().toLowerCase() === rolName.toLowerCase()) { rowIdx = ri + 1; break; }
+      }
+      if (rowIdx > 0) {
+        if (bI > -1) shR.getRange(rowIdx, bI+1).setValue(bloqueadas);
+        if (lI > -1) shR.getRange(rowIdx, lI+1).setValue(soloLec);
+        if (dI > -1) shR.getRange(rowIdx, dI+1).setValue(desc);
+      } else {
+        var newRow = Array(rData[0].length).fill('');
+        if (rI > -1) newRow[rI] = rolName;
+        if (bI > -1) newRow[bI] = bloqueadas;
+        if (lI > -1) newRow[lI] = soloLec;
+        if (dI > -1) newRow[dI] = desc;
+        shR.appendRow(newRow);
+      }
+      return jsonResponse({ success: true });
+    }
+
     if (action === 'menu') {
       return jsonResponse({
         menu:        readMenu(ss),
@@ -462,6 +498,10 @@ function readViewData(ss, viewId, fechaInicio, fechaFin) {
 
   if (fuente === 'qx-resumen' || viewId === 'qx-resumen') {
     return readQxResumen(fechaInicio, fechaFin);
+  }
+
+  if (viewId === 'gestion-roles') {
+    return readGestionRoles(ss);
   }
 
   if (fuente === 'Rep Ejecutivo' || viewId === 'rep-ejecutivo') {
@@ -1222,6 +1262,34 @@ function setupSheets() {
   ]);
 
   Logger.log('✅ setupSheets completado');
+}
+
+/* ══════════════════════════════════════════════════════════════
+   GESTIÓN DE ROLES — Lee todos los roles con sus permisos
+   ══════════════════════════════════════════════════════════════ */
+function readGestionRoles(ss) {
+  var shR = ss.getSheetByName('Roles');
+  var roles = [];
+  if (shR && shR.getLastRow() > 1) {
+    var data = shR.getDataRange().getValues();
+    var h    = data[0].map(function(c){ return String(c).trim().toLowerCase(); });
+    var rI   = h.indexOf('rol');
+    var bI   = h.indexOf('vistas_bloqueadas');
+    var lI   = h.indexOf('solo_lectura');
+    var dI   = h.indexOf('descripcion');
+    for (var i = 1; i < data.length; i++) {
+      var rolName = rI > -1 ? String(data[i][rI]).trim() : '';
+      if (!rolName) continue;
+      var bloq = bI > -1 ? String(data[i][bI]).trim() : '';
+      roles.push({
+        rol:              rolName,
+        vistasBloqueadas: bloq ? bloq.split(',').map(function(v){ return v.trim(); }).filter(Boolean) : [],
+        soloLectura:      lI > -1 ? !!data[i][lI] : false,
+        descripcion:      dI > -1 ? String(data[i][dI]).trim() : ''
+      });
+    }
+  }
+  return { view: 'gestion-roles', fuente: 'Roles', roles: roles };
 }
 
 function crearHoja(ss, nombre, datos) {

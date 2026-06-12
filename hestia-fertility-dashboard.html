@@ -922,8 +922,19 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
       </div>
     </div>
 
+    <!-- Tarjeta: Administración (solo admin) -->
+    <div class="card" id="cfg-admin-card" style="display:none">
+      <div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:14px">Administración</div>
+      <button onclick="navigateTo('gestion-roles')" style="padding:10px 18px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Gestión de Roles y Permisos
+      </button>
+    </div>
+
   </div>
 </div>
+
+<div id="view-gestion-roles" class="view" style="display:none"></div>
 
 </main>
 </div>
@@ -1772,6 +1783,8 @@ function setDateInputs(fi, ff) {
 var menuItems = [];
 var svgPlus = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
 var viewCache = {};  // { 'resumen_2026-Q2': { data, _ts } }
+var _grRoles = [];
+var _grSelected = '';
 
 const VIEW_TITLES = {
   resumen:'Resumen Financiero', ingresos:'Ingresos', gastos:'Gastos Operativos',
@@ -1936,11 +1949,195 @@ function renderAjustes() {
   if (syncEl && mainSync) syncEl.textContent = mainSync.textContent;
   var label = document.getElementById('cfg-updated-label');
   if (label) label.textContent = 'Vista de solo lectura · actualizado ' + new Date().toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'});
+  var adminCard = document.getElementById('cfg-admin-card');
+  if (adminCard) adminCard.style.display = s.rol && s.rol.toLowerCase() === 'admin' ? '' : 'none';
+}
+
+/* ════════════════════════════════════════════════════════════════
+   GESTIÓN DE ROLES — Admin only
+   ════════════════════════════════════════════════════════════════ */
+function renderGestionRoles(data) {
+  var container = document.getElementById('view-gestion-roles');
+  if (!container) return;
+  var s = getSession() || {};
+  if (s.rol && s.rol.toLowerCase() !== 'admin') {
+    container.innerHTML = '<div style="padding:2rem;color:#c46a7a;font-weight:600">Solo administradores pueden gestionar roles.</div>';
+    return;
+  }
+  if (data && data.roles) _grRoles = data.roles;
+
+  if (!document.getElementById('gr-left')) {
+    container.innerHTML =
+      '<div style="display:grid;grid-template-columns:210px 1fr;gap:16px;height:calc(100vh - 180px);min-height:420px">'
+      // ── Left: role list ──
+      +'<div style="display:flex;flex-direction:column;gap:6px">'
+        +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">'
+          +'<div style="font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--color-text-muted)">Roles</div>'
+          +'<button onclick="grNewRole()" style="font-size:11px;background:var(--color-primary);color:#fff;border:none;border-radius:6px;padding:3px 9px;cursor:pointer;font-weight:600">+ Nuevo</button>'
+        +'</div>'
+        +'<div id="gr-left" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:3px;border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:6px;background:var(--color-surface)"></div>'
+      +'</div>'
+      // ── Right: editor ──
+      +'<div style="display:flex;flex-direction:column;gap:10px;overflow:hidden">'
+        +'<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">'
+          +'<div>'
+            +'<label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:4px">Nombre del rol</label>'
+            +'<input id="gr-rol-name" placeholder="Ej. Laboratorio" style="width:100%;padding:7px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:13px;background:var(--color-surface);color:var(--color-text);box-sizing:border-box">'
+          +'</div>'
+          +'<div>'
+            +'<label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:4px">Descripción</label>'
+            +'<input id="gr-descripcion" placeholder="Descripción corta" style="width:100%;padding:7px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:13px;background:var(--color-surface);color:var(--color-text);box-sizing:border-box">'
+          +'</div>'
+          +'<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start">'
+            +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--color-text);white-space:nowrap">'
+              +'<input type="checkbox" id="gr-solo-lectura" style="width:14px;height:14px;accent-color:var(--color-primary)"> Solo lectura'
+            +'</label>'
+            +'<button onclick="grSaveRole()" style="padding:7px 18px;background:var(--color-primary);color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">Guardar rol</button>'
+          +'</div>'
+        +'</div>'
+        +'<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px 16px;overflow-y:auto;flex:1">'
+          +'<div style="font-size:9px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:12px">Acceso por módulo — <span style="color:var(--color-primary)">marcado = tiene acceso</span>, desmarcado = bloqueado</div>'
+          +'<div id="gr-permisos" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:0 24px"></div>'
+        +'</div>'
+        +'<div style="display:flex;gap:8px;align-items:center">'
+          +'<button onclick="grSelectAll(true)" style="font-size:11px;padding:4px 10px;border:1px solid var(--color-divider);border-radius:6px;background:transparent;cursor:pointer;color:var(--color-text)">Marcar todo</button>'
+          +'<button onclick="grSelectAll(false)" style="font-size:11px;padding:4px 10px;border:1px solid var(--color-divider);border-radius:6px;background:transparent;cursor:pointer;color:var(--color-text)">Desmarcar todo</button>'
+          +'<div id="gr-save-status" style="font-size:11px;color:var(--color-text-muted);margin-left:auto"></div>'
+        +'</div>'
+      +'</div>'
+    +'</div>';
+  }
+
+  grRenderList();
+  if (!_grSelected && _grRoles.length > 0) grSelectRole(_grRoles[0].rol);
+  else if (_grSelected) grSelectRole(_grSelected);
+  else grNewRole();
+}
+
+function grRenderList() {
+  var el = document.getElementById('gr-left');
+  if (!el) return;
+  el.innerHTML = _grRoles.map(function(r) {
+    var sel = r.rol === _grSelected;
+    return '<div onclick="grSelectRole(\'' + r.rol.replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\')" style="padding:7px 10px;border-radius:6px;cursor:pointer;font-size:13px;user-select:none;'
+      + (sel ? 'background:var(--color-primary-hl,rgba(196,106,122,.12));color:var(--color-primary);font-weight:600' : 'color:var(--color-text)')
+      + '">' + r.rol + (r.soloLectura ? ' <span style="font-size:9px;opacity:.6">(lectura)</span>' : '') + '</div>';
+  }).join('') || '<div style="font-size:12px;color:var(--color-text-muted);padding:8px">Sin roles. Presiona + Nuevo.</div>';
+}
+
+function grSelectRole(rolName) {
+  _grSelected = rolName;
+  var role = null;
+  for (var i = 0; i < _grRoles.length; i++) {
+    if (_grRoles[i].rol === rolName) { role = _grRoles[i]; break; }
+  }
+  grRenderList();
+  var n = document.getElementById('gr-rol-name'); if (n) { n.value = role ? role.rol : ''; n.disabled = !!role; }
+  var d = document.getElementById('gr-descripcion'); if (d) d.value = role ? (role.descripcion || '') : '';
+  var sl = document.getElementById('gr-solo-lectura'); if (sl) sl.checked = role ? !!role.soloLectura : false;
+  grRenderCheckboxes(role);
+}
+
+function grNewRole() {
+  _grSelected = '';
+  grRenderList();
+  var n = document.getElementById('gr-rol-name'); if (n) { n.value = ''; n.disabled = false; setTimeout(function(){ n.focus(); }, 50); }
+  var d = document.getElementById('gr-descripcion'); if (d) d.value = '';
+  var sl = document.getElementById('gr-solo-lectura'); if (sl) sl.checked = false;
+  grRenderCheckboxes(null);
+}
+
+function grRenderCheckboxes(role) {
+  var bloqueadas = role ? (role.vistasBloqueadas || []) : [];
+  var el = document.getElementById('gr-permisos');
+  if (!el) return;
+  var items = (menuItems || []);
+  if (!items.length) {
+    el.innerHTML = '<div style="color:var(--color-text-muted);font-size:12px;grid-column:1/-1">El menú aún no ha cargado. Navega a cualquier otra vista y regresa.</div>';
+    return;
+  }
+  var sections = {}, secOrder = [];
+  items.forEach(function(item) {
+    var sec = item.seccion || 'OTROS';
+    if (!sections[sec]) { sections[sec] = []; secOrder.push(sec); }
+    sections[sec].push(item);
+  });
+  var html = '';
+  secOrder.forEach(function(sec) {
+    html += '<div style="break-inside:avoid;margin-bottom:14px">'
+      +'<div style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--color-text-muted);padding-bottom:4px;border-bottom:1px solid var(--color-divider);margin-bottom:5px">' + sec + '</div>';
+    sections[sec].forEach(function(item) {
+      var chk = bloqueadas.indexOf(item.id) === -1;
+      var indent = item.padre ? 'padding-left:14px' : '';
+      var bold = (!item.padre) ? 'font-weight:600' : '';
+      html += '<label style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer;' + indent + '">'
+        +'<input type="checkbox" ' + (chk?'checked':'') + ' data-id="' + item.id + '" style="width:13px;height:13px;cursor:pointer;flex-shrink:0;accent-color:var(--color-primary)">'
+        +'<span style="font-size:12px;color:var(--color-text);' + bold + '">' + (item.label || item.id) + '</span>'
+        +'</label>';
+    });
+    html += '</div>';
+  });
+  el.innerHTML = html;
+}
+
+function grSelectAll(val) {
+  document.querySelectorAll('#gr-permisos input[type="checkbox"]').forEach(function(cb){ cb.checked = val; });
+}
+
+async function grSaveRole() {
+  var nEl = document.getElementById('gr-rol-name');
+  var rolName = nEl ? nEl.value.trim() : '';
+  if (!rolName) { alert('Escribe el nombre del rol'); return; }
+  var descripcion = (document.getElementById('gr-descripcion')||{}).value || '';
+  var soloLectura = !!((document.getElementById('gr-solo-lectura')||{}).checked);
+  var statusEl = document.getElementById('gr-save-status');
+  var bloqueadas = [];
+  document.querySelectorAll('#gr-permisos input[type="checkbox"]').forEach(function(cb){
+    if (!cb.checked) bloqueadas.push(cb.getAttribute('data-id'));
+  });
+  if (statusEl) statusEl.textContent = 'Guardando…';
+  try {
+    var url = APPS_SCRIPT_URL + '?action=saveRole'
+      + '&token=' + encodeURIComponent(getToken() || '')
+      + '&rol=' + encodeURIComponent(rolName)
+      + '&vistasBloqueadas=' + encodeURIComponent(bloqueadas.join(','))
+      + '&soloLectura=' + (soloLectura ? 'true' : 'false')
+      + '&descripcion=' + encodeURIComponent(descripcion);
+    var res = await fetch(url);
+    var json = await res.json();
+    if (json.error) { if(statusEl) statusEl.textContent='Error: '+json.error; setStatus('Error: '+json.error,'err'); return; }
+    if (statusEl) statusEl.textContent = 'Guardado ' + new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+    setStatus('Rol guardado correctamente', 'ok');
+    var found = false;
+    for (var i = 0; i < _grRoles.length; i++) {
+      if (_grRoles[i].rol.toLowerCase() === rolName.toLowerCase()) {
+        _grRoles[i].vistasBloqueadas = bloqueadas; _grRoles[i].soloLectura = soloLectura; _grRoles[i].descripcion = descripcion;
+        found = true; break;
+      }
+    }
+    if (!found) _grRoles.push({ rol: rolName, vistasBloqueadas: bloqueadas, soloLectura: soloLectura, descripcion: descripcion });
+    _grSelected = rolName;
+    if (nEl) nEl.disabled = true;
+    grRenderList();
+  } catch(e) { if(statusEl) statusEl.textContent='Error de red'; setStatus('Error de red: '+e.message,'err'); }
+}
+
+async function grLoadRoles() {
+  try {
+    var url = APPS_SCRIPT_URL + '?action=view&view=gestion-roles&fechaInicio=2026-01-01&fechaFin=2026-12-31&token=' + encodeURIComponent(getToken() || '');
+    var res = await fetch(url);
+    var data = await res.json();
+    if (data.error) { setStatus('Error cargando roles: ' + data.error, 'err'); return; }
+    renderGestionRoles(data);
+    setStatus('Roles cargados', 'ok');
+  } catch(e) { setStatus('Error: ' + e.message, 'err'); }
 }
 
 async function loadView(viewId, fechaInicio, fechaFin, force) {
   // Ajustes es local — no necesita fetch al API
   if (/^(configuracion|ajustes|config)$/i.test(viewId) || isConfigFuente(viewId)) { renderAjustes(); return; }
+  // Gestión de roles — carga siempre fresco del API (sin caché)
+  if (viewId === 'gestion-roles') { renderGestionRoles({}); grLoadRoles(); return; }
 
   var cacheKey = viewId + '_' + fechaInicio + '_' + fechaFin;
   var now = Date.now();
@@ -2006,7 +2203,8 @@ function renderViewData(viewId, data) {
     laboratorios:          function(d) { renderLaboratorios(d); },
     configuracion: function(){ renderAjustes(); },
     ajustes:        function(){ renderAjustes(); },
-    config:         function(){ renderAjustes(); }
+    config:         function(){ renderAjustes(); },
+    'gestion-roles': function(d){ renderGestionRoles(d); }
   };
 
   if (knownViews[viewId]) {
