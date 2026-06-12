@@ -1479,67 +1479,42 @@ function renderQxResumen(data) {
 }
 
 function renderRepEjecutivo(data) {
-  var container = document.getElementById('view-rep-ejecutivo');
-  if (!container) return;
+  var s = function(id, v) { var e = document.getElementById(id); if (e) e.textContent = v; };
+  var sc = function(id, color) { var e = document.getElementById(id); if (e) e.style.color = color; };
 
-  var fmtMXN = function(n){ return (n !== null && n !== undefined) ? '$' + Number(n||0).toLocaleString('es-MX',{minimumFractionDigits:0,maximumFractionDigits:0}) : '—'; };
-  var fmtNum = function(n){ return (n !== null && n !== undefined) ? Number(n||0).toLocaleString('es-MX') : '—'; };
-  var fmtPct = function(n){ return (n !== null && n !== undefined) ? Number(n||0).toFixed(1) + '%' : '—'; };
-
-  function card(label, value, sub, cls) {
-    return '<div class="kpi-card' + (cls ? ' ' + cls : '') + '" style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-lg);padding:var(--space-5);display:flex;flex-direction:column;gap:var(--space-2)">'
-      + '<div class="kpi-label" style="font-size:var(--text-xs);color:var(--color-text-muted)">' + label + '</div>'
-      + '<div class="kpi-value" style="font-size:var(--text-xl);font-weight:700">' + value + '</div>'
-      + (sub ? '<div class="kpi-sub" style="font-size:var(--text-xs);color:var(--color-text-muted)">' + sub + '</div>' : '')
-      + '</div>';
-  }
-
-  function sectionLabel(text) {
-    return '<div style="font-size:var(--text-xs);font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-muted);margin:var(--space-6) 0 var(--space-3);border-left:3px solid var(--color-primary);padding-left:var(--space-2)">' + text + '</div>';
-  }
-
-  function grid(cards) {
-    return '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-4);margin-bottom:var(--space-2)">' + cards + '</div>';
-  }
+  var fmtMXN = function(n) { return n !== null ? '$' + Number(n).toLocaleString('es-MX',{minimumFractionDigits:0,maximumFractionDigits:0}) : '—'; };
+  var fmtNum = function(n) { return n != null ? Number(n).toLocaleString('es-MX') : '—'; };
+  var fmtPct = function(n) { return n !== null ? Number(n).toFixed(1) + '%' : '—'; };
 
   var sec  = (data && data.sections) || {};
-  var fin  = sec.financiero || {};
-  var clin = sec.clinico    || {};
+  var fin  = sec.financiero  || {};
+  var clin = sec.clinico     || {};
   var ops  = sec.operaciones || {};
 
   var ingresos = fin.ingresos != null ? Number(fin.ingresos) : null;
   var gastos   = fin.gastos   != null ? Number(fin.gastos)   : null;
   var utilidad = (ingresos !== null && gastos !== null) ? ingresos - gastos : null;
   var margen   = (ingresos && ingresos > 0 && utilidad !== null) ? (utilidad / ingresos * 100) : null;
-  var utilCls  = utilidad !== null ? (utilidad >= 0 ? 'lr-kpi--ok' : 'lr-kpi--warn') : '';
 
-  var periodo = (data && data.periodo) || (currentFechaInicio ? currentFechaInicio + ' — ' + currentFechaFin : '');
+  s('rep-periodo-txt', (data && data.periodo) || (currentFechaInicio ? currentFechaInicio + ' — ' + currentFechaFin : '—'));
 
-  container.innerHTML =
-    '<div style="margin-bottom:var(--space-4)">'
-      + '<p style="color:var(--color-text-muted);font-size:var(--text-sm)">' + periodo + '</p>'
-    + '</div>'
-    + sectionLabel('Financiero')
-    + grid(
-        card('Ingresos del período', ingresos !== null ? fmtMXN(ingresos) : '—', 'Total cobrado', '') +
-        card('Gastos totales',       gastos   !== null ? fmtMXN(gastos)   : '—', 'Operativos + costos', '') +
-        card('Utilidad neta',        utilidad !== null ? fmtMXN(utilidad) : '—', 'Ingresos − Gastos', utilCls) +
-        card('Margen',               margen   !== null ? fmtPct(margen)   : '—', 'Utilidad / Ingresos', utilCls)
-      )
-    + sectionLabel('Clínico')
-    + grid(
-        card('Pacientes nuevas',   fmtNum(clin.pacientesNuevos), 'En el período', '') +
-        card('Ciclos ART',         fmtNum(clin.ciclosART),        'Iniciados', '') +
-        card('Transferencias FET', fmtNum(clin.fetRealizados),    'Realizadas', '') +
-        card('Tasa de embarazo',   clin.tasaEmbarazo != null ? fmtPct(clin.tasaEmbarazo) : '—', 'Embarazo clínico', '')
-      )
-    + sectionLabel('Operaciones')
-    + grid(
-        card('Banco Crío',         fmtNum(ops.bancoCrio),          'Embriones y muestras', '') +
-        card('Alertas inventario', fmtNum(ops.alertasInventario),  'Stock crítico', ops.alertasInventario > 0 ? 'lr-kpi--warn' : '') +
-        card('Insumos activos',    fmtNum(ops.insumosActivos),     'Artículos en catálogo', '') +
-        card('Satisfacción NPS',   ops.nps != null ? ops.nps + '/10' : '—', 'Promedio período', '')
-      );
+  s('rep-v-ingresos', fmtMXN(ingresos));
+  s('rep-v-gastos',   fmtMXN(gastos));
+  s('rep-v-utilidad', fmtMXN(utilidad));
+  s('rep-v-margen',   fmtPct(margen));
+  if (utilidad !== null) sc('rep-v-utilidad', utilidad >= 0 ? '#2e7d32' : '#e65100');
+  if (margen   !== null) sc('rep-v-margen',   margen   >= 0 ? '#2e7d32' : '#e65100');
+
+  s('rep-v-pacientes', fmtNum(clin.pacientesNuevos));
+  s('rep-v-ciclos',    fmtNum(clin.ciclosART));
+  s('rep-v-fet',       fmtNum(clin.fetRealizados));
+  s('rep-v-tasa',      clin.tasaEmbarazo != null ? fmtPct(clin.tasaEmbarazo) : '—');
+
+  s('rep-v-crio',    fmtNum(ops.bancoCrio));
+  s('rep-v-alertas', fmtNum(ops.alertasInventario));
+  s('rep-v-insumos', fmtNum(ops.insumosActivos));
+  s('rep-v-nps',     ops.nps != null ? ops.nps + '/10' : '—');
+  if (ops.alertasInventario > 0) sc('rep-v-alertas', '#e65100');
 }
 
 function renderMedicamentos(data) {
@@ -2019,6 +1994,10 @@ function navigateTo(viewId) {
     document.getElementById('view-' + viewId).style.display = '';
   }
 
+  // Scroll al inicio del contenido al cambiar de vista
+  var mainEl = document.querySelector('.main');
+  if (mainEl) mainEl.scrollTop = 0;
+
   // Actualizar topbar y nav
   var menuItem = menuItems.filter(function(i){ return i.id === viewId; })[0];
   var title = (menuItem && menuItem.label) || VIEW_TITLES[viewId] || viewId;
@@ -2384,30 +2363,81 @@ function initTheme() {
 
 <!-- ══ VIEW: REPORTE EJECUTIVO ══ -->
 <div id="view-rep-ejecutivo" class="view" style="display:none">
-  <div style="margin-bottom:var(--space-6)">
-    <h2 style="font-size:var(--text-2xl);font-weight:700;color:var(--color-text)">Reporte Ejecutivo</h2>
-    <p id="rep-ej-periodo" style="color:var(--color-text-muted);font-size:var(--text-sm);margin-top:var(--space-1)">—</p>
+  <p id="rep-periodo-txt" style="color:#7a7670;font-size:0.85rem;margin-bottom:1.25rem">—</p>
+
+  <!-- FINANCIERO -->
+  <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:#7a7670;margin-bottom:0.75rem;border-left:3px solid #c46a7a;padding-left:8px">Financiero</div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1.75rem">
+    <div style="background:#fff;border:1px solid #e5e2dc;border-radius:10px;padding:1.2rem">
+      <div style="font-size:0.68rem;color:#7a7670;margin-bottom:6px">Ingresos del período</div>
+      <div id="rep-v-ingresos" style="font-size:1.6rem;font-weight:700;color:#28251d">—</div>
+      <div style="font-size:0.68rem;color:#7a7670;margin-top:4px">Total cobrado</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e5e2dc;border-radius:10px;padding:1.2rem">
+      <div style="font-size:0.68rem;color:#7a7670;margin-bottom:6px">Gastos totales</div>
+      <div id="rep-v-gastos" style="font-size:1.6rem;font-weight:700;color:#28251d">—</div>
+      <div style="font-size:0.68rem;color:#7a7670;margin-top:4px">Operativos + costos</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e5e2dc;border-radius:10px;padding:1.2rem">
+      <div style="font-size:0.68rem;color:#7a7670;margin-bottom:6px">Utilidad neta</div>
+      <div id="rep-v-utilidad" style="font-size:1.6rem;font-weight:700;color:#28251d">—</div>
+      <div style="font-size:0.68rem;color:#7a7670;margin-top:4px">Ingresos − Gastos</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e5e2dc;border-radius:10px;padding:1.2rem">
+      <div style="font-size:0.68rem;color:#7a7670;margin-bottom:6px">Margen</div>
+      <div id="rep-v-margen" style="font-size:1.6rem;font-weight:700;color:#28251d">—</div>
+      <div style="font-size:0.68rem;color:#7a7670;margin-top:4px">Utilidad / Ingresos</div>
+    </div>
   </div>
-  <div class="rep-section-label" style="margin-top:var(--space-2)">Financiero</div>
-  <div class="kpi-grid" id="rep-fin-grid" style="margin-bottom:var(--space-6)">
-    <div class="kpi-card"><div class="kpi-label">Ingresos del período</div><div class="kpi-value">—</div><div class="kpi-sub">Total cobrado</div></div>
-    <div class="kpi-card"><div class="kpi-label">Gastos totales</div><div class="kpi-value">—</div><div class="kpi-sub">Operativos + costos</div></div>
-    <div class="kpi-card"><div class="kpi-label">Utilidad neta</div><div class="kpi-value">—</div><div class="kpi-sub">Ingresos − Gastos</div></div>
-    <div class="kpi-card"><div class="kpi-label">Margen</div><div class="kpi-value">—</div><div class="kpi-sub">Utilidad / Ingresos</div></div>
+
+  <!-- CLÍNICO -->
+  <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:#7a7670;margin-bottom:0.75rem;border-left:3px solid #c46a7a;padding-left:8px">Clínico</div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1.75rem">
+    <div style="background:#fff;border:1px solid #e5e2dc;border-radius:10px;padding:1.2rem">
+      <div style="font-size:0.68rem;color:#7a7670;margin-bottom:6px">Pacientes nuevas</div>
+      <div id="rep-v-pacientes" style="font-size:1.6rem;font-weight:700;color:#28251d">—</div>
+      <div style="font-size:0.68rem;color:#7a7670;margin-top:4px">En el período</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e5e2dc;border-radius:10px;padding:1.2rem">
+      <div style="font-size:0.68rem;color:#7a7670;margin-bottom:6px">Ciclos ART</div>
+      <div id="rep-v-ciclos" style="font-size:1.6rem;font-weight:700;color:#28251d">—</div>
+      <div style="font-size:0.68rem;color:#7a7670;margin-top:4px">Iniciados</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e5e2dc;border-radius:10px;padding:1.2rem">
+      <div style="font-size:0.68rem;color:#7a7670;margin-bottom:6px">Transferencias FET</div>
+      <div id="rep-v-fet" style="font-size:1.6rem;font-weight:700;color:#28251d">—</div>
+      <div style="font-size:0.68rem;color:#7a7670;margin-top:4px">Realizadas</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e5e2dc;border-radius:10px;padding:1.2rem">
+      <div style="font-size:0.68rem;color:#7a7670;margin-bottom:6px">Tasa de embarazo</div>
+      <div id="rep-v-tasa" style="font-size:1.6rem;font-weight:700;color:#28251d">—</div>
+      <div style="font-size:0.68rem;color:#7a7670;margin-top:4px">Embarazo clínico</div>
+    </div>
   </div>
-  <div class="rep-section-label">Clínico</div>
-  <div class="kpi-grid" id="rep-clin-grid" style="margin-bottom:var(--space-6)">
-    <div class="kpi-card"><div class="kpi-label">Pacientes nuevas</div><div class="kpi-value">—</div><div class="kpi-sub">En el período</div></div>
-    <div class="kpi-card"><div class="kpi-label">Ciclos ART</div><div class="kpi-value">—</div><div class="kpi-sub">Iniciados</div></div>
-    <div class="kpi-card"><div class="kpi-label">Transferencias FET</div><div class="kpi-value">—</div><div class="kpi-sub">Realizadas</div></div>
-    <div class="kpi-card"><div class="kpi-label">Tasa de embarazo</div><div class="kpi-value">—</div><div class="kpi-sub">Embarazo clínico</div></div>
-  </div>
-  <div class="rep-section-label">Operaciones</div>
-  <div class="kpi-grid" id="rep-ops-grid" style="margin-bottom:var(--space-6)">
-    <div class="kpi-card"><div class="kpi-label">Banco Crío</div><div class="kpi-value">—</div><div class="kpi-sub">Embriones y muestras</div></div>
-    <div class="kpi-card"><div class="kpi-label">Alertas inventario</div><div class="kpi-value">—</div><div class="kpi-sub">Stock crítico</div></div>
-    <div class="kpi-card"><div class="kpi-label">Insumos activos</div><div class="kpi-value">—</div><div class="kpi-sub">Artículos en catálogo</div></div>
-    <div class="kpi-card"><div class="kpi-label">Satisfacción NPS</div><div class="kpi-value">—</div><div class="kpi-sub">Promedio período</div></div>
+
+  <!-- OPERACIONES -->
+  <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:#7a7670;margin-bottom:0.75rem;border-left:3px solid #c46a7a;padding-left:8px">Operaciones</div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1.75rem">
+    <div style="background:#fff;border:1px solid #e5e2dc;border-radius:10px;padding:1.2rem">
+      <div style="font-size:0.68rem;color:#7a7670;margin-bottom:6px">Banco Crío</div>
+      <div id="rep-v-crio" style="font-size:1.6rem;font-weight:700;color:#28251d">—</div>
+      <div style="font-size:0.68rem;color:#7a7670;margin-top:4px">Embriones y muestras</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e5e2dc;border-radius:10px;padding:1.2rem">
+      <div style="font-size:0.68rem;color:#7a7670;margin-bottom:6px">Alertas inventario</div>
+      <div id="rep-v-alertas" style="font-size:1.6rem;font-weight:700;color:#28251d">—</div>
+      <div style="font-size:0.68rem;color:#7a7670;margin-top:4px">Stock crítico</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e5e2dc;border-radius:10px;padding:1.2rem">
+      <div style="font-size:0.68rem;color:#7a7670;margin-bottom:6px">Insumos activos</div>
+      <div id="rep-v-insumos" style="font-size:1.6rem;font-weight:700;color:#28251d">—</div>
+      <div style="font-size:0.68rem;color:#7a7670;margin-top:4px">Artículos en catálogo</div>
+    </div>
+    <div style="background:#fff;border:1px solid #e5e2dc;border-radius:10px;padding:1.2rem">
+      <div style="font-size:0.68rem;color:#7a7670;margin-bottom:6px">Satisfacción NPS</div>
+      <div id="rep-v-nps" style="font-size:1.6rem;font-weight:700;color:#28251d">—</div>
+      <div style="font-size:0.68rem;color:#7a7670;margin-top:4px">Promedio período</div>
+    </div>
   </div>
 </div>
 
