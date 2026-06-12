@@ -1479,53 +1479,67 @@ function renderQxResumen(data) {
 }
 
 function renderRepEjecutivo(data) {
-  var fmtMXN = function(n){ return n !== null && n !== undefined ? '$' + Number(n||0).toLocaleString('es-MX',{minimumFractionDigits:0,maximumFractionDigits:0}) : '—'; };
-  var fmtNum = function(n){ return n !== null && n !== undefined ? Number(n||0).toLocaleString('es-MX') : '—'; };
-  var fmtPct = function(n){ return n !== null && n !== undefined ? Number(n||0).toFixed(1) + '%' : '—'; };
+  var container = document.getElementById('view-rep-ejecutivo');
+  if (!container) return;
+
+  var fmtMXN = function(n){ return (n !== null && n !== undefined) ? '$' + Number(n||0).toLocaleString('es-MX',{minimumFractionDigits:0,maximumFractionDigits:0}) : '—'; };
+  var fmtNum = function(n){ return (n !== null && n !== undefined) ? Number(n||0).toLocaleString('es-MX') : '—'; };
+  var fmtPct = function(n){ return (n !== null && n !== undefined) ? Number(n||0).toFixed(1) + '%' : '—'; };
 
   function card(label, value, sub, cls) {
-    return '<div class="kpi-card' + (cls ? ' ' + cls : '') + '">'
-      + '<div class="kpi-label">' + label + '</div>'
-      + '<div class="kpi-value">' + value + '</div>'
-      + (sub ? '<div class="kpi-sub">' + sub + '</div>' : '')
+    return '<div class="kpi-card' + (cls ? ' ' + cls : '') + '" style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-lg);padding:var(--space-5);display:flex;flex-direction:column;gap:var(--space-2)">'
+      + '<div class="kpi-label" style="font-size:var(--text-xs);color:var(--color-text-muted)">' + label + '</div>'
+      + '<div class="kpi-value" style="font-size:var(--text-xl);font-weight:700">' + value + '</div>'
+      + (sub ? '<div class="kpi-sub" style="font-size:var(--text-xs);color:var(--color-text-muted)">' + sub + '</div>' : '')
       + '</div>';
   }
 
-  var sec = data.sections || {};
-  var fin = sec.financiero || {};
-  var clin = sec.clinico || {};
-  var ops = sec.operaciones || {};
+  function sectionLabel(text) {
+    return '<div style="font-size:var(--text-xs);font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-muted);margin:var(--space-6) 0 var(--space-3);border-left:3px solid var(--color-primary);padding-left:var(--space-2)">' + text + '</div>';
+  }
 
-  // Compute derived
+  function grid(cards) {
+    return '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-4);margin-bottom:var(--space-2)">' + cards + '</div>';
+  }
+
+  var sec  = (data && data.sections) || {};
+  var fin  = sec.financiero || {};
+  var clin = sec.clinico    || {};
+  var ops  = sec.operaciones || {};
+
   var ingresos = fin.ingresos != null ? Number(fin.ingresos) : null;
   var gastos   = fin.gastos   != null ? Number(fin.gastos)   : null;
   var utilidad = (ingresos !== null && gastos !== null) ? ingresos - gastos : null;
   var margen   = (ingresos && ingresos > 0 && utilidad !== null) ? (utilidad / ingresos * 100) : null;
   var utilCls  = utilidad !== null ? (utilidad >= 0 ? 'lr-kpi--ok' : 'lr-kpi--warn') : '';
 
-  var finGrid = document.getElementById('rep-fin-grid');
-  if (finGrid) finGrid.innerHTML =
-    card('Ingresos del período',  ingresos  !== null ? fmtMXN(ingresos)  : '—', 'Total cobrado', '') +
-    card('Gastos totales',        gastos    !== null ? fmtMXN(gastos)    : '—', 'Operativos + costos', '') +
-    card('Utilidad neta',         utilidad  !== null ? fmtMXN(utilidad)  : '—', 'Ingresos − Gastos', utilCls) +
-    card('Margen',                margen    !== null ? fmtPct(margen)    : '—', 'Utilidad / Ingresos', utilCls);
+  var periodo = (data && data.periodo) || (currentFechaInicio ? currentFechaInicio + ' — ' + currentFechaFin : '');
 
-  var clinGrid = document.getElementById('rep-clin-grid');
-  if (clinGrid) clinGrid.innerHTML =
-    card('Pacientes nuevas',     fmtNum(clin.pacientesNuevos), 'En el período', '') +
-    card('Ciclos ART',           fmtNum(clin.ciclosART),       'Iniciados', '') +
-    card('Transferencias FET',   fmtNum(clin.fetRealizados),   'Realizadas', '') +
-    card('Tasa de embarazo',     clin.tasaEmbarazo != null ? fmtPct(clin.tasaEmbarazo) : '—', 'Embarazo clínico', '');
-
-  var opsGrid = document.getElementById('rep-ops-grid');
-  if (opsGrid) opsGrid.innerHTML =
-    card('Banco Crío',           fmtNum(ops.bancoCrio),        'Embriones y muestras', '') +
-    card('Alertas inventario',   fmtNum(ops.alertasInventario),'Stock crítico', ops.alertasInventario > 0 ? 'lr-kpi--warn' : '') +
-    card('Insumos activos',      fmtNum(ops.insumosActivos),   'Artículos en catálogo', '') +
-    card('Satisfacción NPS',     ops.nps != null ? ops.nps + '/10' : '—', 'Promedio período', '');
-
-  var periodoEl = document.getElementById('rep-ej-periodo');
-  if (periodoEl) periodoEl.textContent = data.periodo || (currentFechaInicio ? currentFechaInicio + ' — ' + currentFechaFin : '—');
+  container.innerHTML =
+    '<div style="margin-bottom:var(--space-4)">'
+      + '<p style="color:var(--color-text-muted);font-size:var(--text-sm)">' + periodo + '</p>'
+    + '</div>'
+    + sectionLabel('Financiero')
+    + grid(
+        card('Ingresos del período', ingresos !== null ? fmtMXN(ingresos) : '—', 'Total cobrado', '') +
+        card('Gastos totales',       gastos   !== null ? fmtMXN(gastos)   : '—', 'Operativos + costos', '') +
+        card('Utilidad neta',        utilidad !== null ? fmtMXN(utilidad) : '—', 'Ingresos − Gastos', utilCls) +
+        card('Margen',               margen   !== null ? fmtPct(margen)   : '—', 'Utilidad / Ingresos', utilCls)
+      )
+    + sectionLabel('Clínico')
+    + grid(
+        card('Pacientes nuevas',   fmtNum(clin.pacientesNuevos), 'En el período', '') +
+        card('Ciclos ART',         fmtNum(clin.ciclosART),        'Iniciados', '') +
+        card('Transferencias FET', fmtNum(clin.fetRealizados),    'Realizadas', '') +
+        card('Tasa de embarazo',   clin.tasaEmbarazo != null ? fmtPct(clin.tasaEmbarazo) : '—', 'Embarazo clínico', '')
+      )
+    + sectionLabel('Operaciones')
+    + grid(
+        card('Banco Crío',         fmtNum(ops.bancoCrio),          'Embriones y muestras', '') +
+        card('Alertas inventario', fmtNum(ops.alertasInventario),  'Stock crítico', ops.alertasInventario > 0 ? 'lr-kpi--warn' : '') +
+        card('Insumos activos',    fmtNum(ops.insumosActivos),     'Artículos en catálogo', '') +
+        card('Satisfacción NPS',   ops.nps != null ? ops.nps + '/10' : '—', 'Promedio período', '')
+      );
 }
 
 function renderMedicamentos(data) {
