@@ -2169,7 +2169,8 @@ async function grSaveRole() {
     }
     _grSelected = rolName;
     if (nEl) nEl.disabled = true;
-    grRenderList();
+    // Recargar desde Sheets para que _rowNum sea correcto
+    grLoadRoles();
 
   } catch(e) {
     console.error('[grSaveRole] excepción:', e);
@@ -2180,18 +2181,31 @@ async function grSaveRole() {
 }
 
 function grParseCaptura(data) {
-  var h = (data.headers || []).map(function(c){ return String(c).trim().toLowerCase(); });
-  var rI = h.indexOf('rol'), bI = h.indexOf('vistas_bloqueadas'), lI = h.indexOf('solo_lectura'), dI = h.indexOf('descripcion');
-  return (data.rows || []).map(function(row, idx) {
-    var rolName = rI > -1 ? String(row[rI] || '').trim() : String(row[0] || '').trim();
+  // readCapturaData devuelve filas como objetos {Rol:v, rol:v, _rowNum:N, ...}
+  // También soporta filas como arrays para compatibilidad
+  return (data.rows || []).map(function(row) {
+    var isArr = Array.isArray(row);
+    var headers = isArr ? (data.headers || []) : null;
+    var get = function(key, idx) {
+      if (isArr) return row[idx] !== undefined ? row[idx] : undefined;
+      return row[key] !== undefined ? row[key] : row[key.toLowerCase()];
+    };
+    var hIdx = function(name) {
+      if (!isArr) return -1;
+      return (headers || []).findIndex ? (headers || []).findIndex(function(h){ return String(h).trim().toLowerCase() === name; })
+           : (function(){ for(var i=0;i<headers.length;i++){ if(String(headers[i]).trim().toLowerCase()===name) return i; } return -1; })();
+    };
+    var rolName = String(get('Rol', hIdx('rol')) || '').trim();
     if (!rolName) return null;
-    var bloqStr = bI > -1 ? String(row[bI] || '').trim() : '';
+    var bloqStr = String(get('Vistas_Bloqueadas', hIdx('vistas_bloqueadas')) || '').trim();
+    var soloLec = !!(get('Solo_Lectura', hIdx('solo_lectura')));
+    var desc    = String(get('Descripcion', hIdx('descripcion')) || '').trim();
     return {
-      rol: rolName,
+      rol:              rolName,
       vistasBloqueadas: bloqStr ? bloqStr.split(',').map(function(v){ return v.trim(); }).filter(Boolean) : [],
-      soloLectura: lI > -1 ? !!row[lI] : false,
-      descripcion: dI > -1 ? String(row[dI] || '').trim() : '',
-      _rowNum: idx + 2
+      soloLectura:      soloLec,
+      descripcion:      desc,
+      _rowNum:          isArr ? undefined : row['_rowNum']
     };
   }).filter(Boolean);
 }
