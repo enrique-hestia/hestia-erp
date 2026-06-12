@@ -1479,31 +1479,65 @@ function renderQxResumen(data) {
 }
 
 function renderRepEjecutivo(data) {
-  var s = function(id, v) { var e = document.getElementById(id); if (e) e.textContent = v; };
-  var sc = function(id, color) { var e = document.getElementById(id); if (e) e.style.color = color; };
+  var container = document.getElementById('view-rep-ejecutivo');
+  if (!container) return;
 
-  var fmtMXN = function(n) { return n !== null ? '$' + Number(n).toLocaleString('es-MX',{minimumFractionDigits:0,maximumFractionDigits:0}) : '—'; };
+  // Si el HTML estático no está (caché viejo), construir el layout completo
+  if (!document.getElementById('rep-v-ingresos')) {
+    var C = '#fff', B = '1px solid #e5e2dc', R = '10px', P = '1.2rem';
+    var card = function(id, label, sub) {
+      return '<div style="background:'+C+';border:'+B+';border-radius:'+R+';padding:'+P+'">'
+        +'<div style="font-size:0.68rem;color:#7a7670;margin-bottom:6px">'+label+'</div>'
+        +'<div id="rep-v-'+id+'" style="font-size:1.6rem;font-weight:700;color:#28251d">—</div>'
+        +'<div style="font-size:0.68rem;color:#7a7670;margin-top:4px">'+sub+'</div></div>';
+    };
+    var sec = function(label) {
+      return '<div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:#7a7670;margin:1.25rem 0 0.75rem;border-left:3px solid #c46a7a;padding-left:8px">'+label+'</div>';
+    };
+    var grid = function(html) {
+      return '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:0.5rem">'+html+'</div>';
+    };
+    container.innerHTML =
+      '<p id="rep-periodo-txt" style="color:#7a7670;font-size:0.85rem;margin-bottom:1rem">—</p>'
+      + sec('Financiero')
+      + grid(card('ingresos','Ingresos del período','Total cobrado')
+           + card('gastos','Gastos totales','Operativos + costos')
+           + card('utilidad','Utilidad neta','Ingresos − Gastos')
+           + card('margen','Margen','Utilidad / Ingresos'))
+      + sec('Clínico')
+      + grid(card('pacientes','Pacientes nuevas','En el período')
+           + card('ciclos','Ciclos ART','Iniciados')
+           + card('fet','Transferencias FET','Realizadas')
+           + card('tasa','Tasa de embarazo','Embarazo clínico'))
+      + sec('Operaciones')
+      + grid(card('crio','Banco Crío','Embriones y muestras')
+           + card('alertas','Alertas inventario','Stock crítico')
+           + card('insumos','Insumos activos','Artículos en catálogo')
+           + card('nps','Satisfacción NPS','Promedio período'));
+  }
+
+  // Actualizar valores
+  var s  = function(id, v) { var e = document.getElementById(id); if (e) e.textContent = v; };
+  var sc = function(id, c) { var e = document.getElementById(id); if (e) e.style.color = c; };
+  var fmtMXN = function(n) { return n !== null ? '$'+Number(n).toLocaleString('es-MX',{minimumFractionDigits:0,maximumFractionDigits:0}) : '—'; };
   var fmtNum = function(n) { return n != null ? Number(n).toLocaleString('es-MX') : '—'; };
-  var fmtPct = function(n) { return n !== null ? Number(n).toFixed(1) + '%' : '—'; };
+  var fmtPct = function(n) { return n !== null ? Number(n).toFixed(1)+'%' : '—'; };
 
-  var sec  = (data && data.sections) || {};
-  var fin  = sec.financiero  || {};
-  var clin = sec.clinico     || {};
-  var ops  = sec.operaciones || {};
+  var sec2 = (data && data.sections) || {};
+  var fin  = sec2.financiero  || {};
+  var clin = sec2.clinico     || {};
+  var ops  = sec2.operaciones || {};
 
-  var ingresos = fin.ingresos != null ? Number(fin.ingresos) : null;
-  var gastos   = fin.gastos   != null ? Number(fin.gastos)   : null;
-  var utilidad = (ingresos !== null && gastos !== null) ? ingresos - gastos : null;
-  var margen   = (ingresos && ingresos > 0 && utilidad !== null) ? (utilidad / ingresos * 100) : null;
+  var ing  = fin.ingresos != null ? Number(fin.ingresos) : null;
+  var gas  = fin.gastos   != null ? Number(fin.gastos)   : null;
+  var util = (ing !== null && gas !== null) ? ing - gas : null;
+  var marg = (ing && ing > 0 && util !== null) ? (util / ing * 100) : null;
 
-  s('rep-periodo-txt', (data && data.periodo) || (currentFechaInicio ? currentFechaInicio + ' — ' + currentFechaFin : '—'));
-
-  s('rep-v-ingresos', fmtMXN(ingresos));
-  s('rep-v-gastos',   fmtMXN(gastos));
-  s('rep-v-utilidad', fmtMXN(utilidad));
-  s('rep-v-margen',   fmtPct(margen));
-  if (utilidad !== null) sc('rep-v-utilidad', utilidad >= 0 ? '#2e7d32' : '#e65100');
-  if (margen   !== null) sc('rep-v-margen',   margen   >= 0 ? '#2e7d32' : '#e65100');
+  s('rep-periodo-txt', (data && data.periodo) || (currentFechaInicio ? currentFechaInicio+' — '+currentFechaFin : '—'));
+  s('rep-v-ingresos', fmtMXN(ing));  s('rep-v-gastos', fmtMXN(gas));
+  s('rep-v-utilidad', fmtMXN(util)); s('rep-v-margen', fmtPct(marg));
+  if (util !== null) sc('rep-v-utilidad', util >= 0 ? '#2e7d32' : '#e65100');
+  if (marg !== null) sc('rep-v-margen',   marg >= 0 ? '#2e7d32' : '#e65100');
 
   s('rep-v-pacientes', fmtNum(clin.pacientesNuevos));
   s('rep-v-ciclos',    fmtNum(clin.ciclosART));
@@ -1513,7 +1547,7 @@ function renderRepEjecutivo(data) {
   s('rep-v-crio',    fmtNum(ops.bancoCrio));
   s('rep-v-alertas', fmtNum(ops.alertasInventario));
   s('rep-v-insumos', fmtNum(ops.insumosActivos));
-  s('rep-v-nps',     ops.nps != null ? ops.nps + '/10' : '—');
+  s('rep-v-nps',     ops.nps != null ? ops.nps+'/10' : '—');
   if (ops.alertasInventario > 0) sc('rep-v-alertas', '#e65100');
 }
 
