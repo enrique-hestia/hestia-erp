@@ -2051,8 +2051,9 @@ function grNewRole() {
   grRenderCheckboxes(null);
 }
 
-function grRenderCheckboxes(role) {
-  var bloqueadas = role ? (role.vistasBloqueadas || []) : [];
+function grBuildCheckboxTree() {
+  // Construye el árbol de checkboxes UNA SOLA VEZ — todos marcados por defecto.
+  // grApplyChecked() actualiza el estado sin tocar el DOM.
   var el = document.getElementById('gr-permisos');
   if (!el) return;
   var items = (menuItems || []);
@@ -2060,37 +2061,28 @@ function grRenderCheckboxes(role) {
     el.innerHTML = '<div style="color:var(--color-text-muted);font-size:12px;grid-column:1/-1">El menú aún no ha cargado. Navega a cualquier otra vista y regresa.</div>';
     return;
   }
-
-  // Mapa id → item para navegación de árbol
   var itemMap = {};
   items.forEach(function(it) { itemMap[it.id] = it; });
 
-  // Resolver sección subiendo por la cadena de padres
   function resolveSection(it) {
     if (it.seccion) return it.seccion;
     if (it.padre && itemMap[it.padre]) return resolveSection(itemMap[it.padre]);
     return 'OTROS';
   }
-
-  // Renderizar un item y sus hijos de forma recursiva
   function renderItem(it, depth) {
-    var chk  = bloqueadas.indexOf(it.id) === -1;
     var pad  = (depth * 14) + 'px';
     var bold = (it.tipo === 'grupo' || depth === 0) ? 'font-weight:600' : 'font-weight:400';
     var out  = '<label style="display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer;padding-left:' + pad + '">'
-      + '<input type="checkbox" ' + (chk ? 'checked' : '') + ' data-id="' + it.id
+      + '<input type="checkbox" checked data-id="' + it.id
       + '" style="width:13px;height:13px;cursor:pointer;flex-shrink:0;accent-color:var(--color-primary)">'
       + '<span style="font-size:12px;color:var(--color-text);' + bold + '">' + (it.label || it.id) + '</span>'
       + '</label>';
-    // Hijos ordenados por 'orden'
     items
       .filter(function(c) { return c.padre === it.id; })
       .sort(function(a, b) { return (a.orden || 0) - (b.orden || 0); })
       .forEach(function(c) { out += renderItem(c, depth + 1); });
     return out;
   }
-
-  // Items raíz (sin padre o cuyo padre no está en el menú), agrupados por sección
   var sections = {}, secOrder = [];
   items
     .filter(function(it) { return !it.padre || !itemMap[it.padre]; })
@@ -2100,7 +2092,6 @@ function grRenderCheckboxes(role) {
       if (!sections[sec]) { sections[sec] = []; secOrder.push(sec); }
       sections[sec].push(it);
     });
-
   var html = '';
   secOrder.forEach(function(sec) {
     html += '<div style="break-inside:avoid;margin-bottom:16px">'
@@ -2111,6 +2102,28 @@ function grRenderCheckboxes(role) {
     html += '</div>';
   });
   el.innerHTML = html;
+  el.setAttribute('data-tree-count', String(items.length));
+}
+
+function grApplyChecked(bloqueadas) {
+  // Solo actualiza checked/unchecked — no toca el DOM, es instantáneo.
+  var el = document.getElementById('gr-permisos');
+  if (!el) return;
+  el.querySelectorAll('input[type="checkbox"]').forEach(function(cb) {
+    cb.checked = bloqueadas.indexOf(cb.getAttribute('data-id')) === -1;
+  });
+}
+
+function grRenderCheckboxes(role) {
+  var el = document.getElementById('gr-permisos');
+  if (!el) return;
+  var items = (menuItems || []);
+  // Reconstruir árbol solo si el menú cambió (nuevos items) o aún no existe
+  var builtCount = parseInt(el.getAttribute('data-tree-count') || '0');
+  if (!el.querySelector('input[data-id]') || builtCount !== items.length) {
+    grBuildCheckboxTree();
+  }
+  grApplyChecked(role ? (role.vistasBloqueadas || []) : []);
 }
 
 function grSelectAll(val) {
