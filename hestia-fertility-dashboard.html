@@ -1942,6 +1942,10 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     return;
   }
 
+  // Pre-render placeholder for dashboard views while API loads
+  var PRE_RENDER_VIEWS = ['rep-ejecutivo','qx-resumen','med-resumen','lab-resumen','labo-resumen'];
+  if (PRE_RENDER_VIEWS.indexOf(viewId) >= 0) { try { renderViewData(viewId, {}); } catch(e){} }
+
   setStatus('Actualizando…');
   try {
     var url = APPS_SCRIPT_URL +
