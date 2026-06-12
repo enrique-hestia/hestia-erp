@@ -1964,7 +1964,11 @@ function renderGestionRoles(data) {
     container.innerHTML = '<div style="padding:2rem;color:#c46a7a;font-weight:600">Solo administradores pueden gestionar roles.</div>';
     return;
   }
-  if (data && data.roles) _grRoles = data.roles;
+  if (data && data.roles) {
+    _grRoles = data.roles;
+  } else if (data && data.headers && data.rows) {
+    _grRoles = grParseCaptura(data);
+  }
 
   if (!document.getElementById('gr-left')) {
     container.innerHTML =
@@ -2096,35 +2100,69 @@ async function grSaveRole() {
     if (!cb.checked) bloqueadas.push(cb.getAttribute('data-id'));
   });
   if (statusEl) statusEl.textContent = 'Guardando…';
+  // Buscar si el rol ya existe (para update vs insert)
+  var existingRole = null;
+  for (var ei = 0; ei < _grRoles.length; ei++) {
+    if (_grRoles[ei].rol.toLowerCase() === rolName.toLowerCase()) { existingRole = _grRoles[ei]; break; }
+  }
   try {
-    var url = APPS_SCRIPT_URL + '?action=saveRole'
-      + '&token=' + encodeURIComponent(getToken() || '')
-      + '&rol=' + encodeURIComponent(rolName)
-      + '&vistasBloqueadas=' + encodeURIComponent(bloqueadas.join(','))
-      + '&soloLectura=' + (soloLectura ? 'true' : 'false')
-      + '&descripcion=' + encodeURIComponent(descripcion);
+    var tk = encodeURIComponent(getToken() || '');
+    var vb = encodeURIComponent(bloqueadas.join(','));
+    var sl = soloLectura ? 'TRUE' : 'FALSE';
+    var dc = encodeURIComponent(descripcion);
+    var url;
+    if (existingRole && existingRole._rowNum) {
+      url = APPS_SCRIPT_URL + '?action=update&sheet=Roles&rowNum=' + existingRole._rowNum
+        + '&token=' + tk + '&Rol=' + encodeURIComponent(rolName)
+        + '&Vistas_Bloqueadas=' + vb + '&Solo_Lectura=' + sl + '&Descripcion=' + dc;
+    } else {
+      url = APPS_SCRIPT_URL + '?action=insert&sheet=Roles'
+        + '&token=' + tk + '&Rol=' + encodeURIComponent(rolName)
+        + '&Vistas_Bloqueadas=' + vb + '&Solo_Lectura=' + sl + '&Descripcion=' + dc;
+    }
     var res = await fetch(url);
     var json = await res.json();
     if (json.error) { if(statusEl) statusEl.textContent='Error: '+json.error; setStatus('Error: '+json.error,'err'); return; }
     if (statusEl) statusEl.textContent = 'Guardado ' + new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
     setStatus('Rol guardado correctamente', 'ok');
-    var found = false;
-    for (var i = 0; i < _grRoles.length; i++) {
-      if (_grRoles[i].rol.toLowerCase() === rolName.toLowerCase()) {
-        _grRoles[i].vistasBloqueadas = bloqueadas; _grRoles[i].soloLectura = soloLectura; _grRoles[i].descripcion = descripcion;
-        found = true; break;
-      }
+    if (existingRole) {
+      existingRole.vistasBloqueadas = bloqueadas; existingRole.soloLectura = soloLectura; existingRole.descripcion = descripcion;
+    } else {
+      var newIdx = _grRoles.length + 2;
+      _grRoles.push({ rol: rolName, vistasBloqueadas: bloqueadas, soloLectura: soloLectura, descripcion: descripcion, _rowNum: newIdx });
     }
-    if (!found) _grRoles.push({ rol: rolName, vistasBloqueadas: bloqueadas, soloLectura: soloLectura, descripcion: descripcion });
     _grSelected = rolName;
     if (nEl) nEl.disabled = true;
     grRenderList();
   } catch(e) { if(statusEl) statusEl.textContent='Error de red'; setStatus('Error de red: '+e.message,'err'); }
 }
 
+function grParseCaptura(data) {
+  var h = (data.headers || []).map(function(c){ return String(c).trim().toLowerCase(); });
+  var rI = h.indexOf('rol'), bI = h.indexOf('vistas_bloqueadas'), lI = h.indexOf('solo_lectura'), dI = h.indexOf('descripcion');
+  return (data.rows || []).map(function(row, idx) {
+    var rolName = rI > -1 ? String(row[rI] || '').trim() : String(row[0] || '').trim();
+    if (!rolName) return null;
+    var bloqStr = bI > -1 ? String(row[bI] || '').trim() : '';
+    return {
+      rol: rolName,
+      vistasBloqueadas: bloqStr ? bloqStr.split(',').map(function(v){ return v.trim(); }).filter(Boolean) : [],
+      soloLectura: lI > -1 ? !!row[lI] : false,
+      descripcion: dI > -1 ? String(row[dI] || '').trim() : '',
+      _rowNum: idx + 2
+    };
+  }).filter(Boolean);
+}
+
 async function grLoadRoles() {
+  // Buscar en el menú el item cuya fuente sea Roles, si no usar gestion-roles
+  var rolesItem = null;
+  for (var mi = 0; mi < menuItems.length; mi++) {
+    if (String(menuItems[mi].fuente || '').toLowerCase() === 'roles') { rolesItem = menuItems[mi]; break; }
+  }
+  var fetchId = rolesItem ? rolesItem.id : 'gestion-roles';
   try {
-    var url = APPS_SCRIPT_URL + '?action=view&view=gestion-roles&fechaInicio=2026-01-01&fechaFin=2026-12-31&token=' + encodeURIComponent(getToken() || '');
+    var url = APPS_SCRIPT_URL + '?action=view&view=' + encodeURIComponent(fetchId) + '&fechaInicio=2026-01-01&fechaFin=2026-12-31&token=' + encodeURIComponent(getToken() || '');
     var res = await fetch(url);
     var data = await res.json();
     if (data.error) { setStatus('Error cargando roles: ' + data.error, 'err'); return; }
@@ -2207,6 +2245,11 @@ function renderViewData(viewId, data) {
     'gestion-roles': function(d){ renderGestionRoles(d); }
   };
 
+  // Interceptar cualquier vista cuya fuente sea Roles → gestor de roles
+  if (data && String(data.fuente || '').toLowerCase() === 'roles') {
+    renderGestionRoles(data); return;
+  }
+
   if (knownViews[viewId]) {
     knownViews[viewId](data);
   } else if (data.headers) {
@@ -2220,6 +2263,12 @@ function navigateTo(viewId) {
   // Ocultar todas
   document.querySelectorAll('.view').forEach(function(v) { v.style.display = 'none'; });
 
+  // Resolver alias: menú item apuntando a hoja Roles → gestor de roles
+  for (var _mi = 0; _mi < menuItems.length; _mi++) {
+    if (menuItems[_mi].id === viewId && String(menuItems[_mi].fuente || '').toLowerCase() === 'roles') {
+      viewId = 'gestion-roles'; break;
+    }
+  }
   // Resolver alias: variantes de config siempre usan view-configuracion
   var resolvedId = isConfigFuente(viewId) ? 'configuracion' : viewId;
   // Mostrar la vista (conocida o genérica)
