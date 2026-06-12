@@ -468,6 +468,11 @@ function readViewData(ss, viewId, fechaInicio, fechaFin) {
     return readRepEjecutivo(ss, fechaInicio, fechaFin);
   }
 
+  // Vistas de Reportes: devolver placeholder vacío hasta que se creen las hojas
+  if (/^rep-/.test(viewId)) {
+    return { view: viewId, fuente: fuente, rows: [], headers: [], periodo: fechaInicio + ' — ' + fechaFin };
+  }
+
   return readCapturaData(ss, fuente, viewId, fechaInicio, fechaFin);
 }
 
