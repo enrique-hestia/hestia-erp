@@ -2012,15 +2012,16 @@ function renderEstadoResultados(data) {
     var l = label.toLowerCase();
     return rows.find(function(r){ return r.label.toLowerCase() === l; }) || null;
   }
-  var rowIncome   = findRow('Total Income');
-  var rowCogs     = findRow('Total COGS');
-  var rowGross    = findRow('Gross Profit');
-  var rowEbitda   = findRow('EBITDA');
-  var rowNet      = findRow('Net Profit');
-  var totalIncome = rowIncome  ? rowIncome.total  : 0;
-  var totalEbitda = rowEbitda  ? rowEbitda.total  : 0;
-  var totalNet    = rowNet     ? rowNet.total     : 0;
-  var totalGross  = rowGross   ? rowGross.total   : (totalIncome - (rowCogs ? rowCogs.total : 0));
+  var rowIncome    = findRow('Total Income');
+  var rowCogs      = findRow('Total COGS');
+  var rowExpenses  = findRow('Total Expenses');
+  var rowEbitda    = findRow('EBITDA');
+  var rowNet       = findRow('Net Profit');
+  var totalIncome  = rowIncome   ? rowIncome.total   : 0;
+  var totalExpenses= rowExpenses ? Math.abs(rowExpenses.total) : 0;
+  var totalEbitda  = rowEbitda   ? rowEbitda.total   : 0;
+  var totalNet     = rowNet      ? rowNet.total      : 0;
+  var totalGross   = totalIncome - (rowCogs ? Math.abs(rowCogs.total) : 0);
 
   var periodo = meses.length
     ? meses[0].slice(0,7) + (meses.length > 1 ? ' — ' + meses[meses.length-1].slice(0,7) : '')
@@ -2072,8 +2073,8 @@ function renderEstadoResultados(data) {
   var wfItems = [
     { label: 'Ingresos',      val: totalIncome, color: '#378ADD' },
     { label: 'COGS',          val: -(rowCogs ? rowCogs.total : 0), color: '#E24B4A' },
-    { label: 'Utilidad bruta',val: totalGross,  color: '#1D9E75' },
-    { label: 'Gastos op.',    val: totalGross - totalEbitda, color: '#E24B4A' },
+    { label: 'Utilidad bruta', val: totalGross,            color: '#1D9E75' },
+    { label: 'Total gastos',   val: -(totalExpenses),       color: '#E24B4A' },
     { label: 'EBITDA',        val: totalEbitda, color: '#7F77DD' },
     { label: 'Otros/Imptos',  val: totalEbitda - totalNet, color: '#E24B4A' },
     { label: 'Utilidad neta', val: totalNet,    color: '#1D9E75' }
@@ -2098,7 +2099,7 @@ function renderEstadoResultados(data) {
 
     '<div class="er-kpis">',
       '<div class="er-kpi"><p class="er-kpi-lbl">Ingresos totales</p><p class="er-kpi-val">' + fmt(totalIncome) + '</p><p class="er-kpi-pct" style="color:var(--text-secondary)">' + periodo + '</p></div>',
-      '<div class="er-kpi"><p class="er-kpi-lbl">Utilidad bruta</p><p class="er-kpi-val" style="color:' + kpiColor(totalGross) + '">' + fmt(totalGross) + '</p><p class="er-kpi-pct" style="color:var(--text-secondary)">' + pct(totalGross, totalIncome) + ' de ingresos</p></div>',
+      '<div class="er-kpi"><p class="er-kpi-lbl">Total de Gastos</p><p class="er-kpi-val" style="color:#D85A30">' + fmt(totalExpenses) + '</p><p class="er-kpi-pct" style="color:var(--text-secondary)">' + pct(totalExpenses, totalIncome) + ' de ingresos</p></div>',
       '<div class="er-kpi"><p class="er-kpi-lbl">EBITDA</p><p class="er-kpi-val" style="color:' + kpiColor(totalEbitda) + '">' + fmt(totalEbitda) + '</p><p class="er-kpi-pct" style="color:var(--text-secondary)">Margen ' + pct(totalEbitda, totalIncome) + '</p></div>',
       '<div class="er-kpi"><p class="er-kpi-lbl">Utilidad neta</p><p class="er-kpi-val" style="color:' + kpiColor(totalNet) + '">' + fmt(totalNet) + '</p><p class="er-kpi-pct" style="color:var(--text-secondary)">Margen ' + pct(totalNet, totalIncome) + '</p></div>',
     '</div>',
