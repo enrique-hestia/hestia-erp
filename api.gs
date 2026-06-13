@@ -142,6 +142,7 @@ function doGet(e) {
     var defFin     = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
     var fechaInicio = (e && e.parameter.fechaInicio) || fmtDate(defInicio);
     var fechaFin    = (e && e.parameter.fechaFin)    || fmtDate(defFin);
+    var sucursal    = (e && e.parameter.sucursal)    || 'Todas';
 
     // ── LOGIN: valida credenciales y devuelve token + permisos ──
     if (action === 'login') {
@@ -257,6 +258,7 @@ function doGet(e) {
     if (action === 'menu') {
       return jsonResponse({
         menu:        readMenu(ss),
+        sucursales:  readSucursales(ss),
         fechaInicio: fechaInicio,
         fechaFin:    fechaFin,
         version:     API_VERSION
@@ -388,17 +390,17 @@ function doGet(e) {
     // action === 'view'  — con caché de 60 s para reducir lecturas a Sheets
     if (action === 'view') {
       var cache    = CacheService.getScriptCache();
-      var cacheKey = 'v2_' + view + '_' + fechaInicio + '_' + fechaFin;
+      var cacheKey = 'v2_' + view + '_' + fechaInicio + '_' + fechaFin + '_' + sucursal;
       var cached   = cache.get(cacheKey);
       if (cached) {
         return ContentService.createTextOutput(cached).setMimeType(ContentService.MimeType.JSON);
       }
-      var result   = readViewData(ss, view, fechaInicio, fechaFin);
+      var result   = readViewData(ss, view, fechaInicio, fechaFin, sucursal);
       var json     = JSON.stringify(result);
       try { cache.put(cacheKey, json, 60); } catch(ignored) {}
       return ContentService.createTextOutput(json).setMimeType(ContentService.MimeType.JSON);
     }
-    return jsonResponse(readViewData(ss, view, fechaInicio, fechaFin));
+    return jsonResponse(readViewData(ss, view, fechaInicio, fechaFin, sucursal));
 
   } catch(err) {
     return jsonResponse({ error: err.message });
@@ -469,7 +471,8 @@ function readMenu(ss) {
    fuente = 'mensual' → datos financieros filtrados por rango de fechas
    fuente = NombreHoja → lee esa hoja como tabla de captura (sin filtro)
    ══════════════════════════════════════════════════════════════ */
-function readViewData(ss, viewId, fechaInicio, fechaFin) {
+function readViewData(ss, viewId, fechaInicio, fechaFin, sucursal) {
+  sucursal = sucursal || 'Todas';
   var menu = readMenu(ss);
   var item = null;
   for (var i = 0; i < menu.length; i++) {
@@ -485,7 +488,7 @@ function readViewData(ss, viewId, fechaInicio, fechaFin) {
   }
 
   if (!fuente || fuente === 'mensual') {
-    return readMensualData(ss, fechaInicio, fechaFin, viewId);
+    return readMensualData(ss, fechaInicio, fechaFin, viewId, sucursal);
   }
 
   if (fuente === 'med-dashboard' || viewId === 'med-resumen' || viewId === 'prod-medicamentos') {
@@ -521,7 +524,7 @@ function readViewData(ss, viewId, fechaInicio, fechaFin) {
     return { view: viewId, fuente: fuente, rows: [], headers: [], periodo: fechaInicio + ' — ' + fechaFin };
   }
 
-  return readCapturaData(ss, fuente, viewId, fechaInicio, fechaFin);
+  return readCapturaData(ss, fuente, viewId, fechaInicio, fechaFin, sucursal);
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -934,23 +937,24 @@ function readMedDashboard(ss, fechaInicio, fechaFin) {
 }
 
 /* ── Datos financieros completos (filtrados por rango de fechas) ─── */
-function readMensualData(ss, fechaInicio, fechaFin, viewId) {
+function readMensualData(ss, fechaInicio, fechaFin, viewId, sucursal) {
+  sucursal = sucursal || 'Todas';
   var label = fechaInicio.slice(0,7) + ' → ' + fechaFin.slice(0,7);
   return {
     view:          viewId,
-    periodo:       label,          // string descriptivo para subtítulos
+    periodo:       label,
     fechaInicio:   fechaInicio,
     fechaFin:      fechaFin,
-    todos:         readMensual(ss, 'Mensual_Todos',         fechaInicio, fechaFin),
-    local:         readMensual(ss, 'Mensual_Local',         fechaInicio, fechaFin),
-    internacional: readMensual(ss, 'Mensual_Internacional', fechaInicio, fechaFin),
+    todos:         readMensual(ss, 'Mensual_Todos',         fechaInicio, fechaFin, sucursal),
+    local:         readMensual(ss, 'Mensual_Local',         fechaInicio, fechaFin, sucursal),
+    internacional: readMensual(ss, 'Mensual_Internacional', fechaInicio, fechaFin, sucursal),
     servicios:     readServicios(ss),
     funnel:        readFunnel(ss),
     alertas:       readAlertas(ss),
     donut:         readDonut(ss),
-    cashflow:      readCashFlow(ss, fechaInicio, fechaFin),
+    cashflow:      readCashFlow(ss, fechaInicio, fechaFin, sucursal),
     costos:        readCostos(ss),
-    paisesOrigen:  readPaisesOrigen(ss, fechaInicio, fechaFin),
+    paisesOrigen:  readPaisesOrigen(ss, fechaInicio, fechaFin, sucursal),
     updated:       new Date().toISOString()
   };
 }
@@ -995,7 +999,8 @@ function getCapturaId(nombreHoja) {
   return CAPTURA_SHEET_ID_DEFAULT;
 }
 
-function readCapturaData(ss, nombreHoja, viewId, fechaInicio, fechaFin) {
+function readCapturaData(ss, nombreHoja, viewId, fechaInicio, fechaFin, sucursal) {
+  sucursal = sucursal || 'Todas';
   var capturaId = getCapturaId(nombreHoja);
   var ssCap = SpreadsheetApp.openById(capturaId);
   var hoja  = findSheet(ssCap, nombreHoja);
@@ -1069,6 +1074,17 @@ function readCapturaData(ss, nombreHoja, viewId, fechaInicio, fechaFin) {
     return obj;
   });
 
+  // Filtro por sucursal — solo si la columna existe y el filtro está activo
+  if (sucursal && sucursal !== 'Todas') {
+    var sucHdrIdx = headers.map(function(h){ return h.toLowerCase(); }).indexOf('sucursal');
+    if (sucHdrIdx >= 0) {
+      rows = rows.filter(function(row) {
+        var val = String(row['Sucursal'] || row['sucursal'] || '').trim();
+        return val === '' || val === sucursal; // vacío = hereda todas las sucursales
+      });
+    }
+  }
+
   return { view: viewId, fuente: nombreHoja, headers: headers, rows: rows,
            updated: new Date().toISOString() };
 }
@@ -1077,35 +1093,65 @@ function readCapturaData(ss, nombreHoja, viewId, fechaInicio, fechaFin) {
    LECTORES INDIVIDUALES
    ══════════════════════════════════════════════════════════════ */
 /* Columnas: A=Sucursal | B=Fecha(YYYY-MM-DD) | C=Mes | D=Ingresos | E=Gastos | F=Ciclos | G=CAC | H=Margen */
-function readMensual(ss, sheetName, fechaInicio, fechaFin) {
-  var rows = ss.getSheetByName(sheetName).getDataRange().getValues();
+function readMensual(ss, sheetName, fechaInicio, fechaFin, sucursal) {
+  var hoja = ss.getSheetByName(sheetName);
+  if (!hoja) return { meses:[], ingresos:[], gastos:[], ciclos:[], cac:[], margen:[] };
+  var rows = hoja.getDataRange().getValues();
+  if (rows.length < 2) return { meses:[], ingresos:[], gastos:[], ciclos:[], cac:[], margen:[] };
+  // Detectar columnas por encabezado (soporta columnas en cualquier orden)
+  var hdrs = rows[0].map(function(h){ return String(h).trim().toLowerCase(); });
+  var iSuc    = hdrs.indexOf('sucursal');
+  var iFecha  = hdrs.indexOf('fecha');  if (iFecha  < 0) iFecha  = 1;
+  var iMes    = hdrs.indexOf('mes');    if (iMes    < 0) iMes    = 2;
+  var iIngr   = hdrs.indexOf('ingresos'); if (iIngr < 0) iIngr   = 3;
+  var iGast   = hdrs.indexOf('gastos');   if (iGast < 0) iGast   = 4;
+  var iCiclos = hdrs.indexOf('ciclos');   if (iCiclos < 0) iCiclos = 5;
+  var iCac    = hdrs.indexOf('cac');      if (iCac  < 0) iCac    = 6;
+  var iMargen = hdrs.indexOf('margen');   if (iMargen < 0) iMargen = 7;
   var data = rows.slice(1).filter(function(r) {
-    var f = String(r[1]).trim(); // col B = Fecha
-    return f >= fechaInicio && f <= fechaFin;
+    var f = String(r[iFecha]).trim();
+    if (f < fechaInicio || f > fechaFin) return false;
+    if (sucursal && sucursal !== 'Todas' && iSuc >= 0) {
+      var s = String(r[iSuc] || '').trim();
+      if (s && s !== sucursal) return false;
+    }
+    return true;
   });
-  // Ordenar por fecha ascendente
-  data.sort(function(a, b) { return String(a[1]) < String(b[1]) ? -1 : 1; });
+  data.sort(function(a, b) { return String(a[iFecha]) < String(b[iFecha]) ? -1 : 1; });
   return {
-    meses:    data.map(function(r) { return String(r[2]); }),  // col C
-    ingresos: data.map(function(r) { return Number(r[3]); }),  // col D
-    gastos:   data.map(function(r) { return Number(r[4]); }),  // col E
-    ciclos:   data.map(function(r) { return Number(r[5]); }),  // col F
-    cac:      data.map(function(r) { return Number(r[6]); }),  // col G
-    margen:   data.map(function(r) { return Number(r[7]); })   // col H
+    meses:    data.map(function(r) { return String(r[iMes]); }),
+    ingresos: data.map(function(r) { return Number(r[iIngr]); }),
+    gastos:   data.map(function(r) { return Number(r[iGast]); }),
+    ciclos:   data.map(function(r) { return Number(r[iCiclos]); }),
+    cac:      data.map(function(r) { return Number(r[iCac]); }),
+    margen:   data.map(function(r) { return Number(r[iMargen]); })
   };
 }
 
 /* Columnas CashFlow: A=Sucursal | B=Fecha | C=Mes | D=Flujo_MXN */
-function readCashFlow(ss, fechaInicio, fechaFin) {
-  var rows = ss.getSheetByName('CashFlow').getDataRange().getValues();
+function readCashFlow(ss, fechaInicio, fechaFin, sucursal) {
+  var hoja = ss.getSheetByName('CashFlow');
+  if (!hoja) return { meses:[], flujo:[] };
+  var rows = hoja.getDataRange().getValues();
+  if (rows.length < 2) return { meses:[], flujo:[] };
+  var hdrs = rows[0].map(function(h){ return String(h).trim().toLowerCase(); });
+  var iSuc   = hdrs.indexOf('sucursal');
+  var iFecha = hdrs.indexOf('fecha');  if (iFecha < 0) iFecha = 1;
+  var iMes   = hdrs.indexOf('mes');   if (iMes   < 0) iMes   = 2;
+  var iFlujo = hdrs.indexOf('flujo_mxn'); if (iFlujo < 0) iFlujo = hdrs.indexOf('flujo'); if (iFlujo < 0) iFlujo = 3;
   var data = rows.slice(1).filter(function(r) {
-    var f = String(r[1]).trim();
-    return f >= fechaInicio && f <= fechaFin;
+    var f = String(r[iFecha]).trim();
+    if (f < fechaInicio || f > fechaFin) return false;
+    if (sucursal && sucursal !== 'Todas' && iSuc >= 0) {
+      var s = String(r[iSuc] || '').trim();
+      if (s && s !== sucursal) return false;
+    }
+    return true;
   });
-  data.sort(function(a, b) { return String(a[1]) < String(b[1]) ? -1 : 1; });
+  data.sort(function(a, b) { return String(a[iFecha]) < String(b[iFecha]) ? -1 : 1; });
   return {
-    meses: data.map(function(r) { return String(r[2]); }),
-    flujo: data.map(function(r) { return Number(r[3]); })
+    meses: data.map(function(r) { return String(r[iMes]); }),
+    flujo: data.map(function(r) { return Number(r[iFlujo]); })
   };
 }
 
@@ -1142,18 +1188,30 @@ function readDonut(ss) {
 }
 
 /* PaisesOrigen: A=Sucursal | B=Fecha | C=Pais | D=Porcentaje | E=Color */
-function readPaisesOrigen(ss, fechaInicio, fechaFin) {
+function readPaisesOrigen(ss, fechaInicio, fechaFin, sucursal) {
   var hoja = ss.getSheetByName('PaisesOrigen');
   if (!hoja) return { labels: [], data: [], colors: [] };
   var rows = hoja.getDataRange().getValues();
+  if (rows.length < 2) return { labels: [], data: [], colors: [] };
+  var hdrs = rows[0].map(function(h){ return String(h).trim().toLowerCase(); });
+  var iSuc   = hdrs.indexOf('sucursal');
+  var iFecha = hdrs.indexOf('fecha');  if (iFecha < 0) iFecha = 1;
+  var iPais  = hdrs.indexOf('pais');   if (iPais  < 0) iPais  = 2;
+  var iPct   = hdrs.indexOf('porcentaje'); if (iPct < 0) iPct  = 3;
+  var iColor = hdrs.indexOf('color'); if (iColor < 0) iColor  = 4;
   var data = rows.slice(1).filter(function(r) {
-    var f = String(r[1]).trim();
-    return f >= fechaInicio && f <= fechaFin;
+    var f = String(r[iFecha]).trim();
+    if (f < fechaInicio || f > fechaFin) return false;
+    if (sucursal && sucursal !== 'Todas' && iSuc >= 0) {
+      var s = String(r[iSuc] || '').trim();
+      if (s && s !== sucursal) return false;
+    }
+    return true;
   });
   return {
-    labels: data.map(function(r) { return String(r[2]); }),
-    data:   data.map(function(r) { return Number(r[3]); }),
-    colors: data.map(function(r) { return String(r[4]); })
+    labels: data.map(function(r) { return String(r[iPais]); }),
+    data:   data.map(function(r) { return Number(r[iPct]); }),
+    colors: data.map(function(r) { return String(r[iColor]); })
   };
 }
 
@@ -1395,4 +1453,26 @@ function crearHoja(ss, nombre, datos) {
   header.setBackground('#fce8f0');
   h.setFrozenRows(1);
   h.autoResizeColumns(1, datos[0].length);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SUCURSALES — Lee hoja Sucursales y devuelve lista activa
+   ══════════════════════════════════════════════════════════════ */
+function readSucursales(ss) {
+  var hoja = ss.getSheetByName('Sucursales');
+  if (!hoja) return [];
+  var rows = hoja.getDataRange().getValues();
+  if (rows.length < 2) return [];
+  var hdrs = rows[0].map(function(h){ return String(h).trim(); });
+  return rows.slice(1)
+    .filter(function(r){ return String(r[0]).trim() !== ''; })
+    .map(function(r){
+      var obj = {};
+      hdrs.forEach(function(h, i){ obj[h] = r[i]; });
+      return obj;
+    })
+    .filter(function(s){
+      var activo = String(s['Activo'] !== undefined ? s['Activo'] : 'true').trim().toLowerCase();
+      return activo !== 'false' && activo !== 'no' && activo !== '0';
+    });
 }

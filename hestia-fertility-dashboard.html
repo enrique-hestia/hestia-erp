@@ -340,6 +340,12 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
       <input type="date" class="select-pill" id="fechaFinInput" style="padding:4px 10px;cursor:pointer">
       <button onclick="applyDateRange()" class="btn btn-primary" style="padding:5px 14px;font-size:var(--text-xs);border-radius:var(--radius-full)">Aplicar</button>
     </div>
+    <div class="filter-group" id="sucursal-filter-group" style="display:none">
+      <span class="filter-label">Sucursal:</span>
+      <select class="select-pill" id="sucursalSelect" onchange="updateSucursal(this.value)">
+        <option value="Todas">Todas</option>
+      </select>
+    </div>
     <div class="filter-group">
       <span class="filter-label">Segmento:</span>
       <select class="select-pill" id="segmentoSelect" onchange="updateSegment(this.value)">
@@ -1799,8 +1805,9 @@ function renderLaboratorios(data) {
 }
 
 /* ── ESTADO GLOBAL ─── */
-let currentSegment = 'todos';
-let currentPeriodo    = '';   // string descriptivo para subtítulos (ej. "2026-01 → 2026-06")
+let currentSegment     = 'todos';
+let currentSucursal    = 'Todas';
+let currentPeriodo     = '';
 let currentFechaInicio = '';
 let currentFechaFin    = '';
 let currentView        = 'resumen';
@@ -1861,6 +1868,7 @@ async function loadMenu() {
     if (json.version) _apiVersion = json.version;
     setDateInputs(currentFechaInicio, currentFechaFin);
     buildSidebar(menuItems);
+    populateSucursales(json.sucursales || []);
     lucide.createIcons();
   } catch(e) {
     setStatus('Error cargando menú: ' + e.message, 'err');
@@ -2536,7 +2544,7 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
   if (viewId === 'gestion-roles') { renderGestionRoles({}); grLoadRoles(); return; }
   // Si el API devolverá fuente=Roles, renderViewData lo interceptará automáticamente
 
-  var cacheKey = viewId + '_' + fechaInicio + '_' + fechaFin;
+  var cacheKey = viewId + '_' + fechaInicio + '_' + fechaFin + '_' + currentSucursal;
   var now = Date.now();
   var cached = viewCache[cacheKey];
 
@@ -2555,6 +2563,7 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
       '?action=view&view='         + encodeURIComponent(viewId) +
       '&fechaInicio='              + encodeURIComponent(fechaInicio) +
       '&fechaFin='                 + encodeURIComponent(fechaFin) +
+      '&sucursal='                 + encodeURIComponent(currentSucursal) +
       '&token='                    + encodeURIComponent(getToken());
     var res  = await fetch(url);
     var data = await res.json();
@@ -2846,9 +2855,34 @@ function renderResumen(data) {
 }
 
 /* ── Segment / Date controls ─── */
+function populateSucursales(sucursales) {
+  var sel = document.getElementById('sucursalSelect');
+  var grp = document.getElementById('sucursal-filter-group');
+  if (!sel || !grp) return;
+  // Solo mostrar el filtro si hay más de una sucursal activa
+  if (!sucursales || sucursales.length <= 1) { grp.style.display = 'none'; return; }
+  sel.innerHTML = '<option value="Todas">Todas</option>';
+  sucursales.forEach(function(s) {
+    var id     = String(s['ID'] || s['id'] || s['Nombre'] || '').trim();
+    var nombre = String(s['Nombre'] || s['nombre'] || id).trim();
+    if (!id) return;
+    var opt = document.createElement('option');
+    opt.value       = id;
+    opt.textContent = nombre;
+    sel.appendChild(opt);
+  });
+  grp.style.display = '';
+}
+
+function updateSucursal(val) {
+  currentSucursal = val || 'Todas';
+  viewCache = {};  // invalidar caché — datos cambian por sucursal
+  loadView(currentView, currentFechaInicio, currentFechaFin, true);
+}
+
 function updateSegment(val) {
   currentSegment = val;
-  var cached = viewCache[currentView + '_' + currentFechaInicio + '_' + currentFechaFin];
+  var cached = viewCache[currentView + '_' + currentFechaInicio + '_' + currentFechaFin + '_' + currentSucursal];
   if (cached) renderViewData(currentView, cached);
 }
 function applyDateRange() {
