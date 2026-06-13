@@ -2601,15 +2601,18 @@ function renderViewData(viewId, data) {
   };
 
   // Interceptar por fuente — independiente del ID que el usuario ponga en el menú
-  var _fuente = String(data && data.fuente || '').toLowerCase().replace(/[\s_-]/g,'');
-  if (_fuente === 'roles') {
+  function _matchFuente(s, kw1, kw2) {
+    var n = (s||'').toLowerCase().replace(/\bde\b/g,'').replace(/[\s_\-]+/g,'');
+    return kw2 ? (n.indexOf(kw1)>-1 && n.indexOf(kw2)>-1) : n === kw1;
+  }
+  if (_matchFuente(data && data.fuente, 'roles')) {
     document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
     var _grEl = document.getElementById('view-gestion-roles');
     if (_grEl) _grEl.style.display = '';
     renderGestionRoles(data);
     return;
   }
-  if (_fuente === 'estadorresultados' || _fuente === 'estadoderesultados' || (_fuente.indexOf('estado') > -1 && _fuente.indexOf('result') > -1)) {
+  if (_matchFuente(data && data.fuente, 'estado', 'result')) {
     document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
     var _erEl = document.getElementById('view-estado-resultados');
     if (_erEl) _erEl.style.display = '';

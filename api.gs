@@ -505,8 +505,8 @@ function readViewData(ss, viewId, fechaInicio, fechaFin) {
   }
 
   function _erMatch(s) {
-    var n = (s || '').toLowerCase().replace(/[\s_\-de]+/g,'');
-    return n === 'estadorresultados' || n === 'estadoresultados' || n.indexOf('estado') > -1 && n.indexOf('result') > -1;
+    var n = (s || '').toLowerCase().replace(/\bde\b/g,'').replace(/[\s_\-]+/g,'');
+    return n.indexOf('estado') > -1 && n.indexOf('result') > -1;
   }
   if (_erMatch(fuente) || _erMatch(viewId)) {
     return readEstadoResultados(fechaInicio, fechaFin);
