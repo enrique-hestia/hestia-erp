@@ -554,6 +554,9 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 
 </div><!-- /view-resumen -->
 
+<!-- ══ VISTA: ESTADO DE RESULTADOS ══ -->
+<div id="view-estado-resultados" class="view" style="display:none"></div>
+
 <!-- ══ VISTA: INGRESOS ══ -->
 <div id="view-ingresos" class="view" style="display:none">
   <div class="row-2">
@@ -1973,6 +1976,204 @@ function isConfigFuente(id) {
   return /config|ajustes/i.test(id || '');
 }
 
+/* ════════════════════════════════════════════════════════════════
+   ESTADO DE RESULTADOS — P&L jerárquico filtrado por fecha
+   ════════════════════════════════════════════════════════════════ */
+function renderEstadoResultados(data) {
+  var el = document.getElementById('view-estado-resultados');
+  if (!el) return;
+
+  if (data && data.error && !data.rows) {
+    el.innerHTML = '<div class="card" style="padding:2rem;text-align:center;color:var(--danger)">Error: ' + data.error + '</div>';
+    return;
+  }
+
+  var rows  = (data && data.rows)  || [];
+  var meses = (data && data.meses) || [];
+
+  // Formatear número como moneda compacta
+  function fmt(n) {
+    n = Number(n) || 0;
+    if (Math.abs(n) >= 1000000) return '$' + (n/1000000).toFixed(2) + 'M';
+    if (Math.abs(n) >= 1000)    return '$' + Math.round(n/1000) + 'K';
+    return '$' + Math.round(n).toLocaleString();
+  }
+  function fmtFull(n) {
+    n = Number(n) || 0;
+    return (n < 0 ? '-$' : '$') + Math.abs(Math.round(n)).toLocaleString('es-MX');
+  }
+  function pct(n, base) {
+    if (!base) return '—';
+    return (n / base * 100).toFixed(1) + '%';
+  }
+
+  // Extraer KPIs clave de las filas
+  function findRow(label) {
+    var l = label.toLowerCase();
+    return rows.find(function(r){ return r.label.toLowerCase() === l; }) || null;
+  }
+  var rowIncome   = findRow('Total Income');
+  var rowCogs     = findRow('Total COGS');
+  var rowGross    = findRow('Gross Profit');
+  var rowEbitda   = findRow('EBITDA');
+  var rowNet      = findRow('Net Profit');
+  var totalIncome = rowIncome  ? rowIncome.total  : 0;
+  var totalEbitda = rowEbitda  ? rowEbitda.total  : 0;
+  var totalNet    = rowNet     ? rowNet.total     : 0;
+  var totalGross  = rowGross   ? rowGross.total   : (totalIncome - (rowCogs ? rowCogs.total : 0));
+
+  var periodo = meses.length
+    ? meses[0].slice(0,7) + (meses.length > 1 ? ' — ' + meses[meses.length-1].slice(0,7) : '')
+    : (data.fechaInicio || '') + ' — ' + (data.fechaFin || '');
+
+  function kpiColor(v) { return v >= 0 ? 'var(--success,#1D9E75)' : '#D85A30'; }
+  function kpiArrow(v) { return v >= 0 ? '▲' : '▼'; }
+
+  // Construir tabla de filas
+  function buildRows() {
+    if (!rows.length) return '<tr><td colspan="3" style="text-align:center;padding:2rem;color:var(--text-secondary)">Sin datos para el período seleccionado</td></tr>';
+    return rows.map(function(r) {
+      var isNeg = r.total < 0;
+      switch(r.tipo) {
+        case 'header':
+          return '<tr><td colspan="3" style="background:var(--bg-secondary,var(--surface));font-size:10px;font-weight:500;letter-spacing:.6px;color:var(--text-secondary);padding:8px 16px;text-transform:uppercase;border-top:1px solid var(--border)">' + r.label + '</td></tr>';
+        case 'subseccion':
+          return '<tr><td colspan="3" style="background:var(--bg-secondary,var(--surface));font-size:11px;font-weight:500;color:var(--text-secondary);padding:5px 16px 5px 24px;border-top:0.5px solid var(--border)">' + r.label + '</td></tr>';
+        case 'subtotal':
+          return '<tr style="border-top:1px solid var(--border)">'
+            + '<td style="padding:8px 16px;font-weight:500;font-size:12px">' + r.label + '</td>'
+            + '<td style="padding:8px 16px;text-align:right;font-weight:500;font-size:12px;color:' + kpiColor(r.total) + '">' + fmtFull(r.total) + '</td>'
+            + '<td style="padding:8px 16px;text-align:right;font-size:11px;color:var(--text-secondary)">' + pct(r.total, totalIncome) + '</td>'
+            + '</tr>';
+        case 'total':
+          return '<tr style="border-top:2px solid var(--border)">'
+            + '<td style="padding:10px 16px;font-weight:500;font-size:13px">' + r.label + '</td>'
+            + '<td style="padding:10px 16px;text-align:right;font-weight:500;font-size:13px;color:' + kpiColor(r.total) + '">' + fmtFull(r.total) + '</td>'
+            + '<td style="padding:10px 16px;text-align:right;font-size:11px;color:var(--text-secondary)">' + pct(r.total, totalIncome) + '</td>'
+            + '</tr>';
+        case 'metric':
+          return '<tr style="background:var(--primary-soft,rgba(196,106,122,.08));border-top:1px solid var(--border)">'
+            + '<td style="padding:11px 16px;font-weight:500;font-size:13px;color:var(--primary,#c46a7a)">' + r.label + '</td>'
+            + '<td style="padding:11px 16px;text-align:right;font-weight:500;font-size:14px;color:' + kpiColor(r.total) + '">' + fmtFull(r.total) + '</td>'
+            + '<td style="padding:11px 16px;text-align:right;font-size:11px;color:var(--text-secondary)">' + pct(r.total, totalIncome) + '</td>'
+            + '</tr>';
+        default: // dato / categoria
+          var indent = r.nivel === 2 ? '32px' : (r.nivel === 1 ? '24px' : '16px');
+          return '<tr style="border-bottom:0.5px solid var(--border)">'
+            + '<td style="padding:5px 12px 5px ' + indent + ';font-size:12px;color:var(--text-secondary)">' + r.label + '</td>'
+            + '<td style="padding:5px 12px;text-align:right;font-size:12px;color:' + (isNeg ? '#D85A30' : 'var(--text-primary)') + '">' + fmtFull(r.total) + '</td>'
+            + '<td style="padding:5px 12px;text-align:right;font-size:11px;color:var(--text-secondary)">' + pct(r.total, totalIncome) + '</td>'
+            + '</tr>';
+      }
+    }).join('');
+  }
+
+  // Datos para gráfica de cascada
+  var wfItems = [
+    { label: 'Ingresos',      val: totalIncome, color: '#378ADD' },
+    { label: 'COGS',          val: -(rowCogs ? rowCogs.total : 0), color: '#E24B4A' },
+    { label: 'Utilidad bruta',val: totalGross,  color: '#1D9E75' },
+    { label: 'Gastos op.',    val: totalGross - totalEbitda, color: '#E24B4A' },
+    { label: 'EBITDA',        val: totalEbitda, color: '#7F77DD' },
+    { label: 'Otros/Imptos',  val: totalEbitda - totalNet, color: '#E24B4A' },
+    { label: 'Utilidad neta', val: totalNet,    color: '#1D9E75' }
+  ];
+
+  el.innerHTML = [
+    '<style>',
+    '#view-estado-resultados .er-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px}',
+    '#view-estado-resultados .er-kpi{background:var(--surface,var(--bg-secondary));border-radius:10px;padding:14px 16px}',
+    '#view-estado-resultados .er-kpi-lbl{font-size:10px;font-weight:500;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary);margin:0 0 4px}',
+    '#view-estado-resultados .er-kpi-val{font-size:20px;font-weight:500;margin:0}',
+    '#view-estado-resultados .er-kpi-pct{font-size:11px;margin:2px 0 0}',
+    '#view-estado-resultados .er-grid{display:grid;grid-template-columns:1fr 380px;gap:16px;align-items:start}',
+    '#view-estado-resultados .er-card{background:var(--card-bg,#fff);border:0.5px solid var(--border);border-radius:12px;overflow:hidden}',
+    '#view-estado-resultados .er-card-head{padding:12px 16px;border-bottom:0.5px solid var(--border)}',
+    '#view-estado-resultados .er-card-head h3{margin:0;font-size:13px;font-weight:500}',
+    '#view-estado-resultados .er-card-head p{margin:2px 0 0;font-size:11px;color:var(--text-secondary)}',
+    '#view-estado-resultados .er-table{width:100%;border-collapse:collapse}',
+    '#view-estado-resultados .er-table th{padding:8px 12px;font-size:10px;font-weight:500;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary);text-align:right;border-bottom:1px solid var(--border);background:var(--surface,var(--bg-secondary))}',
+    '#view-estado-resultados .er-table th:first-child{text-align:left}',
+    '</style>',
+
+    '<div class="er-kpis">',
+      '<div class="er-kpi"><p class="er-kpi-lbl">Ingresos totales</p><p class="er-kpi-val">' + fmt(totalIncome) + '</p><p class="er-kpi-pct" style="color:var(--text-secondary)">' + periodo + '</p></div>',
+      '<div class="er-kpi"><p class="er-kpi-lbl">Utilidad bruta</p><p class="er-kpi-val" style="color:' + kpiColor(totalGross) + '">' + fmt(totalGross) + '</p><p class="er-kpi-pct" style="color:var(--text-secondary)">' + pct(totalGross, totalIncome) + ' de ingresos</p></div>',
+      '<div class="er-kpi"><p class="er-kpi-lbl">EBITDA</p><p class="er-kpi-val" style="color:' + kpiColor(totalEbitda) + '">' + fmt(totalEbitda) + '</p><p class="er-kpi-pct" style="color:var(--text-secondary)">Margen ' + pct(totalEbitda, totalIncome) + '</p></div>',
+      '<div class="er-kpi"><p class="er-kpi-lbl">Utilidad neta</p><p class="er-kpi-val" style="color:' + kpiColor(totalNet) + '">' + fmt(totalNet) + '</p><p class="er-kpi-pct" style="color:var(--text-secondary)">Margen ' + pct(totalNet, totalIncome) + '</p></div>',
+    '</div>',
+
+    '<div class="er-grid">',
+      '<div class="er-card">',
+        '<div class="er-card-head"><h3>Estado de resultados</h3><p>' + periodo + ' · MXN · % sobre ingresos</p></div>',
+        '<div style="overflow-y:auto;max-height:65vh">',
+          '<table class="er-table">',
+            '<thead><tr><th>Concepto</th><th>Importe</th><th>%</th></tr></thead>',
+            '<tbody id="er-tbody">' + buildRows() + '</tbody>',
+          '</table>',
+        '</div>',
+      '</div>',
+
+      '<div class="er-card">',
+        '<div class="er-card-head"><h3>Cascada de utilidad</h3><p>Ingresos → Utilidad neta</p></div>',
+        '<div style="position:relative;height:320px;padding:12px 8px 8px"><canvas id="er-waterfall" role="img" aria-label="Cascada de ingresos a utilidad neta">Gráfica de cascada del estado de resultados.</canvas></div>',
+      '</div>',
+    '</div>'
+  ].join('');
+
+  // Render waterfall chart with Chart.js
+  setTimeout(function() {
+    var cvs = document.getElementById('er-waterfall');
+    if (!cvs || typeof Chart === 'undefined') return;
+    if (cvs._chart) { cvs._chart.destroy(); }
+
+    var labels = wfItems.map(function(i){ return i.label; });
+    var vals   = wfItems.map(function(i){ return i.val; });
+    var colors = wfItems.map(function(i){ return i.color; });
+
+    cvs._chart = new Chart(cvs, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: vals,
+          backgroundColor: colors,
+          borderRadius: 4,
+          borderSkipped: false
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function(ctx) {
+                var v = ctx.parsed.y;
+                return (v < 0 ? '-$' : '$') + Math.abs(Math.round(v)).toLocaleString('es-MX');
+              }
+            }
+          }
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+          y: {
+            grid: { color: 'rgba(128,128,128,0.1)' },
+            ticks: {
+              font: { size: 10 },
+              callback: function(v) {
+                if (Math.abs(v) >= 1000000) return '$' + (v/1000000).toFixed(1) + 'M';
+                if (Math.abs(v) >= 1000)    return '$' + Math.round(v/1000) + 'K';
+                return '$' + v;
+              }
+            }
+          }
+        }
+      }
+    });
+  }, 50);
+}
+
 function renderAjustes() {
   var s = getSession() || {};
   var set = function(id, val) { var el = document.getElementById(id); if (el) el.textContent = val || '-'; };
@@ -2395,7 +2596,8 @@ function renderViewData(viewId, data) {
     configuracion: function(){ renderAjustes(); },
     ajustes:        function(){ renderAjustes(); },
     config:         function(){ renderAjustes(); },
-    'gestion-roles': function(d){ renderGestionRoles(d); }
+    'gestion-roles':       function(d){ renderGestionRoles(d); },
+    'estado-resultados':   function(d){ renderEstadoResultados(d); }
   };
 
   // Interceptar cualquier vista cuya fuente sea Roles → gestor de roles

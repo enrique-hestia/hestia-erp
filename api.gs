@@ -59,6 +59,8 @@ function getRolConfig(ss, rol) {
 // Mapeo: nombre de pestaña → ID del spreadsheet externo donde se lee/escribe
 // Agregar aquí cualquier hoja de captura futura
 var LAB_SS_ID = '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ';
+var ER_SS_ID  = '17jlXzaIvohpN_UoE2kvLK1Bb6P6JxyKONsnrDX_St9U'; // Estado de Resultados
+var ER_GID    = 1953492149;
 var MED_SS_ID = '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM';
 // ⚠️ Reemplaza con el ID real del spreadsheet de Quirofano cuando lo crees
 var QX_SS_ID  = LAB_SS_ID;  // placeholder — apunta al lab por ahora
@@ -500,6 +502,10 @@ function readViewData(ss, viewId, fechaInicio, fechaFin) {
 
   if (viewId === 'gestion-roles') {
     return readGestionRoles(ss);
+  }
+
+  if (viewId === 'estado-resultados' || fuente === 'EstadoResultados') {
+    return readEstadoResultados(fechaInicio, fechaFin);
   }
 
   if (fuente === 'Rep Ejecutivo' || viewId === 'rep-ejecutivo') {
@@ -1271,6 +1277,111 @@ function readGestionRoles(ss) {
     }
   }
   return { view: 'gestion-roles', fuente: 'Roles', roles: roles };
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ESTADO DE RESULTADOS — Lee el P&L desde spreadsheet externo
+   Estructura: filas = conceptos, columnas = meses
+   Jerarquía: col A = sección | col B = categoría | col C = detalle
+   ══════════════════════════════════════════════════════════════ */
+function readEstadoResultados(fechaInicio, fechaFin) {
+  try {
+    var ssEr = SpreadsheetApp.openById(ER_SS_ID);
+    var sh = null;
+    var allSheets = ssEr.getSheets();
+    for (var i = 0; i < allSheets.length; i++) {
+      if (allSheets[i].getSheetId() === ER_GID) { sh = allSheets[i]; break; }
+    }
+    if (!sh) sh = allSheets[0];
+
+    var raw = sh.getDataRange().getValues();
+    var tz  = Session.getScriptTimeZone();
+    var MON = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',
+               jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+
+    function parseColDate(val) {
+      if (!val && val !== 0) return null;
+      if (val instanceof Date) return Utilities.formatDate(val, tz, 'yyyy-MM');
+      var s = String(val).trim();
+      var m = s.match(/^([A-Za-z]{3})-(\d{2})$/);
+      if (m) return '20' + m[2] + '-' + (MON[m[1].toLowerCase()] || '01');
+      return null;
+    }
+
+    // Fila 2 (idx 1) = encabezados de mes, desde col D (idx 3)
+    var headerRow = raw.length > 1 ? raw[1] : [];
+    var colMap = [];
+    for (var j = 3; j < headerRow.length; j++) {
+      var ym = parseColDate(headerRow[j]);
+      if (ym) colMap.push({ idx: j, ym: ym });
+    }
+
+    // Filtrar al rango de fechas
+    var fi = (fechaInicio || '').slice(0, 7);
+    var ff = (fechaFin    || '').slice(0, 7);
+    var cols = colMap.filter(function(c) {
+      return (!fi || c.ym >= fi) && (!ff || c.ym <= ff);
+    });
+
+    // Filas clave con tipo predefinido (col A solamente)
+    var METRIC_ROWS = {
+      'Total Expenses': 'total',
+      'Gross Profit':   'metric',
+      'EBITDA':         'metric',
+      'EBIT':           'metric',
+      'Net Profit':     'metric'
+    };
+    var SUBTOTAL_C = { 'Total Income': true, 'Total COGS': true, 'Total': true };
+
+    var rows = [];
+    for (var i = 4; i < raw.length; i++) {
+      var r = raw[i];
+      var a = String(r[0] || '').trim();
+      var b = String(r[1] || '').trim();
+      var c = String(r[2] || '').trim();
+      if (!a && !b && !c) continue;
+
+      var label, tipo, nivel;
+
+      if (a && !b && !c) {
+        label = a; tipo = METRIC_ROWS[a] || 'header'; nivel = 0;
+      } else if (!a && b && !c) {
+        label = b; tipo = 'categoria'; nivel = 1;
+      } else if (!a && !b && c) {
+        label = c; tipo = SUBTOTAL_C[c] ? 'subtotal' : 'dato'; nivel = 2;
+      } else if (a && b && !c) {
+        label = b; tipo = 'subseccion'; nivel = 1;
+      } else if (!a && b && c) {
+        label = c === 'Total' ? b + ' total' : c;
+        tipo = c === 'Total' ? 'subtotal' : 'dato'; nivel = 2;
+      } else {
+        label = a || b || c; tipo = 'dato'; nivel = 1;
+      }
+
+      var valores = cols.map(function(col) {
+        var v = r[col.idx];
+        return (v instanceof Date) ? 0 : (Number(v) || 0);
+      });
+      var total = valores.reduce(function(s, v) { return s + v; }, 0);
+
+      // Omitir filas de datos sin valores en el rango
+      if (tipo === 'dato' || tipo === 'categoria') {
+        if (total === 0) continue;
+      }
+
+      rows.push({ tipo: tipo, nivel: nivel, label: label, valores: valores, total: total });
+    }
+
+    return {
+      view: 'estado-resultados', fuente: 'EstadoResultados',
+      meses: cols.map(function(c) { return c.ym; }),
+      rows: rows, fechaInicio: fechaInicio, fechaFin: fechaFin,
+      updated: new Date().toISOString()
+    };
+  } catch(ex) {
+    return { view: 'estado-resultados', fuente: 'EstadoResultados',
+             error: ex.message, meses: [], rows: [] };
+  }
 }
 
 function crearHoja(ss, nombre, datos) {
