@@ -1365,10 +1365,8 @@ function readEstadoResultados(fechaInicio, fechaFin) {
       });
       var total = valores.reduce(function(s, v) { return s + v; }, 0);
 
-      // Omitir filas de datos sin valores en el rango
-      if (tipo === 'dato' || tipo === 'categoria') {
-        if (total === 0) continue;
-      }
+      // Omitir filas completamente vacías (sin label y sin datos)
+      if (!label) continue;
 
       rows.push({ tipo: tipo, nivel: nivel, label: label, valores: valores, total: total });
     }
