@@ -434,8 +434,6 @@ function invalidateViewCache(sheetName) {
   } catch(ignored) {}
 }
 
-/* ── getDefaultPeriodo mantenido por compatibilidad (ya no se usa) ─── */
-function getDefaultPeriodo(ss) { return ''; }
 
 /* ══════════════════════════════════════════════════════════════
    LEE LA HOJA Menu
@@ -743,14 +741,14 @@ function readRepEjecutivo(ss, fechaInicio, fechaFin) {
     if (mensualSheet) {
       var mRows = mensualSheet.getDataRange().getValues();
       var mHdrs = mRows[0];
-      var colPeriodo  = mHdrs.indexOf('Periodo');
+      var colFecha    = mHdrs.indexOf('Fecha');
       var colIngresos = mHdrs.indexOf('Ingresos');
       var colGastos   = mHdrs.indexOf('Gastos');
       var totIng = 0, totGas = 0, found = false;
       mRows.slice(1).forEach(function(r) {
-        var p = colPeriodo >= 0 ? String(r[colPeriodo]) : '';
-        if (fechaInicio && p < fechaInicio.slice(0,7)) return;
-        if (fechaFin   && p > fechaFin.slice(0,7))   return;
+        var f = colFecha >= 0 ? String(r[colFecha]).slice(0, 10) : '';
+        if (f && fechaInicio && f < fechaInicio) return;
+        if (f && fechaFin   && f > fechaFin)   return;
         if (colIngresos >= 0) totIng += parseFloat(r[colIngresos]) || 0;
         if (colGastos   >= 0) totGas += parseFloat(r[colGastos])   || 0;
         found = true;
@@ -1068,15 +1066,7 @@ function readCapturaData(ss, nombreHoja, viewId, fechaInicio, fechaFin) {
 /* ══════════════════════════════════════════════════════════════
    LECTORES INDIVIDUALES
    ══════════════════════════════════════════════════════════════ */
-function readPeriodos(ss) {
-  var rows = ss.getSheetByName('Periodos').getDataRange().getValues();
-  return rows.slice(1).map(function(r) {
-    return { id: String(r[0]), label: String(r[1]), orden: Number(r[2]) };
-  });
-}
-
-/* Columnas esperadas (con la nueva col Fecha en B):
-   A=Periodo | B=Fecha(YYYY-MM-DD) | C=Mes | D=Ingresos | E=Gastos | F=Ciclos | G=CAC | H=Margen */
+/* Columnas: A=Sucursal | B=Fecha(YYYY-MM-DD) | C=Mes | D=Ingresos | E=Gastos | F=Ciclos | G=CAC | H=Margen */
 function readMensual(ss, sheetName, fechaInicio, fechaFin) {
   var rows = ss.getSheetByName(sheetName).getDataRange().getValues();
   var data = rows.slice(1).filter(function(r) {
@@ -1095,7 +1085,7 @@ function readMensual(ss, sheetName, fechaInicio, fechaFin) {
   };
 }
 
-/* Columnas CashFlow: A=Periodo | B=Fecha | C=Mes | D=Flujo_MXN */
+/* Columnas CashFlow: A=Sucursal | B=Fecha | C=Mes | D=Flujo_MXN */
 function readCashFlow(ss, fechaInicio, fechaFin) {
   var rows = ss.getSheetByName('CashFlow').getDataRange().getValues();
   var data = rows.slice(1).filter(function(r) {
@@ -1141,7 +1131,7 @@ function readDonut(ss) {
   };
 }
 
-/* PaisesOrigen: A=Periodo | B=Fecha | C=Pais | D=Porcentaje | E=Color */
+/* PaisesOrigen: A=Sucursal | B=Fecha | C=Pais | D=Porcentaje | E=Color */
 function readPaisesOrigen(ss, fechaInicio, fechaFin) {
   var hoja = ss.getSheetByName('PaisesOrigen');
   if (!hoja) return { labels: [], data: [], colors: [] };
@@ -1201,8 +1191,7 @@ function insertRow(ss, e) {
 
   var hdrInfo = getSheetHeaders(hoja);
   var headers = hdrInfo.headers;
-  var row = headers.map(function(h, i) {
-    if (i === 0 && h === 'Periodo') return (e && e.parameter.periodo) || '';
+  var row = headers.map(function(h) {
     return (e && e.parameter[h] !== undefined) ? e.parameter[h] : '';
   });
 
@@ -1251,14 +1240,6 @@ function setupSheets() {
     ['laboratorios',  'captura',   'Laboratorios',     '',         'microscope',       2,       'vista', 'Laboratorios', true],
     // ── CONFIG ──
     ['ajustes',       '',          'Ajustes',          'CONFIG',   'settings',         6,       'vista', '',         true],
-  ]);
-
-  // ── Hoja: Periodos ──────────────────────────────────────────
-  crearHoja(ss, 'Periodos', [
-    ['ID',         'Label',      'Orden'],
-    ['2026-Q2',    'Q2 2026',    1],
-    ['2026-Q1',    'Q1 2026',    2],
-    ['2025-Anual', '2025 Anual', 3],
   ]);
 
   Logger.log('✅ setupSheets completado');
