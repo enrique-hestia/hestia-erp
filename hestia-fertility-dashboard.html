@@ -2600,13 +2600,20 @@ function renderViewData(viewId, data) {
     'estado-resultados':   function(d){ renderEstadoResultados(d); }
   };
 
-  // Interceptar cualquier vista cuya fuente sea Roles → gestor de roles
-  if (data && String(data.fuente || '').toLowerCase() === 'roles') {
-    // Asegurar que el div correcto esté visible
+  // Interceptar por fuente — independiente del ID que el usuario ponga en el menú
+  var _fuente = String(data && data.fuente || '').toLowerCase().replace(/[\s_-]/g,'');
+  if (_fuente === 'roles') {
     document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
     var _grEl = document.getElementById('view-gestion-roles');
     if (_grEl) _grEl.style.display = '';
     renderGestionRoles(data);
+    return;
+  }
+  if (_fuente === 'estadorresultados') {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _erEl = document.getElementById('view-estado-resultados');
+    if (_erEl) _erEl.style.display = '';
+    renderEstadoResultados(data);
     return;
   }
 

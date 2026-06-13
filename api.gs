@@ -504,7 +504,8 @@ function readViewData(ss, viewId, fechaInicio, fechaFin) {
     return readGestionRoles(ss);
   }
 
-  if (viewId === 'estado-resultados' || fuente === 'EstadoResultados') {
+  if ((fuente || '').replace(/[\s_-]/g,'').toLowerCase() === 'estadorresultados'
+      || (viewId || '').replace(/[\s_-]/g,'').toLowerCase() === 'estadorresultados') {
     return readEstadoResultados(fechaInicio, fechaFin);
   }
 
