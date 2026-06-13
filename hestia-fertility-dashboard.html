@@ -257,17 +257,81 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 .alert-info .alert-icon{color:var(--color-blue)}
 
 /* MOBILE */
-@media (max-width:900px) {
-  :root{--sidebar-w:0px}
-  .sidebar{display:none}
-  .app{grid-template-columns:1fr}
-  .topbar{grid-column:1}
-  .main{grid-column:1;padding:var(--space-4)}
-  .kpi-grid{grid-template-columns:repeat(2,1fr)}
-  .row-2,.row-3{grid-template-columns:1fr}
+@media (min-width:901px){
+  .mobile-only{display:none!important}
+  #mobile-filter-panel{display:none!important}
 }
-@media (max-width:480px) {
+@media (max-width:900px){
+  .desktop-only{display:none!important}
+  .mobile-only{display:flex!important}
+  #hamburger-btn,#filter-toggle-btn{display:flex!important}
+
+  /* Layout */
+  :root{--sidebar-w:260px}
+  .app{grid-template-columns:1fr;grid-template-rows:var(--header-h) 1fr}
+  .topbar{grid-column:1;padding:0 12px;gap:8px}
+  .main{grid-column:1;padding:var(--space-4);gap:var(--space-4)}
+
+  /* Sidebar → drawer deslizable */
+  .sidebar{
+    position:fixed;top:0;left:0;height:100dvh;width:var(--sidebar-w);
+    z-index:100;transform:translateX(-100%);
+    transition:transform 280ms cubic-bezier(0.16,1,0.3,1);
+    box-shadow:4px 0 24px rgba(0,0,0,.18)
+  }
+  .sidebar.open{transform:translateX(0)}
+  #sidebar-overlay{display:none}
+  #sidebar-overlay.open{display:block!important}
+
+  /* KPI cards */
+  .kpi-grid{grid-template-columns:repeat(2,1fr);gap:var(--space-3)}
+
+  /* Grids de 2+ columnas → 1 columna */
+  .row-2,.row-3,.er-grid,
+  [class*="grid-cols"]{grid-template-columns:1fr!important}
+
+  /* Tablas con scroll horizontal */
+  .cap-table-wrap,.services-table-wrap,
+  .er-card div[style*="overflow-y"],
+  [id^="cap-tbody"]{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{min-width:540px}
+
+  /* Cards y modals */
+  .card{padding:var(--space-4)}
+  .card-header{flex-wrap:wrap;gap:8px}
+  .modal{margin:12px;max-height:92dvh;border-radius:var(--radius-lg)}
+  .form-grid{grid-template-columns:1fr}
+
+  /* Topbar title truncado */
+  .topbar-title{font-size:var(--text-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+
+  /* Botón de filtros activo */
+  #filter-toggle-btn.active{color:var(--color-primary);background:var(--color-primary-hl)}
+
+  /* Estado de Resultados */
+  #view-estado-resultados .er-kpis{grid-template-columns:repeat(2,1fr)!important}
+  #view-estado-resultados .er-grid{grid-template-columns:1fr!important}
+  #view-estado-resultados .er-card div[style]{max-height:none!important}
+
+  /* Rep Ejecutivo y dashboards inline */
+  [style*="grid-template-columns:repeat(4"]{grid-template-columns:repeat(2,1fr)!important}
+  [style*="grid-template-columns: repeat(4"]{grid-template-columns:repeat(2,1fr)!important}
+
+  /* Lab/Qx resumen */
+  #lr-kpi-grid,#med-kpi-grid,#qx-kpi-grid{grid-template-columns:repeat(2,1fr)!important}
+
+  /* Ocultar columnas no esenciales en tablas de captura */
+  .cap-card{max-height:none}
+
+  /* Main tiene espacio para el panel de filtros cuando está abierto */
+  .main.filters-open{padding-top:calc(var(--space-4) + 96px)}
+}
+@media (max-width:480px){
   .kpi-grid{grid-template-columns:1fr}
+  #view-estado-resultados .er-kpis{grid-template-columns:1fr!important}
+  [style*="grid-template-columns:repeat(4"]{grid-template-columns:1fr!important}
+  [style*="grid-template-columns: repeat(4"]{grid-template-columns:1fr!important}
+  .topbar-title{max-width:130px}
 }
 /* ── MODAL ── */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:2000;display:flex;align-items:center;justify-content:center;padding:var(--space-4)}
@@ -327,26 +391,33 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
   </div>
 </nav>
 
+<!-- Overlay para cerrar sidebar en móvil -->
+<div id="sidebar-overlay" onclick="closeSidebar()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:90"></div>
+
 <!-- TOPBAR -->
 <header class="topbar" role="banner">
-  <div>
+  <div style="display:flex;align-items:center;gap:var(--space-3)">
+    <button id="hamburger-btn" class="icon-btn mobile-only" aria-label="Menú" onclick="openSidebar()" style="display:none">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
     <div class="topbar-title" id="topbar-title">Resumen Financiero</div>
   </div>
   <div class="topbar-right">
-    <div class="filter-group" style="gap:6px">
+    <!-- Filtros desktop -->
+    <div class="filter-group desktop-only" style="gap:6px">
       <span class="filter-label">Del</span>
       <input type="date" class="select-pill" id="fechaInicioInput" style="padding:4px 10px;cursor:pointer">
       <span class="filter-label">al</span>
       <input type="date" class="select-pill" id="fechaFinInput" style="padding:4px 10px;cursor:pointer">
       <button onclick="applyDateRange()" class="btn btn-primary" style="padding:5px 14px;font-size:var(--text-xs);border-radius:var(--radius-full)">Aplicar</button>
     </div>
-    <div class="filter-group" id="sucursal-filter-group" style="display:none">
+    <div class="filter-group desktop-only" id="sucursal-filter-group" style="display:none">
       <span class="filter-label">Sucursal:</span>
       <select class="select-pill" id="sucursalSelect" onchange="updateSucursal(this.value)">
         <option value="Todas">Todas</option>
       </select>
     </div>
-    <div class="filter-group">
+    <div class="filter-group desktop-only">
       <span class="filter-label">Segmento:</span>
       <select class="select-pill" id="segmentoSelect" onchange="updateSegment(this.value)">
         <option value="todos">Todos</option>
@@ -354,6 +425,10 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
         <option value="internacional">Internacional</option>
       </select>
     </div>
+    <!-- Botón de filtros móvil -->
+    <button id="filter-toggle-btn" class="icon-btn mobile-only" aria-label="Filtros" onclick="toggleMobileFilters()" style="display:none">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+    </button>
     <button class="icon-btn" aria-label="Exportar CSV" onclick="exportCSV()" title="Exportar">
       <i data-lucide="download"></i>
     </button>
@@ -372,6 +447,33 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
     </div>
   </div>
 </header>
+
+<!-- Panel de filtros móvil (se despliega debajo del topbar) -->
+<div id="mobile-filter-panel" style="display:none;position:fixed;top:var(--header-h);left:0;right:0;z-index:85;background:var(--color-surface);border-bottom:1px solid var(--color-divider);padding:12px 16px;flex-direction:column;gap:10px">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <span style="font-size:var(--text-xs);color:var(--color-text-muted);white-space:nowrap">Del</span>
+    <input type="date" class="select-pill" id="fechaInicioInput-mob" style="padding:4px 8px;cursor:pointer;flex:1;min-width:130px">
+    <span style="font-size:var(--text-xs);color:var(--color-text-muted);white-space:nowrap">al</span>
+    <input type="date" class="select-pill" id="fechaFinInput-mob" style="padding:4px 8px;cursor:pointer;flex:1;min-width:130px">
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <div id="sucursal-filter-group-mob" style="display:none;align-items:center;gap:6px">
+      <span style="font-size:var(--text-xs);color:var(--color-text-muted)">Sucursal:</span>
+      <select class="select-pill" id="sucursalSelect-mob" onchange="updateSucursal(this.value)">
+        <option value="Todas">Todas</option>
+      </select>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <span style="font-size:var(--text-xs);color:var(--color-text-muted)">Segmento:</span>
+      <select class="select-pill" id="segmentoSelect-mob" onchange="updateSegment(this.value)">
+        <option value="todos">Todos</option>
+        <option value="local">Local MX</option>
+        <option value="internacional">Internacional</option>
+      </select>
+    </div>
+    <button onclick="applyDateRangeMob()" class="btn btn-primary" style="padding:5px 16px;font-size:var(--text-xs);border-radius:var(--radius-full);margin-left:auto">Aplicar</button>
+  </div>
+</div>
 
 <!-- ══ PANTALLA DE LOGIN ══ -->
 <div id="login-screen" style="position:fixed;inset:0;background:var(--color-bg);display:flex;align-items:center;justify-content:center;z-index:9999;flex-direction:column;gap:20px">
@@ -2644,6 +2746,8 @@ function renderViewData(viewId, data) {
 
 /* ── Navegación entre vistas ─── */
 function navigateTo(viewId) {
+  // Cerrar sidebar en móvil al navegar
+  closeSidebar();
   // Ocultar todas
   document.querySelectorAll('.view').forEach(function(v) { v.style.display = 'none'; });
 
@@ -2855,23 +2959,75 @@ function renderResumen(data) {
 }
 
 /* ── Segment / Date controls ─── */
+/* ── MÓVIL: sidebar drawer ─── */
+function openSidebar() {
+  document.querySelector('.sidebar').classList.add('open');
+  document.getElementById('sidebar-overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeSidebar() {
+  document.querySelector('.sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+/* ── MÓVIL: panel de filtros ─── */
+function toggleMobileFilters() {
+  var panel = document.getElementById('mobile-filter-panel');
+  var btn   = document.getElementById('filter-toggle-btn');
+  var main  = document.querySelector('.main');
+  var open  = panel.style.display === 'flex';
+  panel.style.display = open ? 'none' : 'flex';
+  btn.classList.toggle('active', !open);
+  if (main) main.classList.toggle('filters-open', !open);
+  // Sincronizar valores al abrir
+  if (!open) {
+    var fi = document.getElementById('fechaInicioInput');
+    var ff = document.getElementById('fechaFinInput');
+    var mobFi = document.getElementById('fechaInicioInput-mob');
+    var mobFf = document.getElementById('fechaFinInput-mob');
+    if (fi && mobFi) mobFi.value = fi.value;
+    if (ff && mobFf) mobFf.value = ff.value;
+  }
+}
+function applyDateRangeMob() {
+  var fi = document.getElementById('fechaInicioInput-mob').value;
+  var ff = document.getElementById('fechaFinInput-mob').value;
+  if (!fi || !ff) { alert('Selecciona ambas fechas'); return; }
+  if (fi > ff)    { alert('La fecha inicial debe ser anterior a la final'); return; }
+  // Sincronizar con los inputs desktop
+  var dFi = document.getElementById('fechaInicioInput');
+  var dFf = document.getElementById('fechaFinInput');
+  if (dFi) dFi.value = fi;
+  if (dFf) dFf.value = ff;
+  currentFechaInicio = fi;
+  currentFechaFin    = ff;
+  currentPeriodo     = fi.slice(0,7) + ' → ' + ff.slice(0,7);
+  toggleMobileFilters();
+  loadView(currentView, fi, ff, true);
+}
+
 function populateSucursales(sucursales) {
+  var show = sucursales && sucursales.length > 1;
+  var opts = '<option value="Todas">Todas</option>';
+  if (show) {
+    sucursales.forEach(function(s) {
+      var id     = String(s['ID'] || s['id'] || s['Nombre'] || '').trim();
+      var nombre = String(s['Nombre'] || s['nombre'] || id).trim();
+      if (!id) return;
+      opts += '<option value="' + id + '">' + nombre + '</option>';
+    });
+  }
+  // Desktop
   var sel = document.getElementById('sucursalSelect');
   var grp = document.getElementById('sucursal-filter-group');
-  if (!sel || !grp) return;
-  // Solo mostrar el filtro si hay más de una sucursal activa
-  if (!sucursales || sucursales.length <= 1) { grp.style.display = 'none'; return; }
-  sel.innerHTML = '<option value="Todas">Todas</option>';
-  sucursales.forEach(function(s) {
-    var id     = String(s['ID'] || s['id'] || s['Nombre'] || '').trim();
-    var nombre = String(s['Nombre'] || s['nombre'] || id).trim();
-    if (!id) return;
-    var opt = document.createElement('option');
-    opt.value       = id;
-    opt.textContent = nombre;
-    sel.appendChild(opt);
-  });
-  grp.style.display = '';
+  if (sel) sel.innerHTML = opts;
+  if (grp) grp.style.display = show ? '' : 'none';
+  // Móvil
+  var selMob = document.getElementById('sucursalSelect-mob');
+  var grpMob = document.getElementById('sucursal-filter-group-mob');
+  if (selMob) selMob.innerHTML = opts;
+  if (grpMob) grpMob.style.display = show ? 'flex' : 'none';
 }
 
 function updateSucursal(val) {
@@ -2882,6 +3038,11 @@ function updateSucursal(val) {
 
 function updateSegment(val) {
   currentSegment = val;
+  // Sincronizar ambos selects
+  var d = document.getElementById('segmentoSelect');
+  var m = document.getElementById('segmentoSelect-mob');
+  if (d && d.value !== val) d.value = val;
+  if (m && m.value !== val) m.value = val;
   var cached = viewCache[currentView + '_' + currentFechaInicio + '_' + currentFechaFin + '_' + currentSucursal];
   if (cached) renderViewData(currentView, cached);
 }
