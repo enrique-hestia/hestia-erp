@@ -479,7 +479,10 @@ function readMenu(ss) {
    ══════════════════════════════════════════════════════════════ */
 function _plMatch(s) {
   var n = (s||'').toLowerCase().replace(/[\s&_\-]+/g,'');
-  return n === 'pl' || n === 'operatingpl' || n === 'pyg';
+  // Coincide con: pl, fin-pl, operatingpl, p&l, pyg, etc.
+  return n === 'pl' || n === 'operatingpl' || n === 'pyg' ||
+         n === 'finpl' || n.indexOf('operatingpl') >= 0 ||
+         /^.{0,6}pl$/.test(n); // termina en "pl" con hasta 6 chars de prefijo
 }
 
 function readViewData(ss, viewId, fechaInicio, fechaFin, sucursal, viewType, plMonth, plYear, plPrevYear) {
