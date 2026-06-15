@@ -60,8 +60,9 @@ function getRolConfig(ss, rol) {
 // Agregar aquí cualquier hoja de captura futura
 var LAB_SS_ID = '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ';
 var ER_SS_ID  = '17jlXzaIvohpN_UoE2kvLK1Bb6P6JxyKONsnrDX_St9U'; // Estado de Resultados
-var ER_GID    = 1953492149;
-var PL_GID    = 1415550816; // Operating P&L Statement
+var ER_GID     = 1953492149;
+var BUDGET_GID = 2097864117; // Budget
+var PL_GID     = 1415550816; // Operating P&L Statement (solo para Ver en Sheets)
 var MED_SS_ID = '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM';
 // ⚠️ Reemplaza con el ID real del spreadsheet de Quirofano cuando lo crees
 var QX_SS_ID  = LAB_SS_ID;  // placeholder — apunta al lab por ahora
@@ -1496,216 +1497,207 @@ function readSucursales(ss) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   OPERATING P&L STATEMENT
-   A1 = trimestre/vista  (Q1|Q2|Q3|Q4|Actual|Budget|…)
-   B1 = mes              (Enero|Febrero|… o vacío = modo trimestral)
-   E1 = año actual       (ej. 2026)
-   H1 = año anterior     (ej. 2025)
-   Columnas devueltas: C–J (8 columnas, sin K en adelante)
+   OPERATING P&L STATEMENT — 100% stateless, sin modificar celdas
+   Lee Estado de Resultados (ER_GID) y Budget (BUDGET_GID) directo.
+   viewType : Q1|Q2|Q3|Q4|Actual
+   plMonth  : Enero|Febrero|…  (vacío = modo trimestral)
+   plYear   : año actual  (ej. 2026)
+   plPrevYear: año anterior (ej. 2025)
+   Columnas del P&L: Actual | % | Budget | % | vs.Budget | Prior | % | YOY%
    ══════════════════════════════════════════════════════════════ */
 function readOperatingPL(viewType, plMonth, plYear, plPrevYear) {
-  viewType   = viewType   || '';
-  plMonth    = plMonth    || '';
-  plYear     = String(plYear    || '').trim();
-  plPrevYear = String(plPrevYear || '').trim();
+  // ── Parámetros con defaults ───────────────────────────────────
+  viewType   = (viewType   || 'Q1').trim();
+  plMonth    = (plMonth    || '').trim();
+  var thisYear = new Date().getFullYear();
+  var yr  = parseInt(plYear    || thisYear,     10) || thisYear;
+  var prv = parseInt(plPrevYear || (yr - 1),    10) || (yr - 1);
+
+  // ── Opciones fijas (dropdown Vista y Mes) ─────────────────────
+  var VIEW_OPTIONS = [
+    { value:'Q1',    label:'Q1 — Primer trimestre'  },
+    { value:'Q2',    label:'Q2 — Segundo trimestre' },
+    { value:'Q3',    label:'Q3 — Tercer trimestre'  },
+    { value:'Q4',    label:'Q4 — Cuarto trimestre'  },
+    { value:'Actual',label:'Actual — Año completo'  }
+  ];
+  var MONTH_OPTIONS = [{ value:'', label:'— Trimestral —' }];
+  ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+   'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+  .forEach(function(m){ MONTH_OPTIONS.push({ value:m, label:m }); });
+
+  // ── Meses por trimestre ───────────────────────────────────────
+  var QTR = { Q1:[1,2,3], Q2:[4,5,6], Q3:[7,8,9], Q4:[10,11,12],
+              Actual:[1,2,3,4,5,6,7,8,9,10,11,12] };
+  var MES_NUM = { Enero:1,Febrero:2,Marzo:3,Abril:4,Mayo:5,Junio:6,
+                  Julio:7,Agosto:8,Septiembre:9,Octubre:10,Noviembre:11,Diciembre:12 };
+  var targetMonths = plMonth && MES_NUM[plMonth]
+    ? [MES_NUM[plMonth]]
+    : (QTR[viewType] || QTR['Q1']);
+
+  // Rango de años para selects
+  var yearRange = [];
+  for (var yy = yr - 3; yy <= yr + 3; yy++) yearRange.push(String(yy));
 
   try {
     var erSS = SpreadsheetApp.openById(ER_SS_ID);
-    var plSheet = null;
-    var sheets  = erSS.getSheets();
+    var actualSheet = null, budgetSheet = null;
+    var sheets = erSS.getSheets();
     for (var i = 0; i < sheets.length; i++) {
-      if (sheets[i].getSheetId() === PL_GID) { plSheet = sheets[i]; break; }
+      var gid = sheets[i].getSheetId();
+      if (gid === ER_GID)     actualSheet = sheets[i];
+      if (gid === BUDGET_GID) budgetSheet = sheets[i];
     }
-    if (!plSheet) {
-      return { view:'p-l', fuente:'OperatingPL', error:'Hoja Operating P&L Statement no encontrada', rows:[], colHeaders:[] };
+    if (!actualSheet) {
+      return { view:'p-l', fuente:'OperatingPL', error:'Hoja Estado de Resultados no encontrada', rows:[], colHeaders:[] };
     }
 
-    // ── Guardar valores originales ANTES de cualquier lectura ─
-    var origA1 = plSheet.getRange('A1').getValue();
-    var origB1 = plSheet.getRange('B1').getValue();
-    var origE1 = plSheet.getRange('E1').getValue();
-    var origH1 = plSheet.getRange('H1').getValue();
-    var changed = false;
+    // ── Helper: parsear encabezado "Jan-25" → {year, month} ──────
+    var MON_IDX = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+    function parseHeader(val) {
+      var s = String(val || '').trim();
+      var m = s.match(/^([A-Za-z]{3})-(\d{2,4})$/);
+      if (!m) return null;
+      var mo = MON_IDX[m[1].toLowerCase()];
+      if (!mo) return null;
+      var y2 = m[2].length === 2 ? 2000 + parseInt(m[2], 10) : parseInt(m[2], 10);
+      return { year: y2, month: mo };
+    }
 
-    // ── Leer opciones reales de los dropdowns del sheet ───────
-    // A1: opciones de vista (trimestre/período)
-    var VIEW_OPTIONS = [];
-    try {
-      var valA1 = plSheet.getRange('A1').getDataValidation();
-      if (valA1 && valA1.getCriteriaType() === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
-        var listA1 = valA1.getCriteriaValues()[0]; // array de strings
-        if (listA1 && listA1.length) {
-          VIEW_OPTIONS = listA1.map(function(v){ return { value:String(v).trim(), label:String(v).trim() }; });
+    // ── Helper: suma numérica de columnas seleccionadas ───────────
+    function sumCols(row, cols) {
+      var t = 0;
+      for (var ci = 0; ci < cols.length; ci++) {
+        var v = row[cols[ci]];
+        if (typeof v === 'number') { t += v; continue; }
+        if (typeof v === 'string') {
+          var n = parseFloat(v.replace(/[$,\s]/g, ''));
+          if (!isNaN(n)) t += n;
         }
       }
-    } catch(eA1) {}
-    // Fallback si no tiene validación
-    if (!VIEW_OPTIONS.length) {
-      VIEW_OPTIONS = [
-        { value:'Q1', label:'Q1' }, { value:'Q2', label:'Q2' },
-        { value:'Q3', label:'Q3' }, { value:'Q4', label:'Q4' }
-      ];
+      return t;
     }
 
-    // B1: opciones de mes — intentar leer validación, con fallback a lista estándar
-    var MONTH_OPTIONS = [{ value:'', label:'— Sin mes —' }];
-    var gotMonthsFromSheet = false;
-    try {
-      var valB1 = plSheet.getRange('B1').getDataValidation();
-      if (valB1) {
-        var criteriaType = valB1.getCriteriaType();
-        if (criteriaType === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
-          var listB1 = valB1.getCriteriaValues()[0];
-          if (listB1 && listB1.length) {
-            listB1.forEach(function(v){
-              var s = String(v).trim();
-              if (s) MONTH_OPTIONS.push({ value:s, label:s });
-            });
-            gotMonthsFromSheet = true;
-          }
-        }
-      }
-    } catch(eB1) {}
-    // Fallback: lista estándar de meses en español
-    if (!gotMonthsFromSheet) {
-      ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
-       'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
-      .forEach(function(m){ MONTH_OPTIONS.push({ value:m, label:m }); });
+    // ── Leer hoja Actual ─────────────────────────────────────────
+    var actualData = actualSheet.getDataRange().getValues();
+    // Fila 2 (idx 1) = encabezados de mes a partir de col D (idx 3)
+    var hdrRow = actualData.length > 1 ? actualData[1] : [];
+    var currCols = [], prevCols = [];
+    for (var j = 3; j < hdrRow.length; j++) {
+      var ph = parseHeader(hdrRow[j]);
+      if (!ph) continue;
+      if (ph.year === yr  && targetMonths.indexOf(ph.month) >= 0) currCols.push(j);
+      if (ph.year === prv && targetMonths.indexOf(ph.month) >= 0) prevCols.push(j);
     }
-    var hasMonthFilter = true; // siempre mostrar
 
-    // Leer años disponibles del sheet ANTES de modificar
-    var currentYear  = plYear    || String(origE1 || new Date().getFullYear());
-    var currentPrev  = plPrevYear || String(origH1 || (parseInt(currentYear, 10) - 1));
-
-    // Generar rango de años (año actual ± 4)
-    var baseYear  = parseInt(currentYear, 10) || new Date().getFullYear();
-    var yearRange = [];
-    for (var y = baseYear - 3; y <= baseYear + 3; y++) { yearRange.push(String(y)); }
-
-    // ── Aplicar filtros si cambiaron ──────────────────────────
-    if (viewType && viewType !== String(origA1).trim()) {
-      plSheet.getRange('A1').setValue(viewType); changed = true;
-    }
-    // B1: solo cambiar si el usuario envió un valor explícito diferente al actual
-    if (plMonth !== '' && plMonth !== String(origB1).trim()) {
-      plSheet.getRange('B1').setValue(plMonth); changed = true;
-    } else if (plMonth === '' && String(origB1).trim() !== '') {
-      plSheet.getRange('B1').setValue('');      changed = true;
-    }
-    // E1/H1: los años son numéricos en el sheet
-    if (plYear && plYear !== String(origE1).trim()) {
-      plSheet.getRange('E1').setValue(Number(plYear) || plYear); changed = true;
-    }
-    if (plPrevYear && plPrevYear !== String(origH1).trim()) {
-      plSheet.getRange('H1').setValue(Number(plPrevYear) || plPrevYear); changed = true;
-    }
-    if (changed) SpreadsheetApp.flush();
-
-    try {
-      // Leer E1/H1 actuales después del flush
-      var readE1 = String(plSheet.getRange('E1').getValue() || '').trim();
-      var readH1 = String(plSheet.getRange('H1').getValue() || '').trim();
-      if (readE1) currentYear = readE1;
-      if (readH1) currentPrev = readH1;
-
-      var allData     = plSheet.getDataRange().getValues();
-      var activeView  = String(allData[0][0] || '').trim() || 'Q1';
-      var activeMonth = String(allData[0][1] || '').trim(); // B1
-
-      // ── Encontrar fila de encabezados de columna ───────────
-      var headerRowIdx = -1;
-      for (var r = 0; r < allData.length; r++) {
-        var c2 = String(allData[r][2] || '').trim();
-        var c3 = String(allData[r][3] || '').trim();
-        if (c2.toLowerCase().indexOf('actual') === 0 && c3.indexOf('%') > -1) {
-          var c4 = String(allData[r][4] || '').trim();
-          if (c4) { headerRowIdx = r; break; }
-        }
+    // ── Leer hoja Budget ─────────────────────────────────────────
+    var budgetLookup = {}; // key "A||B||C" → valor sumado
+    if (budgetSheet) {
+      var budgetData = budgetSheet.getDataRange().getValues();
+      var bhdr = budgetData.length > 1 ? budgetData[1] : [];
+      var budgCols = [];
+      for (var j = 3; j < bhdr.length; j++) {
+        var bph = parseHeader(bhdr[j]);
+        if (bph && bph.year === yr && targetMonths.indexOf(bph.month) >= 0) budgCols.push(j);
       }
-      if (headerRowIdx < 0) {
-        for (var r = 0; r < allData.length; r++) {
-          var c4b = String(allData[r][4] || '').trim();
-          if (c4b.toLowerCase().indexOf('budget') === 0) { headerRowIdx = r; break; }
-        }
-      }
-      if (headerRowIdx < 0) {
-        return { view:'p-l', fuente:'OperatingPL', viewType:activeView,
-                 viewOptions:VIEW_OPTIONS, monthOptions:MONTH_OPTIONS,
-                 error:'No se encontró tabla', rows:[], colHeaders:[] };
-      }
-
-      // ── Parsear columnas C–J (índices 2–9, máx 8 cols) ────
-      var headerRow = allData[headerRowIdx];
-      var colDefs   = [];
-      for (var c = 2; c <= 9 && c < headerRow.length; c++) { // C=2 … J=9
-        var h = String(headerRow[c] || '').trim();
-        if (!h) continue;
-        var isPct = h.indexOf('%') > -1;
-        var isVs  = h.toLowerCase().indexOf('vs') > -1 || h.toLowerCase().indexOf('yoy') > -1;
-        colDefs.push({ idx:c, label:h, isPct:isPct, isVs:isVs });
-      }
-
-      // ── Clasificar y parsear filas de datos ───────────────
-      var METRICS  = ['gross profit','ebitda','ebit','ebt before extra','ebt','net profit/loss','net profit'];
-      var TOTALS   = ['total income','total cogs','total marketing','total expenses',
-                      'total service','total g&a','total opex','total revenue'];
-      var SECTIONS = ['revenue','cost of good','marketing','service','g&a',
-                      'depreciation','financial cost','cuentas de orden'];
-
-      var rows = [];
-      for (var r = headerRowIdx + 1; r < allData.length; r++) {
-        var row   = allData[r];
-        var labA  = String(row[0] || '').trim();
-        var labB  = String(row[1] || '').trim();
-        var label = labA || labB;
-        if (!label) continue;
-
-        var lbl  = label.toLowerCase();
-        var tipo = 'dato';
-        if      (METRICS.some(function(m){ return lbl === m; }))             tipo = 'metric';
-        else if (TOTALS.some(function(t){ return lbl.indexOf(t) === 0; }))   tipo = 'subtotal';
-        else if (SECTIONS.some(function(s){ return lbl.indexOf(s) === 0; })) tipo = 'header';
-        else if (labA && !labB)                                               tipo = 'header';
-
-        var values = colDefs.map(function(cd) {
-          var v = row[cd.idx];
-          if (v === '' || v === null || v === undefined) return null;
-          if (typeof v === 'number') return v;
-          var sv = String(v).trim();
-          if (!sv || sv === '-' || sv.indexOf('#') === 0) return null;
-          if (sv.indexOf('%') > -1) return parseFloat(sv) / 100;
-          var n = parseFloat(sv.replace(/[$,\s]/g, ''));
-          return isNaN(n) ? null : n;
-        });
-
-        rows.push({ label:label, indent:(labB && !labA) ? 1 : 0, tipo:tipo, values:values });
-      }
-
-      return {
-        view:         'p-l',
-        fuente:       'OperatingPL',
-        viewType:     activeView,
-        activeMonth:  activeMonth,
-        currentYear:  currentYear,
-        currentPrev:  currentPrev,
-        viewOptions:     VIEW_OPTIONS,
-        monthOptions:    MONTH_OPTIONS,
-        hasMonthFilter:  hasMonthFilter,
-        yearRange:       yearRange,
-        colHeaders:   colDefs.map(function(cd){ return { label:cd.label, isPct:cd.isPct, isVs:cd.isVs }; }),
-        rows:         rows
-      };
-
-    } finally {
-      if (changed) {
-        plSheet.getRange('A1').setValue(origA1);
-        plSheet.getRange('B1').setValue(origB1);
-        plSheet.getRange('E1').setValue(origE1);
-        plSheet.getRange('H1').setValue(origH1);
-        SpreadsheetApp.flush();
+      // Filas de datos desde fila 5 (idx 4)
+      for (var ri = 4; ri < budgetData.length; ri++) {
+        var br = budgetData[ri];
+        var ka = String(br[0]||'').trim();
+        var kb = String(br[1]||'').trim();
+        var kc = String(br[2]||'').trim();
+        if (!ka && !kb && !kc) continue;
+        budgetLookup[ka+'||'+kb+'||'+kc] = sumCols(br, budgCols);
       }
     }
+
+    // ── Clasificación de filas ────────────────────────────────────
+    var METRICS  = ['gross profit','ebitda','ebit','ebt before extra','ebt','net profit/loss','net profit'];
+    var SUBTOTS  = ['total income','total cogs','total marketing','total service',
+                    'total g&a','total opex','total expenses','total revenue'];
+    var HEADERS  = ['income','revenue','cost of good','cogs','marketing','service',
+                    'g&a','depreciation','financial cost','otros'];
+
+    // ── Primer paso: encontrar Total Income para % de ingresos ───
+    var totActual = 0, totPrev = 0, totBudget = 0;
+    for (var ri = 4; ri < actualData.length; ri++) {
+      var r = actualData[ri];
+      var lc = String(r[2]||'').trim().toLowerCase();
+      if (lc === 'total income') {
+        totActual = sumCols(r, currCols);
+        totPrev   = sumCols(r, prevCols);
+        var tKey  = String(r[0]||'').trim()+'||'+String(r[1]||'').trim()+'||'+String(r[2]||'').trim();
+        totBudget = budgetLookup[tKey] || 0;
+        break;
+      }
+    }
+
+    // ── Segundo paso: construir filas del P&L ────────────────────
+    var rows = [];
+    for (var ri = 4; ri < actualData.length; ri++) {
+      var r    = actualData[ri];
+      var labA = String(r[0]||'').trim();
+      var labB = String(r[1]||'').trim();
+      var labC = String(r[2]||'').trim();
+      var label = labA || labB || labC;
+      if (!label) continue;
+
+      var lbl  = label.toLowerCase();
+      var tipo = 'dato';
+      if      (METRICS.some(function(m){ return lbl === m; }))                tipo = 'metric';
+      else if (SUBTOTS.some(function(t){ return lbl.indexOf(t) === 0; }))     tipo = 'subtotal';
+      else if (!labA && !labB && labC.toLowerCase().indexOf('total') === 0)   tipo = 'subtotal';
+      else if (HEADERS.some(function(h){ return lbl.indexOf(h) === 0; }) && !labB && !labC) tipo = 'header';
+      else if (labA && !labB && !labC)                                         tipo = 'header';
+      else if (!labA && labB && !labC)                                         tipo = 'categoria';
+
+      var actual = sumCols(r, currCols);
+      var prev   = sumCols(r, prevCols);
+      var key    = labA+'||'+labB+'||'+labC;
+      var budget = budgetLookup.hasOwnProperty(key) ? budgetLookup[key] : 0;
+
+      // 8 valores: Actual | %Rev | Budget | %BudRev | vs.Budget% | Prior | %PriorRev | YOY%
+      var actualPct  = totActual  ? actual / totActual  : null;
+      var budgetPct  = totBudget  ? budget / totBudget  : null;
+      var prevPct    = totPrev    ? prev   / totPrev    : null;
+      var vsBudget   = budget     ? (actual - budget) / Math.abs(budget) : null;
+      var yoy        = prev       ? (actual - prev)   / Math.abs(prev)   : null;
+
+      rows.push({
+        label:  label,
+        indent: (!labA && (labB || labC)) ? 1 : 0,
+        tipo:   tipo,
+        values: [actual, actualPct, budget, budgetPct, vsBudget, prev, prevPct, yoy]
+      });
+    }
+
+    // ── Encabezados de columna ────────────────────────────────────
+    var pLabel = plMonth || viewType;
+    var colHeaders = [
+      { label:'Actual '  + pLabel + ' ' + yr,  isPct:false, isVs:false },
+      { label:'%',                               isPct:true,  isVs:false },
+      { label:'Budget '  + pLabel + ' ' + yr,  isPct:false, isVs:false },
+      { label:'%',                               isPct:true,  isVs:false },
+      { label:'vs. Budget',                      isPct:true,  isVs:true  },
+      { label:prv + ' ' + pLabel,               isPct:false, isVs:false },
+      { label:'%',                               isPct:true,  isVs:false },
+      { label:'YOY %',                           isPct:true,  isVs:true  }
+    ];
+
+    return {
+      view:           'p-l',
+      fuente:         'OperatingPL',
+      viewType:       viewType,
+      activeMonth:    plMonth,
+      currentYear:    String(yr),
+      currentPrev:    String(prv),
+      viewOptions:    VIEW_OPTIONS,
+      monthOptions:   MONTH_OPTIONS,
+      hasMonthFilter: true,
+      yearRange:      yearRange,
+      colHeaders:     colHeaders,
+      rows:           rows
+    };
 
   } catch(ex) {
     return { view:'p-l', fuente:'OperatingPL', error:ex.message, rows:[], colHeaders:[] };
