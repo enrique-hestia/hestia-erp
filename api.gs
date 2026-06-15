@@ -1547,22 +1547,32 @@ function readOperatingPL(viewType, plMonth, plYear, plPrevYear) {
       ];
     }
 
-    // B1: opciones de mes (puede ser vacío = modo trimestral)
+    // B1: opciones de mes — intentar leer validación, con fallback a lista estándar
     var MONTH_OPTIONS = [{ value:'', label:'— Sin mes —' }];
+    var gotMonthsFromSheet = false;
     try {
       var valB1 = plSheet.getRange('B1').getDataValidation();
-      if (valB1 && valB1.getCriteriaType() === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
-        var listB1 = valB1.getCriteriaValues()[0];
-        if (listB1 && listB1.length) {
-          listB1.forEach(function(v){
-            var s = String(v).trim();
-            if (s) MONTH_OPTIONS.push({ value:s, label:s });
-          });
+      if (valB1) {
+        var criteriaType = valB1.getCriteriaType();
+        if (criteriaType === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+          var listB1 = valB1.getCriteriaValues()[0];
+          if (listB1 && listB1.length) {
+            listB1.forEach(function(v){
+              var s = String(v).trim();
+              if (s) MONTH_OPTIONS.push({ value:s, label:s });
+            });
+            gotMonthsFromSheet = true;
+          }
         }
       }
     } catch(eB1) {}
-    // Si el mes actual (origB1) no está en la lista, no mostramos selector de mes
-    var hasMonthFilter = MONTH_OPTIONS.length > 1;
+    // Fallback: lista estándar de meses en español
+    if (!gotMonthsFromSheet) {
+      ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+       'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+      .forEach(function(m){ MONTH_OPTIONS.push({ value:m, label:m }); });
+    }
+    var hasMonthFilter = true; // siempre mostrar
 
     // Leer años disponibles del sheet ANTES de modificar
     var currentYear  = plYear    || String(origE1 || new Date().getFullYear());
