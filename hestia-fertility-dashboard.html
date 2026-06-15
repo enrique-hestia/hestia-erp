@@ -1917,6 +1917,9 @@ let currentFechaInicio = '';
 let currentFechaFin    = '';
 let currentView        = 'resumen';
 let currentPLViewType  = '';
+let currentPLMonth     = '';
+let currentPLYear      = '';
+let currentPLPrevYear  = '';
 let sheetsData     = null;
 let ingresoChart   = null, donutChart = null, cashChart = null, costChart = null;
 const seriesVisible = {ingresos:true, gastos:true, utilidad:true};
@@ -2104,13 +2107,22 @@ function renderOperatingPL(data) {
     return;
   }
 
-  var rows       = data.rows       || [];
-  var colHeaders = data.colHeaders || [];
-  var viewType   = data.viewType   || currentPLViewType || 'Actual';
-  var viewOpts   = data.viewOptions|| [];
-  var ssUrl      = PL_SS_URL; // siempre usar URL hardcodeada al tab correcto
+  var rows        = data.rows        || [];
+  var colHeaders  = data.colHeaders  || [];
+  var viewType    = data.viewType    || currentPLViewType || 'Actual';
+  var activeMonth = data.activeMonth !== undefined ? data.activeMonth : currentPLMonth;
+  var currentYear = data.currentYear || currentPLYear  || String(new Date().getFullYear());
+  var currentPrev = data.currentPrev || currentPLPrevYear || String(new Date().getFullYear() - 1);
+  var viewOpts    = data.viewOptions || [];
+  var monthOpts   = data.monthOptions|| [];
+  var yearRange   = data.yearRange   || [];
+  var ssUrl       = PL_SS_URL;
 
-  if (viewType && viewType !== currentPLViewType) currentPLViewType = viewType;
+  // Sincronizar globals con lo que devolvió el API
+  if (viewType)    currentPLViewType = viewType;
+  if (currentYear) currentPLYear     = currentYear;
+  if (currentPrev) currentPLPrevYear = currentPrev;
+  currentPLMonth = activeMonth;
 
   // ── Estilos ──────────────────────────────────────────────────
   var styleEl = document.getElementById('pl-styles');
@@ -2119,12 +2131,16 @@ function renderOperatingPL(data) {
   s.id = 'pl-styles';
   s.textContent = [
     '.pl-wrap{display:flex;flex-direction:column;gap:0}',
-    /* Topbar sticky: se queda fijo en la parte superior del área .main al hacer scroll */
-    '.pl-topbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;' +
+    /* Topbar sticky */
+    '.pl-topbar{display:flex;flex-direction:column;gap:10px;' +
       'position:sticky;top:calc(-1 * var(--space-6, 24px));z-index:20;' +
       'background:var(--color-bg,#f5f5f5);padding:16px 0 12px;margin-bottom:16px}',
+    '.pl-topbar-row1{display:flex;align-items:center;justify-content:space-between;gap:10px}',
+    '.pl-filters{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}',
+    '.pl-filter-group{display:flex;flex-direction:column;gap:3px}',
+    '.pl-filter-label{font-size:10px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;' +
+      'color:var(--text-secondary,#6b7280);padding-left:2px}',
     '.pl-title{font-size:18px;font-weight:600;color:var(--text-primary,#111);margin:0}',
-    '.pl-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}',
     '.pl-view-select{appearance:none;background:var(--color-surface,#fff);border:1px solid var(--color-divider,#e5e7eb);' +
       'border-radius:8px;padding:7px 32px 7px 12px;font-size:13px;font-weight:500;color:var(--text-primary,#111);cursor:pointer;' +
       'background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%23999\' stroke-width=\'2\'%3E%3Cpolyline points=\'6 9 12 15 18 9\'/%3E%3C/svg%3E");' +
@@ -2198,27 +2214,70 @@ function renderOperatingPL(data) {
   // ── HTML ─────────────────────────────────────────────────────
   var html = ['<div class="pl-wrap">'];
 
-  // Topbar sticky
+  // Construir opciones de años para los selects
+  var yearOpts = yearRange.length ? yearRange : (function(){
+    var yr = parseInt(currentYear,10) || new Date().getFullYear();
+    var arr = [];
+    for (var y = yr-3; y <= yr+3; y++) arr.push(String(y));
+    return arr;
+  })();
+
+  // Topbar sticky — fila 1: título + Sheets; fila 2: 4 controles
   html.push('<div class="pl-topbar">');
+
+  // Línea 1: título + botón Sheets
+  html.push('<div class="pl-topbar-row1">');
   html.push('<h2 class="pl-title">Operating P&amp;L Statement</h2>');
-  html.push('<div class="pl-actions">');
-
-  if (viewOpts.length) {
-    html.push('<select class="pl-view-select" onchange="changePLView(this.value)">');
-    viewOpts.forEach(function(o) {
-      var sel = (o.value === viewType) ? ' selected' : '';
-      html.push('<option value="' + o.value + '"' + sel + '>' + o.label + '</option>');
-    });
-    html.push('</select>');
-  }
-
   html.push(
     '<a href="' + ssUrl + '" target="_blank" class="pl-sheets-btn">' +
     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>' +
     'Ver en Sheets</a>'
   );
+  html.push('</div>');
 
-  html.push('</div></div>'); // /pl-actions /pl-topbar
+  // Línea 2: 4 filtros
+  html.push('<div class="pl-filters">');
+
+  // 1. Vista (A1) — trimestre o tipo
+  html.push('<div class="pl-filter-group"><label class="pl-filter-label">Vista</label>');
+  if (viewOpts.length) {
+    html.push('<select class="pl-view-select" onchange="changePLView(this.value)">');
+    viewOpts.forEach(function(o) {
+      html.push('<option value="' + o.value + '"' + (o.value === viewType ? ' selected' : '') + '>' + o.label + '</option>');
+    });
+    html.push('</select>');
+  }
+  html.push('</div>');
+
+  // 2. Mes (B1) — vacío = modo trimestral
+  html.push('<div class="pl-filter-group"><label class="pl-filter-label">Mes</label>');
+  if (monthOpts.length) {
+    html.push('<select class="pl-view-select" onchange="changePLMonth(this.value)">');
+    monthOpts.forEach(function(o) {
+      html.push('<option value="' + o.value + '"' + (o.value === activeMonth ? ' selected' : '') + '>' + o.label + '</option>');
+    });
+    html.push('</select>');
+  }
+  html.push('</div>');
+
+  // 3. Año actual (E1)
+  html.push('<div class="pl-filter-group"><label class="pl-filter-label">Año</label>');
+  html.push('<select class="pl-view-select" onchange="changePLYear(this.value)">');
+  yearOpts.forEach(function(y) {
+    html.push('<option value="' + y + '"' + (y === String(currentYear) ? ' selected' : '') + '>' + y + '</option>');
+  });
+  html.push('</select></div>');
+
+  // 4. Período anterior (H1)
+  html.push('<div class="pl-filter-group"><label class="pl-filter-label">Año anterior</label>');
+  html.push('<select class="pl-view-select" onchange="changePLPrevYear(this.value)">');
+  yearOpts.forEach(function(y) {
+    html.push('<option value="' + y + '"' + (y === String(currentPrev) ? ' selected' : '') + '>' + y + '</option>');
+  });
+  html.push('</select></div>');
+
+  html.push('</div>'); // /pl-filters
+  html.push('</div>'); // /pl-topbar
 
   if (!rows.length) {
     html.push('<div class="pl-card" style="padding:40px;text-align:center;color:var(--text-secondary,#6b7280)">Sin datos para esta vista.</div>');
@@ -2256,11 +2315,10 @@ function renderOperatingPL(data) {
   el.innerHTML = html.join('');
 }
 
-function changePLView(viewType) {
-  currentPLViewType = viewType;
-  viewCache = {};
-  loadView(currentView, currentFechaInicio, currentFechaFin, true);
-}
+function changePLView(val)     { currentPLViewType = val; viewCache = {}; loadView(currentView, currentFechaInicio, currentFechaFin, true); }
+function changePLMonth(val)    { currentPLMonth    = val; viewCache = {}; loadView(currentView, currentFechaInicio, currentFechaFin, true); }
+function changePLYear(val)     { currentPLYear     = val; viewCache = {}; loadView(currentView, currentFechaInicio, currentFechaFin, true); }
+function changePLPrevYear(val) { currentPLPrevYear = val; viewCache = {}; loadView(currentView, currentFechaInicio, currentFechaFin, true); }
 
 /* ════════════════════════════════════════════════════════════════
    ESTADO DE RESULTADOS — P&L jerárquico filtrado por fecha
@@ -2843,6 +2901,9 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
       '&fechaFin='                 + encodeURIComponent(fechaFin) +
       '&sucursal='                 + encodeURIComponent(currentSucursal) +
       '&viewType='                 + encodeURIComponent(currentPLViewType) +
+      '&plMonth='                  + encodeURIComponent(currentPLMonth) +
+      '&plYear='                   + encodeURIComponent(currentPLYear) +
+      '&plPrevYear='               + encodeURIComponent(currentPLPrevYear) +
       '&token='                    + encodeURIComponent(getToken());
     var res  = await fetch(url);
     var data = await res.json();
