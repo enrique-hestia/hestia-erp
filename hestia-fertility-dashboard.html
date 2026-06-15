@@ -2093,6 +2093,8 @@ function isConfigFuente(id) {
 /* ════════════════════════════════════════════════════════════════
    OPERATING P&L STATEMENT — vista BI/ERP con selector de período
    ════════════════════════════════════════════════════════════════ */
+var PL_SS_URL = 'https://docs.google.com/spreadsheets/d/17jlXzaIvohpN_UoE2kvLK1Bb6P6JxyKONsnrDX_St9U/edit?gid=1415550816#gid=1415550816';
+
 function renderOperatingPL(data) {
   var el = document.getElementById('view-pl');
   if (!el) return;
@@ -2106,48 +2108,72 @@ function renderOperatingPL(data) {
   var colHeaders = data.colHeaders || [];
   var viewType   = data.viewType   || currentPLViewType || 'Actual';
   var viewOpts   = data.viewOptions|| [];
-  var ssUrl      = data.ssUrl      || '';
+  var ssUrl      = PL_SS_URL; // siempre usar URL hardcodeada al tab correcto
 
   if (viewType && viewType !== currentPLViewType) currentPLViewType = viewType;
 
   // ── Estilos ──────────────────────────────────────────────────
-  var styleId = 'pl-styles';
-  if (!document.getElementById(styleId)) {
-    var s = document.createElement('style');
-    s.id = styleId;
-    s.textContent = [
-      '.pl-wrap{display:flex;flex-direction:column;gap:16px}',
-      '.pl-topbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}',
-      '.pl-title{font-size:18px;font-weight:600;color:var(--text-primary);margin:0}',
-      '.pl-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}',
-      '.pl-view-select{appearance:none;background:var(--color-surface,#fff);border:1px solid var(--color-divider);border-radius:8px;padding:7px 32px 7px 12px;font-size:13px;font-weight:500;color:var(--text-primary);cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%23999\' stroke-width=\'2\'%3E%3Cpolyline points=\'6 9 12 15 18 9\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}',
-      '.pl-sheets-btn{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--color-primary,#c46a7a);text-decoration:none;padding:7px 14px;border:1px solid var(--color-primary,#c46a7a);border-radius:20px;white-space:nowrap;transition:background .15s}',
-      '.pl-sheets-btn:hover{background:rgba(196,106,122,.08)}',
-      '.pl-card{background:var(--card-bg,#fff);border:0.5px solid var(--color-divider,#e5e7eb);border-radius:12px;overflow:hidden}',
-      '.pl-table-wrap{overflow-x:auto}',
-      '.pl-table{width:100%;border-collapse:collapse;font-size:13px}',
-      '.pl-table thead th{padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary);background:var(--color-surface,#f9fafb);border-bottom:1px solid var(--color-divider,#e5e7eb);text-align:right;white-space:nowrap}',
-      '.pl-table thead th:first-child{text-align:left}',
-      '.pl-table td{padding:8px 14px;border-bottom:0.5px solid var(--color-divider,#e5e7eb);text-align:right;white-space:nowrap;color:var(--text-primary)}',
-      '.pl-table td:first-child{text-align:left}',
-      '.pl-table tr:last-child td{border-bottom:none}',
-      '.pl-row-header td{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary);background:var(--color-surface,#f9fafb);padding-top:14px!important}',
-      '.pl-row-header td:first-child{padding-left:14px}',
-      '.pl-row-dato td:first-child{padding-left:28px;color:var(--text-primary)}',
-      '.pl-row-dato td{color:var(--text-secondary)}',
-      '.pl-row-subtotal td{font-weight:600;color:var(--text-primary);border-top:1px solid var(--color-divider,#e5e7eb)!important}',
-      '.pl-row-metric td{font-weight:700;font-size:14px;background:var(--color-primary-soft,rgba(196,106,122,.06));color:var(--color-primary,#c46a7a);border-top:2px solid var(--color-primary,#c46a7a)!important}',
-      '.pl-num-pos{color:var(--color-success,#22c55e)}',
-      '.pl-num-neg{color:var(--color-danger,#ef4444)}',
-      '.pl-num-pct{color:var(--text-secondary);font-size:12px}',
-      '@media(max-width:900px){.pl-table thead th,.pl-table td{padding:7px 10px;font-size:12px}}'
-    ].join('\n');
-    document.head.appendChild(s);
-  }
+  var styleEl = document.getElementById('pl-styles');
+  if (styleEl) styleEl.parentNode.removeChild(styleEl); // refrescar siempre
+  var s = document.createElement('style');
+  s.id = 'pl-styles';
+  s.textContent = [
+    '.pl-wrap{display:flex;flex-direction:column;gap:0}',
+    /* Topbar sticky: se queda fijo en la parte superior del área .main al hacer scroll */
+    '.pl-topbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;' +
+      'position:sticky;top:calc(-1 * var(--space-6, 24px));z-index:20;' +
+      'background:var(--color-bg,#f5f5f5);padding:16px 0 12px;margin-bottom:16px}',
+    '.pl-title{font-size:18px;font-weight:600;color:var(--text-primary,#111);margin:0}',
+    '.pl-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}',
+    '.pl-view-select{appearance:none;background:var(--color-surface,#fff);border:1px solid var(--color-divider,#e5e7eb);' +
+      'border-radius:8px;padding:7px 32px 7px 12px;font-size:13px;font-weight:500;color:var(--text-primary,#111);cursor:pointer;' +
+      'background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%23999\' stroke-width=\'2\'%3E%3Cpolyline points=\'6 9 12 15 18 9\'/%3E%3C/svg%3E");' +
+      'background-repeat:no-repeat;background-position:right 10px center}',
+    '.pl-sheets-btn{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;' +
+      'color:var(--color-primary,#c46a7a);text-decoration:none;padding:7px 14px;' +
+      'border:1px solid var(--color-primary,#c46a7a);border-radius:20px;white-space:nowrap;transition:background .15s}',
+    '.pl-sheets-btn:hover{background:rgba(196,106,122,.08)}',
+    '.pl-card{background:var(--card-bg,#fff);border:0.5px solid var(--color-divider,#e5e7eb);border-radius:12px;overflow:hidden}',
+    /* overflow-x en la tabla, primera columna sticky */
+    '.pl-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}',
+    '.pl-table{border-collapse:collapse;font-size:13px;min-width:600px}',
+    /* Encabezados sticky horizontalmente (th sticky top) y primera columna sticky izquierda */
+    '.pl-table thead th{padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;' +
+      'color:var(--text-secondary,#6b7280);background:var(--color-surface,#f9fafb);' +
+      'border-bottom:1px solid var(--color-divider,#e5e7eb);text-align:right;white-space:nowrap;' +
+      'position:sticky;top:0;z-index:2}',
+    '.pl-table thead th:first-child{text-align:left;position:sticky;left:0;z-index:3;' +
+      'width:180px;max-width:180px;min-width:160px;background:var(--color-surface,#f9fafb)}',
+    '.pl-table td{padding:8px 14px;border-bottom:0.5px solid var(--color-divider,#e5e7eb);' +
+      'text-align:right;white-space:nowrap;color:var(--text-primary,#111)}',
+    /* Primera columna de datos: sticky izquierda, ancho controlado, texto puede recortarse */
+    '.pl-table td:first-child{text-align:left;position:sticky;left:0;z-index:1;' +
+      'width:180px;max-width:180px;min-width:160px;overflow:hidden;text-overflow:ellipsis;' +
+      'background:var(--card-bg,#fff)}',
+    '.pl-table tr:last-child td{border-bottom:none}',
+    /* Tipos de fila */
+    '.pl-row-header td{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;' +
+      'color:var(--text-secondary,#6b7280);background:var(--color-surface,#f9fafb);padding-top:14px!important}',
+    '.pl-row-header td:first-child{background:var(--color-surface,#f9fafb)}',
+    '.pl-row-dato td{color:var(--text-secondary,#6b7280)}',
+    '.pl-row-dato td:first-child{padding-left:28px;color:var(--text-primary,#111);background:var(--card-bg,#fff)}',
+    '.pl-row-subtotal td{font-weight:600;color:var(--text-primary,#111);border-top:1px solid var(--color-divider,#e5e7eb)!important}',
+    '.pl-row-subtotal td:first-child{background:var(--card-bg,#fff)}',
+    '.pl-row-metric td{font-weight:700;font-size:14px;' +
+      'background:rgba(196,106,122,.06);color:var(--color-primary,#c46a7a);' +
+      'border-top:2px solid var(--color-primary,#c46a7a)!important}',
+    '.pl-row-metric td:first-child{background:rgba(196,106,122,.06)}',
+    '.pl-num-pos{color:#16a34a}',
+    '.pl-num-neg{color:#dc2626}',
+    '.pl-num-pct{color:var(--text-secondary,#6b7280);font-size:12px}',
+    '@media(max-width:900px){.pl-table thead th,.pl-table td{padding:7px 10px;font-size:12px}' +
+      '.pl-table thead th:first-child,.pl-table td:first-child{width:140px;min-width:120px;max-width:140px}}'
+  ].join('\n');
+  document.head.appendChild(s);
 
   // ── Helpers de formato ───────────────────────────────────────
   function fmtNum(v, isPct) {
-    if (v === null || v === undefined) return '<span style="color:var(--text-secondary)">—</span>';
+    if (v === null || v === undefined) return '<span style="color:var(--text-secondary,#6b7280)">—</span>';
     if (isPct) {
       var pct = (v * 100).toFixed(1);
       return '<span class="pl-num-pct">' + pct + '%</span>';
@@ -2162,22 +2188,21 @@ function renderOperatingPL(data) {
   }
 
   function fmtVs(v, isPct) {
-    if (v === null || v === undefined) return '<span style="color:var(--text-secondary)">—</span>';
+    if (v === null || v === undefined) return '<span style="color:var(--text-secondary,#6b7280)">—</span>';
     var val = isPct ? ((v * 100).toFixed(1) + '%') : ('$' + Math.round(Math.abs(v)).toLocaleString('en-US'));
     if (v > 0) return '<span class="pl-num-pos">▲ ' + val + '</span>';
     if (v < 0) return '<span class="pl-num-neg">▼ ' + val + '</span>';
-    return '<span style="color:var(--text-secondary)">— ' + val + '</span>';
+    return '<span style="color:var(--text-secondary,#6b7280)">— ' + val + '</span>';
   }
 
   // ── HTML ─────────────────────────────────────────────────────
   var html = ['<div class="pl-wrap">'];
 
-  // Topbar
+  // Topbar sticky
   html.push('<div class="pl-topbar">');
   html.push('<h2 class="pl-title">Operating P&amp;L Statement</h2>');
   html.push('<div class="pl-actions">');
 
-  // Selector de vista
   if (viewOpts.length) {
     html.push('<select class="pl-view-select" onchange="changePLView(this.value)">');
     viewOpts.forEach(function(o) {
@@ -2187,27 +2212,24 @@ function renderOperatingPL(data) {
     html.push('</select>');
   }
 
-  // Ver en Sheets
-  if (ssUrl) {
-    html.push(
-      '<a href="' + ssUrl + '" target="_blank" class="pl-sheets-btn">' +
-      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>' +
-      'Ver en Sheets</a>'
-    );
-  }
+  html.push(
+    '<a href="' + ssUrl + '" target="_blank" class="pl-sheets-btn">' +
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>' +
+    'Ver en Sheets</a>'
+  );
 
   html.push('</div></div>'); // /pl-actions /pl-topbar
 
   if (!rows.length) {
-    html.push('<div class="pl-card" style="padding:40px;text-align:center;color:var(--text-secondary)">Sin datos para esta vista.</div>');
+    html.push('<div class="pl-card" style="padding:40px;text-align:center;color:var(--text-secondary,#6b7280)">Sin datos para esta vista.</div>');
     html.push('</div>');
     el.innerHTML = html.join('');
     return;
   }
 
-  // Tabla principal
+  // Tabla
   html.push('<div class="pl-card"><div class="pl-table-wrap"><table class="pl-table"><thead><tr>');
-  html.push('<th style="min-width:200px;text-align:left">Concepto</th>');
+  html.push('<th>Concepto</th>');
   colHeaders.forEach(function(ch) {
     html.push('<th>' + ch.label + '</th>');
   });
@@ -2216,8 +2238,8 @@ function renderOperatingPL(data) {
   rows.forEach(function(row) {
     var cls = 'pl-row-' + (row.tipo || 'dato');
     html.push('<tr class="' + cls + '">');
-    var indent = row.indent ? 'padding-left:28px' : '';
-    html.push('<td' + (indent ? ' style="' + indent + '"' : '') + '>' + (row.label || '') + '</td>');
+    var indentStyle = row.indent ? ' style="padding-left:28px"' : '';
+    html.push('<td' + indentStyle + ' title="' + (row.label || '').replace(/"/g, '&quot;') + '">' + (row.label || '') + '</td>');
     row.values.forEach(function(v, ci) {
       var ch = colHeaders[ci] || {};
       var cell;
