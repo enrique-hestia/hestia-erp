@@ -665,6 +665,9 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 <!-- ══ VISTA: ESTADO DE RESULTADOS ══ -->
 <div id="view-estado-resultados" class="view" style="display:none"></div>
 
+<!-- ══ VISTA: OPERATING P&L ══ -->
+<div id="view-pl" class="view" style="display:none"></div>
+
 <!-- ══ VISTA: INGRESOS ══ -->
 <div id="view-ingresos" class="view" style="display:none">
   <div class="row-2">
@@ -1913,6 +1916,7 @@ let currentPeriodo     = '';
 let currentFechaInicio = '';
 let currentFechaFin    = '';
 let currentView        = 'resumen';
+let currentPLViewType  = '';
 let sheetsData     = null;
 let ingresoChart   = null, donutChart = null, cashChart = null, costChart = null;
 const seriesVisible = {ingresos:true, gastos:true, utilidad:true};
@@ -2084,6 +2088,156 @@ function setActiveNav(viewId) {
    ══════════════════════════════════════════════════════ */
 function isConfigFuente(id) {
   return /config|ajustes/i.test(id || '');
+}
+
+/* ════════════════════════════════════════════════════════════════
+   OPERATING P&L STATEMENT — vista BI/ERP con selector de período
+   ════════════════════════════════════════════════════════════════ */
+function renderOperatingPL(data) {
+  var el = document.getElementById('view-pl');
+  if (!el) return;
+
+  if (data && data.error && !(data.rows && data.rows.length)) {
+    el.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-secondary)">' + (data.error || 'Error cargando P&L') + '</div>';
+    return;
+  }
+
+  var rows       = data.rows       || [];
+  var colHeaders = data.colHeaders || [];
+  var viewType   = data.viewType   || currentPLViewType || 'Actual';
+  var viewOpts   = data.viewOptions|| [];
+  var ssUrl      = data.ssUrl      || '';
+
+  if (viewType && viewType !== currentPLViewType) currentPLViewType = viewType;
+
+  // ── Estilos ──────────────────────────────────────────────────
+  var styleId = 'pl-styles';
+  if (!document.getElementById(styleId)) {
+    var s = document.createElement('style');
+    s.id = styleId;
+    s.textContent = [
+      '.pl-wrap{display:flex;flex-direction:column;gap:16px}',
+      '.pl-topbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}',
+      '.pl-title{font-size:18px;font-weight:600;color:var(--text-primary);margin:0}',
+      '.pl-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}',
+      '.pl-view-select{appearance:none;background:var(--color-surface,#fff);border:1px solid var(--color-divider);border-radius:8px;padding:7px 32px 7px 12px;font-size:13px;font-weight:500;color:var(--text-primary);cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%23999\' stroke-width=\'2\'%3E%3Cpolyline points=\'6 9 12 15 18 9\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}',
+      '.pl-sheets-btn{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--color-primary,#c46a7a);text-decoration:none;padding:7px 14px;border:1px solid var(--color-primary,#c46a7a);border-radius:20px;white-space:nowrap;transition:background .15s}',
+      '.pl-sheets-btn:hover{background:rgba(196,106,122,.08)}',
+      '.pl-card{background:var(--card-bg,#fff);border:0.5px solid var(--color-divider,#e5e7eb);border-radius:12px;overflow:hidden}',
+      '.pl-table-wrap{overflow-x:auto}',
+      '.pl-table{width:100%;border-collapse:collapse;font-size:13px}',
+      '.pl-table thead th{padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary);background:var(--color-surface,#f9fafb);border-bottom:1px solid var(--color-divider,#e5e7eb);text-align:right;white-space:nowrap}',
+      '.pl-table thead th:first-child{text-align:left}',
+      '.pl-table td{padding:8px 14px;border-bottom:0.5px solid var(--color-divider,#e5e7eb);text-align:right;white-space:nowrap;color:var(--text-primary)}',
+      '.pl-table td:first-child{text-align:left}',
+      '.pl-table tr:last-child td{border-bottom:none}',
+      '.pl-row-header td{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary);background:var(--color-surface,#f9fafb);padding-top:14px!important}',
+      '.pl-row-header td:first-child{padding-left:14px}',
+      '.pl-row-dato td:first-child{padding-left:28px;color:var(--text-primary)}',
+      '.pl-row-dato td{color:var(--text-secondary)}',
+      '.pl-row-subtotal td{font-weight:600;color:var(--text-primary);border-top:1px solid var(--color-divider,#e5e7eb)!important}',
+      '.pl-row-metric td{font-weight:700;font-size:14px;background:var(--color-primary-soft,rgba(196,106,122,.06));color:var(--color-primary,#c46a7a);border-top:2px solid var(--color-primary,#c46a7a)!important}',
+      '.pl-num-pos{color:var(--color-success,#22c55e)}',
+      '.pl-num-neg{color:var(--color-danger,#ef4444)}',
+      '.pl-num-pct{color:var(--text-secondary);font-size:12px}',
+      '@media(max-width:900px){.pl-table thead th,.pl-table td{padding:7px 10px;font-size:12px}}'
+    ].join('\n');
+    document.head.appendChild(s);
+  }
+
+  // ── Helpers de formato ───────────────────────────────────────
+  function fmtNum(v, isPct) {
+    if (v === null || v === undefined) return '<span style="color:var(--text-secondary)">—</span>';
+    if (isPct) {
+      var pct = (v * 100).toFixed(1);
+      return '<span class="pl-num-pct">' + pct + '%</span>';
+    }
+    var abs = Math.abs(v);
+    var str;
+    if (abs >= 1000000) str = '$' + (v / 1000000).toFixed(2) + 'M';
+    else if (abs >= 1000) str = '$' + Math.round(v).toLocaleString('en-US');
+    else str = '$' + v.toFixed(2);
+    if (v < 0) return '<span class="pl-num-neg">' + str + '</span>';
+    return str;
+  }
+
+  function fmtVs(v, isPct) {
+    if (v === null || v === undefined) return '<span style="color:var(--text-secondary)">—</span>';
+    var val = isPct ? ((v * 100).toFixed(1) + '%') : ('$' + Math.round(Math.abs(v)).toLocaleString('en-US'));
+    if (v > 0) return '<span class="pl-num-pos">▲ ' + val + '</span>';
+    if (v < 0) return '<span class="pl-num-neg">▼ ' + val + '</span>';
+    return '<span style="color:var(--text-secondary)">— ' + val + '</span>';
+  }
+
+  // ── HTML ─────────────────────────────────────────────────────
+  var html = ['<div class="pl-wrap">'];
+
+  // Topbar
+  html.push('<div class="pl-topbar">');
+  html.push('<h2 class="pl-title">Operating P&amp;L Statement</h2>');
+  html.push('<div class="pl-actions">');
+
+  // Selector de vista
+  if (viewOpts.length) {
+    html.push('<select class="pl-view-select" onchange="changePLView(this.value)">');
+    viewOpts.forEach(function(o) {
+      var sel = (o.value === viewType) ? ' selected' : '';
+      html.push('<option value="' + o.value + '"' + sel + '>' + o.label + '</option>');
+    });
+    html.push('</select>');
+  }
+
+  // Ver en Sheets
+  if (ssUrl) {
+    html.push(
+      '<a href="' + ssUrl + '" target="_blank" class="pl-sheets-btn">' +
+      '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>' +
+      'Ver en Sheets</a>'
+    );
+  }
+
+  html.push('</div></div>'); // /pl-actions /pl-topbar
+
+  if (!rows.length) {
+    html.push('<div class="pl-card" style="padding:40px;text-align:center;color:var(--text-secondary)">Sin datos para esta vista.</div>');
+    html.push('</div>');
+    el.innerHTML = html.join('');
+    return;
+  }
+
+  // Tabla principal
+  html.push('<div class="pl-card"><div class="pl-table-wrap"><table class="pl-table"><thead><tr>');
+  html.push('<th style="min-width:200px;text-align:left">Concepto</th>');
+  colHeaders.forEach(function(ch) {
+    html.push('<th>' + ch.label + '</th>');
+  });
+  html.push('</tr></thead><tbody>');
+
+  rows.forEach(function(row) {
+    var cls = 'pl-row-' + (row.tipo || 'dato');
+    html.push('<tr class="' + cls + '">');
+    var indent = row.indent ? 'padding-left:28px' : '';
+    html.push('<td' + (indent ? ' style="' + indent + '"' : '') + '>' + (row.label || '') + '</td>');
+    row.values.forEach(function(v, ci) {
+      var ch = colHeaders[ci] || {};
+      var cell;
+      if (ch.isVs) cell = fmtVs(v, ch.isPct);
+      else         cell = fmtNum(v, ch.isPct);
+      html.push('<td>' + cell + '</td>');
+    });
+    html.push('</tr>');
+  });
+
+  html.push('</tbody></table></div></div>');
+  html.push('</div>'); // /pl-wrap
+
+  el.innerHTML = html.join('');
+}
+
+function changePLView(viewType) {
+  currentPLViewType = viewType;
+  viewCache = {};
+  loadView(currentView, currentFechaInicio, currentFechaFin, true);
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -2666,6 +2820,7 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
       '&fechaInicio='              + encodeURIComponent(fechaInicio) +
       '&fechaFin='                 + encodeURIComponent(fechaFin) +
       '&sucursal='                 + encodeURIComponent(currentSucursal) +
+      '&viewType='                 + encodeURIComponent(currentPLViewType) +
       '&token='                    + encodeURIComponent(getToken());
     var res  = await fetch(url);
     var data = await res.json();
@@ -2733,6 +2888,13 @@ function renderViewData(viewId, data) {
     var _erEl = document.getElementById('view-estado-resultados');
     if (_erEl) _erEl.style.display = '';
     renderEstadoResultados(data);
+    return;
+  }
+  if (data && data.fuente === 'OperatingPL') {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _plEl = document.getElementById('view-pl');
+    if (_plEl) _plEl.style.display = '';
+    renderOperatingPL(data);
     return;
   }
 

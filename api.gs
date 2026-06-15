@@ -61,6 +61,7 @@ function getRolConfig(ss, rol) {
 var LAB_SS_ID = '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ';
 var ER_SS_ID  = '17jlXzaIvohpN_UoE2kvLK1Bb6P6JxyKONsnrDX_St9U'; // Estado de Resultados
 var ER_GID    = 1953492149;
+var PL_GID    = 1415550816; // Operating P&L Statement
 var MED_SS_ID = '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM';
 // ⚠️ Reemplaza con el ID real del spreadsheet de Quirofano cuando lo crees
 var QX_SS_ID  = LAB_SS_ID;  // placeholder — apunta al lab por ahora
@@ -143,6 +144,7 @@ function doGet(e) {
     var fechaInicio = (e && e.parameter.fechaInicio) || fmtDate(defInicio);
     var fechaFin    = (e && e.parameter.fechaFin)    || fmtDate(defFin);
     var sucursal    = (e && e.parameter.sucursal)    || 'Todas';
+    var viewType    = (e && e.parameter.viewType)   || '';
 
     // ── LOGIN: valida credenciales y devuelve token + permisos ──
     if (action === 'login') {
@@ -390,17 +392,17 @@ function doGet(e) {
     // action === 'view'  — con caché de 60 s para reducir lecturas a Sheets
     if (action === 'view') {
       var cache    = CacheService.getScriptCache();
-      var cacheKey = 'v2_' + view + '_' + fechaInicio + '_' + fechaFin + '_' + sucursal;
+      var cacheKey = 'v2_' + view + '_' + fechaInicio + '_' + fechaFin + '_' + sucursal + '_' + viewType;
       var cached   = cache.get(cacheKey);
       if (cached) {
         return ContentService.createTextOutput(cached).setMimeType(ContentService.MimeType.JSON);
       }
-      var result   = readViewData(ss, view, fechaInicio, fechaFin, sucursal);
+      var result   = readViewData(ss, view, fechaInicio, fechaFin, sucursal, viewType);
       var json     = JSON.stringify(result);
       try { cache.put(cacheKey, json, 60); } catch(ignored) {}
       return ContentService.createTextOutput(json).setMimeType(ContentService.MimeType.JSON);
     }
-    return jsonResponse(readViewData(ss, view, fechaInicio, fechaFin, sucursal));
+    return jsonResponse(readViewData(ss, view, fechaInicio, fechaFin, sucursal, viewType));
 
   } catch(err) {
     return jsonResponse({ error: err.message });
@@ -471,8 +473,14 @@ function readMenu(ss) {
    fuente = 'mensual' → datos financieros filtrados por rango de fechas
    fuente = NombreHoja → lee esa hoja como tabla de captura (sin filtro)
    ══════════════════════════════════════════════════════════════ */
-function readViewData(ss, viewId, fechaInicio, fechaFin, sucursal) {
+function _plMatch(s) {
+  var n = (s||'').toLowerCase().replace(/[\s&_\-]+/g,'');
+  return n === 'pl' || n === 'operatingpl' || n === 'pyg';
+}
+
+function readViewData(ss, viewId, fechaInicio, fechaFin, sucursal, viewType) {
   sucursal = sucursal || 'Todas';
+  viewType = viewType || '';
   var menu = readMenu(ss);
   var item = null;
   for (var i = 0; i < menu.length; i++) {
@@ -522,6 +530,10 @@ function readViewData(ss, viewId, fechaInicio, fechaFin, sucursal) {
   // Vistas de Reportes: devolver placeholder vacío hasta que se creen las hojas
   if (/^rep-/.test(viewId)) {
     return { view: viewId, fuente: fuente, rows: [], headers: [], periodo: fechaInicio + ' — ' + fechaFin };
+  }
+
+  if (_plMatch(fuente) || _plMatch(viewId)) {
+    return readOperatingPL(viewType, fechaInicio, fechaFin);
   }
 
   return readCapturaData(ss, fuente, viewId, fechaInicio, fechaFin, sucursal);
@@ -1475,4 +1487,142 @@ function readSucursales(ss) {
       var activo = String(s['Activo'] !== undefined ? s['Activo'] : 'true').trim().toLowerCase();
       return activo !== 'false' && activo !== 'no' && activo !== '0';
     });
+}
+
+/* ══════════════════════════════════════════════════════════════
+   OPERATING P&L STATEMENT
+   Lee la pestaña Operating P&L Statement (GID 1415550816) del
+   spreadsheet de Estado de Resultados.
+   viewType: Q1|Q2|Q3|Q4|Actual|Budget|Ingresos|Egresos
+   Si viewType vacío, usa el valor actual de la celda A1.
+   ══════════════════════════════════════════════════════════════ */
+function readOperatingPL(viewType, fechaInicio, fechaFin) {
+  try {
+    var erSS = SpreadsheetApp.openById(ER_SS_ID);
+    var plSheet = null;
+    var sheets = erSS.getSheets();
+    for (var i = 0; i < sheets.length; i++) {
+      if (sheets[i].getSheetId() === PL_GID) { plSheet = sheets[i]; break; }
+    }
+    if (!plSheet) {
+      return { view:'p-l', fuente:'OperatingPL', error:'Hoja Operating P&L Statement no encontrada', rows:[], colHeaders:[] };
+    }
+
+    var VIEW_OPTIONS = [
+      { value:'Q1',      label:'Q1 — Primer trimestre' },
+      { value:'Q2',      label:'Q2 — Segundo trimestre' },
+      { value:'Q3',      label:'Q3 — Tercer trimestre' },
+      { value:'Q4',      label:'Q4 — Cuarto trimestre' },
+      { value:'Actual',  label:'Actual — Consolidado anual' },
+      { value:'Budget',  label:'Budget — Presupuesto anual' },
+      { value:'Ingresos',label:'Ingresos — Detalle de ingresos' },
+      { value:'Egresos', label:'Egresos — Detalle de egresos' }
+    ];
+
+    var origA1 = plSheet.getRange('A1').getValue();
+    var origB2 = plSheet.getRange('B2').getValue();
+    var changed = false;
+
+    if (viewType && viewType !== '' && viewType !== String(origA1).trim()) {
+      plSheet.getRange('A1').setValue(viewType);
+      plSheet.getRange('B2').setValue('');
+      SpreadsheetApp.flush();
+      changed = true;
+    }
+
+    try {
+      var allData = plSheet.getDataRange().getValues();
+      var activeView = String(allData[0][0] || '').trim() || 'Actual';
+
+      // Encontrar fila de encabezados: col C empieza con "Actual" y col D tiene "%"
+      var headerRowIdx = -1;
+      for (var r = 0; r < allData.length; r++) {
+        var c2 = String(allData[r][2] || '').trim();
+        var c3 = String(allData[r][3] || '').trim();
+        if (c2.toLowerCase().indexOf('actual') === 0 && c3.indexOf('%') > -1) {
+          var c4 = String(allData[r][4] || '').trim();
+          if (c4) { headerRowIdx = r; break; }
+        }
+      }
+      if (headerRowIdx < 0) {
+        for (var r = 0; r < allData.length; r++) {
+          var c4 = String(allData[r][4] || '').trim();
+          if (c4.toLowerCase().indexOf('budget') === 0) { headerRowIdx = r; break; }
+        }
+      }
+
+      if (headerRowIdx < 0) {
+        return { view:'p-l', fuente:'OperatingPL', viewType:activeView,
+                 viewOptions:VIEW_OPTIONS, error:'No se encontró tabla', rows:[], colHeaders:[] };
+      }
+
+      var headerRow = allData[headerRowIdx];
+      var colDefs = [];
+      for (var c = 2; c < headerRow.length; c++) {
+        var h = String(headerRow[c] || '').trim();
+        if (!h) continue;
+        var isPct = h.indexOf('%') > -1;
+        var isVs  = h.toLowerCase().indexOf('vs') > -1 || h.toLowerCase().indexOf('yoy') > -1;
+        colDefs.push({ idx:c, label:h, isPct:isPct, isVs:isVs });
+      }
+      colDefs = colDefs.slice(0, 10);
+
+      var METRICS  = ['gross profit','ebitda','ebit','ebt before extra','ebt','net profit/loss','net profit'];
+      var TOTALS   = ['total income','total cogs','total marketing','total expenses',
+                      'total service','total g&a','total opex','total revenue'];
+      var SECTIONS = ['revenue','cost of good','marketing','service','g&a',
+                      'depreciation','financial cost','cuentas de orden'];
+
+      var rows = [];
+      for (var r = headerRowIdx + 1; r < allData.length; r++) {
+        var row   = allData[r];
+        var labA  = String(row[0] || '').trim();
+        var labB  = String(row[1] || '').trim();
+        var label = labA || labB;
+        if (!label) continue;
+
+        var lbl  = label.toLowerCase();
+        var tipo = 'dato';
+        if      (METRICS.some(function(m){ return lbl === m; }))                  tipo = 'metric';
+        else if (TOTALS.some(function(t){ return lbl.indexOf(t) === 0; }))        tipo = 'subtotal';
+        else if (SECTIONS.some(function(s){ return lbl.indexOf(s) === 0; }))      tipo = 'header';
+        else if (labA && !labB)                                                    tipo = 'header';
+
+        var values = colDefs.map(function(cd) {
+          var v = row[cd.idx];
+          if (v === '' || v === null || v === undefined) return null;
+          if (typeof v === 'number') return v;
+          var s = String(v).trim();
+          if (s === '' || s === '-' || s.indexOf('#') === 0) return null;
+          if (s.indexOf('%') > -1) return parseFloat(s) / 100;
+          var n = parseFloat(s.replace(/[$,\s]/g, ''));
+          return isNaN(n) ? null : n;
+        });
+
+        rows.push({ label:label, indent:(labB && !labA) ? 1 : 0, tipo:tipo, values:values });
+      }
+
+      return {
+        view:        'p-l',
+        fuente:      'OperatingPL',
+        viewType:    activeView,
+        viewOptions: VIEW_OPTIONS,
+        colHeaders:  colDefs.map(function(cd){ return { label:cd.label, isPct:cd.isPct, isVs:cd.isVs }; }),
+        rows:        rows,
+        ssUrl:       'https://docs.google.com/spreadsheets/d/' + ER_SS_ID + '/edit?gid=' + PL_GID + '#gid=' + PL_GID,
+        fechaInicio: fechaInicio,
+        fechaFin:    fechaFin
+      };
+
+    } finally {
+      if (changed) {
+        plSheet.getRange('A1').setValue(origA1);
+        plSheet.getRange('B2').setValue(origB2);
+        SpreadsheetApp.flush();
+      }
+    }
+
+  } catch(ex) {
+    return { view:'p-l', fuente:'OperatingPL', error:ex.message, rows:[], colHeaders:[] };
+  }
 }
