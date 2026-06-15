@@ -505,6 +505,11 @@ function readViewData(ss, viewId, fechaInicio, fechaFin, sucursal, viewType, plM
     return { viewId: viewId, fuente: fuente, rows: [], headers: [], _isConfig: true };
   }
 
+  // P&L check ANTES del fallback mensual — el fuente puede estar vacío en el menú
+  if (_plMatch(fuente) || _plMatch(viewId)) {
+    return readOperatingPL(viewType, plMonth, plYear, plPrevYear);
+  }
+
   if (!fuente || fuente === 'mensual') {
     return readMensualData(ss, fechaInicio, fechaFin, viewId, sucursal);
   }
@@ -540,10 +545,6 @@ function readViewData(ss, viewId, fechaInicio, fechaFin, sucursal, viewType, plM
   // Vistas de Reportes: devolver placeholder vacío hasta que se creen las hojas
   if (/^rep-/.test(viewId)) {
     return { view: viewId, fuente: fuente, rows: [], headers: [], periodo: fechaInicio + ' — ' + fechaFin };
-  }
-
-  if (_plMatch(fuente) || _plMatch(viewId)) {
-    return readOperatingPL(viewType, plMonth, plYear, plPrevYear);
   }
 
   return readCapturaData(ss, fuente, viewId, fechaInicio, fechaFin, sucursal);
