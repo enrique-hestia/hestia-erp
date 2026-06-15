@@ -1696,7 +1696,19 @@ function readOperatingPL(viewType, plMonth, plYear, plPrevYear) {
       hasMonthFilter: true,
       yearRange:      yearRange,
       colHeaders:     colHeaders,
-      rows:           rows
+      rows:           rows,
+      _debug: {
+        yr: yr, prv: prv,
+        viewType: viewType, plMonth: plMonth,
+        targetMonths: targetMonths,
+        currColsCount: currCols.length,
+        prevColsCount: prevCols.length,
+        budgColsCount: Object.keys(budgetLookup).length,
+        totActual: totActual, totPrev: totPrev, totBudget: totBudget,
+        actualRows: actualData.length,
+        hdrSample: hdrRow.slice(0, 8).map(function(v){ return String(v); }),
+        hdrD_to_H: hdrRow.slice(3, 8).map(function(v){ return String(v); })
+      }
     };
 
   } catch(ex) {
