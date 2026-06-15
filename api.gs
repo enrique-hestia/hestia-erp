@@ -1520,41 +1520,49 @@ function readOperatingPL(viewType, plMonth, plYear, plPrevYear) {
       return { view:'p-l', fuente:'OperatingPL', error:'Hoja Operating P&L Statement no encontrada', rows:[], colHeaders:[] };
     }
 
-    // ── Opciones fijas de vista (A1) ─────────────────────────
-    var VIEW_OPTIONS = [
-      { value:'Q1',       label:'Q1 — Primer trimestre' },
-      { value:'Q2',       label:'Q2 — Segundo trimestre' },
-      { value:'Q3',       label:'Q3 — Tercer trimestre' },
-      { value:'Q4',       label:'Q4 — Cuarto trimestre' },
-      { value:'Actual',   label:'Actual — Consolidado anual' },
-      { value:'Budget',   label:'Budget — Presupuesto anual' },
-      { value:'Ingresos', label:'Ingresos — Detalle de ingresos' },
-      { value:'Egresos',  label:'Egresos — Detalle de egresos' }
-    ];
-
-    // Meses disponibles para B1 (vacío = modo trimestral)
-    var MONTH_OPTIONS = [
-      { value:'',          label:'— Trimestral —' },
-      { value:'Enero',     label:'Enero' },
-      { value:'Febrero',   label:'Febrero' },
-      { value:'Marzo',     label:'Marzo' },
-      { value:'Abril',     label:'Abril' },
-      { value:'Mayo',      label:'Mayo' },
-      { value:'Junio',     label:'Junio' },
-      { value:'Julio',     label:'Julio' },
-      { value:'Agosto',    label:'Agosto' },
-      { value:'Septiembre',label:'Septiembre' },
-      { value:'Octubre',   label:'Octubre' },
-      { value:'Noviembre', label:'Noviembre' },
-      { value:'Diciembre', label:'Diciembre' }
-    ];
-
-    // ── Guardar valores originales ────────────────────────────
+    // ── Guardar valores originales ANTES de cualquier lectura ─
     var origA1 = plSheet.getRange('A1').getValue();
     var origB1 = plSheet.getRange('B1').getValue();
     var origE1 = plSheet.getRange('E1').getValue();
     var origH1 = plSheet.getRange('H1').getValue();
     var changed = false;
+
+    // ── Leer opciones reales de los dropdowns del sheet ───────
+    // A1: opciones de vista (trimestre/período)
+    var VIEW_OPTIONS = [];
+    try {
+      var valA1 = plSheet.getRange('A1').getDataValidation();
+      if (valA1 && valA1.getCriteriaType() === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+        var listA1 = valA1.getCriteriaValues()[0]; // array de strings
+        if (listA1 && listA1.length) {
+          VIEW_OPTIONS = listA1.map(function(v){ return { value:String(v).trim(), label:String(v).trim() }; });
+        }
+      }
+    } catch(eA1) {}
+    // Fallback si no tiene validación
+    if (!VIEW_OPTIONS.length) {
+      VIEW_OPTIONS = [
+        { value:'Q1', label:'Q1' }, { value:'Q2', label:'Q2' },
+        { value:'Q3', label:'Q3' }, { value:'Q4', label:'Q4' }
+      ];
+    }
+
+    // B1: opciones de mes (puede ser vacío = modo trimestral)
+    var MONTH_OPTIONS = [{ value:'', label:'— Sin mes —' }];
+    try {
+      var valB1 = plSheet.getRange('B1').getDataValidation();
+      if (valB1 && valB1.getCriteriaType() === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+        var listB1 = valB1.getCriteriaValues()[0];
+        if (listB1 && listB1.length) {
+          listB1.forEach(function(v){
+            var s = String(v).trim();
+            if (s) MONTH_OPTIONS.push({ value:s, label:s });
+          });
+        }
+      }
+    } catch(eB1) {}
+    // Si el mes actual (origB1) no está en la lista, no mostramos selector de mes
+    var hasMonthFilter = MONTH_OPTIONS.length > 1;
 
     // Leer años disponibles del sheet ANTES de modificar
     var currentYear  = plYear    || String(origE1 || new Date().getFullYear());
@@ -1569,9 +1577,13 @@ function readOperatingPL(viewType, plMonth, plYear, plPrevYear) {
     if (viewType && viewType !== String(origA1).trim()) {
       plSheet.getRange('A1').setValue(viewType); changed = true;
     }
-    if (plMonth !== String(origB1).trim()) {
-      plSheet.getRange('B1').setValue(plMonth);  changed = true;
+    // B1: solo cambiar si el usuario envió un valor explícito diferente al actual
+    if (plMonth !== '' && plMonth !== String(origB1).trim()) {
+      plSheet.getRange('B1').setValue(plMonth); changed = true;
+    } else if (plMonth === '' && String(origB1).trim() !== '') {
+      plSheet.getRange('B1').setValue('');      changed = true;
     }
+    // E1/H1: los años son numéricos en el sheet
     if (plYear && plYear !== String(origE1).trim()) {
       plSheet.getRange('E1').setValue(Number(plYear) || plYear); changed = true;
     }
@@ -1581,15 +1593,15 @@ function readOperatingPL(viewType, plMonth, plYear, plPrevYear) {
     if (changed) SpreadsheetApp.flush();
 
     try {
-      var allData    = plSheet.getDataRange().getValues();
-      var activeView = String(allData[0][0] || '').trim() || 'Actual';
-      var activeMonth = String(allData[0][1] || '').trim(); // B1
-      var activeYear  = String(allData[4][0] || '').trim(); // E1 (fila 5, col A=idx0 — puede variar)
-      // Intentar leer E1 y H1 de la primera fila (idx 0)
+      // Leer E1/H1 actuales después del flush
       var readE1 = String(plSheet.getRange('E1').getValue() || '').trim();
       var readH1 = String(plSheet.getRange('H1').getValue() || '').trim();
       if (readE1) currentYear = readE1;
       if (readH1) currentPrev = readH1;
+
+      var allData     = plSheet.getDataRange().getValues();
+      var activeView  = String(allData[0][0] || '').trim() || 'Q1';
+      var activeMonth = String(allData[0][1] || '').trim(); // B1
 
       // ── Encontrar fila de encabezados de columna ───────────
       var headerRowIdx = -1;
@@ -1667,9 +1679,10 @@ function readOperatingPL(viewType, plMonth, plYear, plPrevYear) {
         activeMonth:  activeMonth,
         currentYear:  currentYear,
         currentPrev:  currentPrev,
-        viewOptions:  VIEW_OPTIONS,
-        monthOptions: MONTH_OPTIONS,
-        yearRange:    yearRange,
+        viewOptions:     VIEW_OPTIONS,
+        monthOptions:    MONTH_OPTIONS,
+        hasMonthFilter:  hasMonthFilter,
+        yearRange:       yearRange,
         colHeaders:   colDefs.map(function(cd){ return { label:cd.label, isPct:cd.isPct, isVs:cd.isVs }; }),
         rows:         rows
       };

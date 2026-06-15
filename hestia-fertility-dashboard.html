@@ -2114,8 +2114,9 @@ function renderOperatingPL(data) {
   var currentYear = data.currentYear || currentPLYear  || String(new Date().getFullYear());
   var currentPrev = data.currentPrev || currentPLPrevYear || String(new Date().getFullYear() - 1);
   var viewOpts    = data.viewOptions || [];
-  var monthOpts   = data.monthOptions|| [];
-  var yearRange   = data.yearRange   || [];
+  var monthOpts      = data.monthOptions   || [];
+  var hasMonthFilter = data.hasMonthFilter !== false && monthOpts.length > 1;
+  var yearRange      = data.yearRange      || [];
   var ssUrl       = PL_SS_URL;
 
   // Sincronizar globals con lo que devolvió el API
@@ -2249,16 +2250,15 @@ function renderOperatingPL(data) {
   }
   html.push('</div>');
 
-  // 2. Mes (B1) — vacío = modo trimestral
-  html.push('<div class="pl-filter-group"><label class="pl-filter-label">Mes</label>');
-  if (monthOpts.length) {
+  // 2. Mes (B1) — solo se muestra si el sheet tiene validación de lista en B1
+  if (hasMonthFilter) {
+    html.push('<div class="pl-filter-group"><label class="pl-filter-label">Mes</label>');
     html.push('<select class="pl-view-select" onchange="changePLMonth(this.value)">');
     monthOpts.forEach(function(o) {
       html.push('<option value="' + o.value + '"' + (o.value === activeMonth ? ' selected' : '') + '>' + o.label + '</option>');
     });
-    html.push('</select>');
+    html.push('</select></div>');
   }
-  html.push('</div>');
 
   // 3. Año actual (E1)
   html.push('<div class="pl-filter-group"><label class="pl-filter-label">Año</label>');
