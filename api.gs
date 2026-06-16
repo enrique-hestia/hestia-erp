@@ -1,6 +1,562 @@
-var SHEET_ID      = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4';
-var API_VERSION   = 'v2026-06-08-U';
-var AUTH_SECRET   = 'hestia2026erp-secret'; // Cambia esto por algo único
+/* ══════════════════════════════════════════════════════════════
+   api_config.gs — Constantes globales del ERP Hestia
+   ──────────────────────────────────────────────────────────────
+   INSTRUCCIONES: Copiar este archivo como un .gs separado dentro
+   del mismo proyecto de Google Apps Script. Todas las constantes
+   aquí son accesibles globalmente por api_core.gs y api_finance.gs
+   ══════════════════════════════════════════════════════════════ */
+
+var API_VERSION  = 'v2026-06-15';
+var AUTH_SECRET  = 'hestia2026erp-secret'; // ← Cambia este valor por algo único y secreto
+
+/* ── IDs de Spreadsheets ──────────────────────────────────── */
+var SHEET_ID    = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4'; // ERP principal
+var ER_SS_ID    = '17jlXzaIvohpN_UoE2kvLK1Bb6P6JxyKONsnrDX_St9U'; // Estado de Resultados
+var BANKS_SS_ID = '1O1tmtuVMlDl6rsN0IVFH14KmYjQZhY6GOs68PU_u0cg'; // Cuentas bancarias
+var LAB_SS_ID   = '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ'; // Laboratorio
+var MED_SS_ID   = '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM'; // Medicamentos
+var PAC_SS_ID   = '1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio'; // Pacientes
+var PROD_SS_ID  = '1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY'; // Productos
+var QX_SS_ID    = LAB_SS_ID; // ← Reemplaza cuando exista el sheet de Quirófano
+var CAJA_CHICA_SS_ID = '1uB9HnQLqHbotP0w21z6mVQcc4ABb428iKXEru8hvDQE'; // Caja Chica
+
+/* ── GIDs (pestañas individuales por ID numérico) ─────────── */
+var ER_GID     = 1953492149; // Estado de Resultados
+var BUDGET_GID = 2097864117; // Budget
+var PL_GID     = 1415550816; // Operating P&L Statement (referencia visual)
+
+var BANKS_GID = {
+  santander:   0,
+  amex:        13958125,
+  mercadopago: 1036684249
+};
+
+/* ── Mapeo: nombre de pestaña → spreadsheet donde vive ─────── */
+var CAPTURA_SHEETS = {
+  // Medicamentos
+  'Medicamentos':    MED_SS_ID,
+  'Orden_Compra':    MED_SS_ID,
+  'Ent. Med':        MED_SS_ID,
+  'Lista Med':       MED_SS_ID,
+  'Estimulacion':    MED_SS_ID,
+  'Estimulación':    MED_SS_ID,
+  'Salidas Med':     MED_SS_ID,
+  // Laboratorio
+  'Resumen':         LAB_SS_ID,
+  'ART Lab':         LAB_SS_ID,
+  'FET':             LAB_SS_ID,
+  'Andrología':      LAB_SS_ID,
+  'Andrologia':      LAB_SS_ID,
+  'Inventario Crío': LAB_SS_ID,
+  'Inventario Crio': LAB_SS_ID,
+  'Insumos':         LAB_SS_ID,
+  'Salidas Lab':     LAB_SS_ID,
+  // Quirófano
+  'Insumos Qx':      QX_SS_ID,
+  'Salidas Qx':      QX_SS_ID,
+  // Otras
+  'Pacientes':       PAC_SS_ID,
+  'Productos':       PROD_SS_ID,
+  'Caja Chica':      CAJA_CHICA_SS_ID
+  // ── FASE 2: agregar aquí CxC, CxP, Nómina, etc. ───────────
+};
+
+/* ── Aliases: nombre alternativo → nombre exacto en Sheets ─── */
+var SHEET_ALIASES = {
+  'Orden_Compra': 'Ent. Med',
+  'Estimulacion': 'Estimulación'
+};
+
+var CAPTURA_SHEET_ID_DEFAULT = SHEET_ID;
+
+/* ══════════════════════════════════════════════════════════════
+   api_finance.gs — Módulo Financiero del ERP Hestia
+   ──────────────────────────────────────────────────────────────
+   Funciones:
+     · readCashFlow       — Flujo mensual desde hoja CashFlow
+     · readServicios      — Servicios y márgenes
+     · readFunnel         — Embudo de conversión
+     · readAlertas        — Alertas del dashboard
+     · readDonut          — Distribución donut
+     · readPaisesOrigen   — Turismo médico
+     · readCostos         — Distribución de costos
+     · readEstadoResultados — P&L detallado desde hoja ER
+     · readOperatingPL    — Operating P&L Statement (stateless)
+     · _buildPLReport     — Constructor interno del P&L
+     · readBanksData      — Saldos y movimientos de 3 bancos
+     · saveBankRow        — Escribe movimiento en pestaña bancaria
+     · doPost             — Handler HTTP POST
+   ══════════════════════════════════════════════════════════════ */
+
+/* Columnas CashFlow: A=Sucursal | B=Fecha | C=Mes | D=Flujo_MXN */
+function readCashFlow(ss, fechaInicio, fechaFin, sucursal) {
+  var hoja = ss.getSheetByName('CashFlow');
+  if (!hoja) return { meses:[], flujo:[] };
+  var rows = hoja.getDataRange().getValues();
+  if (rows.length < 2) return { meses:[], flujo:[] };
+  var hdrs = rows[0].map(function(h){ return String(h).trim().toLowerCase(); });
+  var iSuc   = hdrs.indexOf('sucursal');
+  var iFecha = hdrs.indexOf('fecha');   if (iFecha < 0) iFecha = 1;
+  var iMes   = hdrs.indexOf('mes');     if (iMes   < 0) iMes   = 2;
+  var iFlujo = hdrs.indexOf('flujo_mxn');
+  if (iFlujo < 0) iFlujo = hdrs.indexOf('flujo');
+  if (iFlujo < 0) iFlujo = 3;
+  var data = rows.slice(1).filter(function(r) {
+    var f = String(r[iFecha]).trim();
+    if (f < fechaInicio || f > fechaFin) return false;
+    if (sucursal && sucursal !== 'Todas' && iSuc >= 0) {
+      var s = String(r[iSuc] || '').trim();
+      if (s && s !== sucursal) return false;
+    }
+    return true;
+  });
+  data.sort(function(a, b) { return String(a[iFecha]) < String(b[iFecha]) ? -1 : 1; });
+  return {
+    meses: data.map(function(r) { return String(r[iMes]); }),
+    flujo: data.map(function(r) { return Number(r[iFlujo]); })
+  };
+}
+
+function readServicios(ss) {
+  var rows = ss.getSheetByName('Servicios').getDataRange().getValues();
+  return rows.slice(1).map(function(r) {
+    return { name: String(r[0]), color: String(r[1]), ingresos: String(r[2]),
+             margen: Number(r[3]), meta: Number(r[4]) };
+  });
+}
+
+function readFunnel(ss) {
+  var rows = ss.getSheetByName('Funnel').getDataRange().getValues();
+  return rows.slice(1).map(function(r) {
+    return { label: String(r[0]), val: Number(r[1]), pct: Number(r[2]), color: String(r[3]) };
+  });
+}
+
+function readAlertas(ss) {
+  var rows = ss.getSheetByName('Alertas').getDataRange().getValues();
+  return rows.slice(1).map(function(r) {
+    return { type: String(r[0]), icon: String(r[1]), title: String(r[2]), desc: String(r[3]) };
+  });
+}
+
+function readDonut(ss) {
+  var rows = ss.getSheetByName('DonutServicios').getDataRange().getValues();
+  var data = rows.slice(1);
+  return {
+    labels: data.map(function(r) { return String(r[0]); }),
+    data:   data.map(function(r) { return Number(r[1]); }),
+    colors: data.map(function(r) { return String(r[2]); })
+  };
+}
+
+function readPaisesOrigen(ss, fechaInicio, fechaFin, sucursal) {
+  var hoja = ss.getSheetByName('PaisesOrigen');
+  if (!hoja) return { labels: [], data: [], colors: [] };
+  var rows = hoja.getDataRange().getValues();
+  if (rows.length < 2) return { labels: [], data: [], colors: [] };
+  var hdrs = rows[0].map(function(h){ return String(h).trim().toLowerCase(); });
+  var iSuc   = hdrs.indexOf('sucursal');
+  var iFecha = hdrs.indexOf('fecha');       if (iFecha < 0) iFecha = 1;
+  var iPais  = hdrs.indexOf('pais');        if (iPais  < 0) iPais  = 2;
+  var iPct   = hdrs.indexOf('porcentaje'); if (iPct   < 0) iPct   = 3;
+  var iColor = hdrs.indexOf('color');      if (iColor < 0) iColor = 4;
+  var data = rows.slice(1).filter(function(r) {
+    var f = String(r[iFecha]).trim();
+    if (f < fechaInicio || f > fechaFin) return false;
+    if (sucursal && sucursal !== 'Todas' && iSuc >= 0) {
+      var s = String(r[iSuc] || '').trim();
+      if (s && s !== sucursal) return false;
+    }
+    return true;
+  });
+  return {
+    labels: data.map(function(r) { return String(r[iPais]); }),
+    data:   data.map(function(r) { return Number(r[iPct]); }),
+    colors: data.map(function(r) { return String(r[iColor]); })
+  };
+}
+
+function readCostos(ss) {
+  var rows = ss.getSheetByName('DistribucionCostos').getDataRange().getValues();
+  var data = rows.slice(1);
+  return {
+    labels: data.map(function(r) { return String(r[0]); }),
+    data:   data.map(function(r) { return Number(r[1]); }),
+    colors: data.map(function(r) { return String(r[2]); })
+  };
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ESTADO DE RESULTADOS
+   ══════════════════════════════════════════════════════════════ */
+function readEstadoResultados(fechaInicio, fechaFin) {
+  try {
+    var ssEr = SpreadsheetApp.openById(ER_SS_ID);
+    var sh = null, allSheets = ssEr.getSheets();
+    for (var i = 0; i < allSheets.length; i++) {
+      if (allSheets[i].getSheetId() === ER_GID) { sh = allSheets[i]; break; }
+    }
+    if (!sh) sh = allSheets[0];
+
+    var raw = sh.getDataRange().getValues();
+    var tz  = Session.getScriptTimeZone();
+    var MON = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',
+               jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+
+    function parseColDate(val) {
+      if (!val && val !== 0) return null;
+      if (val instanceof Date) return Utilities.formatDate(val, tz, 'yyyy-MM');
+      var s = String(val).trim();
+      var m = s.match(/^([A-Za-z]{3})-(\d{2})$/);
+      if (m) return '20' + m[2] + '-' + (MON[m[1].toLowerCase()] || '01');
+      return null;
+    }
+
+    var headerRow = raw.length > 1 ? raw[1] : [];
+    var colMap = [];
+    for (var j = 3; j < headerRow.length; j++) {
+      var ym = parseColDate(headerRow[j]);
+      if (ym) colMap.push({ idx: j, ym: ym });
+    }
+    var fi = (fechaInicio || '').slice(0, 7);
+    var ff = (fechaFin    || '').slice(0, 7);
+    var cols = colMap.filter(function(c) {
+      return (!fi || c.ym >= fi) && (!ff || c.ym <= ff);
+    });
+
+    var METRIC_ROWS = { 'Total Expenses':'total','Gross Profit':'metric','EBITDA':'metric','EBIT':'metric','Net Profit':'metric' };
+    var SUBTOTAL_C  = { 'Total Income':true,'Total COGS':true,'Total':true };
+
+    var rows = [];
+    for (var i = 4; i < raw.length; i++) {
+      var r = raw[i];
+      var a = String(r[0]||'').trim(), b = String(r[1]||'').trim(), c = String(r[2]||'').trim();
+      if (!a && !b && !c) continue;
+      var label, tipo, nivel;
+      if      (a && !b && !c) { label=a; tipo=METRIC_ROWS[a]||'header'; nivel=0; }
+      else if (!a && b && !c) { label=b; tipo='categoria'; nivel=1; }
+      else if (!a && !b && c) { label=c; tipo=SUBTOTAL_C[c]?'subtotal':'dato'; nivel=2; }
+      else if (a && b && !c)  { label=b; tipo='subseccion'; nivel=1; }
+      else if (!a && b && c)  { label=c==='Total'?b+' total':c; tipo=c==='Total'?'subtotal':'dato'; nivel=2; }
+      else                    { label=a||b||c; tipo='dato'; nivel=1; }
+      if (!label) continue;
+      var valores = cols.map(function(col) {
+        var v = r[col.idx]; return (v instanceof Date)?0:(Number(v)||0);
+      });
+      rows.push({ tipo:tipo, nivel:nivel, label:label, valores:valores,
+                  total:valores.reduce(function(s,v){return s+v;},0) });
+    }
+    return { view:'estado-resultados', fuente:'EstadoResultados',
+             meses:cols.map(function(c){return c.ym;}),
+             rows:rows, fechaInicio:fechaInicio, fechaFin:fechaFin,
+             updated:new Date().toISOString() };
+  } catch(ex) {
+    return { view:'estado-resultados', fuente:'EstadoResultados',
+             error:ex.message, meses:[], rows:[] };
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   OPERATING P&L STATEMENT — 100% stateless, multi-usuario
+   ══════════════════════════════════════════════════════════════ */
+function readOperatingPL(viewType, plMonth, plYear, plPrevYear) {
+  viewType = (viewType || 'Q1').trim();
+  plMonth  = (plMonth  || '').trim();
+  var thisYear = new Date().getFullYear();
+  var yr  = parseInt(plYear     || thisYear, 10) || thisYear;
+  var prv = parseInt(plPrevYear || (yr - 1),  10) || (yr - 1);
+
+  var VIEW_OPTIONS = [
+    {value:'Q1',label:'Q1 — Primer trimestre'},{value:'Q2',label:'Q2 — Segundo trimestre'},
+    {value:'Q3',label:'Q3 — Tercer trimestre'},{value:'Q4',label:'Q4 — Cuarto trimestre'}
+  ];
+  var MONTH_OPTIONS = [{value:'',label:'— Trimestral —'}];
+  ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+   'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+  .forEach(function(m){ MONTH_OPTIONS.push({value:m,label:m}); });
+  var yearRange = [];
+  for (var yy = yr-3; yy <= yr+3; yy++) yearRange.push(String(yy));
+
+  try {
+    var erSS = SpreadsheetApp.openById(ER_SS_ID);
+    var sheets = erSS.getSheets();
+    var plSheet=null, erSheet=null, bgSheet=null;
+    for (var i = 0; i < sheets.length; i++) {
+      var gid = sheets[i].getSheetId();
+      if (gid===PL_GID)     plSheet=sheets[i];
+      if (gid===ER_GID)     erSheet=sheets[i];
+      if (gid===BUDGET_GID) bgSheet=sheets[i];
+    }
+    return _buildPLReport(plSheet, erSheet, bgSheet,
+      viewType, plMonth, yr, prv, VIEW_OPTIONS, MONTH_OPTIONS, yearRange);
+  } catch(ex) {
+    return { view:'p-l', fuente:'OperatingPL', error:ex.message+' L:'+ex.lineNumber,
+             rows:[], colHeaders:[], viewOptions:VIEW_OPTIONS, monthOptions:MONTH_OPTIONS };
+  }
+}
+
+function _buildPLReport(plSheet, erSheet, bgSheet, viewType, plMonth, yr, prv,
+                        VIEW_OPTIONS, MONTH_OPTIONS, yearRange) {
+  var QTR     = {Q1:[1,2,3],Q2:[4,5,6],Q3:[7,8,9],Q4:[10,11,12]};
+  var MES_NUM = {Enero:1,Febrero:2,Marzo:3,Abril:4,Mayo:5,Junio:6,
+                 Julio:7,Agosto:8,Septiembre:9,Octubre:10,Noviembre:11,Diciembre:12};
+  var targetMonths = plMonth && MES_NUM[plMonth] ? [MES_NUM[plMonth]] : (QTR[viewType]||QTR['Q1']);
+
+  var MON_IDX={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  function parseColHdr(val) {
+    if (!val && val!==0) return null;
+    if (val instanceof Date) return {year:val.getFullYear(),month:val.getMonth()+1};
+    var s=String(val).trim(), m=s.match(/^([A-Za-z]{3})-(\d{2,4})$/);
+    if (!m) return null;
+    var mo=MON_IDX[m[1].toLowerCase()]; if(!mo) return null;
+    var y=m[2].length===2?2000+parseInt(m[2],10):parseInt(m[2],10);
+    return {year:y,month:mo};
+  }
+  function sumCols(row, cols) {
+    var t=0;
+    for (var ci=0;ci<cols.length;ci++) {
+      var v=row[cols[ci]];
+      if (typeof v==='number'){t+=v;continue;}
+      if (typeof v==='string'){var n=parseFloat(v.replace(/[$,\s]/g,''));if(!isNaN(n))t+=n;}
+    }
+    return t;
+  }
+  function normalize(s){ return String(s||'').trim().toLowerCase(); }
+
+  if (!erSheet) return {view:'p-l',fuente:'OperatingPL',
+    error:'Hoja Estado de Resultados no encontrada',
+    rows:[],colHeaders:[],viewOptions:VIEW_OPTIONS,monthOptions:MONTH_OPTIONS};
+
+  var erData=erSheet.getDataRange().getValues();
+  var erHdr=erData.length>1?erData[1]:[];
+  var currCols=[],prevCols=[];
+  for (var j=3;j<erHdr.length;j++) {
+    var ph=parseColHdr(erHdr[j]); if(!ph) continue;
+    if (ph.year===yr  && targetMonths.indexOf(ph.month)>=0) currCols.push(j);
+    if (ph.year===prv && targetMonths.indexOf(ph.month)>=0) prevCols.push(j);
+  }
+
+  var erLookup={}, totActual=0, totPrev=0;
+  for (var ri=4;ri<erData.length;ri++) {
+    var r=erData[ri];
+    var labA=String(r[0]||'').trim(),labB=String(r[1]||'').trim(),labC=String(r[2]||'').trim();
+    if (!labA&&!labB&&!labC) continue;
+    var actual=sumCols(r,currCols), prev=sumCols(r,prevCols);
+    [labA,labB,labC].forEach(function(lbl){
+      if (!lbl) return;
+      var k=normalize(lbl);
+      if (!erLookup[k]||(actual!==0&&erLookup[k].actual===0)) erLookup[k]={actual:actual,prev:prev};
+    });
+    if (normalize(labC)==='total income'){totActual=actual;totPrev=prev;}
+  }
+
+  var bgLookup={}, totBudget=0;
+  if (bgSheet) {
+    var bgData=bgSheet.getDataRange().getValues();
+    var bgHdr=bgData.length>1?bgData[1]:[];
+    var bgCols=[];
+    for (var j=3;j<bgHdr.length;j++) {
+      var bph=parseColHdr(bgHdr[j]);
+      if (bph&&bph.year===yr&&targetMonths.indexOf(bph.month)>=0) bgCols.push(j);
+    }
+    for (var ri=4;ri<bgData.length;ri++) {
+      var br=bgData[ri];
+      var ba=String(br[0]||'').trim(),bb=String(br[1]||'').trim(),bc=String(br[2]||'').trim();
+      if (!ba&&!bb&&!bc) continue;
+      var bv=sumCols(br,bgCols);
+      [ba,bb,bc].forEach(function(lbl){
+        if (!lbl) return;
+        var k=normalize(lbl);
+        if (!bgLookup[k]||(bv!==0&&bgLookup[k]===0)) bgLookup[k]=bv;
+      });
+    }
+    totBudget=bgLookup['total income']||0;
+  }
+
+  var STRUCTURE=[
+    {label:'Revenue',                    tipo:'seccion',indent:0,erAlias:'total income'},
+    {label:'Alta',                        tipo:'dato',   indent:1},
+    {label:'Surrogacy',                   tipo:'dato',   indent:1},
+    {label:'Externos',                    tipo:'dato',   indent:1},
+    {label:'Other Income',                tipo:'dato',   indent:1},
+    {label:'COGS',                        tipo:'seccion',indent:0,erAlias:'total cogs'},
+    {label:'Medicamentos',                tipo:'dato',   indent:1},
+    {label:'Laboratorios',                tipo:'dato',   indent:1},
+    {label:'Insumos Lab',                 tipo:'dato',   indent:1},
+    {label:'Insumos Qx',                  tipo:'dato',   indent:1},
+    {label:'Comisiones',                  tipo:'dato',   indent:1},
+    {label:'Honorarios',                  tipo:'dato',   indent:1},
+    {label:'Honorarios Consultas',        tipo:'dato',   indent:1},
+    {label:'Other Costs',                 tipo:'dato',   indent:1},
+    {label:'Gross Profit',                tipo:'metric', indent:0},
+    {label:'OpEx',                        tipo:'seccion',indent:0,erAlias:'total opex'},
+    {label:'Marketing',                   tipo:'dato',   indent:1},
+    {label:'Renta',                       tipo:'dato',   indent:1},
+    {label:'Mto Renta',                   tipo:'dato',   indent:1},
+    {label:'Servicios',                   tipo:'dato',   indent:1},
+    {label:'Clinic Contribution',         tipo:'metric', indent:0},
+    {label:'G&A',                         tipo:'seccion',indent:0,erAlias:'total g&a'},
+    {label:'Nomina',                      tipo:'dato',   indent:1},
+    {label:'Gastos Varios',               tipo:'dato',   indent:1},
+    {label:'EBITDA',                      tipo:'metric', indent:0},
+    {label:'Depreciation & Amortization',tipo:'dato',   indent:1},
+    {label:'EBIT',                        tipo:'metric', indent:0},
+    {label:'EBT',                         tipo:'metric', indent:0},
+    {label:'Taxes',                       tipo:'dato',   indent:1},
+    {label:'Net Profit',                  tipo:'metric', indent:0}
+  ];
+
+  var rows=[];
+  for (var si=0;si<STRUCTURE.length;si++) {
+    var s=STRUCTURE[si];
+    var key=s.erAlias||normalize(s.label);
+    var er=erLookup[key]||{actual:0,prev:0};
+    var bg=bgLookup[key]||bgLookup[normalize(s.label)]||0;
+    rows.push({
+      label:s.label, tipo:s.tipo, indent:s.indent,
+      values:[
+        er.actual,
+        totActual  ? er.actual/totActual  : null,
+        bg,
+        totBudget  ? bg/totBudget         : null,
+        bg         ? (er.actual-bg)/Math.abs(bg)       : null,
+        er.prev,
+        totPrev    ? er.prev/totPrev      : null,
+        er.prev    ? (er.actual-er.prev)/Math.abs(er.prev) : null
+      ]
+    });
+  }
+
+  var pLabel=plMonth||viewType;
+  return {
+    view:'p-l', fuente:'OperatingPL',
+    viewType:viewType, activeMonth:plMonth,
+    currentYear:String(yr), currentPrev:String(prv),
+    viewOptions:VIEW_OPTIONS, monthOptions:MONTH_OPTIONS,
+    hasMonthFilter:true, yearRange:yearRange,
+    colHeaders:[
+      {label:'Actual '+pLabel+' '+yr,    isPct:false,isVs:false},
+      {label:'%',                          isPct:true, isVs:false},
+      {label:'Budget '+pLabel+' '+yr,    isPct:false,isVs:false},
+      {label:'%',                          isPct:true, isVs:false},
+      {label:'vs. Budget',                 isPct:true, isVs:true },
+      {label:prv+' '+pLabel,             isPct:false,isVs:false},
+      {label:'%',                          isPct:true, isVs:false},
+      {label:'YOY %',                      isPct:true, isVs:true }
+    ],
+    rows:rows,
+    _debug:{currCols:currCols,prevCols:prevCols,totActual:totActual,
+            hdrSample:erHdr.slice(3,9).map(function(v){
+              return (v instanceof Date)?'[Date:'+v.getFullYear()+'-'+(v.getMonth()+1)+']':String(v);
+            })}
+  };
+}
+
+/* ══════════════════════════════════════════════════════════════
+   BANCOS — 3 cuentas + escritura por pestaña
+   ══════════════════════════════════════════════════════════════ */
+function doPost(e) {
+  try {
+    var raw = e && e.postData && e.postData.contents;
+    if (!raw) return jsonResponse({error:'Sin datos POST'});
+    var body = JSON.parse(raw);
+    if (body.action === 'saveBankRow') return jsonResponse(saveBankRow(body.banco, body.row));
+    return jsonResponse({error:'Accion desconocida: ' + body.action});
+  } catch(ex) { return jsonResponse({error: ex.message}); }
+}
+
+function readBanksData() {
+  try {
+    var ss = SpreadsheetApp.openById(BANKS_SS_ID);
+    var sh = ss.getSheets();
+    function byGid(gid){ for(var i=0;i<sh.length;i++) if(sh[i].getSheetId()===gid) return sh[i]; return null; }
+    function num(v){ if(typeof v==='number') return v; var n=parseFloat(String(v||'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
+    function dt(v){ if(!v) return ''; if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0'); return String(v); }
+
+    function rSant(sheet) {
+      var B={id:'santander',nombre:'Santander',color:'#ec0000',saldo:0,movimientos:[],totalRows:0};
+      if(!sheet) return B;
+      var r=sheet.getDataRange().getValues(); if(r.length<2) return B;
+      for(var i=r.length-1;i>=1;i--){ var s=num(r[i][3]); if(s!==0){B.saldo=s;break;} }
+      B.totalRows=r.length-1;
+      B.movimientos=r.slice(1).slice(-30).reverse().map(function(x){
+        var d=num(x[1]),t=num(x[2]);
+        return{fecha:dt(x[0]),deposito:d,retiro:t,monto:d>0?d:-t,saldo:num(x[3]),
+               referencia:String(x[4]||''),depositoUSD:num(x[5]),tipoCambio:num(x[6]),
+               poliza:String(x[7]||''),observaciones:String(x[8]||''),tipo:d>0?'deposito':'retiro'};
+      });
+      return B;
+    }
+    function rAmex(sheet) {
+      var B={id:'amex',nombre:'AMEX',color:'#007bc1',saldo:0,movimientos:[],totalRows:0};
+      if(!sheet) return B;
+      var r=sheet.getDataRange().getValues(); if(r.length<2) return B;
+      for(var i=r.length-1;i>=1;i--){ var s=num(r[i][2]); if(s!==0){B.saldo=s;break;} }
+      B.totalRows=r.length-1;
+      B.movimientos=r.slice(1).slice(-30).reverse().map(function(x){
+        var m=num(x[1]);
+        return{fecha:dt(x[0]),monto:m,saldo:num(x[2]),referencia:String(x[3]||''),
+               usd:num(x[4]),tipoCambio:num(x[5]),notas:String(x[6]||''),
+               poliza:String(x[7]||''),mes:String(x[8]||''),tipo:m>=0?'cargo':'pago'};
+      });
+      return B;
+    }
+    function rMP(sheet) {
+      var B={id:'mercadopago',nombre:'Mercado Pago',color:'#009ee3',saldo:0,movimientos:[],totalRows:0};
+      if(!sheet) return B;
+      var r=sheet.getDataRange().getValues(); if(r.length<2) return B;
+      for(var i=r.length-1;i>=1;i--){ var s=num(r[i][6]); if(s!==0){B.saldo=s;break;} }
+      B.totalRows=r.length-1;
+      B.movimientos=r.slice(1).slice(-30).reverse().map(function(x){
+        return{mes:String(x[0]||''),fecha:dt(x[1]),cobro:num(x[2]),comisiones:num(x[3]),
+               pctComision:num(x[4]),totalVenta:num(x[5]),saldo:num(x[6]),
+               liberado:x[7]===true||String(x[7]).toUpperCase()==='TRUE',
+               observaciones:String(x[8]||''),tipo:String(x[9]||'CARGO').toUpperCase(),monto:num(x[5])};
+      });
+      return B;
+    }
+
+    var sant=rSant(byGid(BANKS_GID.santander));
+    var amex=rAmex(byGid(BANKS_GID.amex));
+    var mp  =rMP(byGid(BANKS_GID.mercadopago));
+    return { view:'cashflow', fuente:'CashFlow',
+             bancos:{santander:sant,amex:amex,mercadopago:mp},
+             totalSaldo:sant.saldo+amex.saldo+mp.saldo };
+  } catch(ex) {
+    return { view:'cashflow', fuente:'CashFlow', error:ex.message, bancos:{}, totalSaldo:0 };
+  }
+}
+
+function saveBankRow(banco, row) {
+  try {
+    var ss=SpreadsheetApp.openById(BANKS_SS_ID);
+    var sh=ss.getSheets();
+    var key=String(banco).toLowerCase().replace(/[\s-]/g,'');
+    var gid=BANKS_GID[key];
+    if (gid===undefined) return {ok:false, error:'Banco desconocido: '+banco};
+    var sheet=null;
+    for(var i=0;i<sh.length;i++) if(sh[i].getSheetId()===gid){sheet=sh[i];break;}
+    if(!sheet) return {ok:false, error:'Pestaña no encontrada'};
+    // Columna del saldo por banco: Santander=col4, AMEX=col3, MP=col7
+    var sc=(key==='santander')?4:(key==='amex')?3:7;
+    var lr=sheet.getLastRow(), ls=0;
+    if(lr>1){
+      var sv=sheet.getRange(lr,sc).getValue();
+      ls=(typeof sv==='number')?sv:parseFloat(String(sv).replace(/[$,]/g,''))||0;
+    }
+    if      (key==='santander') row[3]=ls+(parseFloat(row[1])||0)-(parseFloat(row[2])||0);
+    else if (key==='amex')      row[2]=ls+(parseFloat(row[1])||0);
+    else                        row[6]=ls+(parseFloat(row[5])||0);
+    sheet.appendRow(row);
+    return {ok:true, banco:banco, newSaldo:row[sc-1], totalRows:sheet.getLastRow()-1};
+  } catch(ex) { return {ok:false, error:ex.message}; }
+}
+
+/* ── Constantes definidas en api_config.gs (mismo proyecto GAS) ──
+   SHEET_ID, AUTH_SECRET, ER_SS_ID, BANKS_SS_ID, LAB_SS_ID, MED_SS_ID,
+   PAC_SS_ID, PROD_SS_ID, QX_SS_ID, ER_GID, BUDGET_GID, PL_GID,
+   BANKS_GID, CAPTURA_SHEETS, SHEET_ALIASES, CAPTURA_SHEET_ID_DEFAULT
+   ────────────────────────────────────────────────────────────────── */
 
 /* ── Autenticación: helpers ──────────────────────────────────── */
 function sha256Hex(str) {
@@ -56,50 +612,6 @@ function getRolConfig(ss, rol) {
   return def;
 }
 
-// Mapeo: nombre de pestaña → ID del spreadsheet externo donde se lee/escribe
-// Agregar aquí cualquier hoja de captura futura
-var LAB_SS_ID = '1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ';
-var ER_SS_ID  = '17jlXzaIvohpN_UoE2kvLK1Bb6P6JxyKONsnrDX_St9U'; // Estado de Resultados
-var ER_GID     = 1953492149;
-var BUDGET_GID = 2097864117; // Budget
-var PL_GID     = 1415550816; // Operating P&L Statement (solo para Ver en Sheets)
-var MED_SS_ID = '1fiuUtw-sg2ELNxq9bCjaOtRz1n87wuVi8IOQYzEi8tM';
-// ⚠️ Reemplaza con el ID real del spreadsheet de Quirofano cuando lo crees
-var QX_SS_ID  = LAB_SS_ID;  // placeholder — apunta al lab por ahora
-
-var CAPTURA_SHEETS = {
-  // ── Medicamentos ─────────────────────────────────────────────
-  'Medicamentos':    MED_SS_ID,
-  'Orden_Compra':    MED_SS_ID,
-  'Ent. Med':        MED_SS_ID,
-  'Lista Med':       MED_SS_ID,
-  'Estimulacion':    MED_SS_ID,
-  'Estimulación':    MED_SS_ID,
-  'Salidas Med':     MED_SS_ID,
-  // ── Laboratorio ──────────────────────────────────────────────
-  'Resumen':         LAB_SS_ID,
-  'ART Lab':         LAB_SS_ID,
-  'FET':             LAB_SS_ID,
-  'Andrología':      LAB_SS_ID,
-  'Andrologia':      LAB_SS_ID,
-  'Inventario Crío': LAB_SS_ID,
-  'Inventario Crio': LAB_SS_ID,
-  'Insumos':         LAB_SS_ID,
-  'Salidas Lab':     LAB_SS_ID,
-  // ── Quirofano ────────────────────────────────────────────────
-  'Insumos Qx':      QX_SS_ID,
-  'Salidas Qx':      QX_SS_ID,
-  // ── Otras hojas ──────────────────────────────────────────────
-  'Pacientes':       '1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio',
-  'Productos':       '1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY'
-};
-// Aliases: nombre alternativo del menú → nombre exacto de la pestaña en Sheets
-var SHEET_ALIASES = {
-  'Orden_Compra':  'Ent. Med',
-  'Estimulacion':  'Estimulación'
-};
-// Fallback si la hoja no está en el mapeo (usa el sheet principal de Hestia ERP)
-var CAPTURA_SHEET_ID_DEFAULT = SHEET_ID;
 
 /* ══════════════════════════════════════════════════════════════
    doGet — Enrutador principal
@@ -261,6 +773,10 @@ function doGet(e) {
       return jsonResponse({ success: true });
     }
 
+    if (action === 'banks') {
+      return jsonResponse(readBanksData());
+    }
+
     if (action === 'menu') {
       return jsonResponse({
         menu:        readMenu(ss),
@@ -271,7 +787,16 @@ function doGet(e) {
       });
     }
 
+    // Caja Chica: dashboard con saldo y resumen de gasto
+    if (action === 'cajachica') {
+      return jsonResponse(readCajaChicaData());
+    }
+
     if (action === 'insert') {
+      var sheetParamIns = (e && e.parameter.sheet) || '';
+      if (sheetParamIns.trim().toLowerCase() === 'caja chica') {
+        return jsonResponse(insertCajaChicaRow(e));
+      }
       return jsonResponse(insertRow(ss, e));
     }
 
@@ -545,6 +1070,12 @@ function readViewData(ss, viewId, fechaInicio, fechaFin, sucursal, viewType, plM
   // Vistas de Reportes: devolver placeholder vacío hasta que se creen las hojas
   if (/^rep-/.test(viewId)) {
     return { view: viewId, fuente: fuente, rows: [], headers: [], periodo: fechaInicio + ' — ' + fechaFin };
+  }
+
+  // Cash Flow / Flujo de Efectivo — los datos reales vienen de action=banks
+  if (/flujo|cashflow|cash.flow|efectivo|fin.cf/i.test(viewId) ||
+      /flujo|cashflow|cash.flow|efectivo/i.test(fuente||'')) {
+    return readBanksData();
   }
 
   return readCapturaData(ss, fuente, viewId, fechaInicio, fechaFin, sucursal);
@@ -1005,6 +1536,227 @@ function findSheet(ssCap, nombreHoja) {
   return null;
 }
 
+/* Detecta la fila de encabezado de una hoja de captura (igual lógica que readCapturaData)
+   y devuelve { headers, dataStart } usando posiciones absolutas de columna (incluye Periodo si existe). */
+function getSheetHeaders(sheet) {
+  var allRows = sheet.getDataRange().getValues();
+  function countFilled(row) {
+    return row.filter(function(c) { return String(c).trim() !== ''; }).length;
+  }
+  var r0 = allRows.length > 0 ? countFilled(allRows[0]) : 0;
+  var r1 = allRows.length > 1 ? countFilled(allRows[1]) : 0;
+  var headerRow, dataStart;
+
+  if (r0 === 0) {
+    headerRow = allRows[1] || [];
+    dataStart = 2;
+  } else if (r0 > 0 && r1 > 0) {
+    var complementario = allRows[0].every(function(v, i) {
+      var v0 = String(v).trim();
+      var v1 = String((allRows[1][i] !== undefined ? allRows[1][i] : '')).trim();
+      return !(v0 && v1);
+    });
+    if (complementario) {
+      headerRow = allRows[0].map(function(v, i) {
+        return String(v).trim() || String(allRows[1][i] !== undefined ? allRows[1][i] : '').trim();
+      });
+      dataStart = 2;
+    } else {
+      headerRow = allRows[0];
+      dataStart = 1;
+    }
+  } else {
+    headerRow = allRows[0] || [];
+    dataStart = 1;
+  }
+
+  var headers = headerRow.map(function(h) { return String(h).trim(); });
+  return { headers: headers, dataStart: dataStart };
+}
+
+/* insert: ?action=insert&sheet=X&Campo1=valor1&... → agrega una fila nueva al final */
+function insertRow(ss, e) {
+  var sheetName = (e && e.parameter.sheet) || '';
+  if (SHEET_ALIASES[sheetName]) sheetName = SHEET_ALIASES[sheetName];
+  if (!sheetName) return { error: 'sheet es requerido' };
+  var capturaId = getCapturaId(sheetName);
+  try {
+    var ssIns = SpreadsheetApp.openById(capturaId);
+    var shIns = findSheet(ssIns, sheetName);
+    if (!shIns) return { error: 'Hoja no encontrada: ' + sheetName };
+    var hdrInfo = getSheetHeaders(shIns);
+    var hdrs = hdrInfo.headers;
+
+    // Validación de duplicados: en Pacientes no se permite repetir el mismo nombre
+    if (sheetName.trim().toLowerCase() === 'pacientes') {
+      var nombreIdx = -1;
+      for (var hi = 0; hi < hdrs.length; hi++) {
+        if (hdrs[hi].toLowerCase().indexOf('nombre') > -1) { nombreIdx = hi; break; }
+      }
+      if (nombreIdx > -1) {
+        var nombreNuevo = String(e.parameter[hdrs[nombreIdx]] || '').trim().toLowerCase();
+        if (nombreNuevo) {
+          var allData = shIns.getDataRange().getValues();
+          for (var ri = hdrInfo.dataStart; ri < allData.length; ri++) {
+            var existente = String(allData[ri][nombreIdx] || '').trim().toLowerCase();
+            if (existente && existente === nombreNuevo) {
+              return { error: 'Ya existe un paciente registrado con el nombre "' + e.parameter[hdrs[nombreIdx]] + '".', duplicado: true };
+            }
+          }
+        }
+      }
+    }
+
+    var newRow = hdrs.map(function(h) {
+      return (h && e.parameter[h] !== undefined) ? e.parameter[h] : '';
+    });
+    shIns.appendRow(newRow);
+    var rowNum = shIns.getLastRow();
+    invalidateViewCache(sheetName);
+    return { success: true, rowNum: rowNum };
+  } catch(ex) {
+    return { error: ex.message };
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   CAJA CHICA — hoja independiente con saldo corrido (columna TOTAL
+   es fórmula en Sheets: Total_n = Total_(n-1) - Salida_n + Entrada_n).
+   La pestaña activa lleva como nombre el año en curso (ej. "2026");
+   muchas filas debajo de la última captura ya tienen la fórmula de
+   TOTAL copiada hacia abajo en blanco, esperando captura futura —
+   por eso nunca usamos appendRow() aquí, sino que buscamos la
+   primera fila con FECHA y CONCEPTO vacíos para no romper el orden.
+   ══════════════════════════════════════════════════════════════ */
+function getCajaChicaSheet() {
+  var ss = SpreadsheetApp.openById(CAJA_CHICA_SS_ID);
+  var sh = ss.getSheetByName('Caja Chica');
+  if (sh) return sh;
+  var anioActual = String(new Date().getFullYear());
+  sh = ss.getSheetByName(anioActual);
+  if (sh) return sh;
+  return ss.getSheets()[0]; // pestaña más reciente como último recurso
+}
+
+function readCajaChicaData() {
+  try {
+    var sh = getCajaChicaSheet();
+    var data = sh.getDataRange().getValues();
+    if (data.length < 2) return { movimientos: [], saldoInicial: 0, saldoFinal: 0 };
+    var headers = data[0].map(function(h) { return String(h).trim().toUpperCase(); });
+    var iFecha    = headers.indexOf('FECHA');
+    var iConcepto = headers.indexOf('CONCEPTO');
+    var iSalida   = headers.indexOf('SALIDA');
+    var iEntrada  = headers.indexOf('ENTRADA');
+    var iTotal    = headers.indexOf('TOTAL');
+
+    var rows = [];
+    var saldoInicial = 0;
+    for (var r = 1; r < data.length; r++) {
+      var row      = data[r];
+      var fecha    = String(row[iFecha]    || '').trim();
+      var concepto = String(row[iConcepto] || '').trim();
+      if (!fecha && !concepto) continue; // fila reservada (solo fórmula de TOTAL), aún sin capturar
+      var salida   = Number(row[iSalida])  || 0;
+      var entrada  = Number(row[iEntrada]) || 0;
+      var total    = Number(row[iTotal])   || 0;
+      var esRemanente = /^REMANENTE/i.test(fecha);
+      if (esRemanente) saldoInicial = total;
+      rows.push({
+        _rowNum:    r + 1,
+        fecha:      esRemanente ? '' : fecha,
+        concepto:   esRemanente ? fecha : concepto,
+        esRemanente: esRemanente,
+        salida:     salida,
+        entrada:    entrada,
+        total:      total
+      });
+    }
+
+    var saldoFinal = rows.length ? rows[rows.length - 1].total : saldoInicial;
+
+    // Resumen de gasto por periodo (admite DD/MM/YYYY y MM/DD/YYYY mezclados en la hoja)
+    function parseFechaMx(f) {
+      var m = f.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (!m) return null;
+      var a = parseInt(m[1], 10), b = parseInt(m[2], 10), y = parseInt(m[3], 10);
+      var day = a, month = b;
+      if (a > 12) { day = a; month = b; }
+      else if (b > 12) { day = b; month = a; }
+      return new Date(y, month - 1, day);
+    }
+    var hoy        = new Date();
+    var inicioHoy  = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+    var inicio7d   = new Date(inicioHoy.getTime() - 6 * 24 * 60 * 60 * 1000);
+    var inicioMes  = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    var gastoHoy = 0, gastoSemana = 0, gastoMes = 0, ingresoMes = 0;
+    rows.forEach(function(m) {
+      if (m.esRemanente) return;
+      var d = parseFechaMx(m.fecha);
+      if (!d) return;
+      if (d >= inicioMes) { gastoMes += m.salida; ingresoMes += m.entrada; }
+      if (d >= inicio7d)  gastoSemana += m.salida;
+      if (d >= inicioHoy) gastoHoy += m.salida;
+    });
+
+    return {
+      saldoInicial: saldoInicial,
+      saldoFinal:   saldoFinal,
+      gastoHoy:     gastoHoy,
+      gastoSemana:  gastoSemana,
+      gastoMes:     gastoMes,
+      ingresoMes:   ingresoMes,
+      movimientos:  rows.slice().reverse(), // más reciente primero
+      updated:      new Date().toISOString()
+    };
+  } catch(ex) {
+    return { error: ex.message, movimientos: [], saldoInicial: 0, saldoFinal: 0 };
+  }
+}
+
+function insertCajaChicaRow(e) {
+  try {
+    var sh = getCajaChicaSheet();
+    var data = sh.getDataRange().getValues();
+    var headers = data[0].map(function(h) { return String(h).trim().toUpperCase(); });
+    var iFecha    = headers.indexOf('FECHA');
+    var iConcepto = headers.indexOf('CONCEPTO');
+    var iSalida   = headers.indexOf('SALIDA');
+    var iEntrada  = headers.indexOf('ENTRADA');
+    var iTotal    = headers.indexOf('TOTAL');
+
+    var concepto = String(e.parameter['CONCEPTO'] || '').trim();
+    var fecha    = String(e.parameter['FECHA']    || '').trim();
+    var salida   = parseFloat(e.parameter['SALIDA'])  || 0;
+    var entrada  = parseFloat(e.parameter['ENTRADA']) || 0;
+
+    if (!concepto)            return { error: 'El concepto es requerido.' };
+    if (!fecha)               return { error: 'La fecha es requerida.' };
+    if (!salida && !entrada)  return { error: 'Captura un monto de salida o entrada.' };
+
+    // Primera fila reservada (placeholder con fórmula de TOTAL) con FECHA y CONCEPTO vacíos
+    var targetRow = -1;
+    for (var r = 1; r < data.length; r++) {
+      if (!String(data[r][iFecha] || '').trim() && !String(data[r][iConcepto] || '').trim()) {
+        targetRow = r + 1; // fila 1-indexada en la hoja
+        break;
+      }
+    }
+    if (targetRow === -1) targetRow = sh.getLastRow() + 1;
+
+    sh.getRange(targetRow, iFecha + 1).setValue(fecha);
+    sh.getRange(targetRow, iConcepto + 1).setValue(concepto);
+    if (salida)  sh.getRange(targetRow, iSalida + 1).setValue(salida);
+    if (entrada) sh.getRange(targetRow, iEntrada + 1).setValue(entrada);
+    SpreadsheetApp.flush();
+
+    var nuevoTotal = sh.getRange(targetRow, iTotal + 1).getValue();
+    return { success: true, rowNum: targetRow, saldoFinal: Number(nuevoTotal) || 0 };
+  } catch(ex) {
+    return { error: ex.message };
+  }
+}
+
 function getCapturaId(nombreHoja) {
   if (CAPTURA_SHEETS[nombreHoja]) return CAPTURA_SHEETS[nombreHoja];
   // Búsqueda tolerante a tildes
@@ -1151,336 +1903,6 @@ function readMensual(ss, sheetName, fechaInicio, fechaFin, sucursal) {
   };
 }
 
-/* Columnas CashFlow: A=Sucursal | B=Fecha | C=Mes | D=Flujo_MXN */
-function readCashFlow(ss, fechaInicio, fechaFin, sucursal) {
-  var hoja = ss.getSheetByName('CashFlow');
-  if (!hoja) return { meses:[], flujo:[] };
-  var rows = hoja.getDataRange().getValues();
-  if (rows.length < 2) return { meses:[], flujo:[] };
-  var hdrs = rows[0].map(function(h){ return String(h).trim().toLowerCase(); });
-  var iSuc   = hdrs.indexOf('sucursal');
-  var iFecha = hdrs.indexOf('fecha');  if (iFecha < 0) iFecha = 1;
-  var iMes   = hdrs.indexOf('mes');   if (iMes   < 0) iMes   = 2;
-  var iFlujo = hdrs.indexOf('flujo_mxn'); if (iFlujo < 0) iFlujo = hdrs.indexOf('flujo'); if (iFlujo < 0) iFlujo = 3;
-  var data = rows.slice(1).filter(function(r) {
-    var f = String(r[iFecha]).trim();
-    if (f < fechaInicio || f > fechaFin) return false;
-    if (sucursal && sucursal !== 'Todas' && iSuc >= 0) {
-      var s = String(r[iSuc] || '').trim();
-      if (s && s !== sucursal) return false;
-    }
-    return true;
-  });
-  data.sort(function(a, b) { return String(a[iFecha]) < String(b[iFecha]) ? -1 : 1; });
-  return {
-    meses: data.map(function(r) { return String(r[iMes]); }),
-    flujo: data.map(function(r) { return Number(r[iFlujo]); })
-  };
-}
-
-function readServicios(ss) {
-  var rows = ss.getSheetByName('Servicios').getDataRange().getValues();
-  return rows.slice(1).map(function(r) {
-    return { name: String(r[0]), color: String(r[1]), ingresos: String(r[2]),
-             margen: Number(r[3]), meta: Number(r[4]) };
-  });
-}
-
-function readFunnel(ss) {
-  var rows = ss.getSheetByName('Funnel').getDataRange().getValues();
-  return rows.slice(1).map(function(r) {
-    return { label: String(r[0]), val: Number(r[1]), pct: Number(r[2]), color: String(r[3]) };
-  });
-}
-
-function readAlertas(ss) {
-  var rows = ss.getSheetByName('Alertas').getDataRange().getValues();
-  return rows.slice(1).map(function(r) {
-    return { type: String(r[0]), icon: String(r[1]), title: String(r[2]), desc: String(r[3]) };
-  });
-}
-
-function readDonut(ss) {
-  var rows = ss.getSheetByName('DonutServicios').getDataRange().getValues();
-  var data = rows.slice(1);
-  return {
-    labels: data.map(function(r) { return String(r[0]); }),
-    data:   data.map(function(r) { return Number(r[1]); }),
-    colors: data.map(function(r) { return String(r[2]); })
-  };
-}
-
-/* PaisesOrigen: A=Sucursal | B=Fecha | C=Pais | D=Porcentaje | E=Color */
-function readPaisesOrigen(ss, fechaInicio, fechaFin, sucursal) {
-  var hoja = ss.getSheetByName('PaisesOrigen');
-  if (!hoja) return { labels: [], data: [], colors: [] };
-  var rows = hoja.getDataRange().getValues();
-  if (rows.length < 2) return { labels: [], data: [], colors: [] };
-  var hdrs = rows[0].map(function(h){ return String(h).trim().toLowerCase(); });
-  var iSuc   = hdrs.indexOf('sucursal');
-  var iFecha = hdrs.indexOf('fecha');  if (iFecha < 0) iFecha = 1;
-  var iPais  = hdrs.indexOf('pais');   if (iPais  < 0) iPais  = 2;
-  var iPct   = hdrs.indexOf('porcentaje'); if (iPct < 0) iPct  = 3;
-  var iColor = hdrs.indexOf('color'); if (iColor < 0) iColor  = 4;
-  var data = rows.slice(1).filter(function(r) {
-    var f = String(r[iFecha]).trim();
-    if (f < fechaInicio || f > fechaFin) return false;
-    if (sucursal && sucursal !== 'Todas' && iSuc >= 0) {
-      var s = String(r[iSuc] || '').trim();
-      if (s && s !== sucursal) return false;
-    }
-    return true;
-  });
-  return {
-    labels: data.map(function(r) { return String(r[iPais]); }),
-    data:   data.map(function(r) { return Number(r[iPct]); }),
-    colors: data.map(function(r) { return String(r[iColor]); })
-  };
-}
-
-/* ══════════════════════════════════════════════════════════════
-   INSERT ROW — agrega una fila al final de la hoja indicada
-   Params: sheet, periodo, + una clave por columna (según cabecera)
-   ══════════════════════════════════════════════════════════════ */
-/* Detecta la fila de encabezados real de una hoja (maneja row1-vacía y headers combinados row1+row2) */
-function getSheetHeaders(hoja) {
-  var numCols = hoja.getLastColumn();
-  var numRows = Math.min(hoja.getLastRow(), 3);
-  if (numRows === 0 || numCols === 0) return { headers: [], dataStart: 1 };
-  var allRows = hoja.getRange(1, 1, numRows, numCols).getValues();
-  function countFilled(row) {
-    return row.filter(function(c) { return String(c).trim() !== ''; }).length;
-  }
-  var r0 = countFilled(allRows[0]);
-  var r1 = allRows.length > 1 ? countFilled(allRows[1]) : 0;
-  var headers, dataStart;
-  if (r0 === 0) {
-    headers = allRows[1] || []; dataStart = 3;
-  } else if (r0 > 0 && r1 > 0) {
-    var complementario = allRows[0].every(function(v, i) {
-      var v0 = String(v).trim();
-      var v1 = String((allRows[1][i] !== undefined ? allRows[1][i] : '')).trim();
-      return !(v0 && v1);
-    });
-    if (complementario) {
-      headers = allRows[0].map(function(v, i) {
-        return String(v).trim() || String(allRows[1][i] !== undefined ? allRows[1][i] : '').trim();
-      });
-      dataStart = 3;
-    } else { headers = allRows[0]; dataStart = 2; }
-  } else { headers = allRows[0]; dataStart = 2; }
-  return { headers: headers.map(function(h){ return String(h).trim(); }), dataStart: dataStart };
-}
-
-function insertRow(ss, e) {
-  var sheetName = (e && e.parameter.sheet) || '';
-  if (SHEET_ALIASES[sheetName]) sheetName = SHEET_ALIASES[sheetName];
-  var capturaId = getCapturaId(sheetName);
-  var ssCap = SpreadsheetApp.openById(capturaId);
-  var hoja = findSheet(ssCap, sheetName);
-  if (!hoja) return { error: 'Hoja "' + sheetName + '" no encontrada.' };
-
-  var hdrInfo = getSheetHeaders(hoja);
-  var headers = hdrInfo.headers;
-  var row = headers.map(function(h) {
-    return (e && e.parameter[h] !== undefined) ? e.parameter[h] : '';
-  });
-
-  hoja.appendRow(row);
-  invalidateViewCache(sheetName);
-  return { success: true };
-}
-
-function readCostos(ss) {
-  var rows = ss.getSheetByName('DistribucionCostos').getDataRange().getValues();
-  var data = rows.slice(1);
-  return {
-    labels: data.map(function(r) { return String(r[0]); }),
-    data:   data.map(function(r) { return Number(r[1]); }),
-    colors: data.map(function(r) { return String(r[2]); })
-  };
-}
-
-/* ══════════════════════════════════════════════════════════════
-   setupSheets — Ejecutar para crear/migrar todas las hojas
-   ══════════════════════════════════════════════════════════════ */
-function setupSheets() {
-  var ss = SpreadsheetApp.openById(SHEET_ID);
-
-  // ── Hoja: Menu ──────────────────────────────────────────────
-  // Columnas: ID | Padre | Label | Seccion | Icono | Orden | Tipo | Fuente | Activo
-  crearHoja(ss, 'Menu', [
-    ['ID',            'Padre',     'Label',            'Seccion',  'Icono',            'Orden', 'Tipo',  'Fuente',   'Activo'],
-    // ── PANEL ──
-    ['resumen',       '',          'Resumen General',  'PANEL',    'layout-dashboard', 1,       'vista', 'mensual',  true],
-    ['finanzas',      '',          'Finanzas',         'PANEL',    'landmark',         2,       'grupo', '',         true],
-    ['ingresos',      'finanzas',  'Ingresos',         '',         'trending-up',      1,       'vista', 'mensual',  true],
-    ['gastos',        'finanzas',  'Gastos Operativos','',         'receipt',          2,       'vista', 'mensual',  true],
-    ['costos',        'finanzas',  'Costos',           '',         'calculator',       3,       'vista', 'mensual',  true],
-    ['pacientes',     '',          'Pacientes',        'PANEL',    'users',            3,       'vista', 'mensual',  true],
-    // ── ANÁLISIS ──
-    ['analisis',      '',          'Análisis',         'ANÁLISIS', 'bar-chart-2',      4,       'grupo', '',         true],
-    ['servicios',     'analisis',  'Servicios',        '',         'flask-conical',    1,       'vista', 'mensual',  true],
-    ['turismo',       'analisis',  'Turismo Médico',   '',         'plane',            2,       'vista', 'mensual',  true],
-    ['rentabilidad',  'analisis',  'Rentabilidad',     '',         'percent',          3,       'vista', 'mensual',  true],
-    // ── CAPTURA ──
-    ['medicamentos',  '',          'Medicamentos',     'PANEL',    'pill',             4,       'grupo', '',              true],
-    ['med-resumen',   'medicamentos','Resumen Med.',   '',         'bar-chart-2',      1,       'vista', 'med-dashboard', true],
-    ['captura',       '',          'Captura',          'CAPTURA',  'database',         5,       'grupo', '',         true],
-    ['inventarios',   'captura',   'Inventarios',      '',         'package',          1,       'vista', 'Inventarios',  true],
-    ['laboratorios',  'captura',   'Laboratorios',     '',         'microscope',       2,       'vista', 'Laboratorios', true],
-    // ── CONFIG ──
-    ['ajustes',       '',          'Ajustes',          'CONFIG',   'settings',         6,       'vista', '',         true],
-  ]);
-
-  Logger.log('✅ setupSheets completado');
-}
-
-/* ══════════════════════════════════════════════════════════════
-   GESTIÓN DE ROLES — Lee todos los roles con sus permisos
-   ══════════════════════════════════════════════════════════════ */
-function readGestionRoles(ss) {
-  var shR = ss.getSheetByName('Roles');
-  var roles = [];
-  if (shR && shR.getLastRow() > 1) {
-    var data = shR.getDataRange().getValues();
-    var h    = data[0].map(function(c){ return String(c).trim().toLowerCase(); });
-    var rI   = h.indexOf('rol');
-    var bI   = h.indexOf('vistas_bloqueadas');
-    var lI   = h.indexOf('solo_lectura');
-    var dI   = h.indexOf('descripcion');
-    for (var i = 1; i < data.length; i++) {
-      var rolName = rI > -1 ? String(data[i][rI]).trim() : '';
-      if (!rolName) continue;
-      var bloq = bI > -1 ? String(data[i][bI]).trim() : '';
-      roles.push({
-        rol:              rolName,
-        vistasBloqueadas: bloq ? bloq.split(',').map(function(v){ return v.trim(); }).filter(Boolean) : [],
-        soloLectura:      lI > -1 ? !!data[i][lI] : false,
-        descripcion:      dI > -1 ? String(data[i][dI]).trim() : ''
-      });
-    }
-  }
-  return { view: 'gestion-roles', fuente: 'Roles', roles: roles };
-}
-
-/* ══════════════════════════════════════════════════════════════
-   ESTADO DE RESULTADOS — Lee el P&L desde spreadsheet externo
-   Estructura: filas = conceptos, columnas = meses
-   Jerarquía: col A = sección | col B = categoría | col C = detalle
-   ══════════════════════════════════════════════════════════════ */
-function readEstadoResultados(fechaInicio, fechaFin) {
-  try {
-    var ssEr = SpreadsheetApp.openById(ER_SS_ID);
-    var sh = null;
-    var allSheets = ssEr.getSheets();
-    for (var i = 0; i < allSheets.length; i++) {
-      if (allSheets[i].getSheetId() === ER_GID) { sh = allSheets[i]; break; }
-    }
-    if (!sh) sh = allSheets[0];
-
-    var raw = sh.getDataRange().getValues();
-    var tz  = Session.getScriptTimeZone();
-    var MON = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',
-               jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
-
-    function parseColDate(val) {
-      if (!val && val !== 0) return null;
-      if (val instanceof Date) return Utilities.formatDate(val, tz, 'yyyy-MM');
-      var s = String(val).trim();
-      var m = s.match(/^([A-Za-z]{3})-(\d{2})$/);
-      if (m) return '20' + m[2] + '-' + (MON[m[1].toLowerCase()] || '01');
-      return null;
-    }
-
-    // Fila 2 (idx 1) = encabezados de mes, desde col D (idx 3)
-    var headerRow = raw.length > 1 ? raw[1] : [];
-    var colMap = [];
-    for (var j = 3; j < headerRow.length; j++) {
-      var ym = parseColDate(headerRow[j]);
-      if (ym) colMap.push({ idx: j, ym: ym });
-    }
-
-    // Filtrar al rango de fechas
-    var fi = (fechaInicio || '').slice(0, 7);
-    var ff = (fechaFin    || '').slice(0, 7);
-    var cols = colMap.filter(function(c) {
-      return (!fi || c.ym >= fi) && (!ff || c.ym <= ff);
-    });
-
-    // Filas clave con tipo predefinido (col A solamente)
-    var METRIC_ROWS = {
-      'Total Expenses': 'total',
-      'Gross Profit':   'metric',
-      'EBITDA':         'metric',
-      'EBIT':           'metric',
-      'Net Profit':     'metric'
-    };
-    var SUBTOTAL_C = { 'Total Income': true, 'Total COGS': true, 'Total': true };
-
-    var rows = [];
-    for (var i = 4; i < raw.length; i++) {
-      var r = raw[i];
-      var a = String(r[0] || '').trim();
-      var b = String(r[1] || '').trim();
-      var c = String(r[2] || '').trim();
-      if (!a && !b && !c) continue;
-
-      var label, tipo, nivel;
-
-      if (a && !b && !c) {
-        label = a; tipo = METRIC_ROWS[a] || 'header'; nivel = 0;
-      } else if (!a && b && !c) {
-        label = b; tipo = 'categoria'; nivel = 1;
-      } else if (!a && !b && c) {
-        label = c; tipo = SUBTOTAL_C[c] ? 'subtotal' : 'dato'; nivel = 2;
-      } else if (a && b && !c) {
-        label = b; tipo = 'subseccion'; nivel = 1;
-      } else if (!a && b && c) {
-        label = c === 'Total' ? b + ' total' : c;
-        tipo = c === 'Total' ? 'subtotal' : 'dato'; nivel = 2;
-      } else {
-        label = a || b || c; tipo = 'dato'; nivel = 1;
-      }
-
-      var valores = cols.map(function(col) {
-        var v = r[col.idx];
-        return (v instanceof Date) ? 0 : (Number(v) || 0);
-      });
-      var total = valores.reduce(function(s, v) { return s + v; }, 0);
-
-      // Omitir filas completamente vacías (sin label y sin datos)
-      if (!label) continue;
-
-      rows.push({ tipo: tipo, nivel: nivel, label: label, valores: valores, total: total });
-    }
-
-    return {
-      view: 'estado-resultados', fuente: 'EstadoResultados',
-      meses: cols.map(function(c) { return c.ym; }),
-      rows: rows, fechaInicio: fechaInicio, fechaFin: fechaFin,
-      updated: new Date().toISOString()
-    };
-  } catch(ex) {
-    return { view: 'estado-resultados', fuente: 'EstadoResultados',
-             error: ex.message, meses: [], rows: [] };
-  }
-}
-
-function crearHoja(ss, nombre, datos) {
-  var h = ss.getSheetByName(nombre) || ss.insertSheet(nombre);
-  h.clearContents();
-  h.getRange(1, 1, datos.length, datos[0].length).setValues(datos);
-  var header = h.getRange(1, 1, 1, datos[0].length);
-  header.setFontWeight('bold');
-  header.setBackground('#fce8f0');
-  h.setFrozenRows(1);
-  h.autoResizeColumns(1, datos[0].length);
-}
-
-/* ══════════════════════════════════════════════════════════════
-   SUCURSALES — Lee hoja Sucursales y devuelve lista activa
-   ══════════════════════════════════════════════════════════════ */
 function readSucursales(ss) {
   var hoja = ss.getSheetByName('Sucursales');
   if (!hoja) return [];
@@ -1500,222 +1922,8 @@ function readSucursales(ss) {
     });
 }
 
-/* ══════════════════════════════════════════════════════════════
-   OPERATING P&L STATEMENT — 100% stateless, sin modificar celdas
-   Lee Estado de Resultados (ER_GID) y Budget (BUDGET_GID) directo.
-   viewType : Q1|Q2|Q3|Q4|Actual
-   plMonth  : Enero|Febrero|…  (vacío = modo trimestral)
-   plYear   : año actual  (ej. 2026)
-   plPrevYear: año anterior (ej. 2025)
-   Columnas del P&L: Actual | % | Budget | % | vs.Budget | Prior | % | YOY%
-   ══════════════════════════════════════════════════════════════ */
-function readOperatingPL(viewType, plMonth, plYear, plPrevYear) {
-  // ── Parámetros con defaults ───────────────────────────────────
-  viewType   = (viewType   || 'Q1').trim();
-  plMonth    = (plMonth    || '').trim();
-  var thisYear = new Date().getFullYear();
-  var yr  = parseInt(plYear    || thisYear,     10) || thisYear;
-  var prv = parseInt(plPrevYear || (yr - 1),    10) || (yr - 1);
-
-  // ── Opciones fijas (dropdown Vista y Mes) ─────────────────────
-  var VIEW_OPTIONS = [
-    { value:'Q1',    label:'Q1 — Primer trimestre'  },
-    { value:'Q2',    label:'Q2 — Segundo trimestre' },
-    { value:'Q3',    label:'Q3 — Tercer trimestre'  },
-    { value:'Q4',    label:'Q4 — Cuarto trimestre'  },
-    { value:'Actual',label:'Actual — Año completo'  }
-  ];
-  var MONTH_OPTIONS = [{ value:'', label:'— Trimestral —' }];
-  ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
-   'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
-  .forEach(function(m){ MONTH_OPTIONS.push({ value:m, label:m }); });
-
-  // ── Meses por trimestre ───────────────────────────────────────
-  var QTR = { Q1:[1,2,3], Q2:[4,5,6], Q3:[7,8,9], Q4:[10,11,12],
-              Actual:[1,2,3,4,5,6,7,8,9,10,11,12] };
-  var MES_NUM = { Enero:1,Febrero:2,Marzo:3,Abril:4,Mayo:5,Junio:6,
-                  Julio:7,Agosto:8,Septiembre:9,Octubre:10,Noviembre:11,Diciembre:12 };
-  var targetMonths = plMonth && MES_NUM[plMonth]
-    ? [MES_NUM[plMonth]]
-    : (QTR[viewType] || QTR['Q1']);
-
-  // Rango de años para selects
-  var yearRange = [];
-  for (var yy = yr - 3; yy <= yr + 3; yy++) yearRange.push(String(yy));
-
-  try {
-    var erSS = SpreadsheetApp.openById(ER_SS_ID);
-    var actualSheet = null, budgetSheet = null;
-    var sheets = erSS.getSheets();
-    for (var i = 0; i < sheets.length; i++) {
-      var gid = sheets[i].getSheetId();
-      if (gid === ER_GID)     actualSheet = sheets[i];
-      if (gid === BUDGET_GID) budgetSheet = sheets[i];
-    }
-    if (!actualSheet) {
-      return { view:'p-l', fuente:'OperatingPL', error:'Hoja Estado de Resultados no encontrada', rows:[], colHeaders:[] };
-    }
-
-    // ── Helper: parsear encabezado "Jan-25" → {year, month} ──────
-    var MON_IDX = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
-    function parseHeader(val) {
-      var s = String(val || '').trim();
-      var m = s.match(/^([A-Za-z]{3})-(\d{2,4})$/);
-      if (!m) return null;
-      var mo = MON_IDX[m[1].toLowerCase()];
-      if (!mo) return null;
-      var y2 = m[2].length === 2 ? 2000 + parseInt(m[2], 10) : parseInt(m[2], 10);
-      return { year: y2, month: mo };
-    }
-
-    // ── Helper: suma numérica de columnas seleccionadas ───────────
-    function sumCols(row, cols) {
-      var t = 0;
-      for (var ci = 0; ci < cols.length; ci++) {
-        var v = row[cols[ci]];
-        if (typeof v === 'number') { t += v; continue; }
-        if (typeof v === 'string') {
-          var n = parseFloat(v.replace(/[$,\s]/g, ''));
-          if (!isNaN(n)) t += n;
-        }
-      }
-      return t;
-    }
-
-    // ── Leer hoja Actual ─────────────────────────────────────────
-    var actualData = actualSheet.getDataRange().getValues();
-    // Fila 2 (idx 1) = encabezados de mes a partir de col D (idx 3)
-    var hdrRow = actualData.length > 1 ? actualData[1] : [];
-    var currCols = [], prevCols = [];
-    for (var j = 3; j < hdrRow.length; j++) {
-      var ph = parseHeader(hdrRow[j]);
-      if (!ph) continue;
-      if (ph.year === yr  && targetMonths.indexOf(ph.month) >= 0) currCols.push(j);
-      if (ph.year === prv && targetMonths.indexOf(ph.month) >= 0) prevCols.push(j);
-    }
-
-    // ── Leer hoja Budget ─────────────────────────────────────────
-    var budgetLookup = {}; // key "A||B||C" → valor sumado
-    if (budgetSheet) {
-      var budgetData = budgetSheet.getDataRange().getValues();
-      var bhdr = budgetData.length > 1 ? budgetData[1] : [];
-      var budgCols = [];
-      for (var j = 3; j < bhdr.length; j++) {
-        var bph = parseHeader(bhdr[j]);
-        if (bph && bph.year === yr && targetMonths.indexOf(bph.month) >= 0) budgCols.push(j);
-      }
-      // Filas de datos desde fila 5 (idx 4)
-      for (var ri = 4; ri < budgetData.length; ri++) {
-        var br = budgetData[ri];
-        var ka = String(br[0]||'').trim();
-        var kb = String(br[1]||'').trim();
-        var kc = String(br[2]||'').trim();
-        if (!ka && !kb && !kc) continue;
-        budgetLookup[ka+'||'+kb+'||'+kc] = sumCols(br, budgCols);
-      }
-    }
-
-    // ── Clasificación de filas ────────────────────────────────────
-    var METRICS  = ['gross profit','ebitda','ebit','ebt before extra','ebt','net profit/loss','net profit'];
-    var SUBTOTS  = ['total income','total cogs','total marketing','total service',
-                    'total g&a','total opex','total expenses','total revenue'];
-    var HEADERS  = ['income','revenue','cost of good','cogs','marketing','service',
-                    'g&a','depreciation','financial cost','otros'];
-
-    // ── Primer paso: encontrar Total Income para % de ingresos ───
-    var totActual = 0, totPrev = 0, totBudget = 0;
-    for (var ri = 4; ri < actualData.length; ri++) {
-      var r = actualData[ri];
-      var lc = String(r[2]||'').trim().toLowerCase();
-      if (lc === 'total income') {
-        totActual = sumCols(r, currCols);
-        totPrev   = sumCols(r, prevCols);
-        var tKey  = String(r[0]||'').trim()+'||'+String(r[1]||'').trim()+'||'+String(r[2]||'').trim();
-        totBudget = budgetLookup[tKey] || 0;
-        break;
-      }
-    }
-
-    // ── Segundo paso: construir filas del P&L ────────────────────
-    var rows = [];
-    for (var ri = 4; ri < actualData.length; ri++) {
-      var r    = actualData[ri];
-      var labA = String(r[0]||'').trim();
-      var labB = String(r[1]||'').trim();
-      var labC = String(r[2]||'').trim();
-      var label = labA || labB || labC;
-      if (!label) continue;
-
-      var lbl  = label.toLowerCase();
-      var tipo = 'dato';
-      if      (METRICS.some(function(m){ return lbl === m; }))                tipo = 'metric';
-      else if (SUBTOTS.some(function(t){ return lbl.indexOf(t) === 0; }))     tipo = 'subtotal';
-      else if (!labA && !labB && labC.toLowerCase().indexOf('total') === 0)   tipo = 'subtotal';
-      else if (HEADERS.some(function(h){ return lbl.indexOf(h) === 0; }) && !labB && !labC) tipo = 'header';
-      else if (labA && !labB && !labC)                                         tipo = 'header';
-      else if (!labA && labB && !labC)                                         tipo = 'categoria';
-
-      var actual = sumCols(r, currCols);
-      var prev   = sumCols(r, prevCols);
-      var key    = labA+'||'+labB+'||'+labC;
-      var budget = budgetLookup.hasOwnProperty(key) ? budgetLookup[key] : 0;
-
-      // 8 valores: Actual | %Rev | Budget | %BudRev | vs.Budget% | Prior | %PriorRev | YOY%
-      var actualPct  = totActual  ? actual / totActual  : null;
-      var budgetPct  = totBudget  ? budget / totBudget  : null;
-      var prevPct    = totPrev    ? prev   / totPrev    : null;
-      var vsBudget   = budget     ? (actual - budget) / Math.abs(budget) : null;
-      var yoy        = prev       ? (actual - prev)   / Math.abs(prev)   : null;
-
-      rows.push({
-        label:  label,
-        indent: (!labA && (labB || labC)) ? 1 : 0,
-        tipo:   tipo,
-        values: [actual, actualPct, budget, budgetPct, vsBudget, prev, prevPct, yoy]
-      });
-    }
-
-    // ── Encabezados de columna ────────────────────────────────────
-    var pLabel = plMonth || viewType;
-    var colHeaders = [
-      { label:'Actual '  + pLabel + ' ' + yr,  isPct:false, isVs:false },
-      { label:'%',                               isPct:true,  isVs:false },
-      { label:'Budget '  + pLabel + ' ' + yr,  isPct:false, isVs:false },
-      { label:'%',                               isPct:true,  isVs:false },
-      { label:'vs. Budget',                      isPct:true,  isVs:true  },
-      { label:prv + ' ' + pLabel,               isPct:false, isVs:false },
-      { label:'%',                               isPct:true,  isVs:false },
-      { label:'YOY %',                           isPct:true,  isVs:true  }
-    ];
-
-    return {
-      view:           'p-l',
-      fuente:         'OperatingPL',
-      viewType:       viewType,
-      activeMonth:    plMonth,
-      currentYear:    String(yr),
-      currentPrev:    String(prv),
-      viewOptions:    VIEW_OPTIONS,
-      monthOptions:   MONTH_OPTIONS,
-      hasMonthFilter: true,
-      yearRange:      yearRange,
-      colHeaders:     colHeaders,
-      rows:           rows,
-      _debug: {
-        yr: yr, prv: prv,
-        viewType: viewType, plMonth: plMonth,
-        targetMonths: targetMonths,
-        currColsCount: currCols.length,
-        prevColsCount: prevCols.length,
-        budgColsCount: Object.keys(budgetLookup).length,
-        totActual: totActual, totPrev: totPrev, totBudget: totBudget,
-        actualRows: actualData.length,
-        hdrSample: hdrRow.slice(0, 8).map(function(v){ return String(v); }),
-        hdrD_to_H: hdrRow.slice(3, 8).map(function(v){ return String(v); })
-      }
-    };
-
-  } catch(ex) {
-    return { view:'p-l', fuente:'OperatingPL', error:ex.message, rows:[], colHeaders:[] };
-  }
-}
+/* ── Funciones financieras definidas en api_finance.gs (mismo proyecto GAS) ──
+   readCashFlow, readServicios, readFunnel, readAlertas, readDonut,
+   readPaisesOrigen, readCostos, readEstadoResultados, readOperatingPL,
+   _buildPLReport, readBanksData, saveBankRow, doPost
+   ────────────────────────────────────────────────────────────────────────── */
