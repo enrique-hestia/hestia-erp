@@ -2638,21 +2638,17 @@ function renderOperatingPL(data) {
   function fmtNum(v, isPct) {
     if (v === null || v === undefined) return '<span style="color:var(--text-secondary,#6b7280)">—</span>';
     if (isPct) {
-      var pct = (v * 100).toFixed(1);
+      var pct = (v * 100).toFixed(2);
       return '<span class="pl-num-pct">' + pct + '%</span>';
     }
-    var abs = Math.abs(v);
-    var str;
-    if (abs >= 1000000) str = '$' + (v / 1000000).toFixed(2) + 'M';
-    else if (abs >= 1000) str = '$' + Math.round(v).toLocaleString('en-US');
-    else str = '$' + v.toFixed(2);
+    var str = '$' + Number(v).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
     if (v < 0) return '<span class="pl-num-neg">' + str + '</span>';
     return str;
   }
 
   function fmtVs(v, isPct) {
     if (v === null || v === undefined) return '<span style="color:var(--text-secondary,#9ca3af)">—</span>';
-    var val = isPct ? ((v * 100).toFixed(1) + '%') : ('$' + Math.round(Math.abs(v)).toLocaleString('en-US'));
+    var val = isPct ? ((v * 100).toFixed(2) + '%') : ('$' + Number(Math.abs(v)).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}));
     if (v > 0.001)  return '<span class="pl-num-vs-pos">▲ ' + val + '</span>';
     if (v < -0.001) return '<span class="pl-num-vs-neg">▼ ' + val + '</span>';
     return '<span style="color:var(--text-secondary,#9ca3af)">— ' + val + '</span>';
