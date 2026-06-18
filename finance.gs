@@ -527,9 +527,17 @@ function readBanksData() {
       }
       B.saldo=saldoLib;
       B.porLiberar=porLib;
-      B.totalRows=r.length-1;
-      B.movimientos=r.slice(1).slice(-30).reverse().map(function(x,ri){
-        return{rowNum:r.length-ri,mes:String(x[0]||''),fecha:dt(x[1]),cobro:num(x[2]),comisiones:num(x[3]),
+      // Filtrar solo filas con fecha válida o cobro real (excluye filas de fórmula vacías)
+      var dataRows=[];
+      for(var i=1;i<r.length;i++){
+        var hasFecha=r[i][1]&&r[i][1]!=='';
+        var hasCobro=num(r[i][2])!==0||num(r[i][5])!==0;
+        if(hasFecha||hasCobro) dataRows.push({row:r[i],sheetRow:i+1});
+      }
+      B.totalRows=dataRows.length;
+      B.movimientos=dataRows.slice(-30).reverse().map(function(entry){
+        var x=entry.row;
+        return{rowNum:entry.sheetRow,mes:String(x[0]||''),fecha:dt(x[1]),cobro:num(x[2]),comisiones:num(x[3]),
                pctComision:num(x[4]),totalVenta:num(x[5]),saldo:num(x[6]),
                liberado:x[7]===true||String(x[7]).toUpperCase()==='TRUE',
                observaciones:String(x[8]||''),tipo:String(x[9]||'CARGO').toUpperCase(),monto:num(x[5])};
