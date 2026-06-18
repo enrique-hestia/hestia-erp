@@ -2162,17 +2162,24 @@ var _cfLiveData    = null;
 async function loadCashFlowData() {
   var el = document.getElementById('view-cashflow');
   if (!el) return;
-  // Mostrar skeleton mientras carga
   el.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px">' +
     '<div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;' +
     'border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Cargando cuentas bancarias…</div>';
   try {
-    var resp = await fetch(APPS_SCRIPT_URL + '?action=banks&token=' + encodeURIComponent(getToken()), {redirect:'follow'});
+    var tok = encodeURIComponent(getToken());
+    var [resp, ccResp] = await Promise.all([
+      fetch(APPS_SCRIPT_URL + '?action=banks&token=' + tok, {redirect:'follow'}),
+      fetch(APPS_SCRIPT_URL + '?action=cajachica&token=' + tok, {redirect:'follow'})
+    ]);
     var data = await resp.json();
+    try {
+      var ccData = await ccResp.json();
+      data.cajachicaSaldo = (ccData && ccData.saldoFinal != null) ? ccData.saldoFinal : 0;
+    } catch(e2) { data.cajachicaSaldo = 0; }
     _cfLiveData = data;
     renderCashFlow(data);
   } catch(e) {
-    renderCashFlow({error: e.message, bancos:{}, totalSaldo:0});
+    renderCashFlow({error: e.message, bancos:{}, totalSaldo:0, cajachicaSaldo:0});
   }
 }
 
@@ -2239,7 +2246,9 @@ function renderCashFlow(data) {
   var sant = B.santander   ||{id:'santander',   nombre:'Santander',   color:'#ec0000',saldo:0,movimientos:[],totalRows:0};
   var amex = B.amex        ||{id:'amex',        nombre:'AMEX',        color:'#007bc1',saldo:0,movimientos:[],totalRows:0};
   var mp   = B.mercadopago ||{id:'mercadopago', nombre:'Mercado Pago',color:'#009ee3',saldo:0,movimientos:[],totalRows:0};
-  var tot  = (data&&data.totalSaldo!=null)?data.totalSaldo:(sant.saldo+amex.saldo+mp.saldo);
+  var ccSaldo = (data&&data.cajachicaSaldo!=null) ? data.cajachicaSaldo : 0;
+  var tot  = sant.saldo + mp.saldo + ccSaldo;
+  var netPos = tot - Math.abs(amex.saldo);
   var live = !!(B.santander);
   if(!_cfActiveBanco) _cfActiveBanco='santander';
   var allB=[sant,amex,mp];
@@ -2264,9 +2273,15 @@ function renderCashFlow(data) {
       +'.cf-al{padding:10px 14px;border-radius:9px;font-size:12px;font-weight:500;margin-bottom:13px;display:flex;align-items:center;gap:8px}'
       +'.cf-al-e{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}'
       +'.cf-al-d{background:#fef9c3;border:1px solid #fde68a;color:#92400e}'
-      +'.cf-kg{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin-bottom:16px}'
-      +'@media(max-width:900px){.cf-kg{grid-template-columns:repeat(2,1fr)}}'
-      +'@media(max-width:500px){.cf-kg{grid-template-columns:1fr}}'
+      +'.cf-kg{display:grid;gap:13px;margin-bottom:13px}'
+      +'.cf-kg-top{grid-template-columns:repeat(4,1fr)}'
+      +'.cf-kg-bot{grid-template-columns:1fr 1fr;margin-bottom:16px}'
+      +'@media(max-width:900px){.cf-kg-top{grid-template-columns:repeat(2,1fr)}.cf-kg-bot{grid-template-columns:1fr 1fr}}'
+      +'@media(max-width:500px){.cf-kg-top,.cf-kg-bot{grid-template-columns:1fr}}'
+      +'.cf-k-total{border:2px solid rgba(196,106,122,.3);background:rgba(196,106,122,.04)}'
+      +'.cf-kval-total{font-size:22px}'
+      +'.cf-k-debt{border:2px solid rgba(180,83,9,.25);background:rgba(180,83,9,.04)}'
+      +'.cf-kval-debt{color:#b45309}'
       +'.cf-k{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:16px 17px;position:relative;overflow:hidden;cursor:pointer;transition:box-shadow .15s}'
       +'.cf-k:hover{box-shadow:0 4px 14px rgba(0,0,0,.07)}'
       +'.cf-k.act{box-shadow:0 0 0 2.5px var(--kc)}'
@@ -2344,7 +2359,7 @@ function renderCashFlow(data) {
 
   var hh=['<div class="cf-wrap">'];
 
-  hh.push('<div class="cf-top"><div class="cf-top-row"><div><h2 class="cf-h1">Flujo de Efectivo</h2><div class="cf-h1s">Consolidado \u00b7 Santander \u00b7 AMEX \u00b7 Mercado Pago</div></div>');
+  hh.push('<div class="cf-top"><div class="cf-top-row"><div><h2 class="cf-h1">Flujo de Efectivo</h2><div class="cf-h1s">Disponible: Santander \u00b7 Mercado Pago \u00b7 Caja Chica \u00a0\u00b7\u00a0 Deuda: AMEX</div></div>');
   hh.push('<div class="cf-acts">');
   hh.push('<button class="cf-btn cf-btg" onclick="loadCashFlowData()">\u21ba Actualizar</button>');
   hh.push('<button class="cf-btn cf-btp" onclick="cfOpenDrawer()">+ Capturar movimiento</button>');
@@ -2353,10 +2368,10 @@ function renderCashFlow(data) {
   if(data&&data.error) hh.push('<div class="cf-al cf-al-e">\u26a0 '+data.error+'</div>');
   if(!live) hh.push('<div class="cf-al cf-al-d">\u2605 Datos de ejemplo. <a href="javascript:loadCashFlowData()" style="font-weight:700;text-decoration:underline">Conectar con bancos reales \u2192</a></div>');
 
-  hh.push('<div class="cf-kg">');
-  allB.forEach(function(b){
-    var ak=b.id===_cfActiveBanco;
-    var lo=b.nombre==='Santander'?'San':b.nombre==='AMEX'?'AMX':'MP';
+  // Row 1: asset cards (Santander, MP, Caja Chica) + Total Disponible
+  hh.push('<div class="cf-kg cf-kg-top">');
+  [{b:sant,lo:'SAN'},{b:mp,lo:'MP'}].forEach(function(x){
+    var b=x.b,lo=x.lo,ak=b.id===_cfActiveBanco;
     hh.push('<div class="cf-k'+(ak?' act':'')+'" style="--kc:'+b.color+'" onclick="cfSB(\''+b.id+'\')">'
       +'<div class="cf-kstr" style="background:'+b.color+'"></div>'
       +'<div class="cf-klogo" style="background:'+b.color+'">'+lo+'</div>'
@@ -2364,12 +2379,34 @@ function renderCashFlow(data) {
       +'<div class="cf-kval">'+fS(b.saldo)+'</div>'
       +'<div class="cf-kmeta">'+((b.totalRows||0)+' movimientos')+'</div></div>');
   });
-  hh.push('<div class="cf-k" style="--kc:#c46a7a;cursor:default">'
+  hh.push('<div class="cf-k" style="--kc:#059669;cursor:default">'
+    +'<div class="cf-kstr" style="background:#059669"></div>'
+    +'<div class="cf-klogo" style="background:#059669;font-size:13px">CC</div>'
+    +'<div class="cf-klbl">Caja Chica</div>'
+    +'<div class="cf-kval">'+fS(ccSaldo)+'</div>'
+    +'<div class="cf-kmeta">Saldo disponible</div></div>');
+  hh.push('<div class="cf-k cf-k-total" style="--kc:#c46a7a;cursor:default">'
     +'<div class="cf-kstr" style="background:#c46a7a"></div>'
     +'<div class="cf-klogo" style="background:#c46a7a;font-size:16px">\u03a3</div>'
-    +'<div class="cf-klbl">Total cuentas</div>'
-    +'<div class="cf-kval" style="color:#c46a7a">'+fS(tot)+'</div>'
-    +'<div class="cf-kmeta">3 cuentas activas</div></div>');
+    +'<div class="cf-klbl">Total Disponible</div>'
+    +'<div class="cf-kval cf-kval-total" style="color:#c46a7a">'+fS(tot)+'</div>'
+    +'<div class="cf-kmeta">Santander + MP + Caja Chica</div></div>');
+  hh.push('</div>');
+  // Row 2: AMEX Deuda + Posici\u00f3n Neta
+  hh.push('<div class="cf-kg cf-kg-bot">');
+  hh.push('<div class="cf-k cf-k-debt'+(amex.id===_cfActiveBanco?' act':'')+'" style="--kc:#b45309" onclick="cfSB(\'amex\')">'
+    +'<div class="cf-kstr" style="background:#b45309"></div>'
+    +'<div class="cf-klogo" style="background:#b45309">AMX</div>'
+    +'<div class="cf-klbl">\u26a0\ufe0f AMEX \u2014 Deuda tarjeta</div>'
+    +'<div class="cf-kval cf-kval-debt">'+fS(Math.abs(amex.saldo))+'</div>'
+    +'<div class="cf-kmeta">'+((amex.totalRows||0)+' cargos \u00b7 No incluida en disponible')+'</div></div>');
+  var netColor = netPos>=0 ? '#0ea5e9' : '#dc2626';
+  hh.push('<div class="cf-k" style="--kc:'+netColor+';cursor:default">'
+    +'<div class="cf-kstr" style="background:'+netColor+'"></div>'
+    +'<div class="cf-klogo" style="background:'+netColor+';font-size:13px">NET</div>'
+    +'<div class="cf-klbl">Posici\u00f3n Neta</div>'
+    +'<div class="cf-kval" style="color:'+netColor+'">'+fS(netPos)+'</div>'
+    +'<div class="cf-kmeta">Disponible menos deuda AMEX</div></div>');
   hh.push('</div>');
 
   hh.push('<div class="cf-tabs">');
@@ -2418,14 +2455,20 @@ function renderCashFlow(data) {
   hh.push('</tbody></table></div></div>');
 
   hh.push('<div class="cf-side">');
-  hh.push('<div class="cf-sc"><div class="cf-sh">Saldo por cuenta</div>');
-  allB.forEach(function(b){hh.push('<div class="cf-br"><div class="cf-bn"><div class="cf-bdot" style="background:'+b.color+'"></div>'+b.nombre+'</div><div class="cf-bv">$'+Math.round(b.saldo).toLocaleString('en-US')+'</div></div>');});
-  hh.push('<div class="cf-br cf-bt"><div class="cf-bn">Total</div><div class="cf-bv">$'+Math.round(tot).toLocaleString('en-US')+'</div></div></div>');
-  var tA=allB.reduce(function(ss,b){return ss+Math.abs(b.saldo);},0)||1;
-  hh.push('<div class="cf-sc"><div class="cf-sh">Distribuci\u00f3n</div><div class="cf-pw">');
-  allB.forEach(function(b){
-    var p=(Math.abs(b.saldo)/tA*100).toFixed(1);
-    hh.push('<div class="cf-pr"><div class="cf-pl"><span style="color:var(--text-primary,#374151)">'+b.nombre+'</span><span style="color:'+b.color+'">'+p+'%</span></div><div class="cf-pb"><div class="cf-pbar" style="width:'+p+'%;background:'+b.color+'"></div></div></div>');
+  hh.push('<div class="cf-sc"><div class="cf-sh">Cuentas disponibles</div>');
+  hh.push('<div class="cf-br"><div class="cf-bn"><div class="cf-bdot" style="background:#ec0000"></div>Santander</div><div class="cf-bv">$'+Math.round(sant.saldo).toLocaleString('en-US')+'</div></div>');
+  hh.push('<div class="cf-br"><div class="cf-bn"><div class="cf-bdot" style="background:#009ee3"></div>Mercado Pago</div><div class="cf-bv">$'+Math.round(mp.saldo).toLocaleString('en-US')+'</div></div>');
+  hh.push('<div class="cf-br"><div class="cf-bn"><div class="cf-bdot" style="background:#059669"></div>Caja Chica</div><div class="cf-bv">$'+Math.round(ccSaldo).toLocaleString('en-US')+'</div></div>');
+  hh.push('<div class="cf-br cf-bt"><div class="cf-bn">Total Disponible</div><div class="cf-bv">$'+Math.round(tot).toLocaleString('en-US')+'</div></div>');
+  hh.push('<div class="cf-br" style="background:rgba(180,83,9,.04);border-top:1px dashed rgba(180,83,9,.3)"><div class="cf-bn"><div class="cf-bdot" style="background:#b45309"></div><span style="color:#b45309;font-weight:700">AMEX Deuda</span></div><div class="cf-bv" style="color:#b45309">($'+Math.round(Math.abs(amex.saldo)).toLocaleString('en-US')+')</div></div>');
+  hh.push('<div class="cf-br" style="background:rgba(14,165,233,.04);border-top:1px solid rgba(14,165,233,.2)"><div class="cf-bn" style="font-weight:700">Posici\u00f3n Neta</div><div class="cf-bv" style="color:'+(netPos>=0?'#0ea5e9':'#dc2626')+'">$'+Math.round(netPos).toLocaleString('en-US')+'</div></div>');
+  hh.push('</div>');
+  var tA = Math.abs(sant.saldo) + Math.abs(mp.saldo) + Math.abs(ccSaldo) || 1;
+  hh.push('<div class="cf-sc"><div class="cf-sh">Distribuci\u00f3n disponible</div><div class="cf-pw">');
+  [{b:sant,lbl:'Santander',c:'#ec0000'},{b:mp,lbl:'Mercado Pago',c:'#009ee3'},{saldo:ccSaldo,lbl:'Caja Chica',c:'#059669'}].forEach(function(x){
+    var s=x.b?x.b.saldo:x.saldo;
+    var p=(Math.abs(s)/tA*100).toFixed(1);
+    hh.push('<div class="cf-pr"><div class="cf-pl"><span style="color:var(--text-primary,#374151)">'+x.lbl+'</span><span style="color:'+x.c+'">'+p+'%</span></div><div class="cf-pb"><div class="cf-pbar" style="width:'+p+'%;background:'+x.c+'"></div></div></div>');
   });
   hh.push('</div></div></div>');
   hh.push('</div>');
