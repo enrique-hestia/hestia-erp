@@ -601,6 +601,107 @@ function saveLiberado(rowNum, liberado) {
   } catch(ex) { return {ok:false,error:ex.message}; }
 }
 
+/* ══════════════════════════════════════════════════════════════
+   CUENTAS POR PAGAR — lectura de hoja externa, solo reporte
+   ══════════════════════════════════════════════════════════════ */
+function readCxPData() {
+  try {
+    var ss    = SpreadsheetApp.openById(CXP_SS_ID);
+    var sheets= ss.getSheets();
+    var sheet = null;
+    for (var i=0;i<sheets.length;i++) if(sheets[i].getSheetId()===CXP_GID){sheet=sheets[i];break;}
+    if (!sheet) sheet = ss.getSheets()[0];
+    var raw = sheet.getDataRange().getValues();
+    if (raw.length < 2) return {view:'cxp',headers:[],rows:[],resumen:{vencido:0,d3:0,d7:0,d30:0,totalVencido:0,totalD3:0,totalD7:0,totalD30:0}};
+
+    var headers = raw[0].map(function(h){ return String(h).trim(); });
+    // Detectar columna de vencimiento: busca por nombre o cae en columna L (índice 11)
+    var iVenc = -1;
+    var vencKw = /venc|due|expir|plazo/i;
+    for (var c=0;c<headers.length;c++) { if(vencKw.test(headers[c])){iVenc=c;break;} }
+    if (iVenc < 0) iVenc = Math.min(11, headers.length-1); // columna L
+
+    // Detectar columna de monto/importe
+    var iMonto = -1;
+    var montoKw = /monto|importe|total|amount|valor/i;
+    for (var c2=0;c2<headers.length;c2++) { if(montoKw.test(headers[c2])){iMonto=c2;break;} }
+
+    var hoy = new Date();
+    hoy.setHours(0,0,0,0);
+
+    function parseDate(v) {
+      if (!v) return null;
+      if (v instanceof Date) { var d=new Date(v); d.setHours(0,0,0,0); return d; }
+      var s=String(v).trim();
+      // DD/MM/YYYY
+      var m=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+      if(m){ return new Date(parseInt(m[3]),parseInt(m[2])-1,parseInt(m[1])); }
+      // YYYY-MM-DD
+      m=s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+      if(m){ return new Date(parseInt(m[1]),parseInt(m[2])-1,parseInt(m[3])); }
+      var d=new Date(s); return isNaN(d)?null:d;
+    }
+
+    function diasRestantes(fechaVenc) {
+      if (!fechaVenc) return null;
+      return Math.round((fechaVenc - hoy) / 86400000);
+    }
+
+    function urgencia(dias) {
+      if (dias === null) return 'sin-fecha';
+      if (dias < 0)  return 'vencido';
+      if (dias <= 3) return 'd3';
+      if (dias <= 7) return 'd7';
+      if (dias <= 30) return 'd30';
+      return 'ok';
+    }
+
+    var resumen = {vencido:0,d3:0,d7:0,d30:0,totalVencido:0,totalD3:0,totalD7:0,totalD30:0};
+    var rows = [];
+
+    for (var r=1;r<raw.length;r++) {
+      var row = raw[r];
+      // Saltar filas completamente vacías
+      if (row.every(function(c){ return String(c).trim()===''; })) continue;
+      var fechaVenc = parseDate(row[iVenc]);
+      var dias = diasRestantes(fechaVenc);
+      var urg  = urgencia(dias);
+      var monto = iMonto>=0 ? (parseFloat(row[iMonto])||0) : 0;
+
+      if (urg==='vencido') { resumen.vencido++; resumen.totalVencido+=monto; }
+      else if (urg==='d3') { resumen.d3++;      resumen.totalD3+=monto; }
+      else if (urg==='d7') { resumen.d7++;      resumen.totalD7+=monto; }
+      else if (urg==='d30'){ resumen.d30++;     resumen.totalD30+=monto; }
+
+      var obj = {_urgencia:urg, _dias:dias, _monto:monto};
+      headers.forEach(function(h,i){
+        var v=row[i];
+        if (v instanceof Date) {
+          var dd=String(v.getDate()).padStart(2,'0');
+          var mm=String(v.getMonth()+1).padStart(2,'0');
+          obj[h] = dd+'/'+mm+'/'+v.getFullYear();
+        } else {
+          obj[h] = (v===null||v===undefined)?'':v;
+        }
+      });
+      rows.push(obj);
+    }
+
+    // Ordenar: vencidos primero, luego por días ascendente
+    rows.sort(function(a,b){
+      var ua={'vencido':0,'d3':1,'d7':2,'d30':3,'ok':4,'sin-fecha':5}[a._urgencia]||4;
+      var ub={'vencido':0,'d3':1,'d7':2,'d30':3,'ok':4,'sin-fecha':5}[b._urgencia]||4;
+      if(ua!==ub) return ua-ub;
+      return (a._dias||999)-(b._dias||999);
+    });
+
+    return {view:'cxp', headers:headers, rows:rows, resumen:resumen,
+            iVenc:iVenc, iMonto:iMonto, updated:new Date().toISOString()};
+  } catch(ex) {
+    return {view:'cxp', error:ex.message, headers:[], rows:[], resumen:{}};
+  }
+}
+
 /* ── Constantes definidas en api_config.gs (mismo proyecto GAS) ──
    SHEET_ID, AUTH_SECRET, ER_SS_ID, BANKS_SS_ID, LAB_SS_ID, MED_SS_ID,
    PAC_SS_ID, PROD_SS_ID, QX_SS_ID, ER_GID, BUDGET_GID, PL_GID,

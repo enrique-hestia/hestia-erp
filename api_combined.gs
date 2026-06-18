@@ -19,6 +19,8 @@ var PAC_SS_ID   = '1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio'; // Pacientes
 var PROD_SS_ID  = '1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY'; // Productos
 var QX_SS_ID    = LAB_SS_ID; // ← Reemplaza cuando exista el sheet de Quirófano
 var CAJA_CHICA_SS_ID = '1uB9HnQLqHbotP0w21z6mVQcc4ABb428iKXEru8hvDQE'; // Caja Chica
+var CXP_SS_ID        = '1iRjpYtkcqx-3NRwlVK-UYx09I0gVyiTDRtIA9X9RAQw'; // Cuentas por Pagar
+var CXP_GID          = 1448371071;
 
 /* ── GIDs (pestañas individuales por ID numérico) ─────────── */
 var ER_GID     = 1953492149; // Estado de Resultados
@@ -689,6 +691,81 @@ function saveLiberado(rowNum, liberado) {
   } catch(ex) { return {ok:false,error:ex.message}; }
 }
 
+/* ══════════════════════════════════════════════════════════════
+   CUENTAS POR PAGAR — lectura de hoja externa, solo reporte
+   ══════════════════════════════════════════════════════════════ */
+function readCxPData() {
+  try {
+    var ss    = SpreadsheetApp.openById(CXP_SS_ID);
+    var sheets= ss.getSheets();
+    var sheet = null;
+    for (var i=0;i<sheets.length;i++) if(sheets[i].getSheetId()===CXP_GID){sheet=sheets[i];break;}
+    if (!sheet) sheet = ss.getSheets()[0];
+    var raw = sheet.getDataRange().getValues();
+    if (raw.length < 2) return {view:'cxp',headers:[],rows:[],resumen:{vencido:0,d3:0,d7:0,d30:0,totalVencido:0,totalD3:0,totalD7:0,totalD30:0}};
+    var headers = raw[0].map(function(h){ return String(h).trim(); });
+    var iVenc = -1;
+    var vencKw = /venc|due|expir|plazo/i;
+    for (var c=0;c<headers.length;c++) { if(vencKw.test(headers[c])){iVenc=c;break;} }
+    if (iVenc < 0) iVenc = Math.min(11, headers.length-1);
+    var iMonto = -1;
+    var montoKw = /monto|importe|total|amount|valor/i;
+    for (var c2=0;c2<headers.length;c2++) { if(montoKw.test(headers[c2])){iMonto=c2;break;} }
+    var hoy = new Date(); hoy.setHours(0,0,0,0);
+    function parseDate(v) {
+      if (!v) return null;
+      if (v instanceof Date) { var d=new Date(v); d.setHours(0,0,0,0); return d; }
+      var s=String(v).trim();
+      var m=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+      if(m){ return new Date(parseInt(m[3]),parseInt(m[2])-1,parseInt(m[1])); }
+      m=s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+      if(m){ return new Date(parseInt(m[1]),parseInt(m[2])-1,parseInt(m[3])); }
+      var d=new Date(s); return isNaN(d)?null:d;
+    }
+    function diasRestantes(fv) { if(!fv) return null; return Math.round((fv-hoy)/86400000); }
+    function urgencia(dias) {
+      if(dias===null) return 'sin-fecha';
+      if(dias<0)  return 'vencido';
+      if(dias<=3) return 'd3';
+      if(dias<=7) return 'd7';
+      if(dias<=30) return 'd30';
+      return 'ok';
+    }
+    var resumen={vencido:0,d3:0,d7:0,d30:0,totalVencido:0,totalD3:0,totalD7:0,totalD30:0};
+    var rows=[];
+    for (var r=1;r<raw.length;r++) {
+      var row=raw[r];
+      if (row.every(function(c){ return String(c).trim()===''; })) continue;
+      var fechaVenc=parseDate(row[iVenc]);
+      var dias=diasRestantes(fechaVenc);
+      var urg=urgencia(dias);
+      var monto=iMonto>=0?(parseFloat(row[iMonto])||0):0;
+      if(urg==='vencido'){resumen.vencido++;resumen.totalVencido+=monto;}
+      else if(urg==='d3'){resumen.d3++;resumen.totalD3+=monto;}
+      else if(urg==='d7'){resumen.d7++;resumen.totalD7+=monto;}
+      else if(urg==='d30'){resumen.d30++;resumen.totalD30+=monto;}
+      var obj={_urgencia:urg,_dias:dias,_monto:monto};
+      headers.forEach(function(h,i){
+        var v=row[i];
+        if(v instanceof Date){
+          var dd=String(v.getDate()).padStart(2,'0'),mm=String(v.getMonth()+1).padStart(2,'0');
+          obj[h]=dd+'/'+mm+'/'+v.getFullYear();
+        } else { obj[h]=(v===null||v===undefined)?'':v; }
+      });
+      rows.push(obj);
+    }
+    rows.sort(function(a,b){
+      var o={'vencido':0,'d3':1,'d7':2,'d30':3,'ok':4,'sin-fecha':5};
+      var ua=o[a._urgencia]||4, ub=o[b._urgencia]||4;
+      if(ua!==ub) return ua-ub;
+      return (a._dias||999)-(b._dias||999);
+    });
+    return {view:'cxp',headers:headers,rows:rows,resumen:resumen,updated:new Date().toISOString()};
+  } catch(ex) {
+    return {view:'cxp',error:ex.message,headers:[],rows:[],resumen:{}};
+  }
+}
+
 /* ── Constantes definidas en api_config.gs (mismo proyecto GAS) ──
    SHEET_ID, AUTH_SECRET, ER_SS_ID, BANKS_SS_ID, LAB_SS_ID, MED_SS_ID,
    PAC_SS_ID, PROD_SS_ID, QX_SS_ID, ER_GID, BUDGET_GID, PL_GID,
@@ -945,6 +1022,10 @@ function doGet(e) {
     // Caja Chica: dashboard con saldo y resumen de gasto
     if (action === 'cajachica') {
       return jsonResponse(readCajaChicaData());
+    }
+
+    if (action === 'cxp') {
+      return jsonResponse(readCxPData());
     }
 
     if (action === 'insert') {

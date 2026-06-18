@@ -764,6 +764,16 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
   </div>
 </div>
 
+<!-- ══ VISTA: CUENTAS POR PAGAR ══ -->
+<div id="view-cxp" class="view" style="display:none">
+  <div id="cxp-root">
+    <div style="padding:32px;text-align:center;color:var(--color-text-muted,#9ca3af);font-size:13px">
+      <div style="width:32px;height:32px;border:3px solid var(--color-border,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 12px"></div>
+      Cargando cuentas por pagar…
+    </div>
+  </div>
+</div>
+
 <!-- ══ VISTA: SERVICIOS ══ -->
 <div id="view-servicios" class="view" style="display:none">
   <div class="card">
@@ -3437,6 +3447,14 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     loadCajaChicaData();
     return;
   }
+  // Cuentas por Pagar — reporte de vencimientos
+  if (/cuentas?.por.?pagar|cxp|fin.cxp/i.test(viewId)) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _cxpEl = document.getElementById('view-cxp');
+    if (_cxpEl) _cxpEl.style.display = '';
+    loadCxPData();
+    return;
+  }
   // Gestión de roles (acceso directo desde Configuración): mostrar shell + cargar roles
   if (viewId === 'gestion-roles') { renderGestionRoles({}); grLoadRoles(); return; }
   // Si el API devolverá fuente=Roles, renderViewData lo interceptará automáticamente
@@ -4614,6 +4632,171 @@ function loadPacientesOptions() {
 
 function closeModal(tipo) {
   document.getElementById('modal-' + tipo).style.display = 'none';
+}
+
+/* ══ CUENTAS POR PAGAR ══ */
+async function loadCxPData() {
+  var root = document.getElementById('cxp-root');
+  if (!root) return;
+  root.innerHTML = '<div style="padding:32px;text-align:center;color:var(--color-text-muted,#9ca3af);font-size:13px">'
+    + '<div style="width:32px;height:32px;border:3px solid var(--color-border,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 12px"></div>'
+    + 'Cargando cuentas por pagar…</div>';
+  try {
+    var url = APPS_SCRIPT_URL + '?action=cxp&token=' + encodeURIComponent(getToken());
+    var res  = await fetch(url, {redirect:'follow'});
+    var data = await res.json();
+    if (data.error) throw new Error(data.error);
+    renderCxP(data);
+    setStatus('Actualizado ' + new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}));
+  } catch(e) {
+    if (root) root.innerHTML = '<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px">⚠ ' + e.message + '</div>';
+    setStatus('Error: ' + e.message, 'err');
+  }
+}
+
+function renderCxP(data) {
+  var root = document.getElementById('cxp-root');
+  if (!root) return;
+  var r = data.resumen || {};
+  var rows = data.rows || [];
+  var headers = data.headers || [];
+
+  function fM(v){ var n=parseFloat(v)||0; return '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function urg2label(u,d){
+    if(u==='vencido') return '<span class="cxp-badge cxp-vencido">Vencido ('+(Math.abs(d||0))+' días)</span>';
+    if(u==='d3')  return '<span class="cxp-badge cxp-d3">Vence en '+(d||0)+' día'+(d===1?'':'s')+'</span>';
+    if(u==='d7')  return '<span class="cxp-badge cxp-d7">Vence en '+(d||0)+' días</span>';
+    if(u==='d30') return '<span class="cxp-badge cxp-d30">Vence en '+(d||0)+' días</span>';
+    if(u==='ok')  return '<span class="cxp-badge cxp-ok">Al corriente</span>';
+    return '<span class="cxp-badge cxp-na">Sin fecha</span>';
+  }
+
+  var html = '';
+  // Styles
+  if (!document.getElementById('cxp-styles')) {
+    var s = document.createElement('style'); s.id='cxp-styles';
+    s.textContent =
+      '.cxp-wrap{max-width:1280px;margin:0 auto;padding:0 2px 48px;animation:cfFI .25s ease}'
+      +'.cxp-top{position:sticky;top:calc(-1*var(--space-6,24px));z-index:20;background:var(--color-bg,#f5f5f5);padding:12px 0 10px;border-bottom:1px solid var(--color-divider,#e5e7eb);margin-bottom:16px}'
+      +'.cxp-top-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}'
+      +'.cxp-h1{font-size:17px;font-weight:700;color:var(--text-primary,#111);margin:0}'
+      +'.cxp-h1s{font-size:11px;color:var(--text-secondary,#6b7280);margin-top:1px}'
+      +'.cxp-kg{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin-bottom:18px}'
+      +'@media(max-width:900px){.cxp-kg{grid-template-columns:repeat(2,1fr)}}'
+      +'@media(max-width:500px){.cxp-kg{grid-template-columns:1fr}}'
+      +'.cxp-k{border-radius:14px;padding:18px 18px 14px;border:1.5px solid;position:relative;overflow:hidden}'
+      +'.cxp-k-vencido{background:#fef2f2;border-color:#fecaca}'
+      +'.cxp-k-d3{background:#fff7ed;border-color:#fed7aa}'
+      +'.cxp-k-d7{background:#fefce8;border-color:#fde68a}'
+      +'.cxp-k-d30{background:#eff6ff;border-color:#bfdbfe}'
+      +'.cxp-kico{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:10px;font-size:16px}'
+      +'.cxp-klbl{font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#6b7280);margin-bottom:3px}'
+      +'.cxp-kval{font-size:22px;font-weight:800;margin-bottom:2px}'
+      +'.cxp-ksub{font-size:11px;font-weight:600;opacity:.7}'
+      +'.cxp-k-vencido .cxp-kval{color:#dc2626}'
+      +'.cxp-k-d3 .cxp-kval{color:#ea580c}'
+      +'.cxp-k-d7 .cxp-kval{color:#ca8a04}'
+      +'.cxp-k-d30 .cxp-kval{color:#2563eb}'
+      +'.cxp-card{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;overflow:hidden}'
+      +'.cxp-card-hdr{padding:13px 17px;border-bottom:1px solid var(--color-divider,#f0f0f0);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}'
+      +'.cxp-card-title{font-size:13px;font-weight:700;color:var(--text-primary,#111)}'
+      +'.cxp-card-sub{font-size:10.5px;color:var(--text-secondary,#9ca3af);margin-top:1px}'
+      +'.cxp-srch{padding:7px 12px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:20px;font-size:12px;font-family:inherit;background:var(--card-bg,#fff);color:var(--text-primary,#111);width:220px;transition:border-color .15s}'
+      +'.cxp-srch:focus{outline:none;border-color:#c46a7a}'
+      +'.cxp-tbl-wrap{overflow-x:auto}'
+      +'.cxp-tbl{width:100%;border-collapse:collapse;font-size:12px}'
+      +'.cxp-tbl th{padding:8px 12px;font-size:9.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#6b7280);background:var(--color-surface,#f3f4f6);border-bottom:1px solid var(--color-divider,#e5e7eb);white-space:nowrap;text-align:left}'
+      +'.cxp-tbl td{padding:8px 12px;border-bottom:1px solid var(--color-divider,#f5f5f5);white-space:nowrap;color:var(--text-primary,#374151);max-width:220px;overflow:hidden;text-overflow:ellipsis}'
+      +'.cxp-tbl tr:last-child td{border-bottom:none}'
+      +'.cxp-tbl tr.row-vencido td{background:#fef2f2}'
+      +'.cxp-tbl tr.row-d3 td{background:#fff7ed}'
+      +'.cxp-tbl tr.row-d7 td{background:#fefce8}'
+      +'.cxp-badge{display:inline-flex;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;white-space:nowrap}'
+      +'.cxp-vencido{background:#fee2e2;color:#991b1b}'
+      +'.cxp-d3{background:#ffedd5;color:#9a3412}'
+      +'.cxp-d7{background:#fef9c3;color:#854d0e}'
+      +'.cxp-d30{background:#dbeafe;color:#1e40af}'
+      +'.cxp-ok{background:#dcfce7;color:#166534}'
+      +'.cxp-na{background:#f3f4f6;color:#6b7280}'
+      +'.cxp-empty{text-align:center;padding:36px 16px;color:var(--text-secondary,#9ca3af);font-size:13px}'
+      +'.cxp-link{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--color-primary,#c46a7a);text-decoration:none;padding:5px 11px;border:1.5px solid var(--color-primary,#c46a7a);border-radius:20px}'
+      +'.cxp-link:hover{background:rgba(196,106,122,.06)}';
+    document.head.appendChild(s);
+  }
+
+  // KPI cards
+  html += '<div class="cxp-wrap">';
+  html += '<div class="cxp-top"><div class="cxp-top-row">'
+    + '<div><h2 class="cxp-h1">Cuentas por Pagar</h2><div class="cxp-h1s">Reporte de vencimientos · Solo lectura · ' + rows.length + ' registros</div></div>'
+    + '<div style="display:flex;gap:8px;align-items:center">'
+    + '<a href="https://docs.google.com/spreadsheets/d/1iRjpYtkcqx-3NRwlVK-UYx09I0gVyiTDRtIA9X9RAQw/edit?gid=1448371071" target="_blank" class="cxp-link">'
+    + '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Ver en Sheets</a>'
+    + '<button onclick="loadCxPData()" style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--text-secondary,#6b7280);background:transparent;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:20px;padding:5px 11px;cursor:pointer">↺ Actualizar</button>'
+    + '</div></div></div>';
+
+  var kpis = [
+    {cls:'cxp-k-vencido', ico:'🔴', lbl:'Vencido', n:r.vencido||0, total:r.totalVencido||0},
+    {cls:'cxp-k-d3',      ico:'🟠', lbl:'Vence ≤ 3 días', n:r.d3||0, total:r.totalD3||0},
+    {cls:'cxp-k-d7',      ico:'🟡', lbl:'Vence ≤ 7 días', n:r.d7||0, total:r.totalD7||0},
+    {cls:'cxp-k-d30',     ico:'🔵', lbl:'Vence ≤ 30 días', n:r.d30||0, total:r.totalD30||0}
+  ];
+  html += '<div class="cxp-kg">';
+  kpis.forEach(function(k){
+    html += '<div class="cxp-k '+k.cls+'">'
+      + '<div class="cxp-kico">'+k.ico+'</div>'
+      + '<div class="cxp-klbl">'+k.lbl+'</div>'
+      + '<div class="cxp-kval">'+k.n+'</div>'
+      + '<div class="cxp-ksub">'+(k.total>0?fM(k.total):'Sin monto')+'</div>'
+      + '</div>';
+  });
+  html += '</div>';
+
+  // Table card
+  html += '<div class="cxp-card">';
+  html += '<div class="cxp-card-hdr">'
+    + '<div><div class="cxp-card-title">Detalle de cuentas por pagar</div>'
+    + '<div class="cxp-card-sub">Ordenado por urgencia · Col. vencimiento resaltada</div></div>'
+    + '<input class="cxp-srch" id="cxp-srch" placeholder="Buscar…" oninput="cxpFilter()" type="text">'
+    + '</div>';
+  html += '<div class="cxp-tbl-wrap"><table class="cxp-tbl" id="cxp-tbl">';
+  html += '<thead><tr><th>Estado</th>';
+  headers.forEach(function(h){ html += '<th>'+h+'</th>'; });
+  html += '</tr></thead><tbody id="cxp-tbody">';
+  html += cxpBuildRows(rows, headers);
+  html += '</tbody></table></div></div>';
+  html += '</div>'; // cxp-wrap
+
+  root.innerHTML = html;
+
+  window._cxpRows    = rows;
+  window._cxpHeaders = headers;
+  window.cxpFilter   = function() {
+    var q = (document.getElementById('cxp-srch').value||'').toLowerCase().trim();
+    var filtered = q ? _cxpRows.filter(function(row){
+      return _cxpHeaders.some(function(h){ return String(row[h]||'').toLowerCase().indexOf(q)>-1; });
+    }) : _cxpRows;
+    var tb = document.getElementById('cxp-tbody');
+    if(tb) tb.innerHTML = cxpBuildRows(filtered, _cxpHeaders);
+  };
+}
+
+function cxpBuildRows(rows, headers) {
+  if (!rows.length) return '<tr><td colspan="'+(headers.length+1)+'" class="cxp-empty">Sin registros encontrados</td></tr>';
+  return rows.map(function(row){
+    var urg = row._urgencia||'ok';
+    var rowCls = (urg==='vencido'||urg==='d3'||urg==='d7') ? ' class="row-'+urg+'"' : '';
+    var badge = '';
+    var d = row._dias;
+    if(urg==='vencido') badge='<span class="cxp-badge cxp-vencido">Vencido ('+Math.abs(d||0)+'d)</span>';
+    else if(urg==='d3') badge='<span class="cxp-badge cxp-d3">≤ 3 días ('+d+'d)</span>';
+    else if(urg==='d7') badge='<span class="cxp-badge cxp-d7">≤ 7 días ('+d+'d)</span>';
+    else if(urg==='d30')badge='<span class="cxp-badge cxp-d30">≤ 30 días ('+d+'d)</span>';
+    else if(urg==='ok') badge='<span class="cxp-badge cxp-ok">Al corriente</span>';
+    else                badge='<span class="cxp-badge cxp-na">Sin fecha</span>';
+    var cells = '<td>'+badge+'</td>';
+    headers.forEach(function(h){ cells += '<td title="'+String(row[h]||'')+'">'+String(row[h]===null||row[h]===undefined?'—':row[h])+'</td>'; });
+    return '<tr'+rowCls+'>'+cells+'</tr>';
+  }).join('');
 }
 
 /* ══ CAJA CHICA ══ */
