@@ -1397,7 +1397,7 @@ function renderView(view, data) {
   if (view === 'inventarios')  renderInventarios(data);
   if (view === 'laboratorios') renderLaboratorios(data);
   if (view === 'ingresos')     renderIngresos(data);
-  if (view === 'gastos')       renderGastos(data);
+  if (view === 'gastos' || view === 'egresos') renderGastos(data);
   if (view === 'pacientes')    renderPacientes(data);
   if (view === 'servicios')    renderServicios(data);
   if (view === 'turismo')      renderTurismo(data);
@@ -2020,8 +2020,8 @@ var _grRoles = [];
 var _grSelected = '';
 
 const VIEW_TITLES = {
-  resumen:'Resumen Financiero', ingresos:'Ingresos', gastos:'Gastos Operativos',
-  costos:'Costos', pacientes:'Pacientes', servicios:'Servicios',
+  resumen:'Resumen Financiero', ingresos:'Ingresos', gastos:'Egresos', egresos:'Egresos',
+  costos:'Egresos', pacientes:'Pacientes', servicios:'Servicios',
   turismo:'Turismo Médico', rentabilidad:'Rentabilidad',
   inventarios:'Inventarios', laboratorios:'Laboratorios', configuracion:'Configuración'
 };
@@ -2035,9 +2035,28 @@ async function loadMenu() {
     if (json.error) throw new Error(json.error);
     var session = getSession();
     var bloqueadas = (session && session.vistasBloqueadas) || [];
-    menuItems = (json.menu || []).filter(function(item) {
-      return bloqueadas.indexOf(item.id) === -1;
-    });
+    // Fusionar "Gastos Operativos" y "Costos" en un solo ítem "Egresos"
+    var rawMenu = (json.menu || []);
+    var gastosItem = rawMenu.filter(function(i){ return i.id==='gastos'; })[0];
+    var costosItem = rawMenu.filter(function(i){ return i.id==='costos'; })[0];
+    var egresosRef = gastosItem || costosItem;
+    var egresosInserted = false;
+    menuItems = rawMenu.filter(function(item) {
+      if (bloqueadas.indexOf(item.id) !== -1) return false;
+      if (item.id === 'gastos' || item.id === 'costos') return false;
+      return true;
+    }).reduce(function(acc, item) {
+      // Insertar "Egresos" en el lugar donde estaba "gastos"
+      if (!egresosInserted && egresosRef && item.orden > (egresosRef.orden||0)) {
+        acc.push(Object.assign({}, egresosRef, {id:'egresos', label:'Egresos', icono:'trending-down', orden:(egresosRef.orden||0)}));
+        egresosInserted = true;
+      }
+      acc.push(item);
+      return acc;
+    }, []);
+    if (!egresosInserted && egresosRef) {
+      menuItems.push(Object.assign({}, egresosRef, {id:'egresos', label:'Egresos', icono:'trending-down'}));
+    }
     currentFechaInicio = json.fechaInicio || '';
     currentFechaFin    = json.fechaFin    || '';
     currentPeriodo     = currentFechaInicio.slice(0,7) + ' → ' + currentFechaFin.slice(0,7);
@@ -3573,6 +3592,8 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
   if (viewId === 'gestion-roles') { renderGestionRoles({}); grLoadRoles(); return; }
   // Si el API devolverá fuente=Roles, renderViewData lo interceptará automáticamente
 
+  // Alias: egresos usa los datos y la vista de gastos
+  if (viewId === 'egresos') viewId = 'gastos';
   var cacheKey = viewId + '_' + fechaInicio + '_' + fechaFin + '_' + currentSucursal;
   var now = Date.now();
   var cached = viewCache[cacheKey];
@@ -3713,6 +3734,7 @@ function navigateTo(viewId) {
   if (/caja.?chica/i.test(viewId) || (_foundItem && /caja.?chica/i.test(_foundItem.fuente || ''))) {
     displayId = 'caja-chica';
   }
+  if (viewId === 'egresos') { displayId = 'gastos'; }
   // Resolver alias: variantes de config siempre usan view-configuracion
   var resolvedId = isConfigFuente(displayId) ? 'configuracion' : displayId;
   // Mostrar la vista (conocida o genérica)
