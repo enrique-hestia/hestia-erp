@@ -621,10 +621,8 @@ function readCxPData() {
     for (var c=0;c<headers.length;c++) { if(vencKw.test(headers[c])){iVenc=c;break;} }
     if (iVenc < 0) iVenc = Math.min(11, headers.length-1); // columna L
 
-    // Detectar columna de monto/importe
-    var iMonto = -1;
-    var montoKw = /monto|importe|total|amount|valor/i;
-    for (var c2=0;c2<headers.length;c2++) { if(montoKw.test(headers[c2])){iMonto=c2;break;} }
+    // Columna de monto: siempre columna J (índice 9)
+    var iMonto = Math.min(9, headers.length-1);
 
     var hoy = new Date();
     hoy.setHours(0,0,0,0);
