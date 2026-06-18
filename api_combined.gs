@@ -1830,11 +1830,20 @@ function readCajaChicaData() {
     var iEntrada  = headers.indexOf('ENTRADA');
     var iTotal    = headers.indexOf('TOTAL');
 
+    function fmtFechaCC(v) {
+      if (!v) return '';
+      if (v instanceof Date) {
+        var dd = String(v.getDate()).padStart(2,'0');
+        var mm = String(v.getMonth()+1).padStart(2,'0');
+        return dd + '/' + mm + '/' + v.getFullYear();
+      }
+      return String(v).trim();
+    }
     var rows = [];
     var saldoInicial = 0;
     for (var r = 1; r < data.length; r++) {
       var row      = data[r];
-      var fecha    = String(row[iFecha]    || '').trim();
+      var fecha    = fmtFechaCC(row[iFecha]);
       var concepto = String(row[iConcepto] || '').trim();
       if (!fecha && !concepto) continue; // fila reservada (solo fórmula de TOTAL), aún sin capturar
       var salida   = Number(row[iSalida])  || 0;
