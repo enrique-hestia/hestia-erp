@@ -2177,15 +2177,44 @@ async function loadCashFlowData() {
     'border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Cargando cuentas bancarias…</div>';
   try {
     var tok = encodeURIComponent(getToken());
-    var [resp, ccResp] = await Promise.all([
-      fetch(APPS_SCRIPT_URL + '?action=banks&token=' + tok, {redirect:'follow'}),
-      fetch(APPS_SCRIPT_URL + '?action=cajachica&token=' + tok, {redirect:'follow'})
+    var [resp, ccResp, cxpResp] = await Promise.all([
+      fetch(APPS_SCRIPT_URL + '?action=banks&token='    + tok, {redirect:'follow'}),
+      fetch(APPS_SCRIPT_URL + '?action=cajachica&token='+ tok, {redirect:'follow'}),
+      fetch(APPS_SCRIPT_URL + '?action=cxp&token='     + tok, {redirect:'follow'})
     ]);
     var data = await resp.json();
     try {
       var ccData = await ccResp.json();
       data.cajachicaSaldo = (ccData && ccData.saldoFinal != null) ? ccData.saldoFinal : 0;
     } catch(e2) { data.cajachicaSaldo = 0; }
+    try {
+      var cxpData = await cxpResp.json();
+      // Filtrar solo los compromisos del mes corriente + vencidos
+      var hoyMs = new Date(); hoyMs.setHours(0,0,0,0);
+      var mesAct = hoyMs.getMonth(), anioAct = hoyMs.getFullYear();
+      var finMes = new Date(anioAct, mesAct+1, 0); finMes.setHours(23,59,59,999);
+      function parseCxpDate(s) {
+        if (!s) return null;
+        var m = String(s).match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+        if (m) return new Date(parseInt(m[3]), parseInt(m[2])-1, parseInt(m[1]));
+        var d = new Date(s); return isNaN(d) ? null : d;
+      }
+      var cxpRows = (cxpData.rows||[]);
+      var iVenc   = cxpData.iVenc != null ? cxpData.iVenc : 11;
+      var iMonto  = cxpData.iMonto != null ? cxpData.iMonto : -1;
+      var hdrs    = cxpData.headers||[];
+      var vencHdr = hdrs[iVenc]||'';
+      var monHdr  = hdrs[iMonto]||'';
+      var cxpMes  = cxpRows.filter(function(r){
+        var fv = parseCxpDate(r[vencHdr]||r._venc||'');
+        return fv && fv <= finMes; // vencido o vence este mes
+      });
+      data.cxpMes      = cxpMes;
+      data.cxpHeaders  = hdrs;
+      data.cxpVencHdr  = vencHdr;
+      data.cxpMonHdr   = monHdr;
+      data.cxpTotalMes = cxpMes.reduce(function(s,r){ return s+(parseFloat(r[monHdr])||0); }, 0);
+    } catch(e3) { data.cxpMes=[]; data.cxpTotalMes=0; }
     _cfLiveData = data;
     renderCashFlow(data);
   } catch(e) {
@@ -2258,9 +2287,13 @@ function renderCashFlow(data) {
   var sant = B.santander   ||{id:'santander',   nombre:'Santander',   color:'#ec0000',saldo:0,movimientos:[],totalRows:0};
   var amex = B.amex        ||{id:'amex',        nombre:'AMEX',        color:'#007bc1',saldo:0,movimientos:[],totalRows:0};
   var mp   = B.mercadopago ||{id:'mercadopago', nombre:'Mercado Pago',color:'#009ee3',saldo:0,movimientos:[],totalRows:0};
-  var ccSaldo = (data&&data.cajachicaSaldo!=null) ? data.cajachicaSaldo : 0;
-  var tot  = sant.saldo + mp.saldo + ccSaldo;
-  var netPos = tot - Math.abs(amex.saldo);
+  var ccSaldo    = (data&&data.cajachicaSaldo!=null) ? data.cajachicaSaldo : 0;
+  var cxpMes     = (data&&data.cxpMes)     || [];
+  var cxpTotal   = (data&&data.cxpTotalMes)|| 0;
+  var cxpVencHdr = (data&&data.cxpVencHdr) || '';
+  var cxpMonHdr  = (data&&data.cxpMonHdr)  || '';
+  var tot    = sant.saldo + mp.saldo + ccSaldo;
+  var netPos = tot - Math.abs(amex.saldo) - Math.abs(cxpTotal);
   var live = !!(B.santander);
   if(!_cfActiveBanco) _cfActiveBanco='santander';
   var allB=[sant,amex,mp];
@@ -2287,8 +2320,9 @@ function renderCashFlow(data) {
       +'.cf-al-d{background:#fef9c3;border:1px solid #fde68a;color:#92400e}'
       +'.cf-kg{display:grid;gap:13px;margin-bottom:13px}'
       +'.cf-kg-top{grid-template-columns:repeat(4,1fr)}'
-      +'.cf-kg-bot{grid-template-columns:1fr 1fr;margin-bottom:16px}'
-      +'@media(max-width:900px){.cf-kg-top{grid-template-columns:repeat(2,1fr)}.cf-kg-bot{grid-template-columns:1fr 1fr}}'
+      +'.cf-kg-bot{grid-template-columns:1fr 1fr 1fr;margin-bottom:16px}'
+      +'#cxp-panel.open{max-height:640px!important}'
+      +'@media(max-width:900px){.cf-kg-top{grid-template-columns:repeat(2,1fr)}.cf-kg-bot{grid-template-columns:1fr}}'
       +'@media(max-width:500px){.cf-kg-top,.cf-kg-bot{grid-template-columns:1fr}}'
       +'.cf-k-total{border:2px solid rgba(196,106,122,.3);background:rgba(196,106,122,.04)}'
       +'.cf-kval-total{font-size:22px}'
@@ -2423,22 +2457,76 @@ function renderCashFlow(data) {
     +'<div class="cf-kval cf-kval-total" style="color:#c46a7a">'+fS(tot)+'</div>'
     +'<div class="cf-kmeta">Santander + MP + Caja Chica</div></div>');
   hh.push('</div>');
-  // Row 2: AMEX Deuda + Posici\u00f3n Neta
+  // Row 2: AMEX Deuda \u00b7 CxP del Mes \u00b7 Posici\u00f3n Neta Real
   hh.push('<div class="cf-kg cf-kg-bot">');
+  // AMEX
   hh.push('<div class="cf-k cf-k-debt'+(amex.id===_cfActiveBanco?' act':'')+'" style="--kc:#b45309" onclick="cfSB(\'amex\')">'
     +'<div class="cf-kstr" style="background:#b45309"></div>'
     +'<div class="cf-klogo" style="background:#b45309">AMX</div>'
     +'<div class="cf-klbl">\u26a0\ufe0f AMEX \u2014 Deuda tarjeta</div>'
     +'<div class="cf-kval cf-kval-debt">'+fS(Math.abs(amex.saldo))+'</div>'
     +'<div class="cf-kmeta">'+((amex.totalRows||0)+' cargos \u00b7 No incluida en disponible')+'</div></div>');
+  // CxP del mes
+  var cxpVencidos = cxpMes.filter(function(r){return r._urgencia==='vencido';}).length;
+  var cxpProximos = cxpMes.filter(function(r){return r._urgencia!=='vencido';}).length;
+  hh.push('<div class="cf-k cf-k-debt" style="--kc:#7c3aed;border-color:rgba(124,58,237,.25);background:rgba(124,58,237,.04);cursor:pointer" onclick="document.getElementById(\'cxp-panel\').classList.toggle(\'open\')">'
+    +'<div class="cf-kstr" style="background:#7c3aed"></div>'
+    +'<div class="cf-klogo" style="background:#7c3aed;font-size:11px">CxP</div>'
+    +'<div class="cf-klbl">\ud83d\udccb Cuentas por Pagar \u2014 Mes</div>'
+    +'<div class="cf-kval" style="color:#7c3aed">'+fS(Math.abs(cxpTotal))+'</div>'
+    +'<div class="cf-kmeta">'
+      +(cxpVencidos>0?'<span style="color:#dc2626;font-weight:700">'+cxpVencidos+' vencidas</span> \u00b7 ':'')
+      +cxpProximos+' pr\u00f3ximas \u00b7 Ver detalle \u25be'
+    +'</div></div>');
+  // Posici\u00f3n Neta
   var netColor = netPos>=0 ? '#0ea5e9' : '#dc2626';
   hh.push('<div class="cf-k" style="--kc:'+netColor+';cursor:default">'
     +'<div class="cf-kstr" style="background:'+netColor+'"></div>'
-    +'<div class="cf-klogo" style="background:'+netColor+';font-size:13px">NET</div>'
-    +'<div class="cf-klbl">Posici\u00f3n Neta</div>'
+    +'<div class="cf-klogo" style="background:'+netColor+';font-size:11px">NET</div>'
+    +'<div class="cf-klbl">Posici\u00f3n Neta Real</div>'
     +'<div class="cf-kval" style="color:'+netColor+'">'+fS(netPos)+'</div>'
-    +'<div class="cf-kmeta">Disponible menos deuda AMEX</div></div>');
+    +'<div class="cf-kmeta">Disponible \u2212 AMEX \u2212 CxP del mes</div></div>');
   hh.push('</div>');
+
+  // Panel CxP expandible
+  var mesNombre = new Date().toLocaleDateString('es-MX',{month:'long',year:'numeric'});
+  hh.push('<div id="cxp-panel" style="margin-bottom:14px;overflow:hidden;max-height:0;transition:max-height .35s ease">');
+  hh.push('<div style="background:var(--card-bg,#fff);border:1.5px solid rgba(124,58,237,.25);border-radius:14px;overflow:hidden">');
+  hh.push('<div style="padding:12px 16px;background:rgba(124,58,237,.05);border-bottom:1px solid rgba(124,58,237,.15);display:flex;align-items:center;justify-content:space-between">'
+    +'<div style="font-size:13px;font-weight:700;color:#7c3aed">\ud83d\udccb Compromisos del mes \u2014 '+mesNombre+'</div>'
+    +'<div style="font-size:12px;color:var(--text-secondary,#6b7280)">'+cxpMes.length+' facturas \u00b7 <strong style="color:#7c3aed">'+fS(Math.abs(cxpTotal))+'</strong> total</div>'
+    +'</div>');
+  if (cxpMes.length) {
+    hh.push('<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">');
+    hh.push('<thead><tr style="background:var(--color-surface,#f9f9f9)">');
+    // Mostrar columnas relevantes: Estado + todas excepto columnas internas
+    hh.push('<th style="padding:7px 12px;text-align:left;font-size:9.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#6b7280);white-space:nowrap">Estado</th>');
+    var cxpHdrs = (data.cxpHeaders||[]);
+    cxpHdrs.forEach(function(h){ hh.push('<th style="padding:7px 12px;text-align:left;font-size:9.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#6b7280);white-space:nowrap">'+h+'</th>'); });
+    hh.push('</tr></thead><tbody>');
+    cxpMes.forEach(function(row, i) {
+      var urg = row._urgencia||'ok';
+      var dias = row._dias;
+      var badge='', bg='';
+      if(urg==='vencido'){ badge='<span style="background:#fee2e2;color:#991b1b;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700">Vencido ('+Math.abs(dias||0)+'d)</span>'; bg='background:#fff5f5'; }
+      else if(urg==='d3'){ badge='<span style="background:#ffedd5;color:#9a3412;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700">\u22643 d\u00edas</span>'; bg='background:#fffaf5'; }
+      else if(urg==='d7'){ badge='<span style="background:#fef9c3;color:#854d0e;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700">\u22647 d\u00edas</span>'; bg=''; }
+      else { badge='<span style="background:#ede9fe;color:#5b21b6;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700">'+dias+'d</span>'; bg=''; }
+      hh.push('<tr style="border-top:1px solid var(--color-divider,#f0f0f0);'+bg+'">'
+        +'<td style="padding:7px 12px;white-space:nowrap">'+badge+'</td>');
+      cxpHdrs.forEach(function(h){
+        var v = row[h]; if(v===null||v===undefined) v='\u2014';
+        var isNum = typeof v==='number'||(typeof v==='string'&&/^\d[\d,\.]+$/.test(String(v).trim()));
+        var style = 'padding:7px 12px;white-space:nowrap;'+(isNum?'text-align:right;font-weight:600':'');
+        hh.push('<td style="'+style+'">'+String(v)+'</td>');
+      });
+      hh.push('</tr>');
+    });
+    hh.push('</tbody></table></div>');
+  } else {
+    hh.push('<div style="padding:20px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:12px">Sin compromisos pendientes este mes \u2713</div>');
+  }
+  hh.push('</div></div>');
 
   hh.push('<div class="cf-tabs">');
   allB.forEach(function(b){hh.push('<button class="cf-tab'+(b.id===_cfActiveBanco?' act':'')+'" onclick="cfSB(\''+b.id+'\')">'+'<div class="cf-tdot" style="background:'+b.color+'"></div>'+b.nombre+'</button>');});
