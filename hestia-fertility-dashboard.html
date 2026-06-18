@@ -1091,8 +1091,16 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
           <div style="font-size:13px;font-weight:700;font-family:monospace" id="cfg-api-version">—</div>
         </div>
         <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:12px">
-          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Auto-refresh</div>
-          <div style="font-size:13px;font-weight:700" id="cfg-refresh">—</div>
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:6px">Auto-refresh</div>
+          <select id="cfg-refresh-select" onchange="startAutoRefresh(this.value==='manual'?null:parseInt(this.value))"
+            style="width:100%;padding:5px 8px;border:1px solid var(--color-divider);border-radius:6px;font-size:12px;font-weight:600;background:var(--color-surface);color:var(--color-text);font-family:inherit;cursor:pointer">
+            <option value="manual">Manual (sin auto-refresh)</option>
+            <option value="60000">1 minuto</option>
+            <option value="120000" selected>2 minutos</option>
+            <option value="300000">5 minutos</option>
+            <option value="600000">10 minutos</option>
+            <option value="1800000">30 minutos</option>
+          </select>
         </div>
         <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:12px">
           <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Caché frontend</div>
@@ -3994,7 +4002,14 @@ function renderAjustes() {
   // Sistema
   set('cfg-fe-version',  DASHBOARD_VERSION);
   set('cfg-api-version', _apiVersion || '—');
-  set('cfg-refresh',     (AUTO_REFRESH_MS / 60000) + ' min');
+  // Auto-refresh: sincronizar dropdown con valor actual
+  var sel = document.getElementById('cfg-refresh-select');
+  if (sel) {
+    var savedR = localStorage.getItem('hestia_refresh_ms');
+    sel.value  = savedR === 'manual' ? 'manual' : (savedR || String(AUTO_REFRESH_MS));
+    if (!sel.value) sel.value = String(AUTO_REFRESH_MS);
+  }
+  set('cfg-refresh', _refreshCurrentMs ? (_refreshCurrentMs / 60000) + ' min' : 'Manual');
   set('cfg-cache',       (FRONTEND_CACHE_MS / 60000) + ' min');
   set('cfg-cache-count', Object.keys(viewCache || {}).length + ' vistas');
   var syncEl  = document.getElementById('sync-status');
@@ -5243,12 +5258,38 @@ window.addEventListener('DOMContentLoaded', function() {
   waitForChart(20);
 });
 
+var _refreshIntervalId = null;
+var _refreshCurrentMs  = null; // null = manual
+
+function startAutoRefresh(ms) {
+  if (_refreshIntervalId) { clearInterval(_refreshIntervalId); _refreshIntervalId = null; }
+  _refreshCurrentMs = ms;
+  if (ms && ms > 0) {
+    _refreshIntervalId = setInterval(function() {
+      loadView(currentView, currentFechaInicio, currentFechaFin, true);
+    }, ms);
+  }
+  // Persistir en localStorage
+  localStorage.setItem('hestia_refresh_ms', ms ? String(ms) : 'manual');
+  // Actualizar etiquetas en Configuración y Panel de Control
+  try {
+    var label = _refreshCurrentMs ? (_refreshCurrentMs / 60000) + ' min' : 'Manual';
+    var el1 = document.getElementById('cfg-refresh');     if (el1) el1.textContent = label;
+    var el2 = document.getElementById('pc-refresh-val'); if (el2) el2.textContent = label;
+    var sel = document.getElementById('cfg-refresh-select');
+    if (sel && sel.value !== String(ms || 'manual')) sel.value = String(ms || 'manual');
+  } catch(e) {}
+}
+
 async function initApp() {
   await loadMenu();
   navigateTo('resumen');
-  setInterval(function() {
-    loadView(currentView, currentFechaInicio, currentFechaFin, true);
-  }, AUTO_REFRESH_MS);
+  // Restaurar preferencia de refresh guardada
+  var savedRefresh = localStorage.getItem('hestia_refresh_ms');
+  var initMs = savedRefresh === 'manual' ? null
+             : savedRefresh ? parseInt(savedRefresh)
+             : AUTO_REFRESH_MS;
+  startAutoRefresh(initMs);
 }
 
 function initTheme() {
