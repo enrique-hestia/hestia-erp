@@ -89,7 +89,49 @@
   --shadow-sm:0 1px 3px oklch(0 0 0/0.25);--shadow-md:0 4px 14px oklch(0 0 0/0.35);
 }}
 
-/* ── BASE ─────────────────────────────────────────────── */
+/* ── PANEL DE CONTROL ─────────────────────────────────── */
+.pc-wrap{max-width:900px;display:flex;flex-direction:column;gap:0}
+.pc-head{display:flex;align-items:center;gap:14px;padding:28px 0 20px}
+.pc-head-icon{width:44px;height:44px;border-radius:12px;background:var(--color-primary-hl);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--color-primary)}
+.pc-tabs{display:flex;gap:2px;border-bottom:2px solid var(--color-divider);margin-bottom:24px}
+.pc-tab{padding:9px 18px;font-size:13px;font-weight:600;color:var(--color-text-muted);background:transparent;border:none;border-bottom:2.5px solid transparent;margin-bottom:-2px;cursor:pointer;font-family:inherit;border-radius:6px 6px 0 0;transition:color .15s,border-color .15s}
+.pc-tab:hover{color:var(--color-text);background:var(--color-surface-offset)}
+.pc-tab.active{color:var(--color-primary);border-bottom-color:var(--color-primary);background:transparent}
+.pc-section{display:flex;flex-direction:column;gap:20px}
+.pc-card{background:var(--color-surface);border:1px solid var(--color-divider);border-radius:var(--radius-lg);padding:22px 24px}
+.pc-card-title{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:16px}
+/* Themes */
+.theme-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px}
+.theme-card{border:2px solid var(--color-divider);border-radius:var(--radius-md);padding:14px 12px;cursor:pointer;display:flex;flex-direction:column;gap:8px;transition:border-color .15s,box-shadow .15s;background:var(--color-surface-2)}
+.theme-card:hover{border-color:var(--color-border);box-shadow:var(--shadow-sm)}
+.theme-card.active{border-color:var(--color-primary);box-shadow:0 0 0 3px var(--color-primary-hl)}
+.theme-swatch{height:32px;border-radius:7px;display:flex;gap:4px;align-items:center;justify-content:center;overflow:hidden}
+.theme-dot{width:14px;height:14px;border-radius:50%}
+.theme-name{font-size:12px;font-weight:600;color:var(--color-text)}
+.theme-desc{font-size:10px;color:var(--color-text-muted);line-height:1.4}
+/* Conexiones */
+.conn-row{display:flex;flex-direction:column;gap:3px;padding:12px 14px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md)}
+.conn-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted)}
+.conn-val{font-size:11px;font-family:monospace;color:var(--color-text);word-break:break-all}
+.conn-link{font-size:10px;color:var(--color-primary);text-decoration:none;margin-top:2px;display:inline-block}
+.conn-link:hover{text-decoration:underline}
+/* Menú editor */
+.menu-table{width:100%;border-collapse:collapse;font-size:12px}
+.menu-table th{padding:8px 10px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);border-bottom:1px solid var(--color-divider)}
+.menu-table td{padding:9px 10px;border-bottom:1px solid var(--color-divider);color:var(--color-text);vertical-align:middle}
+.menu-table tr:last-child td{border-bottom:none}
+.menu-table tr:hover td{background:var(--color-surface-offset)}
+.menu-badge{font-size:9px;padding:2px 6px;border-radius:20px;font-weight:600;background:var(--color-primary-hl);color:var(--color-primary)}
+.menu-badge.off{background:var(--color-surface-offset);color:var(--color-text-muted)}
+/* Toggle modo oscuro */
+.theme-toggle-row{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md)}
+.toggle-switch{position:relative;width:42px;height:24px;cursor:pointer}
+.toggle-switch input{opacity:0;width:0;height:0}
+.toggle-slider{position:absolute;inset:0;background:var(--color-divider);border-radius:12px;transition:background .2s}
+.toggle-slider::before{content:'';position:absolute;width:18px;height:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:transform .2s}
+.toggle-switch input:checked + .toggle-slider{background:var(--color-primary)}
+.toggle-switch input:checked + .toggle-slider::before{transform:translateX(18px)}
+/* BASE ─────────────────────────────────────────────── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden;font-family:var(--font-body);font-size:var(--text-sm);color:var(--color-text);background:var(--color-bg);-webkit-font-smoothing:antialiased}
 img,svg{display:block;max-width:100%}
@@ -1133,16 +1175,214 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
     <!-- Tarjeta: Administración (solo admin) -->
     <div class="card" id="cfg-admin-card" style="display:none">
       <div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:14px">Administración</div>
-      <button onclick="navigateTo('gestion-roles')" style="padding:10px 18px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        Gestión de Roles y Permisos
-      </button>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button onclick="navigateTo('panel-control')" style="padding:10px 18px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Panel de Control
+        </button>
+        <button onclick="navigateTo('gestion-roles')" style="padding:10px 18px;background:var(--color-surface-offset);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Gestión de Roles y Permisos
+        </button>
+      </div>
     </div>
 
   </div>
 </div>
 
 <div id="view-gestion-roles" class="view" style="display:none"></div>
+
+<!-- ══════════════════════════════════════════════════════════
+     PANEL DE CONTROL
+     ══════════════════════════════════════════════════════════ -->
+<div id="view-panel-control" class="view" style="display:none">
+  <div class="pc-wrap">
+    <!-- Encabezado -->
+    <div class="pc-head">
+      <div class="pc-head-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      </div>
+      <div>
+        <div style="font-size:var(--text-lg);font-weight:700">Panel de Control</div>
+        <div style="font-size:var(--text-xs);color:var(--color-text-muted)">Administración del sistema · Hestia ERP</div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="pc-tabs">
+      <button class="pc-tab active" onclick="pcTab('apariencia',this)">Apariencia</button>
+      <button class="pc-tab" onclick="pcTab('menu',this)">Menú</button>
+      <button class="pc-tab" onclick="pcTab('conexiones',this)">Conexiones</button>
+      <button class="pc-tab" onclick="pcTab('general',this)">General</button>
+    </div>
+
+    <!-- ── Apariencia ─────────────────────────────────────── -->
+    <div id="pc-apariencia" class="pc-section">
+      <!-- Modo claro / oscuro -->
+      <div class="pc-card">
+        <div class="pc-card-title">Modo de visualización</div>
+        <div class="theme-toggle-row">
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--color-text)">Modo oscuro</div>
+            <div style="font-size:11px;color:var(--color-text-muted);margin-top:2px">Cambia el fondo y los colores base del sistema</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="pc-dark-toggle" onchange="pcToggleDark(this.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+      <!-- Paletas de color -->
+      <div class="pc-card">
+        <div class="pc-card-title">Color de acento</div>
+        <div class="theme-grid" id="pc-theme-grid"></div>
+        <div style="margin-top:16px;font-size:11px;color:var(--color-text-muted)">
+          El color de acento afecta botones, links activos, indicadores y elementos de marca en toda la aplicación. Se guarda en el navegador.
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Menú ───────────────────────────────────────────── -->
+    <div id="pc-menu" class="pc-section" style="display:none">
+      <div class="pc-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div class="pc-card-title" style="margin-bottom:0">Items del menú</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="text" id="pc-menu-search" placeholder="Buscar…" oninput="pcFilterMenu()" style="padding:6px 10px;font-size:12px;border:1px solid var(--color-divider);border-radius:7px;background:var(--color-surface-2);color:var(--color-text);font-family:inherit;width:160px">
+            <button onclick="pcLoadMenu()" style="padding:6px 12px;font-size:12px;font-weight:600;background:var(--color-surface-offset);border:1px solid var(--color-divider);border-radius:7px;cursor:pointer;color:var(--color-text);font-family:inherit">↺ Recargar</button>
+          </div>
+        </div>
+        <div id="pc-menu-table-wrap" style="overflow-x:auto">
+          <div style="padding:32px;text-align:center;color:var(--color-text-muted);font-size:13px" id="pc-menu-empty">Cargando menú…</div>
+        </div>
+      </div>
+      <div class="pc-card" style="background:rgba(196,106,122,.04);border-color:rgba(196,106,122,.2)">
+        <div style="display:flex;gap:10px;align-items:flex-start">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <div style="font-size:12px;color:var(--color-text);line-height:1.6">
+            Los items del menú se editan directamente en la pestaña <strong>Menu</strong> del
+            <a href="https://docs.google.com/spreadsheets/d/1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4/edit#gid=0" target="_blank" style="color:var(--color-primary)">Sheets ERP principal</a>.
+            Columnas: <code style="background:var(--color-surface-offset);padding:1px 5px;border-radius:4px;font-size:11px">ID · Padre · Label · Seccion · Icono · Orden · Tipo · Fuente · Activo</code>.
+            Después de guardar en Sheets, presiona <strong>Recargar</strong> para reflejar los cambios.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Conexiones ─────────────────────────────────────── -->
+    <div id="pc-conexiones" class="pc-section" style="display:none">
+      <div class="pc-card">
+        <div class="pc-card-title">API y Spreadsheets activos</div>
+        <div style="display:flex;flex-direction:column;gap:10px" id="pc-conn-list">
+          <!-- Se rellena con pcRenderConexiones() -->
+        </div>
+      </div>
+      <div class="pc-card">
+        <div class="pc-card-title">Estado del sistema</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px" id="pc-sys-status">
+          <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">
+            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Versión Frontend</div>
+            <div style="font-size:13px;font-weight:700;font-family:monospace" id="pc-fe-ver">—</div>
+          </div>
+          <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">
+            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Versión API</div>
+            <div style="font-size:13px;font-weight:700;font-family:monospace" id="pc-api-ver">—</div>
+          </div>
+          <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">
+            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Auto-refresh</div>
+            <div style="font-size:13px;font-weight:700" id="pc-refresh-val">—</div>
+          </div>
+          <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">
+            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Caché frontend</div>
+            <div style="font-size:13px;font-weight:700" id="pc-cache-val">—</div>
+          </div>
+          <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">
+            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Vistas en caché</div>
+            <div style="font-size:13px;font-weight:700" id="pc-cache-count">—</div>
+          </div>
+          <div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">
+            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">Última sincronización</div>
+            <div style="font-size:13px;font-weight:700" id="pc-last-sync">—</div>
+          </div>
+        </div>
+      </div>
+      <div class="pc-card">
+        <div class="pc-card-title">Dominio y hosting</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div class="conn-row">
+            <div class="conn-label">Dominio personalizado</div>
+            <div class="conn-val" style="font-weight:700;color:var(--color-primary)">erp.hestiafertility.com</div>
+            <div style="font-size:10px;color:var(--color-text-muted);margin-top:3px">CNAME → enrique-hestia.github.io · GitHub Pages + HTTPS automático</div>
+          </div>
+          <div class="conn-row">
+            <div class="conn-label">Repositorio GitHub</div>
+            <div class="conn-val">enrique-hestia / hestia-erp</div>
+            <a href="https://github.com/enrique-hestia/hestia-erp" target="_blank" class="conn-link">→ Ver repositorio</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── General ────────────────────────────────────────── -->
+    <div id="pc-general" class="pc-section" style="display:none">
+      <div class="pc-card">
+        <div class="pc-card-title">Información de la clínica</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div>
+            <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:5px">Nombre de la clínica</label>
+            <input id="pc-g-nombre" type="text" value="Hestia Fertility" style="width:100%;padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:13px;background:var(--color-surface-2);color:var(--color-text);font-family:inherit;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:5px">País</label>
+            <select id="pc-g-pais" style="width:100%;padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:13px;background:var(--color-surface-2);color:var(--color-text);font-family:inherit;box-sizing:border-box">
+              <option value="MX" selected>México</option>
+              <option value="US">Estados Unidos</option>
+              <option value="ES">España</option>
+              <option value="AR">Argentina</option>
+              <option value="CO">Colombia</option>
+              <option value="CL">Chile</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:5px">Moneda</label>
+            <select id="pc-g-moneda" style="width:100%;padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:13px;background:var(--color-surface-2);color:var(--color-text);font-family:inherit;box-sizing:border-box">
+              <option value="MXN" selected>MXN — Peso mexicano</option>
+              <option value="USD">USD — Dólar americano</option>
+              <option value="EUR">EUR — Euro</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:5px">Zona horaria</label>
+            <select id="pc-g-tz" style="width:100%;padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:13px;background:var(--color-surface-2);color:var(--color-text);font-family:inherit;box-sizing:border-box">
+              <option value="America/Mexico_City" selected>América/Ciudad de México (UTC-6)</option>
+              <option value="America/Monterrey">América/Monterrey (UTC-6)</option>
+              <option value="America/Tijuana">América/Tijuana (UTC-8)</option>
+              <option value="America/New_York">América/Nueva York (UTC-5)</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:5px">Email de contacto</label>
+            <input id="pc-g-email" type="email" value="enrique@hestiafertility.com" style="width:100%;padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:13px;background:var(--color-surface-2);color:var(--color-text);font-family:inherit;box-sizing:border-box">
+          </div>
+          <div>
+            <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:5px">Sitio web</label>
+            <input id="pc-g-web" type="url" value="https://hestiafertility.com" style="width:100%;padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:13px;background:var(--color-surface-2);color:var(--color-text);font-family:inherit;box-sizing:border-box">
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:18px">
+          <button onclick="pcSaveGeneral()" style="padding:9px 22px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Guardar cambios</button>
+          <div id="pc-g-msg" style="font-size:12px;color:var(--color-text-muted)"></div>
+        </div>
+      </div>
+
+      <div class="pc-card">
+        <div class="pc-card-title">Sesión activa</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px" id="pc-session-info"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
 
 </main>
 </div>
@@ -4111,6 +4351,14 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     loadConciliacionData();
     return;
   }
+  // Panel de Control
+  if (/panel.?control/i.test(viewId)) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _pcEl = document.getElementById('view-panel-control');
+    if (_pcEl) _pcEl.style.display = '';
+    pcInit();
+    return;
+  }
   // Gestión de roles (acceso directo desde Configuración): mostrar shell + cargar roles
   if (viewId === 'gestion-roles') { renderGestionRoles({}); grLoadRoles(); return; }
   // Si el API devolverá fuente=Roles, renderViewData lo interceptará automáticamente
@@ -4557,6 +4805,261 @@ function applyDateRange() {
 }
 
 /* ── INIT ─── */
+/* ══ PANEL DE CONTROL ══════════════════════════════════════════
+   Apariencia · Menú · Conexiones · General
+   Almacenamiento: localStorage para preferencias de UI;
+   Sheets (via API) para menú y config de clínica.
+   ══════════════════════════════════════════════════════════════ */
+
+var PC_THEMES = [
+  { id:'hestia',    name:'Rosa Hestia',     desc:'Color oficial de marca',
+    p:'#c46a7a', ph:'#a8505f', pa:'#8c3848', hl:'rgba(196,106,122,.12)',
+    hld:'#4a3038', pd:'#e08898', phd:'#c86a7a', pad:'#aa5060' },
+  { id:'azul',      name:'Azul corporativo', desc:'Profesional y confiable',
+    p:'#2563eb', ph:'#1d4ed8', pa:'#1e40af', hl:'rgba(37,99,235,.12)',
+    hld:'#1e3a8a', pd:'#60a5fa', phd:'#3b82f6', pad:'#2563eb' },
+  { id:'esmeralda', name:'Verde esmeralda',  desc:'Salud y bienestar',
+    p:'#059669', ph:'#047857', pa:'#065f46', hl:'rgba(5,150,105,.12)',
+    hld:'#064e3b', pd:'#34d399', phd:'#10b981', pad:'#059669' },
+  { id:'indigo',    name:'Índigo',           desc:'Moderno y tecnológico',
+    p:'#6366f1', ph:'#4f46e5', pa:'#4338ca', hl:'rgba(99,102,241,.12)',
+    hld:'#312e81', pd:'#a5b4fc', phd:'#818cf8', pad:'#6366f1' },
+  { id:'ambar',     name:'Ámbar',            desc:'Cálido y energético',
+    p:'#d97706', ph:'#b45309', pa:'#92400e', hl:'rgba(217,119,6,.12)',
+    hld:'#78350f', pd:'#fbbf24', phd:'#f59e0b', pad:'#d97706' },
+  { id:'pizarra',   name:'Gris pizarra',     desc:'Minimalista y neutral',
+    p:'#475569', ph:'#334155', pa:'#1e293b', hl:'rgba(71,85,105,.12)',
+    hld:'#1e293b', pd:'#94a3b8', phd:'#64748b', pad:'#475569' }
+];
+
+var _pcActiveTab = 'apariencia';
+var _pcMenuAll   = [];
+
+function pcInit() {
+  pcRenderApariencia();
+  pcRenderConexiones();
+  pcRenderSession();
+  pcLoadMenu();
+  // Sincronizar toggle de modo oscuro
+  var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  var tog = document.getElementById('pc-dark-toggle');
+  if (tog) tog.checked = isDark;
+  // Mostrar tab activo
+  pcTab(_pcActiveTab, null, true);
+}
+
+function pcTab(tab, btn, silent) {
+  _pcActiveTab = tab;
+  ['apariencia','menu','conexiones','general'].forEach(function(t) {
+    var el = document.getElementById('pc-' + t);
+    if (el) el.style.display = (t === tab) ? '' : 'none';
+  });
+  document.querySelectorAll('#view-panel-control .pc-tab').forEach(function(b) {
+    b.classList.toggle('active', b.getAttribute('onclick') && b.getAttribute('onclick').indexOf("'" + tab + "'") > -1);
+  });
+}
+
+/* ── Apariencia ─────────────────────────────────────────────── */
+
+function pcRenderApariencia() {
+  var saved = localStorage.getItem('hestia_theme') || 'hestia';
+  var grid  = document.getElementById('pc-theme-grid');
+  if (!grid) return;
+  grid.innerHTML = PC_THEMES.map(function(t) {
+    var active = t.id === saved ? ' active' : '';
+    return '<div class="theme-card' + active + '" onclick="pcApplyTheme(\'' + t.id + '\')" title="' + t.desc + '">'
+      + '<div class="theme-swatch" style="background:' + t.hl.replace('rgba','rgba') + ';border:1.5px solid ' + t.p + '20">'
+      + '<div class="theme-dot" style="background:' + t.p + '"></div>'
+      + '<div class="theme-dot" style="background:' + t.ph + '"></div>'
+      + '<div class="theme-dot" style="background:' + t.pa + '"></div>'
+      + '</div>'
+      + '<div class="theme-name">' + t.name + '</div>'
+      + '<div class="theme-desc">' + t.desc + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function pcApplyTheme(themeId) {
+  var t = PC_THEMES.find(function(x){ return x.id === themeId; });
+  if (!t) return;
+  var root = document.documentElement;
+  var dark = root.getAttribute('data-theme') === 'dark';
+  root.style.setProperty('--color-primary',        dark ? t.pd  : t.p);
+  root.style.setProperty('--color-primary-hover',  dark ? t.phd : t.ph);
+  root.style.setProperty('--color-primary-active', dark ? t.pad : t.pa);
+  root.style.setProperty('--color-primary-hl',     dark ? t.hld : t.hl);
+  localStorage.setItem('hestia_theme', themeId);
+  // Actualizar selección visual
+  document.querySelectorAll('.theme-card').forEach(function(c) {
+    c.classList.toggle('active', c.getAttribute('onclick') && c.getAttribute('onclick').indexOf("'" + themeId + "'") > -1);
+  });
+}
+
+function pcLoadTheme() {
+  var saved = localStorage.getItem('hestia_theme');
+  if (saved) pcApplyTheme(saved);
+  // Restaurar modo oscuro
+  var darkSaved = localStorage.getItem('hestia_dark');
+  if (darkSaved === '1') {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    var tog = document.getElementById('pc-dark-toggle');
+    if (tog) tog.checked = true;
+  }
+}
+
+function pcToggleDark(isDark) {
+  document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+  localStorage.setItem('hestia_dark', isDark ? '1' : '0');
+  // Reaplicar tema de color con la variante correcta
+  var saved = localStorage.getItem('hestia_theme') || 'hestia';
+  pcApplyTheme(saved);
+}
+
+/* ── Menú ───────────────────────────────────────────────────── */
+
+function pcLoadMenu() {
+  var wrap  = document.getElementById('pc-menu-table-wrap');
+  var empty = document.getElementById('pc-menu-empty');
+  if (empty) empty.style.display = '';
+  if (empty) empty.textContent = 'Cargando menú…';
+  _pcMenuAll = (menuItems || []).slice();
+  if (_pcMenuAll.length) { pcRenderMenuTable(_pcMenuAll); return; }
+  // Si aún no hay menuItems, usar caché de localStorage
+  try {
+    var cached = JSON.parse(localStorage.getItem(LS_PREFIX + 'menu') || 'null');
+    if (cached && cached.items) { _pcMenuAll = cached.items; pcRenderMenuTable(_pcMenuAll); return; }
+  } catch(e2){}
+  if (empty) empty.textContent = 'El menú aún no ha cargado. Navega a otra vista y regresa.';
+}
+
+function pcFilterMenu() {
+  var q = (document.getElementById('pc-menu-search') || {}).value || '';
+  if (!q.trim()) { pcRenderMenuTable(_pcMenuAll); return; }
+  var lq = q.toLowerCase();
+  pcRenderMenuTable(_pcMenuAll.filter(function(it){
+    return (it.label||'').toLowerCase().indexOf(lq) > -1
+        || (it.id||'').toLowerCase().indexOf(lq) > -1
+        || (it.seccion||'').toLowerCase().indexOf(lq) > -1
+        || (it.fuente||'').toLowerCase().indexOf(lq) > -1;
+  }));
+}
+
+function pcRenderMenuTable(items) {
+  var wrap  = document.getElementById('pc-menu-table-wrap');
+  var empty = document.getElementById('pc-menu-empty');
+  if (!items || !items.length) {
+    if (wrap) wrap.innerHTML = '';
+    if (empty) { empty.style.display = ''; empty.textContent = 'Sin resultados.'; }
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  var sorted = items.slice().sort(function(a,b){ return (a.orden||0)-(b.orden||0); });
+  var html = '<table class="menu-table"><thead><tr>'
+    + '<th>ID</th><th>Label</th><th>Sección</th><th>Padre</th>'
+    + '<th>Tipo</th><th>Fuente</th><th>Icono</th><th>Orden</th><th>Estado</th>'
+    + '</tr></thead><tbody>';
+  sorted.forEach(function(it) {
+    var activo = it.activo !== false && String(it.activo).toLowerCase() !== 'false';
+    html += '<tr>'
+      + '<td><code style="font-size:10px;background:var(--color-surface-offset);padding:2px 5px;border-radius:4px">' + (it.id||'') + '</code></td>'
+      + '<td style="font-weight:600">' + (it.label||'—') + '</td>'
+      + '<td style="color:var(--color-text-muted)">' + (it.seccion||'—') + '</td>'
+      + '<td style="font-size:11px;color:var(--color-text-muted)">' + (it.padre||'—') + '</td>'
+      + '<td>' + (it.tipo||'—') + '</td>'
+      + '<td style="font-size:11px">' + (it.fuente||'—') + '</td>'
+      + '<td style="text-align:center">' + (it.icono ? '<i data-lucide="' + it.icono + '" style="width:14px;height:14px"></i>' : '—') + '</td>'
+      + '<td style="text-align:center;color:var(--color-text-muted)">' + (it.orden||'—') + '</td>'
+      + '<td><span class="menu-badge' + (activo ? '' : ' off') + '">' + (activo ? 'Activo' : 'Inactivo') + '</span></td>'
+      + '</tr>';
+  });
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  try { lucide.createIcons(); } catch(e){}
+}
+
+/* ── Conexiones ─────────────────────────────────────────────── */
+
+function pcRenderConexiones() {
+  var list = document.getElementById('pc-conn-list');
+  if (!list) return;
+  var conns = [
+    { label:'Apps Script URL (API)',              val: APPS_SCRIPT_URL,  link: APPS_SCRIPT_URL },
+    { label:'ERP Principal (SHEET_ID)',            val: MAIN_SHEET_ID,    link: 'https://docs.google.com/spreadsheets/d/' + MAIN_SHEET_ID + '/edit' },
+    { label:'Laboratorio (LAB_SS_ID)',             val: LAB_SS_ID_FE,     link: 'https://docs.google.com/spreadsheets/d/' + LAB_SS_ID_FE + '/edit' },
+    { label:'Medicamentos / Captura (MED_SS_ID)', val: MED_SS_ID_FE,     link: 'https://docs.google.com/spreadsheets/d/' + MED_SS_ID_FE + '/edit' },
+    { label:'Bancos (BANKS_SS_ID)',                val: '1O1tmtuVMlDl6rsN0IVFH14KmYjQZhY6GOs68PU_u0cg', link: 'https://docs.google.com/spreadsheets/d/1O1tmtuVMlDl6rsN0IVFH14KmYjQZhY6GOs68PU_u0cg/edit' },
+    { label:'Caja Chica',                          val: '1uB9HnQLqHbotP0w21z6mVQcc4ABb428iKXEru8hvDQE', link: 'https://docs.google.com/spreadsheets/d/1uB9HnQLqHbotP0w21z6mVQcc4ABb428iKXEru8hvDQE/edit' },
+    { label:'Pacientes (PAC_SS_ID)',               val: '1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio', link: 'https://docs.google.com/spreadsheets/d/1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio/edit' },
+    { label:'Productos (PROD_SS_ID)',              val: '1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY', link: 'https://docs.google.com/spreadsheets/d/1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY/edit' },
+    { label:'Estado de Resultados (ER_SS_ID)',     val: '17jlXzaIvohpN_UoE2kvLK1Bb6P6JxyKONsnrDX_St9U', link: 'https://docs.google.com/spreadsheets/d/17jlXzaIvohpN_UoE2kvLK1Bb6P6JxyKONsnrDX_St9U/edit' }
+  ];
+  list.innerHTML = conns.map(function(c) {
+    return '<div class="conn-row">'
+      + '<div class="conn-label">' + c.label + '</div>'
+      + '<div class="conn-val">' + c.val + '</div>'
+      + (c.link ? '<a href="' + c.link + '" target="_blank" class="conn-link">→ Abrir en Sheets</a>' : '')
+      + '</div>';
+  }).join('');
+  // Estado del sistema
+  var set = function(id, val) { var el = document.getElementById(id); if (el) el.textContent = val || '—'; };
+  set('pc-fe-ver',      DASHBOARD_VERSION);
+  set('pc-api-ver',     _apiVersion);
+  set('pc-refresh-val', (AUTO_REFRESH_MS / 60000) + ' min');
+  set('pc-cache-val',   (FRONTEND_CACHE_MS / 60000) + ' min');
+  set('pc-cache-count', Object.keys(viewCache || {}).length + ' vistas');
+  var syncEl = document.getElementById('sync-status');
+  set('pc-last-sync', syncEl ? syncEl.textContent : '—');
+}
+
+/* ── General ────────────────────────────────────────────────── */
+
+function pcRenderSession() {
+  var s   = getSession() || {};
+  var el  = document.getElementById('pc-session-info');
+  if (!el) return;
+  var items = [
+    { label:'Usuario',      val: s.nombre || s.email || 'Invitado' },
+    { label:'Email',        val: s.email || '—' },
+    { label:'Rol',          val: s.rol || '—' },
+    { label:'Periodo activo', val: currentFechaInicio && currentFechaFin
+        ? currentFechaInicio + ' → ' + currentFechaFin : currentPeriodo || '—' }
+  ];
+  el.innerHTML = items.map(function(i) {
+    return '<div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px">'
+      + '<div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:4px">' + i.label + '</div>'
+      + '<div style="font-size:13px;font-weight:700;word-break:break-all">' + i.val + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function pcSaveGeneral() {
+  var data = {
+    nombre:  (document.getElementById('pc-g-nombre') || {}).value || '',
+    pais:    (document.getElementById('pc-g-pais')   || {}).value || '',
+    moneda:  (document.getElementById('pc-g-moneda') || {}).value || '',
+    tz:      (document.getElementById('pc-g-tz')     || {}).value || '',
+    email:   (document.getElementById('pc-g-email')  || {}).value || '',
+    web:     (document.getElementById('pc-g-web')    || {}).value || ''
+  };
+  localStorage.setItem('hestia_general_config', JSON.stringify(data));
+  var msg = document.getElementById('pc-g-msg');
+  if (msg) { msg.textContent = '✓ Guardado localmente'; msg.style.color = 'var(--color-green)'; setTimeout(function(){ msg.textContent = ''; }, 3000); }
+}
+
+function pcLoadGeneral() {
+  try {
+    var data = JSON.parse(localStorage.getItem('hestia_general_config') || 'null');
+    if (!data) return;
+    var set = function(id, val) { var el = document.getElementById(id); if (el && val) el.value = val; };
+    set('pc-g-nombre', data.nombre);
+    set('pc-g-pais',   data.pais);
+    set('pc-g-moneda', data.moneda);
+    set('pc-g-tz',     data.tz);
+    set('pc-g-email',  data.email);
+    set('pc-g-web',    data.web);
+  } catch(e) {}
+}
+
 /* ══ SESIÓN ══════════════════════════════════════════════════ */
 var SESSION_KEY = 'hestia_session';
 function getSession() {
@@ -4642,6 +5145,8 @@ function handleApiError(data) {
 
 /* ══ INIT ════════════════════════════════════════════════════ */
 window.addEventListener('DOMContentLoaded', function() {
+  pcLoadTheme();   // Restaura tema de color y modo oscuro guardados
+  pcLoadGeneral(); // Restaura config general guardada
   initTheme();
 
   function waitForChart(attempts) {
