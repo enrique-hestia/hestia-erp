@@ -774,6 +774,9 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
   </div>
 </div>
 
+<!-- ══ VISTA: CONCILIACIÓN BANCARIA ══ -->
+<div id="view-conciliacion" class="view" style="display:none"></div>
+
 <!-- ══ VISTA: SERVICIOS ══ -->
 <div id="view-servicios" class="view" style="display:none">
   <div class="card">
@@ -2241,6 +2244,354 @@ async function loadCashFlowData() {
   }
 }
 
+/* ══════════════════════════════════════════════════════════
+   CONCILIACIÓN BANCARIA
+   ══════════════════════════════════════════════════════════ */
+var _cbLiveData = null;
+var _cbActiveBanco = 'santander';
+var _cbDrawerOpen  = false;
+
+async function loadConciliacionData() {
+  var el = document.getElementById('view-conciliacion');
+  if (!el) return;
+  el.innerHTML = '<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px">'
+    +'<div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Cargando conciliación bancaria…</div>';
+  try {
+    var tok = encodeURIComponent(getToken());
+    var resp = await fetch(APPS_SCRIPT_URL + '?action=banks&token=' + tok, {redirect:'follow'});
+    var data = await resp.json();
+    _cbLiveData = data;
+    renderConciliacion(data);
+  } catch(e) {
+    renderConciliacion({error: e.message, bancos:{}});
+  }
+}
+
+function cbSB(id) {
+  _cbActiveBanco = id;
+  renderConciliacion(_cbLiveData);
+  setTimeout(function(){ var d=document.getElementById('cb-drw'); if(d&&_cbDrawerOpen) d.classList.add('open'); },0);
+}
+
+function cbOpenDrawer() {
+  _cbDrawerOpen = true;
+  var d = document.getElementById('cb-drw'), o = document.getElementById('cb-ovl');
+  if (d) d.classList.add('open');
+  if (o) o.classList.add('open');
+  var bb = document.getElementById('cb-dbb');
+  if (bb) bb.innerHTML = cbBuildForm(_cbActiveBanco);
+}
+
+function cbCloseDrawer() {
+  _cbDrawerOpen = false;
+  var d = document.getElementById('cb-drw'), o = document.getElementById('cb-ovl');
+  if (d) d.classList.remove('open');
+  if (o) o.classList.remove('open');
+}
+
+window.cbSB = cbSB;
+window.cbOpenDrawer = cbOpenDrawer;
+window.cbCloseDrawer = cbCloseDrawer;
+
+function cbBuildForm(banco) {
+  var today = new Date().toISOString().slice(0,10);
+  var mes = new Date().toLocaleDateString('es-MX',{month:'short',year:'2-digit'}).replace(' ','-');
+  var h = [];
+  if (banco === 'santander') {
+    h.push('<div class="cf-form-group"><label class="cf-lbl">Fecha</label><input type="date" id="cb-fecha" class="cf-inp" value="'+today+'"></div>');
+    h.push('<div class="cf-form-group"><label class="cf-lbl">Tipo</label><select id="cb-tipo" class="cf-sel"><option value="deposito">Depósito</option><option value="retiro">Retiro</option></select></div>');
+    h.push('<div class="cf-form-group"><label class="cf-lbl">Monto MXN</label><input type="number" id="cb-monto" class="cf-inp" placeholder="0.00" step="0.01" min="0"></div>');
+    h.push('<div class="cf-form-group"><label class="cf-lbl">Referencia / Concepto</label><input type="text" id="cb-referencia" class="cf-inp" placeholder="Descripción del movimiento"></div>');
+    h.push('<hr style="border:none;border-top:1px solid var(--color-divider,#e5e7eb);margin:6px 0 14px">');
+    h.push('<div class="cf-form-row"><div class="cf-form-group"><label class="cf-lbl">Monto USD</label><input type="number" id="cb-usd" class="cf-inp" placeholder="0.00" step="0.01"></div><div class="cf-form-group"><label class="cf-lbl">T. Cambio</label><input type="number" id="cb-tc" class="cf-inp" placeholder="18.50" step="0.01"></div></div>');
+    h.push('<div class="cf-form-row"><div class="cf-form-group"><label class="cf-lbl">Póliza</label><input type="text" id="cb-poliza" class="cf-inp" placeholder="D-01, I-01…"></div><div class="cf-form-group"><label class="cf-lbl">Observaciones</label><input type="text" id="cb-obs" class="cf-inp" placeholder="Nota adicional"></div></div>');
+  } else if (banco === 'amex') {
+    h.push('<div class="cf-form-group"><label class="cf-lbl">Fecha</label><input type="date" id="cb-fecha" class="cf-inp" value="'+today+'"></div>');
+    h.push('<div class="cf-form-group"><label class="cf-lbl">Tipo</label><select id="cb-tipo" class="cf-sel"><option value="cargo">Cargo (gasto)</option><option value="pago">Pago a AMEX</option></select></div>');
+    h.push('<div class="cf-form-group"><label class="cf-lbl">Importe MXN</label><input type="number" id="cb-monto" class="cf-inp" placeholder="0.00" step="0.01"><div class="cf-hint">Cargo: número positivo · Pago: número negativo</div></div>');
+    h.push('<div class="cf-form-group"><label class="cf-lbl">Referencia / Establecimiento</label><input type="text" id="cb-referencia" class="cf-inp" placeholder="Nombre del comercio"></div>');
+    h.push('<hr style="border:none;border-top:1px solid var(--color-divider,#e5e7eb);margin:6px 0 14px">');
+    h.push('<div class="cf-form-row"><div class="cf-form-group"><label class="cf-lbl">Monto USD</label><input type="number" id="cb-usd" class="cf-inp" placeholder="0.00" step="0.01"></div><div class="cf-form-group"><label class="cf-lbl">T. Cambio</label><input type="number" id="cb-tc" class="cf-inp" placeholder="18.50" step="0.01"></div></div>');
+    h.push('<div class="cf-form-row"><div class="cf-form-group"><label class="cf-lbl">Notas</label><input type="text" id="cb-notas" class="cf-inp" placeholder="Descripción adicional"></div><div class="cf-form-group"><label class="cf-lbl">Póliza</label><input type="text" id="cb-poliza" class="cf-inp" placeholder="D-01…"></div></div>');
+    h.push('<div class="cf-form-group"><label class="cf-lbl">Mes edo. de cuenta</label><input type="text" id="cb-mes" class="cf-inp" value="'+mes+'"></div>');
+  } else {
+    // Mercado Pago
+    h.push('<div class="cf-form-group"><label class="cf-lbl">Fecha</label><input type="date" id="cb-fecha" class="cf-inp" value="'+today+'"></div>');
+    h.push('<div class="cf-form-group"><label class="cf-lbl">Tipo</label><select id="cb-tipo" class="cf-sel"><option value="CARGO">CARGO (cobro)</option><option value="ABONO">ABONO (retiro)</option></select></div>');
+    h.push('<div class="cf-form-group"><label class="cf-lbl">Cobro bruto</label><input type="number" id="cb-cobro" class="cf-inp" placeholder="0.00" step="0.01" oninput="cbMPCalc()"><div class="cf-hint">Para ABONO ingresa número negativo</div></div>');
+    h.push('<div class="cf-form-group"><label class="cf-lbl">Comisión MP (importe $)</label><input type="number" id="cb-importe-com" class="cf-inp" placeholder="0.00" step="0.01" min="0" oninput="cbMPCalc()"><div class="cf-hint">Descuento en pesos que cobra Mercado Pago</div></div>');
+    h.push('<div class="cf-form-group"><div class="cf-calc" id="cb-mp-calc">Ingresa el cobro para calcular</div><input type="hidden" id="cb-comisiones" value="0"><input type="hidden" id="cb-pct-com" value="0"><input type="hidden" id="cb-total-venta" value="0"></div>');
+    h.push('<div class="cf-form-row"><div class="cf-form-group"><label class="cf-lbl">Mes</label><input type="text" id="cb-mes" class="cf-inp" value="'+mes+'"></div><div class="cf-form-group"><label class="cf-lbl">Observaciones</label><input type="text" id="cb-obs" class="cf-inp" placeholder="Nombre paciente…"></div></div>');
+  }
+  h.push('<div style="margin-top:18px;display:flex;gap:10px">'
+    +'<button class="cf-btn cf-btp" style="flex:1;justify-content:center" onclick="cbSaveRow()">Guardar movimiento</button>'
+    +'<button class="cf-btn cf-btg" onclick="cbCloseDrawer()">Cancelar</button>'
+    +'</div>');
+  return h.join('');
+}
+
+window.cbMPCalc = function() {
+  var c = parseFloat(document.getElementById('cb-cobro').value)||0;
+  var imp = parseFloat(document.getElementById('cb-importe-com').value)||0;
+  var cm = -Math.abs(imp);
+  var ne = c + cm;
+  var pct = (c!==0) ? ((Math.abs(cm)/Math.abs(c))*100) : 0;
+  var el = document.getElementById('cb-mp-calc');
+  if (el) el.innerHTML = '% Comisión: <strong>'+pct.toFixed(4)+'%</strong> &nbsp;·&nbsp; Neto: <strong>$'+ne.toFixed(2)+'</strong>';
+  var ce = document.getElementById('cb-comisiones'); if(ce) ce.value = cm.toFixed(2);
+  var pe = document.getElementById('cb-pct-com');    if(pe) pe.value = pct.toFixed(4);
+  var te = document.getElementById('cb-total-venta');if(te) te.value = ne.toFixed(2);
+};
+
+window.cbSaveRow = async function() {
+  function g(id){ var e=document.getElementById(id); return e?e.value.trim():''; }
+  function n(id){ var v=parseFloat(g(id)); return isNaN(v)?0:v; }
+  var fecha = g('cb-fecha');
+  if (!fecha) { alert('La fecha es obligatoria'); return; }
+  var row, banco = _cbActiveBanco;
+  if (banco==='santander') {
+    var tipo=g('cb-tipo'), monto=Math.abs(n('cb-monto'));
+    row = [fecha, tipo==='deposito'?monto:0, tipo==='retiro'?monto:0, 0, g('cb-referencia'), n('cb-usd'), n('cb-tc'), g('cb-poliza'), g('cb-obs')];
+  } else if (banco==='amex') {
+    var mov=n('cb-monto');
+    if(g('cb-tipo')==='pago'&&mov>0) mov=-mov;
+    row = [fecha, mov, 0, g('cb-referencia'), n('cb-usd'), n('cb-tc'), g('cb-notas'), g('cb-poliza'), g('cb-mes')];
+  } else {
+    row = [g('cb-mes'), fecha, n('cb-cobro'), n('cb-importe-com'), n('cb-pct-com'), n('cb-total-venta'), g('cb-obs'), false];
+  }
+  var btn = document.querySelector('#cb-drw .cf-btp');
+  if (btn) { btn.disabled=true; btn.textContent='Guardando…'; }
+  try {
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'saveBankRow', banco:banco, row:row})});
+    var res = await r.json();
+    if (res.ok) { cbCloseDrawer(); loadConciliacionData(); }
+    else { alert('Error: '+(res.error||'No se pudo guardar')); if(btn){btn.disabled=false;btn.textContent='Guardar movimiento';} }
+  } catch(e) { alert('Error de conexión'); if(btn){btn.disabled=false;btn.textContent='Guardar movimiento';} }
+};
+
+function renderConciliacion(data) {
+  var el = document.getElementById('view-conciliacion');
+  if (!el) return;
+  var live = !!(data && data.bancos && Object.keys(data.bancos).length);
+  var bancos = (data&&data.bancos)||{};
+  function bk(id, fallback) {
+    return bancos[id] || {id:id, nombre:fallback, saldo:0, movimientos:[], totalRows:0, color:'#888'};
+  }
+  var sant = bk('santander','Santander');
+  var mp   = bk('mercadopago','Mercado Pago');
+  var amex = bk('amex','AMEX');
+  var allB = [sant, mp, amex];
+  var aB   = allB.filter(function(b){ return b.id===_cbActiveBanco; })[0] || sant;
+  function fS(v){ return '$'+Math.round(Math.abs(v)).toLocaleString('en-US'); }
+  var hh = [];
+
+  // ── Estilos ──────────────────────────────────────────────
+  hh.push('<style id="cb-styles">'
+    +'.cb-wrap{display:grid;grid-template-columns:1fr 320px;gap:20px;padding:20px;max-width:1400px;margin:0 auto}'
+    +'@media(max-width:1024px){.cb-wrap{grid-template-columns:1fr}}'
+    +'.cb-main{min-width:0}'
+    +'.cb-top{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:16px;padding:20px 24px;margin-bottom:16px}'
+    +'.cb-top-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}'
+    +'.cb-h1{font-size:18px;font-weight:700;color:var(--text-primary,#111);margin:0 0 3px}'
+    +'.cb-h1s{font-size:11.5px;color:var(--text-secondary,#6b7280)}'
+    +'.cb-acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}'
+    // KPI grid
+    +'.cb-kg{display:grid;grid-template-columns:repeat(3,1fr);gap:13px;margin-bottom:16px}'
+    +'@media(max-width:900px){.cb-kg{grid-template-columns:repeat(2,1fr)}}'
+    +'@media(max-width:500px){.cb-kg{grid-template-columns:1fr}}'
+    +'.cb-k{background:var(--card-bg,#fff);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:16px 18px;cursor:pointer;transition:box-shadow .15s,border-color .15s;position:relative;overflow:hidden}'
+    +'.cb-k:hover{box-shadow:0 4px 18px rgba(0,0,0,.08)}'
+    +'.cb-k.act{border-color:var(--kc,#888);box-shadow:0 0 0 3px color-mix(in srgb,var(--kc,#888) 15%,transparent)}'
+    +'.cb-kstr{position:absolute;top:0;left:0;right:0;height:3px}'
+    +'.cb-klogo{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:800;margin-bottom:10px;letter-spacing:-.3px}'
+    +'.cb-klbl{font-size:11px;font-weight:600;color:var(--text-secondary,#6b7280);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}'
+    +'.cb-kval{font-size:20px;font-weight:800;color:var(--text-primary,#111);margin-bottom:4px}'
+    +'.cb-kmeta{font-size:10.5px;color:var(--text-secondary,#9ca3af)}'
+    +'.cb-k-debt{border-color:rgba(180,83,9,.2);background:rgba(180,83,9,.03)}'
+    // Tabla movimientos
+    +'.cb-body{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:16px;overflow:hidden}'
+    +'.cb-tabs{display:flex;gap:6px;padding:14px 16px 0;border-bottom:1px solid var(--color-divider,#e5e7eb)}'
+    +'.cb-tab{display:flex;align-items:center;gap:7px;padding:7px 14px;border-radius:8px 8px 0 0;font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;transition:color .15s}'
+    +'.cb-tab.act{color:var(--text-primary,#111);border-bottom-color:var(--color-primary,#c46a7a);background:var(--color-surface,#f9f9f9)}'
+    +'.cb-tdot{width:8px;height:8px;border-radius:50%;flex-shrink:0}'
+    +'.cb-mc{padding:0}'
+    +'.cb-mh{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--color-divider,#f0f0f0)}'
+    +'.cb-mt{font-size:13px;font-weight:700;color:var(--text-primary,#111);display:flex;align-items:center;gap:8px}'
+    +'.cb-ms{font-size:11px;color:var(--text-secondary,#9ca3af)}'
+    +'.cb-tbl{width:100%;border-collapse:collapse;font-size:12px}'
+    +'.cb-tbl th{padding:8px 14px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);background:var(--color-surface,#f9f9f9);border-bottom:1px solid var(--color-divider,#e5e7eb);white-space:nowrap}'
+    +'.cb-tbl td{padding:9px 14px;border-bottom:1px solid var(--color-divider,#f4f4f5);vertical-align:middle}'
+    +'.cb-tbl tr:last-child td{border-bottom:none}'
+    +'.cb-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700}'
+    +'.cb-dep{background:#dcfce7;color:#166534}'
+    +'.cb-ret{background:#fee2e2;color:#991b1b}'
+    +'.cb-neu{background:#f3f4f6;color:#374151}'
+    +'.cb-empty{padding:32px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:12px}'
+    // Sidebar resumen
+    +'.cb-sc{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:16px;margin-bottom:14px}'
+    +'.cb-sh{font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:10px}'
+    +'.cb-br{display:flex;align-items:center;justify-content:space-between;padding:7px 2px;border-radius:8px}'
+    +'.cb-bn{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-primary,#374151)}'
+    +'.cb-bv{font-size:12.5px;font-weight:700;color:var(--text-primary,#111)}'
+    +'.cb-bdot{width:8px;height:8px;border-radius:50%;flex-shrink:0}'
+    +'.cb-bt{border-top:1.5px solid var(--color-divider,#e5e7eb);margin-top:6px;padding-top:10px;font-weight:700}'
+    // Drawer
+    +'.cb-ovl{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:999;backdrop-filter:blur(2px)}'
+    +'.cb-ovl.open{display:block}'
+    +'.cb-drw{position:fixed;right:0;top:0;bottom:0;width:min(420px,100vw);background:var(--card-bg,#fff);box-shadow:-4px 0 32px rgba(0,0,0,.15);z-index:1000;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column}'
+    +'.cb-drw.open{transform:none}'
+    +'.cb-dt{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--color-divider,#e5e7eb)}'
+    +'.cb-dtl{font-size:15px;font-weight:700;color:var(--text-primary,#111)}'
+    +'.cb-dx{background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-secondary,#6b7280);line-height:1;padding:4px}'
+    +'.cb-dbb{flex:1;overflow-y:auto;padding:20px}'
+    +'</style>');
+
+  hh.push('<div class="cb-wrap">');
+  hh.push('<div class="cb-main">');
+
+  // ── Header ──────────────────────────────────────────────
+  hh.push('<div class="cb-top"><div class="cb-top-row">');
+  hh.push('<div><h2 class="cb-h1">Conciliación Bancaria</h2><div class="cb-h1s">Santander · Mercado Pago · AMEX — Movimientos y saldos</div></div>');
+  hh.push('<div class="cb-acts">');
+  hh.push('<button class="cf-btn cf-btg" onclick="loadConciliacionData()">↺ Actualizar</button>');
+  hh.push('<a class="cf-btn cf-btg" href="https://docs.google.com/spreadsheets/d/1O1tmtuVMlDl6rsN0IVFH14KmYjQZhY6GOs68PU_u0cg/edit" target="_blank" style="text-decoration:none">↗ Editar en Sheets</a>');
+  hh.push('<button class="cf-btn cf-btp" onclick="cbOpenDrawer()">+ Agregar movimiento</button>');
+  hh.push('</div></div></div>');
+
+  if (!live) hh.push('<div class="cf-al cf-al-d">⚠ Sin conexión a datos bancarios. <a href="javascript:loadConciliacionData()" style="font-weight:700;text-decoration:underline">Reintentar →</a></div>');
+
+  // ── KPI Cards ─────────────────────────────────────────
+  hh.push('<div class="cb-kg">');
+  [{b:sant,color:'#ec0000',logo:'SAN'},{b:mp,color:'#009ee3',logo:'MP'},{b:amex,color:'#b45309',logo:'AMX',debt:true}].forEach(function(x){
+    var b=x.b, isDebt=x.debt, isActive=(b.id===_cbActiveBanco);
+    var val = isDebt ? fS(Math.abs(b.saldo)) : fS(b.saldo);
+    var valColor = isDebt ? '#b45309' : (b.saldo>=0?'var(--text-primary,#111)':'#dc2626');
+    var extraClass = isDebt ? ' cb-k-debt' : '';
+    hh.push('<div class="cb-k'+extraClass+(isActive?' act':'')+'" style="--kc:'+x.color+'" onclick="cbSB(\''+b.id+'\')">'
+      +'<div class="cb-kstr" style="background:'+x.color+'"></div>'
+      +'<div class="cb-klogo" style="background:'+x.color+'">'+x.logo+'</div>'
+      +'<div class="cb-klbl">'+b.nombre+'</div>'
+      +'<div class="cb-kval" style="color:'+valColor+'">'+val+'</div>'
+      +'<div class="cb-kmeta">'+(b.totalRows||0)+' movimientos · '+(isDebt?'Deuda tarjeta':'Saldo disponible')+'</div>'
+      +(isDebt?'<div style="margin-top:6px;font-size:9.5px;color:#92400e;font-weight:600;background:#fef3c7;padding:3px 8px;border-radius:6px;display:inline-block">Tarjeta de crédito</div>':'')
+      +'</div>');
+  });
+  hh.push('</div>');
+
+  // ── Tabs y movimientos ────────────────────────────────
+  hh.push('<div class="cb-body">');
+  hh.push('<div class="cb-tabs">');
+  allB.forEach(function(b){
+    hh.push('<button class="cb-tab'+(b.id===_cbActiveBanco?' act':'')+'" onclick="cbSB(\''+b.id+'\')">'
+      +'<div class="cb-tdot" style="background:'+b.color+'"></div>'+b.nombre+'</button>');
+  });
+  hh.push('</div>');
+  hh.push('<div class="cb-mc">');
+  hh.push('<div class="cb-mh">'
+    +'<div><div class="cb-mt"><div style="width:9px;height:9px;border-radius:50%;background:'+aB.color+'"></div>'+aB.nombre+' — últimos movimientos</div>'
+    +'<div class="cb-ms">'+(aB.movimientos||[]).length+' de '+(aB.totalRows||0)+' registros</div></div>'
+    +'<button class="cf-btn cf-btp" style="font-size:11px;padding:6px 14px" onclick="cbSB(\''+aB.id+'\');cbOpenDrawer()">+ Nuevo</button>'
+    +'</div>');
+  var movs = (aB.movimientos||[]);
+  if (movs.length) {
+    hh.push('<div style="overflow-x:auto"><table class="cb-tbl"><thead><tr>');
+    hh.push('<th>Fecha</th>');
+    if (aB.id==='santander')    { hh.push('<th>Tipo</th><th style="text-align:right">Depósito</th><th style="text-align:right">Retiro</th><th style="text-align:right">Saldo</th><th>Referencia</th>'); }
+    else if (aB.id==='amex')    { hh.push('<th>Tipo</th><th style="text-align:right">Importe</th><th style="text-align:right">Saldo</th><th>Referencia</th>'); }
+    else                        { hh.push('<th>Tipo</th><th style="text-align:right">Cobro</th><th style="text-align:right">Comisión</th><th style="text-align:right">Neto</th><th>Obs.</th>'); }
+    hh.push('</tr></thead><tbody>');
+    movs.forEach(function(m) {
+      hh.push('<tr>');
+      hh.push('<td style="white-space:nowrap;color:var(--text-secondary,#6b7280)">'+((m.fecha||m.mes)||'—')+'</td>');
+      if (aB.id==='santander') {
+        var dep=parseFloat(m.deposito||0), ret=parseFloat(m.retiro||0);
+        var tipoBadge = dep>0 ? '<span class="cb-badge cb-dep">Depósito</span>' : ret>0 ? '<span class="cb-badge cb-ret">Retiro</span>' : '<span class="cb-badge cb-neu">—</span>';
+        hh.push('<td>'+tipoBadge+'</td>');
+        hh.push('<td style="text-align:right;font-weight:600;color:#166534">'+(dep>0?'$'+dep.toLocaleString('en-US',{minimumFractionDigits:2}):'—')+'</td>');
+        hh.push('<td style="text-align:right;font-weight:600;color:#991b1b">'+(ret>0?'$'+ret.toLocaleString('en-US',{minimumFractionDigits:2}):'—')+'</td>');
+        hh.push('<td style="text-align:right;font-weight:700">'+(m.saldo!=null?'$'+parseFloat(m.saldo||0).toLocaleString('en-US',{minimumFractionDigits:2}):'—')+'</td>');
+        hh.push('<td style="color:var(--text-secondary,#374151);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(m.referencia||'—')+'</td>');
+      } else if (aB.id==='amex') {
+        var imp=parseFloat(m.importe||m.monto||0);
+        var tipoBadge2 = imp>0 ? '<span class="cb-badge cb-ret">Cargo</span>' : imp<0 ? '<span class="cb-badge cb-dep">Pago</span>' : '<span class="cb-badge cb-neu">—</span>';
+        hh.push('<td>'+tipoBadge2+'</td>');
+        hh.push('<td style="text-align:right;font-weight:600;color:'+(imp>0?'#991b1b':'#166534')+'">'+(imp!==0?'$'+Math.abs(imp).toLocaleString('en-US',{minimumFractionDigits:2}):'—')+'</td>');
+        hh.push('<td style="text-align:right;font-weight:700">'+(m.saldo!=null?'$'+Math.abs(parseFloat(m.saldo||0)).toLocaleString('en-US',{minimumFractionDigits:2}):'—')+'</td>');
+        hh.push('<td style="color:var(--text-secondary,#374151);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(m.referencia||m.establecimiento||'—')+'</td>');
+      } else {
+        var cobro=parseFloat(m.cobro||m.totalBruto||0), com=parseFloat(m.comisiones||0), neto=parseFloat(m.totalVenta||0);
+        var tipoBadge3 = cobro>0?'<span class="cb-badge cb-dep">CARGO</span>':cobro<0?'<span class="cb-badge cb-ret">ABONO</span>':'<span class="cb-badge cb-neu">—</span>';
+        hh.push('<td>'+tipoBadge3+'</td>');
+        hh.push('<td style="text-align:right;font-weight:600">'+(cobro?'$'+Math.abs(cobro).toLocaleString('en-US',{minimumFractionDigits:2}):'—')+'</td>');
+        hh.push('<td style="text-align:right;color:#b45309">'+(com?'($'+Math.abs(com).toLocaleString('en-US',{minimumFractionDigits:2})+')':'—')+'</td>');
+        hh.push('<td style="text-align:right;font-weight:700;color:#009ee3">'+(neto?'$'+Math.abs(neto).toLocaleString('en-US',{minimumFractionDigits:2}):'—')+'</td>');
+        hh.push('<td style="color:var(--text-secondary,#374151);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(m.observaciones||'—')+'</td>');
+      }
+      hh.push('</tr>');
+    });
+    hh.push('</tbody></table></div>');
+  } else {
+    hh.push('<div class="cb-empty">Sin movimientos registrados para '+aB.nombre+'.<br>Usa el botón <strong>+ Agregar movimiento</strong> para capturar.</div>');
+  }
+  hh.push('</div></div></div>'); // cb-mc, cb-body, cb-main
+
+  // ── Sidebar ──────────────────────────────────────────
+  hh.push('<div>');
+  hh.push('<div class="cb-sc"><div class="cb-sh">Resumen de saldos</div>');
+  hh.push('<div class="cb-br"><div class="cb-bn"><div class="cb-bdot" style="background:#ec0000"></div>Santander</div><div class="cb-bv">$'+Math.round(sant.saldo).toLocaleString('en-US')+'</div></div>');
+  hh.push('<div class="cb-br"><div class="cb-bn"><div class="cb-bdot" style="background:#009ee3"></div>'
+    +'<div><div>Mercado Pago</div>'
+    +((mp.porLiberar||0)>0?'<div style="font-size:9.5px;color:#92400e;font-weight:600">⏳ $'+Math.round(mp.porLiberar).toLocaleString('en-US')+' por liberar</div>':'')
+    +'</div></div><div class="cb-bv">$'+Math.round(mp.saldo).toLocaleString('en-US')+'</div></div>');
+  var sanMp = sant.saldo + mp.saldo;
+  hh.push('<div class="cb-br cb-bt"><div class="cb-bn">Subtotal Disponible</div><div class="cb-bv">$'+Math.round(sanMp).toLocaleString('en-US')+'</div></div>');
+  hh.push('<div style="margin-top:12px;padding-top:10px;border-top:1px dashed rgba(180,83,9,.3)">'
+    +'<div style="font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#b45309;margin-bottom:6px">Tarjeta de crédito</div>'
+    +'<div class="cb-br" style="background:rgba(180,83,9,.04);border-radius:8px;padding:6px 8px">'
+      +'<div class="cb-bn"><div class="cb-bdot" style="background:#b45309"></div><div><div style="color:#b45309;font-weight:600">AMEX</div><div style="font-size:9.5px;color:#92400e">'+(amex.totalRows||0)+' movimientos</div></div></div>'
+      +'<div class="cb-bv" style="color:#b45309">($'+Math.round(Math.abs(amex.saldo)).toLocaleString('en-US')+')</div></div>'
+    +'</div>');
+  hh.push('</div>');
+
+  // Distribución
+  var tA = Math.max(Math.abs(sant.saldo)+Math.abs(mp.saldo)+Math.abs(amex.saldo), 1);
+  hh.push('<div class="cb-sc"><div class="cb-sh">Distribución de movimientos</div><div style="display:flex;flex-direction:column;gap:8px">');
+  [{b:sant,lbl:'Santander',c:'#ec0000'},{b:mp,lbl:'Mercado Pago',c:'#009ee3'},{b:amex,lbl:'AMEX',c:'#b45309'}].forEach(function(x){
+    var p = (Math.abs(x.b.saldo)/tA*100).toFixed(1);
+    hh.push('<div>'
+      +'<div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:4px">'
+        +'<span style="color:var(--text-primary,#374151)">'+x.lbl+'</span>'
+        +'<span style="color:'+x.c+';font-weight:700">'+p+'%</span>'
+      +'</div>'
+      +'<div style="height:6px;background:var(--color-divider,#e5e7eb);border-radius:3px;overflow:hidden">'
+        +'<div style="height:100%;width:'+p+'%;background:'+x.c+';border-radius:3px;transition:width .5s ease"></div>'
+      +'</div></div>');
+  });
+  hh.push('</div></div>');
+
+  // Nota informativa
+  hh.push('<div class="cb-sc" style="background:rgba(196,106,122,.04);border-color:rgba(196,106,122,.2)">'
+    +'<div class="cb-sh" style="color:#c46a7a">ℹ Conciliación</div>'
+    +'<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);line-height:1.6">'
+      +'Compara los movimientos capturados aquí con los estados de cuenta de cada banco. '
+      +'Los saldos se calculan de los movimientos registrados en Sheets.'
+    +'</div></div>');
+
+  hh.push('</div>'); // sidebar
+  hh.push('</div>'); // cb-wrap
+
+  // ── Drawer ───────────────────────────────────────────
+  hh.push('<div class="cb-ovl" id="cb-ovl" onclick="cbCloseDrawer()"></div>');
+  hh.push('<div class="cb-drw" id="cb-drw">');
+  hh.push('<div class="cb-dt"><div class="cb-dtl">Nuevo movimiento — '+aB.nombre+'</div><button class="cb-dx" onclick="cbCloseDrawer()">✕</button></div>');
+  hh.push('<div class="cb-dbb" id="cb-dbb">');
+  hh.push(cbBuildForm(_cbActiveBanco));
+  hh.push('</div></div>');
+
+  el.innerHTML = hh.join('');
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
 /* Construye el formulario de captura según el banco activo */
 function cfBuildForm(banco) {
   var today = new Date().toISOString().slice(0,10);
@@ -3588,6 +3939,14 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     loadCxPData();
     return;
   }
+  // Conciliación Bancaria
+  if (/concilia/i.test(viewId)) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _cbEl = document.getElementById('view-conciliacion');
+    if (_cbEl) _cbEl.style.display = '';
+    loadConciliacionData();
+    return;
+  }
   // Gestión de roles (acceso directo desde Configuración): mostrar shell + cargar roles
   if (viewId === 'gestion-roles') { renderGestionRoles({}); grLoadRoles(); return; }
   // Si el API devolverá fuente=Roles, renderViewData lo interceptará automáticamente
@@ -3735,6 +4094,7 @@ function navigateTo(viewId) {
     displayId = 'caja-chica';
   }
   if (viewId === 'egresos') { displayId = 'gastos'; }
+  if (/concilia/i.test(viewId)) { displayId = 'conciliacion'; }
   // Resolver alias: variantes de config siempre usan view-configuracion
   var resolvedId = isConfigFuente(displayId) ? 'configuracion' : displayId;
   // Mostrar la vista (conocida o genérica)
