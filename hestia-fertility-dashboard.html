@@ -2039,17 +2039,20 @@ async function loadMenu() {
     var session = getSession();
     var bloqueadas = (session && session.vistasBloqueadas) || [];
     // Fusionar "Gastos Operativos" y "Costos" en un solo ítem "Egresos"
+    // Detecta por ID O por label (insensible a mayúsculas/acentos)
     var rawMenu = (json.menu || []);
-    var gastosItem = rawMenu.filter(function(i){ return i.id==='gastos'; })[0];
-    var costosItem = rawMenu.filter(function(i){ return i.id==='costos'; })[0];
+    function _isGastos(i){ return /^gastos?$/i.test(i.id) || /gastos?\s*operativos?/i.test(i.label); }
+    function _isCostos(i){ return /^costos?$/i.test(i.id) || /^costos?$/i.test((i.label||'').trim()); }
+    function _isToReplace(i){ return _isGastos(i) || _isCostos(i); }
+    var gastosItem = rawMenu.filter(_isGastos)[0];
+    var costosItem = rawMenu.filter(_isCostos)[0];
     var egresosRef = gastosItem || costosItem;
     var egresosInserted = false;
     menuItems = rawMenu.filter(function(item) {
       if (bloqueadas.indexOf(item.id) !== -1) return false;
-      if (item.id === 'gastos' || item.id === 'costos') return false;
+      if (_isToReplace(item)) return false;
       return true;
     }).reduce(function(acc, item) {
-      // Insertar "Egresos" en el lugar donde estaba "gastos"
       if (!egresosInserted && egresosRef && item.orden > (egresosRef.orden||0)) {
         acc.push(Object.assign({}, egresosRef, {id:'egresos', label:'Egresos', icono:'trending-down', orden:(egresosRef.orden||0)}));
         egresosInserted = true;
@@ -2060,6 +2063,7 @@ async function loadMenu() {
     if (!egresosInserted && egresosRef) {
       menuItems.push(Object.assign({}, egresosRef, {id:'egresos', label:'Egresos', icono:'trending-down'}));
     }
+    // Si no había ningún ítem gastos/costos en el menú (quizás ya no vienen del API), no insertamos nada extra
     currentFechaInicio = json.fechaInicio || '';
     currentFechaFin    = json.fechaFin    || '';
     currentPeriodo     = currentFechaInicio.slice(0,7) + ' → ' + currentFechaFin.slice(0,7);
