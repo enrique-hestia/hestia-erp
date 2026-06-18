@@ -2313,6 +2313,13 @@ function renderCashFlow(data) {
       +'.cf-chip{display:inline-flex;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700}'
       +'.cc-dep,.cc-pago,.cc-abono{background:#dcfce7;color:#16a34a}'
       +'.cc-ret,.cc-cargo{background:#fee2e2;color:#dc2626}'
+      +'.cf-chk{width:17px;height:17px;border:2px solid var(--color-divider,#d1d5db);border-radius:4px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;flex-shrink:0}'
+      +'.cf-chk.on{background:#009ee3;border-color:#009ee3;color:#fff}'
+      +'.cf-chk:hover{border-color:#009ee3}'
+      +'.cf-por-liberar{margin:0 0 0;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;overflow:hidden}'
+      +'.cf-pl-hdr{padding:10px 14px 8px;font-size:11px;font-weight:700;color:#92400e;display:flex;align-items:center;gap:6px;border-bottom:1px solid #fde68a}'
+      +'.cf-pl-row{display:flex;align-items:center;justify-content:space-between;padding:7px 14px;border-bottom:1px solid #fef3c7;font-size:11.5px}'
+      +'.cf-pl-row:last-child{border-bottom:none}'
       +'.cf-empty{text-align:center;padding:36px 16px;color:var(--text-secondary,#9ca3af);font-size:13px}'
       +'.cf-side{display:flex;flex-direction:column;gap:13px}'
       +'.cf-sc{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;overflow:hidden}'
@@ -2372,15 +2379,27 @@ function renderCashFlow(data) {
 
   // Row 1: asset cards (Santander, MP, Caja Chica) + Total Disponible
   hh.push('<div class="cf-kg cf-kg-top">');
-  [{b:sant,lo:'SAN'},{b:mp,lo:'MP'}].forEach(function(x){
-    var b=x.b,lo=x.lo,ak=b.id===_cfActiveBanco;
+  // Santander card
+  (function(){var b=sant,lo='SAN',ak=b.id===_cfActiveBanco;
     hh.push('<div class="cf-k'+(ak?' act':'')+'" style="--kc:'+b.color+'" onclick="cfSB(\''+b.id+'\')">'
       +'<div class="cf-kstr" style="background:'+b.color+'"></div>'
       +'<div class="cf-klogo" style="background:'+b.color+'">'+lo+'</div>'
       +'<div class="cf-klbl">'+b.nombre+'</div>'
       +'<div class="cf-kval">'+fS(b.saldo)+'</div>'
       +'<div class="cf-kmeta">'+((b.totalRows||0)+' movimientos')+'</div></div>');
-  });
+  })();
+  // Mercado Pago card — shows liberado saldo + por liberar badge
+  (function(){var b=mp,ak=b.id===_cfActiveBanco,pl=b.porLiberar||0;
+    hh.push('<div class="cf-k'+(ak?' act':'')+'" style="--kc:'+b.color+'" onclick="cfSB(\''+b.id+'\')">'
+      +'<div class="cf-kstr" style="background:'+b.color+'"></div>'
+      +'<div class="cf-klogo" style="background:'+b.color+'">MP</div>'
+      +'<div class="cf-klbl">Mercado Pago</div>'
+      +'<div class="cf-kval">'+fS(b.saldo)+'</div>'
+      +'<div class="cf-kmeta" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
+        +'<span>✓ Liberado</span>'
+        +(pl>0?'<span style="background:#fef3c7;color:#92400e;font-size:9.5px;font-weight:700;padding:1px 5px;border-radius:4px">⏳ '+fS(pl)+' por liberar</span>':'')
+      +'</div></div>');
+  })();
   hh.push('<div class="cf-k" style="--kc:#059669;cursor:default">'
     +'<div class="cf-kstr" style="background:#059669"></div>'
     +'<div class="cf-klogo" style="background:#059669;font-size:13px">CC</div>'
@@ -2442,24 +2461,51 @@ function renderCashFlow(data) {
         +'<td style="color:var(--text-secondary,#9ca3af);font-size:11px">'+(m.poliza||'\u2014')+'</td></tr>');
     });
   } else {
-    hh.push('<thead><tr><th>Fecha</th><th>Tipo</th><th>Descripci\u00f3n</th><th>Cobro</th><th>Comisi\u00f3n</th><th>Neto</th><th>Saldo</th><th>Lib</th></tr></thead><tbody>');
+    hh.push('<thead><tr><th>Fecha</th><th>Tipo</th><th>Descripci\u00f3n</th><th>Cobro</th><th>Comisi\u00f3n</th><th>Neto</th><th style="text-align:center">Liberado</th></tr></thead><tbody>');
     movs.forEach(function(m){
-      hh.push('<tr><td>'+fD(m.fecha)+'</td><td><span class="cf-chip cc-'+(m.tipo==='ABONO'?'abono':'cargo')+'">'+(m.tipo||'CARGO')+'</span></td>'
+      var chkCls='cf-chk'+(m.liberado?' on':'');
+      var rn=m.rowNum||0;
+      hh.push('<tr style="'+(m.liberado?'':'background:rgba(251,191,36,.04)')+'">'
+        +'<td>'+fD(m.fecha)+'</td>'
+        +'<td><span class="cf-chip cc-'+(m.tipo==='ABONO'?'abono':'cargo')+'">'+(m.tipo||'CARGO')+'</span></td>'
         +'<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis">'+tr32(m.observaciones)+'</td>'
         +'<td>$'+Math.abs(Math.round(m.cobro||0)).toLocaleString('en-US')+'</td>'
         +'<td style="color:#dc2626;font-size:11px">'+(m.comisiones?'($'+Math.abs(Math.round(m.comisiones)).toLocaleString('en-US')+')':'\u2014')+'</td>'
         +'<td style="font-weight:600;color:#16a34a">$'+Math.round(Math.abs(m.totalVenta||m.monto||0)).toLocaleString('en-US')+'</td>'
-        +'<td style="font-weight:600">$'+Math.round(m.saldo).toLocaleString('en-US')+'</td>'
-        +'<td style="text-align:center;color:#16a34a">'+(m.liberado?'\u2713':'')+'</td></tr>');
+        +'<td style="text-align:center"><div class="'+chkCls+'" onclick="cfToggleLib('+rn+','+(!m.liberado)+')" title="'+(m.liberado?'Marcar como NO liberado':'Marcar como liberado')+'">'+(m.liberado?'\u2713':'')+'</div></td>'
+        +'</tr>');
     });
+    if(!movs.length) hh.push('<tr><td colspan="7"><div class="cf-empty">Sin movimientos \u00b7 <a href="javascript:cfOpenDrawer()" style="color:var(--color-primary,#c46a7a)">Capturar primero \u2192</a></div></td></tr>');
+    hh.push('</tbody></table></div>');
+    // Secci\u00f3n "Por liberar"
+    var porLib=(mp.porLiberar||0);
+    if(porLib>0){
+      var pendMov=movs.filter(function(m){return !m.liberado&&(m.totalVenta||m.monto||0)>0;});
+      hh.push('<div class="cf-por-liberar"><div class="cf-pl-hdr">\u23f3 Por liberar \u2014 '+fS(porLib)+' pendiente de transferir al banco</div>');
+      pendMov.forEach(function(m){
+        hh.push('<div class="cf-pl-row">'
+          +'<div style="display:flex;align-items:center;gap:8px"><div style="color:var(--text-secondary,#9ca3af);font-size:10.5px">'+fD(m.fecha)+'</div><div>'+tr32(m.observaciones)+'</div></div>'
+          +'<div style="display:flex;align-items:center;gap:10px">'
+            +'<span style="font-weight:600;color:#16a34a">'+fS(Math.abs(m.totalVenta||m.monto||0))+'</span>'
+            +'<div class="cf-chk" onclick="cfToggleLib('+(m.rowNum||0)+',true)" title="Marcar como liberado" style="font-size:11px">\u2713</div>'
+          +'</div></div>');
+      });
+      hh.push('</div>');
+    }
+    hh.push('</div>');
+    hh.push('</div>');
   }
-  if(!movs.length) hh.push('<tr><td colspan="8"><div class="cf-empty">Sin movimientos \u00b7 <a href="javascript:cfOpenDrawer()" style="color:var(--color-primary,#c46a7a)">Capturar primero \u2192</a></div></td></tr>');
-  hh.push('</tbody></table></div></div>');
+  if(aB.id!=='mercadopago'){
+    if(!movs.length) hh.push('<tr><td colspan="8"><div class="cf-empty">Sin movimientos \u00b7 <a href="javascript:cfOpenDrawer()" style="color:var(--color-primary,#c46a7a)">Capturar primero \u2192</a></div></td></tr>');
+    hh.push('</tbody></table></div></div>');
+  }
 
   hh.push('<div class="cf-side">');
   hh.push('<div class="cf-sc"><div class="cf-sh">Cuentas disponibles</div>');
   hh.push('<div class="cf-br"><div class="cf-bn"><div class="cf-bdot" style="background:#ec0000"></div>Santander</div><div class="cf-bv">$'+Math.round(sant.saldo).toLocaleString('en-US')+'</div></div>');
-  hh.push('<div class="cf-br"><div class="cf-bn"><div class="cf-bdot" style="background:#009ee3"></div>Mercado Pago</div><div class="cf-bv">$'+Math.round(mp.saldo).toLocaleString('en-US')+'</div></div>');
+  hh.push('<div class="cf-br"><div class="cf-bn"><div class="cf-bdot" style="background:#009ee3"></div><div><div>Mercado Pago</div>'
+    +((mp.porLiberar||0)>0?'<div style="font-size:9.5px;color:#92400e;font-weight:600">⏳ '+fS(mp.porLiberar||0)+' por liberar</div>':'')
+    +'</div></div><div class="cf-bv">$'+Math.round(mp.saldo).toLocaleString('en-US')+'</div></div>');
   hh.push('<div class="cf-br"><div class="cf-bn"><div class="cf-bdot" style="background:#059669"></div>Caja Chica</div><div class="cf-bv">$'+Math.round(ccSaldo).toLocaleString('en-US')+'</div></div>');
   hh.push('<div class="cf-br cf-bt"><div class="cf-bn">Total Disponible</div><div class="cf-bv">$'+Math.round(tot).toLocaleString('en-US')+'</div></div>');
   hh.push('<div class="cf-br" style="background:rgba(180,83,9,.04);border-top:1px dashed rgba(180,83,9,.3)"><div class="cf-bn"><div class="cf-bdot" style="background:#b45309"></div><span style="color:#b45309;font-weight:700">AMEX Deuda</span></div><div class="cf-bv" style="color:#b45309">($'+Math.round(Math.abs(amex.saldo)).toLocaleString('en-US')+')</div></div>');
@@ -2495,6 +2541,15 @@ function renderCashFlow(data) {
   el.innerHTML = hh.join('');
 
   window.cfSB = function(id){ _cfActiveBanco=id; renderCashFlow(_cfLiveData); };
+  window.cfToggleLib = async function(rowNum, liberado) {
+    if(!rowNum) return;
+    try {
+      var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'saveLiberado', rowNum:rowNum, liberado:liberado})});
+      var res = await r.json();
+      if(res.ok) { loadCashFlowData(); }
+      else { alert('Error: ' + (res.error||'No se pudo guardar')); }
+    } catch(e) { alert('Error de conexión: ' + e.message); }
+  };
   window.cfOpenDrawer = function(banco){
     if(banco) _cfActiveBanco=banco;
     document.getElementById('cf-ovl').classList.add('open');
