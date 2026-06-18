@@ -6043,7 +6043,8 @@ function renderCxP(data) {
   html += '<thead><tr><th>Estado</th>';
   headers.forEach(function(h){ html += '<th>'+h+'</th>'; });
   html += '</tr></thead><tbody id="cxp-tbody">';
-  html += cxpBuildRows(rows, headers);
+  var monHdr = data.monHdr || (data.iMonto != null && headers[data.iMonto]) || '';
+  html += cxpBuildRows(rows, headers, monHdr);
   html += '</tbody></table></div></div>';
   html += '</div>'; // cxp-wrap
 
@@ -6051,18 +6052,23 @@ function renderCxP(data) {
 
   window._cxpRows    = rows;
   window._cxpHeaders = headers;
+  window._cxpMonHdr  = monHdr;
   window.cxpFilter   = function() {
     var q = (document.getElementById('cxp-srch').value||'').toLowerCase().trim();
     var filtered = q ? _cxpRows.filter(function(row){
       return _cxpHeaders.some(function(h){ return String(row[h]||'').toLowerCase().indexOf(q)>-1; });
     }) : _cxpRows;
     var tb = document.getElementById('cxp-tbody');
-    if(tb) tb.innerHTML = cxpBuildRows(filtered, _cxpHeaders);
+    if(tb) tb.innerHTML = cxpBuildRows(filtered, _cxpHeaders, _cxpMonHdr);
   };
 }
 
-function cxpBuildRows(rows, headers) {
+function cxpBuildRows(rows, headers, monHdr) {
   if (!rows.length) return '<tr><td colspan="'+(headers.length+1)+'" class="cxp-empty">Sin registros encontrados</td></tr>';
+  function fMXN(v) {
+    var n = parseFloat(String(v).replace(/,/g,'')) || 0;
+    return '$' + n.toLocaleString('es-MX', {minimumFractionDigits:2, maximumFractionDigits:2});
+  }
   return rows.map(function(row){
     var urg = row._urgencia||'ok';
     var rowCls = (urg==='vencido'||urg==='d3'||urg==='d7') ? ' class="row-'+urg+'"' : '';
@@ -6075,7 +6081,14 @@ function cxpBuildRows(rows, headers) {
     else if(urg==='ok') badge='<span class="cxp-badge cxp-ok">Al corriente</span>';
     else                badge='<span class="cxp-badge cxp-na">Sin fecha</span>';
     var cells = '<td>'+badge+'</td>';
-    headers.forEach(function(h){ cells += '<td title="'+String(row[h]||'')+'">'+String(row[h]===null||row[h]===undefined?'—':row[h])+'</td>'; });
+    headers.forEach(function(h){
+      var raw = row[h];
+      var isMonto = monHdr && h === monHdr;
+      var display = (raw === null || raw === undefined || raw === '') ? '—'
+                  : isMonto ? fMXN(raw)
+                  : String(raw);
+      cells += '<td title="'+String(raw||'')+'"'+(isMonto?' style="font-weight:600;font-variant-numeric:tabular-nums"':'')+'>'+display+'</td>';
+    });
     return '<tr'+rowCls+'>'+cells+'</tr>';
   }).join('');
 }
