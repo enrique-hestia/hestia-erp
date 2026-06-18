@@ -2300,48 +2300,208 @@ window.cbCloseDrawer = cbCloseDrawer;
 function cbBuildForm(banco) {
   var today = new Date().toISOString().slice(0,10);
   var mes = new Date().toLocaleDateString('es-MX',{month:'short',year:'2-digit'}).replace(' ','-');
-  var h = [];
-  if (banco === 'santander') {
-    h.push('<div class="cf-form-group"><label class="cf-lbl">Fecha</label><input type="date" id="cb-fecha" class="cf-inp" value="'+today+'"></div>');
-    h.push('<div class="cf-form-group"><label class="cf-lbl">Tipo</label><select id="cb-tipo" class="cf-sel"><option value="deposito">Depósito</option><option value="retiro">Retiro</option></select></div>');
-    h.push('<div class="cf-form-group"><label class="cf-lbl">Monto MXN</label><input type="number" id="cb-monto" class="cf-inp" placeholder="0.00" step="0.01" min="0"></div>');
-    h.push('<div class="cf-form-group"><label class="cf-lbl">Referencia / Concepto</label><input type="text" id="cb-referencia" class="cf-inp" placeholder="Descripción del movimiento"></div>');
-    h.push('<hr style="border:none;border-top:1px solid var(--color-divider,#e5e7eb);margin:6px 0 14px">');
-    h.push('<div class="cf-form-row"><div class="cf-form-group"><label class="cf-lbl">Monto USD</label><input type="number" id="cb-usd" class="cf-inp" placeholder="0.00" step="0.01"></div><div class="cf-form-group"><label class="cf-lbl">T. Cambio</label><input type="number" id="cb-tc" class="cf-inp" placeholder="18.50" step="0.01"></div></div>');
-    h.push('<div class="cf-form-row"><div class="cf-form-group"><label class="cf-lbl">Póliza</label><input type="text" id="cb-poliza" class="cf-inp" placeholder="D-01, I-01…"></div><div class="cf-form-group"><label class="cf-lbl">Observaciones</label><input type="text" id="cb-obs" class="cf-inp" placeholder="Nota adicional"></div></div>');
-  } else if (banco === 'amex') {
-    h.push('<div class="cf-form-group"><label class="cf-lbl">Fecha</label><input type="date" id="cb-fecha" class="cf-inp" value="'+today+'"></div>');
-    h.push('<div class="cf-form-group"><label class="cf-lbl">Tipo</label><select id="cb-tipo" class="cf-sel"><option value="cargo">Cargo (gasto)</option><option value="pago">Pago a AMEX</option></select></div>');
-    h.push('<div class="cf-form-group"><label class="cf-lbl">Importe MXN</label><input type="number" id="cb-monto" class="cf-inp" placeholder="0.00" step="0.01"><div class="cf-hint">Cargo: número positivo · Pago: número negativo</div></div>');
-    h.push('<div class="cf-form-group"><label class="cf-lbl">Referencia / Establecimiento</label><input type="text" id="cb-referencia" class="cf-inp" placeholder="Nombre del comercio"></div>');
-    h.push('<hr style="border:none;border-top:1px solid var(--color-divider,#e5e7eb);margin:6px 0 14px">');
-    h.push('<div class="cf-form-row"><div class="cf-form-group"><label class="cf-lbl">Monto USD</label><input type="number" id="cb-usd" class="cf-inp" placeholder="0.00" step="0.01"></div><div class="cf-form-group"><label class="cf-lbl">T. Cambio</label><input type="number" id="cb-tc" class="cf-inp" placeholder="18.50" step="0.01"></div></div>');
-    h.push('<div class="cf-form-row"><div class="cf-form-group"><label class="cf-lbl">Notas</label><input type="text" id="cb-notas" class="cf-inp" placeholder="Descripción adicional"></div><div class="cf-form-group"><label class="cf-lbl">Póliza</label><input type="text" id="cb-poliza" class="cf-inp" placeholder="D-01…"></div></div>');
-    h.push('<div class="cf-form-group"><label class="cf-lbl">Mes edo. de cuenta</label><input type="text" id="cb-mes" class="cf-inp" value="'+mes+'"></div>');
-  } else {
-    // Mercado Pago
-    h.push('<div class="cf-form-group"><label class="cf-lbl">Fecha</label><input type="date" id="cb-fecha" class="cf-inp" value="'+today+'"></div>');
-    h.push('<div class="cf-form-group"><label class="cf-lbl">Tipo</label><select id="cb-tipo" class="cf-sel"><option value="CARGO">CARGO (cobro)</option><option value="ABONO">ABONO (retiro)</option></select></div>');
-    h.push('<div class="cf-form-group"><label class="cf-lbl">Cobro bruto</label><input type="number" id="cb-cobro" class="cf-inp" placeholder="0.00" step="0.01" oninput="cbMPCalc()"><div class="cf-hint">Para ABONO ingresa número negativo</div></div>');
-    h.push('<div class="cf-form-group"><label class="cf-lbl">Comisión MP (importe $)</label><input type="number" id="cb-importe-com" class="cf-inp" placeholder="0.00" step="0.01" min="0" oninput="cbMPCalc()"><div class="cf-hint">Descuento en pesos que cobra Mercado Pago</div></div>');
-    h.push('<div class="cf-form-group"><div class="cf-calc" id="cb-mp-calc">Ingresa el cobro para calcular</div><input type="hidden" id="cb-comisiones" value="0"><input type="hidden" id="cb-pct-com" value="0"><input type="hidden" id="cb-total-venta" value="0"></div>');
-    h.push('<div class="cf-form-row"><div class="cf-form-group"><label class="cf-lbl">Mes</label><input type="text" id="cb-mes" class="cf-inp" value="'+mes+'"></div><div class="cf-form-group"><label class="cf-lbl">Observaciones</label><input type="text" id="cb-obs" class="cf-inp" placeholder="Nombre paciente…"></div></div>');
-  }
-  h.push('<div style="margin-top:18px;display:flex;gap:10px">'
-    +'<button class="cf-btn cf-btp" style="flex:1;justify-content:center" onclick="cbSaveRow()">Guardar movimiento</button>'
-    +'<button class="cf-btn cf-btg" onclick="cbCloseDrawer()">Cancelar</button>'
+  var bancoMeta = {
+    santander:  {color:'#ec0000', label:'Santander',    logo:'SAN', tipo:'banco'},
+    mercadopago:{color:'#009ee3', label:'Mercado Pago', logo:'MP',  tipo:'digital'},
+    amex:       {color:'#b45309', label:'AMEX',         logo:'AMX', tipo:'tarjeta'}
+  }[banco] || {color:'#c46a7a', label:banco, logo:'—', tipo:'banco'};
+
+  var CSS = '<style id="cb-form-styles">'
+    // Layout base
+    +'.cbf{font-family:inherit;color:var(--text-primary,#111)}'
+    // Bank header banner
+    +'.cbf-banner{display:flex;align-items:center;gap:14px;padding:18px 20px;border-radius:12px;margin-bottom:20px}'
+    +'.cbf-logo{width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:800;letter-spacing:-.5px;flex-shrink:0}'
+    +'.cbf-bname{font-size:16px;font-weight:700;color:#fff}'
+    +'.cbf-bsub{font-size:11px;color:rgba(255,255,255,.75);margin-top:2px}'
+    // Amount display
+    +'.cbf-amt-box{background:var(--color-surface,#f9fafb);border:2px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:16px 18px;margin-bottom:20px;transition:border-color .2s}'
+    +'.cbf-amt-box:focus-within{border-color:var(--cbf-color,#c46a7a)}'
+    +'.cbf-amt-lbl{font-size:10px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:6px}'
+    +'.cbf-amt-row{display:flex;align-items:center;gap:8px}'
+    +'.cbf-currency{font-size:22px;font-weight:700;color:var(--text-secondary,#9ca3af)}'
+    +'.cbf-amt-inp{flex:1;font-size:28px;font-weight:800;border:none;background:transparent;color:var(--cbf-color,#111);outline:none;width:100%;font-family:inherit}'
+    +'.cbf-amt-inp::placeholder{color:var(--color-divider,#d1d5db)}'
+    // Tipo selector (pill style)
+    +'.cbf-tipo-wrap{display:flex;gap:6px;margin-bottom:20px}'
+    +'.cbf-tipo-btn{flex:1;padding:9px 8px;border-radius:8px;border:1.5px solid var(--color-divider,#e5e7eb);background:var(--card-bg,#fff);font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);cursor:pointer;transition:all .15s;text-align:center}'
+    +'.cbf-tipo-btn.sel{border-color:var(--cbf-color,#c46a7a);background:color-mix(in srgb,var(--cbf-color,#c46a7a) 10%,transparent);color:var(--cbf-color,#c46a7a)}'
+    // Section titles
+    +'.cbf-sec{font-size:9.5px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin:18px 0 10px;display:flex;align-items:center;gap:8px}'
+    +'.cbf-sec::after{content:"";flex:1;height:1px;background:var(--color-divider,#e5e7eb)}'
+    // Field grid
+    +'.cbf-grid{display:grid;gap:12px}'
+    +'.cbf-grid-2{grid-template-columns:1fr 1fr}'
+    +'.cbf-field{display:flex;flex-direction:column;gap:5px}'
+    +'.cbf-lbl{font-size:11px;font-weight:600;color:var(--text-secondary,#6b7280);letter-spacing:.2px}'
+    +'.cbf-inp{width:100%;padding:9px 12px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:13px;font-family:inherit;background:var(--card-bg,#fff);color:var(--text-primary,#111);transition:border-color .15s,box-shadow .15s;box-sizing:border-box}'
+    +'.cbf-inp:focus{outline:none;border-color:var(--cbf-color,#c46a7a);box-shadow:0 0 0 3px color-mix(in srgb,var(--cbf-color,#c46a7a) 15%,transparent)}'
+    +'.cbf-sel{width:100%;padding:9px 12px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:13px;font-family:inherit;background:var(--card-bg,#fff);color:var(--text-primary,#111);cursor:pointer;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%236b7280\' stroke-width=\'2\'%3E%3Cpath d=\'m6 9 6 6 6-6\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:32px;transition:border-color .15s}'
+    +'.cbf-sel:focus{outline:none;border-color:var(--cbf-color,#c46a7a)}'
+    +'.cbf-hint{font-size:10.5px;color:var(--text-secondary,#9ca3af);margin-top:2px}'
+    // MP neto display
+    +'.cbf-neto{background:var(--color-surface,#f9fafb);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:12px 14px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:4px}'
+    +'.cbf-neto-item{text-align:center}'
+    +'.cbf-neto-lbl{font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af);margin-bottom:4px}'
+    +'.cbf-neto-val{font-size:14px;font-weight:800}'
+    // Footer actions
+    +'.cbf-footer{position:sticky;bottom:0;background:var(--card-bg,#fff);border-top:1px solid var(--color-divider,#e5e7eb);padding:16px 20px;margin:20px -20px -20px;display:flex;gap:10px}'
+    +'.cbf-save{flex:1;padding:12px;border-radius:10px;border:none;background:var(--cbf-color,#c46a7a);color:#fff;font-size:13px;font-weight:700;cursor:pointer;transition:opacity .15s;font-family:inherit}'
+    +'.cbf-save:hover{opacity:.88}'
+    +'.cbf-save:disabled{opacity:.5;cursor:not-allowed}'
+    +'.cbf-cancel{padding:12px 18px;border-radius:10px;border:1.5px solid var(--color-divider,#e5e7eb);background:var(--card-bg,#fff);color:var(--text-secondary,#6b7280);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}'
+    +'</style>';
+
+  var color = bancoMeta.color;
+  var h = [CSS];
+  h.push('<div class="cbf" style="--cbf-color:'+color+'">');
+
+  // Banner de banco
+  h.push('<div class="cbf-banner" style="background:linear-gradient(135deg,'+color+' 0%,color-mix(in srgb,'+color+' 70%,#000) 100%)">'
+    +'<div class="cbf-logo" style="background:rgba(255,255,255,.2);backdrop-filter:blur(4px)">'+bancoMeta.logo+'</div>'
+    +'<div><div class="cbf-bname">'+bancoMeta.label+'</div>'
+    +'<div class="cbf-bsub">Captura de movimiento bancario</div></div>'
     +'</div>');
+
+  // ── SANTANDER ───────────────────────────────────────────────
+  if (banco === 'santander') {
+    // Tipo: botones pill
+    h.push('<div class="cbf-sec">Tipo de operación</div>');
+    h.push('<div class="cbf-tipo-wrap">'
+      +'<button class="cbf-tipo-btn sel" id="cb-pill-dep" onclick="cbTipoPill(\'dep\')">↑ Depósito</button>'
+      +'<button class="cbf-tipo-btn"     id="cb-pill-ret" onclick="cbTipoPill(\'ret\')">↓ Retiro</button>'
+      +'<input type="hidden" id="cb-tipo" value="deposito">'
+      +'</div>');
+    // Monto prominente
+    h.push('<div class="cbf-sec">Importe</div>');
+    h.push('<div class="cbf-amt-box">'
+      +'<div class="cbf-amt-lbl">Monto en pesos mexicanos</div>'
+      +'<div class="cbf-amt-row">'
+        +'<div class="cbf-currency">$</div>'
+        +'<input type="number" id="cb-monto" class="cbf-amt-inp" placeholder="0.00" step="0.01" min="0" style="color:'+color+'">'
+        +'<div style="font-size:11px;font-weight:700;color:var(--text-secondary,#9ca3af)">MXN</div>'
+      +'</div></div>');
+    // Detalle
+    h.push('<div class="cbf-sec">Detalle</div>');
+    h.push('<div class="cbf-grid"><div class="cbf-field">'
+      +'<label class="cbf-lbl">Fecha de operación</label>'
+      +'<input type="date" id="cb-fecha" class="cbf-inp" value="'+today+'">'
+      +'</div><div class="cbf-field">'
+      +'<label class="cbf-lbl">Referencia / Concepto</label>'
+      +'<input type="text" id="cb-referencia" class="cbf-inp" placeholder="Descripción del movimiento">'
+      +'</div></div>');
+    // Opcional
+    h.push('<div class="cbf-sec">Datos adicionales <span style="font-size:9px;font-weight:500;text-transform:none;letter-spacing:0;color:var(--text-secondary,#b0b0b0)">(opcional)</span></div>');
+    h.push('<div class="cbf-grid cbf-grid-2">'
+      +'<div class="cbf-field"><label class="cbf-lbl">Monto USD</label><input type="number" id="cb-usd" class="cbf-inp" placeholder="0.00" step="0.01"></div>'
+      +'<div class="cbf-field"><label class="cbf-lbl">Tipo de cambio</label><input type="number" id="cb-tc" class="cbf-inp" placeholder="18.50" step="0.01"></div>'
+      +'<div class="cbf-field"><label class="cbf-lbl">Póliza contable</label><input type="text" id="cb-poliza" class="cbf-inp" placeholder="D-01, I-01…"></div>'
+      +'<div class="cbf-field"><label class="cbf-lbl">Observaciones</label><input type="text" id="cb-obs" class="cbf-inp" placeholder="Nota adicional"></div>'
+      +'</div>');
+
+  // ── AMEX ───────────────────────────────────────────────────
+  } else if (banco === 'amex') {
+    h.push('<div class="cbf-sec">Tipo de operación</div>');
+    h.push('<div class="cbf-tipo-wrap">'
+      +'<button class="cbf-tipo-btn sel" id="cb-pill-cargo" onclick="cbTipoPill(\'cargo\')">⚡ Cargo</button>'
+      +'<button class="cbf-tipo-btn"     id="cb-pill-pago"  onclick="cbTipoPill(\'pago\')">✓ Pago a AMEX</button>'
+      +'<input type="hidden" id="cb-tipo" value="cargo">'
+      +'</div>');
+    h.push('<div class="cbf-sec">Importe</div>');
+    h.push('<div class="cbf-amt-box">'
+      +'<div class="cbf-amt-lbl">Importe en pesos mexicanos</div>'
+      +'<div class="cbf-amt-row">'
+        +'<div class="cbf-currency">$</div>'
+        +'<input type="number" id="cb-monto" class="cbf-amt-inp" placeholder="0.00" step="0.01" style="color:'+color+'">'
+        +'<div style="font-size:11px;font-weight:700;color:var(--text-secondary,#9ca3af)">MXN</div>'
+      +'</div>'
+      +'<div style="margin-top:8px;font-size:10.5px;color:var(--text-secondary,#9ca3af)">Cargo positivo · Pago negativo</div>'
+      +'</div>');
+    h.push('<div class="cbf-sec">Detalle</div>');
+    h.push('<div class="cbf-grid">'
+      +'<div class="cbf-field"><label class="cbf-lbl">Fecha de operación</label><input type="date" id="cb-fecha" class="cbf-inp" value="'+today+'"></div>'
+      +'<div class="cbf-field"><label class="cbf-lbl">Establecimiento / Referencia</label><input type="text" id="cb-referencia" class="cbf-inp" placeholder="Nombre del comercio"></div>'
+      +'</div>');
+    h.push('<div class="cbf-sec">Datos adicionales <span style="font-size:9px;font-weight:500;text-transform:none;letter-spacing:0;color:var(--text-secondary,#b0b0b0)">(opcional)</span></div>');
+    h.push('<div class="cbf-grid cbf-grid-2">'
+      +'<div class="cbf-field"><label class="cbf-lbl">Monto USD</label><input type="number" id="cb-usd" class="cbf-inp" placeholder="0.00" step="0.01"></div>'
+      +'<div class="cbf-field"><label class="cbf-lbl">Tipo de cambio</label><input type="number" id="cb-tc" class="cbf-inp" placeholder="18.50" step="0.01"></div>'
+      +'<div class="cbf-field"><label class="cbf-lbl">Notas</label><input type="text" id="cb-notas" class="cbf-inp" placeholder="Descripción adicional"></div>'
+      +'<div class="cbf-field"><label class="cbf-lbl">Póliza contable</label><input type="text" id="cb-poliza" class="cbf-inp" placeholder="D-01…"></div>'
+      +'</div>');
+    h.push('<div class="cbf-field" style="margin-top:12px"><label class="cbf-lbl">Mes del estado de cuenta</label><input type="text" id="cb-mes" class="cbf-inp" value="'+mes+'"></div>');
+
+  // ── MERCADO PAGO ───────────────────────────────────────────
+  } else {
+    h.push('<div class="cbf-sec">Tipo de operación</div>');
+    h.push('<div class="cbf-tipo-wrap">'
+      +'<button class="cbf-tipo-btn sel" id="cb-pill-cargo" onclick="cbTipoPill(\'cargo\')">⬆ Cobro</button>'
+      +'<button class="cbf-tipo-btn"     id="cb-pill-abono" onclick="cbTipoPill(\'abono\')">⬇ Retiro</button>'
+      +'<input type="hidden" id="cb-tipo" value="CARGO">'
+      +'</div>');
+    h.push('<div class="cbf-sec">Cobro y comisión</div>');
+    h.push('<div class="cbf-amt-box">'
+      +'<div class="cbf-amt-lbl">Cobro bruto al paciente</div>'
+      +'<div class="cbf-amt-row">'
+        +'<div class="cbf-currency">$</div>'
+        +'<input type="number" id="cb-cobro" class="cbf-amt-inp" placeholder="0.00" step="0.01" style="color:'+color+'" oninput="cbMPCalc()">'
+        +'<div style="font-size:11px;font-weight:700;color:var(--text-secondary,#9ca3af)">MXN</div>'
+      +'</div></div>');
+    h.push('<div class="cbf-field" style="margin:12px 0">'
+      +'<label class="cbf-lbl">Comisión Mercado Pago (importe $)</label>'
+      +'<div class="cbf-amt-row" style="gap:8px">'
+        +'<span style="font-size:16px;color:var(--text-secondary,#9ca3af)">$</span>'
+        +'<input type="number" id="cb-importe-com" class="cbf-inp" style="flex:1" placeholder="0.00" step="0.01" min="0" oninput="cbMPCalc()">'
+      +'</div>'
+      +'<div class="cbf-hint">Monto en pesos que descuenta MP</div>'
+      +'</div>');
+    // Panel neto
+    h.push('<div class="cbf-neto" id="cb-mp-panel">'
+      +'<div class="cbf-neto-item"><div class="cbf-neto-lbl">Cobro</div><div class="cbf-neto-val" id="cb-neto-cobro" style="color:'+color+'">—</div></div>'
+      +'<div class="cbf-neto-item"><div class="cbf-neto-lbl">Comisión</div><div class="cbf-neto-val" id="cb-neto-com" style="color:#b45309">—</div></div>'
+      +'<div class="cbf-neto-item"><div class="cbf-neto-lbl">Neto recibido</div><div class="cbf-neto-val" id="cb-neto-net" style="color:#059669">—</div></div>'
+      +'</div>');
+    h.push('<input type="hidden" id="cb-comisiones" value="0"><input type="hidden" id="cb-pct-com" value="0"><input type="hidden" id="cb-total-venta" value="0">');
+    h.push('<div class="cbf-sec">Detalle</div>');
+    h.push('<div class="cbf-grid cbf-grid-2">'
+      +'<div class="cbf-field"><label class="cbf-lbl">Mes</label><input type="text" id="cb-mes" class="cbf-inp" value="'+mes+'"></div>'
+      +'<div class="cbf-field"><label class="cbf-lbl">Observaciones</label><input type="text" id="cb-obs" class="cbf-inp" placeholder="Nombre del paciente…"></div>'
+      +'</div>');
+  }
+
+  // Footer pegajoso
+  h.push('<div class="cbf-footer">'
+    +'<button class="cbf-save" id="cb-save-btn" onclick="cbSaveRow()">Guardar movimiento</button>'
+    +'<button class="cbf-cancel" onclick="cbCloseDrawer()">Cancelar</button>'
+    +'</div>');
+  h.push('</div>'); // .cbf
   return h.join('');
 }
 
+window.cbTipoPill = function(val) {
+  var maps = {
+    dep:   {hidden:'deposito',  on:'cb-pill-dep',   off:['cb-pill-ret']},
+    ret:   {hidden:'retiro',    on:'cb-pill-ret',   off:['cb-pill-dep']},
+    cargo: {hidden:'cargo',     on:'cb-pill-cargo', off:['cb-pill-ret','cb-pill-pago','cb-pill-abono']},
+    pago:  {hidden:'pago',      on:'cb-pill-pago',  off:['cb-pill-cargo']},
+    abono: {hidden:'ABONO',     on:'cb-pill-abono', off:['cb-pill-cargo']}
+  };
+  var m = maps[val]; if (!m) return;
+  var t = document.getElementById('cb-tipo'); if (t) t.value = m.hidden;
+  var on = document.getElementById(m.on); if (on) on.classList.add('sel');
+  m.off.forEach(function(id){ var el=document.getElementById(id); if(el) el.classList.remove('sel'); });
+};
+
 window.cbMPCalc = function() {
-  var c = parseFloat(document.getElementById('cb-cobro').value)||0;
+  var c   = parseFloat(document.getElementById('cb-cobro').value)||0;
   var imp = parseFloat(document.getElementById('cb-importe-com').value)||0;
-  var cm = -Math.abs(imp);
-  var ne = c + cm;
+  var cm  = -Math.abs(imp);
+  var ne  = c + cm;
   var pct = (c!==0) ? ((Math.abs(cm)/Math.abs(c))*100) : 0;
-  var el = document.getElementById('cb-mp-calc');
-  if (el) el.innerHTML = '% Comisión: <strong>'+pct.toFixed(4)+'%</strong> &nbsp;·&nbsp; Neto: <strong>$'+ne.toFixed(2)+'</strong>';
+  function fmt(v){ return '$'+(Math.abs(v)).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  var eC = document.getElementById('cb-neto-cobro'); if(eC) eC.textContent = c ? fmt(c) : '—';
+  var eM = document.getElementById('cb-neto-com');   if(eM) eM.textContent = imp ? '('+fmt(cm)+')' : '—';
+  var eN = document.getElementById('cb-neto-net');   if(eN) eN.textContent = (c||imp) ? fmt(ne) : '—';
   var ce = document.getElementById('cb-comisiones'); if(ce) ce.value = cm.toFixed(2);
   var pe = document.getElementById('cb-pct-com');    if(pe) pe.value = pct.toFixed(4);
   var te = document.getElementById('cb-total-venta');if(te) te.value = ne.toFixed(2);
