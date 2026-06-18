@@ -2293,7 +2293,7 @@ function renderCashFlow(data) {
   var cxpVencHdr = (data&&data.cxpVencHdr) || '';
   var cxpMonHdr  = (data&&data.cxpMonHdr)  || '';
   var tot    = sant.saldo + mp.saldo + ccSaldo;
-  var netPos = tot - Math.abs(amex.saldo) - Math.abs(cxpTotal);
+  var netPos = tot - Math.abs(cxpTotal); // AMEX es solo informativo
   var live = !!(B.santander);
   if(!_cfActiveBanco) _cfActiveBanco='santander';
   var allB=[sant,amex,mp];
@@ -2613,8 +2613,26 @@ function renderCashFlow(data) {
     +'</div></div><div class="cf-bv">$'+Math.round(mp.saldo).toLocaleString('en-US')+'</div></div>');
   hh.push('<div class="cf-br"><div class="cf-bn"><div class="cf-bdot" style="background:#059669"></div>Caja Chica</div><div class="cf-bv">$'+Math.round(ccSaldo).toLocaleString('en-US')+'</div></div>');
   hh.push('<div class="cf-br cf-bt"><div class="cf-bn">Total Disponible</div><div class="cf-bv">$'+Math.round(tot).toLocaleString('en-US')+'</div></div>');
-  hh.push('<div class="cf-br" style="background:rgba(180,83,9,.04);border-top:1px dashed rgba(180,83,9,.3)"><div class="cf-bn"><div class="cf-bdot" style="background:#b45309"></div><span style="color:#b45309;font-weight:700">AMEX Deuda</span></div><div class="cf-bv" style="color:#b45309">($'+Math.round(Math.abs(amex.saldo)).toLocaleString('en-US')+')</div></div>');
-  hh.push('<div class="cf-br" style="background:rgba(14,165,233,.04);border-top:1px solid rgba(14,165,233,.2)"><div class="cf-bn" style="font-weight:700">Posici\u00f3n Neta</div><div class="cf-bv" style="color:'+(netPos>=0?'#0ea5e9':'#dc2626')+'">$'+Math.round(netPos).toLocaleString('en-US')+'</div></div>');
+  // CxP del mes: resta al neto
+  if (cxpTotal > 0) {
+    hh.push('<div class="cf-br" style="background:rgba(124,58,237,.04);border-top:1px dashed rgba(124,58,237,.25)">'
+      +'<div class="cf-bn"><div class="cf-bdot" style="background:#7c3aed"></div>'
+      +'<div><div style="color:#7c3aed;font-weight:700">CxP \u2014 Este mes</div>'
+      +'<div style="font-size:9.5px;color:#6b7280">'+cxpMes.length+' facturas por pagar</div></div></div>'
+      +'<div class="cf-bv" style="color:#7c3aed">($'+Math.round(Math.abs(cxpTotal)).toLocaleString('en-US')+')</div></div>');
+  }
+  // Posici\u00f3n Neta = Disponible \u2212 CxP
+  var netPos2 = tot - Math.abs(cxpTotal);
+  hh.push('<div class="cf-br" style="background:rgba(14,165,233,.04);border-top:1px solid rgba(14,165,233,.2)"><div class="cf-bn" style="font-weight:700">Posici\u00f3n Neta</div><div class="cf-bv" style="color:'+(netPos2>=0?'#0ea5e9':'#dc2626')+'">$'+Math.round(netPos2).toLocaleString('en-US')+'</div></div>');
+  // AMEX: solo informativo, no suma
+  hh.push('<div style="margin:10px -1px -1px;padding:8px 14px 4px;background:rgba(180,83,9,.03);border-top:1px dashed rgba(180,83,9,.25);border-radius:0 0 12px 12px">'
+    +'<div style="font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#b45309;margin-bottom:6px">Informativo \u2014 no incluido en saldo</div>'
+    +'<div class="cf-br" style="background:transparent;padding:3px 0">'
+      +'<div class="cf-bn" style="font-size:11.5px"><div class="cf-bdot" style="background:#b45309"></div>'
+        +'<div><div style="color:#b45309;font-weight:600">AMEX Tarjeta</div>'
+          +'<div style="font-size:9.5px;color:#92400e">Por pagar pr\u00f3ximo mes</div></div></div>'
+      +'<div class="cf-bv" style="color:#b45309;font-size:12px">($'+Math.round(Math.abs(amex.saldo)).toLocaleString('en-US')+')</div></div>'
+    +'</div>');
   hh.push('</div>');
   var tA = Math.abs(sant.saldo) + Math.abs(mp.saldo) + Math.abs(ccSaldo) || 1;
   hh.push('<div class="cf-sc"><div class="cf-sh">Distribuci\u00f3n disponible</div><div class="cf-pw">');
