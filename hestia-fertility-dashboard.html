@@ -2209,8 +2209,8 @@ function cfBuildForm(banco) {
     h.push('<div class="cf-form-group"><label class="cf-lbl">Fecha</label><input type="date" id="cf-fecha" class="cf-inp" value="'+today+'"></div>');
     h.push('<div class="cf-form-group"><label class="cf-lbl">Tipo</label><select id="cf-tipo" class="cf-sel"><option value="CARGO">CARGO (cobro a paciente)</option><option value="ABONO">ABONO (retiro a banco)</option></select></div>');
     h.push('<div class="cf-form-group"><label class="cf-lbl">Cobro bruto</label><input type="number" id="cf-cobro" class="cf-inp" placeholder="0.00" step="0.01" oninput="cfMPCalc()"><div class="cf-hint">Para ABONO ingresa n\u00famero negativo</div></div>');
-    h.push('<div class="cf-form-group"><label class="cf-lbl">% Comisi\u00f3n MP</label><input type="number" id="cf-pct-com" class="cf-inp" value="2.89" step="0.01" oninput="cfMPCalc()"></div>');
-    h.push('<div class="cf-form-group"><div class="cf-calc" id="cf-mp-calc">Ingresa el cobro para calcular</div><input type="hidden" id="cf-comisiones" value="0"><input type="hidden" id="cf-total-venta" value="0"></div>');
+    h.push('<div class="cf-form-group"><label class="cf-lbl">Comisi\u00f3n MP (importe $)</label><input type="number" id="cf-importe-com" class="cf-inp" placeholder="0.00" step="0.01" min="0" oninput="cfMPCalc()"><div class="cf-hint">Descuento en pesos que cobra Mercado Pago</div></div>');
+    h.push('<div class="cf-form-group"><div class="cf-calc" id="cf-mp-calc">Ingresa el cobro para calcular</div><input type="hidden" id="cf-comisiones" value="0"><input type="hidden" id="cf-pct-com" value="0"><input type="hidden" id="cf-total-venta" value="0"></div>');
     h.push('<div class="cf-form-row"><div class="cf-form-group"><label class="cf-lbl">Mes</label><input type="text" id="cf-mes" class="cf-inp" value="'+mes+'"></div><div class="cf-form-group"><label class="cf-lbl">Observaciones</label><input type="text" id="cf-obs" class="cf-inp" placeholder="Nombre paciente\u2026"></div></div>');
   }
   return h.join('');
@@ -2229,10 +2229,12 @@ function cfCollectRow(banco) {
     if(g('cf-tipo')==='pago'&&mov>0) mov=-mov;
     return [fecha, mov, 0, g('cf-referencia'), n('cf-usd'), n('cf-tc'), g('cf-notas'), g('cf-poliza'), g('cf-mes')];
   } else {
-    var cobro=n('cf-cobro'), pct=n('cf-pct-com');
+    var cobro=n('cf-cobro');
     var comEl=document.getElementById('cf-comisiones');
+    var pctEl=document.getElementById('cf-pct-com');
     var netEl=document.getElementById('cf-total-venta');
-    var com=comEl?parseFloat(comEl.value)||0:-(Math.abs(cobro)*pct/100);
+    var com=comEl?parseFloat(comEl.value)||0:-Math.abs(n('cf-importe-com'));
+    var pct=pctEl?parseFloat(pctEl.value)||0:(cobro!==0?(Math.abs(com)/Math.abs(cobro)*100):0);
     var neto=netEl?parseFloat(netEl.value)||0:(cobro+com);
     return [g('cf-mes'), fecha, cobro, com, pct, neto, 0, false, g('cf-obs'), g('cf-tipo')];
   }
@@ -2520,11 +2522,14 @@ function renderCashFlow(data) {
   window.cfDB = function(btn){_cfActiveBanco=btn.dataset.banco;cfDRf();};
   window.cfMPCalc = function(){
     var c=parseFloat(document.getElementById('cf-cobro').value)||0;
-    var p=parseFloat(document.getElementById('cf-pct-com').value)||2.89;
-    var cm=-(Math.abs(c)*p/100), ne=c+cm;
+    var imp=parseFloat(document.getElementById('cf-importe-com').value)||0;
+    var cm=-Math.abs(imp);
+    var ne=c+cm;
+    var pct=(c!==0)?((Math.abs(cm)/Math.abs(c))*100):0;
     var el2=document.getElementById('cf-mp-calc');
-    if(el2)el2.innerHTML='Comisi\u00f3n: <strong>($'+Math.abs(cm).toFixed(2)+')</strong> &nbsp;\u00b7&nbsp; Neto: <strong>$'+ne.toFixed(2)+'</strong>';
+    if(el2)el2.innerHTML='% Comisi\u00f3n: <strong>'+pct.toFixed(4)+'%</strong> &nbsp;\u00b7&nbsp; Neto: <strong>$'+ne.toFixed(2)+'</strong>';
     var ce=document.getElementById('cf-comisiones');if(ce)ce.value=cm.toFixed(2);
+    var pe=document.getElementById('cf-pct-com');if(pe)pe.value=pct.toFixed(4);
     var ne2=document.getElementById('cf-total-venta');if(ne2)ne2.value=ne.toFixed(2);
   };
   window.cfSubmit = async function(){
