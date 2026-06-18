@@ -2926,7 +2926,7 @@ function renderConciliacion(data) {
     hh.push('<th>Fecha</th>');
     if (aB.id==='santander')    { hh.push('<th>Tipo</th><th style="text-align:right">Depósito</th><th style="text-align:right">Retiro</th><th style="text-align:right">Saldo</th><th>Referencia</th>'); }
     else if (aB.id==='amex')    { hh.push('<th>Tipo</th><th style="text-align:right">Importe</th><th style="text-align:right">Saldo</th><th>Referencia</th>'); }
-    else                        { hh.push('<th>Tipo</th><th style="text-align:right">Cobro</th><th style="text-align:right">Comisión</th><th style="text-align:right">Neto</th><th>Obs.</th>'); }
+    else                        { hh.push('<th>Tipo</th><th style="text-align:right">Cobro</th><th style="text-align:right">Comisión</th><th style="text-align:right">Neto</th><th>Obs.</th><th style="text-align:center">Liberado</th>'); }
     hh.push('</tr></thead><tbody>');
     movs.forEach(function(m) {
       hh.push('<tr>');
@@ -2949,11 +2949,15 @@ function renderConciliacion(data) {
       } else {
         var cobro=parseFloat(m.cobro||m.totalBruto||0), com=parseFloat(m.comisiones||0), neto=parseFloat(m.totalVenta||0);
         var tipoBadge3 = cobro>0?'<span class="cb-badge cb-dep">DEPÓSITO</span>':cobro<0?'<span class="cb-badge cb-ret">RETIRO</span>':'<span class="cb-badge cb-neu">—</span>';
+        var cbChkCls = 'cf-chk' + (m.liberado ? ' on' : '');
+        var cbRn = m.rowNum || 0;
         hh.push('<td>'+tipoBadge3+'</td>');
         hh.push('<td style="text-align:right;font-weight:600">'+(cobro?'$'+Math.abs(cobro).toLocaleString('en-US',{minimumFractionDigits:2}):'—')+'</td>');
         hh.push('<td style="text-align:right;color:#b45309">'+(com?'($'+Math.abs(com).toLocaleString('en-US',{minimumFractionDigits:2})+')':'—')+'</td>');
         hh.push('<td style="text-align:right;font-weight:700;color:#009ee3">'+(neto?'$'+Math.abs(neto).toLocaleString('en-US',{minimumFractionDigits:2}):'—')+'</td>');
         hh.push('<td style="color:var(--text-secondary,#374151);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(m.observaciones||'—')+'</td>');
+        hh.push('<td style="text-align:center"><div class="'+cbChkCls+'" onclick="cfToggleLib('+cbRn+','+(!(m.liberado))+')"\
+ title="'+(m.liberado?'Marcar como NO liberado':'Marcar como liberado')+'">'+(m.liberado?'✓':'')+'</div></td>');
       }
       hh.push('</tr>');
     });
@@ -3463,15 +3467,7 @@ function renderCashFlow(data) {
   el.innerHTML = hh.join('');
 
   window.cfSB = function(id){ _cfActiveBanco=id; renderCashFlow(_cfLiveData); };
-  window.cfToggleLib = async function(rowNum, liberado) {
-    if(!rowNum) return;
-    try {
-      var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'saveLiberado', rowNum:rowNum, liberado:liberado})});
-      var res = await r.json();
-      if(res.ok) { loadCashFlowData(); }
-      else { alert('Error: ' + (res.error||'No se pudo guardar')); }
-    } catch(e) { alert('Error de conexión: ' + e.message); }
-  };
+  window.cfSB_reassign = true; // marker, cfToggleLib is global
   window.cfOpenDrawer = function(banco){
     if(banco) _cfActiveBanco=banco;
     document.getElementById('cf-ovl').classList.add('open');
@@ -3527,6 +3523,24 @@ function renderCashFlow(data) {
   };
 }
 
+
+/* ── Liberar movimiento MP — compartido por CF y Conciliación ── */
+async function cfToggleLib(rowNum, liberado) {
+  if (!rowNum) { alert('Sin número de fila. Recarga los datos e intenta de nuevo.'); return; }
+  try {
+    var r   = await fetch(APPS_SCRIPT_URL, {method:'POST',
+                body: JSON.stringify({action:'saveLiberado', rowNum:rowNum, liberado:liberado,
+                                     token: getToken()})});
+    var res = await r.json();
+    if (res.ok || res.success) {
+      // Refrescar ambas vistas si están montadas
+      if (typeof loadCashFlowData    === 'function') loadCashFlowData();
+      if (typeof loadConciliacionData === 'function') loadConciliacionData();
+    } else {
+      alert('Error al guardar: ' + (res.error || 'Respuesta inesperada del servidor'));
+    }
+  } catch(e) { alert('Error de conexión: ' + e.message); }
+}
 
 /* ════════════════════════════════════════════════════════════════
    OPERATING P&L STATEMENT — vista BI/ERP con selector de período
