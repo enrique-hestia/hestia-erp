@@ -556,16 +556,24 @@ function readBanksData() {
       B.totalRows=dataRows.length;
       B.movimientos=dataRows.slice(-30).reverse().map(function(entry){
         var x=entry.row;
-        return{rowNum:entry.sheetRow,mes:String(x[0]||''),fecha:dt(x[1]),cobro:num(x[2]),comisiones:num(x[3]),
+        return{rowNum:entry.sheetRow,mes:fmtMes(x[0]),fecha:dt(x[1]),cobro:num(x[2]),comisiones:num(x[3]),
                pctComision:num(x[4]),totalVenta:num(x[5]),saldo:num(x[6]),
                liberado:x[7]===true||String(x[7]).toUpperCase()==='TRUE',
                observaciones:String(x[8]||''),tipo:String(x[9]||'CARGO').toUpperCase(),monto:num(x[5])};
       });
       // Resumen de comisiones por mes (todas las filas, no solo últimas 30)
+      var _mNames=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      function fmtMes(v){
+        if(v instanceof Date) return _mNames[v.getMonth()]+'-'+v.getFullYear();
+        var s=String(v||'').trim();
+        // Si parece fecha ISO o parseable, convertir
+        var d=new Date(s); if(!isNaN(d)&&s.length>6) return _mNames[d.getMonth()]+'-'+d.getFullYear();
+        return s;
+      }
       var comByMes = {};
       for(var ci=0;ci<dataRows.length;ci++){
         var cx=dataRows[ci].row;
-        var mes=String(cx[0]||'').trim(); if(!mes) continue;
+        var mes=fmtMes(cx[0]); if(!mes) continue;
         var cobro=num(cx[2]), com=Math.abs(num(cx[3])), neto=num(cx[5]);
         if(!comByMes[mes]) comByMes[mes]={mes:mes,totalCobro:0,totalComision:0,totalNeto:0,movimientos:0};
         if(cobro>0) comByMes[mes].totalCobro+=cobro;
