@@ -488,6 +488,11 @@ function doPost(e) {
       var result = createBankSheet(body.nombre, body.color);
       return jsonResponse(result);
     }
+    if (body.action === 'saveLiberado') {
+      var result = saveLiberado(body.rowNum, body.liberado);
+      try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
+      return jsonResponse(result);
+    }
     return jsonResponse({error:'Accion desconocida: ' + body.action});
   } catch(ex) { return jsonResponse({error: ex.message}); }
 }
