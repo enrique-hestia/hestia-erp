@@ -4430,6 +4430,10 @@ function renderGestionRoles(data) {
         +'<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:var(--radius-md);padding:14px 16px;overflow-y:auto;flex:1">'
           +'<div style="font-size:9px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:12px">Acceso por módulo — <span style="color:var(--color-primary)">marcado = tiene acceso</span>, desmarcado = bloqueado</div>'
           +'<div id="gr-permisos" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:0 24px"></div>'
+          +'<div style="margin-top:18px;padding-top:14px;border-top:2px solid var(--color-divider)">'
+            +'<div style="font-size:9px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:#0369a1;margin-bottom:12px">⚙ Permisos operativos — <span style="color:var(--color-primary)">marcado = permitido</span></div>'
+            +'<div id="gr-op-perms" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0 24px"></div>'
+          +'</div>'
         +'</div>'
         +'<div style="display:flex;gap:8px;align-items:center">'
           +'<button onclick="grSelectAll(true)" style="font-size:11px;padding:4px 10px;border:1px solid var(--color-divider);border-radius:6px;background:transparent;cursor:pointer;color:var(--color-text)">Marcar todo</button>'
@@ -4546,16 +4550,62 @@ function grRenderCheckboxes(role) {
   var el = document.getElementById('gr-permisos');
   if (!el) return;
   var items = (menuItems || []);
-  // Reconstruir árbol solo si el menú cambió (nuevos items) o aún no existe
   var builtCount = parseInt(el.getAttribute('data-tree-count') || '0');
   if (!el.querySelector('input[data-id]') || builtCount !== items.length) {
     grBuildCheckboxTree();
   }
   grApplyChecked(role ? (role.vistasBloqueadas || []) : []);
+  // Permisos operativos
+  var opEl = document.getElementById('gr-op-perms');
+  if (opEl && !opEl.querySelector('input[data-op]')) grBuildOpPerms();
+  grApplyOpPerms(role ? (role.permisosOperativos || []) : []);
 }
 
 function grSelectAll(val) {
   document.querySelectorAll('#gr-permisos input[type="checkbox"]').forEach(function(cb){ cb.checked = val; });
+  document.querySelectorAll('#gr-op-perms input[type="checkbox"]').forEach(function(cb){ cb.checked = val; });
+}
+
+function grBuildOpPerms() {
+  var el = document.getElementById('gr-op-perms');
+  if (!el) return;
+  var cats = {}, catOrder = [];
+  OP_PERMS_CATALOG.forEach(function(p) {
+    if (!cats[p.cat]) { cats[p.cat] = []; catOrder.push(p.cat); }
+    cats[p.cat].push(p);
+  });
+  var h = '';
+  catOrder.forEach(function(cat) {
+    h += '<div style="break-inside:avoid;margin-bottom:14px">'
+      + '<div style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;'
+      + 'color:var(--color-text-muted);padding-bottom:4px;border-bottom:1px solid var(--color-divider);margin-bottom:6px">'
+      + cat + '</div>';
+    cats[cat].forEach(function(p) {
+      h += '<label style="display:flex;align-items:center;gap:6px;padding:3px 0;cursor:pointer">'
+        + '<input type="checkbox" data-op="' + p.key + '" style="width:13px;height:13px;cursor:pointer;flex-shrink:0;accent-color:#0369a1">'
+        + '<span style="font-size:12px;color:var(--color-text)">' + p.label + '</span>'
+        + '</label>';
+    });
+    h += '</div>';
+  });
+  el.innerHTML = h;
+}
+
+function grApplyOpPerms(permisosArr) {
+  var el = document.getElementById('gr-op-perms');
+  if (!el) return;
+  var isAll = permisosArr && permisosArr.indexOf('*') !== -1;
+  el.querySelectorAll('input[data-op]').forEach(function(cb) {
+    cb.checked = isAll || (permisosArr && permisosArr.indexOf(cb.getAttribute('data-op')) !== -1);
+  });
+}
+
+function grCollectOpPerms() {
+  var perms = [];
+  document.querySelectorAll('#gr-op-perms input[data-op]').forEach(function(cb) {
+    if (cb.checked) perms.push(cb.getAttribute('data-op'));
+  });
+  return perms;
 }
 
 async function grSaveRole() {
@@ -4569,6 +4619,7 @@ async function grSaveRole() {
   document.querySelectorAll('#gr-permisos input[type="checkbox"]').forEach(function(cb){
     if (!cb.checked) bloqueadas.push(cb.getAttribute('data-id'));
   });
+  var opPerms = grCollectOpPerms();
   if (statusEl) statusEl.textContent = 'Guardando…';
 
   var existingRole = null;
@@ -4584,12 +4635,14 @@ async function grSaveRole() {
 
     // ── Intento 1: action=saveRole (api.gs nuevo, requiere redespliegue) ──
     try {
+      var opStr = opPerms.join(',');
       var u1 = APPS_SCRIPT_URL + '?action=saveRole'
         + '&token='           + encodeURIComponent(tk)
         + '&rol='             + encodeURIComponent(rolName)
         + '&vistasBloqueadas='+ encodeURIComponent(bloqStr)
         + '&soloLectura='     + (soloLectura ? 'true' : 'false')
-        + '&descripcion='     + encodeURIComponent(descripcion);
+        + '&descripcion='     + encodeURIComponent(descripcion)
+        + '&permisosOperativos=' + encodeURIComponent(opStr);
       var r1 = await fetch(u1);
       var d1 = await r1.json();
       console.log('[grSaveRole] saveRole →', d1);
@@ -4603,7 +4656,8 @@ async function grSaveRole() {
       var cols = '&Rol=' + encodeURIComponent(rolName)
                + '&Vistas_Bloqueadas=' + encodeURIComponent(bloqStr)
                + '&Solo_Lectura='      + (soloLectura ? 'TRUE' : 'FALSE')
-               + '&Descripcion='       + encodeURIComponent(descripcion);
+               + '&Descripcion='       + encodeURIComponent(descripcion)
+               + '&Permisos_Operativos=' + encodeURIComponent(opPerms.join(','));
       if (existingRole && existingRole._rowNum) {
         u2 = APPS_SCRIPT_URL + '?action=update&sheet=Roles&rowNum=' + existingRole._rowNum
            + '&token=' + encodeURIComponent(tk) + cols;
@@ -4631,11 +4685,12 @@ async function grSaveRole() {
     setStatus('Rol guardado en Sheets correctamente', 'ok');
 
     if (existingRole) {
-      existingRole.vistasBloqueadas = bloqueadas;
-      existingRole.soloLectura      = soloLectura;
-      existingRole.descripcion      = descripcion;
+      existingRole.vistasBloqueadas  = bloqueadas;
+      existingRole.soloLectura       = soloLectura;
+      existingRole.descripcion       = descripcion;
+      existingRole.permisosOperativos = opPerms;
     } else {
-      _grRoles.push({ rol: rolName, vistasBloqueadas: bloqueadas, soloLectura: soloLectura, descripcion: descripcion, _rowNum: _grRoles.length + 2 });
+      _grRoles.push({ rol: rolName, vistasBloqueadas: bloqueadas, soloLectura: soloLectura, descripcion: descripcion, permisosOperativos: opPerms, _rowNum: _grRoles.length + 2 });
     }
     _grSelected = rolName;
     if (nEl) nEl.disabled = true;
@@ -4669,11 +4724,13 @@ function grParseCaptura(data) {
     var bloqStr = String(get('Vistas_Bloqueadas', hIdx('vistas_bloqueadas')) || '').trim();
     var soloLec = !!(get('Solo_Lectura', hIdx('solo_lectura')));
     var desc    = String(get('Descripcion', hIdx('descripcion')) || '').trim();
+    var opStr   = String(get('Permisos_Operativos', hIdx('permisos_operativos')) || '').trim();
     return {
       rol:              rolName,
       vistasBloqueadas: bloqStr ? bloqStr.split(',').map(function(v){ return v.trim(); }).filter(Boolean) : [],
       soloLectura:      soloLec,
       descripcion:      desc,
+      permisosOperativos: opStr ? opStr.split(',').map(function(v){ return v.trim(); }).filter(Boolean) : [],
       _rowNum:          isArr ? undefined : row['_rowNum']
     };
   }).filter(Boolean);
@@ -5470,26 +5527,41 @@ function getUserRole() { var s = getSession(); return s ? (s.rol||'').toLowerCas
    2. En el frontend usa: if (hasPermission('mi_permiso')) { ... }
    3. En el GAS valida: if (!checkPermission(token, 'mi_permiso')) return {ok:false, error:'Sin permisos'};
    ──────────────────────────────────────────────────────────── */
-var ROLE_PERMS = {
+/* ── Catálogo de permisos operativos ──────────────────────
+   Para agregar un permiso: agrega un objeto al array.
+   Se muestra automáticamente en Gestión de Roles.        */
+var OP_PERMS_CATALOG = [
+  {key:'bank_create',   label:'Crear bancos nuevos',           cat:'Conciliación Bancaria'},
+  {key:'bank_capture',  label:'Capturar movimientos',          cat:'Conciliación Bancaria'},
+  {key:'bank_edit',     label:'Editar movimientos',            cat:'Conciliación Bancaria'},
+  {key:'bank_delete',   label:'Eliminar movimientos',          cat:'Conciliación Bancaria'},
+  {key:'bank_liberado', label:'Marcar liberado (MP)',           cat:'Conciliación Bancaria'},
+  {key:'sheets_access', label:'Acceso directo a Google Sheets', cat:'General'},
+  {key:'cf_capture',    label:'Capturar en Flujo de Efectivo',  cat:'Flujo de Efectivo'},
+  {key:'export_data',   label:'Exportar datos',                 cat:'General'}
+];
+
+// Fallback hardcoded (se usa solo si la sesión no trae permisosOperativos)
+var ROLE_PERMS_DEFAULT = {
   admin:    ['*'],
   director: ['*'],
   gerente:  ['bank_create','bank_edit','bank_delete','bank_capture','bank_liberado',
-             'sheets_access','cb_view','cf_view','er_view','pl_view',
-             'egresos_view','ingresos_view','rentabilidad_view',
-             'cxp_view','inventario_view','laboratorio_view'],
-  operador: ['bank_capture','bank_edit','bank_liberado',
-             'cb_view','cf_view','er_view','pl_view',
-             'egresos_view','ingresos_view','rentabilidad_view',
-             'cxp_view','inventario_view','laboratorio_view'],
-  captura:  ['bank_capture',
-             'cb_view','cf_view'],
-  viewer:   ['cb_view','cf_view','er_view','pl_view',
-             'egresos_view','ingresos_view','rentabilidad_view']
+             'sheets_access','cf_capture','export_data'],
+  operador: ['bank_capture','bank_edit','bank_liberado','cf_capture'],
+  captura:  ['bank_capture','cf_capture'],
+  viewer:   []
 };
 
 function hasPermission(perm) {
+  var s = getSession();
+  // Si la sesión trae permisos operativos del servidor, usar esos
+  if (s && s.permisosOperativos) {
+    if (s.permisosOperativos.indexOf('*') !== -1) return true;
+    return s.permisosOperativos.indexOf(perm) !== -1;
+  }
+  // Fallback: usar mapa hardcoded por rol
   var role = getUserRole();
-  var perms = ROLE_PERMS[role] || ROLE_PERMS.viewer;
+  var perms = ROLE_PERMS_DEFAULT[role] || ROLE_PERMS_DEFAULT.viewer;
   if (perms.indexOf('*') !== -1) return true;
   return perms.indexOf(perm) !== -1;
 }
