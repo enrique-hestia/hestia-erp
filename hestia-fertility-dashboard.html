@@ -2926,7 +2926,7 @@ window.cbCrearBanco = async function() {
   } catch(e) { alert('Error de conexión'); if(btn){btn.disabled=false;btn.textContent='Crear banco';} }
 };
 
-var _CB_VER = '20260619-2'; // bump para forzar recarga de caché
+var APP_VERSION = '2026.06.19.3';
 function renderConciliacion(data) {
   var el = document.getElementById('view-conciliacion');
   if (!el) return;
@@ -7683,5 +7683,51 @@ function submitEntmed() {
     </div>
   </div>
 </div>
+<!-- ── Auto-update notification ──────────────────────── -->
+<style>
+.upd-toast{position:fixed;bottom:-80px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:12px;background:#0c4a6e;color:#fff;padding:12px 20px;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.25);font-family:var(--font-primary,'Satoshi',sans-serif);transition:bottom .4s cubic-bezier(.4,0,.2,1);max-width:480px;width:90%}
+.upd-toast.show{bottom:24px}
+.upd-icon{width:36px;height:36px;border-radius:9px;background:rgba(255,255,255,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.upd-icon svg{width:18px;height:18px;stroke:#7dd3fc;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.upd-text{flex:1;min-width:0}
+.upd-title{font-size:13px;font-weight:700;margin-bottom:2px}
+.upd-desc{font-size:11px;color:#bae6fd;line-height:1.3}
+.upd-btn{background:#fff;color:#0c4a6e;border:none;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;transition:background .15s}
+.upd-btn:hover{background:#e0f2fe}
+.upd-close{background:none;border:none;color:rgba(255,255,255,.5);font-size:18px;cursor:pointer;padding:4px;line-height:1;margin-left:-4px}
+.upd-close:hover{color:#fff}
+</style>
+<div class="upd-toast" id="upd-toast">
+  <div class="upd-icon"><svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></div>
+  <div class="upd-text">
+    <div class="upd-title">Actualización disponible</div>
+    <div class="upd-desc">Hay una nueva versión del sistema. Actualiza para ver los últimos cambios.</div>
+  </div>
+  <button class="upd-btn" onclick="location.reload(true)">Actualizar</button>
+  <button class="upd-close" onclick="document.getElementById('upd-toast').classList.remove('show')" title="Cerrar">×</button>
+</div>
+<script>
+(function(){
+  var CHECK_INTERVAL = 60000; // revisar cada 60 segundos
+  var currentVersion = (typeof APP_VERSION !== 'undefined') ? APP_VERSION : '';
+  if (!currentVersion) return;
+
+  function checkForUpdate() {
+    var url = location.href.split('?')[0] + '?_vc=' + Date.now();
+    fetch(url, {cache:'no-store'}).then(function(r){ return r.text(); }).then(function(html){
+      var m = html.match(/APP_VERSION\s*=\s*['"]([^'"]+)['"]/);
+      if (m && m[1] && m[1] !== currentVersion) {
+        document.getElementById('upd-toast').classList.add('show');
+      }
+    }).catch(function(){});
+  }
+
+  // No verificar en file:// (solo funciona en servidor/GitHub Pages)
+  if (location.protocol === 'file:') return;
+  setInterval(checkForUpdate, CHECK_INTERVAL);
+  // Primera verificación a los 30 segundos de carga
+  setTimeout(checkForUpdate, 30000);
+})();
+</script>
 </body>
 </html>
