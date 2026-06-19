@@ -4098,51 +4098,127 @@ function renderEstadoResultados(data) {
     { label: 'Utilidad neta', val: totalNet,    color: '#1D9E75' }
   ];
 
-  el.innerHTML = [
-    '<style>',
-    '#view-estado-resultados .er-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px}',
-    '#view-estado-resultados .er-kpi{background:var(--surface,var(--bg-secondary));border-radius:10px;padding:14px 16px}',
-    '#view-estado-resultados .er-kpi-lbl{font-size:10px;font-weight:500;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary);margin:0 0 4px}',
-    '#view-estado-resultados .er-kpi-val{font-size:20px;font-weight:500;margin:0}',
-    '#view-estado-resultados .er-kpi-pct{font-size:11px;margin:2px 0 0}',
-    '#view-estado-resultados .er-grid{display:grid;grid-template-columns:1fr 380px;gap:16px;align-items:start}',
-    '#view-estado-resultados .er-card{background:var(--card-bg,#fff);border:0.5px solid var(--border);border-radius:12px;overflow:hidden}',
-    '#view-estado-resultados .er-card-head{padding:12px 16px;border-bottom:0.5px solid var(--border)}',
-    '#view-estado-resultados .er-card-head h3{margin:0;font-size:13px;font-weight:500}',
-    '#view-estado-resultados .er-card-head p{margin:2px 0 0;font-size:11px;color:var(--text-secondary)}',
-    '#view-estado-resultados .er-table{width:100%;border-collapse:collapse}',
-    '#view-estado-resultados .er-table th{padding:8px 12px;font-size:10px;font-weight:500;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary);text-align:right;border-bottom:1px solid var(--border);background:var(--surface,var(--bg-secondary))}',
-    '#view-estado-resultados .er-table th:first-child{text-align:left}',
-    '</style>',
+  // ── Estilos profesionales estilo Big Four ──
+  var css = '<style id="er-styles">'
+    +'.er-wrap{max-width:1400px;margin:0 auto;padding:20px}'
+    // Header corporativo
+    +'.er-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;padding-bottom:16px;border-bottom:2px solid var(--text-primary,#111)}'
+    +'.er-brand{font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280);margin-bottom:4px}'
+    +'.er-title{font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0;letter-spacing:-.3px}'
+    +'.er-subtitle{font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px}'
+    +'.er-header-right{text-align:right}'
+    +'.er-header-right .er-period{font-size:12px;font-weight:700;color:var(--text-primary,#111)}'
+    +'.er-header-right .er-currency{font-size:10px;color:var(--text-secondary,#6b7280);text-transform:uppercase;letter-spacing:.5px}'
+    // KPI strip
+    +'.er-kstrip{display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin-bottom:24px;border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;overflow:hidden}'
+    +'.er-ks{padding:16px 20px;position:relative}'
+    +'.er-ks:not(:last-child){border-right:1px solid var(--color-divider,#e5e7eb)}'
+    +'.er-ks-lbl{font-size:9.5px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:6px}'
+    +'.er-ks-val{font-size:22px;font-weight:800;letter-spacing:-.5px}'
+    +'.er-ks-sub{font-size:10.5px;color:var(--text-secondary,#6b7280);margin-top:3px}'
+    +'.er-ks-bar{position:absolute;bottom:0;left:16px;right:16px;height:3px;border-radius:2px}'
+    // Layout grid
+    +'.er-layout{display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:start}'
+    +'@media(max-width:1024px){.er-layout{grid-template-columns:1fr}.er-kstrip{grid-template-columns:repeat(2,1fr)}.er-ks:nth-child(2){border-right:none}}'
+    +'@media(max-width:500px){.er-kstrip{grid-template-columns:1fr}.er-ks{border-right:none!important;border-bottom:1px solid var(--color-divider,#e5e7eb)}.er-ks:last-child{border-bottom:none}}'
+    // Tabla financiera
+    +'.er-panel{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;overflow:hidden}'
+    +'.er-panel-h{padding:14px 20px;border-bottom:1px solid var(--color-divider,#e5e7eb);display:flex;align-items:center;justify-content:space-between}'
+    +'.er-panel-t{font-size:14px;font-weight:700;color:var(--text-primary,#111)}'
+    +'.er-ft{width:100%;border-collapse:collapse}'
+    +'.er-ft th{padding:8px 20px;font-size:9px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);background:var(--color-surface,#fafafa);border-bottom:2px solid var(--color-divider,#d1d5db)}'
+    +'.er-ft th:first-child{text-align:left}'
+    +'.er-ft th:not(:first-child){text-align:right;border-left:1px solid rgba(0,0,0,.04)}'
+    +'.er-ft td{padding:0 20px}'
+    +'.er-ft td:not(:first-child){text-align:right;border-left:1px solid rgba(0,0,0,.04)}'
+    // Tipos de fila
+    +'.er-r-header td{padding:10px 20px 4px!important;font-size:10px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--color-primary,#c46a7a);border-top:2px solid var(--color-divider,#d1d5db);background:transparent}'
+    +'.er-r-subsec td{padding:6px 20px 3px 28px!important;font-size:10px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);background:transparent}'
+    +'.er-r-data{transition:background .1s}'
+    +'.er-r-data:hover{background:rgba(0,0,0,.015)}'
+    +'.er-r-data td{height:32px;font-size:12px;color:var(--text-secondary,#374151)}'
+    +'.er-r-data td:first-child{color:var(--text-secondary,#555);position:relative}'
+    // Dotted leader line
+    +'.er-r-data td:first-child::after{content:"";position:absolute;bottom:8px;left:0;right:-8px;border-bottom:1px dotted rgba(0,0,0,.1)}'
+    +'.er-r-data td:not(:first-child){position:relative;z-index:1;background:var(--card-bg,#fff)}'
+    +'.er-r-subtotal{border-top:1.5px solid var(--color-divider,#d1d5db)}'
+    +'.er-r-subtotal td{height:36px;font-size:12.5px;font-weight:700;color:var(--text-primary,#111)}'
+    +'.er-r-total{border-top:2px solid var(--text-primary,#333)}'
+    +'.er-r-total td{height:40px;font-size:13px;font-weight:800;color:var(--text-primary,#111)}'
+    +'.er-r-metric{background:linear-gradient(90deg,rgba(196,106,122,.05),rgba(196,106,122,.02));border-top:2px solid var(--color-primary,#c46a7a);border-bottom:2px solid var(--color-primary,#c46a7a)}'
+    +'.er-r-metric td{height:44px;font-size:14px;font-weight:800;color:var(--color-primary,#c46a7a)}'
+    +'.er-neg{color:#D85A30!important}'
+    +'.er-pos{color:#1D9E75!important}'
+    +'</style>';
 
-    '<div class="er-kpis">',
-      '<div class="er-kpi"><p class="er-kpi-lbl">Ingresos totales</p><p class="er-kpi-val">' + fmt(totalIncome) + '</p><p class="er-kpi-pct" style="color:var(--text-secondary)">' + periodo + '</p></div>',
-      '<div class="er-kpi"><p class="er-kpi-lbl">Total de Gastos</p><p class="er-kpi-val" style="color:#D85A30">' + fmt(totalExpenses) + '</p><p class="er-kpi-pct" style="color:var(--text-secondary)">' + pct(totalExpenses, totalIncome) + ' de ingresos</p></div>',
-      '<div class="er-kpi"><p class="er-kpi-lbl">EBITDA</p><p class="er-kpi-val" style="color:' + kpiColor(totalEbitda) + '">' + fmt(totalEbitda) + '</p><p class="er-kpi-pct" style="color:var(--text-secondary)">Margen ' + pct(totalEbitda, totalIncome) + '</p></div>',
-      '<div class="er-kpi"><p class="er-kpi-lbl">Utilidad neta</p><p class="er-kpi-val" style="color:' + kpiColor(totalNet) + '">' + fmt(totalNet) + '</p><p class="er-kpi-pct" style="color:var(--text-secondary)">Margen ' + pct(totalNet, totalIncome) + '</p></div>',
-    '</div>',
+  // ── Build table rows ──
+  function buildProRows() {
+    if (!rows.length) return '<tr><td colspan="3" style="text-align:center;padding:3rem;color:var(--text-secondary)">Sin datos para el período seleccionado</td></tr>';
+    var h = '';
+    rows.forEach(function(r) {
+      var neg = r.total < 0;
+      var valCls = neg ? ' class="er-neg"' : '';
+      switch(r.tipo) {
+        case 'header':
+          h += '<tr class="er-r-header"><td colspan="3">'+r.label+'</td></tr>';
+          break;
+        case 'subseccion':
+          h += '<tr class="er-r-subsec"><td colspan="3">'+r.label+'</td></tr>';
+          break;
+        case 'subtotal':
+          h += '<tr class="er-r-subtotal"><td>'+r.label+'</td><td'+valCls+'>'+fmtFull(r.total)+'</td><td>'+pct(r.total,totalIncome)+'</td></tr>';
+          break;
+        case 'total':
+          h += '<tr class="er-r-total"><td>'+r.label+'</td><td'+valCls+'>'+fmtFull(r.total)+'</td><td>'+pct(r.total,totalIncome)+'</td></tr>';
+          break;
+        case 'metric':
+          h += '<tr class="er-r-metric"><td>'+r.label+'</td><td>'+fmtFull(r.total)+'</td><td>'+pct(r.total,totalIncome)+'</td></tr>';
+          break;
+        default:
+          var indent = r.nivel===2?'40px':r.nivel===1?'28px':'20px';
+          h += '<tr class="er-r-data"><td style="padding-left:'+indent+'">'+r.label+'</td><td'+valCls+'>'+fmtFull(r.total)+'</td><td style="color:var(--text-secondary,#9ca3af);font-size:11px">'+pct(r.total,totalIncome)+'</td></tr>';
+      }
+    });
+    return h;
+  }
 
-    '<div style="display:flex;justify-content:flex-end;margin-bottom:10px">',
-      '<a href="https://docs.google.com/spreadsheets/d/17jlXzaIvohpN_UoE2kvLK1Bb6P6JxyKONsnrDX_St9U/edit?gid=1953492149#gid=1953492149" target="_blank" style="display:inline-flex;align-items:center;gap:6px;font-size:var(--text-xs);font-weight:600;color:var(--color-primary);text-decoration:none;padding:6px 12px;border:1px solid var(--color-primary);border-radius:var(--radius-full);white-space:nowrap"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Ver en Sheets</a>',
-    '</div>',
-
-    '<div class="er-grid">',
-      '<div class="er-card">',
-        '<div class="er-card-head"><h3>Estado de resultados</h3><p>' + periodo + ' · MXN · % sobre ingresos</p></div>',
-        '<div style="overflow-y:auto;max-height:65vh">',
-          '<table class="er-table">',
-            '<thead><tr><th>Concepto</th><th>Importe</th><th>%</th></tr></thead>',
-            '<tbody id="er-tbody">' + buildRows() + '</tbody>',
-          '</table>',
-        '</div>',
-      '</div>',
-
-      '<div class="er-card">',
-        '<div class="er-card-head"><h3>Cascada de utilidad</h3><p>Ingresos → Utilidad neta</p></div>',
-        '<div style="position:relative;height:320px;padding:12px 8px 8px"><canvas id="er-waterfall" role="img" aria-label="Cascada de ingresos a utilidad neta">Gráfica de cascada del estado de resultados.</canvas></div>',
-      '</div>',
-    '</div>'
-  ].join('');
+  el.innerHTML = css
+    + '<div class="er-wrap">'
+    // Header corporativo
+    + '<div class="er-header">'
+      + '<div>'
+        + '<div class="er-brand">Hestia Fertility</div>'
+        + '<h1 class="er-title">Estado de Resultados</h1>'
+        + '<div class="er-subtitle">Cifras expresadas en pesos mexicanos (MXN) · Porcentajes sobre ingresos totales</div>'
+      + '</div>'
+      + '<div class="er-header-right">'
+        + '<div class="er-period">'+periodo+'</div>'
+        + '<div class="er-currency">Moneda: MXN</div>'
+        + '<a href="https://docs.google.com/spreadsheets/d/17jlXzaIvohpN_UoE2kvLK1Bb6P6JxyKONsnrDX_St9U/edit?gid=1953492149#gid=1953492149" target="_blank" style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--color-primary,#c46a7a);text-decoration:none;margin-top:6px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Ver en Sheets</a>'
+      + '</div>'
+    + '</div>'
+    // KPI strip
+    + '<div class="er-kstrip">'
+      + '<div class="er-ks"><div class="er-ks-lbl">Ingresos Totales</div><div class="er-ks-val" style="color:#0c4a6e">'+fmt(totalIncome)+'</div><div class="er-ks-sub">'+periodo+'</div><div class="er-ks-bar" style="background:#0c4a6e"></div></div>'
+      + '<div class="er-ks"><div class="er-ks-lbl">Total Gastos</div><div class="er-ks-val" style="color:#D85A30">'+fmt(totalExpenses)+'</div><div class="er-ks-sub">'+pct(totalExpenses,totalIncome)+' de ingresos</div><div class="er-ks-bar" style="background:#D85A30"></div></div>'
+      + '<div class="er-ks"><div class="er-ks-lbl">EBITDA</div><div class="er-ks-val" style="color:'+kpiColor(totalEbitda)+'">'+fmt(totalEbitda)+'</div><div class="er-ks-sub">Margen '+pct(totalEbitda,totalIncome)+'</div><div class="er-ks-bar" style="background:'+kpiColor(totalEbitda)+'"></div></div>'
+      + '<div class="er-ks"><div class="er-ks-lbl">Utilidad Neta</div><div class="er-ks-val" style="color:'+kpiColor(totalNet)+'">'+fmt(totalNet)+'</div><div class="er-ks-sub">Margen '+pct(totalNet,totalIncome)+'</div><div class="er-ks-bar" style="background:'+kpiColor(totalNet)+'"></div></div>'
+    + '</div>'
+    // Layout: tabla + cascada
+    + '<div class="er-layout">'
+      + '<div class="er-panel">'
+        + '<div class="er-panel-h"><div class="er-panel-t">Detalle por concepto</div><div style="font-size:10px;color:var(--text-secondary,#9ca3af)">% s/ Ingresos</div></div>'
+        + '<div style="overflow-y:auto;max-height:68vh">'
+          + '<table class="er-ft"><thead><tr><th style="width:55%">Concepto</th><th style="width:28%">Importe</th><th style="width:17%">%</th></tr></thead>'
+          + '<tbody>'+buildProRows()+'</tbody></table>'
+        + '</div>'
+      + '</div>'
+      + '<div class="er-panel">'
+        + '<div class="er-panel-h"><div class="er-panel-t">Cascada de utilidad</div></div>'
+        + '<div style="position:relative;height:340px;padding:12px 8px 8px"><canvas id="er-waterfall"></canvas></div>'
+      + '</div>'
+    + '</div>'
+    + '</div>';
 
   // Render waterfall chart with Chart.js
   setTimeout(function() {
