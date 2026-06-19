@@ -559,6 +559,19 @@ function doPost(e) {
       try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
       return jsonResponse(result);
     }
+    if (body.action === 'deleteBankRow') {
+      var result = deleteBankRow(body.banco, body.rowNum);
+      try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
+      return jsonResponse(result);
+    }
+    if (body.action === 'updateBankRow') {
+      var result = updateBankRow(body.banco, body.rowNum, body.row);
+      try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
+      return jsonResponse(result);
+    }
+    if (body.action === 'createBankSheet') {
+      return jsonResponse(createBankSheet(body.nombre, body.color));
+    }
     if (body.action === 'saveLiberado') {
       var result = saveLiberado(body.rowNum, body.liberado);
       try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
@@ -582,12 +595,12 @@ function readBanksData() {
       var r=sheet.getDataRange().getValues(); if(r.length<2) return B;
       for(var i=r.length-1;i>=1;i--){ var s=num(r[i][3]); if(s!==0){B.saldo=s;break;} }
       B.totalRows=r.length-1;
-      B.movimientos=r.slice(1).slice(-30).reverse().map(function(x){
+      B.movimientos=r.slice(1).map(function(x,idx){
         var d=num(x[1]),t=num(x[2]);
-        return{fecha:dt(x[0]),deposito:d,retiro:t,monto:d>0?d:-t,saldo:num(x[3]),
+        return{rowNum:idx+2,fecha:dt(x[0]),deposito:d,retiro:t,monto:d>0?d:-t,saldo:num(x[3]),
                referencia:String(x[4]||''),depositoUSD:num(x[5]),tipoCambio:num(x[6]),
                poliza:String(x[7]||''),observaciones:String(x[8]||''),tipo:d>0?'deposito':'retiro'};
-      });
+      }).slice(-30).reverse();
       return B;
     }
     function rAmex(sheet) {
@@ -596,12 +609,12 @@ function readBanksData() {
       var r=sheet.getDataRange().getValues(); if(r.length<2) return B;
       for(var i=r.length-1;i>=1;i--){ var s=num(r[i][2]); if(s!==0){B.saldo=s;break;} }
       B.totalRows=r.length-1;
-      B.movimientos=r.slice(1).slice(-30).reverse().map(function(x){
+      B.movimientos=r.slice(1).map(function(x,idx){
         var m=num(x[1]);
-        return{fecha:dt(x[0]),monto:m,saldo:num(x[2]),referencia:String(x[3]||''),
+        return{rowNum:idx+2,fecha:dt(x[0]),monto:m,saldo:num(x[2]),referencia:String(x[3]||''),
                usd:num(x[4]),tipoCambio:num(x[5]),notas:String(x[6]||''),
                poliza:String(x[7]||''),mes:String(x[8]||''),tipo:m>=0?'cargo':'pago'};
-      });
+      }).slice(-30).reverse();
       return B;
     }
     function rMP(sheet) {
@@ -638,9 +651,25 @@ function readBanksData() {
     var sant=rSant(byGid(BANKS_GID.santander));
     var amex=rAmex(byGid(BANKS_GID.amex));
     var mp  =rMP(byGid(BANKS_GID.mercadopago));
-    return { view:'cashflow', fuente:'CashFlow',
-             bancos:{santander:sant,amex:amex,mercadopago:mp},
-             totalSaldo:sant.saldo+amex.saldo+mp.saldo };
+    var bancos={santander:sant,amex:amex,mercadopago:mp};
+    var std=['santander','amex','mercadopago'];
+    for (var key in BANKS_GID) {
+      if (std.indexOf(key)>=0) continue;
+      var extraSheet=byGid(BANKS_GID[key]); if(!extraSheet) continue;
+      var rE=extraSheet.getDataRange().getValues();
+      var EB={id:key,nombre:extraSheet.getName(),color:'#6b7280',saldo:0,movimientos:[],totalRows:0};
+      if(rE.length>1){
+        for(var ei=rE.length-1;ei>=1;ei--){var es=num(rE[ei][3]);if(es!==0){EB.saldo=es;break;}}
+        EB.totalRows=rE.length-1;
+        EB.movimientos=rE.slice(1).map(function(x,idx){
+          var d=num(x[1]),t=num(x[2]);
+          return{rowNum:idx+2,fecha:dt(x[0]),deposito:d,retiro:t,monto:d>0?d:-t,saldo:num(x[3]),referencia:String(x[4]||''),tipo:d>0?'deposito':'retiro'};
+        }).slice(-30).reverse();
+      }
+      bancos[key]=EB;
+    }
+    var totalSaldo=0; for(var bk in bancos) totalSaldo+=bancos[bk].saldo||0;
+    return { view:'cashflow', fuente:'CashFlow', bancos:bancos, totalSaldo:totalSaldo };
   } catch(ex) {
     return { view:'cashflow', fuente:'CashFlow', error:ex.message, bancos:{}, totalSaldo:0 };
   }
@@ -676,6 +705,71 @@ function saveBankRow(banco, row) {
     sheet.appendRow(row);
     return {ok:true, banco:banco, newSaldo:row[sc-1], totalRows:sheet.getLastRow()-1};
   } catch(ex) { return {ok:false, error:ex.message}; }
+}
+
+function deleteBankRow(banco, rowNum) {
+  try {
+    var ss=SpreadsheetApp.openById(BANKS_SS_ID);
+    var sh=ss.getSheets();
+    var key=String(banco).toLowerCase().replace(/[\s-]/g,'');
+    var gid=BANKS_GID[key];
+    if(gid===undefined) return {ok:false,error:'Banco desconocido: '+banco};
+    var sheet=null;
+    for(var i=0;i<sh.length;i++) if(sh[i].getSheetId()===gid){sheet=sh[i];break;}
+    if(!sheet) return {ok:false,error:'Pestaña no encontrada'};
+    if(rowNum<2||rowNum>sheet.getLastRow()) return {ok:false,error:'Fila fuera de rango'};
+    sheet.deleteRow(rowNum);
+    _recalcSaldos(sheet, key);
+    return {ok:true, banco:banco, deletedRow:rowNum};
+  } catch(ex) { return {ok:false,error:ex.message}; }
+}
+
+function updateBankRow(banco, rowNum, row) {
+  try {
+    var ss=SpreadsheetApp.openById(BANKS_SS_ID);
+    var sh=ss.getSheets();
+    var key=String(banco).toLowerCase().replace(/[\s-]/g,'');
+    var gid=BANKS_GID[key];
+    if(gid===undefined) return {ok:false,error:'Banco desconocido: '+banco};
+    var sheet=null;
+    for(var i=0;i<sh.length;i++) if(sh[i].getSheetId()===gid){sheet=sh[i];break;}
+    if(!sheet) return {ok:false,error:'Pestaña no encontrada'};
+    if(rowNum<2||rowNum>sheet.getLastRow()) return {ok:false,error:'Fila fuera de rango'};
+    sheet.getRange(rowNum,1,1,row.length).setValues([row]);
+    _recalcSaldos(sheet, key);
+    return {ok:true, banco:banco, updatedRow:rowNum};
+  } catch(ex) { return {ok:false,error:ex.message}; }
+}
+
+function _recalcSaldos(sheet, key) {
+  var lr=sheet.getLastRow(); if(lr<2) return;
+  var vals=sheet.getRange(2,1,lr-1,9).getValues();
+  function num(v){var n=parseFloat(String(v||'').replace(/[$,\s]/g,''));return isNaN(n)?0:n;}
+  if(key==='santander'){
+    var run=0;
+    for(var i=0;i<vals.length;i++){run+=num(vals[i][1])-num(vals[i][2]);vals[i][3]=run;}
+    sheet.getRange(2,4,lr-1,1).setValues(vals.map(function(r){return[r[3]];}));
+  } else if(key==='amex'){
+    var run=0;
+    for(var i=0;i<vals.length;i++){run+=num(vals[i][1]);vals[i][2]=run;}
+    sheet.getRange(2,3,lr-1,1).setValues(vals.map(function(r){return[r[2]];}));
+  }
+}
+
+function createBankSheet(nombre, color) {
+  try {
+    var ss=SpreadsheetApp.openById(BANKS_SS_ID);
+    var sheets=ss.getSheets();
+    var key=nombre.toLowerCase().replace(/[\s-]/g,'');
+    for(var i=0;i<sheets.length;i++) if(sheets[i].getName().toLowerCase().replace(/[\s-]/g,'')===key) return {ok:false,error:'Ya existe una pestaña con ese nombre'};
+    var newSheet=ss.insertSheet(nombre);
+    newSheet.getRange(1,1,1,9).setValues([['Fecha','Depósito','Retiro','Saldo','Referencia','USD','T.Cambio','Póliza','Observaciones']]);
+    newSheet.getRange(1,1,1,9).setFontWeight('bold').setBackground('#f3f4f6');
+    newSheet.setFrozenRows(1);
+    var gid=newSheet.getSheetId();
+    return {ok:true,nombre:nombre,gid:gid,key:key,
+            instruccion:'Agrega esta línea a BANKS_GID en config.gs: '+key+': '+gid};
+  } catch(ex) { return {ok:false,error:ex.message}; }
 }
 
 function saveLiberado(rowNum, liberado) {

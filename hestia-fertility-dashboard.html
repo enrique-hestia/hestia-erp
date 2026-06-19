@@ -2543,6 +2543,7 @@ function cbSB(id) {
 
 function cbOpenDrawer() {
   _cbDrawerOpen = true;
+  _cbEditRowNum  = null; // reset edit mode
   var d = document.getElementById('cb-drw'), o = document.getElementById('cb-ovl');
   if (d) d.classList.add('open');
   if (o) o.classList.add('open');
@@ -2772,12 +2773,12 @@ window.cbMPCalc = function() {
   var te = document.getElementById('cb-total-venta');if(te) te.value = ne.toFixed(2);
 };
 
-window.cbSaveRow = async function() {
+function _cbCollectRow(banco) {
   function g(id){ var e=document.getElementById(id); return e?e.value.trim():''; }
   function n(id){ var v=parseFloat(g(id)); return isNaN(v)?0:v; }
   var fecha = g('cb-fecha');
-  if (!fecha) { alert('La fecha es obligatoria'); return; }
-  var row, banco = _cbActiveBanco;
+  if (!fecha) { alert('La fecha es obligatoria'); return null; }
+  var row;
   if (banco==='santander') {
     var tipo=g('cb-tipo'), monto=Math.abs(n('cb-monto'));
     row = [fecha, tipo==='deposito'?monto:0, tipo==='retiro'?monto:0, 0, g('cb-referencia'), n('cb-usd'), n('cb-tc'), g('cb-poliza'), g('cb-obs')];
@@ -2788,14 +2789,108 @@ window.cbSaveRow = async function() {
   } else {
     row = [g('cb-mes'), fecha, n('cb-cobro'), n('cb-importe-com'), n('cb-pct-com'), n('cb-total-venta'), g('cb-obs'), false];
   }
-  var btn = document.querySelector('#cb-drw .cf-btp');
+  return row;
+}
+
+window.cbSaveRow = async function() {
+  var row = _cbCollectRow(_cbActiveBanco);
+  if (!row) return;
+  var btn = document.getElementById('cb-save-btn');
   if (btn) { btn.disabled=true; btn.textContent='Guardando…'; }
   try {
-    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'saveBankRow', banco:banco, row:row})});
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'saveBankRow', banco:_cbActiveBanco, row:row})});
     var res = await r.json();
     if (res.ok) { cbCloseDrawer(); loadConciliacionData(); }
     else { alert('Error: '+(res.error||'No se pudo guardar')); if(btn){btn.disabled=false;btn.textContent='Guardar movimiento';} }
   } catch(e) { alert('Error de conexión'); if(btn){btn.disabled=false;btn.textContent='Guardar movimiento';} }
+};
+
+/* ── Editar fila existente ─────────────────────────────── */
+var _cbEditRowNum = null;
+
+window.cbEditRow = function(banco, rowNum, movJson) {
+  _cbActiveBanco = banco;
+  _cbEditRowNum  = rowNum;
+  // Abrir drawer con formulario base
+  cbOpenDrawer();
+  // Cambiar header y botón a modo edición
+  var dtl = document.querySelector('.cb-dtl');
+  if (dtl) dtl.textContent = 'Editar movimiento — ' + ({santander:'Santander',mercadopago:'Mercado Pago',amex:'AMEX'}[banco]||banco);
+  var btn = document.getElementById('cb-save-btn');
+  if (btn) { btn.textContent = 'Actualizar movimiento'; btn.onclick = cbUpdateRow; }
+  // Pre-llenar campos con los datos de la fila
+  try {
+    var m = typeof movJson === 'string' ? JSON.parse(movJson) : movJson;
+    function sv(id,v){ var e=document.getElementById(id); if(e) e.value=v||''; }
+    sv('cb-fecha', m.fecha||'');
+    if (banco==='santander') {
+      cbTipoPill(parseFloat(m.deposito||0)>0?'dep':'ret');
+      sv('cb-monto', parseFloat(m.deposito||0)>0 ? m.deposito : m.retiro);
+      sv('cb-referencia', m.referencia||'');
+      sv('cb-usd', m.depositoUSD||0); sv('cb-tc', m.tipoCambio||0);
+      sv('cb-poliza', m.poliza||''); sv('cb-obs', m.observaciones||'');
+    } else if (banco==='amex') {
+      cbTipoPill(parseFloat(m.monto||0)>=0?'cargo':'pago');
+      sv('cb-monto', Math.abs(parseFloat(m.monto||0)));
+      sv('cb-referencia', m.referencia||'');
+      sv('cb-usd', m.usd||0); sv('cb-tc', m.tipoCambio||0);
+      sv('cb-notas', m.notas||''); sv('cb-poliza', m.poliza||'');
+    } else {
+      cbTipoPill(parseFloat(m.cobro||0)>=0?'cargo':'abono');
+      sv('cb-cobro', Math.abs(parseFloat(m.cobro||0)));
+      sv('cb-importe-com', Math.abs(parseFloat(m.comisiones||0)));
+      sv('cb-obs', m.observaciones||'');
+      cbMPCalc();
+    }
+  } catch(ex) { console.warn('cbEditRow parse error', ex); }
+};
+
+window.cbUpdateRow = async function() {
+  if (!_cbEditRowNum) return;
+  var row = _cbCollectRow(_cbActiveBanco);
+  if (!row) return;
+  var btn = document.getElementById('cb-save-btn');
+  if (btn) { btn.disabled=true; btn.textContent='Actualizando…'; }
+  try {
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'updateBankRow', banco:_cbActiveBanco, rowNum:_cbEditRowNum, row:row})});
+    var res = await r.json();
+    if (res.ok) { _cbEditRowNum=null; cbCloseDrawer(); loadConciliacionData(); }
+    else { alert('Error: '+(res.error||'No se pudo actualizar')); if(btn){btn.disabled=false;btn.textContent='Actualizar movimiento';} }
+  } catch(e) { alert('Error de conexión'); if(btn){btn.disabled=false;btn.textContent='Actualizar movimiento';} }
+};
+
+/* ── Borrar fila ───────────────────────────────────────── */
+window.cbDeleteRow = async function(banco, rowNum) {
+  if (!rowNum) return;
+  if (!confirm('¿Eliminar este movimiento?\n\nEsta acción no se puede deshacer.')) return;
+  try {
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'deleteBankRow', banco:banco, rowNum:rowNum})});
+    var res = await r.json();
+    if (res.ok) { loadConciliacionData(); }
+    else { alert('Error al eliminar: '+(res.error||'Intenta de nuevo')); }
+  } catch(e) { alert('Error de conexión'); }
+};
+
+/* ── Crear nueva pestaña de banco ──────────────────────── */
+window.cbCrearBanco = async function() {
+  var nombre = document.getElementById('cb-nuevo-nombre') && document.getElementById('cb-nuevo-nombre').value.trim();
+  if (!nombre) { alert('El nombre del banco es obligatorio'); return; }
+  var btn = document.getElementById('cb-crear-btn');
+  if (btn) { btn.disabled=true; btn.textContent='Creando…'; }
+  try {
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'createBankSheet', nombre:nombre, color:'#6b7280'})});
+    var res = await r.json();
+    if (res.ok) {
+      var msg = '✅ Pestaña "'+res.nombre+'" creada en Sheets.\n\n'
+        +'Para activarla en el ERP, agrega esta línea a BANKS_GID en config.gs:\n\n'
+        +res.key + ': ' + res.gid;
+      alert(msg);
+      if(btn){btn.disabled=false;btn.textContent='Crear banco';}
+    } else {
+      alert('Error: '+(res.error||'No se pudo crear'));
+      if(btn){btn.disabled=false;btn.textContent='Crear banco';}
+    }
+  } catch(e) { alert('Error de conexión'); if(btn){btn.disabled=false;btn.textContent='Crear banco';} }
 };
 
 function renderConciliacion(data) {
@@ -2856,6 +2951,9 @@ function renderConciliacion(data) {
     +'.cb-ret{background:#fee2e2;color:#991b1b}'
     +'.cb-neu{background:#f3f4f6;color:#374151}'
     +'.cb-empty{padding:32px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:12px}'
+    +'.cb-act-btn{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;border:none;cursor:pointer;font-size:13px;transition:background .15s}'
+    +'.cb-act-edit{background:rgba(59,130,246,.1);color:#2563eb}.cb-act-edit:hover{background:rgba(59,130,246,.2)}'
+    +'.cb-act-del{background:rgba(220,38,38,.08);color:#dc2626;margin-left:4px}.cb-act-del:hover{background:rgba(220,38,38,.18)}'
     // Sidebar resumen
     +'.cb-sc{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:16px;margin-bottom:14px}'
     +'.cb-sh{font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:10px}'
@@ -2928,8 +3026,15 @@ function renderConciliacion(data) {
     if (aB.id==='santander')    { hh.push('<th>Tipo</th><th style="text-align:right">Depósito</th><th style="text-align:right">Retiro</th><th style="text-align:right">Saldo</th><th>Referencia</th>'); }
     else if (aB.id==='amex')    { hh.push('<th>Tipo</th><th style="text-align:right">Importe</th><th style="text-align:right">Saldo</th><th>Referencia</th>'); }
     else                        { hh.push('<th>Tipo</th><th style="text-align:right">Cobro</th><th style="text-align:right">Comisión</th><th style="text-align:right">Neto</th><th>Obs.</th><th style="text-align:center">Liberado</th>'); }
+    hh.push('<th style="text-align:center;width:72px"></th>');
     hh.push('</tr></thead><tbody>');
     movs.forEach(function(m) {
+      var rn = m.rowNum || 0;
+      var mj = encodeURIComponent(JSON.stringify(m));
+      var actCells = '<td style="text-align:center;white-space:nowrap">'
+        +'<button class="cb-act-btn cb-act-edit" title="Editar" onclick="cbEditRow(\''+aB.id+'\','+rn+',decodeURIComponent(\''+mj+'\'))">✎</button>'
+        +'<button class="cb-act-btn cb-act-del"  title="Eliminar" onclick="cbDeleteRow(\''+aB.id+'\','+rn+')">✕</button>'
+        +'</td>';
       hh.push('<tr>');
       hh.push('<td style="white-space:nowrap;color:var(--text-secondary,#6b7280)">'+((m.fecha||m.mes)||'—')+'</td>');
       if (aB.id==='santander') {
@@ -2951,16 +3056,14 @@ function renderConciliacion(data) {
         var cobro=parseFloat(m.cobro||m.totalBruto||0), com=parseFloat(m.comisiones||0), neto=parseFloat(m.totalVenta||0);
         var tipoBadge3 = cobro>0?'<span class="cb-badge cb-dep">DEPÓSITO</span>':cobro<0?'<span class="cb-badge cb-ret">RETIRO</span>':'<span class="cb-badge cb-neu">—</span>';
         var cbChkCls = 'cf-chk' + (m.liberado ? ' on' : '');
-        var cbRn = m.rowNum || 0;
         hh.push('<td>'+tipoBadge3+'</td>');
         hh.push('<td style="text-align:right;font-weight:600">'+(cobro?'$'+Math.abs(cobro).toLocaleString('en-US',{minimumFractionDigits:2}):'—')+'</td>');
         hh.push('<td style="text-align:right;color:#b45309">'+(com?'($'+Math.abs(com).toLocaleString('en-US',{minimumFractionDigits:2})+')':'—')+'</td>');
         hh.push('<td style="text-align:right;font-weight:700;color:#009ee3">'+(neto?'$'+Math.abs(neto).toLocaleString('en-US',{minimumFractionDigits:2}):'—')+'</td>');
         hh.push('<td style="color:var(--text-secondary,#374151);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(m.observaciones||'—')+'</td>');
-        hh.push('<td style="text-align:center"><div class="'+cbChkCls+'" onclick="cfToggleLib('+cbRn+','+(!(m.liberado))+')"\
- title="'+(m.liberado?'Marcar como NO liberado':'Marcar como liberado')+'">'+(m.liberado?'✓':'')+'</div></td>');
+        hh.push('<td style="text-align:center"><div class="'+cbChkCls+'" onclick="cfToggleLib('+rn+','+(!(m.liberado))+') " title="'+(m.liberado?'Marcar como NO liberado':'Marcar como liberado')+'">'+(m.liberado?'✓':'')+'</div></td>');
       }
-      hh.push('</tr>');
+      hh.push(actCells+'</tr>');
     });
     hh.push('</tbody></table></div>');
   } else {
@@ -3009,6 +3112,22 @@ function renderConciliacion(data) {
       +'Compara los movimientos capturados aquí con los estados de cuenta de cada banco. '
       +'Los saldos se calculan de los movimientos registrados en Sheets.'
     +'</div></div>');
+
+  // ── Agregar banco ──────────────────────────────────────
+  hh.push('<div class="cb-sc" style="border:1.5px dashed var(--color-divider,#d1d5db);background:transparent">'
+    +'<div class="cb-sh">+ Agregar banco</div>'
+    +'<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-bottom:10px;line-height:1.5">'
+      +'Crea una nueva pestaña en el Spreadsheet de bancos. Después agrega el GID a <code style="background:var(--color-surface,#f3f4f6);padding:1px 5px;border-radius:4px;font-size:10px">config.gs</code> para activarlo.'
+    +'</div>'
+    +'<div style="display:flex;gap:8px">'
+      +'<input id="cb-nuevo-nombre" class="cbf-inp" style="flex:1;font-size:12px;padding:8px 10px" placeholder="Ej: BBVA, HSBC…">'
+      +'<button id="cb-crear-btn" onclick="cbCrearBanco()" style="padding:8px 14px;border-radius:8px;border:none;background:var(--color-primary,#c46a7a);color:#fff;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">Crear</button>'
+    +'</div>'
+    +'<div style="margin-top:10px;padding:8px 10px;background:var(--color-surface,#f9fafb);border-radius:8px;font-size:10.5px;color:var(--text-secondary,#6b7280)">'
+      +'<strong>Estructura de la pestaña nueva:</strong><br>'
+      +'Fecha · Depósito · Retiro · Saldo · Referencia · USD · T.Cambio · Póliza · Observaciones'
+    +'</div>'
+    +'</div>');
 
   hh.push('</div>'); // sidebar
   hh.push('</div>'); // cb-wrap
