@@ -3192,34 +3192,48 @@ function renderConciliacion(data) {
   // ── Comisiones MP por mes ──────────────────────────────
   var comMes = (mp.comisionesPorMes || []);
   if (comMes.length) {
+    // Normalizar mes a formato corto mm-aaaa
+    var mesesMap = {jan:'01',ene:'01',feb:'02',mar:'03',apr:'04',abr:'04',may:'05',jun:'06',jul:'07',aug:'08',ago:'08',sep:'09',oct:'10',nov:'11',dec:'12',dic:'12'};
+    function fmtMes(raw) {
+      var s = String(raw||'').trim().toLowerCase().replace(/[\/_\s]+/g,'-');
+      var p = s.match(/^([a-z]+)-?(\d{2,4})$/);
+      if (p) { var mm = mesesMap[p[1].substring(0,3)]||'??'; var yy = p[2].length===4?p[2]:'20'+p[2]; return mm+'-'+yy; }
+      var p2 = s.match(/^(\d{1,2})-(\d{2,4})$/);
+      if (p2) { return p2[1].padStart(2,'0')+'-'+(p2[2].length===4?p2[2]:'20'+p2[2]); }
+      return raw;
+    }
     var totalComAcum = 0;
     comMes.forEach(function(m){ totalComAcum += m.totalComision; });
+    var cbComTotalId = 'cb-com-total-'+Date.now();
     hh.push('<div class="cb-sc">'
       +'<div class="cb-sh" style="display:flex;align-items:center;justify-content:space-between">'
-        +'<span>Comisiones Mercado Pago</span>'
-        +'<span style="font-size:10px;font-weight:800;color:#b45309;letter-spacing:0;text-transform:none">Total: '+fS(totalComAcum)+'</span>'
+        +'<span>Comisiones MP</span>'
+        +'<label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);letter-spacing:0;text-transform:none">'
+          +'<input type="checkbox" checked onchange="document.getElementById(\''+cbComTotalId+'\').style.display=this.checked?\'table-row\':\'none\'" style="width:12px;height:12px;accent-color:#b45309"> Total'
+        +'</label>'
       +'</div>'
-      +'<div style="overflow-x:auto">'
       +'<table style="width:100%;border-collapse:collapse;font-size:11px">'
       +'<thead><tr>'
-        +'<th style="text-align:left;padding:6px 8px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);border-bottom:1.5px solid var(--color-divider,#e5e7eb)">Mes</th>'
-        +'<th style="text-align:right;padding:6px 8px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);border-bottom:1.5px solid var(--color-divider,#e5e7eb)">Cobros</th>'
-        +'<th style="text-align:right;padding:6px 8px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);border-bottom:1.5px solid var(--color-divider,#e5e7eb)">Comisión</th>'
-        +'<th style="text-align:right;padding:6px 8px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);border-bottom:1.5px solid var(--color-divider,#e5e7eb)">%</th>'
+        +'<th style="text-align:left;padding:5px 6px;font-size:8.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);border-bottom:1.5px solid var(--color-divider,#d1d5db)">Mes</th>'
+        +'<th style="text-align:right;padding:5px 6px;font-size:8.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);border-bottom:1.5px solid var(--color-divider,#d1d5db)">Comisión</th>'
+        +'<th style="text-align:right;padding:5px 6px;font-size:8.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);border-bottom:1.5px solid var(--color-divider,#d1d5db)">%</th>'
       +'</tr></thead><tbody>');
-    comMes.slice(0,12).forEach(function(m){
+    comMes.forEach(function(m){
       var pctDisp = m.pctPromedio > 0 && m.pctPromedio < 1 ? (m.pctPromedio*100) : m.pctPromedio;
       hh.push('<tr style="border-bottom:1px solid var(--color-divider,#f0f0f0)">'
-        +'<td style="padding:5px 8px;font-weight:600;color:var(--text-primary,#374151)">'+m.mes+'</td>'
-        +'<td style="padding:5px 8px;text-align:right;color:var(--text-primary,#374151)">'+fS(m.totalCobro)+'</td>'
-        +'<td style="padding:5px 8px;text-align:right;font-weight:700;color:#b45309">'+fS(m.totalComision)+'</td>'
-        +'<td style="padding:5px 8px;text-align:right;color:var(--text-secondary,#6b7280)">'+pctDisp.toFixed(2)+'%</td>'
+        +'<td style="padding:4px 6px;font-weight:600;color:var(--text-primary,#374151);font-size:11px">'+fmtMes(m.mes)+'</td>'
+        +'<td style="padding:4px 6px;text-align:right;font-weight:700;color:#b45309">'+fS(m.totalComision)+'</td>'
+        +'<td style="padding:4px 6px;text-align:right;color:var(--text-secondary,#6b7280)">'+pctDisp.toFixed(2)+'%</td>'
         +'</tr>');
     });
-    hh.push('</tbody></table></div>'
-      +'<div style="margin-top:8px;font-size:9.5px;color:var(--text-secondary,#9ca3af);line-height:1.4">'
-        +'Últimos '+Math.min(comMes.length,12)+' meses · % promedio = comisión / cobros brutos'
-      +'</div>'
+    // Fila total (togglable)
+    hh.push('<tr id="'+cbComTotalId+'" style="border-top:2px solid var(--color-divider,#d1d5db)">'
+      +'<td style="padding:6px;font-weight:800;font-size:11px;color:var(--text-primary,#111)">TOTAL</td>'
+      +'<td style="padding:6px;text-align:right;font-weight:800;font-size:12px;color:#92400e">'+fS(totalComAcum)+'</td>'
+      +'<td style="padding:6px;text-align:right;font-weight:700;color:var(--text-secondary,#6b7280)">'+(mp.comisionesPorMes.length?((totalComAcum / comMes.reduce(function(s,m){return s+(m.totalCobro||0);},0))*100).toFixed(2)+'%':'—')+'</td>'
+      +'</tr>');
+    hh.push('</tbody></table>'
+      +'<div style="margin-top:6px;font-size:9px;color:var(--text-secondary,#b0b0b0)">% = comisión / cobros brutos del mes</div>'
       +'</div>');
   }
 
