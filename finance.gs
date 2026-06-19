@@ -638,18 +638,24 @@ function updateBankRow(banco, rowNum, row) {
 // Recalcula la columna de saldo acumulado tras editar/borrar
 function _recalcSaldos(sheet, key) {
   var lr=sheet.getLastRow(); if(lr<2) return;
-  var vals=sheet.getRange(2,1,lr-1,9).getValues();
   function num(v){var n=parseFloat(String(v||'').replace(/[$,\s]/g,''));return isNaN(n)?0:n;}
   if(key==='santander') {
+    var vals=sheet.getRange(2,1,lr-1,4).getValues();
     var run=0;
     for(var i=0;i<vals.length;i++){run+=num(vals[i][1])-num(vals[i][2]); vals[i][3]=run;}
     sheet.getRange(2,4,lr-1,1).setValues(vals.map(function(r){return[r[3]];}));
   } else if(key==='amex') {
+    var vals=sheet.getRange(2,1,lr-1,3).getValues();
     var run=0;
     for(var i=0;i<vals.length;i++){run+=num(vals[i][1]); vals[i][2]=run;}
     sheet.getRange(2,3,lr-1,1).setValues(vals.map(function(r){return[r[2]];}));
+  } else if(key==='mercadopago') {
+    // Recalcula col G (saldo corrido) = suma acumulada de col F (Total de Venta)
+    var vals=sheet.getRange(2,6,lr-1,1).getValues(); // col F = totalVenta (index 5, col 6)
+    var run=0;
+    var saldos=vals.map(function(r){run+=num(r[0]); return[run];});
+    sheet.getRange(2,7,lr-1,1).setValues(saldos); // col G = saldo
   }
-  // MP: saldo de col G se maneja por fórmulas, no se recalcula aquí
 }
 
 function createBankSheet(nombre, color) {
@@ -692,7 +698,11 @@ function saveBankRow(banco, row) {
     } else if (key==='amex') {
       row[2]=ls+(parseFloat(row[1])||0);
     } else {
-      // MP: compute running saldo from col F (totalVenta) sum — independent of col G formulas
+      // MP col E (idx 4): pct = 1-(totalVenta/cobro) como fracción decimal (ej. 0.0406)
+      var mpCobro = parseFloat(row[2]) || 0;
+      var mpNeto  = parseFloat(row[5]) || 0;
+      row[4] = (mpCobro !== 0) ? (1 - (mpNeto / mpCobro)) : 0;
+      // MP col G (idx 6): saldo corrido = suma acumulada de col F
       var allVals=sheet.getLastRow()>1?sheet.getRange(2,6,sheet.getLastRow()-1,1).getValues():[];
       var runSum=0; for(var k=0;k<allVals.length;k++) runSum+=parseFloat(allVals[k][0])||0;
       row[6]=runSum+(parseFloat(row[5])||0);

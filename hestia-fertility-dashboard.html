@@ -2471,10 +2471,11 @@ async function loadCashFlowData() {
     'border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Cargando cuentas bancarias…</div>';
   try {
     var tok = encodeURIComponent(getToken());
+    var _t = Date.now();
     var [resp, ccResp, cxpResp] = await Promise.all([
-      fetch(APPS_SCRIPT_URL + '?action=banks&token='    + tok, {redirect:'follow'}),
-      fetch(APPS_SCRIPT_URL + '?action=cajachica&token='+ tok, {redirect:'follow'}),
-      fetch(APPS_SCRIPT_URL + '?action=cxp&token='     + tok, {redirect:'follow'})
+      fetch(APPS_SCRIPT_URL + '?action=banks&token='    + tok + '&_t=' + _t, {redirect:'follow'}),
+      fetch(APPS_SCRIPT_URL + '?action=cajachica&token='+ tok + '&_t=' + _t, {redirect:'follow'}),
+      fetch(APPS_SCRIPT_URL + '?action=cxp&token='     + tok + '&_t=' + _t, {redirect:'follow'})
     ]);
     var data = await resp.json();
     try {
@@ -2530,7 +2531,7 @@ async function loadConciliacionData() {
     +'<div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Cargando conciliación bancaria…</div>';
   try {
     var tok = encodeURIComponent(getToken());
-    var resp = await fetch(APPS_SCRIPT_URL + '?action=banks&token=' + tok, {redirect:'follow'});
+    var resp = await fetch(APPS_SCRIPT_URL + '?action=banks&token=' + tok + '&_t=' + Date.now(), {redirect:'follow'});
     var data = await resp.json();
     _cbLiveData = data;
     renderConciliacion(data);
@@ -2684,7 +2685,7 @@ function cbBuildForm(banco) {
         +'<input type="number" id="cb-monto" class="cbf-amt-inp" placeholder="0.00" step="0.01" style="color:'+color+'">'
         +'<div style="font-size:11px;font-weight:700;color:var(--text-secondary,#9ca3af)">MXN</div>'
       +'</div>'
-      +'<div style="margin-top:8px;font-size:10.5px;color:var(--text-secondary,#9ca3af)">Cargo positivo · Pago negativo</div>'
+      +'<div style="margin-top:8px;font-size:10.5px;color:var(--text-secondary,#9ca3af)">Ingresa el importe sin signo — se aplica automáticamente según el tipo</div>'
       +'</div>');
     h.push('<div class="cbf-sec">Detalle</div>');
     h.push('<div class="cbf-grid">'
@@ -2716,14 +2717,15 @@ function cbBuildForm(banco) {
         +'<input type="number" id="cb-cobro" class="cbf-amt-inp" placeholder="0.00" step="0.01" style="color:'+color+'" oninput="cbMPCalc()">'
         +'<div style="font-size:11px;font-weight:700;color:var(--text-secondary,#9ca3af)">MXN</div>'
       +'</div></div>');
-    h.push('<div class="cbf-field" style="margin:12px 0">'
+    h.push('<div id="cb-com-section" style="margin:12px 0">'
+      +'<div class="cbf-field">'
       +'<label class="cbf-lbl">Comisión Mercado Pago (importe $)</label>'
       +'<div class="cbf-amt-row" style="gap:8px">'
         +'<span style="font-size:16px;color:var(--text-secondary,#9ca3af)">$</span>'
         +'<input type="number" id="cb-importe-com" class="cbf-inp" style="flex:1" placeholder="0.00" step="0.01" min="0" oninput="cbMPCalc()">'
       +'</div>'
-      +'<div class="cbf-hint">Monto en pesos que descuenta MP</div>'
-      +'</div>');
+      +'<div class="cbf-hint">Se resta automáticamente del cobro bruto</div>'
+      +'</div></div>');
     // Panel neto
     h.push('<div class="cbf-neto" id="cb-mp-panel">'
       +'<div class="cbf-neto-item"><div class="cbf-neto-lbl">Cobro</div><div class="cbf-neto-val" id="cb-neto-cobro" style="color:'+color+'">—</div></div>'
@@ -2760,18 +2762,36 @@ window.cbTipoPill = function(val) {
   var t = document.getElementById('cb-tipo'); if (t) t.value = m.hidden;
   var on = document.getElementById(m.on); if (on) on.classList.add('sel');
   m.off.forEach(function(id){ var el=document.getElementById(id); if(el) el.classList.remove('sel'); });
+  // Si estamos en MP, recalcular panel y mostrar/ocultar comision
+  if (document.getElementById('cb-cobro')) cbMPCalc();
 };
 
 window.cbMPCalc = function() {
-  var c   = parseFloat(document.getElementById('cb-cobro').value)||0;
+  var tipoEl = document.getElementById('cb-tipo');
+  var isRetiro = tipoEl && tipoEl.value === 'ABONO';
+  var raw = parseFloat(document.getElementById('cb-cobro').value)||0;
   var imp = parseFloat(document.getElementById('cb-importe-com').value)||0;
-  var cm  = -Math.abs(imp);
-  var ne  = c + cm;
-  var pct = (c!==0) ? ((Math.abs(cm)/Math.abs(c))*100) : 0;
   function fmt(v){ return '$'+(Math.abs(v)).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); }
-  var eC = document.getElementById('cb-neto-cobro'); if(eC) eC.textContent = c ? fmt(c) : '—';
-  var eM = document.getElementById('cb-neto-com');   if(eM) eM.textContent = imp ? '('+fmt(cm)+')' : '—';
-  var eN = document.getElementById('cb-neto-net');   if(eN) eN.textContent = (c||imp) ? fmt(ne) : '—';
+
+  // Actualizar label del campo cobro según tipo
+  var amtLbl = document.querySelector('.cbf-amt-lbl');
+  if (amtLbl) amtLbl.textContent = isRetiro ? 'Monto del retiro' : 'Cobro bruto al paciente';
+
+
+  // En ambos modos la comisión siempre resta; en Retiro el cobro también es negativo
+  var cobro = isRetiro ? -Math.abs(raw) : Math.abs(raw);
+  var cm    = -Math.abs(imp);
+  var ne    = cobro + cm;
+  // Guardar como fracción decimal (ej. 0.0254) porque col E en Sheets tiene formato %
+  var pct   = (raw !== 0) ? (Math.abs(cm) / Math.abs(raw)) : 0;
+
+  var eC = document.getElementById('cb-neto-cobro');
+  if (eC) eC.textContent = raw ? (isRetiro ? '('+fmt(cobro)+')' : fmt(cobro)) : '—';
+  var eM = document.getElementById('cb-neto-com');
+  if (eM) eM.textContent = imp ? '('+fmt(cm)+')' : '—';
+  var eN = document.getElementById('cb-neto-net');
+  if (eN) eN.textContent = raw ? (ne < 0 ? '('+fmt(ne)+')' : fmt(ne)) : '—';
+
   var ce = document.getElementById('cb-comisiones'); if(ce) ce.value = cm.toFixed(2);
   var pe = document.getElementById('cb-pct-com');    if(pe) pe.value = pct.toFixed(4);
   var te = document.getElementById('cb-total-venta');if(te) te.value = ne.toFixed(2);
@@ -2791,7 +2811,15 @@ function _cbCollectRow(banco) {
     if(g('cb-tipo')==='pago'&&mov>0) mov=-mov;
     row = [fecha, mov, 0, g('cb-referencia'), n('cb-usd'), n('cb-tc'), g('cb-notas'), g('cb-poliza'), g('cb-mes')];
   } else {
-    row = [g('cb-mes'), fecha, n('cb-cobro'), n('cb-importe-com'), n('cb-pct-com'), n('cb-total-venta'), g('cb-obs'), false];
+    // MP: retiro = cobro negativo; row de 10 col para coincidir con hoja (A-J)
+    var isRetiro = g('cb-tipo') === 'ABONO';
+    var cobroVal = isRetiro ? -Math.abs(n('cb-cobro')) : Math.abs(n('cb-cobro'));
+    var comVal   = n('cb-importe-com'); // comisión siempre resta en ambos modos
+    var pctVal   = n('cb-pct-com');
+    var netoVal  = n('cb-total-venta'); // calculado por cbMPCalc
+    var tipoLabel = isRetiro ? 'Retiro' : 'Deposito';
+    // Col: A=mes B=fecha C=cobro D=comisiones E=pct F=totalVenta G=saldo(calc) H=liberado I=obs J=C/A
+    row = [g('cb-mes'), fecha, cobroVal, comVal, pctVal, netoVal, 0, false, g('cb-obs'), tipoLabel];
   }
   return row;
 }
@@ -2804,7 +2832,7 @@ window.cbSaveRow = async function() {
   try {
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'saveBankRow', banco:_cbActiveBanco, row:row})});
     var res = await r.json();
-    if (res.ok) { cbCloseDrawer(); loadConciliacionData(); }
+    if (res.ok) { cbCloseDrawer(); loadConciliacionData(); loadCashFlowData(); }
     else { alert('Error: '+(res.error||'No se pudo guardar')); if(btn){btn.disabled=false;btn.textContent='Guardar movimiento';} }
   } catch(e) { alert('Error de conexión'); if(btn){btn.disabled=false;btn.textContent='Guardar movimiento';} }
 };
@@ -2859,7 +2887,7 @@ window.cbUpdateRow = async function() {
   try {
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'updateBankRow', banco:_cbActiveBanco, rowNum:_cbEditRowNum, row:row})});
     var res = await r.json();
-    if (res.ok) { _cbEditRowNum=null; cbCloseDrawer(); loadConciliacionData(); }
+    if (res.ok) { _cbEditRowNum=null; cbCloseDrawer(); loadConciliacionData(); loadCashFlowData(); }
     else { alert('Error: '+(res.error||'No se pudo actualizar')); if(btn){btn.disabled=false;btn.textContent='Actualizar movimiento';} }
   } catch(e) { alert('Error de conexión'); if(btn){btn.disabled=false;btn.textContent='Actualizar movimiento';} }
 };
@@ -2871,7 +2899,7 @@ window.cbDeleteRow = async function(banco, rowNum) {
   try {
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'deleteBankRow', banco:banco, rowNum:rowNum})});
     var res = await r.json();
-    if (res.ok) { loadConciliacionData(); }
+    if (res.ok) { loadConciliacionData(); loadCashFlowData(); }
     else { alert('Error al eliminar: '+(res.error||'Intenta de nuevo')); }
   } catch(e) { alert('Error de conexión'); }
 };
@@ -2898,6 +2926,7 @@ window.cbCrearBanco = async function() {
   } catch(e) { alert('Error de conexión'); if(btn){btn.disabled=false;btn.textContent='Crear banco';} }
 };
 
+var _CB_VER = '20260619-2'; // bump para forzar recarga de caché
 function renderConciliacion(data) {
   var el = document.getElementById('view-conciliacion');
   if (!el) return;
@@ -2911,7 +2940,7 @@ function renderConciliacion(data) {
   var amex = bk('amex','AMEX');
   var allB = [sant, mp, amex];
   var aB   = allB.filter(function(b){ return b.id===_cbActiveBanco; })[0] || sant;
-  function fS(v){ return '$'+Math.round(Math.abs(v)).toLocaleString('en-US'); }
+  function fS(v){ return '$'+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
   var hh = [];
 
   // ── Estilos ──────────────────────────────────────────────
@@ -2959,6 +2988,12 @@ function renderConciliacion(data) {
     +'.cb-act-btn{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;border:none;cursor:pointer;font-size:13px;transition:background .15s}'
     +'.cb-act-edit{background:rgba(59,130,246,.1);color:#2563eb}.cb-act-edit:hover{background:rgba(59,130,246,.2)}'
     +'.cb-act-del{background:rgba(220,38,38,.08);color:#dc2626;margin-left:4px}.cb-act-del:hover{background:rgba(220,38,38,.18)}'
+    // Action buttons header
+    +'.cb-hbtn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;text-decoration:none;white-space:nowrap;border:1.5px solid transparent}'
+    +'.cb-hbtn-ref{background:var(--color-surface,#f5f5f5);color:var(--text-secondary,#374151);border-color:var(--color-divider,#e5e7eb)}.cb-hbtn-ref:hover{background:var(--color-divider,#e5e7eb);border-color:#d1d5db}'
+    +'.cb-hbtn-sh{background:#fff;color:#188038;border-color:#34a853}.cb-hbtn-sh:hover{background:#f0fdf4;border-color:#22c55e}'
+    +'.cb-hbtn-add{background:var(--color-primary,#c46a7a);color:#fff;border-color:var(--color-primary,#c46a7a);box-shadow:0 2px 8px rgba(196,106,122,.25)}.cb-hbtn-add:hover{filter:brightness(1.07);box-shadow:0 3px 12px rgba(196,106,122,.35)}'
+    +'.cb-hbtn svg{flex-shrink:0}'
     // Sidebar resumen
     +'.cb-sc{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:16px;margin-bottom:14px}'
     +'.cb-sh{font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:10px}'
@@ -2985,9 +3020,9 @@ function renderConciliacion(data) {
   hh.push('<div class="cb-top"><div class="cb-top-row">');
   hh.push('<div><h2 class="cb-h1">Conciliación Bancaria</h2><div class="cb-h1s">Santander · Mercado Pago · AMEX — Movimientos y saldos</div></div>');
   hh.push('<div class="cb-acts">');
-  hh.push('<button class="cf-btn cf-btg" onclick="loadConciliacionData()">↺ Actualizar</button>');
-  hh.push('<a class="cf-btn cf-btg" href="https://docs.google.com/spreadsheets/d/1O1tmtuVMlDl6rsN0IVFH14KmYjQZhY6GOs68PU_u0cg/edit" target="_blank" style="text-decoration:none">↗ Editar en Sheets</a>');
-  hh.push('<button class="cf-btn cf-btp" onclick="cbOpenDrawer()">+ Agregar movimiento</button>');
+  hh.push('<button class="cb-hbtn cb-hbtn-ref" onclick="loadConciliacionData()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Actualizar</button>');
+  hh.push('<a class="cb-hbtn cb-hbtn-sh" href="https://docs.google.com/spreadsheets/d/1O1tmtuVMlDl6rsN0IVFH14KmYjQZhY6GOs68PU_u0cg/edit" target="_blank"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Editar en Sheets</a>');
+  hh.push('<button class="cb-hbtn cb-hbtn-add" onclick="cbOpenDrawer()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Agregar movimiento</button>');
   hh.push('</div></div></div>');
 
   if (!live) hh.push('<div class="cf-al cf-al-d">⚠ Sin conexión a datos bancarios. <a href="javascript:loadConciliacionData()" style="font-weight:700;text-decoration:underline">Reintentar →</a></div>');
@@ -2999,14 +3034,26 @@ function renderConciliacion(data) {
     var val = isDebt ? fS(Math.abs(b.saldo)) : fS(b.saldo);
     var valColor = isDebt ? '#b45309' : (b.saldo>=0?'var(--text-primary,#111)':'#dc2626');
     var extraClass = isDebt ? ' cb-k-debt' : '';
+    var porLiberar = b.id==='mercadopago' ? (b.porLiberar||0) : 0;
     hh.push('<div class="cb-k'+extraClass+(isActive?' act':'')+'" style="--kc:'+x.color+'" onclick="cbSB(\''+b.id+'\')">'
       +'<div class="cb-kstr" style="background:'+x.color+'"></div>'
       +'<div class="cb-klogo" style="background:'+x.color+'">'+x.logo+'</div>'
-      +'<div class="cb-klbl">'+b.nombre+'</div>'
-      +'<div class="cb-kval" style="color:'+valColor+'">'+val+'</div>'
-      +'<div class="cb-kmeta">'+(b.totalRows||0)+' movimientos · '+(isDebt?'Deuda tarjeta':'Saldo disponible')+'</div>'
-      +(isDebt?'<div style="margin-top:6px;font-size:9.5px;color:#92400e;font-weight:600;background:#fef3c7;padding:3px 8px;border-radius:6px;display:inline-block">Tarjeta de crédito</div>':'')
-      +'</div>');
+      +'<div class="cb-klbl">'+b.nombre+(b.id==='mercadopago'?' — Liberado':'')+'</div>'
+      +'<div class="cb-kval" style="color:'+valColor+'">'+val+'</div>');
+    if (b.id==='mercadopago') {
+      hh.push('<div class="cb-kmeta">'+(b.totalRows||0)+' movimientos · Saldo disponible</div>');
+      if (porLiberar>0) {
+        hh.push('<div style="margin-top:7px;display:flex;align-items:center;gap:6px;background:rgba(180,83,9,.06);border:1px solid rgba(180,83,9,.15);border-radius:8px;padding:5px 9px">'
+          +'<span style="font-size:13px">⏳</span>'
+          +'<div><div style="font-size:9px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.4px">Por liberar</div>'
+          +'<div style="font-size:13px;font-weight:800;color:#b45309">'+fS(porLiberar)+'</div></div>'
+          +'</div>');
+      }
+    } else {
+      hh.push('<div class="cb-kmeta">'+(b.totalRows||0)+' movimientos · '+(isDebt?'Deuda tarjeta':'Saldo disponible')+'</div>');
+      if (isDebt) hh.push('<div style="margin-top:6px;font-size:9.5px;color:#92400e;font-weight:600;background:#fef3c7;padding:3px 8px;border-radius:6px;display:inline-block">Tarjeta de crédito</div>');
+    }
+    hh.push('</div>');
   });
   hh.push('</div>');
 
@@ -3030,7 +3077,7 @@ function renderConciliacion(data) {
     hh.push('<th>Fecha</th>');
     if (aB.id==='santander')    { hh.push('<th>Tipo</th><th style="text-align:right">Depósito</th><th style="text-align:right">Retiro</th><th style="text-align:right">Saldo</th><th>Referencia</th>'); }
     else if (aB.id==='amex')    { hh.push('<th>Tipo</th><th style="text-align:right">Importe</th><th style="text-align:right">Saldo</th><th>Referencia</th>'); }
-    else                        { hh.push('<th>Tipo</th><th style="text-align:right">Cobro</th><th style="text-align:right">Comisión</th><th style="text-align:right">Neto</th><th>Obs.</th><th style="text-align:center">Liberado</th>'); }
+    else                        { hh.push('<th>Tipo</th><th style="text-align:right">Cobro</th><th style="text-align:right">Comisión</th><th style="text-align:right">Neto</th><th style="text-align:right">% Com.</th><th>Obs.</th><th style="text-align:center">Liberado</th>'); }
     hh.push('<th style="text-align:center;width:72px"></th>');
     hh.push('</tr></thead><tbody>');
     movs.forEach(function(m) {
@@ -3065,7 +3112,11 @@ function renderConciliacion(data) {
         hh.push('<td style="text-align:right;font-weight:600">'+(cobro?'$'+Math.abs(cobro).toLocaleString('en-US',{minimumFractionDigits:2}):'—')+'</td>');
         hh.push('<td style="text-align:right;color:#b45309">'+(com?'($'+Math.abs(com).toLocaleString('en-US',{minimumFractionDigits:2})+')':'—')+'</td>');
         hh.push('<td style="text-align:right;font-weight:700;color:#009ee3">'+(neto?'$'+Math.abs(neto).toLocaleString('en-US',{minimumFractionDigits:2}):'—')+'</td>');
-        hh.push('<td style="color:var(--text-secondary,#374151);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(m.observaciones||'—')+'</td>');
+        var pctDisp = parseFloat(m.pctComision||0);
+        // Detectar si viene como fracción decimal (0.025) o ya como porcentaje (2.5)
+        var pctVal = (pctDisp > 0 && pctDisp < 1) ? (pctDisp*100) : pctDisp;
+        hh.push('<td style="text-align:right;color:#b45309;font-weight:600">'+(pctVal>0?pctVal.toFixed(2)+'%':'—')+'</td>');
+        hh.push('<td style="color:var(--text-secondary,#374151);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(m.observaciones||'—')+'</td>');
         hh.push('<td style="text-align:center"><div class="'+cbChkCls+'" onclick="cfToggleLib('+rn+','+(!(m.liberado))+') " title="'+(m.liberado?'Marcar como NO liberado':'Marcar como liberado')+'">'+(m.liberado?'✓':'')+'</div></td>');
       }
       hh.push(actCells+'</tr>');
@@ -3079,18 +3130,26 @@ function renderConciliacion(data) {
   // ── Sidebar ──────────────────────────────────────────
   hh.push('<div>');
   hh.push('<div class="cb-sc"><div class="cb-sh">Resumen de saldos</div>');
-  hh.push('<div class="cb-br"><div class="cb-bn"><div class="cb-bdot" style="background:#ec0000"></div>Santander</div><div class="cb-bv">$'+Math.round(sant.saldo).toLocaleString('en-US')+'</div></div>');
-  hh.push('<div class="cb-br"><div class="cb-bn"><div class="cb-bdot" style="background:#009ee3"></div>'
-    +'<div><div>Mercado Pago</div>'
-    +((mp.porLiberar||0)>0?'<div style="font-size:9.5px;color:#92400e;font-weight:600">⏳ $'+Math.round(mp.porLiberar).toLocaleString('en-US')+' por liberar</div>':'')
-    +'</div></div><div class="cb-bv">$'+Math.round(mp.saldo).toLocaleString('en-US')+'</div></div>');
+  hh.push('<div class="cb-br"><div class="cb-bn"><div class="cb-bdot" style="background:#ec0000"></div>Santander</div><div class="cb-bv">'+fS(sant.saldo)+'</div></div>');
+  hh.push('<div class="cb-br" style="flex-direction:column;align-items:stretch;gap:4px">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between">'
+      +'<div class="cb-bn"><div class="cb-bdot" style="background:#009ee3"></div>MP Liberado</div>'
+      +'<div class="cb-bv">'+fS(mp.saldo)+'</div>'
+    +'</div>'
+    +((mp.porLiberar||0)>0
+      ? '<div style="display:flex;align-items:center;justify-content:space-between;padding:3px 0 0 16px">'
+          +'<div style="font-size:10.5px;color:#92400e;font-weight:600">⏳ Por liberar</div>'
+          +'<div style="font-size:11px;font-weight:700;color:#b45309">'+fS(mp.porLiberar)+'</div>'
+        +'</div>'
+      : '')
+    +'</div>');
   var sanMp = sant.saldo + mp.saldo;
-  hh.push('<div class="cb-br cb-bt"><div class="cb-bn">Subtotal Disponible</div><div class="cb-bv">$'+Math.round(sanMp).toLocaleString('en-US')+'</div></div>');
+  hh.push('<div class="cb-br cb-bt"><div class="cb-bn">Subtotal Disponible</div><div class="cb-bv">'+fS(sanMp)+'</div></div>');
   hh.push('<div style="margin-top:12px;padding-top:10px;border-top:1px dashed rgba(180,83,9,.3)">'
     +'<div style="font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#b45309;margin-bottom:6px">Tarjeta de crédito</div>'
     +'<div class="cb-br" style="background:rgba(180,83,9,.04);border-radius:8px;padding:6px 8px">'
       +'<div class="cb-bn"><div class="cb-bdot" style="background:#b45309"></div><div><div style="color:#b45309;font-weight:600">AMEX</div><div style="font-size:9.5px;color:#92400e">'+(amex.totalRows||0)+' movimientos</div></div></div>'
-      +'<div class="cb-bv" style="color:#b45309">($'+Math.round(Math.abs(amex.saldo)).toLocaleString('en-US')+')</div></div>'
+      +'<div class="cb-bv" style="color:#b45309">('+fS(Math.abs(amex.saldo))+')</div></div>'
     +'</div>');
   hh.push('</div>');
 
