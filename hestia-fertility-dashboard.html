@@ -7708,25 +7708,25 @@ function submitEntmed() {
 </div>
 <script>
 (function(){
-  var CHECK_INTERVAL = 60000; // revisar cada 60 segundos
-  var currentVersion = (typeof APP_VERSION !== 'undefined') ? APP_VERSION : '';
-  if (!currentVersion) return;
+  if (location.protocol === 'file:') return;
+  var CHECK_INTERVAL = 60000;
+  var _lastModified = null;
+  var _pageUrl = location.href.split('?')[0].split('#')[0];
 
   function checkForUpdate() {
-    var url = location.href.split('?')[0] + '?_vc=' + Date.now();
-    fetch(url, {cache:'no-store'}).then(function(r){ return r.text(); }).then(function(html){
-      var m = html.match(/APP_VERSION\s*=\s*['"]([^'"]+)['"]/);
-      if (m && m[1] && m[1] !== currentVersion) {
+    fetch(_pageUrl, {method:'HEAD', cache:'no-store'}).then(function(r){
+      var lm = r.headers.get('last-modified') || r.headers.get('etag') || '';
+      if (!lm) return;
+      if (_lastModified === null) {
+        _lastModified = lm;
+      } else if (lm !== _lastModified) {
         document.getElementById('upd-toast').classList.add('show');
       }
     }).catch(function(){});
   }
 
-  // No verificar en file:// (solo funciona en servidor/GitHub Pages)
-  if (location.protocol === 'file:') return;
+  setTimeout(checkForUpdate, 15000);
   setInterval(checkForUpdate, CHECK_INTERVAL);
-  // Primera verificación a los 30 segundos de carga
-  setTimeout(checkForUpdate, 30000);
 })();
 </script>
 </body>
