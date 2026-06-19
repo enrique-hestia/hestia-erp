@@ -262,6 +262,10 @@ function doGet(e) {
       return jsonResponse(readCxPData());
     }
 
+    if (action === 'ingresos') {
+      return jsonResponse(readIngresosData());
+    }
+
     if (action === 'insert') {
       var sheetParamIns = (e && e.parameter.sheet) || '';
       if (sheetParamIns.trim().toLowerCase() === 'caja chica') {
