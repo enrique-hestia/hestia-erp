@@ -2825,6 +2825,7 @@ function _cbCollectRow(banco) {
 }
 
 window.cbSaveRow = async function() {
+  if (!hasPermission('bank_capture')) { alert('No tienes permisos para capturar movimientos.'); return; }
   var row = _cbCollectRow(_cbActiveBanco);
   if (!row) return;
   var btn = document.getElementById('cb-save-btn');
@@ -2879,6 +2880,7 @@ window.cbEditRow = function(banco, rowNum, movJson) {
 };
 
 window.cbUpdateRow = async function() {
+  if (!hasPermission('bank_edit')) { alert('No tienes permisos para editar movimientos.'); return; }
   if (!_cbEditRowNum) return;
   var row = _cbCollectRow(_cbActiveBanco);
   if (!row) return;
@@ -2894,6 +2896,7 @@ window.cbUpdateRow = async function() {
 
 /* ── Borrar fila ───────────────────────────────────────── */
 window.cbDeleteRow = async function(banco, rowNum) {
+  if (!hasPermission('bank_delete')) { alert('No tienes permisos para eliminar movimientos.'); return; }
   if (!rowNum) return;
   if (!confirm('¿Eliminar este movimiento?\n\nEsta acción no se puede deshacer.')) return;
   try {
@@ -2906,6 +2909,7 @@ window.cbDeleteRow = async function(banco, rowNum) {
 
 /* ── Crear nueva pestaña de banco ──────────────────────── */
 window.cbCrearBanco = async function() {
+  if (!hasPermission('bank_create')) { alert('No tienes permisos para crear bancos. Contacta al administrador.'); return; }
   var nombre = document.getElementById('cb-nuevo-nombre') && document.getElementById('cb-nuevo-nombre').value.trim();
   if (!nombre) { alert('El nombre del banco es obligatorio'); return; }
   var btn = document.getElementById('cb-crear-btn');
@@ -3021,8 +3025,12 @@ function renderConciliacion(data) {
   hh.push('<div><h2 class="cb-h1">Conciliación Bancaria</h2><div class="cb-h1s">Santander · Mercado Pago · AMEX — Movimientos y saldos</div></div>');
   hh.push('<div class="cb-acts">');
   hh.push('<button class="cb-hbtn cb-hbtn-ref" onclick="loadConciliacionData()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Actualizar</button>');
-  hh.push('<a class="cb-hbtn cb-hbtn-sh" href="https://docs.google.com/spreadsheets/d/1O1tmtuVMlDl6rsN0IVFH14KmYjQZhY6GOs68PU_u0cg/edit" target="_blank"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Editar en Sheets</a>');
-  hh.push('<button class="cb-hbtn cb-hbtn-add" onclick="cbOpenDrawer()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Agregar movimiento</button>');
+  if (hasPermission('sheets_access')) {
+    hh.push('<a class="cb-hbtn cb-hbtn-sh" href="https://docs.google.com/spreadsheets/d/1O1tmtuVMlDl6rsN0IVFH14KmYjQZhY6GOs68PU_u0cg/edit" target="_blank"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Editar en Sheets</a>');
+  }
+  if (hasPermission('bank_capture')) {
+    hh.push('<button class="cb-hbtn cb-hbtn-add" onclick="cbOpenDrawer()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Agregar movimiento</button>');
+  }
   hh.push('</div></div></div>');
 
   if (!live) hh.push('<div class="cf-al cf-al-d">⚠ Sin conexión a datos bancarios. <a href="javascript:loadConciliacionData()" style="font-weight:700;text-decoration:underline">Reintentar →</a></div>');
@@ -3069,7 +3077,7 @@ function renderConciliacion(data) {
   hh.push('<div class="cb-mh">'
     +'<div><div class="cb-mt"><div style="width:9px;height:9px;border-radius:50%;background:'+aB.color+'"></div>'+aB.nombre+' — últimos movimientos</div>'
     +'<div class="cb-ms">'+(aB.movimientos||[]).length+' de '+(aB.totalRows||0)+' registros</div></div>'
-    +'<button class="cf-btn cf-btp" style="font-size:11px;padding:6px 14px" onclick="cbSB(\''+aB.id+'\');cbOpenDrawer()">+ Nuevo</button>'
+    +(hasPermission('bank_capture')?'<button class="cf-btn cf-btp" style="font-size:11px;padding:6px 14px" onclick="cbSB(\''+aB.id+'\');cbOpenDrawer()">+ Nuevo</button>':'')
     +'</div>');
   var movs = (aB.movimientos||[]);
   if (movs.length) {
@@ -3084,8 +3092,8 @@ function renderConciliacion(data) {
       var rn = m.rowNum || 0;
       var mj = encodeURIComponent(JSON.stringify(m));
       var actCells = '<td style="text-align:center;white-space:nowrap">'
-        +'<button class="cb-act-btn cb-act-edit" title="Editar" onclick="cbEditRow(\''+aB.id+'\','+rn+',decodeURIComponent(\''+mj+'\'))">✎</button>'
-        +'<button class="cb-act-btn cb-act-del"  title="Eliminar" onclick="cbDeleteRow(\''+aB.id+'\','+rn+')">✕</button>'
+        +(hasPermission('bank_edit')?'<button class="cb-act-btn cb-act-edit" title="Editar" onclick="cbEditRow(\''+aB.id+'\','+rn+',decodeURIComponent(\''+mj+'\'))">✎</button>':'')
+        +(hasPermission('bank_delete')?'<button class="cb-act-btn cb-act-del"  title="Eliminar" onclick="cbDeleteRow(\''+aB.id+'\','+rn+')">✕</button>':'')
         +'</td>';
       hh.push('<tr>');
       hh.push('<td style="white-space:nowrap;color:var(--text-secondary,#6b7280)">'+((m.fecha||m.mes)||'—')+'</td>');
@@ -3186,21 +3194,23 @@ function renderConciliacion(data) {
       +'Los saldos se calculan de los movimientos registrados en Sheets.'
     +'</div></div>');
 
-  // ── Agregar banco ──────────────────────────────────────
-  hh.push('<div class="cb-sc" style="border:1.5px dashed var(--color-divider,#d1d5db);background:transparent">'
-    +'<div class="cb-sh">+ Agregar banco</div>'
-    +'<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-bottom:10px;line-height:1.5">'
-      +'Crea una nueva pestaña en el Spreadsheet de bancos. Después agrega el GID a <code style="background:var(--color-surface,#f3f4f6);padding:1px 5px;border-radius:4px;font-size:10px">config.gs</code> para activarlo.'
-    +'</div>'
-    +'<div style="display:flex;gap:8px">'
-      +'<input id="cb-nuevo-nombre" class="cbf-inp" style="flex:1;font-size:12px;padding:8px 10px" placeholder="Ej: BBVA, HSBC…">'
-      +'<button id="cb-crear-btn" onclick="cbCrearBanco()" style="padding:8px 14px;border-radius:8px;border:none;background:var(--color-primary,#c46a7a);color:#fff;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">Crear</button>'
-    +'</div>'
-    +'<div style="margin-top:10px;padding:8px 10px;background:var(--color-surface,#f9fafb);border-radius:8px;font-size:10.5px;color:var(--text-secondary,#6b7280)">'
-      +'<strong>Estructura de la pestaña nueva:</strong><br>'
-      +'Fecha · Depósito · Retiro · Saldo · Referencia · USD · T.Cambio · Póliza · Observaciones'
-    +'</div>'
-    +'</div>');
+  // ── Agregar banco (solo bank_create) ────────────────────
+  if (hasPermission('bank_create')) {
+    hh.push('<div class="cb-sc" style="border:1.5px dashed var(--color-divider,#d1d5db);background:transparent">'
+      +'<div class="cb-sh">+ Agregar banco</div>'
+      +'<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-bottom:10px;line-height:1.5">'
+        +'Crea una nueva pestaña en el Spreadsheet de bancos. Después agrega el GID a <code style="background:var(--color-surface,#f3f4f6);padding:1px 5px;border-radius:4px;font-size:10px">config.gs</code> para activarlo.'
+      +'</div>'
+      +'<div style="display:flex;gap:8px">'
+        +'<input id="cb-nuevo-nombre" class="cbf-inp" style="flex:1;font-size:12px;padding:8px 10px" placeholder="Ej: BBVA, HSBC…">'
+        +'<button id="cb-crear-btn" onclick="cbCrearBanco()" style="padding:8px 14px;border-radius:8px;border:none;background:var(--color-primary,#c46a7a);color:#fff;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">Crear</button>'
+      +'</div>'
+      +'<div style="margin-top:10px;padding:8px 10px;background:var(--color-surface,#f9fafb);border-radius:8px;font-size:10.5px;color:var(--text-secondary,#6b7280)">'
+        +'<strong>Estructura de la pestaña nueva:</strong><br>'
+        +'Fecha · Depósito · Retiro · Saldo · Referencia · USD · T.Cambio · Póliza · Observaciones'
+      +'</div>'
+      +'</div>');
+  }
 
   hh.push('</div>'); // sidebar
   hh.push('</div>'); // cb-wrap
@@ -3410,8 +3420,12 @@ function renderCashFlow(data) {
   hh.push('<div class="cf-top"><div class="cf-top-row"><div><h2 class="cf-h1">Flujo de Efectivo</h2><div class="cf-h1s">Disponible: Santander \u00b7 Mercado Pago \u00b7 Caja Chica \u00a0\u00b7\u00a0 Deuda: AMEX</div></div>');
   hh.push('<div class="cf-acts">');
   hh.push('<button class="cf-btn cf-btg" onclick="loadCashFlowData()">\u21ba Actualizar</button>');
-  hh.push('<a class="cf-btn cf-btg" href="https://docs.google.com/spreadsheets/d/1O1tmtuVMlDl6rsN0IVFH14KmYjQZhY6GOs68PU_u0cg/edit" target="_blank" style="text-decoration:none">\u2197 Editar en Sheets</a>');
-  hh.push('<button class="cf-btn cf-btp" onclick="cfOpenDrawer()">+ Capturar movimiento</button>');
+  if (hasPermission('sheets_access')) {
+    hh.push('<a class="cf-btn cf-btg" href="https://docs.google.com/spreadsheets/d/1O1tmtuVMlDl6rsN0IVFH14KmYjQZhY6GOs68PU_u0cg/edit" target="_blank" style="text-decoration:none">\u2197 Editar en Sheets</a>');
+  }
+  if (hasPermission('bank_capture')) {
+    hh.push('<button class="cf-btn cf-btp" onclick="cfOpenDrawer()">+ Capturar movimiento</button>');
+  }
   hh.push('</div></div></div>');
 
   if(data&&data.error) hh.push('<div class="cf-al cf-al-e">\u26a0 '+data.error+'</div>');
@@ -5448,6 +5462,37 @@ function clearSession()   { sessionStorage.removeItem(SESSION_KEY); }
 function getToken() { var s = getSession(); return s ? s.token : ''; }
 function canEdit()  { var s = getSession(); return s ? !s.soloLectura : true; }
 function isAdmin()  { var s = getSession(); return s ? s.rol === 'admin' : false; }
+function getUserRole() { var s = getSession(); return s ? (s.rol||'').toLowerCase() : 'viewer'; }
+
+/* ── Sistema de permisos por rol ─────────────────────────────
+   Para agregar un permiso nuevo:
+   1. Agrega la clave a ROLE_PERMS para cada rol que deba tenerlo
+   2. En el frontend usa: if (hasPermission('mi_permiso')) { ... }
+   3. En el GAS valida: if (!checkPermission(token, 'mi_permiso')) return {ok:false, error:'Sin permisos'};
+   ──────────────────────────────────────────────────────────── */
+var ROLE_PERMS = {
+  admin:    ['*'],
+  director: ['*'],
+  gerente:  ['bank_create','bank_edit','bank_delete','bank_capture','bank_liberado',
+             'sheets_access','cb_view','cf_view','er_view','pl_view',
+             'egresos_view','ingresos_view','rentabilidad_view',
+             'cxp_view','inventario_view','laboratorio_view'],
+  operador: ['bank_capture','bank_edit','bank_liberado',
+             'cb_view','cf_view','er_view','pl_view',
+             'egresos_view','ingresos_view','rentabilidad_view',
+             'cxp_view','inventario_view','laboratorio_view'],
+  captura:  ['bank_capture',
+             'cb_view','cf_view'],
+  viewer:   ['cb_view','cf_view','er_view','pl_view',
+             'egresos_view','ingresos_view','rentabilidad_view']
+};
+
+function hasPermission(perm) {
+  var role = getUserRole();
+  var perms = ROLE_PERMS[role] || ROLE_PERMS.viewer;
+  if (perms.indexOf('*') !== -1) return true;
+  return perms.indexOf(perm) !== -1;
+}
 
 function showUserChip(session) {
   var chip = document.getElementById('user-chip');
