@@ -561,6 +561,25 @@ function readBanksData() {
                liberado:x[7]===true||String(x[7]).toUpperCase()==='TRUE',
                observaciones:String(x[8]||''),tipo:String(x[9]||'CARGO').toUpperCase(),monto:num(x[5])};
       });
+      // Resumen de comisiones por mes (todas las filas, no solo últimas 30)
+      var comByMes = {};
+      for(var ci=0;ci<dataRows.length;ci++){
+        var cx=dataRows[ci].row;
+        var mes=String(cx[0]||'').trim(); if(!mes) continue;
+        var cobro=num(cx[2]), com=Math.abs(num(cx[3])), neto=num(cx[5]);
+        if(!comByMes[mes]) comByMes[mes]={mes:mes,totalCobro:0,totalComision:0,totalNeto:0,movimientos:0};
+        if(cobro>0) comByMes[mes].totalCobro+=cobro;
+        comByMes[mes].totalComision+=com;
+        if(neto>0) comByMes[mes].totalNeto+=neto;
+        comByMes[mes].movimientos++;
+      }
+      B.comisionesPorMes=[];
+      for(var mk in comByMes){
+        var m=comByMes[mk];
+        m.pctPromedio=m.totalCobro>0?(m.totalComision/m.totalCobro):0;
+        B.comisionesPorMes.push(m);
+      }
+      B.comisionesPorMes.sort(function(a,b){return a.mes>b.mes?-1:a.mes<b.mes?1:0;});
       return B;
     }
 

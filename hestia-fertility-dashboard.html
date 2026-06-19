@@ -3186,6 +3186,40 @@ function renderConciliacion(data) {
   });
   hh.push('</div></div>');
 
+  // ── Comisiones MP por mes ──────────────────────────────
+  var comMes = (mp.comisionesPorMes || []);
+  if (comMes.length) {
+    var totalComAcum = 0;
+    comMes.forEach(function(m){ totalComAcum += m.totalComision; });
+    hh.push('<div class="cb-sc">'
+      +'<div class="cb-sh" style="display:flex;align-items:center;justify-content:space-between">'
+        +'<span>Comisiones Mercado Pago</span>'
+        +'<span style="font-size:10px;font-weight:800;color:#b45309;letter-spacing:0;text-transform:none">Total: '+fS(totalComAcum)+'</span>'
+      +'</div>'
+      +'<div style="overflow-x:auto">'
+      +'<table style="width:100%;border-collapse:collapse;font-size:11px">'
+      +'<thead><tr>'
+        +'<th style="text-align:left;padding:6px 8px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);border-bottom:1.5px solid var(--color-divider,#e5e7eb)">Mes</th>'
+        +'<th style="text-align:right;padding:6px 8px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);border-bottom:1.5px solid var(--color-divider,#e5e7eb)">Cobros</th>'
+        +'<th style="text-align:right;padding:6px 8px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);border-bottom:1.5px solid var(--color-divider,#e5e7eb)">Comisión</th>'
+        +'<th style="text-align:right;padding:6px 8px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);border-bottom:1.5px solid var(--color-divider,#e5e7eb)">%</th>'
+      +'</tr></thead><tbody>');
+    comMes.slice(0,12).forEach(function(m){
+      var pctDisp = m.pctPromedio > 0 && m.pctPromedio < 1 ? (m.pctPromedio*100) : m.pctPromedio;
+      hh.push('<tr style="border-bottom:1px solid var(--color-divider,#f0f0f0)">'
+        +'<td style="padding:5px 8px;font-weight:600;color:var(--text-primary,#374151)">'+m.mes+'</td>'
+        +'<td style="padding:5px 8px;text-align:right;color:var(--text-primary,#374151)">'+fS(m.totalCobro)+'</td>'
+        +'<td style="padding:5px 8px;text-align:right;font-weight:700;color:#b45309">'+fS(m.totalComision)+'</td>'
+        +'<td style="padding:5px 8px;text-align:right;color:var(--text-secondary,#6b7280)">'+pctDisp.toFixed(2)+'%</td>'
+        +'</tr>');
+    });
+    hh.push('</tbody></table></div>'
+      +'<div style="margin-top:8px;font-size:9.5px;color:var(--text-secondary,#9ca3af);line-height:1.4">'
+        +'Últimos '+Math.min(comMes.length,12)+' meses · % promedio = comisión / cobros brutos'
+      +'</div>'
+      +'</div>');
+  }
+
   // Nota informativa
   hh.push('<div class="cb-sc" style="background:rgba(196,106,122,.04);border-color:rgba(196,106,122,.2)">'
     +'<div class="cb-sh" style="color:#c46a7a">ℹ Conciliación</div>'
