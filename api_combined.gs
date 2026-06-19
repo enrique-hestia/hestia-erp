@@ -665,7 +665,9 @@ function readBanksData() {
       }
       B.comisionesPorMes=[];
       for(var mk in comByMes){var m=comByMes[mk];m.pctPromedio=m.totalCobro>0?(m.totalComision/m.totalCobro):0;B.comisionesPorMes.push(m);}
-      B.comisionesPorMes.sort(function(a,b){return a.mes>b.mes?-1:a.mes<b.mes?1:0;});
+      var _mIdx={Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+      function mesNum(s){var p=String(s||'').split('-');var mm=parseInt(p[0])||_mIdx[p[0]]||0;var yy=parseInt(p[1])||0;return yy*100+mm;}
+      B.comisionesPorMes.sort(function(a,b){return mesNum(b.mes)-mesNum(a.mes);});
       return B;
     }
 
