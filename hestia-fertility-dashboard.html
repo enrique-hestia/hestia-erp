@@ -718,25 +718,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 <div id="view-cashflow" class="view" style="display:none"></div>
 
 <!-- ══ VISTA: INGRESOS ══ -->
-<div id="view-ingresos" class="view" style="display:none">
-  <div class="row-2">
-    <div class="card">
-      <div class="card-header">
-        <div><div class="card-title">Ingresos Mensuales</div><div class="card-sub">MXN · por segmento</div></div>
-      </div>
-      <div class="chart-wrap-tall"><canvas id="ingChart"></canvas></div>
-    </div>
-    <div class="card">
-      <div class="card-header"><div><div class="card-title">Mix de Ingresos</div><div class="card-sub">% por servicio</div></div></div>
-      <div class="chart-wrap" style="height:180px"><canvas id="ingDonutChart"></canvas></div>
-      <div class="donut-legend" id="ingDonutLegend"></div>
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-header"><div class="card-title">Detalle por Mes</div></div>
-    <table class="services-table" id="ingTable"><thead><tr><th>Mes</th><th>Ingresos</th><th>vs Mes Anterior</th><th>Acumulado</th></tr></thead><tbody id="ingTableBody"></tbody></table>
-  </div>
-</div>
+<div id="view-ingresos" class="view" style="display:none"></div>
 
 <!-- ══ VISTA: GASTOS OPERATIVOS ══ -->
 <div id="view-gastos" class="view" style="display:none">
@@ -1678,34 +1660,283 @@ function renderView(view, data) {
 
 /* ── INGRESOS ─── */
 var ingChart=null, ingDonutChart=null;
+var _ingChart=null, _ingDonutChart=null, _ingPage=1, _ingPerPage=50;
+var _ingFilters={mes:'',categoria:'',formaPago:'',sucursal:'',buscar:''};
+var _ingData=null;
+
 function renderIngresos(data) {
-  var d = data[currentSegment];
-  // Tabla
-  var tb = document.getElementById('ingTableBody'); tb.innerHTML='';
-  var acum = 0;
-  d.meses.forEach(function(m,i){
-    acum += d.ingresos[i];
-    var prev = i>0 ? d.ingresos[i-1] : d.ingresos[i];
-    var diff = Math.round((d.ingresos[i]-prev)/prev*100);
-    tb.innerHTML += '<tr><td>'+m+'</td><td>$'+d.ingresos[i].toLocaleString('es-MX')+'K</td><td><span class="kpi-badge '+(diff>=0?'badge-up':'badge-down')+'">'+(diff>=0?'+':'')+diff+'%</span></td><td>$'+acum.toLocaleString('es-MX')+'K</td></tr>';
+  // Compatibilidad: si data viene del API viejo (con .todos), ignorar y cargar desde nuevo endpoint
+  if (data && data.rows && data.resumenMensual) {
+    _ingData = data;
+    _ingPage = 1;
+    _renderIngresosERP();
+  } else {
+    // Cargar desde nuevo endpoint
+    loadIngresosERP();
+  }
+}
+
+async function loadIngresosERP() {
+  var el = document.getElementById('view-ingresos');
+  if (!el) return;
+  el.innerHTML = '<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px">'
+    +'<div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Cargando ingresos…</div>';
+  try {
+    var tok = encodeURIComponent(getToken());
+    var resp = await fetch(APPS_SCRIPT_URL+'?action=ingresos&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+    var data = await resp.json();
+    _ingData = data;
+    _ingPage = 1;
+    _renderIngresosERP();
+  } catch(e) {
+    el.innerHTML = '<div style="padding:40px;text-align:center;color:#dc2626">Error cargando ingresos: '+e.message+'</div>';
+  }
+}
+
+function _ingFilterRows() {
+  if (!_ingData || !_ingData.rows) return [];
+  var f = _ingFilters;
+  return _ingData.rows.filter(function(r) {
+    if (f.mes && r.mes !== f.mes) return false;
+    if (f.categoria && r.categoria !== f.categoria) return false;
+    if (f.formaPago && r.formaPago !== f.formaPago) return false;
+    if (f.sucursal && r.sucursal !== f.sucursal) return false;
+    if (f.buscar) {
+      var q = f.buscar.toLowerCase();
+      if ((r.paciente||'').toLowerCase().indexOf(q)===-1
+        && (r.producto||'').toLowerCase().indexOf(q)===-1
+        && (r.id||'').toString().indexOf(q)===-1) return false;
+    }
+    return true;
   });
-  // Gráfica barras
-  if(ingChart) ingChart.destroy();
-  ingChart = new Chart(document.getElementById('ingChart').getContext('2d'),{
-    type:'bar',
-    data:{labels:d.meses,datasets:[{label:'Ingresos',data:d.ingresos,backgroundColor:'#c46a7a55',borderColor:'#c46a7a',borderWidth:1.5,borderRadius:4}]},
-    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return '$'+c.parsed.y.toLocaleString('es-MX')+'K';}}}},scales:{x:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted')}},y:{grid:{color:cssVar('--color-divider')},ticks:{color:cssVar('--color-text-muted'),callback:function(v){return '$'+v+'K';}}}}}
+}
+
+function _ingSetFilter(key, val) {
+  _ingFilters[key] = val;
+  _ingPage = 1;
+  _renderIngresosERP();
+}
+
+function _ingSetPage(p) {
+  _ingPage = p;
+  _renderIngresosERP();
+}
+
+function _renderIngresosERP() {
+  var el = document.getElementById('view-ingresos');
+  if (!el || !_ingData) return;
+  var data = _ingData;
+  var rm = data.resumenMensual || [];
+  var filtered = _ingFilterRows();
+  var totalFiltered = filtered.reduce(function(s,r){return s+(r.totalPagar||0);},0);
+  var pagadoFiltered = filtered.reduce(function(s,r){return s+(r.pagado||0);},0);
+
+  function fC(v){return '$'+Math.abs(Number(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+  function fK(v){v=Number(v)||0;if(Math.abs(v)>=1e6)return '$'+(v/1e6).toFixed(2)+'M';if(Math.abs(v)>=1e3)return '$'+Math.round(v/1e3).toLocaleString('en-US')+'K';return '$'+Math.round(v).toLocaleString('en-US');}
+
+  // Extraer opciones únicas para filtros
+  var meses=[],cats=[],fps=[],sucs=[];
+  (data.rows||[]).forEach(function(r){
+    if(r.mes&&meses.indexOf(r.mes)===-1) meses.push(r.mes);
+    if(r.categoria&&cats.indexOf(r.categoria)===-1) cats.push(r.categoria);
+    if(r.formaPago&&fps.indexOf(r.formaPago)===-1) fps.push(r.formaPago);
+    if(r.sucursal&&sucs.indexOf(r.sucursal)===-1) sucs.push(r.sucursal);
   });
-  // Donut servicios
-  var dd = data.donut;
-  if(ingDonutChart) ingDonutChart.destroy();
-  ingDonutChart = new Chart(document.getElementById('ingDonutChart').getContext('2d'),{
-    type:'doughnut',
-    data:{labels:dd.labels,datasets:[{data:dd.data,backgroundColor:dd.colors.map(function(c){return c+'cc';}),borderColor:dd.colors,borderWidth:2}]},
-    options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return c.label+': '+c.parsed+'%';}}}}}
+
+  var h = [];
+
+  // ── Estilos ──
+  h.push('<style id="ing-styles">'
+    +'.ing-w{max-width:1400px;margin:0 auto;padding:20px}'
+    +'.ing-hdr{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;padding-bottom:14px;border-bottom:2px solid var(--text-primary,#111)}'
+    +'.ing-brand{font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280);margin-bottom:4px}'
+    +'.ing-title{font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0;letter-spacing:-.3px}'
+    +'.ing-sub{font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px}'
+    +'.ing-kstrip{display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin-bottom:20px;border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;overflow:hidden}'
+    +'.ing-ks{padding:16px 20px;position:relative}'
+    +'.ing-ks:not(:last-child){border-right:1px solid var(--color-divider,#e5e7eb)}'
+    +'.ing-ks-lbl{font-size:9.5px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:6px}'
+    +'.ing-ks-val{font-size:22px;font-weight:800;letter-spacing:-.5px}'
+    +'.ing-ks-sub{font-size:10.5px;color:var(--text-secondary,#6b7280);margin-top:3px}'
+    +'.ing-ks-bar{position:absolute;bottom:0;left:16px;right:16px;height:3px;border-radius:2px}'
+    +'.ing-filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;padding:12px 16px;background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;align-items:flex-end}'
+    +'.ing-fg{display:flex;flex-direction:column;gap:3px}'
+    +'.ing-fl{font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)}'
+    +'.ing-sel{appearance:none;background:var(--color-surface,#fafafa);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:6px 28px 6px 10px;font-size:11.5px;font-weight:600;color:var(--text-primary,#111);cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'10\' height=\'10\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%23999\' stroke-width=\'2\'%3E%3Cpolyline points=\'6 9 12 15 18 9\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center}'
+    +'.ing-search{border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:6px 10px;font-size:11.5px;color:var(--text-primary,#111);background:var(--color-surface,#fafafa);min-width:180px}'
+    +'.ing-grid{display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start}'
+    +'@media(max-width:1024px){.ing-grid{grid-template-columns:1fr}.ing-kstrip{grid-template-columns:repeat(2,1fr)}.ing-ks:nth-child(2){border-right:none}}'
+    +'.ing-panel{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;overflow:hidden}'
+    +'.ing-ph{padding:12px 18px;border-bottom:1px solid var(--color-divider,#e5e7eb);display:flex;align-items:center;justify-content:space-between}'
+    +'.ing-pt{font-size:14px;font-weight:700;color:var(--text-primary,#111)}'
+    +'.ing-tbl{width:100%;border-collapse:collapse;font-size:11.5px}'
+    +'.ing-tbl th{padding:7px 12px;font-size:8.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);background:var(--color-surface,#fafafa);border-bottom:2px solid var(--color-divider,#d1d5db);white-space:nowrap;text-align:left;position:sticky;top:0;z-index:2}'
+    +'.ing-tbl th:not(:first-child):not(:nth-child(2)):not(:nth-child(3)){text-align:right}'
+    +'.ing-tbl td{padding:6px 12px;border-bottom:1px solid var(--color-divider,#f0f0f0);white-space:nowrap}'
+    +'.ing-tbl tr:hover td{background:rgba(0,0,0,.012)}'
+    +'.ing-tbl td:not(:first-child):not(:nth-child(2)):not(:nth-child(3)){text-align:right}'
+    +'.ing-pag{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-top:1px solid var(--color-divider,#e5e7eb);font-size:11px;color:var(--text-secondary,#6b7280)}'
+    +'.ing-pag-btn{border:1px solid var(--color-divider,#e5e7eb);background:var(--card-bg,#fff);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;color:var(--text-primary,#111)}'
+    +'.ing-pag-btn:hover{background:var(--color-surface,#f5f5f5)}'
+    +'.ing-pag-btn:disabled{opacity:.4;cursor:default}'
+    // Sidebar cards
+    +'.ing-sc{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:14px 16px;margin-bottom:14px}'
+    +'.ing-sh{font-size:9.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:10px}'
+    +'</style>');
+
+  h.push('<div class="ing-w">');
+
+  // ── Header corporativo ──
+  h.push('<div class="ing-hdr"><div>'
+    +'<div class="ing-brand">Hestia Fertility</div>'
+    +'<h1 class="ing-title">Ingresos</h1>'
+    +'<div class="ing-sub">Detalle de cobros y servicios · Cifras en MXN</div>'
+    +'</div><div style="text-align:right">'
+    +'<div style="font-size:12px;font-weight:700;color:var(--text-primary,#111)">'+(data.anio||new Date().getFullYear())+'</div>'
+    +'<div style="font-size:10px;color:var(--text-secondary,#6b7280);text-transform:uppercase;letter-spacing:.5px">'+filtered.length+' de '+(data.totalRows||0)+' registros</div>'
+    +'</div></div>');
+
+  // ── KPI strip ──
+  var tAnual=data.totalAnual||0, tPagado=data.totalPagado||0, nOps=data.numOperaciones||0, tktProm=data.ticketPromedio||0;
+  h.push('<div class="ing-kstrip">'
+    +'<div class="ing-ks"><div class="ing-ks-lbl">Ingresos totales</div><div class="ing-ks-val" style="color:#0c4a6e">'+fK(tAnual)+'</div><div class="ing-ks-sub">Facturado en el año</div><div class="ing-ks-bar" style="background:#0c4a6e"></div></div>'
+    +'<div class="ing-ks"><div class="ing-ks-lbl">Total cobrado</div><div class="ing-ks-val" style="color:#166534">'+fK(tPagado)+'</div><div class="ing-ks-sub">'+(tAnual>0?((tPagado/tAnual)*100).toFixed(1):'0')+'% cobrado</div><div class="ing-ks-bar" style="background:#166534"></div></div>'
+    +'<div class="ing-ks"><div class="ing-ks-lbl">Operaciones</div><div class="ing-ks-val" style="color:var(--text-primary,#111)">'+nOps.toLocaleString('en-US')+'</div><div class="ing-ks-sub">Servicios registrados</div><div class="ing-ks-bar" style="background:var(--color-primary,#c46a7a)"></div></div>'
+    +'<div class="ing-ks"><div class="ing-ks-lbl">Ticket promedio</div><div class="ing-ks-val" style="color:#7c3aed">'+fC(tktProm)+'</div><div class="ing-ks-sub">Por operación</div><div class="ing-ks-bar" style="background:#7c3aed"></div></div>'
+    +'</div>');
+
+  // ── Filtros ──
+  function selOpts(arr,selected,allLabel){
+    var o='<option value="">'+allLabel+'</option>';
+    arr.forEach(function(v){o+='<option value="'+v+'"'+(v===selected?' selected':'')+'>'+v+'</option>';});
+    return o;
+  }
+  h.push('<div class="ing-filters">'
+    +'<div class="ing-fg"><div class="ing-fl">Mes</div><select class="ing-sel" onchange="_ingSetFilter(\'mes\',this.value)">'+selOpts(meses,_ingFilters.mes,'Todos')+'</select></div>'
+    +'<div class="ing-fg"><div class="ing-fl">Categoría</div><select class="ing-sel" onchange="_ingSetFilter(\'categoria\',this.value)">'+selOpts(cats,_ingFilters.categoria,'Todas')+'</select></div>'
+    +'<div class="ing-fg"><div class="ing-fl">Forma de pago</div><select class="ing-sel" onchange="_ingSetFilter(\'formaPago\',this.value)">'+selOpts(fps,_ingFilters.formaPago,'Todas')+'</select></div>'
+    +(sucs.length?'<div class="ing-fg"><div class="ing-fl">Sucursal</div><select class="ing-sel" onchange="_ingSetFilter(\'sucursal\',this.value)">'+selOpts(sucs,_ingFilters.sucursal,'Todas')+'</select></div>':'')
+    +'<div class="ing-fg"><div class="ing-fl">Buscar</div><input class="ing-search" placeholder="Paciente, producto o ID…" value="'+(_ingFilters.buscar||'')+'" oninput="_ingSetFilter(\'buscar\',this.value)"></div>'
+    +'<div style="margin-left:auto;font-size:11px;font-weight:700;color:var(--text-primary,#111)">Filtrado: '+fC(totalFiltered)+'</div>'
+    +'</div>');
+
+  // ── Layout: tabla + sidebar ──
+  h.push('<div class="ing-grid">');
+
+  // Tabla de detalle
+  var start = (_ingPage-1)*_ingPerPage;
+  var pageRows = filtered.slice(start, start+_ingPerPage);
+  var totalPages = Math.ceil(filtered.length/_ingPerPage)||1;
+
+  h.push('<div class="ing-panel">'
+    +'<div class="ing-ph"><div class="ing-pt">Detalle de operaciones</div><div style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Página '+_ingPage+' de '+totalPages+'</div></div>'
+    +'<div style="overflow-x:auto;max-height:60vh;overflow-y:auto">'
+    +'<table class="ing-tbl"><thead><tr>'
+    +'<th>Fecha</th><th>Paciente</th><th>Categoría / Producto</th><th>P.V.P.</th><th>Cant.</th><th>Total</th><th>Pagado</th><th>F. Pago</th>'
+    +'</tr></thead><tbody>');
+
+  if(pageRows.length){
+    pageRows.forEach(function(r){
+      var isPaid = (r.pagado||0)>=(r.totalPagar||1);
+      h.push('<tr>'
+        +'<td style="color:var(--text-secondary,#6b7280)">'+((r.fecha||'').substring(0,10)||'—')+'</td>'
+        +'<td style="font-weight:600;color:var(--text-primary,#111);max-width:160px;overflow:hidden;text-overflow:ellipsis">'+(r.paciente||'—')+'</td>'
+        +'<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis"><span style="color:var(--text-primary,#374151)">'+(r.categoria||'')+'</span>'
+          +(r.producto?' <span style="color:var(--text-secondary,#9ca3af);font-size:10px">· '+r.producto+'</span>':'')+'</td>'
+        +'<td>'+fC(r.pvp)+'</td>'
+        +'<td style="text-align:center">'+(r.cantidad||1)+'</td>'
+        +'<td style="font-weight:700">'+fC(r.totalPagar)+'</td>'
+        +'<td style="font-weight:600;color:'+(isPaid?'#166534':'#b45309')+'">'+fC(r.pagado)+'</td>'
+        +'<td style="font-size:10.5px;color:var(--text-secondary,#6b7280)">'+(r.formaPago||'—')+'</td>'
+        +'</tr>');
+    });
+  } else {
+    h.push('<tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-secondary,#9ca3af)">Sin registros con los filtros seleccionados</td></tr>');
+  }
+
+  h.push('</tbody></table></div>');
+  // Paginación
+  h.push('<div class="ing-pag">'
+    +'<span>'+filtered.length+' registros</span>'
+    +'<div style="display:flex;gap:6px">'
+    +'<button class="ing-pag-btn" onclick="_ingSetPage('+(_ingPage-1)+')"'+(_ingPage<=1?' disabled':'')+'>← Anterior</button>'
+    +'<button class="ing-pag-btn" onclick="_ingSetPage('+(_ingPage+1)+')"'+(_ingPage>=totalPages?' disabled':'')+'>Siguiente →</button>'
+    +'</div></div></div>');
+
+  // ── Sidebar ──
+  h.push('<div>');
+  // Resumen mensual
+  h.push('<div class="ing-sc"><div class="ing-sh">Ingresos por mes</div>');
+  var acum=0;
+  rm.forEach(function(m){
+    acum+=m.totalIngresos||0;
+    var pct=tAnual>0?((m.totalIngresos/tAnual)*100).toFixed(1):'0';
+    h.push('<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--color-divider,#f0f0f0)">'
+      +'<div style="font-size:11.5px;font-weight:600;color:var(--text-primary,#374151)">'+m.mes+'</div>'
+      +'<div style="display:flex;gap:12px;align-items:center">'
+        +'<span style="font-size:11px;font-weight:700;color:var(--text-primary,#111)">'+fK(m.totalIngresos)+'</span>'
+        +'<span style="font-size:10px;color:var(--text-secondary,#9ca3af);min-width:35px;text-align:right">'+pct+'%</span>'
+      +'</div></div>');
   });
-  var leg=document.getElementById('ingDonutLegend'); leg.innerHTML='';
-  dd.labels.forEach(function(l,i){ leg.innerHTML+='<div class="legend-row"><span class="legend-dot" style="background:'+dd.colors[i]+'"></span><span class="legend-name">'+l+'</span><span class="legend-pct" style="color:'+dd.colors[i]+'">'+dd.data[i]+'%</span></div>'; });
+  h.push('</div>');
+
+  // Top categorías
+  var topCats=data.topCategorias||[];
+  if(topCats.length){
+    var catColors=['#c46a7a','#3a72a8','#4d8c5a','#b45309','#7c3aed','#0891b2','#dc2626','#6366f1','#059669','#d97706'];
+    h.push('<div class="ing-sc"><div class="ing-sh">Top categorías</div>');
+    topCats.slice(0,8).forEach(function(c,i){
+      var color=catColors[i%catColors.length];
+      var pct=c.pct||0;
+      h.push('<div style="margin-bottom:8px">'
+        +'<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">'
+          +'<span style="color:var(--text-primary,#374151);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+c.nombre+'</span>'
+          +'<span style="font-weight:700;color:'+color+'">'+pct.toFixed(1)+'%</span>'
+        +'</div>'
+        +'<div style="height:5px;background:var(--color-divider,#e5e7eb);border-radius:3px;overflow:hidden">'
+          +'<div style="height:100%;width:'+pct+'%;background:'+color+';border-radius:3px"></div>'
+        +'</div></div>');
+    });
+    h.push('</div>');
+  }
+
+  // Top formas de pago
+  var topFP=data.topFormasPago||[];
+  if(topFP.length){
+    h.push('<div class="ing-sc"><div class="ing-sh">Formas de pago</div>');
+    topFP.slice(0,6).forEach(function(f){
+      h.push('<div style="display:flex;align-items:center;justify-content:space-between;padding:3px 0">'
+        +'<span style="font-size:11.5px;color:var(--text-primary,#374151)">'+f.nombre+'</span>'
+        +'<span style="font-size:11px;font-weight:700;color:var(--text-primary,#111)">'+fK(f.total)+'</span>'
+        +'</div>');
+    });
+    h.push('</div>');
+  }
+
+  // Gráfica tendencia mensual
+  h.push('<div class="ing-sc" style="padding-bottom:8px"><div class="ing-sh">Tendencia mensual</div>'
+    +'<div style="height:180px;position:relative"><canvas id="ing-chart-trend"></canvas></div></div>');
+
+  h.push('</div>'); // /sidebar
+  h.push('</div>'); // /ing-grid
+  h.push('</div>'); // /ing-w
+
+  el.innerHTML = h.join('');
+
+  // Render chart
+  setTimeout(function(){
+    var cvs=document.getElementById('ing-chart-trend');
+    if(!cvs||typeof Chart==='undefined') return;
+    if(_ingChart){_ingChart.destroy();_ingChart=null;}
+    var labels=rm.map(function(m){return m.mes.substring(0,3);});
+    var vals=rm.map(function(m){return (m.totalIngresos||0)/1000;});
+    _ingChart=new Chart(cvs,{
+      type:'bar',
+      data:{labels:labels,datasets:[{data:vals,backgroundColor:'rgba(196,106,122,.35)',borderColor:'#c46a7a',borderWidth:1.5,borderRadius:4}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:function(c){return '$'+c.parsed.y.toFixed(0)+'K';}}}},
+        scales:{x:{grid:{display:false},ticks:{font:{size:10}}},y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{font:{size:9},callback:function(v){return '$'+v+'K';}}}}}
+    });
+  },50);
 }
 
 /* ── GASTOS ─── */
@@ -4838,6 +5069,14 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     var _cxpEl = document.getElementById('view-cxp');
     if (_cxpEl) _cxpEl.style.display = '';
     loadCxPData();
+    return;
+  }
+  // Ingresos ERP
+  if (viewId === 'ingresos') {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _ingEl = document.getElementById('view-ingresos');
+    if (_ingEl) _ingEl.style.display = '';
+    loadIngresosERP();
     return;
   }
   // Conciliación Bancaria

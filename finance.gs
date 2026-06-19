@@ -853,6 +853,181 @@ function readCxPData() {
   }
 }
 
+/* ══════════════════════════════════════════════════════════════
+   INGRESOS — lectura de spreadsheet mensual de ingresos
+   ══════════════════════════════════════════════════════════════ */
+var INGRESOS_SS_ID = '1x_TE_YxLOwnBXKV_lA3Ss_EOSu1p61uTdUmw2zh_6uc'; // Ingresos 2026
+
+function readIngresosData() {
+  try {
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                 'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    var tz = Session.getScriptTimeZone();
+
+    function num(v) {
+      if (typeof v === 'number') return v;
+      var n = parseFloat(String(v || '').replace(/[$,\s]/g, ''));
+      return isNaN(n) ? 0 : n;
+    }
+    function dt(v) {
+      if (!v) return '';
+      if (v instanceof Date) {
+        return v.getFullYear() + '-' +
+          String(v.getMonth() + 1).padStart(2, '0') + '-' +
+          String(v.getDate()).padStart(2, '0');
+      }
+      return String(v);
+    }
+
+    var allRows = [];
+    var monthSummaries = [];
+
+    var sheets = ss.getSheets();
+    for (var si = 0; si < sheets.length; si++) {
+      var tabName = sheets[si].getName().trim();
+      var mesIdx = MESES.indexOf(tabName);
+      if (mesIdx < 0) continue;
+
+      var raw = sheets[si].getDataRange().getValues();
+      if (raw.length < 2) continue;
+
+      var tabRows = [];
+      for (var ri = 1; ri < raw.length; ri++) {
+        var r = raw[ri];
+        var idVal = r[0];
+        // Skip empty or non-numeric ID rows (summaries/formulas)
+        if (idVal === '' || idVal === null || idVal === undefined) continue;
+        var idNum = Number(idVal);
+        if (isNaN(idNum) || idNum <= 0) continue;
+
+        var totalPagar = num(r[8]);
+        var pagado = num(r[9]);
+
+        tabRows.push({
+          id: idVal,
+          fecha: dt(r[1]),
+          paciente: String(r[2] || ''),
+          categoria: String(r[3] || ''),
+          producto: String(r[4] || ''),
+          pvp: num(r[5]),
+          descuento: num(r[6]),
+          cantidad: num(r[7]),
+          totalPagar: totalPagar,
+          pagado: pagado,
+          montoFact: num(r[10]),
+          formaPago: String(r[11] || ''),
+          facturacion: String(r[12] || ''),
+          conciliacion: String(r[13] || ''),
+          contabilidad: String(r[14] || ''),
+          observaciones: String(r[15] || ''),
+          factura: String(r[16] || ''),
+          poliza: String(r[17] || ''),
+          moneda: String(r[18] || ''),
+          ciclo: String(r[19] || ''),
+          sucursal: (r.length > 20) ? String(r[20] || '') : '',
+          mes: tabName,
+          mesIdx: mesIdx
+        });
+      }
+
+      // Month summary
+      var totalIngresos = 0, totalPagadoMes = 0, countPositive = 0, sumPositive = 0;
+      var categorias = {}, formasPago = {};
+      for (var ti = 0; ti < tabRows.length; ti++) {
+        var row = tabRows[ti];
+        totalIngresos += row.totalPagar;
+        totalPagadoMes += row.pagado;
+        if (row.totalPagar > 0) { countPositive++; sumPositive += row.totalPagar; }
+
+        var cat = row.categoria || 'Sin categoría';
+        if (!categorias[cat]) categorias[cat] = { total: 0, count: 0 };
+        categorias[cat].total += row.totalPagar;
+        categorias[cat].count++;
+
+        var fp = row.formaPago || 'Sin especificar';
+        if (!formasPago[fp]) formasPago[fp] = { total: 0, count: 0 };
+        formasPago[fp].total += row.totalPagar;
+        formasPago[fp].count++;
+      }
+
+      monthSummaries.push({
+        mes: tabName,
+        mesIdx: mesIdx,
+        totalIngresos: totalIngresos,
+        totalPagado: totalPagadoMes,
+        numOperaciones: tabRows.length,
+        ticketPromedio: countPositive > 0 ? sumPositive / countPositive : 0,
+        categorias: categorias,
+        formasPago: formasPago
+      });
+
+      allRows = allRows.concat(tabRows);
+    }
+
+    // Sort month summaries by mesIdx
+    monthSummaries.sort(function(a, b) { return a.mesIdx - b.mesIdx; });
+
+    // Top-level KPIs
+    var totalAnual = 0, totalPagado = 0, numOps = allRows.length;
+    var countPos = 0, sumPos = 0;
+    var catMap = {}, fpMap = {};
+    for (var ai = 0; ai < allRows.length; ai++) {
+      var ar = allRows[ai];
+      totalAnual += ar.totalPagar;
+      totalPagado += ar.pagado;
+      if (ar.totalPagar > 0) { countPos++; sumPos += ar.totalPagar; }
+
+      var c = ar.categoria || 'Sin categoría';
+      if (!catMap[c]) catMap[c] = { nombre: c, total: 0, count: 0 };
+      catMap[c].total += ar.totalPagar;
+      catMap[c].count++;
+
+      var f = ar.formaPago || 'Sin especificar';
+      if (!fpMap[f]) fpMap[f] = { nombre: f, total: 0, count: 0 };
+      fpMap[f].total += ar.totalPagar;
+      fpMap[f].count++;
+    }
+
+    function sortAndTop(map, limit) {
+      var arr = [];
+      for (var k in map) arr.push(map[k]);
+      arr.sort(function(a, b) { return b.total - a.total; });
+      var top = arr.slice(0, limit);
+      for (var i = 0; i < top.length; i++) {
+        top[i].pct = totalAnual > 0 ? top[i].total / totalAnual : 0;
+      }
+      return top;
+    }
+
+    var ticketPromedio = countPos > 0 ? sumPos / countPos : 0;
+    var anio = new Date().getFullYear();
+    // Try to extract year from spreadsheet name
+    var ssName = ss.getName();
+    var ym = ssName.match(/(\d{4})/);
+    if (ym) anio = parseInt(ym[1], 10);
+
+    return {
+      view: 'ingresos',
+      anio: anio,
+      rows: allRows.slice(-500).reverse(),
+      totalRows: allRows.length,
+      resumenMensual: monthSummaries,
+      totalAnual: totalAnual,
+      totalPagado: totalPagado,
+      numOperaciones: numOps,
+      ticketPromedio: ticketPromedio,
+      topCategorias: sortAndTop(catMap, 10),
+      topFormasPago: sortAndTop(fpMap, 10),
+      headers: ['ID','Fecha','Paciente','Categoría','Producto','P.V.P.','Desc.','Cantidad','Total','Pagado','Forma Pago','Sucursal']
+    };
+  } catch(ex) {
+    return { view: 'ingresos', error: ex.message, rows: [], resumenMensual: [],
+             totalAnual: 0, totalPagado: 0, numOperaciones: 0, ticketPromedio: 0,
+             topCategorias: [], topFormasPago: [], headers: [] };
+  }
+}
+
 /* ── Constantes definidas en api_config.gs (mismo proyecto GAS) ──
    SHEET_ID, AUTH_SECRET, ER_SS_ID, BANKS_SS_ID, LAB_SS_ID, MED_SS_ID,
    PAC_SS_ID, PROD_SS_ID, QX_SS_ID, ER_GID, BUDGET_GID, PL_GID,
