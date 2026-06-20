@@ -497,7 +497,7 @@ function doPost(e) {
       return jsonResponse(saveIngreso(body));
     }
     if (body.action === 'uploadIngresoPDF') {
-      return jsonResponse(uploadIngresoPDF(body.opId, body.fileName, body.base64, body.mimeType));
+      return jsonResponse(uploadIngresoPDF(body.opId, body.tipo||'factura', body.fileName, body.base64, body.mimeType));
     }
     if (body.action === 'setupBDIngresos') {
       return jsonResponse(setupBDIngresos());
@@ -1179,7 +1179,8 @@ function _getNextOP(sheet) {
   return 'OP-' + String(next).padStart(4, '0');
 }
 
-var INGRESOS_DRIVE_FOLDER = ''; // ID de carpeta en Drive para PDFs — configurar
+var INGRESOS_FOLDER_FACTURAS = '1t8--HM1xymgqGyBbIsI2jhMVCgQUBm9n';
+var INGRESOS_FOLDER_PAGOS    = '1D9H3nNIrkgg2wqJtKXzhuSLDH6hIUoPk';
 
 function saveIngreso(payload) {
   try {
@@ -1256,10 +1257,11 @@ function saveIngreso(payload) {
   }
 }
 
-function uploadIngresoPDF(opId, fileName, base64Data, mimeType) {
+function uploadIngresoPDF(opId, tipo, fileName, base64Data, mimeType) {
   try {
-    if (!INGRESOS_DRIVE_FOLDER) return {ok:false, error:'Carpeta de Drive no configurada'};
-    var folder = DriveApp.getFolderById(INGRESOS_DRIVE_FOLDER);
+    var folderId = (tipo === 'pago') ? INGRESOS_FOLDER_PAGOS : INGRESOS_FOLDER_FACTURAS;
+    if (!folderId) return {ok:false, error:'Carpeta de Drive no configurada para '+tipo};
+    var folder = DriveApp.getFolderById(folderId);
     var blob = Utilities.newBlob(Utilities.base64Decode(base64Data), mimeType || 'application/pdf', fileName);
     var file = folder.createFile(blob);
     file.setName(opId + '_' + fileName);
