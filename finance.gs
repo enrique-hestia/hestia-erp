@@ -866,6 +866,8 @@ function readCxPData() {
    INGRESOS — lectura de spreadsheet mensual de ingresos
    ══════════════════════════════════════════════════════════════ */
 var INGRESOS_SS_ID = '1x_TE_YxLOwnBXKV_lA3Ss_EOSu1p61uTdUmw2zh_6uc'; // Ingresos 2026
+var INGRESOS_SS_2025 = '17gNzXavMbQ8DhFEIxCqzCJ6z-wTZgIwL4ibEDyVKE2w';
+var INGRESOS_SS_2024 = '1Zx4QWulAgrrVBeI8nfTR10EiYL-l3crJsaZSYDbWSug';
 
 function _readFromBDIngresos(sheet) {
   var raw = sheet.getDataRange().getValues();
@@ -1172,11 +1174,11 @@ function setupBDIngresos() {
 
 function _getNextOP(sheet) {
   var lr = sheet.getLastRow();
-  if (lr < 2) return 'OP-0001';
+  if (lr < 2) return 'OP-00001';
   var lastOP = String(sheet.getRange(lr, 1).getValue() || '');
   var m = lastOP.match(/OP-(\d+)/);
   var next = m ? (parseInt(m[1], 10) + 1) : 1;
-  return 'OP-' + String(next).padStart(4, '0');
+  return 'OP-' + String(next).padStart(5, '0');
 }
 
 var INGRESOS_FOLDER_FACTURAS = '1t8--HM1xymgqGyBbIsI2jhMVCgQUBm9n';
@@ -1290,17 +1292,18 @@ function uploadIngresoPDF(opId, tipo, fileName, base64Data, mimeType) {
 }
 
 function migrateIngresosToDBD() {
-  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+  // Destino: BD_Ingresos en el spreadsheet 2026
+  var ssDest = SpreadsheetApp.openById(INGRESOS_SS_ID);
   var sheet = null;
-  var sheets = ss.getSheets();
-  for (var i = 0; i < sheets.length; i++) {
-    if (sheets[i].getName() === BD_INGRESOS_TAB) { sheet = sheets[i]; break; }
+  var destSheets = ssDest.getSheets();
+  for (var i = 0; i < destSheets.length; i++) {
+    if (destSheets[i].getName() === BD_INGRESOS_TAB) { sheet = destSheets[i]; break; }
   }
   if (!sheet) {
     setupBDIngresos();
-    sheets = ss.getSheets();
-    for (var j = 0; j < sheets.length; j++) {
-      if (sheets[j].getName() === BD_INGRESOS_TAB) { sheet = sheets[j]; break; }
+    destSheets = ssDest.getSheets();
+    for (var j = 0; j < destSheets.length; j++) {
+      if (destSheets[j].getName() === BD_INGRESOS_TAB) { sheet = destSheets[j]; break; }
     }
   }
 
@@ -1321,66 +1324,92 @@ function migrateIngresosToDBD() {
     return String(v);
   }
 
+  // Procesar múltiples spreadsheets en orden cronológico
+  var sources = [
+    {id: INGRESOS_SS_2024, label: '2024'},
+    {id: INGRESOS_SS_2025, label: '2025'},
+    {id: INGRESOS_SS_ID,   label: '2026'}
+  ];
+
   var totalMigrated = 0;
-  for (var si = 0; si < sheets.length; si++) {
-    var tabName = sheets[si].getName().trim();
-    if (MESES.indexOf(tabName) < 0) continue;
-    var raw = sheets[si].getDataRange().getValues();
-    if (raw.length < 2) continue;
+  var log = [];
 
-    // Agrupar filas por ID original (columna A) — mismo ID = misma operación
-    var groups = {};
-    var groupOrder = [];
-    for (var ri = 1; ri < raw.length; ri++) {
-      var r = raw[ri];
-      var origId = String(r[0]||'').trim();
-      if (!origId || origId === '0') continue;
-      var idNum = Number(origId);
-      if (isNaN(idNum) || idNum <= 0) continue;
-      if (!groups[origId]) { groups[origId] = []; groupOrder.push(origId); }
-      groups[origId].push(r);
-    }
+  for (var si = 0; si < sources.length; si++) {
+    var srcId = sources[si].id;
+    if (!srcId) continue;
+    var srcSS;
+    try { srcSS = SpreadsheetApp.openById(srcId); }
+    catch(ex) { log.push(sources[si].label + ': Error abriendo — ' + ex.message); continue; }
 
-    var batchRows = [];
-    for (var gi = 0; gi < groupOrder.length; gi++) {
-      var grp = groups[groupOrder[gi]];
-      opCounter++;
-      var opId = 'OP-' + String(opCounter).padStart(4,'0');
-      for (var li = 0; li < grp.length; li++) {
-        var r = grp[li];
-        var pvp  = num(r[5]);
-        var descPct = num(r[6]); // ya viene como porcentaje (ej 10, 50)
-        var cant = num(r[7]) || 1;
-        var totalPagar = num(r[8]) || (pvp * cant * (1 - descPct/100));
-        var pagado = num(r[9]);
-        var montoFact = num(r[10]);
-        var facChk  = r[12]===true||String(r[12]).toUpperCase()==='TRUE';
-        var conChk  = r[13]===true||String(r[13]).toUpperCase()==='TRUE';
-        var ctaChk  = r[14]===true||String(r[14]).toUpperCase()==='TRUE';
-        // OP,Linea,Fecha,Paciente,Cat,Prod,PVP,Desc,Cant,TotalPagar,
-        // Pagado,MontoFactMes,FormaPago,Facturacion,Conciliacion,Contabilidad,
-        // Obs,Factura,Poliza,USMX,CicloAltaBaja,Sucursal,ArchivoURL
-        batchRows.push([
-          opId, li+1, dt(r[1]), String(r[2]||''),
-          String(r[3]||''), String(r[4]||''),
-          pvp, descPct, cant, totalPagar,
-          pagado, montoFact,
-          String(r[11]||''),
-          facChk, conChk, ctaChk,
-          String(r[15]||''), String(r[16]||''), String(r[17]||''),
-          String(r[18]||''), String(r[19]||''),
-          (r.length > 20 ? String(r[20]||'') : ''),
-          '' // ArchivoURL
-        ]);
+    var srcSheets = srcSS.getSheets();
+    var yearMigrated = 0;
+
+    // Procesar meses en orden (Enero primero)
+    for (var mi = 0; mi < MESES.length; mi++) {
+      var tabName = MESES[mi];
+      var srcSheet = null;
+      for (var ti = 0; ti < srcSheets.length; ti++) {
+        if (srcSheets[ti].getName().trim() === tabName) { srcSheet = srcSheets[ti]; break; }
+      }
+      if (!srcSheet) continue;
+
+      var raw = srcSheet.getDataRange().getValues();
+      if (raw.length < 2) continue;
+
+      // Agrupar filas por ID original (columna A)
+      var groups = {};
+      var groupOrder = [];
+      for (var ri = 1; ri < raw.length; ri++) {
+        var r = raw[ri];
+        var origId = String(r[0]||'').trim();
+        if (!origId || origId === '0') continue;
+        var idNum = Number(origId);
+        if (isNaN(idNum) || idNum <= 0) continue;
+        if (!groups[origId]) { groups[origId] = []; groupOrder.push(origId); }
+        groups[origId].push(r);
+      }
+
+      var batchRows = [];
+      for (var gi = 0; gi < groupOrder.length; gi++) {
+        var grp = groups[groupOrder[gi]];
+        opCounter++;
+        var opId = 'OP-' + String(opCounter).padStart(5,'0');
+        for (var li = 0; li < grp.length; li++) {
+          var r = grp[li];
+          var pvp  = num(r[5]);
+          var descPct = num(r[6]);
+          var cant = num(r[7]) || 1;
+          var totalPagar = num(r[8]) || (pvp * cant * (1 - descPct/100));
+          var pagado = num(r[9]);
+          var montoFact = num(r[10]);
+          var facChk  = r[12]===true||String(r[12]).toUpperCase()==='TRUE';
+          var conChk  = r[13]===true||String(r[13]).toUpperCase()==='TRUE';
+          var ctaChk  = r[14]===true||String(r[14]).toUpperCase()==='TRUE';
+          batchRows.push([
+            opId, li+1, dt(r[1]), String(r[2]||''),
+            String(r[3]||''), String(r[4]||''),
+            pvp, descPct, cant, totalPagar,
+            pagado, montoFact,
+            String(r[11]||''),
+            facChk, conChk, ctaChk,
+            String(r[15]||''), String(r[16]||''), String(r[17]||''),
+            String(r[18]||''), String(r[19]||''),
+            (r.length > 20 ? String(r[20]||'') : ''),
+            ''
+          ]);
+        }
+      }
+
+      if (batchRows.length) {
+        sheet.getRange(sheet.getLastRow()+1, 1, batchRows.length, batchRows[0].length).setValues(batchRows);
+        totalMigrated += batchRows.length;
+        yearMigrated += batchRows.length;
       }
     }
-
-    if (batchRows.length) {
-      sheet.getRange(sheet.getLastRow()+1, 1, batchRows.length, batchRows[0].length).setValues(batchRows);
-      totalMigrated += batchRows.length;
-    }
+    log.push(sources[si].label + ': ' + yearMigrated + ' filas migradas');
   }
-  return {ok:true, totalMigrated:totalMigrated, lastOP:'OP-'+String(opCounter).padStart(4,'0')};
+
+  return {ok:true, totalMigrated:totalMigrated, lastOP:'OP-'+String(opCounter).padStart(5,'0'), log:log};
 }
 
 /* ── Constantes definidas en api_config.gs (mismo proyecto GAS) ──
