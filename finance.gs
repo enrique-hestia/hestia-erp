@@ -496,6 +496,9 @@ function doPost(e) {
     if (body.action === 'saveIngreso') {
       return jsonResponse(saveIngreso(body));
     }
+    if (body.action === 'uploadIngresoPDF') {
+      return jsonResponse(uploadIngresoPDF(body.opId, body.fileName, body.base64, body.mimeType));
+    }
     if (body.action === 'setupBDIngresos') {
       return jsonResponse(setupBDIngresos());
     }
@@ -1148,8 +1151,9 @@ function readIngresosData() {
    ══════════════════════════════════════════════════════════════ */
 var BD_INGRESOS_TAB = 'BD_Ingresos';
 var BD_INGRESOS_HEADERS = ['OP','Linea','Fecha','Paciente','Categoria','Producto',
-  'PVP','Descuento','Cantidad','TotalLinea','FormaPago','Sucursal','Moneda',
-  'Ciclo','Observaciones','Factura','Poliza'];
+  'PVP','Descuento','Cantidad','TotalPagar','Pagado','MontoFactMes',
+  'FormaPago','Facturacion','Conciliacion','Contabilidad',
+  'Observaciones','Factura','Poliza','USMX','CicloAltaBaja','Sucursal','ArchivoURL'];
 
 function setupBDIngresos() {
   var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
@@ -1175,6 +1179,8 @@ function _getNextOP(sheet) {
   return 'OP-' + String(next).padStart(4, '0');
 }
 
+var INGRESOS_DRIVE_FOLDER = ''; // ID de carpeta en Drive para PDFs — configurar
+
 function saveIngreso(payload) {
   try {
     var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
@@ -1196,38 +1202,86 @@ function saveIngreso(payload) {
     var lineas = payload.lineas || [];
     if (!lineas.length) return {ok:false, error:'No hay productos en la operación'};
 
-    var fecha    = payload.fecha || '';
-    var paciente = payload.paciente || '';
-    var formaPago= payload.formaPago || '';
-    var sucursal = payload.sucursal || '';
-    var moneda   = payload.moneda || 'MX';
-    var ciclo    = payload.ciclo || '';
-    var obs      = payload.observaciones || '';
-    var factura  = payload.factura || '';
-    var poliza   = payload.poliza || '';
+    var fecha     = payload.fecha || '';
+    var paciente  = payload.paciente || '';
+    var formaPago = payload.formaPago || '';
+    var sucursal  = payload.sucursal || '';
+    var moneda    = payload.moneda || 'MX';
+    var ciclo     = payload.ciclo || '';
+    var obs       = payload.observaciones || '';
+    var factura   = payload.factura || '';
+    var poliza    = payload.poliza || '';
+    var facturacionChk  = payload.facturacion === true || payload.facturacion === 'true';
+    var conciliacionChk = payload.conciliacion === true || payload.conciliacion === 'true';
+    var contabilidadChk = payload.contabilidad === true || payload.contabilidad === 'true';
 
     function num(v) { var n = parseFloat(String(v||'').replace(/[$,]/g,'')); return isNaN(n)?0:n; }
 
     var rows = [];
+    var totalOP = 0;
     for (var li = 0; li < lineas.length; li++) {
       var l = lineas[li];
       var pvp  = num(l.pvp);
-      var desc = num(l.descuento);
+      var descPct = num(l.descuento) / 100; // Desc viene como % (ej. 10 = 10%)
       var cant = num(l.cantidad) || 1;
-      var totalLinea = (pvp * cant) - desc;
+      var totalPagar = pvp * cant * (1 - descPct);
+      var pagado = num(l.pagado) || totalPagar; // si no se especifica, pagado = total
+      totalOP += totalPagar;
+
+      // OP,Linea,Fecha,Paciente,Categoria,Producto,PVP,Descuento,Cantidad,TotalPagar,
+      // Pagado,MontoFactMes,FormaPago,Facturacion,Conciliacion,Contabilidad,
+      // Observaciones,Factura,Poliza,USMX,CicloAltaBaja,Sucursal,ArchivoURL
       rows.push([
         opId, li+1, fecha, paciente,
         l.categoria||'', l.producto||'',
-        pvp, desc, cant, totalLinea,
-        formaPago, sucursal, moneda,
-        ciclo, li===0?obs:'', li===0?factura:'', li===0?poliza:''
+        pvp, num(l.descuento), cant, totalPagar,
+        pagado, li===0 ? num(payload.montoFactMes) : 0,
+        formaPago,
+        li===0 ? facturacionChk : false,
+        li===0 ? conciliacionChk : false,
+        li===0 ? contabilidadChk : false,
+        li===0 ? obs : '',
+        li===0 ? factura : '',
+        li===0 ? poliza : '',
+        moneda, ciclo, sucursal,
+        '' // ArchivoURL — se llena al subir PDF
       ]);
     }
 
     sheet.getRange(sheet.getLastRow()+1, 1, rows.length, rows[0].length).setValues(rows);
-    var totalOP = rows.reduce(function(s,r){return s+r[9];},0);
 
     return {ok:true, op:opId, lineas:rows.length, total:totalOP};
+  } catch(ex) {
+    return {ok:false, error:ex.message};
+  }
+}
+
+function uploadIngresoPDF(opId, fileName, base64Data, mimeType) {
+  try {
+    if (!INGRESOS_DRIVE_FOLDER) return {ok:false, error:'Carpeta de Drive no configurada'};
+    var folder = DriveApp.getFolderById(INGRESOS_DRIVE_FOLDER);
+    var blob = Utilities.newBlob(Utilities.base64Decode(base64Data), mimeType || 'application/pdf', fileName);
+    var file = folder.createFile(blob);
+    file.setName(opId + '_' + fileName);
+    var url = file.getUrl();
+
+    // Actualizar ArchivoURL en BD_Ingresos para todas las filas de este OP
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sheet = null;
+    var sheets = ss.getSheets();
+    for (var i = 0; i < sheets.length; i++) {
+      if (sheets[i].getName() === BD_INGRESOS_TAB) { sheet = sheets[i]; break; }
+    }
+    if (sheet) {
+      var data = sheet.getDataRange().getValues();
+      var urlCol = BD_INGRESOS_HEADERS.indexOf('ArchivoURL') + 1; // 1-indexed
+      for (var ri = 1; ri < data.length; ri++) {
+        if (String(data[ri][0]) === opId) {
+          sheet.getRange(ri+1, urlCol).setValue(url);
+        }
+      }
+    }
+    return {ok:true, url:url, fileName:opId+'_'+fileName};
   } catch(ex) {
     return {ok:false, error:ex.message};
   }
@@ -1293,16 +1347,28 @@ function migrateIngresosToDBD() {
       for (var li = 0; li < grp.length; li++) {
         var r = grp[li];
         var pvp  = num(r[5]);
-        var desc = num(r[6]);
+        var descPct = num(r[6]); // ya viene como porcentaje (ej 10, 50)
         var cant = num(r[7]) || 1;
-        var totalLinea = (pvp * cant) - desc;
+        var totalPagar = num(r[8]) || (pvp * cant * (1 - descPct/100));
+        var pagado = num(r[9]);
+        var montoFact = num(r[10]);
+        var facChk  = r[12]===true||String(r[12]).toUpperCase()==='TRUE';
+        var conChk  = r[13]===true||String(r[13]).toUpperCase()==='TRUE';
+        var ctaChk  = r[14]===true||String(r[14]).toUpperCase()==='TRUE';
+        // OP,Linea,Fecha,Paciente,Cat,Prod,PVP,Desc,Cant,TotalPagar,
+        // Pagado,MontoFactMes,FormaPago,Facturacion,Conciliacion,Contabilidad,
+        // Obs,Factura,Poliza,USMX,CicloAltaBaja,Sucursal,ArchivoURL
         batchRows.push([
           opId, li+1, dt(r[1]), String(r[2]||''),
           String(r[3]||''), String(r[4]||''),
-          pvp, desc, cant, totalLinea,
-          String(r[11]||''), (r.length > 20 ? String(r[20]||'') : ''),
-          String(r[18]||'MX'), String(r[19]||''),
-          String(r[15]||''), String(r[16]||''), String(r[17]||'')
+          pvp, descPct, cant, totalPagar,
+          pagado, montoFact,
+          String(r[11]||''),
+          facChk, conChk, ctaChk,
+          String(r[15]||''), String(r[16]||''), String(r[17]||''),
+          String(r[18]||''), String(r[19]||''),
+          (r.length > 20 ? String(r[20]||'') : ''),
+          '' // ArchivoURL
         ]);
       }
     }

@@ -1975,11 +1975,9 @@ function _renderIngresosERP() {
   h.push('</div>'); // /sidebar
   h.push('</div>'); // /ing-grid
 
-  // ── Drawer de captura ──
-  h.push('<div class="cb-ovl" id="ing-ovl" onclick="ingCloseDrawer()"></div>');
-  h.push('<div class="cb-drw" id="ing-drw" style="width:min(520px,100vw)">'
-    +'<div class="cb-dt"><div class="cb-dtl">Registrar operación</div><button class="cb-dx" onclick="ingCloseDrawer()">×</button></div>'
-    +'<div class="cb-dbb" id="ing-drw-body"></div>'
+  // ── Vista de captura (página completa estilo Odoo, oculta por default) ──
+  h.push('<div id="ing-form-view" style="display:none;position:fixed;inset:0;z-index:900;background:var(--color-bg,#f5f5f5);overflow-y:auto">'
+    +'<div id="ing-form-content" style="max-width:900px;margin:0 auto;padding:24px"></div>'
     +'</div>');
 
   h.push('</div>'); // /ing-w
@@ -2002,86 +2000,129 @@ function _renderIngresosERP() {
   },50);
 }
 
-/* ── Ingreso drawer functions ─────────────────────────────── */
+/* ── Ingreso form functions (Odoo-style full page) ────────── */
 var _ingLineCount = 0;
+
+// Dropdown options (matching Sheets validation)
+var ING_CATEGORIAS = ['Almacenamiento','Consulta','Estudios - Andrologia','Estudios - Ciclo','Estudios - Consulta','Extras Externos','Medicamento','PGT-A','Tratamientos','VIOLET'];
+var ING_FORMAS_PAGO = ['TDC','TDD','AMEX','Santander','Transferencia','Efectivo','Otro'];
+var ING_CICLOS = ['ALTA','BAJA','CONSULTA','Almacenamiento','Estudios - Andrologia','Estudios - Ciclo','EXTERNOS'];
 
 function ingOpenDrawer() {
   _ingLineCount = 0;
-  var d=document.getElementById('ing-drw'),o=document.getElementById('ing-ovl');
-  if(d)d.classList.add('open'); if(o)o.classList.add('open');
-  var body = document.getElementById('ing-drw-body');
-  if (!body) return;
+  var view = document.getElementById('ing-form-view');
+  var content = document.getElementById('ing-form-content');
+  if (!view || !content) return;
+  view.style.display = 'block';
 
   var today = new Date().toISOString().substring(0,10);
-  // Collect unique patients for autocomplete
+  // Autocomplete pacientes
   var pacs = [];
   if (_ingData && _ingData.rows) {
     var seen = {};
     _ingData.rows.forEach(function(r){ if(r.paciente && !seen[r.paciente]){seen[r.paciente]=1;pacs.push(r.paciente);} });
   }
-  var datalistHtml = '<datalist id="ing-pac-list">';
-  pacs.slice(0,200).forEach(function(p){ datalistHtml += '<option value="'+p.replace(/"/g,'&quot;')+'">'; });
-  datalistHtml += '</datalist>';
+  var dl = '<datalist id="ing-pac-list">';
+  pacs.slice(0,300).forEach(function(p){ dl += '<option value="'+p.replace(/"/g,'&quot;')+'">'; });
+  dl += '</datalist>';
 
-  var h = '<div style="font-family:var(--font-primary,Satoshi,sans-serif)">';
-  // Banner
-  h += '<div style="background:linear-gradient(135deg,#c46a7a,#a85566);border-radius:12px;padding:16px 18px;color:#fff;margin-bottom:18px">'
-    +'<div style="font-size:16px;font-weight:800">Nueva operación</div>'
-    +'<div style="font-size:11px;opacity:.8;margin-top:2px">Agrega uno o más productos por operación</div>'
+  function selOpts(arr,sel){return arr.map(function(v){return '<option value="'+v+'"'+(v===sel?' selected':'')+'>'+v+'</option>';}).join('');}
+
+  var S = 'style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"';
+  var LBL = 'style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px"';
+
+  var h = dl;
+  // ── Topbar ──
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:14px;border-bottom:2px solid var(--text-primary,#111)">'
+    +'<div>'
+      +'<div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility</div>'
+      +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Nueva operación de ingreso</h1>'
+    +'</div>'
+    +'<button onclick="ingCloseDrawer()" style="display:flex;align-items:center;gap:6px;padding:8px 18px;background:var(--color-surface,#f3f4f6);color:var(--text-primary,#374151);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">'
+      +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>Volver a Ingresos</button>'
     +'</div>';
 
-  // Datos generales
-  h += '<div style="font-size:9px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:8px">Datos del paciente</div>';
-  h += datalistHtml;
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">'
-    +'<div><label style="font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);display:block;margin-bottom:3px">Paciente</label>'
-    +'<input id="ing-paciente" list="ing-pac-list" class="cbf-inp" placeholder="Nombre del paciente" style="width:100%;box-sizing:border-box"></div>'
-    +'<div><label style="font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);display:block;margin-bottom:3px">Fecha</label>'
-    +'<input type="date" id="ing-fecha" class="cbf-inp" value="'+today+'" style="width:100%;box-sizing:border-box"></div>'
+  // ── Sección: Datos del paciente ──
+  h += '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:20px;margin-bottom:16px">';
+  h += '<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:14px;display:flex;align-items:center;gap:8px">'
+    +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Datos del paciente</div>';
+  h += '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:14px">'
+    +'<div><label '+LBL+'>Paciente *</label><input id="ing-paciente" list="ing-pac-list" '+S+' placeholder="Nombre completo del paciente"></div>'
+    +'<div><label '+LBL+'>Fecha *</label><input type="date" id="ing-fecha" '+S+' value="'+today+'"></div>'
+    +'<div><label '+LBL+'>Ciclo Alta/Baja</label><select id="ing-ciclo" '+S+'><option value="">— Seleccionar —</option>'+selOpts(ING_CICLOS)+'</select></div>'
     +'</div>';
-
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:18px">'
-    +'<div><label style="font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);display:block;margin-bottom:3px">Forma de pago</label>'
-    +'<select id="ing-fpago" class="cbf-inp" style="width:100%;box-sizing:border-box">'
-    +'<option>TDC</option><option>Transferencia</option><option>Efectivo</option><option>Santander</option><option>AMEX</option><option>Otro</option>'
-    +'</select></div>'
-    +'<div><label style="font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);display:block;margin-bottom:3px">Sucursal</label>'
-    +'<input id="ing-sucursal" class="cbf-inp" placeholder="CDMX" style="width:100%;box-sizing:border-box"></div>'
-    +'<div><label style="font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);display:block;margin-bottom:3px">Moneda</label>'
-    +'<select id="ing-moneda" class="cbf-inp" style="width:100%;box-sizing:border-box">'
-    +'<option>MX</option><option>USD</option>'
-    +'</select></div>'
-    +'</div>';
-
-  // Líneas de productos
-  h += '<div style="font-size:9px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">'
-    +'<span>Productos / Servicios</span>'
-    +'<button onclick="ingAddLine()" style="font-size:11px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:6px;padding:4px 12px;cursor:pointer;font-weight:700">+ Agregar</button>'
-    +'</div>';
-  h += '<div id="ing-lines" style="display:flex;flex-direction:column;gap:8px"></div>';
-
-  // Total en vivo
-  h += '<div id="ing-total-bar" style="margin-top:16px;background:var(--color-surface,#f9fafb);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between">'
-    +'<div style="font-size:12px;font-weight:700;color:var(--text-primary,#111)">Total de la operación</div>'
-    +'<div id="ing-total-val" style="font-size:20px;font-weight:800;color:var(--color-primary,#c46a7a)">$0.00</div>'
-    +'</div>';
-
-  // Footer
-  h += '<div style="margin-top:18px;display:flex;gap:10px">'
-    +'<button id="ing-save-btn" onclick="ingSubmit()" style="flex:1;padding:12px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">Registrar operación</button>'
-    +'<button onclick="ingCloseDrawer()" style="padding:12px 20px;background:var(--color-surface,#f3f4f6);color:var(--text-primary,#374151);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;font-size:13px;font-weight:600;cursor:pointer">Cancelar</button>'
-    +'</div>';
-
   h += '</div>';
-  body.innerHTML = h;
 
-  // Agregar primera línea
+  // ── Sección: Productos / Servicios ──
+  h += '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:20px;margin-bottom:16px">';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'
+    +'<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);display:flex;align-items:center;gap:8px">'
+      +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>Productos / Servicios</div>'
+    +'<button onclick="ingAddLine()" style="display:flex;align-items:center;gap:5px;font-size:11px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-weight:700">'
+      +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Agregar línea</button>'
+    +'</div>';
+  // Encabezado de tabla
+  h += '<div style="display:grid;grid-template-columns:170px 1fr 100px 80px 60px 110px 30px;gap:8px;padding:0 4px 6px;border-bottom:2px solid var(--color-divider,#d1d5db)">'
+    +'<div style="font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Categoría</div>'
+    +'<div style="font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Producto</div>'
+    +'<div style="font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);text-align:right">P.V.P.</div>'
+    +'<div style="font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);text-align:right">Desc. %</div>'
+    +'<div style="font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);text-align:center">Cant.</div>'
+    +'<div style="font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);text-align:right">Subtotal</div>'
+    +'<div></div>'
+    +'</div>';
+  h += '<div id="ing-lines" style="display:flex;flex-direction:column;gap:0"></div>';
+  // Total
+  h += '<div style="display:flex;justify-content:flex-end;margin-top:12px;padding-top:12px;border-top:2px solid var(--text-primary,#111)">'
+    +'<div style="display:flex;align-items:center;gap:20px">'
+      +'<span style="font-size:13px;font-weight:700;color:var(--text-primary,#111)">TOTAL DE LA OPERACIÓN</span>'
+      +'<span id="ing-total-val" style="font-size:24px;font-weight:800;color:var(--color-primary,#c46a7a)">$0.00</span>'
+    +'</div></div>';
+  h += '</div>';
+
+  // ── Sección: Pago y facturación ──
+  h += '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:20px;margin-bottom:16px">';
+  h += '<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:14px;display:flex;align-items:center;gap:8px">'
+    +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>Pago y facturación</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
+    +'<div><label '+LBL+'>Forma de pago</label><select id="ing-fpago" '+S+'>'+selOpts(ING_FORMAS_PAGO)+'</select></div>'
+    +'<div><label '+LBL+'>Monto pagado</label><input type="number" id="ing-pagado" '+S+' placeholder="Auto = Total" step="0.01"></div>'
+    +'<div><label '+LBL+'>Monto Fact/Mes</label><input type="number" id="ing-monto-fact" '+S+' placeholder="0.00" step="0.01"></div>'
+    +'<div><label '+LBL+'>Moneda</label><select id="ing-moneda" '+S+'><option>MX</option><option>USD</option></select></div>'
+    +'</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
+    +'<div><label '+LBL+'>No. Factura</label><input id="ing-factura" '+S+' placeholder="Número de factura"></div>'
+    +'<div><label '+LBL+'>Póliza</label><input id="ing-poliza" '+S+' placeholder="Número de póliza"></div>'
+    +'<div><label '+LBL+'>Sucursal</label><input id="ing-sucursal" '+S+' placeholder="CDMX"></div>'
+    +'</div>';
+  // Checkboxes
+  h += '<div style="display:flex;gap:24px;margin-bottom:14px">'
+    +'<label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--text-primary,#374151)">'
+      +'<input type="checkbox" id="ing-chk-fact" style="width:16px;height:16px;accent-color:var(--color-primary,#c46a7a)"> Facturación</label>'
+    +'<label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--text-primary,#374151)">'
+      +'<input type="checkbox" id="ing-chk-conc" style="width:16px;height:16px;accent-color:var(--color-primary,#c46a7a)"> Conciliación</label>'
+    +'<label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--text-primary,#374151)">'
+      +'<input type="checkbox" id="ing-chk-cont" style="width:16px;height:16px;accent-color:var(--color-primary,#c46a7a)"> Contabilidad</label>'
+    +'</div>';
+  // Observaciones
+  h += '<div><label '+LBL+'>Observaciones</label><textarea id="ing-obs" '+S+' rows="2" placeholder="Notas adicionales sobre la operación…" style="resize:vertical"></textarea></div>';
+  h += '</div>';
+
+  // ── Footer sticky ──
+  h += '<div style="display:flex;gap:12px;justify-content:flex-end;padding:16px 0">'
+    +'<button onclick="ingCloseDrawer()" style="padding:10px 24px;background:var(--color-surface,#f3f4f6);color:var(--text-primary,#374151);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;font-size:13px;font-weight:600;cursor:pointer">Descartar</button>'
+    +'<button id="ing-save-btn" onclick="ingSubmit()" style="padding:10px 28px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(196,106,122,.3)">'
+      +'Guardar operación</button>'
+    +'</div>';
+
+  content.innerHTML = h;
   ingAddLine();
+  view.scrollTop = 0;
 }
 
 function ingCloseDrawer() {
-  var d=document.getElementById('ing-drw'),o=document.getElementById('ing-ovl');
-  if(d)d.classList.remove('open'); if(o)o.classList.remove('open');
+  var view = document.getElementById('ing-form-view');
+  if (view) view.style.display = 'none';
 }
 
 function ingAddLine() {
@@ -2089,27 +2130,18 @@ function ingAddLine() {
   var n = _ingLineCount;
   var el = document.getElementById('ing-lines');
   if (!el) return;
+  var IS = 'style="width:100%;box-sizing:border-box;padding:6px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"';
+  var catOpts = ING_CATEGORIAS.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join('');
   var div = document.createElement('div');
   div.id = 'ing-line-'+n;
-  div.style.cssText = 'background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:10px 12px';
-  div.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
-    +'<span style="font-size:10px;font-weight:700;color:var(--color-primary,#c46a7a)">Línea '+n+'</span>'
-    +(n>1?'<button onclick="ingRemoveLine('+n+')" style="font-size:18px;background:none;border:none;color:#dc2626;cursor:pointer;line-height:1;padding:0">×</button>':'')
-    +'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'
-      +'<div><label style="font-size:9px;font-weight:600;color:var(--text-secondary,#9ca3af)">Categoría</label>'
-      +'<input id="ing-cat-'+n+'" class="cbf-inp" placeholder="Consulta, Medicamento…" style="width:100%;box-sizing:border-box;font-size:12px;padding:6px 8px"></div>'
-      +'<div><label style="font-size:9px;font-weight:600;color:var(--text-secondary,#9ca3af)">Producto</label>'
-      +'<input id="ing-prod-'+n+'" class="cbf-inp" placeholder="Nombre del producto" style="width:100%;box-sizing:border-box;font-size:12px;padding:6px 8px"></div>'
-    +'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">'
-      +'<div><label style="font-size:9px;font-weight:600;color:var(--text-secondary,#9ca3af)">P.V.P.</label>'
-      +'<input type="number" id="ing-pvp-'+n+'" class="cbf-inp" placeholder="0.00" step="0.01" oninput="ingCalcTotal()" style="width:100%;box-sizing:border-box;font-size:12px;padding:6px 8px"></div>'
-      +'<div><label style="font-size:9px;font-weight:600;color:var(--text-secondary,#9ca3af)">Descuento $</label>'
-      +'<input type="number" id="ing-desc-'+n+'" class="cbf-inp" placeholder="0" step="0.01" oninput="ingCalcTotal()" style="width:100%;box-sizing:border-box;font-size:12px;padding:6px 8px"></div>'
-      +'<div><label style="font-size:9px;font-weight:600;color:var(--text-secondary,#9ca3af)">Cantidad</label>'
-      +'<input type="number" id="ing-cant-'+n+'" class="cbf-inp" value="1" min="1" oninput="ingCalcTotal()" style="width:100%;box-sizing:border-box;font-size:12px;padding:6px 8px"></div>'
-    +'</div>';
+  div.style.cssText = 'display:grid;grid-template-columns:170px 1fr 100px 80px 60px 110px 30px;gap:8px;padding:8px 4px;align-items:center;border-bottom:1px solid var(--color-divider,#f0f0f0)';
+  div.innerHTML = '<select id="ing-cat-'+n+'" '+IS+'><option value="">—</option>'+catOpts+'</select>'
+    +'<input id="ing-prod-'+n+'" '+IS+' placeholder="Nombre del producto/servicio">'
+    +'<input type="number" id="ing-pvp-'+n+'" '+IS+' placeholder="0.00" step="0.01" oninput="ingCalcTotal()" style="text-align:right;width:100%;box-sizing:border-box;padding:6px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px">'
+    +'<input type="number" id="ing-desc-'+n+'" '+IS+' placeholder="0" step="1" min="0" max="100" oninput="ingCalcTotal()" style="text-align:right;width:100%;box-sizing:border-box;padding:6px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px">'
+    +'<input type="number" id="ing-cant-'+n+'" '+IS+' value="1" min="1" oninput="ingCalcTotal()" style="text-align:center;width:100%;box-sizing:border-box;padding:6px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px">'
+    +'<div id="ing-sub-'+n+'" style="text-align:right;font-weight:700;font-size:12px;color:var(--text-primary,#111)">$0.00</div>'
+    +(n>1?'<button onclick="ingRemoveLine('+n+')" style="font-size:16px;background:none;border:none;color:#dc2626;cursor:pointer;line-height:1;padding:0" title="Eliminar línea">×</button>':'<div></div>');
   el.appendChild(div);
   ingCalcTotal();
 }
@@ -2125,10 +2157,13 @@ function ingCalcTotal() {
   for (var i = 1; i <= _ingLineCount; i++) {
     var pvpEl = document.getElementById('ing-pvp-'+i);
     if (!pvpEl) continue;
-    var pvp  = parseFloat(pvpEl.value) || 0;
-    var desc = parseFloat((document.getElementById('ing-desc-'+i)||{}).value) || 0;
-    var cant = parseFloat((document.getElementById('ing-cant-'+i)||{}).value) || 1;
-    total += (pvp * cant) - desc;
+    var pvp   = parseFloat(pvpEl.value) || 0;
+    var descP = parseFloat((document.getElementById('ing-desc-'+i)||{}).value) || 0;
+    var cant  = parseFloat((document.getElementById('ing-cant-'+i)||{}).value) || 1;
+    var sub   = pvp * cant * (1 - descP/100);
+    var subEl = document.getElementById('ing-sub-'+i);
+    if (subEl) subEl.textContent = '$'+sub.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+    total += sub;
   }
   var valEl = document.getElementById('ing-total-val');
   if (valEl) valEl.textContent = '$' + total.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
@@ -2144,15 +2179,18 @@ async function ingSubmit() {
   for (var i = 1; i <= _ingLineCount; i++) {
     var pvpEl = document.getElementById('ing-pvp-'+i);
     if (!pvpEl) continue;
+    var pvp = parseFloat(pvpEl.value) || 0;
+    if (pvp === 0) continue; // skip empty lines
     lineas.push({
       categoria:  (document.getElementById('ing-cat-'+i)||{}).value || '',
       producto:   (document.getElementById('ing-prod-'+i)||{}).value || '',
-      pvp:        parseFloat(pvpEl.value) || 0,
+      pvp:        pvp,
       descuento:  parseFloat((document.getElementById('ing-desc-'+i)||{}).value) || 0,
-      cantidad:   parseFloat((document.getElementById('ing-cant-'+i)||{}).value) || 1
+      cantidad:   parseFloat((document.getElementById('ing-cant-'+i)||{}).value) || 1,
+      pagado:     0 // will use header-level pagado
     });
   }
-  if (!lineas.length) { alert('Agrega al menos un producto'); return; }
+  if (!lineas.length) { alert('Agrega al menos un producto con precio'); return; }
 
   var btn = document.getElementById('ing-save-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
@@ -2162,27 +2200,31 @@ async function ingSubmit() {
       action: 'saveIngreso',
       paciente: paciente,
       fecha: fecha,
-      formaPago: (document.getElementById('ing-fpago')||{}).value || '',
-      sucursal:  (document.getElementById('ing-sucursal')||{}).value || '',
-      moneda:    (document.getElementById('ing-moneda')||{}).value || 'MX',
-      ciclo: '',
-      observaciones: '',
-      factura: '',
-      poliza: '',
+      formaPago:      (document.getElementById('ing-fpago')||{}).value || '',
+      sucursal:       (document.getElementById('ing-sucursal')||{}).value || '',
+      moneda:         (document.getElementById('ing-moneda')||{}).value || 'MX',
+      ciclo:          (document.getElementById('ing-ciclo')||{}).value || '',
+      observaciones:  (document.getElementById('ing-obs')||{}).value || '',
+      factura:        (document.getElementById('ing-factura')||{}).value || '',
+      poliza:         (document.getElementById('ing-poliza')||{}).value || '',
+      montoFactMes:   (document.getElementById('ing-monto-fact')||{}).value || '0',
+      facturacion:    !!(document.getElementById('ing-chk-fact')||{}).checked,
+      conciliacion:   !!(document.getElementById('ing-chk-conc')||{}).checked,
+      contabilidad:   !!(document.getElementById('ing-chk-cont')||{}).checked,
       lineas: lineas
     };
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(payload)});
     var res = await r.json();
     if (res.ok) {
       ingCloseDrawer();
-      loadIngresosERP();
+      loadIngresosERP(); // regresa a la lista de ingresos
     } else {
       alert('Error: '+(res.error||'No se pudo guardar'));
-      if(btn){btn.disabled=false;btn.textContent='Registrar operación';}
+      if(btn){btn.disabled=false;btn.textContent='Guardar operación';}
     }
   } catch(e) {
     alert('Error de conexión: '+e.message);
-    if(btn){btn.disabled=false;btn.textContent='Registrar operación';}
+    if(btn){btn.disabled=false;btn.textContent='Guardar operación';}
   }
 }
 
