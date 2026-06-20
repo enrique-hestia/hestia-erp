@@ -1751,6 +1751,18 @@ function _ingFilterRows() {
   });
 }
 
+var _ingBuscarTimer = null;
+function _ingBuscarDebounce(val) {
+  _ingFilters.buscar = val;
+  clearTimeout(_ingBuscarTimer);
+  _ingBuscarTimer = setTimeout(function() {
+    _ingPage = 1;
+    _renderIngresosERP();
+    var inp = document.getElementById('ing-buscar');
+    if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+  }, 400);
+}
+
 function _ingSetFilter(key, val) {
   _ingFilters[key] = val;
   _ingPage = 1;
@@ -1856,7 +1868,7 @@ function _renderIngresosERP() {
     +'<div class="ing-fg"><div class="ing-fl">Categoría</div><select class="ing-sel" onchange="_ingSetFilter(\'categoria\',this.value)">'+selOpts(cats,_ingFilters.categoria,'Todas')+'</select></div>'
     +'<div class="ing-fg"><div class="ing-fl">Forma de pago</div><select class="ing-sel" onchange="_ingSetFilter(\'formaPago\',this.value)">'+selOpts(fps,_ingFilters.formaPago,'Todas')+'</select></div>'
     +(sucs.length?'<div class="ing-fg"><div class="ing-fl">Sucursal</div><select class="ing-sel" onchange="_ingSetFilter(\'sucursal\',this.value)">'+selOpts(sucs,_ingFilters.sucursal,'Todas')+'</select></div>':'')
-    +'<div class="ing-fg"><div class="ing-fl">Buscar</div><input class="ing-search" placeholder="Paciente, producto o ID…" value="'+(_ingFilters.buscar||'')+'" oninput="_ingSetFilter(\'buscar\',this.value)"></div>'
+    +'<div class="ing-fg"><div class="ing-fl">Buscar</div><input id="ing-buscar" class="ing-search" placeholder="Paciente, producto o ID…" value="'+(_ingFilters.buscar||'')+'" oninput="_ingBuscarDebounce(this.value)"></div>'
     +'<div style="margin-left:auto;font-size:11px;font-weight:700;color:var(--text-primary,#111)">Filtrado: '+fC(totalFiltered)+'</div>'
     +'</div>');
 
