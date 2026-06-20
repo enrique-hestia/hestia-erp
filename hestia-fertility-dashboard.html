@@ -1843,9 +1843,12 @@ function _renderIngresosERP() {
     +'<div class="ing-brand">Hestia Fertility</div>'
     +'<h1 class="ing-title">Ingresos</h1>'
     +'<div class="ing-sub">Detalle de cobros y servicios · Cifras en MXN</div>'
-    +'</div><div style="text-align:right">'
+    +'</div><div style="display:flex;align-items:center;gap:12px">'
+    +'<div style="text-align:right">'
     +'<div style="font-size:12px;font-weight:700;color:var(--text-primary,#111)">'+(data.anio||new Date().getFullYear())+'</div>'
     +'<div style="font-size:10px;color:var(--text-secondary,#6b7280);text-transform:uppercase;letter-spacing:.5px">'+filtered.length+' de '+(data.totalRows||0)+' registros</div>'
+    +'</div>'
+    +(hasPermission('bank_capture')?'<button onclick="ingOpenDrawer()" style="display:inline-flex;align-items:center;gap:6px;padding:10px 18px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(196,106,122,.25)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Registrar operación</button>':'')
     +'</div></div>');
 
   // ── KPI strip ──
@@ -1971,6 +1974,14 @@ function _renderIngresosERP() {
 
   h.push('</div>'); // /sidebar
   h.push('</div>'); // /ing-grid
+
+  // ── Drawer de captura ──
+  h.push('<div class="cb-ovl" id="ing-ovl" onclick="ingCloseDrawer()"></div>');
+  h.push('<div class="cb-drw" id="ing-drw" style="width:min(520px,100vw)">'
+    +'<div class="cb-dt"><div class="cb-dtl">Registrar operación</div><button class="cb-dx" onclick="ingCloseDrawer()">×</button></div>'
+    +'<div class="cb-dbb" id="ing-drw-body"></div>'
+    +'</div>');
+
   h.push('</div>'); // /ing-w
 
   el.innerHTML = h.join('');
@@ -1989,6 +2000,190 @@ function _renderIngresosERP() {
         scales:{x:{grid:{display:false},ticks:{font:{size:10}}},y:{grid:{color:'rgba(0,0,0,.06)'},ticks:{font:{size:9},callback:function(v){return '$'+v+'K';}}}}}
     });
   },50);
+}
+
+/* ── Ingreso drawer functions ─────────────────────────────── */
+var _ingLineCount = 0;
+
+function ingOpenDrawer() {
+  _ingLineCount = 0;
+  var d=document.getElementById('ing-drw'),o=document.getElementById('ing-ovl');
+  if(d)d.classList.add('open'); if(o)o.classList.add('open');
+  var body = document.getElementById('ing-drw-body');
+  if (!body) return;
+
+  var today = new Date().toISOString().substring(0,10);
+  // Collect unique patients for autocomplete
+  var pacs = [];
+  if (_ingData && _ingData.rows) {
+    var seen = {};
+    _ingData.rows.forEach(function(r){ if(r.paciente && !seen[r.paciente]){seen[r.paciente]=1;pacs.push(r.paciente);} });
+  }
+  var datalistHtml = '<datalist id="ing-pac-list">';
+  pacs.slice(0,200).forEach(function(p){ datalistHtml += '<option value="'+p.replace(/"/g,'&quot;')+'">'; });
+  datalistHtml += '</datalist>';
+
+  var h = '<div style="font-family:var(--font-primary,Satoshi,sans-serif)">';
+  // Banner
+  h += '<div style="background:linear-gradient(135deg,#c46a7a,#a85566);border-radius:12px;padding:16px 18px;color:#fff;margin-bottom:18px">'
+    +'<div style="font-size:16px;font-weight:800">Nueva operación</div>'
+    +'<div style="font-size:11px;opacity:.8;margin-top:2px">Agrega uno o más productos por operación</div>'
+    +'</div>';
+
+  // Datos generales
+  h += '<div style="font-size:9px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:8px">Datos del paciente</div>';
+  h += datalistHtml;
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">'
+    +'<div><label style="font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);display:block;margin-bottom:3px">Paciente</label>'
+    +'<input id="ing-paciente" list="ing-pac-list" class="cbf-inp" placeholder="Nombre del paciente" style="width:100%;box-sizing:border-box"></div>'
+    +'<div><label style="font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);display:block;margin-bottom:3px">Fecha</label>'
+    +'<input type="date" id="ing-fecha" class="cbf-inp" value="'+today+'" style="width:100%;box-sizing:border-box"></div>'
+    +'</div>';
+
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:18px">'
+    +'<div><label style="font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);display:block;margin-bottom:3px">Forma de pago</label>'
+    +'<select id="ing-fpago" class="cbf-inp" style="width:100%;box-sizing:border-box">'
+    +'<option>TDC</option><option>Transferencia</option><option>Efectivo</option><option>Santander</option><option>AMEX</option><option>Otro</option>'
+    +'</select></div>'
+    +'<div><label style="font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);display:block;margin-bottom:3px">Sucursal</label>'
+    +'<input id="ing-sucursal" class="cbf-inp" placeholder="CDMX" style="width:100%;box-sizing:border-box"></div>'
+    +'<div><label style="font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);display:block;margin-bottom:3px">Moneda</label>'
+    +'<select id="ing-moneda" class="cbf-inp" style="width:100%;box-sizing:border-box">'
+    +'<option>MX</option><option>USD</option>'
+    +'</select></div>'
+    +'</div>';
+
+  // Líneas de productos
+  h += '<div style="font-size:9px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">'
+    +'<span>Productos / Servicios</span>'
+    +'<button onclick="ingAddLine()" style="font-size:11px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:6px;padding:4px 12px;cursor:pointer;font-weight:700">+ Agregar</button>'
+    +'</div>';
+  h += '<div id="ing-lines" style="display:flex;flex-direction:column;gap:8px"></div>';
+
+  // Total en vivo
+  h += '<div id="ing-total-bar" style="margin-top:16px;background:var(--color-surface,#f9fafb);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between">'
+    +'<div style="font-size:12px;font-weight:700;color:var(--text-primary,#111)">Total de la operación</div>'
+    +'<div id="ing-total-val" style="font-size:20px;font-weight:800;color:var(--color-primary,#c46a7a)">$0.00</div>'
+    +'</div>';
+
+  // Footer
+  h += '<div style="margin-top:18px;display:flex;gap:10px">'
+    +'<button id="ing-save-btn" onclick="ingSubmit()" style="flex:1;padding:12px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">Registrar operación</button>'
+    +'<button onclick="ingCloseDrawer()" style="padding:12px 20px;background:var(--color-surface,#f3f4f6);color:var(--text-primary,#374151);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;font-size:13px;font-weight:600;cursor:pointer">Cancelar</button>'
+    +'</div>';
+
+  h += '</div>';
+  body.innerHTML = h;
+
+  // Agregar primera línea
+  ingAddLine();
+}
+
+function ingCloseDrawer() {
+  var d=document.getElementById('ing-drw'),o=document.getElementById('ing-ovl');
+  if(d)d.classList.remove('open'); if(o)o.classList.remove('open');
+}
+
+function ingAddLine() {
+  _ingLineCount++;
+  var n = _ingLineCount;
+  var el = document.getElementById('ing-lines');
+  if (!el) return;
+  var div = document.createElement('div');
+  div.id = 'ing-line-'+n;
+  div.style.cssText = 'background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:10px 12px';
+  div.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+    +'<span style="font-size:10px;font-weight:700;color:var(--color-primary,#c46a7a)">Línea '+n+'</span>'
+    +(n>1?'<button onclick="ingRemoveLine('+n+')" style="font-size:18px;background:none;border:none;color:#dc2626;cursor:pointer;line-height:1;padding:0">×</button>':'')
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">'
+      +'<div><label style="font-size:9px;font-weight:600;color:var(--text-secondary,#9ca3af)">Categoría</label>'
+      +'<input id="ing-cat-'+n+'" class="cbf-inp" placeholder="Consulta, Medicamento…" style="width:100%;box-sizing:border-box;font-size:12px;padding:6px 8px"></div>'
+      +'<div><label style="font-size:9px;font-weight:600;color:var(--text-secondary,#9ca3af)">Producto</label>'
+      +'<input id="ing-prod-'+n+'" class="cbf-inp" placeholder="Nombre del producto" style="width:100%;box-sizing:border-box;font-size:12px;padding:6px 8px"></div>'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">'
+      +'<div><label style="font-size:9px;font-weight:600;color:var(--text-secondary,#9ca3af)">P.V.P.</label>'
+      +'<input type="number" id="ing-pvp-'+n+'" class="cbf-inp" placeholder="0.00" step="0.01" oninput="ingCalcTotal()" style="width:100%;box-sizing:border-box;font-size:12px;padding:6px 8px"></div>'
+      +'<div><label style="font-size:9px;font-weight:600;color:var(--text-secondary,#9ca3af)">Descuento $</label>'
+      +'<input type="number" id="ing-desc-'+n+'" class="cbf-inp" placeholder="0" step="0.01" oninput="ingCalcTotal()" style="width:100%;box-sizing:border-box;font-size:12px;padding:6px 8px"></div>'
+      +'<div><label style="font-size:9px;font-weight:600;color:var(--text-secondary,#9ca3af)">Cantidad</label>'
+      +'<input type="number" id="ing-cant-'+n+'" class="cbf-inp" value="1" min="1" oninput="ingCalcTotal()" style="width:100%;box-sizing:border-box;font-size:12px;padding:6px 8px"></div>'
+    +'</div>';
+  el.appendChild(div);
+  ingCalcTotal();
+}
+
+function ingRemoveLine(n) {
+  var el = document.getElementById('ing-line-'+n);
+  if (el) el.remove();
+  ingCalcTotal();
+}
+
+function ingCalcTotal() {
+  var total = 0;
+  for (var i = 1; i <= _ingLineCount; i++) {
+    var pvpEl = document.getElementById('ing-pvp-'+i);
+    if (!pvpEl) continue;
+    var pvp  = parseFloat(pvpEl.value) || 0;
+    var desc = parseFloat((document.getElementById('ing-desc-'+i)||{}).value) || 0;
+    var cant = parseFloat((document.getElementById('ing-cant-'+i)||{}).value) || 1;
+    total += (pvp * cant) - desc;
+  }
+  var valEl = document.getElementById('ing-total-val');
+  if (valEl) valEl.textContent = '$' + total.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+async function ingSubmit() {
+  var paciente = (document.getElementById('ing-paciente')||{}).value || '';
+  var fecha    = (document.getElementById('ing-fecha')||{}).value || '';
+  if (!paciente) { alert('Ingresa el nombre del paciente'); return; }
+  if (!fecha)    { alert('Selecciona la fecha'); return; }
+
+  var lineas = [];
+  for (var i = 1; i <= _ingLineCount; i++) {
+    var pvpEl = document.getElementById('ing-pvp-'+i);
+    if (!pvpEl) continue;
+    lineas.push({
+      categoria:  (document.getElementById('ing-cat-'+i)||{}).value || '',
+      producto:   (document.getElementById('ing-prod-'+i)||{}).value || '',
+      pvp:        parseFloat(pvpEl.value) || 0,
+      descuento:  parseFloat((document.getElementById('ing-desc-'+i)||{}).value) || 0,
+      cantidad:   parseFloat((document.getElementById('ing-cant-'+i)||{}).value) || 1
+    });
+  }
+  if (!lineas.length) { alert('Agrega al menos un producto'); return; }
+
+  var btn = document.getElementById('ing-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+
+  try {
+    var payload = {
+      action: 'saveIngreso',
+      paciente: paciente,
+      fecha: fecha,
+      formaPago: (document.getElementById('ing-fpago')||{}).value || '',
+      sucursal:  (document.getElementById('ing-sucursal')||{}).value || '',
+      moneda:    (document.getElementById('ing-moneda')||{}).value || 'MX',
+      ciclo: '',
+      observaciones: '',
+      factura: '',
+      poliza: '',
+      lineas: lineas
+    };
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(payload)});
+    var res = await r.json();
+    if (res.ok) {
+      ingCloseDrawer();
+      loadIngresosERP();
+    } else {
+      alert('Error: '+(res.error||'No se pudo guardar'));
+      if(btn){btn.disabled=false;btn.textContent='Registrar operación';}
+    }
+  } catch(e) {
+    alert('Error de conexión: '+e.message);
+    if(btn){btn.disabled=false;btn.textContent='Registrar operación';}
+  }
 }
 
 /* ── GASTOS ─── */

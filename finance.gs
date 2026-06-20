@@ -493,6 +493,12 @@ function doPost(e) {
       try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
       return jsonResponse(result);
     }
+    if (body.action === 'saveIngreso') {
+      return jsonResponse(saveIngreso(body));
+    }
+    if (body.action === 'setupBDIngresos') {
+      return jsonResponse(setupBDIngresos());
+    }
     return jsonResponse({error:'Accion desconocida: ' + body.action});
   } catch(ex) { return jsonResponse({error: ex.message}); }
 }
@@ -858,9 +864,118 @@ function readCxPData() {
    ══════════════════════════════════════════════════════════════ */
 var INGRESOS_SS_ID = '1x_TE_YxLOwnBXKV_lA3Ss_EOSu1p61uTdUmw2zh_6uc'; // Ingresos 2026
 
+function _readFromBDIngresos(sheet) {
+  var raw = sheet.getDataRange().getValues();
+  if (raw.length < 2) return {view:'ingresos',rows:[],resumenMensual:[],totalAnual:0,totalPagado:0,numOperaciones:0,ticketPromedio:0,topCategorias:[],topFormasPago:[],totalRows:0,headers:[]};
+
+  function num(v){if(typeof v==='number')return v;var n=parseFloat(String(v||'').replace(/[$,\s]/g,''));return isNaN(n)?0:n;}
+  function dt(v){if(!v)return'';if(v instanceof Date)return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0');return String(v);}
+
+  var MESES_MAP = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio',
+                   '07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'};
+  var MESES_IDX = {Enero:0,Febrero:1,Marzo:2,Abril:3,Mayo:4,Junio:5,Julio:6,Agosto:7,Septiembre:8,Octubre:9,Noviembre:10,Diciembre:11};
+
+  var allRows = [];
+  var opTotals = {}; // OP -> sum of TotalLinea
+
+  for (var i = 1; i < raw.length; i++) {
+    var r = raw[i];
+    var op = String(r[0]||'').trim();
+    if (!op) continue;
+
+    var fecha = dt(r[2]);
+    var mesNum = fecha.substring(5,7);
+    var mesName = MESES_MAP[mesNum] || '';
+    var mesIdx = MESES_IDX[mesName]; if (mesIdx === undefined) mesIdx = -1;
+    var totalLinea = num(r[9]);
+
+    if (!opTotals[op]) opTotals[op] = 0;
+    opTotals[op] += totalLinea;
+
+    allRows.push({
+      id: op,
+      linea: num(r[1]),
+      fecha: fecha,
+      paciente: String(r[3]||''),
+      categoria: String(r[4]||''),
+      producto: String(r[5]||''),
+      pvp: num(r[6]),
+      descuento: num(r[7]),
+      cantidad: num(r[8]),
+      totalPagar: totalLinea,
+      pagado: totalLinea, // en BD_Ingresos, TotalLinea = pagado
+      montoFact: 0,
+      formaPago: String(r[10]||''),
+      sucursal: String(r[11]||''),
+      moneda: String(r[12]||''),
+      ciclo: String(r[13]||''),
+      observaciones: String(r[14]||''),
+      factura: String(r[15]||''),
+      poliza: String(r[16]||''),
+      mes: mesName,
+      mesIdx: mesIdx
+    });
+  }
+
+  // KPIs y resúmenes
+  var totalAnual=0,totalPagado=0,cP=0,sP=0;
+  var catMap={},fpMap={},mesMap={};
+  for (var ai=0;ai<allRows.length;ai++){
+    var ar=allRows[ai];
+    totalAnual+=ar.totalPagar; totalPagado+=ar.pagado;
+    if(ar.totalPagar>0){cP++;sP+=ar.totalPagar;}
+    var c=ar.categoria||'Sin categoría';
+    if(!catMap[c])catMap[c]={nombre:c,total:0,count:0};catMap[c].total+=ar.totalPagar;catMap[c].count++;
+    var f=ar.formaPago||'Sin especificar';
+    if(!fpMap[f])fpMap[f]={nombre:f,total:0,count:0};fpMap[f].total+=ar.totalPagar;fpMap[f].count++;
+    var mn=ar.mes;
+    if(mn&&!mesMap[mn])mesMap[mn]={mes:mn,mesIdx:ar.mesIdx,totalIngresos:0,totalPagado:0,numOperaciones:0};
+    if(mn){mesMap[mn].totalIngresos+=ar.totalPagar;mesMap[mn].totalPagado+=ar.pagado;mesMap[mn].numOperaciones++;}
+  }
+
+  function sortTop(map,limit){
+    var arr=[];for(var k in map)arr.push(map[k]);
+    arr.sort(function(a,b){return b.total-a.total;});
+    for(var i=0;i<arr.length;i++)arr[i].pct=totalAnual>0?(arr[i].total/totalAnual)*100:0;
+    return arr.slice(0,limit);
+  }
+  var rmArr=[];for(var mk in mesMap)rmArr.push(mesMap[mk]);
+  rmArr.sort(function(a,b){return a.mesIdx-b.mesIdx;});
+
+  // Operaciones únicas para contar
+  var uniqueOps={};for(var ui=0;ui<allRows.length;ui++)uniqueOps[allRows[ui].id]=true;
+  var numOps=Object.keys(uniqueOps).length;
+
+  return {
+    view:'ingresos', fuente:'BD_Ingresos',
+    anio: allRows.length>0 ? allRows[0].fecha.substring(0,4) : String(new Date().getFullYear()),
+    rows: allRows.slice(-500).reverse(),
+    totalRows: allRows.length,
+    resumenMensual: rmArr,
+    totalAnual: totalAnual,
+    totalPagado: totalPagado,
+    numOperaciones: numOps,
+    ticketPromedio: numOps>0?totalAnual/numOps:0,
+    topCategorias: sortTop(catMap,10),
+    topFormasPago: sortTop(fpMap,10),
+    headers:['OP','Fecha','Paciente','Categoría','Producto','P.V.P.','Cant.','Total','F.Pago','Sucursal']
+  };
+}
+
 function readIngresosData() {
   try {
     var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+
+    // Intentar leer de BD_Ingresos primero
+    var bdSheet = null;
+    var allSheets = ss.getSheets();
+    for (var bi = 0; bi < allSheets.length; bi++) {
+      if (allSheets[bi].getName() === BD_INGRESOS_TAB) { bdSheet = allSheets[bi]; break; }
+    }
+    if (bdSheet && bdSheet.getLastRow() > 1) {
+      return _readFromBDIngresos(bdSheet);
+    }
+    // Fallback: leer de pestañas mensuales
     var MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
                  'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
     var tz = Session.getScriptTimeZone();
@@ -1026,6 +1141,178 @@ function readIngresosData() {
              totalAnual: 0, totalPagado: 0, numOperaciones: 0, ticketPromedio: 0,
              topCategorias: [], topFormasPago: [], headers: [] };
   }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   BD_INGRESOS — Sistema de captura de operaciones multi-línea
+   ══════════════════════════════════════════════════════════════ */
+var BD_INGRESOS_TAB = 'BD_Ingresos';
+var BD_INGRESOS_HEADERS = ['OP','Linea','Fecha','Paciente','Categoria','Producto',
+  'PVP','Descuento','Cantidad','TotalLinea','FormaPago','Sucursal','Moneda',
+  'Ciclo','Observaciones','Factura','Poliza'];
+
+function setupBDIngresos() {
+  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+  var existing = null;
+  var sheets = ss.getSheets();
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].getName() === BD_INGRESOS_TAB) { existing = sheets[i]; break; }
+  }
+  if (existing) return {ok:true, msg:'BD_Ingresos ya existe', rows:existing.getLastRow()-1};
+  var sh = ss.insertSheet(BD_INGRESOS_TAB, 0);
+  sh.getRange(1,1,1,BD_INGRESOS_HEADERS.length).setValues([BD_INGRESOS_HEADERS]);
+  sh.getRange(1,1,1,BD_INGRESOS_HEADERS.length).setFontWeight('bold').setBackground('#f3f4f6');
+  sh.setFrozenRows(1);
+  return {ok:true, msg:'BD_Ingresos creada', headers:BD_INGRESOS_HEADERS};
+}
+
+function _getNextOP(sheet) {
+  var lr = sheet.getLastRow();
+  if (lr < 2) return 'OP-0001';
+  var lastOP = String(sheet.getRange(lr, 1).getValue() || '');
+  var m = lastOP.match(/OP-(\d+)/);
+  var next = m ? (parseInt(m[1], 10) + 1) : 1;
+  return 'OP-' + String(next).padStart(4, '0');
+}
+
+function saveIngreso(payload) {
+  try {
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sheet = null;
+    var sheets = ss.getSheets();
+    for (var i = 0; i < sheets.length; i++) {
+      if (sheets[i].getName() === BD_INGRESOS_TAB) { sheet = sheets[i]; break; }
+    }
+    if (!sheet) {
+      setupBDIngresos();
+      sheets = ss.getSheets();
+      for (var j = 0; j < sheets.length; j++) {
+        if (sheets[j].getName() === BD_INGRESOS_TAB) { sheet = sheets[j]; break; }
+      }
+    }
+    if (!sheet) return {ok:false, error:'No se pudo crear BD_Ingresos'};
+
+    var opId = _getNextOP(sheet);
+    var lineas = payload.lineas || [];
+    if (!lineas.length) return {ok:false, error:'No hay productos en la operación'};
+
+    var fecha    = payload.fecha || '';
+    var paciente = payload.paciente || '';
+    var formaPago= payload.formaPago || '';
+    var sucursal = payload.sucursal || '';
+    var moneda   = payload.moneda || 'MX';
+    var ciclo    = payload.ciclo || '';
+    var obs      = payload.observaciones || '';
+    var factura  = payload.factura || '';
+    var poliza   = payload.poliza || '';
+
+    function num(v) { var n = parseFloat(String(v||'').replace(/[$,]/g,'')); return isNaN(n)?0:n; }
+
+    var rows = [];
+    for (var li = 0; li < lineas.length; li++) {
+      var l = lineas[li];
+      var pvp  = num(l.pvp);
+      var desc = num(l.descuento);
+      var cant = num(l.cantidad) || 1;
+      var totalLinea = (pvp * cant) - desc;
+      rows.push([
+        opId, li+1, fecha, paciente,
+        l.categoria||'', l.producto||'',
+        pvp, desc, cant, totalLinea,
+        formaPago, sucursal, moneda,
+        ciclo, li===0?obs:'', li===0?factura:'', li===0?poliza:''
+      ]);
+    }
+
+    sheet.getRange(sheet.getLastRow()+1, 1, rows.length, rows[0].length).setValues(rows);
+    var totalOP = rows.reduce(function(s,r){return s+r[9];},0);
+
+    return {ok:true, op:opId, lineas:rows.length, total:totalOP};
+  } catch(ex) {
+    return {ok:false, error:ex.message};
+  }
+}
+
+function migrateIngresosToDBD() {
+  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+  var sheet = null;
+  var sheets = ss.getSheets();
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].getName() === BD_INGRESOS_TAB) { sheet = sheets[i]; break; }
+  }
+  if (!sheet) {
+    setupBDIngresos();
+    sheets = ss.getSheets();
+    for (var j = 0; j < sheets.length; j++) {
+      if (sheets[j].getName() === BD_INGRESOS_TAB) { sheet = sheets[j]; break; }
+    }
+  }
+
+  var MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+               'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  var opCounter = 0;
+  var lr = sheet.getLastRow();
+  if (lr > 1) {
+    var lastOP = String(sheet.getRange(lr,1).getValue()||'');
+    var m = lastOP.match(/OP-(\d+)/);
+    if (m) opCounter = parseInt(m[1],10);
+  }
+
+  function num(v){var n=parseFloat(String(v||'').replace(/[$,\s]/g,''));return isNaN(n)?0:n;}
+  function dt(v){
+    if(!v) return '';
+    if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0');
+    return String(v);
+  }
+
+  var totalMigrated = 0;
+  for (var si = 0; si < sheets.length; si++) {
+    var tabName = sheets[si].getName().trim();
+    if (MESES.indexOf(tabName) < 0) continue;
+    var raw = sheets[si].getDataRange().getValues();
+    if (raw.length < 2) continue;
+
+    // Agrupar filas por ID original (columna A) — mismo ID = misma operación
+    var groups = {};
+    var groupOrder = [];
+    for (var ri = 1; ri < raw.length; ri++) {
+      var r = raw[ri];
+      var origId = String(r[0]||'').trim();
+      if (!origId || origId === '0') continue;
+      var idNum = Number(origId);
+      if (isNaN(idNum) || idNum <= 0) continue;
+      if (!groups[origId]) { groups[origId] = []; groupOrder.push(origId); }
+      groups[origId].push(r);
+    }
+
+    var batchRows = [];
+    for (var gi = 0; gi < groupOrder.length; gi++) {
+      var grp = groups[groupOrder[gi]];
+      opCounter++;
+      var opId = 'OP-' + String(opCounter).padStart(4,'0');
+      for (var li = 0; li < grp.length; li++) {
+        var r = grp[li];
+        var pvp  = num(r[5]);
+        var desc = num(r[6]);
+        var cant = num(r[7]) || 1;
+        var totalLinea = (pvp * cant) - desc;
+        batchRows.push([
+          opId, li+1, dt(r[1]), String(r[2]||''),
+          String(r[3]||''), String(r[4]||''),
+          pvp, desc, cant, totalLinea,
+          String(r[11]||''), (r.length > 20 ? String(r[20]||'') : ''),
+          String(r[18]||'MX'), String(r[19]||''),
+          String(r[15]||''), String(r[16]||''), String(r[17]||'')
+        ]);
+      }
+    }
+
+    if (batchRows.length) {
+      sheet.getRange(sheet.getLastRow()+1, 1, batchRows.length, batchRows[0].length).setValues(batchRows);
+      totalMigrated += batchRows.length;
+    }
+  }
+  return {ok:true, totalMigrated:totalMigrated, lastOP:'OP-'+String(opCounter).padStart(4,'0')};
 }
 
 /* ── Constantes definidas en api_config.gs (mismo proyecto GAS) ──
