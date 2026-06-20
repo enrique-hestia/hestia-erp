@@ -1685,6 +1685,46 @@ async function loadIngresosERP() {
     var tok = encodeURIComponent(getToken());
     var resp = await fetch(APPS_SCRIPT_URL+'?action=ingresos&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
     var data = await resp.json();
+    // Filtrar por rango de fechas del topbar
+    var fi = currentFechaInicio || '', ff = currentFechaFin || '';
+    if (fi || ff) {
+      var origRows = data.rows || [];
+      data.rows = origRows.filter(function(r) {
+        var fd = (r.fecha||'').substring(0,10);
+        if (fi && fd < fi) return false;
+        if (ff && fd > ff) return false;
+        return true;
+      });
+      // Recalcular KPIs con datos filtrados
+      var tA=0,tP=0,cP=0,sP=0;
+      var catM={},fpM={},mesM={};
+      data.rows.forEach(function(r){
+        tA+=r.totalPagar||0; tP+=r.pagado||0;
+        if(r.totalPagar>0){cP++;sP+=r.totalPagar;}
+        var c=r.categoria||'Sin categoría';
+        if(!catM[c])catM[c]={nombre:c,total:0,count:0};catM[c].total+=r.totalPagar;catM[c].count++;
+        var f=r.formaPago||'Sin especificar';
+        if(!fpM[f])fpM[f]={nombre:f,total:0,count:0};fpM[f].total+=r.totalPagar;fpM[f].count++;
+        var m=r.mes;
+        if(!mesM[m])mesM[m]={mes:m,mesIdx:r.mesIdx,totalIngresos:0,totalPagado:0,numOperaciones:0};
+        mesM[m].totalIngresos+=r.totalPagar;mesM[m].totalPagado+=r.pagado;mesM[m].numOperaciones++;
+      });
+      data.totalAnual=tA; data.totalPagado=tP; data.numOperaciones=data.rows.length;
+      data.ticketPromedio=cP>0?sP/cP:0; data.totalRows=data.rows.length;
+      // Top categorías
+      var catArr=[];for(var ck in catM)catArr.push(catM[ck]);
+      catArr.sort(function(a,b){return b.total-a.total;});
+      catArr.forEach(function(c){c.pct=tA>0?(c.total/tA)*100:0;});
+      data.topCategorias=catArr.slice(0,10);
+      // Top formas de pago
+      var fpArr=[];for(var fk in fpM)fpArr.push(fpM[fk]);
+      fpArr.sort(function(a,b){return b.total-a.total;});
+      data.topFormasPago=fpArr.slice(0,10);
+      // Resumen mensual
+      var rmArr=[];for(var mk in mesM)rmArr.push(mesM[mk]);
+      rmArr.sort(function(a,b){return a.mesIdx-b.mesIdx;});
+      data.resumenMensual=rmArr;
+    }
     _ingData = data;
     _ingPage = 1;
     _renderIngresosERP();
