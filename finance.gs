@@ -897,6 +897,10 @@ function _readFromBDIngresos(sheet) {
     if (!opTotals[op]) opTotals[op] = 0;
     opTotals[op] += totalLinea;
 
+    // BD_Ingresos cols: OP(0),Linea(1),Fecha(2),Paciente(3),Cat(4),Prod(5),
+    // PVP(6),Desc(7),Cant(8),TotalPagar(9),Pagado(10),MontoFactMes(11),
+    // FormaPago(12),Facturacion(13),Conciliacion(14),Contabilidad(15),
+    // Obs(16),Factura(17),Poliza(18),USMX(19),Ciclo(20),Sucursal(21),ArchivoURL(22)
     allRows.push({
       id: op,
       linea: num(r[1]),
@@ -908,15 +912,19 @@ function _readFromBDIngresos(sheet) {
       descuento: num(r[7]),
       cantidad: num(r[8]),
       totalPagar: totalLinea,
-      pagado: totalLinea, // en BD_Ingresos, TotalLinea = pagado
-      montoFact: 0,
-      formaPago: String(r[10]||''),
-      sucursal: String(r[11]||''),
-      moneda: String(r[12]||''),
-      ciclo: String(r[13]||''),
-      observaciones: String(r[14]||''),
-      factura: String(r[15]||''),
-      poliza: String(r[16]||''),
+      pagado: num(r[10]),
+      montoFact: num(r[11]),
+      formaPago: String(r[12]||''),
+      facturacion: r[13]===true||String(r[13]).toUpperCase()==='TRUE',
+      conciliacion: r[14]===true||String(r[14]).toUpperCase()==='TRUE',
+      contabilidad: r[15]===true||String(r[15]).toUpperCase()==='TRUE',
+      observaciones: String(r[16]||''),
+      factura: String(r[17]||''),
+      poliza: String(r[18]||''),
+      moneda: String(r[19]||''),
+      ciclo: String(r[20]||''),
+      sucursal: String(r[21]||''),
+      archivoURL: String(r[22]||''),
       mes: mesName,
       mesIdx: mesIdx
     });
