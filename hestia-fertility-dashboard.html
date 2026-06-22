@@ -873,6 +873,9 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 </div>
 
 <!-- ══ VISTA: INVENTARIOS ══ -->
+<!-- ══ VISTA: PRODUCTOS (catálogo unificado) ══ -->
+<div id="view-productos-catalogo" class="view" style="display:none"></div>
+
 <div id="view-medicamentos" class="view" style="display:none">
   <div class="card">
     <div class="card-header">
@@ -2099,6 +2102,191 @@ function _renderIngresosERP() {
     });
   },50);
 }
+
+/* ══ PRODUCTOS — Vista catálogo unificada ═══════════════════ */
+var _prodData = null;
+var _prodFilterCat = '';
+var _prodSearch = '';
+var _prodPage = 1;
+var _prodPerPage = 50;
+
+async function loadProductosView(catFilter) {
+  _prodFilterCat = catFilter || '';
+  _prodPage = 1;
+  _prodSearch = '';
+  var el = document.getElementById('view-productos-catalogo');
+  if (!el) return;
+  el.innerHTML = '<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px">'
+    +'<div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Cargando catálogo…</div>';
+  try {
+    if (!_prodData) {
+      var tok = encodeURIComponent(getToken());
+      var r = await fetch(APPS_SCRIPT_URL+'?action=productos&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+      _prodData = await r.json();
+    }
+    _renderProductosView();
+  } catch(e) {
+    el.innerHTML = '<div style="padding:40px;text-align:center;color:#dc2626">Error: '+e.message+'</div>';
+  }
+}
+
+function _prodFiltered() {
+  if (!_prodData || !_prodData.todosProductos) return [];
+  return _prodData.todosProductos.filter(function(p) {
+    if (_prodFilterCat) {
+      var cat = (p.categoria||'').toLowerCase();
+      var filter = _prodFilterCat.toLowerCase();
+      if (filter === 'estudios') { if (cat.indexOf('estudio') < 0) return false; }
+      else if (filter === 'externos') { if (cat.indexOf('extern') < 0) return false; }
+      else { if (cat !== filter) return false; }
+    }
+    if (_prodSearch) {
+      var q = _prodSearch.toLowerCase();
+      if ((p.descripcion||'').toLowerCase().indexOf(q)<0
+        && (p.sku||'').toLowerCase().indexOf(q)<0
+        && (p.categoria||'').toLowerCase().indexOf(q)<0) return false;
+    }
+    return true;
+  });
+}
+
+var _prodSearchTimer = null;
+function _prodSetSearch(val) {
+  _prodSearch = val;
+  clearTimeout(_prodSearchTimer);
+  _prodSearchTimer = setTimeout(function() {
+    _prodPage = 1;
+    _renderProductosView();
+    var inp = document.getElementById('prod-search');
+    if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+  }, 400);
+}
+
+function _renderProductosView() {
+  var el = document.getElementById('view-productos-catalogo');
+  if (!el || !_prodData) return;
+  var data = _prodData;
+  var filtered = _prodFiltered();
+  var cats = data.categorias || [];
+  var totalPages = Math.ceil(filtered.length / _prodPerPage) || 1;
+  var start = (_prodPage-1)*_prodPerPage;
+  var pageRows = filtered.slice(start, start+_prodPerPage);
+
+  function fP(v){return '$'+(Number(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+
+  var h = [];
+  h.push('<style id="prod-styles">'
+    +'.prod-w{max-width:1400px;margin:0 auto;padding:20px}'
+    +'.prod-hdr{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;padding-bottom:14px;border-bottom:2px solid var(--text-primary,#111)}'
+    +'.prod-tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:16px}'
+    +'.prod-tab{padding:6px 14px;border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer;border:1.5px solid var(--color-divider,#e5e7eb);background:var(--card-bg,#fff);color:var(--text-secondary,#6b7280);transition:all .15s}'
+    +'.prod-tab:hover{border-color:var(--color-primary,#c46a7a);color:var(--color-primary,#c46a7a)}'
+    +'.prod-tab.act{background:var(--color-primary,#c46a7a);color:#fff;border-color:var(--color-primary,#c46a7a)}'
+    +'.prod-filters{display:flex;gap:10px;align-items:center;margin-bottom:14px;padding:10px 14px;background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px}'
+    +'.prod-panel{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;overflow:hidden}'
+    +'.prod-tbl{width:100%;border-collapse:collapse;font-size:12px}'
+    +'.prod-tbl th{padding:8px 14px;font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);background:var(--color-surface,#fafafa);border-bottom:2px solid var(--color-divider,#d1d5db);text-align:left;white-space:nowrap;position:sticky;top:0;z-index:2}'
+    +'.prod-tbl th:nth-child(n+5){text-align:right}'
+    +'.prod-tbl td{padding:7px 14px;border-bottom:1px solid var(--color-divider,#f0f0f0)}'
+    +'.prod-tbl td:nth-child(n+5){text-align:right}'
+    +'.prod-tbl tr:hover td{background:rgba(0,0,0,.012)}'
+    +'.prod-tbl tr td:first-child{font-family:monospace;font-size:11px;color:var(--color-primary,#c46a7a)}'
+    +'.prod-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600}'
+    +'.prod-pag{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-top:1px solid var(--color-divider,#e5e7eb);font-size:11px;color:var(--text-secondary,#6b7280)}'
+    +'.prod-pag-btn{border:1px solid var(--color-divider,#e5e7eb);background:var(--card-bg,#fff);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer}'
+    +'</style>');
+
+  h.push('<div class="prod-w">');
+
+  // Header
+  h.push('<div class="prod-hdr"><div>'
+    +'<div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility</div>'
+    +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Catálogo de Productos y Servicios</h1>'
+    +'<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">'+filtered.length+' productos'
+      +(_prodFilterCat?' · Filtro: '+_prodFilterCat:'')+'</div>'
+    +'</div><div style="display:flex;gap:10px">'
+    +'<a href="https://docs.google.com/spreadsheets/d/'+PRODUCTOS_SS_ID+'/edit" target="_blank" style="display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--color-primary,#c46a7a);text-decoration:none">'
+      +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Editar en Sheets</a>'
+    +'</div></div>');
+
+  // Category tabs
+  h.push('<div class="prod-tabs">');
+  h.push('<div class="prod-tab'+(!_prodFilterCat?' act':'')+'" onclick="_prodFilterCat=\'\';_prodPage=1;_renderProductosView()">Todos</div>');
+  cats.forEach(function(c) {
+    var isAct = _prodFilterCat && c.nombre.toLowerCase().indexOf(_prodFilterCat.toLowerCase())>=0;
+    h.push('<div class="prod-tab'+(isAct?' act':'')+'" onclick="_prodFilterCat=\''+c.nombre.replace(/'/g,"\\'")+'\';_prodPage=1;_renderProductosView()">'+c.nombre+' <span style="font-size:9px;opacity:.7">('+c.count+')</span></div>');
+  });
+  h.push('</div>');
+
+  // Search
+  h.push('<div class="prod-filters">'
+    +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary,#9ca3af)" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
+    +'<input id="prod-search" placeholder="Buscar por SKU, nombre o categoría…" value="'+(_prodSearch||'')+'" oninput="_prodSetSearch(this.value)" style="flex:1;border:none;outline:none;font-size:12px;background:transparent;color:var(--text-primary,#111)">'
+    +'<span style="font-size:10px;color:var(--text-secondary,#9ca3af)">'+filtered.length+' resultados</span>'
+    +'</div>');
+
+  // Table
+  h.push('<div class="prod-panel">');
+  h.push('<div style="overflow-x:auto;max-height:65vh;overflow-y:auto">');
+  h.push('<table class="prod-tbl"><thead><tr>'
+    +'<th>SKU</th><th>Producto</th><th>Categoría</th><th>Tipo</th><th>Precio vigente</th><th>Vigencia</th><th>Estado</th>'
+    +'</tr></thead><tbody>');
+
+  if (pageRows.length) {
+    var catColors = {'Tratamientos':'#c46a7a','Medicamento':'#0891b2','Consulta':'#7c3aed',
+      'Estudios - Consulta':'#3a72a8','Estudios - Ciclo':'#3a72a8','Estudios - Andrologia':'#3a72a8',
+      'Almacenamiento':'#b45309','PGT-A':'#059669','SURROGACY':'#6366f1','REPROVIDA':'#dc2626',
+      'Externos':'#374151','Extras Externos':'#374151','Complemento':'#0369a1'};
+    pageRows.forEach(function(p) {
+      var color = catColors[p.categoria] || '#6b7280';
+      h.push('<tr>'
+        +'<td>'+(p.sku||p.id)+'</td>'
+        +'<td style="font-weight:600;color:var(--text-primary,#111);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+p.descripcion+'</td>'
+        +'<td><span class="prod-badge" style="background:'+color+'15;color:'+color+'">'+p.categoria+'</span></td>'
+        +'<td style="font-size:11px;color:var(--text-secondary,#6b7280)">'+(p.tipo||'—')+'</td>'
+        +'<td style="font-weight:700;color:var(--text-primary,#111)">'+(p.precio?fP(p.precio):'—')+'</td>'
+        +'<td style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">'+(p.precioVigencia||'—')+'</td>'
+        +'<td>'+(p.activo?'<span class="prod-badge" style="background:#dcfce7;color:#166534">Activo</span>':'<span class="prod-badge" style="background:#fee2e2;color:#991b1b">Inactivo</span>')+'</td>'
+        +'</tr>');
+    });
+  } else {
+    h.push('<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-secondary,#9ca3af)">Sin productos</td></tr>');
+  }
+
+  h.push('</tbody></table></div>');
+  // Pagination
+  h.push('<div class="prod-pag">'
+    +'<span>'+filtered.length+' productos · Página '+_prodPage+' de '+totalPages+'</span>'
+    +'<div style="display:flex;gap:6px">'
+    +'<button class="prod-pag-btn" onclick="_prodPage--;_renderProductosView()"'+(_prodPage<=1?' disabled':'')+'>← Anterior</button>'
+    +'<button class="prod-pag-btn" onclick="_prodPage++;_renderProductosView()"'+(_prodPage>=totalPages?' disabled':'')+'>Siguiente →</button>'
+    +'</div></div>');
+  h.push('</div>'); // /prod-panel
+
+  // Summary cards
+  var totalProds = (data.todosProductos||[]).length;
+  var activos = (data.todosProductos||[]).filter(function(p){return p.activo;}).length;
+  var conPrecio = (data.todosProductos||[]).filter(function(p){return p.precio>0;}).length;
+  h.push('<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:16px">');
+  h.push('<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:14px 16px">'
+    +'<div style="font-size:9.5px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Total productos</div>'
+    +'<div style="font-size:22px;font-weight:800;color:var(--text-primary,#111)">'+totalProds+'</div></div>');
+  h.push('<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:14px 16px">'
+    +'<div style="font-size:9.5px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Activos</div>'
+    +'<div style="font-size:22px;font-weight:800;color:#166534">'+activos+'</div></div>');
+  h.push('<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:14px 16px">'
+    +'<div style="font-size:9.5px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Con precio</div>'
+    +'<div style="font-size:22px;font-weight:800;color:#0c4a6e">'+conPrecio+'</div></div>');
+  h.push('<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:14px 16px">'
+    +'<div style="font-size:9.5px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Categorías</div>'
+    +'<div style="font-size:22px;font-weight:800;color:#7c3aed">'+cats.length+'</div></div>');
+  h.push('</div>');
+
+  h.push('</div>'); // /prod-w
+  el.innerHTML = h.join('');
+}
+
+var PRODUCTOS_SS_ID = '1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY';
 
 var _ingContabilizado = 0; // se calcula al renderizar
 window.ingCalcISR = function() {
@@ -5526,6 +5714,17 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     var _ingEl = document.getElementById('view-ingresos');
     if (_ingEl) _ingEl.style.display = '';
     loadIngresosERP();
+    return;
+  }
+  // Productos (todas las sub-categorías usan la misma vista)
+  var _prodCatMap = {productos:'',tratamientos:'Tratamientos',medicamentos:'Medicamento',
+    estudios:'Estudios',consultas:'Consulta',surrogacy:'SURROGACY',reprovida:'REPROVIDA',externos:'Externos'};
+  var _prodKey = viewId.toLowerCase().replace(/[^a-z]/g,'');
+  if (_prodCatMap.hasOwnProperty(_prodKey)) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _prEl = document.getElementById('view-productos-catalogo');
+    if (_prEl) _prEl.style.display = '';
+    loadProductosView(_prodCatMap[_prodKey]);
     return;
   }
   // Conciliación Bancaria
