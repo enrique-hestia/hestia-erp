@@ -2276,14 +2276,15 @@ function _renderProductosView() {
     // Tabla simple: SKU | Producto | Tipo | Precio | Estado
     h.push('<div class="prod-panel"><div style="overflow-x:auto;max-height:70vh;overflow-y:auto">');
     h.push('<table class="prod-tbl"><thead><tr>'
-      +'<th style="width:100px">SKU</th><th>Producto</th><th style="width:80px">Tipo</th><th style="width:120px;text-align:right">Precio</th><th style="width:80px;text-align:center">Estado</th>'
+      +'<th style="width:100px">SKU</th><th>Producto</th><th style="width:80px">Tipo</th><th style="width:120px;text-align:right">Precio</th><th style="width:80px;text-align:center">Estado</th><th style="width:50px"></th>'
       +'</tr></thead><tbody>');
 
-    var displayRows = filtered; // ya filtrado por tipo en _prodFiltered
+    var displayRows = filtered;
     var pgRows = displayRows.slice(start, start+_prodPerPage);
     totalPages = Math.ceil(displayRows.length / _prodPerPage) || 1;
 
     pgRows.forEach(function(p) {
+      var pj = encodeURIComponent(JSON.stringify({id:p.id,sku:p.sku,descripcion:p.descripcion,categoria:p.categoria,tipo:p.tipo,notas:p.notas,precio:p.precio,activo:p.activo,precios:p.precios||{}}));
       h.push('<tr>'
         +'<td style="font-family:monospace;font-size:11px;color:'+titleColor+'">'+(p.sku||p.id)+'</td>'
         +'<td style="font-weight:600;color:var(--text-primary,#111)">'+p.descripcion
@@ -2291,9 +2292,10 @@ function _renderProductosView() {
         +'<td style="font-size:11px;color:var(--text-secondary,#6b7280)">'+(p.tipo||'—')+'</td>'
         +'<td style="text-align:right;font-weight:700;font-size:13px;color:var(--text-primary,#111)">'+(p.precio?fP(p.precio):'—')+'</td>'
         +'<td style="text-align:center">'+(p.activo?'<span class="prod-badge" style="background:#dcfce7;color:#166534">Activo</span>':'<span class="prod-badge" style="background:#fee2e2;color:#991b1b">Inactivo</span>')+'</td>'
+        +'<td style="text-align:center"><button onclick="prodEditForm(decodeURIComponent(\''+pj+'\'))" style="background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:13px" title="Editar">✎</button></td>'
         +'</tr>');
     });
-    if (!pgRows.length) h.push('<tr><td colspan="5" style="text-align:center;padding:2rem;color:var(--text-secondary)">Sin productos</td></tr>');
+    if (!pgRows.length) h.push('<tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--text-secondary)">Sin productos</td></tr>');
     h.push('</tbody></table></div>');
 
     h.push('<div class="prod-pag"><span>'+displayRows.length+' productos</span>'
@@ -2339,7 +2341,7 @@ function _renderProductosView() {
     // Full table
     h.push('<div class="prod-panel"><div style="overflow-x:auto;max-height:60vh;overflow-y:auto">');
     h.push('<table class="prod-tbl"><thead><tr>'
-      +'<th>SKU</th><th>Producto</th><th>Categoría</th><th>Tipo</th><th style="text-align:right">Precio</th><th style="text-align:right">Vigencia</th><th style="text-align:center">Estado</th>'
+      +'<th>SKU</th><th>Producto</th><th>Categoría</th><th>Tipo</th><th style="text-align:right">Precio</th><th style="text-align:right">Vigencia</th><th style="text-align:center">Estado</th><th style="width:50px"></th>'
       +'</tr></thead><tbody>');
 
     var displayRows2 = filtered;
@@ -2348,6 +2350,7 @@ function _renderProductosView() {
 
     pgRows2.forEach(function(p) {
       var color = catColors[p.categoria] || '#6b7280';
+      var pj2 = encodeURIComponent(JSON.stringify({id:p.id,sku:p.sku,descripcion:p.descripcion,categoria:p.categoria,tipo:p.tipo,notas:p.notas,precio:p.precio,activo:p.activo,precios:p.precios||{}}));
       h.push('<tr>'
         +'<td style="font-family:monospace;font-size:11px;color:var(--color-primary,#c46a7a)">'+(p.sku||p.id)+'</td>'
         +'<td style="font-weight:600;color:var(--text-primary,#111);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+p.descripcion+'</td>'
@@ -2356,9 +2359,10 @@ function _renderProductosView() {
         +'<td style="text-align:right;font-weight:700">'+(p.precio?fP(p.precio):'—')+'</td>'
         +'<td style="text-align:right;font-size:10.5px;color:var(--text-secondary,#9ca3af)">'+(p.precioVigencia||'—')+'</td>'
         +'<td style="text-align:center">'+(p.activo?'<span class="prod-badge" style="background:#dcfce7;color:#166534">Activo</span>':'<span class="prod-badge" style="background:#fee2e2;color:#991b1b">Inactivo</span>')+'</td>'
+        +'<td style="text-align:center"><button onclick="prodEditForm(decodeURIComponent(\''+pj2+'\'))" style="background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:13px" title="Editar">✎</button></td>'
         +'</tr>');
     });
-    if (!pgRows2.length) h.push('<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-secondary)">Sin productos</td></tr>');
+    if (!pgRows2.length) h.push('<tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-secondary)">Sin productos</td></tr>');
     h.push('</tbody></table></div>');
     h.push('<div class="prod-pag"><span>'+displayRows2.length+' productos · Pág. '+_prodPage+'/'+totalPages+'</span>'
       +'<div style="display:flex;gap:6px">'
@@ -2412,6 +2416,7 @@ function prodOpenForm(defaultCat) {
   h += '<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:14px;display:flex;align-items:center;gap:8px">'
     +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>Información del producto</div>';
   h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
+    +'<div><label '+LBL+'>SKU <span style="font-weight:400;color:var(--text-secondary,#9ca3af)">(auto si vacío)</span></label><input id="prod-f-sku" '+S+' placeholder="TRA-0001"></div>'
     +'<div style="grid-column:1/-1"><label '+LBL+'>Descripción *</label><input id="prod-f-desc" '+S+' placeholder="Nombre completo del producto o servicio"></div>'
     +'<div><label '+LBL+'>Categoría *</label><select id="prod-f-cat" '+S+'><option value="">— Seleccionar —</option>'+opts(cats,defaultCat)+'</select></div>'
     +'<div><label '+LBL+'>Tipo</label><select id="prod-f-tipo" '+S+'><option value="">— Seleccionar —</option>'+opts(tipos)+'</select></div>'
@@ -2449,6 +2454,61 @@ function prodOpenForm(defaultCat) {
   h += '</div>';
   el.innerHTML = h;
   el.scrollTop = 0;
+}
+
+function prodEditForm(jsonStr) {
+  var p = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+  prodOpenForm(p.categoria || '');
+  // Pre-llenar campos después de que el form se renderice
+  setTimeout(function() {
+    var el = function(id){return document.getElementById(id);};
+    if(el('prod-f-desc')) el('prod-f-desc').value = p.descripcion||'';
+    if(el('prod-f-cat')) el('prod-f-cat').value = p.categoria||'';
+    if(el('prod-f-tipo')) el('prod-f-tipo').value = p.tipo||'';
+    if(el('prod-f-notas')) el('prod-f-notas').value = p.notas||'';
+    if(el('prod-f-precio')) el('prod-f-precio').value = p.precio||'';
+    if(el('prod-f-activo')) el('prod-f-activo').value = p.activo?'true':'false';
+    // Mostrar SKU editable
+    var skuEl = el('prod-f-sku');
+    if(skuEl) skuEl.value = p.sku||'';
+    // Cambiar título y botón a modo edición
+    var titleEl = document.querySelector('#view-productos-catalogo h1');
+    if(titleEl) titleEl.textContent = 'Editar producto — '+(p.sku||p.id);
+    var btn = el('prod-save-btn');
+    if(btn) {
+      btn.textContent = 'Actualizar producto';
+      btn.onclick = function(){ prodSubmitEdit(p.id); };
+    }
+  }, 50);
+}
+
+async function prodSubmitEdit(productoId) {
+  var desc = (document.getElementById('prod-f-desc')||{}).value||'';
+  if (!desc) { alert('Ingresa la descripción'); return; }
+  var btn = document.getElementById('prod-save-btn');
+  if(btn){btn.disabled=true;btn.textContent='Actualizando…';}
+  try {
+    var s = getSession()||{};
+    var payload = {
+      action:'updateProducto',
+      productoId: productoId,
+      sku: (document.getElementById('prod-f-sku')||{}).value||'',
+      descripcion: desc,
+      categoria: (document.getElementById('prod-f-cat')||{}).value||'',
+      tipo: (document.getElementById('prod-f-tipo')||{}).value||'',
+      notas: (document.getElementById('prod-f-notas')||{}).value||'',
+      activo: (document.getElementById('prod-f-activo')||{}).value!=='false',
+      precio: (document.getElementById('prod-f-precio')||{}).value||'',
+      moneda: (document.getElementById('prod-f-moneda')||{}).value||'MXN',
+      vigencia: (document.getElementById('prod-f-vigencia')||{}).value||'',
+      lista: (document.getElementById('prod-f-lista')||{}).value||'General',
+      usuario: s.email||'sistema'
+    };
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(payload)});
+    var res = await r.json();
+    if(res.ok) { _prodData=null; prodCloseForm(); }
+    else { alert('Error: '+(res.error||'No se pudo actualizar')); if(btn){btn.disabled=false;btn.textContent='Actualizar producto';} }
+  } catch(e) { alert('Error: '+e.message); if(btn){btn.disabled=false;btn.textContent='Actualizar producto';} }
 }
 
 function prodCloseForm() {

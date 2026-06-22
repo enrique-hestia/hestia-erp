@@ -511,6 +511,9 @@ function doPost(e) {
     if (body.action === 'saveProductoPrecio') {
       return jsonResponse(saveProductoPrecio(body.productoId, body.precio, body.vigencia, body.usuario));
     }
+    if (body.action === 'updateProducto') {
+      return jsonResponse(updateProducto(body));
+    }
     if (body.action === 'saveLista') {
       return jsonResponse(saveLista(body));
     }
@@ -1608,7 +1611,44 @@ function setupBDListas() {
       ['REPROVIDA','Precios derivados REPROVIDA','MXN',1,true]
     ]);
   }
+  _syncListasDropdown();
   return {ok:true};
+}
+
+function updateProducto(body) {
+  try {
+    var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+    var prodSheet = ss.getSheetByName('BD_Productos');
+    if (!prodSheet) return {ok:false, error:'BD_Productos no encontrada'};
+    var prodId = String(body.productoId||'').trim();
+    if (!prodId) return {ok:false, error:'ProductoID requerido'};
+    var data = prodSheet.getDataRange().getValues();
+    var found = -1;
+    for (var i=1;i<data.length;i++) {
+      if (String(data[i][0]).trim() === prodId) { found = i+1; break; }
+    }
+    if (found < 0) return {ok:false, error:'Producto no encontrado: '+prodId};
+    var oldDesc = String(data[found-1][2]||'');
+    // Actualizar campos (col: 0=ID, 1=SKU, 2=Desc, 3=Cat, 4=Tipo, 5=Notas, 6=Activo)
+    if (body.sku !== undefined) prodSheet.getRange(found, 2).setValue(body.sku);
+    if (body.descripcion !== undefined) prodSheet.getRange(found, 3).setValue(body.descripcion);
+    if (body.categoria !== undefined) prodSheet.getRange(found, 4).setValue(body.categoria);
+    if (body.tipo !== undefined) prodSheet.getRange(found, 5).setValue(body.tipo);
+    if (body.notas !== undefined) prodSheet.getRange(found, 6).setValue(body.notas);
+    if (body.activo !== undefined) prodSheet.getRange(found, 7).setValue(body.activo!==false&&body.activo!=='false');
+    // Si hay nuevo precio, agregar a BD_Precios
+    var precio = parseFloat(String(body.precio||'').replace(/[$,]/g,''))||0;
+    if (precio > 0) {
+      var precSheet = ss.getSheetByName('BD_Precios');
+      if (precSheet) {
+        var lista = body.lista || 'General';
+        var vigencia = body.vigencia || new Date().toISOString().substring(0,10);
+        precSheet.appendRow([prodId, vigencia, precio, body.moneda||'MXN', body.usuario||'sistema', new Date(), lista]);
+      }
+    }
+    logAudit(body.usuario||'sistema','Productos','Editar',prodId,'Descripcion',oldDesc,body.descripcion||oldDesc);
+    return {ok:true, productoId:prodId};
+  } catch(ex) { return {ok:false, error:ex.message}; }
 }
 
 function readListas() {
