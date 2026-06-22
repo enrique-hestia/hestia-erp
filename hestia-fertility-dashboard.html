@@ -2122,7 +2122,8 @@ async function loadProductosView(catFilter, isCatalog) {
   el.innerHTML = '<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px">'
     +'<div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Cargando catálogo…</div>';
   try {
-    if (!_prodData) {
+    if (!_prodData || _prodData.error) {
+      _prodData = null;
       var tok = encodeURIComponent(getToken());
       var r = await fetch(APPS_SCRIPT_URL+'?action=productos&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
       _prodData = await r.json();
