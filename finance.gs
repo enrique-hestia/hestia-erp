@@ -1453,7 +1453,7 @@ function readProductos() {
         categoria: String(r[3]||''),
         tipo: String(r[4]||''),
         notas: String(r[5]||''),
-        activo: r[6]===true||String(r[6]).toUpperCase()==='TRUE',
+        activo: (r[6]===false||String(r[6]).toUpperCase()==='FALSE') ? false : true,
         precio: 0,
         precioVigencia: ''
       });
@@ -1514,7 +1514,7 @@ function readProductos() {
       total: productos.length
     };
   } catch(ex) {
-    return {ok:false, error:ex.message, productos:[], categorias:[]};
+    return {ok:false, error:ex.message+' (line:'+ex.lineNumber+')', productos:[], categorias:[]};
   }
 }
 

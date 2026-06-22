@@ -2126,6 +2126,11 @@ async function loadProductosView(catFilter, isCatalog) {
       var tok = encodeURIComponent(getToken());
       var r = await fetch(APPS_SCRIPT_URL+'?action=productos&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
       _prodData = await r.json();
+      console.log('[Productos] response:', _prodData && _prodData.ok, 'total:', _prodData && _prodData.total, 'error:', _prodData && _prodData.error);
+    }
+    if (_prodData && _prodData.error) {
+      el.innerHTML = '<div style="padding:40px;text-align:center;color:#dc2626">Error del servidor: '+_prodData.error+'</div>';
+      return;
     }
     _renderProductosView();
   } catch(e) {
