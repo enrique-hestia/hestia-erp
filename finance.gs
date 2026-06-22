@@ -1472,7 +1472,8 @@ function readProductos() {
       var pid = String(pr[0]||'').trim();
       var vig = dt(pr[1]);
       var precio = parseFloat(String(pr[2]||'').replace(/[$,]/g,'')) || 0;
-      var lista = String(pr[6]||'General').trim() || 'General';
+      var lista = (pr.length > 6 && pr[6] !== '' && pr[6] !== null && pr[6] !== undefined) ? String(pr[6]).trim() : 'General';
+      if (!lista) lista = 'General';
       if (!pid || !precio) continue;
       if (vig > dt(hoy)) continue;
       if (!precMap[pid]) precMap[pid] = {};
