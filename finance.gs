@@ -1507,6 +1507,106 @@ function migrateIngresosToDBD() {
   return {ok:true, totalMigrated:totalMigrated, lastOP:'OP-'+String(opCounter).padStart(5,'0'), log:log};
 }
 
+/* ══════════════════════════════════════════════════════════════
+   fixOPGrouping — Reagrupa OP por paciente+fecha
+   Ejecutar UNA VEZ desde el editor de Apps Script (Run ▶)
+   ══════════════════════════════════════════════════════════════ */
+function fixOPGrouping() {
+  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+  var sheet = null;
+  var sheets = ss.getSheets();
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].getName() === BD_INGRESOS_TAB) { sheet = sheets[i]; break; }
+  }
+  if (!sheet) return {ok:false, error:'BD_Ingresos no encontrada'};
+
+  var raw = sheet.getDataRange().getValues();
+  if (raw.length < 2) return {ok:false, error:'Sin datos'};
+
+  function dt(v) {
+    if (!v) return '';
+    if (v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0');
+    return String(v).substring(0,10);
+  }
+
+  // Paso 1: Leer todas las filas de datos (skip header), eliminar vacías
+  var dataRows = [];
+  for (var ri = 1; ri < raw.length; ri++) {
+    var r = raw[ri];
+    var paciente = String(r[3]||'').trim();
+    var fecha = dt(r[2]);
+    // Saltar filas vacías (sin paciente Y sin fecha Y sin producto)
+    if (!paciente && !fecha && !String(r[5]||'').trim()) continue;
+    dataRows.push(r);
+  }
+
+  // Paso 2: Ordenar por fecha ASC, luego paciente
+  dataRows.sort(function(a, b) {
+    var dA = dt(a[2]), dB = dt(b[2]);
+    if (dA < dB) return -1;
+    if (dA > dB) return 1;
+    var pA = String(a[3]||'').toLowerCase(), pB = String(b[3]||'').toLowerCase();
+    if (pA < pB) return -1;
+    if (pA > pB) return 1;
+    return 0;
+  });
+
+  // Paso 3: Agrupar por paciente+fecha → mismo OP
+  var opCounter = 0;
+  var lastKey = '';
+  var lastOP = '';
+  var lineInOP = 0;
+  var newRows = [];
+
+  for (var di = 0; di < dataRows.length; di++) {
+    var r = dataRows[di];
+    var paciente = String(r[3]||'').trim();
+    var fecha = dt(r[2]);
+    var key = (paciente + '||' + fecha).toLowerCase();
+
+    if (key !== lastKey || !lastKey) {
+      // Nueva operación
+      opCounter++;
+      lastOP = 'OP-' + String(opCounter).padStart(5, '0');
+      lastKey = key;
+      lineInOP = 1;
+    } else {
+      lineInOP++;
+    }
+
+    // Construir fila nueva con OP y Linea corregidos
+    var newRow = [lastOP, lineInOP];
+    for (var ci = 2; ci < r.length; ci++) {
+      newRow.push(r[ci]);
+    }
+    // Asegurar 23 columnas
+    while (newRow.length < 23) newRow.push('');
+    newRows.push(newRow);
+  }
+
+  // Paso 4: Reescribir BD_Ingresos (preservar header)
+  var header = raw[0];
+  var lr = sheet.getLastRow();
+  if (lr > 1) sheet.getRange(2, 1, lr - 1, sheet.getLastColumn()).clearContent();
+
+  if (newRows.length) {
+    sheet.getRange(2, 1, newRows.length, newRows[0].length).setValues(newRows);
+  }
+
+  // Contar operaciones únicas
+  var uniqueOps = {};
+  newRows.forEach(function(r) { uniqueOps[r[0]] = true; });
+
+  return {
+    ok: true,
+    filasOriginales: raw.length - 1,
+    filasVaciasEliminadas: (raw.length - 1) - dataRows.length,
+    filasFinales: newRows.length,
+    operacionesUnicas: Object.keys(uniqueOps).length,
+    ultimoOP: lastOP
+  };
+}
+
 /* ── Constantes definidas en api_config.gs (mismo proyecto GAS) ──
    SHEET_ID, AUTH_SECRET, ER_SS_ID, BANKS_SS_ID, LAB_SS_ID, MED_SS_ID,
    PAC_SS_ID, PROD_SS_ID, QX_SS_ID, ER_GID, BUDGET_GID, PL_GID,
