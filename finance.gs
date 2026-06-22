@@ -508,6 +508,12 @@ function doPost(e) {
     if (body.action === 'saveProductoPrecio') {
       return jsonResponse(saveProductoPrecio(body.productoId, body.precio, body.vigencia, body.usuario));
     }
+    if (body.action === 'updateProductoSKU') {
+      return jsonResponse(updateProductoSKU(body.productoId, body.sku, body.usuario));
+    }
+    if (body.action === 'updateProductoID') {
+      return jsonResponse(updateProductoID(body.productoIdViejo, body.productoIdNuevo, body.usuario));
+    }
     return jsonResponse({error:'Accion desconocida: ' + body.action});
   } catch(ex) { return jsonResponse({error: ex.message}); }
 }
@@ -1259,8 +1265,8 @@ function setupBDProductos() {
   // BD_Productos
   if (!ss.getSheetByName('BD_Productos')) {
     var sh = ss.insertSheet('BD_Productos', 0);
-    sh.getRange(1,1,1,6).setValues([['ProductoID','Descripcion','Categoria','Tipo','Notas','Activo']]);
-    sh.getRange(1,1,1,6).setFontWeight('bold').setBackground('#f3f4f6');
+    sh.getRange(1,1,1,8).setValues([['ProductoID','SKU','Descripcion','Categoria','Tipo','Notas','Activo','FechaCreacion']]);
+    sh.getRange(1,1,1,8).setFontWeight('bold').setBackground('#f3f4f6');
     sh.setFrozenRows(1);
   }
   // BD_Precios
@@ -1377,7 +1383,10 @@ function migrateProductos() {
         prodCounter++;
         prodId = 'PROD-' + String(prodCounter).padStart(5,'0');
         seenProducts[key] = prodId;
-        prodRows.push([prodId, desc, cat, tipo, notas, true]);
+        // SKU auto: prefijo categoría (3 letras) + número secuencial
+        var catPrefix = (cat||'GEN').substring(0,3).toUpperCase().replace(/[^A-Z]/g,'');
+        var sku = catPrefix + '-' + String(prodCounter).padStart(4,'0');
+        prodRows.push([prodId, sku, desc, cat, tipo, notas, true, new Date()]);
       }
 
       // Precios
@@ -1426,12 +1435,13 @@ function readProductos() {
       if (!id) continue;
       productos.push({
         id: id,
-        descripcion: String(r[1]||''),
-        categoria: String(r[2]||''),
-        tipo: String(r[3]||''),
-        notas: String(r[4]||''),
-        activo: r[5]===true||String(r[5]).toUpperCase()==='TRUE',
-        precio: 0, // se llena abajo
+        sku: String(r[1]||''),
+        descripcion: String(r[2]||''),
+        categoria: String(r[3]||''),
+        tipo: String(r[4]||''),
+        notas: String(r[5]||''),
+        activo: r[6]===true||String(r[6]).toUpperCase()==='TRUE',
+        precio: 0,
         precioVigencia: ''
       });
     }
@@ -1481,6 +1491,81 @@ function readProductos() {
     };
   } catch(ex) {
     return {ok:false, error:ex.message, productos:[], categorias:[]};
+  }
+}
+
+function updateProductoSKU(productoId, nuevoSKU, usuario) {
+  try {
+    var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+    var prodSheet = ss.getSheetByName('BD_Productos');
+    if (!prodSheet) return {ok:false, error:'BD_Productos no encontrada'};
+    var nuevoSKU_t = String(nuevoSKU||'').trim();
+    if (!nuevoSKU_t) return {ok:false, error:'SKU vacío'};
+
+    // Verificar que no exista otro producto con el mismo SKU
+    var data = prodSheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][1]).trim() === nuevoSKU_t && String(data[i][0]).trim() !== productoId) {
+        return {ok:false, error:'El SKU "'+nuevoSKU_t+'" ya está asignado a '+data[i][0]};
+      }
+    }
+
+    // Actualizar SKU en BD_Productos
+    var skuAnterior = '';
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === productoId) {
+        skuAnterior = String(data[i][1]||'');
+        prodSheet.getRange(i+1, 2).setValue(nuevoSKU_t); // col B = SKU
+        break;
+      }
+    }
+
+    logAudit(usuario||'sistema', 'Productos', 'Cambio SKU', productoId, 'SKU', skuAnterior, nuevoSKU_t);
+    return {ok:true, productoId:productoId, skuAnterior:skuAnterior, skuNuevo:nuevoSKU_t};
+  } catch(ex) {
+    return {ok:false, error:ex.message};
+  }
+}
+
+function updateProductoID(productoIdViejo, productoIdNuevo, usuario) {
+  try {
+    var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+    var prodSheet = ss.getSheetByName('BD_Productos');
+    var precSheet = ss.getSheetByName('BD_Precios');
+    if (!prodSheet) return {ok:false, error:'BD_Productos no encontrada'};
+    var nuevoId = String(productoIdNuevo||'').trim();
+    if (!nuevoId) return {ok:false, error:'ID vacío'};
+
+    // Verificar que no exista
+    var prodData = prodSheet.getDataRange().getValues();
+    for (var i = 1; i < prodData.length; i++) {
+      if (String(prodData[i][0]).trim() === nuevoId) {
+        return {ok:false, error:'El ID "'+nuevoId+'" ya existe'};
+      }
+    }
+
+    // Actualizar en BD_Productos
+    for (var i = 1; i < prodData.length; i++) {
+      if (String(prodData[i][0]).trim() === productoIdViejo) {
+        prodSheet.getRange(i+1, 1).setValue(nuevoId);
+        break;
+      }
+    }
+
+    // Propagar a BD_Precios
+    if (precSheet) {
+      var precData = precSheet.getDataRange().getValues();
+      for (var pi = 1; pi < precData.length; pi++) {
+        if (String(precData[pi][0]).trim() === productoIdViejo) {
+          precSheet.getRange(pi+1, 1).setValue(nuevoId);
+        }
+      }
+    }
+
+    logAudit(usuario||'sistema', 'Productos', 'Cambio ID', productoIdViejo, 'ProductoID', productoIdViejo, nuevoId);
+    return {ok:true, anterior:productoIdViejo, nuevo:nuevoId};
+  } catch(ex) {
+    return {ok:false, error:ex.message};
   }
 }
 
