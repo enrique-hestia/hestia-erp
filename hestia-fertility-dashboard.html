@@ -1933,62 +1933,85 @@ function _renderIngresosERP() {
     +'</div></div>');
 
   // ── Resumen fiscal del período filtrado ──
-  var _subtPagado=0, _totTDC=0, _totEfectivo=0, _totSantander=0, _totAMEX=0, _totMP=0, _totTransf=0, _totOtros=0;
-  var _contabilizado=0, _sinContab=0;
+  var _subtPagado=0, _totEfectivo=0, _totSantander=0, _contabilizado=0;
+  var _fpDetail = {};
   filtered.forEach(function(r){
     var pag = r.pagado||0;
     _subtPagado += pag;
-    var fp = (r.formaPago||'').toLowerCase();
-    if (fp==='tdc'||fp==='tdd') _totTDC+=pag;
-    else if (fp==='efectivo') _totEfectivo+=pag;
-    else if (fp==='santander') _totSantander+=pag;
-    else if (fp==='amex') _totAMEX+=pag;
-    else if (fp.indexOf('mercado')>=0||fp==='mp') _totMP+=pag;
-    else if (fp.indexOf('transfer')>=0) _totTransf+=pag;
-    else _totOtros+=pag;
+    var fp = (r.formaPago||'').trim();
+    var fpLow = fp.toLowerCase();
+    if (fpLow==='efectivo') _totEfectivo+=pag;
+    else if (fpLow==='santander') _totSantander+=pag;
+    var fpKey = fp || 'Sin especificar';
+    if (!_fpDetail[fpKey]) _fpDetail[fpKey] = 0;
+    _fpDetail[fpKey] += pag;
     if (r.contabilidad) _contabilizado+=(r.montoFact||r.pagado||0);
   });
-  _ingContabilizado = _contabilizado; // guardar global para ingCalcISR
+  var _totTDCTDD = _subtPagado - _totEfectivo - _totSantander;
+  _ingContabilizado = _contabilizado;
   var _diferencia = _subtPagado - _contabilizado;
   var _isrDeclarado = _contabilizado;
 
-  var LS='style="padding:8px 14px;font-size:12px;color:var(--text-primary,#374151);border-bottom:1px solid var(--color-divider,#f0f0f0)"';
-  var VS='style="padding:8px 14px;font-size:13px;font-weight:700;text-align:right;border-bottom:1px solid var(--color-divider,#f0f0f0)"';
+  // Ordenar desglose detallado por monto
+  var _fpArr = [];
+  for (var fpk in _fpDetail) { if (_fpDetail[fpk]>0) _fpArr.push({name:fpk, total:_fpDetail[fpk]}); }
+  _fpArr.sort(function(a,b){return b.total-a.total;});
+  // Excluir Efectivo y Santander del sub-desglose de TDC/TDD
+  var _tdcDetail = _fpArr.filter(function(f){var l=f.name.toLowerCase();return l!=='efectivo'&&l!=='santander';});
+
+  var LS='style="padding:8px 16px;font-size:12px;color:var(--text-primary,#374151);border-bottom:1px solid var(--color-divider,#f0f0f0)"';
+  var VS='style="padding:8px 16px;font-size:13px;font-weight:700;text-align:right;border-bottom:1px solid var(--color-divider,#f0f0f0)"';
+  var HS='style="padding:10px 16px;font-size:9.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);background:var(--color-surface,#fafafa);border-bottom:1px solid var(--color-divider,#e5e7eb)"';
 
   h.push('<div style="margin-top:16px;background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;overflow:hidden">');
-  h.push('<div style="padding:14px 18px;border-bottom:1px solid var(--color-divider,#e5e7eb);display:flex;align-items:center;justify-content:space-between">'
-    +'<div style="font-size:13px;font-weight:700;color:var(--text-primary,#111)">Resumen fiscal del período</div>'
-    +'<div style="font-size:10px;color:var(--text-secondary,#9ca3af)">'+currentFechaInicio+' — '+currentFechaFin+'</div>'
+  h.push('<div style="padding:14px 18px;border-bottom:2px solid var(--text-primary,#111);display:flex;align-items:center;justify-content:space-between">'
+    +'<div style="font-size:14px;font-weight:800;color:var(--text-primary,#111)">Resumen fiscal del período</div>'
+    +'<div style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">'+currentFechaInicio+' → '+currentFechaFin+'</div>'
     +'</div>');
   h.push('<div style="display:grid;grid-template-columns:1fr 1fr;gap:0">');
 
-  // Columna izquierda: desglose por forma de pago
+  // ── Columna izquierda: Cobros ──
   h.push('<div style="border-right:1px solid var(--color-divider,#e5e7eb)">');
-  h.push('<div style="padding:10px 14px;font-size:9.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);background:var(--color-surface,#fafafa);border-bottom:1px solid var(--color-divider,#e5e7eb)">Desglose por forma de pago</div>');
+  h.push('<div '+HS+'>Cobros del período</div>');
   h.push('<table style="width:100%;border-collapse:collapse">');
-  h.push('<tr><td '+LS+'>Subtotal Pagado</td><td '+VS+' style="color:#0c4a6e;font-size:15px;font-weight:800;padding:8px 14px;text-align:right;border-bottom:1px solid var(--color-divider,#e5e7eb)">'+fC(_subtPagado)+'</td></tr>');
-  h.push('<tr><td '+LS+'>Total TDC / TDD</td><td '+VS+'>'+fC(_totTDC)+'</td></tr>');
-  h.push('<tr><td '+LS+'>Total Efectivo</td><td '+VS+'>'+fC(_totEfectivo)+'</td></tr>');
-  h.push('<tr><td '+LS+'>Total Santander</td><td '+VS+'>'+fC(_totSantander)+'</td></tr>');
-  h.push('<tr><td '+LS+'>Total AMEX</td><td '+VS+'>'+fC(_totAMEX)+'</td></tr>');
-  h.push('<tr><td '+LS+'>Total Mercado Pago</td><td '+VS+'>'+fC(_totMP)+'</td></tr>');
-  h.push('<tr><td '+LS+'>Total Transferencia</td><td '+VS+'>'+fC(_totTransf)+'</td></tr>');
-  if (_totOtros>0) h.push('<tr><td '+LS+'>Otros</td><td '+VS+'>'+fC(_totOtros)+'</td></tr>');
+  // Subtotal pagado (fila principal)
+  h.push('<tr style="background:rgba(12,74,110,.04)"><td style="padding:12px 16px;font-size:13px;font-weight:800;color:#0c4a6e;border-bottom:2px solid #0c4a6e">Subtotal Pagado</td>'
+    +'<td style="padding:12px 16px;font-size:17px;font-weight:800;text-align:right;color:#0c4a6e;border-bottom:2px solid #0c4a6e">'+fC(_subtPagado)+'</td></tr>');
+  // TDC/TDD = todo menos Efectivo y Santander
+  h.push('<tr><td '+LS+' style="font-weight:700;color:var(--text-primary,#111);padding:10px 16px;font-size:12px;border-bottom:1px solid var(--color-divider,#f0f0f0)">Total TDC / TDD</td>'
+    +'<td style="padding:10px 16px;font-size:14px;font-weight:800;text-align:right;color:var(--text-primary,#111);border-bottom:1px solid var(--color-divider,#f0f0f0)">'+fC(_totTDCTDD)+'</td></tr>');
+  // Sub-desglose de qué compone TDC/TDD
+  _tdcDetail.forEach(function(f){
+    var pct = _subtPagado>0 ? ((f.total/_subtPagado)*100).toFixed(1) : '0';
+    h.push('<tr><td style="padding:5px 16px 5px 32px;font-size:11px;color:var(--text-secondary,#6b7280);border-bottom:1px solid var(--color-divider,#f5f5f5)">↳ '+f.name+'</td>'
+      +'<td style="padding:5px 16px;font-size:11.5px;font-weight:600;text-align:right;color:var(--text-secondary,#374151);border-bottom:1px solid var(--color-divider,#f5f5f5)">'+fC(f.total)+' <span style="font-size:9px;color:var(--text-secondary,#9ca3af)">('+pct+'%)</span></td></tr>');
+  });
+  // Efectivo
+  h.push('<tr><td '+LS+' style="font-weight:700;color:var(--text-primary,#111);padding:10px 16px;font-size:12px;border-bottom:1px solid var(--color-divider,#f0f0f0)">Total Efectivo</td>'
+    +'<td style="padding:10px 16px;font-size:14px;font-weight:800;text-align:right;color:var(--text-primary,#111);border-bottom:1px solid var(--color-divider,#f0f0f0)">'+fC(_totEfectivo)+'</td></tr>');
+  // Santander
+  h.push('<tr><td '+LS+' style="font-weight:700;color:var(--text-primary,#111);padding:10px 16px;font-size:12px;border-bottom:1px solid var(--color-divider,#f0f0f0)">Total Santander</td>'
+    +'<td style="padding:10px 16px;font-size:14px;font-weight:800;text-align:right;color:var(--text-primary,#111);border-bottom:1px solid var(--color-divider,#f0f0f0)">'+fC(_totSantander)+'</td></tr>');
+  // Verificación
+  h.push('<tr style="background:var(--color-surface,#fafafa)"><td style="padding:6px 16px;font-size:10px;color:var(--text-secondary,#9ca3af)">Verificación (TDC+Efectivo+Santander)</td>'
+    +'<td style="padding:6px 16px;font-size:10px;text-align:right;color:var(--text-secondary,#9ca3af)">'+fC(_totTDCTDD+_totEfectivo+_totSantander)+'</td></tr>');
   h.push('</table></div>');
 
-  // Columna derecha: fiscal
+  // ── Columna derecha: Contable ──
   h.push('<div>');
-  h.push('<div style="padding:10px 14px;font-size:9.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);background:var(--color-surface,#fafafa);border-bottom:1px solid var(--color-divider,#e5e7eb)">Resumen contable</div>');
+  h.push('<div '+HS+'>Resumen contable</div>');
   h.push('<table style="width:100%;border-collapse:collapse">');
-  h.push('<tr><td '+LS+'>Contabilizado en el mes</td><td '+VS+'>'+fC(_contabilizado)+'</td></tr>');
-  h.push('<tr><td '+LS+'>Diferencia (Pagado − Contabilizado)</td><td '+VS+' style="color:'+(_diferencia>0?'#b45309':'#166534')+'">'+fC(_diferencia)+'</td></tr>');
-  h.push('<tr><td '+LS+'>CFDI Ingreso mes anterior</td><td '+VS+'><input id="ing-cfdi-anterior" type="number" value="0" step="0.01" style="width:120px;text-align:right;padding:4px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;font-weight:700" oninput="ingCalcISR()"></td></tr>');
-  h.push('<tr style="background:rgba(196,106,122,.05)"><td style="padding:10px 14px;font-size:13px;font-weight:800;color:var(--color-primary,#c46a7a);border-top:2px solid var(--color-primary,#c46a7a)">ISR Declarado</td>'
-    +'<td id="ing-isr-val" style="padding:10px 14px;font-size:16px;font-weight:800;text-align:right;color:var(--color-primary,#c46a7a);border-top:2px solid var(--color-primary,#c46a7a)">'+fC(_isrDeclarado)+'</td></tr>');
+  h.push('<tr><td '+LS+'>Contabilizado en el período</td><td '+VS+'>'+fC(_contabilizado)+'</td></tr>');
+  h.push('<tr><td '+LS+'>Diferencia</td><td '+VS+' style="color:'+(_diferencia>0?'#b45309':'#166534')+'">'+fC(_diferencia)+'</td></tr>');
+  h.push('<tr><td style="padding:8px 16px;font-size:11px;color:var(--text-secondary,#6b7280);border-bottom:1px solid var(--color-divider,#f0f0f0)">Pagado − Contabilizado</td><td style="padding:8px 16px;font-size:10px;text-align:right;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)">'+fC(_subtPagado)+' − '+fC(_contabilizado)+'</td></tr>');
+  h.push('<tr><td '+LS+'>CFDI Ingreso mes anterior</td><td style="padding:8px 16px;text-align:right;border-bottom:1px solid var(--color-divider,#f0f0f0)"><input id="ing-cfdi-anterior" type="number" value="0" step="0.01" style="width:130px;text-align:right;padding:5px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;font-weight:700;background:var(--card-bg,#fff)" oninput="ingCalcISR()"></td></tr>');
+  h.push('<tr style="background:rgba(196,106,122,.06)"><td style="padding:12px 16px;font-size:14px;font-weight:800;color:var(--color-primary,#c46a7a);border-top:2px solid var(--color-primary,#c46a7a)">ISR Declarado</td>'
+    +'<td id="ing-isr-val" style="padding:12px 16px;font-size:18px;font-weight:800;text-align:right;color:var(--color-primary,#c46a7a);border-top:2px solid var(--color-primary,#c46a7a)">'+fC(_isrDeclarado)+'</td></tr>');
   h.push('</table>');
-  h.push('<div style="padding:10px 14px;font-size:10px;color:var(--text-secondary,#9ca3af);line-height:1.4">'
-    +'ISR Declarado = Contabilizado + CFDI mes anterior<br>'
-    +'Contabilizado = Σ Monto Fact/Mes donde Contabilidad ✓</div>');
+  h.push('<div style="padding:10px 16px;font-size:10px;color:var(--text-secondary,#9ca3af);line-height:1.5">'
+    +'<strong>ISR Declarado</strong> = Contabilizado + CFDI mes anterior<br>'
+    +'<strong>Contabilizado</strong> = Σ Monto Fact/Mes donde Contabilidad ✓<br>'
+    +'<strong>Total TDC/TDD</strong> = Subtotal − Efectivo − Santander</div>');
   h.push('</div>');
 
   h.push('</div></div>'); // /grid, /panel
