@@ -511,6 +511,9 @@ function doPost(e) {
     if (body.action === 'saveProductoPrecio') {
       return jsonResponse(saveProductoPrecio(body.productoId, body.precio, body.vigencia, body.usuario));
     }
+    if (body.action === 'saveLista') {
+      return jsonResponse(saveLista(body));
+    }
     if (body.action === 'updateProductoSKU') {
       return jsonResponse(updateProductoSKU(body.productoId, body.sku, body.usuario));
     }
@@ -884,6 +887,8 @@ var INGRESOS_SS_ID = '1x_TE_YxLOwnBXKV_lA3Ss_EOSu1p61uTdUmw2zh_6uc'; // Ingresos
 var INGRESOS_SS_2025 = '17gNzXavMbQ8DhFEIxCqzCJ6z-wTZgIwL4ibEDyVKE2w';
 var INGRESOS_SS_2024 = '1Zx4QWulAgrrVBeI8nfTR10EiYL-l3crJsaZSYDbWSug';
 var PRODUCTOS_SS_ID = '1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY';
+var PACIENTES_SS_ID = '1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio';
+var PAC_COL_LISTA = 10; // columna J (1-indexed) = Lista de Precios
 
 function _readFromBDIngresos(sheet) {
   var raw = sheet.getDataRange().getValues();
@@ -1454,9 +1459,9 @@ function readProductos() {
       });
     }
 
-    // Leer precios y asignar el más reciente a cada producto
+    // Leer precios por lista y asignar el más reciente a cada producto
     var precRaw = precSheet.getDataRange().getValues();
-    var precMap = {}; // prodId → {precio, vigencia}
+    var precMap = {}; // prodId → {General:{precio,vig}, GM:{precio,vig}, ...}
     var hoy = new Date();
     function dt(v){
       if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0');
@@ -1467,20 +1472,30 @@ function readProductos() {
       var pid = String(pr[0]||'').trim();
       var vig = dt(pr[1]);
       var precio = parseFloat(String(pr[2]||'').replace(/[$,]/g,'')) || 0;
+      var lista = String(pr[6]||'General').trim() || 'General';
       if (!pid || !precio) continue;
-      // Solo precios con vigencia <= hoy
       if (vig > dt(hoy)) continue;
-      if (!precMap[pid] || vig > precMap[pid].vig) {
-        precMap[pid] = {precio: precio, vig: vig};
+      if (!precMap[pid]) precMap[pid] = {};
+      if (!precMap[pid][lista] || vig > precMap[pid][lista].vig) {
+        precMap[pid][lista] = {precio: precio, vig: vig};
       }
     }
 
-    // Asignar precios
     var categorias = {};
     productos.forEach(function(p) {
+      p.precios = {}; // {General: 78800, GM: 65000, ...}
       if (precMap[p.id]) {
-        p.precio = precMap[p.id].precio;
-        p.precioVigencia = precMap[p.id].vig;
+        for (var lista in precMap[p.id]) {
+          p.precios[lista] = precMap[p.id][lista].precio;
+        }
+        // Default: General, luego la primera que exista
+        var gen = precMap[p.id]['General'];
+        if (gen) { p.precio = gen.precio; p.precioVigencia = gen.vig; }
+        else {
+          var firstKey = Object.keys(precMap[p.id])[0];
+          p.precio = precMap[p.id][firstKey].precio;
+          p.precioVigencia = precMap[p.id][firstKey].vig;
+        }
       }
       if (!categorias[p.categoria]) categorias[p.categoria] = 0;
       categorias[p.categoria]++;
@@ -1577,7 +1592,123 @@ function updateProductoID(productoIdViejo, productoIdNuevo, usuario) {
   }
 }
 
-function saveNewProducto(body) {
+/* ── Listas de precios ──────────────────────────────────────── */
+function setupBDListas() {
+  var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+  if (!ss.getSheetByName('BD_Listas')) {
+    var sh = ss.insertSheet('BD_Listas');
+    sh.getRange(1,1,1,5).setValues([['Lista','Descripcion','Moneda','Multiplicador','Activo']]);
+    sh.getRange(1,1,1,5).setFontWeight('bold').setBackground('#f3f4f6');
+    sh.setFrozenRows(1);
+    sh.getRange(2,1,4,5).setValues([
+      ['General','Precio estándar','MXN',1,true],
+      ['GM','Grupo Médico — precios autorizados','MXN',1,true],
+      ['Surrogacy','Pacientes internacionales','USD',1,true],
+      ['REPROVIDA','Precios derivados REPROVIDA','MXN',1,true]
+    ]);
+  }
+  return {ok:true};
+}
+
+function readListas() {
+  try {
+    var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+    var sh = ss.getSheetByName('BD_Listas');
+    if (!sh) { setupBDListas(); sh = ss.getSheetByName('BD_Listas'); }
+    var raw = sh.getDataRange().getValues();
+    var listas = [];
+    for (var i=1;i<raw.length;i++) {
+      var r=raw[i]; if(!String(r[0]||'').trim()) continue;
+      listas.push({lista:String(r[0]),descripcion:String(r[1]||''),moneda:String(r[2]||'MXN'),multiplicador:Number(r[3])||1,activo:r[4]===true||String(r[4]).toUpperCase()==='TRUE'});
+    }
+    return {ok:true,listas:listas};
+  } catch(e){return {ok:false,error:e.message,listas:[]};}
+}
+
+function saveLista(body) {
+  try {
+    var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+    var sh = ss.getSheetByName('BD_Listas');
+    if (!sh) { setupBDListas(); sh = ss.getSheetByName('BD_Listas'); }
+    var nombre = String(body.lista||'').trim();
+    if (!nombre) return {ok:false,error:'Nombre vacío'};
+    // Verificar si existe para actualizar
+    var data = sh.getDataRange().getValues();
+    var found = -1;
+    for (var i=1;i<data.length;i++) { if(String(data[i][0]).trim()===nombre){found=i+1;break;} }
+    var row = [nombre, body.descripcion||'', body.moneda||'MXN', Number(body.multiplicador)||1, body.activo!==false];
+    if (found>0) { sh.getRange(found,1,1,5).setValues([row]); }
+    else { sh.appendRow(row); }
+    // Actualizar dropdown en hoja de Pacientes
+    _syncListasDropdown();
+    logAudit(body.usuario||'sistema','Listas','Guardar',nombre,'','',JSON.stringify(row));
+    return {ok:true,lista:nombre};
+  } catch(e){return {ok:false,error:e.message};}
+}
+
+function _syncListasDropdown() {
+  try {
+    var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+    var sh = ss.getSheetByName('BD_Listas');
+    if (!sh) return;
+    var data = sh.getDataRange().getValues();
+    var nombres = [];
+    for (var i=1;i<data.length;i++) {
+      var n=String(data[i][0]||'').trim();
+      if(n && (data[i][4]===true||String(data[i][4]).toUpperCase()==='TRUE')) nombres.push(n);
+    }
+    if (!nombres.length) return;
+    // Aplicar validación a la columna J de Pacientes
+    var pacSS = SpreadsheetApp.openById(PACIENTES_SS_ID);
+    var pacSh = pacSS.getSheets()[0];
+    var lr = pacSh.getLastRow();
+    if (lr < 2) return;
+    var rule = SpreadsheetApp.newDataValidation().requireValueInList(nombres, true).build();
+    pacSh.getRange(2, PAC_COL_LISTA, lr-1, 1).setDataValidation(rule);
+  } catch(e) { /* silencioso */ }
+}
+
+function migrateGMPrices() {
+  try {
+    var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+    var gmSheet = null;
+    var sheets = ss.getSheets();
+    for (var i=0;i<sheets.length;i++) {
+      var name = sheets[i].getName().toLowerCase();
+      if (name.indexOf('autorizado')>=0 || name.indexOf('precio gm')>=0 || name.indexOf('grupomedico')>=0) { gmSheet=sheets[i]; break; }
+    }
+    if (!gmSheet) return {ok:false,error:'Pestaña de precios GM no encontrada'};
+
+    var precSheet = ss.getSheetByName('BD_Precios');
+    var prodSheet = ss.getSheetByName('BD_Productos');
+    if (!precSheet||!prodSheet) return {ok:false,error:'BD_Precios o BD_Productos no encontrada'};
+
+    // Leer productos existentes para buscar por descripción
+    var prodData = prodSheet.getDataRange().getValues();
+    var prodMap = {}; // descripcion.lower → productoId
+    for (var pi=1;pi<prodData.length;pi++) {
+      var desc = String(prodData[pi][2]||'').trim().toLowerCase();
+      if(desc) prodMap[desc] = String(prodData[pi][0]);
+    }
+
+    var raw = gmSheet.getDataRange().getValues();
+    function num(v){var n=parseFloat(String(v||'').replace(/[$,\s]/g,''));return isNaN(n)?0:n;}
+    var count = 0;
+    for (var ri=1;ri<raw.length;ri++) {
+      var r = raw[ri];
+      var desc = String(r[0]||'').trim();
+      var precio = num(r[1]);
+      if (!desc || !precio) continue;
+      var prodId = prodMap[desc.toLowerCase()];
+      if (!prodId) continue;
+      precSheet.appendRow([prodId,'2026-01-01',precio,'MXN','migracion-GM',new Date(),'GM']);
+      count++;
+    }
+    return {ok:true,migrated:count};
+  } catch(e){return {ok:false,error:e.message};}
+}
+
+function readProductos() {
   try {
     var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
     var prodSheet = ss.getSheetByName('BD_Productos');
@@ -1610,6 +1741,21 @@ function saveNewProducto(body) {
   } catch(ex) {
     return {ok:false, error:ex.message};
   }
+}
+
+function readPacienteLista(pacienteNombre) {
+  try {
+    var ss = SpreadsheetApp.openById(PACIENTES_SS_ID);
+    var sh = ss.getSheets()[0];
+    var data = sh.getDataRange().getValues();
+    for (var i=1;i<data.length;i++) {
+      var nombre = String(data[i][1]||'').trim();
+      if (nombre.toLowerCase() === String(pacienteNombre||'').trim().toLowerCase()) {
+        return {ok:true, paciente:nombre, lista:String(data[i][PAC_COL_LISTA-1]||'General').trim()||'General'};
+      }
+    }
+    return {ok:true, paciente:pacienteNombre, lista:'General'};
+  } catch(e) { return {ok:false, error:e.message, lista:'General'}; }
 }
 
 function saveProductoPrecio(productoId, nuevoPrecio, vigenciaDesde, usuario) {

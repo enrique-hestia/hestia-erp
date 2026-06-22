@@ -270,6 +270,15 @@ function doGet(e) {
       return jsonResponse(readProductos());
     }
 
+    if (action === 'listas') {
+      return jsonResponse(readListas());
+    }
+
+    if (action === 'pacienteLista') {
+      var pacNombre = (e && e.parameter.paciente) || '';
+      return jsonResponse(readPacienteLista(decodeURIComponent(pacNombre)));
+    }
+
     if (action === 'getFormatos') {
       return jsonResponse(readFormatos());
     }

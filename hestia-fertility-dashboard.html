@@ -2570,8 +2570,12 @@ function ingOnCatChange(lineNum) {
   var prods = ingGetProductosByCat(cat);
   var h = '<option value="">— Seleccionar producto —</option>';
   prods.forEach(function(p){
-    var label = (p.sku?'['+p.sku+'] ':'')+p.descripcion+(p.precio?' — $'+p.precio.toLocaleString('en-US'):'');
-    h += '<option value="'+p.descripcion.replace(/"/g,'&quot;')+'" data-precio="'+p.precio+'" data-sku="'+(p.sku||'')+'">'+label+'</option>';
+    // Usar precio de la lista del paciente, fallback a General, luego a precio default
+    var precio = (p.precios && p.precios[_ingPacienteLista]) ? p.precios[_ingPacienteLista]
+               : (p.precios && p.precios['General']) ? p.precios['General']
+               : p.precio || 0;
+    var label = (p.sku?'['+p.sku+'] ':'')+p.descripcion+(precio?' — $'+precio.toLocaleString('en-US'):'');
+    h += '<option value="'+p.descripcion.replace(/"/g,'&quot;')+'" data-precio="'+precio+'" data-sku="'+(p.sku||'')+'">'+label+'</option>';
   });
   prodEl.innerHTML = h;
   if (pvpEl) pvpEl.value = '';
@@ -2587,6 +2591,30 @@ function ingOnProdChange(lineNum) {
     pvpEl.value = opt.dataset.precio;
     ingCalcTotal();
   }
+}
+
+// ── Lista de precios por paciente ──
+var _ingPacienteLista = 'General';
+
+async function ingOnPacienteChange() {
+  var pacEl = document.getElementById('ing-paciente');
+  if (!pacEl || !pacEl.value.trim()) return;
+  var listaLabel = document.getElementById('ing-lista-label');
+  try {
+    var tok = encodeURIComponent(getToken());
+    var pac = encodeURIComponent(pacEl.value.trim());
+    var r = await fetch(APPS_SCRIPT_URL+'?action=pacienteLista&token='+tok+'&paciente='+pac+'&_t='+Date.now());
+    var d = await r.json();
+    if (d.ok && d.lista) {
+      _ingPacienteLista = d.lista;
+      if (listaLabel) listaLabel.textContent = 'Lista: '+d.lista;
+      // Refrescar dropdowns de productos con nueva lista
+      for (var i=1;i<=_ingLineCount;i++) {
+        var catEl = document.getElementById('ing-cat-'+i);
+        if (catEl && catEl.value) ingOnCatChange(i);
+      }
+    }
+  } catch(e) { _ingPacienteLista = 'General'; }
 }
 
 async function ingOpenDrawer() {
@@ -2629,7 +2657,8 @@ async function ingOpenDrawer() {
   h += '<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:14px;display:flex;align-items:center;gap:8px">'
     +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Datos del paciente</div>';
   h += '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:14px">'
-    +'<div><label '+LBL+'>Paciente *</label><input id="ing-paciente" list="ing-pac-list" '+S+' placeholder="Nombre completo del paciente"></div>'
+    +'<div><label '+LBL+'>Paciente *</label><input id="ing-paciente" list="ing-pac-list" '+S+' placeholder="Nombre completo del paciente" onchange="ingOnPacienteChange()">'
+    +'<div id="ing-lista-label" style="font-size:10px;font-weight:600;color:#0369a1;margin-top:3px">Lista: General</div></div>'
     +'<div><label '+LBL+'>Fecha *</label><input type="date" id="ing-fecha" '+S+' value="'+today+'"></div>'
     +'<div><label '+LBL+'>Ciclo Alta/Baja</label><select id="ing-ciclo" '+S+'><option value="">— Seleccionar —</option>'+selOpts(ING_CICLOS)+'</select></div>'
     +'</div>';
