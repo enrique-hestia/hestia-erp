@@ -2232,13 +2232,25 @@ function _renderProductosView() {
       +'</div>'
       +'</div></div>');
 
-    // Filtro por Tipo + botón agregar
+    // Filtro por Tipo (siempre visible) + botón agregar
+    // Tipos se calculan de TODOS los productos de esta categoría (sin filtro de tipo)
+    var allCatProds = (_prodData&&_prodData.todosProductos||[]).filter(function(p){
+      var cat=(p.categoria||'').toLowerCase(), filter=(_prodFilterCat||'').toLowerCase();
+      if(filter==='estudios') return cat.indexOf('estudio')>=0;
+      if(filter==='externos') return cat.indexOf('extern')>=0;
+      return cat===filter;
+    });
+    var allTipos = {};
+    allCatProds.forEach(function(p){ if(p.tipo) allTipos[p.tipo]=1; });
+    var allTipoArr = Object.keys(allTipos).sort();
+
     h.push('<div style="display:flex;gap:6px;margin-bottom:14px;align-items:center;flex-wrap:wrap">');
-    if (tipoArr.length > 1) {
+    if (allTipoArr.length > 1) {
       h.push('<span style="font-size:10px;font-weight:700;color:var(--text-secondary,#9ca3af);text-transform:uppercase;letter-spacing:.5px">Tipo:</span>');
-      h.push('<div class="prod-tab'+(!_prodFilterTipo?' act':'')+'" onclick="_prodFilterTipo=\'\';_prodPage=1;_renderProductosView()" style="padding:4px 12px;font-size:11px">Todos</div>');
-      tipoArr.forEach(function(t) {
-        h.push('<div class="prod-tab'+(_prodFilterTipo===t?' act':'')+'" onclick="_prodFilterTipo=\''+t.replace(/'/g,"\\'")+'\';_prodPage=1;_renderProductosView()" style="padding:4px 12px;font-size:11px">'+t+'</div>');
+      h.push('<div class="prod-tab'+(!_prodFilterTipo?' act':'')+'" onclick="_prodFilterTipo=\'\';_prodPage=1;_renderProductosView()" style="padding:4px 12px;font-size:11px">Todos ('+allCatProds.length+')</div>');
+      allTipoArr.forEach(function(t) {
+        var cnt = allCatProds.filter(function(p){return p.tipo===t;}).length;
+        h.push('<div class="prod-tab'+(_prodFilterTipo===t?' act':'')+'" onclick="_prodFilterTipo=\''+t.replace(/'/g,"\\'")+'\';_prodPage=1;_renderProductosView()" style="padding:4px 12px;font-size:11px">'+t+' ('+cnt+')</div>');
       });
     }
     h.push('<div style="margin-left:auto">'
@@ -2288,24 +2300,20 @@ function _renderProductosView() {
         +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Editar en Sheets</a>':'')
       +'</div>');
 
-    // Category tabs
+    // Solo 7 categorías principales + Todos
+    var mainCats = ['Tratamientos','Medicamento','Estudios','Consulta','SURROGACY','REPROVIDA','Externos'];
     h.push('<div class="prod-tabs">');
-    h.push('<div class="prod-tab'+(!_prodFilterCat?' act':'')+'" onclick="_prodFilterCat=\'\';_prodPage=1;_renderProductosView()">Todos</div>');
-    cats.forEach(function(c) {
-      var isAct = _prodFilterCat===c.nombre;
-      h.push('<div class="prod-tab'+(isAct?' act':'')+'" onclick="_prodFilterCat=\''+c.nombre.replace(/'/g,"\\'")+'\';_prodPage=1;_renderProductosView()">'+c.nombre+' <span style="font-size:9px;opacity:.7">('+c.count+')</span></div>');
+    h.push('<div class="prod-tab'+(!_prodFilterCat?' act':'')+'" onclick="_prodFilterCat=\'\';_prodFilterTipo=\'\';_prodPage=1;_renderProductosView()">Todos</div>');
+    mainCats.forEach(function(mc) {
+      var count = 0;
+      if (mc==='Estudios') { count=(cats.filter(function(c){return c.nombre.indexOf('Estudio')>=0;}).reduce(function(s,c){return s+c.count;},0)); }
+      else if (mc==='Externos') { count=(cats.filter(function(c){return c.nombre.indexOf('Extern')>=0;}).reduce(function(s,c){return s+c.count;},0)); }
+      else { var f=cats.filter(function(c){return c.nombre===mc;}); count=f.length?f[0].count:0; }
+      if (!count) return;
+      var isAct = _prodFilterCat===mc;
+      h.push('<div class="prod-tab'+(isAct?' act':'')+'" onclick="_prodFilterCat=\''+mc+'\';_prodFilterTipo=\'\';_prodPage=1;_renderProductosView()">'+mc+' <span style="font-size:9px;opacity:.7">('+count+')</span></div>');
     });
     h.push('</div>');
-
-    // Search + Tipo filter
-    h.push('<div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">'
-      +'<div style="flex:1;min-width:200px;display:flex;gap:8px;align-items:center;padding:8px 12px;background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px">'
-        +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary,#9ca3af)" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
-        +'<input id="prod-search" placeholder="Buscar…" value="'+(_prodSearch||'')+'" oninput="_prodSetSearch(this.value)" style="flex:1;border:none;outline:none;font-size:12px;background:transparent;color:var(--text-primary,#111)">'
-      +'</div>'
-      +(tipoArr.length>1?'<select onchange="_prodSearch=this.value?\'tipo:\'+this.value:\'\';_prodPage=1;_renderProductosView()" style="padding:8px 12px;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
-        +'<option value="">Tipo: Todos</option>'+tipoArr.map(function(t){return '<option value="'+t+'">'+t+'</option>';}).join('')+'</select>':'')
-      +'</div>');
 
     // Full table
     h.push('<div class="prod-panel"><div style="overflow-x:auto;max-height:60vh;overflow-y:auto">');
