@@ -266,6 +266,15 @@ function doGet(e) {
       return jsonResponse(readIngresosData());
     }
 
+    if (action === 'getFormatos') {
+      return jsonResponse(readFormatos());
+    }
+
+    if (action === 'saveFormatos') {
+      var fmtData = e.parameter.data || '{}';
+      return jsonResponse(saveFormatos(JSON.parse(decodeURIComponent(fmtData))));
+    }
+
     if (action === 'insert') {
       var sheetParamIns = (e && e.parameter.sheet) || '';
       if (sheetParamIns.trim().toLowerCase() === 'caja chica') {

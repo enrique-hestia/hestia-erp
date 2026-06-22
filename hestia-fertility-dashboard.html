@@ -1103,6 +1103,19 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
       </div>
     </div>
 
+    <!-- Formatos numéricos por área -->
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--color-text-muted)">Formato numérico por área</div>
+        <button onclick="fmtSaveConfig()" style="font-size:11px;padding:5px 14px;background:var(--color-primary);color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer">Guardar</button>
+      </div>
+      <div style="font-size:11px;color:var(--color-text-muted);margin-bottom:12px">Configura cómo se muestran los montos en cada área. Los cambios se guardan en la hoja <code style="background:var(--color-surface-2);padding:1px 5px;border-radius:4px;font-size:10px">Formatos</code> del spreadsheet.</div>
+      <div id="fmt-config-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">
+        <div style="padding:20px;text-align:center;color:var(--color-text-muted);font-size:12px;grid-column:1/-1">Cargando configuración…</div>
+      </div>
+      <div id="fmt-save-status" style="margin-top:8px;font-size:11px;color:var(--color-text-muted)"></div>
+    </div>
+
     <!-- Arquitectura backend -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
@@ -5867,11 +5880,161 @@ var PC_THEMES = [
 var _pcActiveTab = 'apariencia';
 var _pcMenuAll   = [];
 
+/* ══ FORMATOS NUMÉRICOS ═══════════════════════════════════════ */
+var _fmtConfig = null; // {Finanzas:{escala,moneda,decimales,simbolo}, Ingresos:{...}, ...}
+var _FMT_DEFAULTS = {escala:'Completo',moneda:'MXN',decimales:2,simbolo:'$',activo:true};
+
+async function fmtLoadConfig() {
+  try {
+    var tok = encodeURIComponent(getToken());
+    var r = await fetch(APPS_SCRIPT_URL+'?action=getFormatos&token='+tok+'&_t='+Date.now());
+    var d = await r.json();
+    if (d.ok && d.formatos) {
+      _fmtConfig = {};
+      d.formatos.forEach(function(f){ _fmtConfig[f.area] = f; });
+      localStorage.setItem('hestia_formatos', JSON.stringify(_fmtConfig));
+    }
+  } catch(e) { console.warn('fmtLoadConfig error:', e); }
+  if (!_fmtConfig) {
+    try { _fmtConfig = JSON.parse(localStorage.getItem('hestia_formatos')); } catch(e){}
+  }
+  if (!_fmtConfig) _fmtConfig = {};
+  fmtRenderPanel();
+}
+
+function fmtGetArea(area) {
+  if (!_fmtConfig) return _FMT_DEFAULTS;
+  return _fmtConfig[area] || _FMT_DEFAULTS;
+}
+
+// Función global de formato — úsala en vez de fC/fK/fmt
+function fmtMoney(value, area) {
+  var v = Number(value) || 0;
+  var cfg = fmtGetArea(area || 'Finanzas');
+  var dec = cfg.decimales != null ? cfg.decimales : 2;
+  var sym = cfg.simbolo || '$';
+  var esc = cfg.escala || 'Completo';
+  var suffix = '';
+  if (esc === 'Millones' && Math.abs(v) >= 1e6) { v = v / 1e6; suffix = 'M'; }
+  else if (esc === 'Millones' && Math.abs(v) >= 1e3) { v = v / 1e3; suffix = 'K'; }
+  else if (esc === 'Miles' && Math.abs(v) >= 1e6) { v = v / 1e6; suffix = 'M'; }
+  else if (esc === 'Miles' && Math.abs(v) >= 1e3) { v = v / 1e3; suffix = 'K'; }
+  // Completo: no reduce
+  var neg = v < 0;
+  var formatted = Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:dec,maximumFractionDigits:dec});
+  return (neg?'-':'')+sym+formatted+suffix;
+}
+
+function fmtRenderPanel() {
+  var el = document.getElementById('fmt-config-grid');
+  if (!el) return;
+  var areas = ['Finanzas','Ingresos','Conciliacion','Operaciones'];
+  var escalas = ['Completo','Miles','Millones'];
+  var monedas = ['MXN','USD','EUR'];
+  var decimales = [0,1,2,3,4];
+  var simbolos = {'MXN':'$','USD':'US$','EUR':'€'};
+
+  function sel(id, opts, current) {
+    var h = '<select id="'+id+'" style="width:100%;padding:5px 8px;border:1px solid var(--color-divider);border-radius:6px;font-size:12px;background:var(--color-surface);color:var(--color-text);cursor:pointer">';
+    opts.forEach(function(o){ var v=typeof o==='object'?o.v:o; var l=typeof o==='object'?o.l:o; h+='<option value="'+v+'"'+(String(v)===String(current)?' selected':'')+'>'+l+'</option>'; });
+    return h+'</select>';
+  }
+
+  var h = '';
+  areas.forEach(function(area){
+    var cfg = fmtGetArea(area);
+    var activo = cfg.activo !== false;
+    h += '<div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-md,8px);padding:14px;'+(activo?'':'opacity:.5')+'">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'
+        +'<span style="font-size:11px;font-weight:700;color:var(--color-primary,#c46a7a)">'+area+'</span>'
+        +'<label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:10px;color:var(--color-text-muted)">'
+          +'<input type="checkbox" data-fmt-chk="'+area+'" '+(activo?'checked':'')+' style="width:13px;height:13px;accent-color:var(--color-primary)"> Activo</label>'
+      +'</div>'
+      +'<div style="display:flex;flex-direction:column;gap:8px">'
+        +'<div><div style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted);margin-bottom:2px">Escala</div>'
+          +sel('fmt-esc-'+area, escalas, cfg.escala||'Completo')+'</div>'
+        +'<div><div style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted);margin-bottom:2px">Moneda</div>'
+          +sel('fmt-mon-'+area, monedas, cfg.moneda||'MXN')+'</div>'
+        +'<div><div style="font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted);margin-bottom:2px">Decimales</div>'
+          +sel('fmt-dec-'+area, decimales, cfg.decimales!=null?cfg.decimales:2)+'</div>'
+        +'<div style="margin-top:4px;padding:6px 8px;background:var(--card-bg,#fff);border-radius:6px;text-align:center">'
+          +'<div style="font-size:9px;color:var(--color-text-muted);margin-bottom:2px">Vista previa</div>'
+          +'<div style="font-size:14px;font-weight:800;color:var(--text-primary,#111)" id="fmt-preview-'+area+'">—</div>'
+        +'</div>'
+      +'</div></div>';
+  });
+  el.innerHTML = h;
+
+  // Listeners para preview en vivo
+  areas.forEach(function(area) {
+    ['fmt-esc-'+area,'fmt-mon-'+area,'fmt-dec-'+area].forEach(function(id) {
+      var sel = document.getElementById(id);
+      if (sel) sel.addEventListener('change', function(){ fmtUpdatePreview(area); });
+    });
+    fmtUpdatePreview(area);
+  });
+}
+
+function fmtUpdatePreview(area) {
+  var esc = (document.getElementById('fmt-esc-'+area)||{}).value || 'Completo';
+  var mon = (document.getElementById('fmt-mon-'+area)||{}).value || 'MXN';
+  var dec = parseInt((document.getElementById('fmt-dec-'+area)||{}).value) || 0;
+  var simbolos = {MXN:'$',USD:'US$',EUR:'€'};
+  var sym = simbolos[mon] || '$';
+  var preview = document.getElementById('fmt-preview-'+area);
+  if (!preview) return;
+  // Simular con valor de ejemplo
+  var sample = 1234567.89;
+  var cfg = {escala:esc,moneda:mon,decimales:dec,simbolo:sym,activo:true};
+  // Temporal override para preview
+  var old = _fmtConfig[area];
+  _fmtConfig[area] = cfg;
+  preview.textContent = fmtMoney(sample, area);
+  if (old) _fmtConfig[area] = old; else delete _fmtConfig[area];
+}
+
+async function fmtSaveConfig() {
+  var areas = ['Finanzas','Ingresos','Conciliacion','Operaciones'];
+  var simbolos = {MXN:'$',USD:'US$',EUR:'€'};
+  var formatos = [];
+  areas.forEach(function(area) {
+    var esc = (document.getElementById('fmt-esc-'+area)||{}).value || 'Completo';
+    var mon = (document.getElementById('fmt-mon-'+area)||{}).value || 'MXN';
+    var dec = parseInt((document.getElementById('fmt-dec-'+area)||{}).value) || 0;
+    var chk = document.querySelector('[data-fmt-chk="'+area+'"]');
+    var activo = chk ? chk.checked : true;
+    formatos.push({area:area, escala:esc, moneda:mon, decimales:dec, simbolo:simbolos[mon]||'$', activo:activo});
+  });
+
+  // Guardar local inmediato
+  _fmtConfig = {};
+  formatos.forEach(function(f){ _fmtConfig[f.area] = f; });
+  localStorage.setItem('hestia_formatos', JSON.stringify(_fmtConfig));
+
+  // Guardar en Sheets
+  var statusEl = document.getElementById('fmt-save-status');
+  if (statusEl) statusEl.textContent = 'Guardando…';
+  try {
+    var tok = encodeURIComponent(getToken());
+    var dataStr = encodeURIComponent(JSON.stringify({formatos:formatos}));
+    var r = await fetch(APPS_SCRIPT_URL+'?action=saveFormatos&token='+tok+'&data='+dataStr);
+    var d = await r.json();
+    if (d.ok) {
+      if (statusEl) statusEl.textContent = '✓ Guardado · '+new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+    } else {
+      if (statusEl) statusEl.textContent = 'Error: '+(d.error||'No se pudo guardar');
+    }
+  } catch(e) {
+    if (statusEl) statusEl.textContent = 'Error de conexión';
+  }
+}
+
 function pcInit() {
   pcRenderApariencia();
   pcRenderConexiones();
   pcRenderSession();
   pcLoadMenu();
+  fmtLoadConfig();
   // Sincronizar toggle de modo oscuro
   var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
   var tog = document.getElementById('pc-dark-toggle');
@@ -6273,6 +6436,7 @@ function startAutoRefresh(ms) {
 
 async function initApp() {
   await loadMenu();
+  fmtLoadConfig(); // cargar formatos numéricos (no bloqueante)
   navigateTo('resumen');
   // Restaurar preferencia de refresh guardada
   var savedRefresh = localStorage.getItem('hestia_refresh_ms');

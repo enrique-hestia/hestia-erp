@@ -1157,6 +1157,93 @@ function readIngresosData() {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   FORMATOS — Configuración de formato numérico por área
+   ══════════════════════════════════════════════════════════════ */
+var FORMATOS_TAB = 'Formatos';
+
+function setupFormatos() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sh = ss.getSheetByName(FORMATOS_TAB);
+  if (sh) return {ok:true, msg:'Formatos ya existe'};
+  sh = ss.insertSheet(FORMATOS_TAB);
+  // Headers
+  sh.getRange(1,1,1,6).setValues([['Area','Escala','Moneda','Decimales','SimboloMoneda','Activo']]);
+  sh.getRange(1,1,1,6).setFontWeight('bold').setBackground('#f3f4f6');
+  // Defaults por área
+  var defaults = [
+    ['Finanzas',    'Miles',    'MXN', 2, '$', true],
+    ['Ingresos',    'Miles',    'MXN', 2, '$', true],
+    ['Conciliacion','Completo', 'MXN', 2, '$', true],
+    ['Operaciones', 'Miles',    'MXN', 2, '$', true]
+  ];
+  sh.getRange(2,1,defaults.length,6).setValues(defaults);
+  // Validación dropdown Escala
+  var escalaRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['Completo','Miles','Millones'], true).build();
+  sh.getRange(2,2,defaults.length,1).setDataValidation(escalaRule);
+  // Validación dropdown Moneda
+  var monedaRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['MXN','USD','EUR'], true).build();
+  sh.getRange(2,3,defaults.length,1).setDataValidation(monedaRule);
+  // Validación decimales
+  var decRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['0','1','2','3','4'], true).build();
+  sh.getRange(2,4,defaults.length,1).setDataValidation(decRule);
+  sh.setFrozenRows(1);
+  return {ok:true, msg:'Formatos creada con defaults'};
+}
+
+function readFormatos() {
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var sh = ss.getSheetByName(FORMATOS_TAB);
+    if (!sh) {
+      setupFormatos();
+      sh = ss.getSheetByName(FORMATOS_TAB);
+    }
+    var raw = sh.getDataRange().getValues();
+    if (raw.length < 2) return {ok:true, formatos:[]};
+    var formatos = [];
+    for (var i = 1; i < raw.length; i++) {
+      var r = raw[i];
+      if (!String(r[0]||'').trim()) continue;
+      formatos.push({
+        area:     String(r[0]||''),
+        escala:   String(r[1]||'Completo'),
+        moneda:   String(r[2]||'MXN'),
+        decimales:Number(r[3])||2,
+        simbolo:  String(r[4]||'$'),
+        activo:   r[5]===true||String(r[5]).toUpperCase()==='TRUE'
+      });
+    }
+    return {ok:true, formatos:formatos};
+  } catch(ex) {
+    return {ok:false, error:ex.message, formatos:[]};
+  }
+}
+
+function saveFormatos(data) {
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var sh = ss.getSheetByName(FORMATOS_TAB);
+    if (!sh) { setupFormatos(); sh = ss.getSheetByName(FORMATOS_TAB); }
+    var formatos = data.formatos || [];
+    if (!formatos.length) return {ok:false, error:'Sin datos'};
+    // Limpiar y reescribir
+    var lr = sh.getLastRow();
+    if (lr > 1) sh.getRange(2,1,lr-1,6).clearContent();
+    var rows = formatos.map(function(f) {
+      return [f.area||'', f.escala||'Completo', f.moneda||'MXN',
+              Number(f.decimales)||2, f.simbolo||'$', f.activo!==false];
+    });
+    sh.getRange(2,1,rows.length,6).setValues(rows);
+    return {ok:true, saved:rows.length};
+  } catch(ex) {
+    return {ok:false, error:ex.message};
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
    BD_INGRESOS — Sistema de captura de operaciones multi-línea
    ══════════════════════════════════════════════════════════════ */
 var BD_INGRESOS_TAB = 'BD_Ingresos';
