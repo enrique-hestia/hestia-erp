@@ -1599,20 +1599,24 @@ function updateProductoID(productoIdViejo, productoIdNuevo, usuario) {
 /* ── Listas de precios ──────────────────────────────────────── */
 function setupBDListas() {
   var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
-  if (!ss.getSheetByName('BD_Listas')) {
-    var sh = ss.insertSheet('BD_Listas');
+  var sh = ss.getSheetByName('BD_Listas');
+  if (!sh) {
+    sh = ss.insertSheet('BD_Listas');
     sh.getRange(1,1,1,5).setValues([['Lista','Descripcion','Moneda','Multiplicador','Activo']]);
     sh.getRange(1,1,1,5).setFontWeight('bold').setBackground('#f3f4f6');
     sh.setFrozenRows(1);
+  }
+  // Si está vacía (solo header), insertar defaults
+  if (sh.getLastRow() < 2) {
     sh.getRange(2,1,4,5).setValues([
       ['General','Precio estándar','MXN',1,true],
-      ['GM','Grupo Médico — precios autorizados','MXN',1,true],
+      ['GrupoMedico','Grupo Médico — precios autorizados','MXN',1,true],
       ['Surrogacy','Pacientes internacionales','USD',1,true],
       ['REPROVIDA','Precios derivados REPROVIDA','MXN',1,true]
     ]);
   }
   _syncListasDropdown();
-  return {ok:true};
+  return {ok:true, msg:'BD_Listas configurada, dropdown sincronizado'};
 }
 
 function updateProducto(body) {
