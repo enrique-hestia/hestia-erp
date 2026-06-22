@@ -2141,10 +2141,12 @@ function _prodFiltered() {
     if (_prodFilterCat) {
       var cat = (p.categoria||'').toLowerCase();
       var filter = _prodFilterCat.toLowerCase();
-      if (filter === 'estudios') { if (cat.indexOf('estudio') < 0) return false; }
-      else if (filter === 'externos') { if (cat.indexOf('extern') < 0) return false; }
-      else if (filter === 'surrogacy') { if (cat.indexOf('surrog') < 0) return false; }
+      var tipo = (p.tipo||'').toLowerCase();
+      if (filter === 'estudios') { if (cat.indexOf('estudio') < 0 && cat.indexOf('androlog') < 0) return false; }
+      else if (filter === 'externos') { if (cat.indexOf('extern') < 0 && cat.indexOf('histeroscop') < 0 && cat.indexOf('violet') < 0 && cat.indexOf('magenta') < 0) return false; }
+      else if (filter === 'surrogacy') { if (tipo !== 'surrogacy' && cat.indexOf('surrog') < 0 && cat.indexOf('egg donor') < 0 && cat.indexOf('carrier') < 0 && cat.indexOf('transfer and') < 0 && cat.indexOf('admin') < 0 && cat.indexOf('art lab') < 0 && cat.indexOf('andrology') < 0 && cat.indexOf('consultation') < 0) return false; }
       else if (filter === 'medicamento') { if (cat.indexOf('medic') < 0 && cat.indexOf('suplement') < 0 && cat.indexOf('vacuna') < 0) return false; }
+      else if (filter === 'grupomedico' || filter === 'grupo médico') { if (cat.indexOf('grupo') < 0) return false; }
       else { if (cat !== filter) return false; }
     }
     if (_prodFilterTipo && (p.tipo||'') !== _prodFilterTipo) return false;
@@ -2183,18 +2185,23 @@ function _renderProductosView() {
   var catColors = {'Tratamientos':'#c46a7a','Medicamento':'#0891b2','Consulta':'#7c3aed',
     'Estudios - Consulta':'#3a72a8','Estudios - Ciclo':'#3a72a8','Estudios - Andrologia':'#3a72a8',
     'Almacenamiento':'#b45309','PGT-A':'#059669','SURROGACY':'#6366f1','REPROVIDA':'#dc2626',
-    'Externos':'#374151','Extras Externos':'#374151','Complemento':'#0369a1'};
+    'Externos':'#374151','Extras Externos':'#374151','Complemento':'#0369a1','GrupoMedico':'#0d9488',
+    'Egg Donor':'#6366f1','Carrier':'#6366f1','Transfer and follow up':'#6366f1','Admin':'#6366f1',
+    'Art Lab':'#6366f1','Andrology':'#6366f1','Consultation':'#6366f1'};
   var titleColor = catColors[_prodFilterCat] || 'var(--text-primary,#111)';
+  // Icono genérico por defecto para categorías sin icono específico
+  var _defaultIcon = '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="'+titleColor+'" stroke-width="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>';
   var catIcons = {
     'Tratamientos':'<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="'+titleColor+'" stroke-width="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>',
     'Medicamento':'<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="'+titleColor+'" stroke-width="1.5"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3"/></svg>',
+    'GrupoMedico':'<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="'+titleColor+'" stroke-width="1.5"><path d="M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4z"/><path d="M8 14v4M12 14v4M16 14v4"/></svg>',
     'Consulta':'<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="'+titleColor+'" stroke-width="1.5"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M12 3a2 2 0 0 0-2 2v0a2 2 0 0 0 2 2v0a2 2 0 0 0 2-2v0a2 2 0 0 0-2-2z"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/></svg>',
-    'Estudios':'<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="'+titleColor+'" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.2.65.77 1.1 1.45 1.12H21a2 2 0 0 1 0 4h-.09c-.68.02-1.26.47-1.51 1.12z"/></svg>',
+    'Estudios':'<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="'+titleColor+'" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/><line x1="11" y1="8" x2="11" y2="14"/></svg>',
     'SURROGACY':'<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="'+titleColor+'" stroke-width="1.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
     'REPROVIDA':'<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="'+titleColor+'" stroke-width="1.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
     'Externos':'<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="'+titleColor+'" stroke-width="1.5"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>'
   };
-  var catIcon = catIcons[_prodFilterCat] || catIcons['Estudios'];
+  var catIcon = catIcons[_prodFilterCat] || _defaultIcon;
 
   function fP(v){return '$'+(Number(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
 
@@ -2303,14 +2310,20 @@ function _renderProductosView() {
       +'</div>');
 
     // Solo 7 categorías principales + Todos
-    var mainCats = ['Tratamientos','Medicamento','Estudios','Consulta','SURROGACY','REPROVIDA','Externos'];
+    var mainCats = ['Tratamientos','Medicamento','Estudios','Consulta','SURROGACY','REPROVIDA','Externos','GrupoMedico'];
     h.push('<div class="prod-tabs">');
     h.push('<div class="prod-tab'+(!_prodFilterCat?' act':'')+'" onclick="_prodFilterCat=\'\';_prodFilterTipo=\'\';_prodPage=1;_renderProductosView()">Todos</div>');
+    // Función para contar productos por categoría usando el mismo filtro que _prodFiltered
+    function _countForCat(mc) {
+      var allP = (_prodData&&_prodData.todosProductos)||[];
+      var savedCat=_prodFilterCat, savedTipo=_prodFilterTipo, savedSearch=_prodSearch;
+      _prodFilterCat=mc; _prodFilterTipo=''; _prodSearch='';
+      var c = _prodFiltered().length;
+      _prodFilterCat=savedCat; _prodFilterTipo=savedTipo; _prodSearch=savedSearch;
+      return c;
+    }
     mainCats.forEach(function(mc) {
-      var count = 0;
-      if (mc==='Estudios') { count=(cats.filter(function(c){return c.nombre.indexOf('Estudio')>=0;}).reduce(function(s,c){return s+c.count;},0)); }
-      else if (mc==='Externos') { count=(cats.filter(function(c){return c.nombre.indexOf('Extern')>=0;}).reduce(function(s,c){return s+c.count;},0)); }
-      else { var f=cats.filter(function(c){return c.nombre===mc;}); count=f.length?f[0].count:0; }
+      var count = _countForCat(mc);
       if (!count) return;
       var isAct = _prodFilterCat===mc;
       h.push('<div class="prod-tab'+(isAct?' act':'')+'" onclick="_prodFilterCat=\''+mc+'\';_prodFilterTipo=\'\';_prodPage=1;_renderProductosView()">'+mc+' <span style="font-size:9px;opacity:.7">('+count+')</span></div>');
@@ -3433,6 +3446,16 @@ async function loadMenu() {
         menuItems.push({
           id:'catalogo-general', label:'Catálogo General', padre:prodGroup.id,
           icono:'layout-grid', tipo:'vista', orden:minOrden-1,
+          seccion:prodGroup.seccion, fuente:'productos'
+        });
+      }
+      // Inyectar Grupo Médico si no existe
+      var hasGM = menuItems.some(function(i){ return /grupo.?medico/i.test(i.id)||/grupo.?m/i.test(i.label); });
+      if (!hasGM) {
+        var maxOrden = prodChildren.length ? Math.max.apply(null, prodChildren.map(function(c){return c.orden||0;}))+1 : 10;
+        menuItems.push({
+          id:'prod-grupomedico', label:'Grupo Médico', padre:prodGroup.id,
+          icono:'building', tipo:'vista', orden:maxOrden,
           seccion:prodGroup.seccion, fuente:'productos'
         });
       }
@@ -5956,7 +5979,7 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
   var _prodCatPairs = [
     ['tratamiento','Tratamientos'],['medicamento','Medicamento'],['prod-med','Medicamento'],
     ['estudio','Estudios'],['consulta','Consulta'],['surrogacy','SURROGACY'],
-    ['reprovida','REPROVIDA'],['externo','Externos']
+    ['reprovida','REPROVIDA'],['externo','Externos'],['grupomedico','GrupoMedico'],['grupo-medico','GrupoMedico']
   ];
   var _isProdCatalog = _vidLow.indexOf('catalogo')>=0 || _vidLow==='productos';
   var _prodCatMatch = null;
@@ -6137,7 +6160,7 @@ function navigateTo(viewId) {
   if (viewId === 'egresos') { displayId = 'gastos'; }
   if (/concilia/i.test(viewId)) { displayId = 'conciliacion'; }
   // Productos: todas las sub-categorías usan view-productos-catalogo
-  var _navProdKeys = ['producto','catalogo','tratamiento','medicamento','prod-med','estudio','consulta','surrogacy','reprovida','externo'];
+  var _navProdKeys = ['producto','catalogo','tratamiento','medicamento','prod-med','estudio','consulta','surrogacy','reprovida','externo','grupomedico','grupo-medico'];
   var _navVidLow = viewId.toLowerCase();
   for (var _npi=0; _npi<_navProdKeys.length; _npi++) {
     if (_navVidLow.indexOf(_navProdKeys[_npi]) >= 0) { displayId = 'productos-catalogo'; break; }
