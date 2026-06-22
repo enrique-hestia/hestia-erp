@@ -1329,9 +1329,10 @@ function migrateProductos() {
   // Si ya hay datos, continuar desde el último ID
   var lr = prodSheet.getLastRow();
   if (lr > 1) {
-    var existing = prodSheet.getRange(2,1,lr-1,3).getValues();
+    var existing = prodSheet.getRange(2,1,lr-1,4).getValues();
     existing.forEach(function(r){
-      var key = (String(r[1]||'').trim() + '|' + String(r[2]||'').trim()).toLowerCase();
+      // Col: 0=ProductoID, 1=SKU, 2=Descripcion, 3=Categoria
+      var key = (String(r[2]||'').trim() + '|' + String(r[3]||'').trim()).toLowerCase();
       seenProducts[key] = String(r[0]);
       var n = parseInt(String(r[0]).replace('PROD-',''),10);
       if (n > prodCounter) prodCounter = n;
@@ -1403,7 +1404,7 @@ function migrateProductos() {
 
   // Escribir productos nuevos
   if (prodRows.length) {
-    prodSheet.getRange(prodSheet.getLastRow()+1, 1, prodRows.length, 6).setValues(prodRows);
+    prodSheet.getRange(prodSheet.getLastRow()+1, 1, prodRows.length, 8).setValues(prodRows);
   }
   // Escribir precios
   if (precRows.length) {
