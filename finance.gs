@@ -1744,6 +1744,25 @@ function readProductos() {
   }
 }
 
+function saveNewProducto(body) {
+  try {
+    var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+    var prodSheet = ss.getSheetByName('BD_Productos');
+    var precSheet = ss.getSheetByName('BD_Precios');
+    if (!prodSheet||!precSheet) { setupBDProductos(); prodSheet=ss.getSheetByName('BD_Productos'); precSheet=ss.getSheetByName('BD_Precios'); }
+    var prodId = body.productoId || _getNextProdID(prodSheet);
+    var desc = String(body.descripcion||'').trim();
+    if (!desc) return {ok:false, error:'Descripción vacía'};
+    prodSheet.appendRow([prodId, body.sku||'', desc, body.categoria||'', body.tipo||'', body.notas||'', body.activo!==false, new Date()]);
+    var precio = parseFloat(String(body.precio||'').replace(/[$,]/g,''))||0;
+    if (precio>0) {
+      precSheet.appendRow([prodId, body.vigencia||new Date().toISOString().substring(0,10), precio, body.moneda||'MXN', body.usuario||'sistema', new Date(), body.lista||'General']);
+    }
+    logAudit(body.usuario||'sistema','Productos','Crear',prodId,'','',desc+' | $'+precio);
+    return {ok:true, productoId:prodId, sku:body.sku||''};
+  } catch(ex) { return {ok:false, error:ex.message}; }
+}
+
 function readPacienteLista(pacienteNombre) {
   try {
     var ss = SpreadsheetApp.openById(PACIENTES_SS_ID);
