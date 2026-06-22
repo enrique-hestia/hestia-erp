@@ -5717,14 +5717,21 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     return;
   }
   // Productos (todas las sub-categorías usan la misma vista)
-  var _prodCatMap = {productos:'',tratamientos:'Tratamientos',medicamentos:'Medicamento',
-    estudios:'Estudios',consultas:'Consulta',surrogacy:'SURROGACY',reprovida:'REPROVIDA',externos:'Externos'};
-  var _prodKey = viewId.toLowerCase().replace(/[^a-z]/g,'');
-  if (_prodCatMap.hasOwnProperty(_prodKey)) {
+  var _prodCatPairs = [
+    ['productos',''],['tratamiento','Tratamientos'],['medicamento','Medicamento'],
+    ['estudio','Estudios'],['consulta','Consulta'],['surrogacy','SURROGACY'],
+    ['reprovida','REPROVIDA'],['externo','Externos']
+  ];
+  var _vidLow = viewId.toLowerCase();
+  var _prodMatch = null;
+  for (var _pi=0;_pi<_prodCatPairs.length;_pi++) {
+    if (_vidLow.indexOf(_prodCatPairs[_pi][0]) >= 0) { _prodMatch = _prodCatPairs[_pi][1]; break; }
+  }
+  if (_prodMatch !== null) {
     document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
     var _prEl = document.getElementById('view-productos-catalogo');
     if (_prEl) _prEl.style.display = '';
-    loadProductosView(_prodCatMap[_prodKey]);
+    loadProductosView(_prodMatch);
     return;
   }
   // Conciliación Bancaria
