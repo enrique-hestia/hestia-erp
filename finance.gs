@@ -1709,41 +1709,6 @@ function migrateGMPrices() {
   } catch(e){return {ok:false,error:e.message};}
 }
 
-function readProductos() {
-  try {
-    var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
-    var prodSheet = ss.getSheetByName('BD_Productos');
-    var precSheet = ss.getSheetByName('BD_Precios');
-    if (!prodSheet || !precSheet) { setupBDProductos(); prodSheet=ss.getSheetByName('BD_Productos'); precSheet=ss.getSheetByName('BD_Precios'); }
-
-    var prodId = body.productoId || _getNextProdID(prodSheet);
-    var sku = body.sku || '';
-    var desc = String(body.descripcion||'').trim();
-    if (!desc) return {ok:false, error:'Descripción vacía'};
-
-    // Insertar producto
-    prodSheet.appendRow([
-      prodId, sku, desc,
-      body.categoria||'', body.tipo||'', body.notas||'',
-      body.activo!==false, new Date()
-    ]);
-
-    // Insertar precio
-    var precio = parseFloat(String(body.precio||'').replace(/[$,]/g,''))||0;
-    if (precio > 0) {
-      precSheet.appendRow([
-        prodId, body.vigencia||new Date().toISOString().substring(0,10),
-        precio, body.moneda||'MXN', body.usuario||'sistema', new Date()
-      ]);
-    }
-
-    logAudit(body.usuario||'sistema', 'Productos', 'Crear', prodId, '', '', desc+' | '+body.categoria+' | $'+precio);
-    return {ok:true, productoId:prodId, sku:sku};
-  } catch(ex) {
-    return {ok:false, error:ex.message};
-  }
-}
-
 function saveNewProducto(body) {
   try {
     var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
