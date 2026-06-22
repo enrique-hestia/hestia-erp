@@ -1352,26 +1352,30 @@ function migrateProductos() {
     var raw = tab.getDataRange().getValues();
     if (raw.length < 2) continue;
 
-    // Buscar columnas por header
+    // Buscar columnas por header (español e inglés)
     var hdrs = raw[0].map(function(h){return String(h||'').trim().toLowerCase();});
     var iDesc = -1, iCat = -1, iNotas = -1, iTipo = -1, iPrecio = -1, i2025 = -1, i2026 = -1;
     for (var hi = 0; hi < hdrs.length; hi++) {
-      if (hdrs[hi].indexOf('descripci')>=0 || hdrs[hi]==='descripcion') iDesc = hi;
-      if (hdrs[hi].indexOf('categori')>=0) iCat = hi;
-      if (hdrs[hi].indexOf('notas')>=0) iNotas = hi;
-      if (hdrs[hi]==='tipo') iTipo = hi;
-      if (hdrs[hi]==='precio') iPrecio = hi;
-      if (hdrs[hi]==='2025' && i2025<0) i2025 = hi;
-      if (hdrs[hi]==='2026' && i2026<0) i2026 = hi;
+      var hv = hdrs[hi];
+      if (iDesc<0 && (hv.indexOf('descripci')>=0||hv==='descripcion'||hv==='description'||hv==='product'||hv==='service'||hv==='nombre')) iDesc = hi;
+      if (iCat<0 && (hv.indexOf('categori')>=0||hv==='category'||hv==='tipo de servicio')) iCat = hi;
+      if (iNotas<0 && (hv.indexOf('notas')>=0||hv==='notes'||hv==='details'||hv==='adicional')) iNotas = hi;
+      if (iTipo<0 && (hv==='tipo'||hv==='type'||hv==='tier')) iTipo = hi;
+      if (iPrecio<0 && (hv==='precio'||hv==='price'||hv==='mxn'||hv==='usd'||hv==='costo')) iPrecio = hi;
+      if (i2025<0 && hv==='2025') i2025 = hi;
+      if (i2026<0 && hv==='2026') i2026 = hi;
     }
-    // Si no tiene columna descripción, intentar col 1 (index 1)
-    if (iDesc < 0) { iDesc = 1; iCat = 2; }
+    // Si no tiene columna descripción, intentar col 0 o col 1
+    if (iDesc < 0) { iDesc = hdrs.length > 2 ? 1 : 0; }
+    // Si no tiene categoría, usar nombre de la pestaña
+    var defaultCat = tabName;
 
     for (var ri = 1; ri < raw.length; ri++) {
       var r = raw[ri];
       var desc = String(r[iDesc]||'').trim();
       if (!desc) continue;
-      var cat = iCat >= 0 ? String(r[iCat]||'').trim() : tabName;
+      var cat = iCat >= 0 ? String(r[iCat]||'').trim() : defaultCat;
+      if (!cat) cat = defaultCat;
       var tipo = iTipo >= 0 ? String(r[iTipo]||'').trim() : '';
       var notas = iNotas >= 0 ? String(r[iNotas]||'').trim() : '';
       var precio2026 = iPrecio >= 0 ? num(r[iPrecio]) : (i2026 >= 0 ? num(r[i2026]) : 0);
