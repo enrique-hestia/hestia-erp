@@ -266,6 +266,10 @@ function doGet(e) {
       return jsonResponse(readIngresosData());
     }
 
+    if (action === 'productos') {
+      return jsonResponse(readProductos());
+    }
+
     if (action === 'getFormatos') {
       return jsonResponse(readFormatos());
     }
