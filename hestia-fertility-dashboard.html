@@ -2853,9 +2853,14 @@ async function loadMenu() {
       menuItems.push(Object.assign({}, egresosRef, {id:'egresos', label:'Egresos', icono:'trending-down'}));
     }
     // Si no había ningún ítem gastos/costos en el menú (quizás ya no vienen del API), no insertamos nada extra
-    currentFechaInicio = json.fechaInicio || '';
-    currentFechaFin    = json.fechaFin    || '';
-    currentPeriodo     = currentFechaInicio.slice(0,7) + ' → ' + currentFechaFin.slice(0,7);
+    // Default: mes en curso (no año completo)
+    var _now = new Date();
+    var _y = _now.getFullYear();
+    var _m = String(_now.getMonth()+1).padStart(2,'0');
+    var _lastDay = new Date(_y, _now.getMonth()+1, 0).getDate();
+    currentFechaInicio = _y+'-'+_m+'-01';
+    currentFechaFin    = _y+'-'+_m+'-'+String(_lastDay).padStart(2,'0');
+    currentPeriodo     = currentFechaInicio.slice(0,7);
     if (json.version) _apiVersion = json.version;
     setDateInputs(currentFechaInicio, currentFechaFin);
     buildSidebar(menuItems);
