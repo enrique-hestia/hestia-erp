@@ -2133,6 +2133,8 @@ async function loadProductosView(catFilter, isCatalog) {
   }
 }
 
+var _prodFilterTipo = '';
+
 function _prodFiltered() {
   if (!_prodData || !_prodData.todosProductos) return [];
   return _prodData.todosProductos.filter(function(p) {
@@ -2143,6 +2145,7 @@ function _prodFiltered() {
       else if (filter === 'externos') { if (cat.indexOf('extern') < 0) return false; }
       else { if (cat !== filter) return false; }
     }
+    if (_prodFilterTipo && (p.tipo||'') !== _prodFilterTipo) return false;
     if (_prodSearch) {
       var q = _prodSearch.toLowerCase();
       if ((p.descripcion||'').toLowerCase().indexOf(q)<0
@@ -2229,17 +2232,19 @@ function _renderProductosView() {
       +'</div>'
       +'</div></div>');
 
-    // Solo filtro por Tipo si hay más de uno
+    // Filtro por Tipo + botón agregar
+    h.push('<div style="display:flex;gap:6px;margin-bottom:14px;align-items:center;flex-wrap:wrap">');
     if (tipoArr.length > 1) {
-      h.push('<div style="display:flex;gap:6px;margin-bottom:14px;align-items:center">'
-        +'<span style="font-size:10px;font-weight:700;color:var(--text-secondary,#9ca3af);text-transform:uppercase;letter-spacing:.5px">Tipo:</span>');
-      h.push('<div class="prod-tab'+(!_prodSearch?' act':'')+'" onclick="_prodSearch=\'\';_prodPage=1;_renderProductosView()" style="padding:4px 12px;font-size:11px">Todos</div>');
+      h.push('<span style="font-size:10px;font-weight:700;color:var(--text-secondary,#9ca3af);text-transform:uppercase;letter-spacing:.5px">Tipo:</span>');
+      h.push('<div class="prod-tab'+(!_prodFilterTipo?' act':'')+'" onclick="_prodFilterTipo=\'\';_prodPage=1;_renderProductosView()" style="padding:4px 12px;font-size:11px">Todos</div>');
       tipoArr.forEach(function(t) {
-        var isAct = _prodSearch === 'tipo:'+t;
-        h.push('<div class="prod-tab'+(isAct?' act':'')+'" onclick="_prodSearch=\'tipo:'+t.replace(/'/g,"\\'")+'\';_prodPage=1;_renderProductosView()" style="padding:4px 12px;font-size:11px">'+t+'</div>');
+        h.push('<div class="prod-tab'+(_prodFilterTipo===t?' act':'')+'" onclick="_prodFilterTipo=\''+t.replace(/'/g,"\\'")+'\';_prodPage=1;_renderProductosView()" style="padding:4px 12px;font-size:11px">'+t+'</div>');
       });
-      h.push('</div>');
     }
+    h.push('<div style="margin-left:auto">'
+      +'<button onclick="prodOpenForm(\''+(_prodFilterCat||'').replace(/'/g,"\\'")+'\'" style="display:flex;align-items:center;gap:5px;padding:6px 14px;background:'+titleColor+';color:#fff;border:none;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer">'
+      +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Agregar producto</button></div>');
+    h.push('</div>');
 
     // Tabla simple: SKU | Producto | Tipo | Precio | Estado
     h.push('<div class="prod-panel"><div style="overflow-x:auto;max-height:70vh;overflow-y:auto">');
@@ -2247,12 +2252,7 @@ function _renderProductosView() {
       +'<th style="width:100px">SKU</th><th>Producto</th><th style="width:80px">Tipo</th><th style="width:120px;text-align:right">Precio</th><th style="width:80px;text-align:center">Estado</th>'
       +'</tr></thead><tbody>');
 
-    var displayRows = filtered;
-    // Filtro por tipo si está activo
-    if (_prodSearch && _prodSearch.indexOf('tipo:')===0) {
-      var tipoFilter = _prodSearch.substring(5);
-      displayRows = filtered.filter(function(p){return p.tipo===tipoFilter;});
-    }
+    var displayRows = filtered; // ya filtrado por tipo en _prodFiltered
     var pgRows = displayRows.slice(start, start+_prodPerPage);
     totalPages = Math.ceil(displayRows.length / _prodPerPage) || 1;
 
@@ -2282,7 +2282,9 @@ function _renderProductosView() {
       +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Catálogo General de Productos</h1>'
       +'<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">'+filtered.length+' productos en total</div>'
       +'</div>'
-      +(hasPermission('sheets_access')?'<a href="https://docs.google.com/spreadsheets/d/'+PRODUCTOS_SS_ID+'/edit" target="_blank" style="display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--color-primary,#c46a7a);text-decoration:none">'
+      +'<button onclick="prodOpenForm(\'\')" style="display:flex;align-items:center;gap:6px;padding:8px 16px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">'
+      +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Agregar producto</button>'
+    +(hasPermission('sheets_access')?'<a href="https://docs.google.com/spreadsheets/d/'+PRODUCTOS_SS_ID+'/edit" target="_blank" style="display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--color-primary,#c46a7a);text-decoration:none">'
         +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Editar en Sheets</a>':'')
       +'</div>');
 
@@ -2312,9 +2314,6 @@ function _renderProductosView() {
       +'</tr></thead><tbody>');
 
     var displayRows2 = filtered;
-    if (_prodSearch && _prodSearch.indexOf('tipo:')===0) {
-      displayRows2 = filtered.filter(function(p){return p.tipo===_prodSearch.substring(5);});
-    }
     var pgRows2 = displayRows2.slice(start, start+_prodPerPage);
     totalPages = Math.ceil(displayRows2.length / _prodPerPage) || 1;
 
@@ -2355,6 +2354,149 @@ function _renderProductosView() {
 }
 
 var PRODUCTOS_SS_ID = '1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY';
+
+/* ── Formulario agregar producto (página completa estilo Odoo) ── */
+function prodOpenForm(defaultCat) {
+  var el = document.getElementById('view-productos-catalogo');
+  if (!el) return;
+  var cats = (_prodData && _prodData.categorias) ? _prodData.categorias.map(function(c){return c.nombre;}) : ING_CATEGORIAS;
+  var tipos = ['ALTA','BAJA','FET','FEOC','PGT','CONSULTA','EXTERNOS','SURROGACY','REPROVIDA'];
+  var monedas = ['MXN','USD'];
+  var listas = ['General','GM','Surrogacy','REPROVIDA'];
+
+  function opts(arr,sel){return arr.map(function(v){return '<option value="'+v+'"'+(v===sel?' selected':'')+'>'+v+'</option>';}).join('');}
+  var S = 'style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"';
+  var LBL = 'style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px"';
+
+  var h = '<div style="max-width:800px;margin:0 auto;padding:24px">';
+
+  // Topbar
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:14px;border-bottom:2px solid var(--text-primary,#111)">'
+    +'<div><div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility · Productos</div>'
+    +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Nuevo producto</h1></div>'
+    +'<button onclick="prodCloseForm()" style="display:flex;align-items:center;gap:6px;padding:8px 18px;background:var(--color-surface,#f3f4f6);color:var(--text-primary,#374151);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">'
+      +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>Volver al catálogo</button>'
+    +'</div>';
+
+  // Sección: Información del producto
+  h += '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:20px;margin-bottom:16px">';
+  h += '<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:14px;display:flex;align-items:center;gap:8px">'
+    +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>Información del producto</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
+    +'<div style="grid-column:1/-1"><label '+LBL+'>Descripción *</label><input id="prod-f-desc" '+S+' placeholder="Nombre completo del producto o servicio"></div>'
+    +'<div><label '+LBL+'>Categoría *</label><select id="prod-f-cat" '+S+'><option value="">— Seleccionar —</option>'+opts(cats,defaultCat)+'</select></div>'
+    +'<div><label '+LBL+'>Tipo</label><select id="prod-f-tipo" '+S+'><option value="">— Seleccionar —</option>'+opts(tipos)+'</select></div>'
+    +'<div style="grid-column:1/-1"><label '+LBL+'>Notas adicionales</label><input id="prod-f-notas" '+S+' placeholder="Descripción detallada, indicaciones, etc."></div>'
+    +'</div></div>';
+
+  // Sección: Precio
+  h += '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:20px;margin-bottom:16px">';
+  h += '<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:14px;display:flex;align-items:center;gap:8px">'
+    +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Precio</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">'
+    +'<div><label '+LBL+'>Precio *</label><input type="number" id="prod-f-precio" '+S+' placeholder="0.00" step="0.01" min="0"></div>'
+    +'<div><label '+LBL+'>Moneda</label><select id="prod-f-moneda" '+S+'>'+opts(monedas,'MXN')+'</select></div>'
+    +'<div><label '+LBL+'>Vigencia desde</label><input type="date" id="prod-f-vigencia" '+S+' value="'+new Date().toISOString().substring(0,10)+'"></div>'
+    +'</div></div>';
+
+  // Sección: Lista de precios y configuración
+  h += '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:20px;margin-bottom:16px">';
+  h += '<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:14px;display:flex;align-items:center;gap:8px">'
+    +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Configuración</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
+    +'<div><label '+LBL+'>Lista de precios</label><select id="prod-f-lista" '+S+'>'+opts(listas,'General')+'</select></div>'
+    +'<div><label '+LBL+'>Estado</label><select id="prod-f-activo" '+S+'><option value="true" selected>Activo</option><option value="false">Inactivo</option></select></div>'
+    +'</div>'
+    +'<div style="margin-top:12px"><label '+LBL+'>Imagen del producto (URL o subir después)</label>'
+    +'<input id="prod-f-imagen" '+S+' placeholder="URL de imagen o dejar vacío para agregar después"></div>'
+    +'</div>';
+
+  // Footer
+  h += '<div style="display:flex;gap:12px;justify-content:flex-end;padding:16px 0">'
+    +'<button onclick="prodCloseForm()" style="padding:10px 24px;background:var(--color-surface,#f3f4f6);color:var(--text-primary,#374151);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;font-size:13px;font-weight:600;cursor:pointer">Descartar</button>'
+    +'<button id="prod-save-btn" onclick="prodSubmitForm()" style="padding:10px 28px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(196,106,122,.3)">Guardar producto</button>'
+    +'</div>';
+
+  h += '</div>';
+  el.innerHTML = h;
+  el.scrollTop = 0;
+}
+
+function prodCloseForm() {
+  _prodData = null; // forzar recarga
+  loadProductosView(_prodFilterCat, _prodIsCatalog);
+}
+
+async function prodSubmitForm() {
+  var desc = (document.getElementById('prod-f-desc')||{}).value||'';
+  var cat = (document.getElementById('prod-f-cat')||{}).value||'';
+  var precio = parseFloat((document.getElementById('prod-f-precio')||{}).value)||0;
+  if (!desc) { alert('Ingresa la descripción del producto'); return; }
+  if (!cat) { alert('Selecciona una categoría'); return; }
+  if (!precio) { alert('Ingresa el precio'); return; }
+
+  var btn = document.getElementById('prod-save-btn');
+  if (btn) { btn.disabled=true; btn.textContent='Guardando…'; }
+
+  try {
+    // 1. Crear producto en BD_Productos
+    var payload = {
+      action:'setupBDProductos' // asegurar que existe
+    };
+    await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(payload)});
+
+    // 2. Insertar producto via insert genérico
+    var s = getSession()||{};
+    var vigencia = (document.getElementById('prod-f-vigencia')||{}).value||new Date().toISOString().substring(0,10);
+    var tipo = (document.getElementById('prod-f-tipo')||{}).value||'';
+    var notas = (document.getElementById('prod-f-notas')||{}).value||'';
+    var moneda = (document.getElementById('prod-f-moneda')||{}).value||'MXN';
+    var activo = (document.getElementById('prod-f-activo')||{}).value!=='false';
+
+    // Generar SKU
+    var catPrefix = (cat||'GEN').substring(0,3).toUpperCase().replace(/[^A-Z]/g,'');
+    var existingCount = (_prodData&&_prodData.todosProductos) ? _prodData.todosProductos.filter(function(p){return p.categoria===cat;}).length : 0;
+    var sku = catPrefix+'-'+String(existingCount+1).padStart(4,'0');
+
+    // Generar ProductoID
+    var maxId = 0;
+    if (_prodData&&_prodData.todosProductos) {
+      _prodData.todosProductos.forEach(function(p){
+        var m=String(p.id||'').match(/PROD-(\d+)/);
+        if(m){var n=parseInt(m[1],10);if(n>maxId)maxId=n;}
+      });
+    }
+    var prodId = 'PROD-'+String(maxId+1).padStart(5,'0');
+
+    // Guardar producto + precio via POST
+    var savePayload = {
+      action:'saveNewProducto',
+      productoId: prodId,
+      sku: sku,
+      descripcion: desc,
+      categoria: cat,
+      tipo: tipo,
+      notas: notas,
+      activo: activo,
+      precio: precio,
+      moneda: moneda,
+      vigencia: vigencia,
+      usuario: s.email||'sistema'
+    };
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(savePayload)});
+    var res = await r.json();
+    if (res.ok) {
+      _prodData = null;
+      prodCloseForm();
+    } else {
+      alert('Error: '+(res.error||'No se pudo guardar'));
+      if(btn){btn.disabled=false;btn.textContent='Guardar producto';}
+    }
+  } catch(e) {
+    alert('Error de conexión: '+e.message);
+    if(btn){btn.disabled=false;btn.textContent='Guardar producto';}
+  }
+}
 
 var _ingContabilizado = 0; // se calcula al renderizar
 window.ingCalcISR = function() {
