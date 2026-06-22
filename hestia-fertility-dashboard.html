@@ -1930,7 +1930,70 @@ function _renderIngresosERP() {
     +'<div style="display:flex;gap:6px">'
     +'<button class="ing-pag-btn" onclick="_ingSetPage('+(_ingPage-1)+')"'+(_ingPage<=1?' disabled':'')+'>← Anterior</button>'
     +'<button class="ing-pag-btn" onclick="_ingSetPage('+(_ingPage+1)+')"'+(_ingPage>=totalPages?' disabled':'')+'>Siguiente →</button>'
-    +'</div></div></div>');
+    +'</div></div>');
+
+  // ── Resumen fiscal del período filtrado ──
+  var _subtPagado=0, _totTDC=0, _totEfectivo=0, _totSantander=0, _totAMEX=0, _totMP=0, _totTransf=0, _totOtros=0;
+  var _contabilizado=0, _sinContab=0;
+  filtered.forEach(function(r){
+    var pag = r.pagado||0;
+    _subtPagado += pag;
+    var fp = (r.formaPago||'').toLowerCase();
+    if (fp==='tdc'||fp==='tdd') _totTDC+=pag;
+    else if (fp==='efectivo') _totEfectivo+=pag;
+    else if (fp==='santander') _totSantander+=pag;
+    else if (fp==='amex') _totAMEX+=pag;
+    else if (fp.indexOf('mercado')>=0||fp==='mp') _totMP+=pag;
+    else if (fp.indexOf('transfer')>=0) _totTransf+=pag;
+    else _totOtros+=pag;
+    if (r.contabilidad) _contabilizado+=(r.montoFact||r.pagado||0);
+  });
+  _ingContabilizado = _contabilizado; // guardar global para ingCalcISR
+  var _diferencia = _subtPagado - _contabilizado;
+  var _isrDeclarado = _contabilizado;
+
+  var LS='style="padding:8px 14px;font-size:12px;color:var(--text-primary,#374151);border-bottom:1px solid var(--color-divider,#f0f0f0)"';
+  var VS='style="padding:8px 14px;font-size:13px;font-weight:700;text-align:right;border-bottom:1px solid var(--color-divider,#f0f0f0)"';
+
+  h.push('<div style="margin-top:16px;background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;overflow:hidden">');
+  h.push('<div style="padding:14px 18px;border-bottom:1px solid var(--color-divider,#e5e7eb);display:flex;align-items:center;justify-content:space-between">'
+    +'<div style="font-size:13px;font-weight:700;color:var(--text-primary,#111)">Resumen fiscal del período</div>'
+    +'<div style="font-size:10px;color:var(--text-secondary,#9ca3af)">'+currentFechaInicio+' — '+currentFechaFin+'</div>'
+    +'</div>');
+  h.push('<div style="display:grid;grid-template-columns:1fr 1fr;gap:0">');
+
+  // Columna izquierda: desglose por forma de pago
+  h.push('<div style="border-right:1px solid var(--color-divider,#e5e7eb)">');
+  h.push('<div style="padding:10px 14px;font-size:9.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);background:var(--color-surface,#fafafa);border-bottom:1px solid var(--color-divider,#e5e7eb)">Desglose por forma de pago</div>');
+  h.push('<table style="width:100%;border-collapse:collapse">');
+  h.push('<tr><td '+LS+'>Subtotal Pagado</td><td '+VS+' style="color:#0c4a6e;font-size:15px;font-weight:800;padding:8px 14px;text-align:right;border-bottom:1px solid var(--color-divider,#e5e7eb)">'+fC(_subtPagado)+'</td></tr>');
+  h.push('<tr><td '+LS+'>Total TDC / TDD</td><td '+VS+'>'+fC(_totTDC)+'</td></tr>');
+  h.push('<tr><td '+LS+'>Total Efectivo</td><td '+VS+'>'+fC(_totEfectivo)+'</td></tr>');
+  h.push('<tr><td '+LS+'>Total Santander</td><td '+VS+'>'+fC(_totSantander)+'</td></tr>');
+  h.push('<tr><td '+LS+'>Total AMEX</td><td '+VS+'>'+fC(_totAMEX)+'</td></tr>');
+  h.push('<tr><td '+LS+'>Total Mercado Pago</td><td '+VS+'>'+fC(_totMP)+'</td></tr>');
+  h.push('<tr><td '+LS+'>Total Transferencia</td><td '+VS+'>'+fC(_totTransf)+'</td></tr>');
+  if (_totOtros>0) h.push('<tr><td '+LS+'>Otros</td><td '+VS+'>'+fC(_totOtros)+'</td></tr>');
+  h.push('</table></div>');
+
+  // Columna derecha: fiscal
+  h.push('<div>');
+  h.push('<div style="padding:10px 14px;font-size:9.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);background:var(--color-surface,#fafafa);border-bottom:1px solid var(--color-divider,#e5e7eb)">Resumen contable</div>');
+  h.push('<table style="width:100%;border-collapse:collapse">');
+  h.push('<tr><td '+LS+'>Contabilizado en el mes</td><td '+VS+'>'+fC(_contabilizado)+'</td></tr>');
+  h.push('<tr><td '+LS+'>Diferencia (Pagado − Contabilizado)</td><td '+VS+' style="color:'+(_diferencia>0?'#b45309':'#166534')+'">'+fC(_diferencia)+'</td></tr>');
+  h.push('<tr><td '+LS+'>CFDI Ingreso mes anterior</td><td '+VS+'><input id="ing-cfdi-anterior" type="number" value="0" step="0.01" style="width:120px;text-align:right;padding:4px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;font-weight:700" oninput="ingCalcISR()"></td></tr>');
+  h.push('<tr style="background:rgba(196,106,122,.05)"><td style="padding:10px 14px;font-size:13px;font-weight:800;color:var(--color-primary,#c46a7a);border-top:2px solid var(--color-primary,#c46a7a)">ISR Declarado</td>'
+    +'<td id="ing-isr-val" style="padding:10px 14px;font-size:16px;font-weight:800;text-align:right;color:var(--color-primary,#c46a7a);border-top:2px solid var(--color-primary,#c46a7a)">'+fC(_isrDeclarado)+'</td></tr>');
+  h.push('</table>');
+  h.push('<div style="padding:10px 14px;font-size:10px;color:var(--text-secondary,#9ca3af);line-height:1.4">'
+    +'ISR Declarado = Contabilizado + CFDI mes anterior<br>'
+    +'Contabilizado = Σ Monto Fact/Mes donde Contabilidad ✓</div>');
+  h.push('</div>');
+
+  h.push('</div></div>'); // /grid, /panel
+
+  h.push('</div>'); // /ing-panel (table container)
 
   // ── Sidebar ──
   h.push('<div>');
@@ -2013,6 +2076,14 @@ function _renderIngresosERP() {
     });
   },50);
 }
+
+var _ingContabilizado = 0; // se calcula al renderizar
+window.ingCalcISR = function() {
+  var cfdi = parseFloat((document.getElementById('ing-cfdi-anterior')||{}).value) || 0;
+  var isr = _ingContabilizado + cfdi;
+  var el = document.getElementById('ing-isr-val');
+  if (el) el.textContent = fmtMoney(isr, 'Ingresos');
+};
 
 /* ── Ingreso form functions (Odoo-style full page) ────────── */
 var _ingLineCount = 0;
