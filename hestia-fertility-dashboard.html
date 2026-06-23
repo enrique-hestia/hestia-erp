@@ -2641,12 +2641,19 @@ function ingOnCatChange(lineNum) {
                : (p.precios && p.precios['General']) ? p.precios['General']
                : p.precio || 0;
     var label = (p.sku?'['+p.sku+'] ':'')+p.descripcion+(precio?' — $'+precio.toLocaleString('en-US'):'');
-    h += '<option value="'+p.descripcion.replace(/"/g,'&quot;')+'" data-precio="'+precio+'" data-sku="'+(p.sku||'')+'">'+label+'</option>';
+    h += '<option value="'+p.descripcion.replace(/"/g,'&quot;')+'" data-precio="'+precio+'" data-sku="'+(p.sku||'')+'" data-cat="'+(p.categoria||'').replace(/"/g,'&quot;')+'" data-tipo="'+(p.tipo||'').replace(/"/g,'&quot;')+'">'+label+'</option>';
   });
   prodEl.innerHTML = h;
   if (pvpEl) pvpEl.value = '';
   ingCalcTotal();
 }
+
+var _ING_CAT_TO_CICLO = {
+  'tratamientos':'ALTA', 'pgt-a':'ALTA', 'violet':'ALTA',
+  'consulta':'CONSULTA', 'almacenamiento':'Almacenamiento',
+  'estudios - andrologia':'Estudios - Andrologia', 'estudios - ciclo':'Estudios - Ciclo',
+  'estudios - consulta':'CONSULTA', 'extras externos':'EXTERNOS', 'medicamento':'ALTA'
+};
 
 function ingOnProdChange(lineNum) {
   var prodEl = document.getElementById('ing-prod-'+lineNum);
@@ -2656,6 +2663,19 @@ function ingOnProdChange(lineNum) {
   if (opt && opt.dataset.precio) {
     pvpEl.value = opt.dataset.precio;
     ingCalcTotal();
+  }
+  // Auto-llenar Ciclo basado en categoría del producto (solo si aún no se eligió uno)
+  var cicloEl = document.getElementById('ing-ciclo');
+  if (cicloEl && opt && opt.dataset.cat) {
+    var cat = opt.dataset.cat.toLowerCase();
+    var mapped = _ING_CAT_TO_CICLO[cat];
+    if (!mapped) {
+      // Buscar coincidencia parcial en ING_CICLOS
+      for (var c = 0; c < ING_CICLOS.length; c++) {
+        if (ING_CICLOS[c].toLowerCase() === cat) { mapped = ING_CICLOS[c]; break; }
+      }
+    }
+    if (mapped) cicloEl.value = mapped;
   }
 }
 
