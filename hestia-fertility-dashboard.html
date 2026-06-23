@@ -1937,6 +1937,7 @@ function _renderIngresosERP() {
     +'<div style="overflow-x:auto;max-height:65vh;overflow-y:auto">'
     +'<table class="ing-tbl"><thead><tr>'
     +'<th style="width:30px"></th><th>Fecha</th><th>OP</th><th>Paciente</th><th>Categoría</th><th>Items</th><th>Total</th><th>Pagado</th><th>F. Pago</th>'
+    +(hasPermission('editar_ingresos')?'<th style="width:50px"></th>':'')
     +'</tr></thead><tbody>');
 
   if(pageOps.length){
@@ -1955,9 +1956,11 @@ function _renderIngresosERP() {
         +'<td style="font-weight:700">'+fC(op.total)+'</td>'
         +'<td style="font-weight:600;color:'+(isPaid?'#166534':'#b45309')+'">'+fC(op.pagado)+'</td>'
         +'<td style="font-size:10.5px;color:var(--text-secondary,#6b7280)">'+(op.formaPago||'—')+'</td>'
+        +(hasPermission('editar_ingresos')?'<td style="text-align:center" onclick="event.stopPropagation()"><button class="btn-edit-row" onclick="ingEditOp(\''+opId.replace(/'/g,"\\'")+'\')">✎</button></td>':'')
         +'</tr>');
+      var colSpan = hasPermission('editar_ingresos') ? 10 : 9;
       // Fila expandible con detalle de líneas
-      h.push('<tr id="ing-det-'+safeId+'" style="display:none"><td colspan="9" style="padding:0;background:var(--color-surface,#fafafa)">'
+      h.push('<tr id="ing-det-'+safeId+'" style="display:none"><td colspan="'+colSpan+'" style="padding:0;background:var(--color-surface,#fafafa)">'
         +'<table class="ing-det-tbl"><thead><tr style="background:var(--color-surface-offset,#eee)">'
         +'<td style="font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Línea</td>'
         +'<td style="font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Categoría</td>'
@@ -1983,7 +1986,7 @@ function _renderIngresosERP() {
       h.push('</tbody></table></td></tr>');
     });
   } else {
-    h.push('<tr><td colspan="9" style="text-align:center;padding:2rem;color:var(--text-secondary,#9ca3af)">Sin registros con los filtros seleccionados</td></tr>');
+    h.push('<tr><td colspan="'+(hasPermission('editar_ingresos')?10:9)+'" style="text-align:center;padding:2rem;color:var(--text-secondary,#9ca3af)">Sin registros con los filtros seleccionados</td></tr>');
   }
 
   h.push('</tbody></table></div>');
@@ -2798,7 +2801,88 @@ async function ingLoadPacientes() {
   } catch(e) { console.warn('Error cargando pacientes:', e); }
 }
 
+var _ingEditMode = null; // null = nuevo, 'OP-XXXXX' = editando
+
+function ingEditOp(opId) {
+  if (!hasPermission('editar_ingresos')) { alert('No tienes permisos para editar operaciones.'); return; }
+  if (!_ingData || !_ingData.rows) { alert('Datos no cargados. Recarga la página.'); return; }
+  var opRows = _ingData.rows.filter(function(r){ return r.id === opId; });
+  if (!opRows.length) { alert('Operación ' + opId + ' no encontrada.'); return; }
+
+  _ingEditMode = opId;
+
+  // Abrir el formulario y esperar a que se renderice
+  ingOpenDrawer().then(function() {
+    // Pre-llenar datos del paciente
+    var first = opRows[0];
+    var pacEl = document.getElementById('ing-paciente');
+    if (pacEl) pacEl.value = first.paciente || '';
+    var fechaEl = document.getElementById('ing-fecha');
+    if (fechaEl) fechaEl.value = (first.fecha || '').substring(0, 10);
+    var cicloEl = document.getElementById('ing-ciclo');
+    if (cicloEl) cicloEl.value = first.ciclo || '';
+
+    // Quitar la línea vacía inicial y cargar las líneas del OP
+    var linesEl = document.getElementById('ing-lines');
+    if (linesEl) linesEl.innerHTML = '';
+    _ingLineCount = 0;
+
+    opRows.forEach(function(r) {
+      ingAddLine();
+      var n = _ingLineCount;
+      var catEl = document.getElementById('ing-cat-' + n);
+      if (catEl) { catEl.value = r.categoria || ''; }
+      var prodEl = document.getElementById('ing-prod-' + n);
+      if (prodEl) prodEl.value = r.producto || '';
+      var pvpEl = document.getElementById('ing-pvp-' + n);
+      if (pvpEl) pvpEl.value = r.pvp || '';
+      var descEl = document.getElementById('ing-desc-' + n);
+      if (descEl) descEl.value = r.descuento || '';
+      var cantEl = document.getElementById('ing-cant-' + n);
+      if (cantEl) cantEl.value = r.cantidad || 1;
+    });
+    ingCalcTotal();
+
+    // Pre-llenar pago
+    var payLinesEl = document.getElementById('ing-pay-lines');
+    if (payLinesEl) payLinesEl.innerHTML = '';
+    _ingPayCount = 0;
+    ingAddPay();
+    var fpEl = document.getElementById('ing-fp-1');
+    if (fpEl) fpEl.value = first.formaPago || 'TDC';
+    var fpMontoEl = document.getElementById('ing-fp-monto-1');
+    if (fpMontoEl) fpMontoEl.value = opRows.reduce(function(s,r){return s+(r.pagado||0);},0) || '';
+    ingCalcPayTotal();
+
+    // Pre-llenar facturación
+    var fields = {
+      'ing-factura': first.factura, 'ing-poliza': first.poliza,
+      'ing-sucursal': first.sucursal, 'ing-moneda': first.moneda,
+      'ing-obs': first.observaciones, 'ing-monto-fact': first.montoFact
+    };
+    for (var fid in fields) {
+      var fe = document.getElementById(fid);
+      if (fe && fields[fid]) fe.value = fields[fid];
+    }
+    var chkMap = {'ing-chk-fact': first.facturacion, 'ing-chk-conc': first.conciliacion, 'ing-chk-cont': first.contabilidad};
+    for (var cid in chkMap) {
+      var ce = document.getElementById(cid);
+      if (ce) ce.checked = !!chkMap[cid];
+    }
+
+    // Cambiar título y botón
+    var titleEl = document.querySelector('#ing-form-content h1');
+    if (titleEl) titleEl.textContent = 'Editar operación · ' + opId;
+    var saveBtn = document.getElementById('ing-save-btn');
+    if (saveBtn) saveBtn.textContent = 'Actualizar operación';
+
+    // Lista del paciente
+    ingOnPacienteChange();
+  });
+}
+
 async function ingOpenDrawer() {
+  if (!_ingEditMode) _ingEditMode = null; // reset cuando se abre como nuevo
   _ingLineCount = 0;
   var view = document.getElementById('ing-form-view');
   var content = document.getElementById('ing-form-content');
@@ -2931,6 +3015,7 @@ async function ingOpenDrawer() {
 function ingCloseDrawer() {
   var view = document.getElementById('ing-form-view');
   if (view) view.style.display = 'none';
+  _ingEditMode = null;
 }
 
 function _ingBuildProdDatalist(lineNum) {
@@ -3128,8 +3213,11 @@ function _ingCollectPayload() {
   var mainFP = payments.reduce(function(a,b){ return b.monto > a.monto ? b : a; });
   var totalPagado = payments.reduce(function(s,p){ return s + p.monto; }, 0);
 
+  var s = getSession() || {};
   return {
-    action: 'saveIngreso',
+    action: _ingEditMode ? 'updateIngreso' : 'saveIngreso',
+    opId:   _ingEditMode || undefined,
+    usuario: s.email || s.nombre || '',
     paciente: paciente,
     fecha: fecha,
     formaPago:      mainFP.formaPago,
@@ -3218,7 +3306,12 @@ async function _ingSaveAndBank(payload, comisionMP) {
       return;
     }
 
-    // 2. Auto-registrar movimiento bancario por cada forma de pago
+    // 2. Auto-registrar movimiento bancario (solo operaciones nuevas, no ediciones)
+    if (payload.action === 'updateIngreso') {
+      ingCloseDrawer();
+      loadIngresosERP();
+      return;
+    }
     var fecha  = payload.fecha;
     var pac    = payload.paciente;
     var obs    = (payload.observaciones ? payload.observaciones + ' · ' : '') + 'Px. ' + pac;
@@ -7369,7 +7462,7 @@ var ROLE_PERMS_DEFAULT = {
   admin:    ['*'],
   director: ['*'],
   gerente:  ['bank_create','bank_edit','bank_delete','bank_capture','bank_liberado',
-             'sheets_access','cf_capture','export_data'],
+             'sheets_access','cf_capture','export_data','editar_ingresos'],
   operador: ['bank_capture','bank_edit','bank_liberado','cf_capture'],
   captura:  ['bank_capture','cf_capture'],
   viewer:   []

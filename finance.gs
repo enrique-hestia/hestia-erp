@@ -523,6 +523,9 @@ function doPost(e) {
     if (body.action === 'updateProductoID') {
       return jsonResponse(updateProductoID(body.productoIdViejo, body.productoIdNuevo, body.usuario));
     }
+    if (body.action === 'updateIngreso') {
+      return jsonResponse(updateIngreso(body));
+    }
     if (body.action === 'updateCajaChica') {
       return jsonResponse(updateCajaChicaRow(body));
     }
@@ -1948,6 +1951,90 @@ function saveIngreso(payload) {
     sheet.getRange(sheet.getLastRow()+1, 1, rows.length, rows[0].length).setValues(rows);
 
     return {ok:true, op:opId, lineas:rows.length, total:totalOP};
+  } catch(ex) {
+    return {ok:false, error:ex.message};
+  }
+}
+
+function updateIngreso(payload) {
+  try {
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sheet = null;
+    var sheets = ss.getSheets();
+    for (var i = 0; i < sheets.length; i++) {
+      if (sheets[i].getName() === BD_INGRESOS_TAB) { sheet = sheets[i]; break; }
+    }
+    if (!sheet) return {ok:false, error:'BD_Ingresos no encontrada'};
+
+    var opId = payload.opId;
+    if (!opId) return {ok:false, error:'opId es requerido'};
+
+    // Encontrar y eliminar filas existentes de este OP
+    var data = sheet.getDataRange().getValues();
+    var rowsToDelete = [];
+    for (var r = data.length - 1; r >= 1; r--) {
+      if (String(data[r][0]).trim() === opId) rowsToDelete.push(r + 1);
+    }
+    // Eliminar de abajo hacia arriba para no desplazar índices
+    for (var d = 0; d < rowsToDelete.length; d++) {
+      sheet.deleteRow(rowsToDelete[d]);
+    }
+
+    // Re-insertar con datos actualizados (reutilizar lógica de saveIngreso)
+    var lineas   = payload.lineas || [];
+    if (!lineas.length) return {ok:false, error:'No hay productos en la operación'};
+
+    var fecha     = payload.fecha || '';
+    var paciente  = payload.paciente || '';
+    var formaPago = payload.formaPago || '';
+    var sucursal  = payload.sucursal || '';
+    var moneda    = payload.moneda || 'MX';
+    var obs       = payload.observaciones || '';
+    var factura   = payload.factura || '';
+    var poliza    = payload.poliza || '';
+    var facturacionChk  = payload.facturacion === true || payload.facturacion === 'true';
+    var conciliacionChk = payload.conciliacion === true || payload.conciliacion === 'true';
+    var contabilidadChk = payload.contabilidad === true || payload.contabilidad === 'true';
+
+    function num(v) { var n = parseFloat(String(v||'').replace(/[$,]/g,'')); return isNaN(n)?0:n; }
+
+    var rows = [];
+    var totalOP = 0;
+    for (var li = 0; li < lineas.length; li++) {
+      var l = lineas[li];
+      var pvp  = num(l.pvp);
+      var descPct = num(l.descuento) / 100;
+      var cant = num(l.cantidad) || 1;
+      var totalPagar = pvp * cant * (1 - descPct);
+      var pagado = num(l.pagado) || totalPagar;
+      totalOP += totalPagar;
+
+      rows.push([
+        opId, li+1, fecha, paciente,
+        l.categoria||'', l.producto||'',
+        pvp, num(l.descuento), cant, totalPagar,
+        pagado, li===0 ? num(payload.montoFactMes) : 0,
+        formaPago,
+        li===0 ? facturacionChk : false,
+        li===0 ? conciliacionChk : false,
+        li===0 ? contabilidadChk : false,
+        li===0 ? obs : '',
+        li===0 ? factura : '',
+        li===0 ? poliza : '',
+        moneda, l.ciclo || '', sucursal,
+        ''
+      ]);
+    }
+
+    sheet.getRange(sheet.getLastRow()+1, 1, rows.length, rows[0].length).setValues(rows);
+
+    // Auditoría
+    try {
+      logAudit(payload.usuario || 'sistema', 'Ingresos', 'Editar', opId, 'Operación completa',
+        rowsToDelete.length + ' líneas anteriores', rows.length + ' líneas nuevas · Total: $' + totalOP.toFixed(2));
+    } catch(ae) {}
+
+    return {ok:true, op:opId, lineas:rows.length, total:totalOP, edited:true};
   } catch(ex) {
     return {ok:false, error:ex.message};
   }
