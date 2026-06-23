@@ -1940,7 +1940,7 @@ function saveIngreso(payload) {
         li===0 ? obs : '',
         li===0 ? factura : '',
         li===0 ? poliza : '',
-        moneda, ciclo, sucursal,
+        moneda, l.ciclo || ciclo, sucursal,
         '' // ArchivoURL — se llena al subir PDF
       ]);
     }

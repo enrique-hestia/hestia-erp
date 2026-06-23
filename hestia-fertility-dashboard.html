@@ -1786,6 +1786,15 @@ function _ingSetFilter(key, val) {
   _renderIngresosERP();
 }
 
+function ingToggleOp(safeId) {
+  var det = document.getElementById('ing-det-'+safeId);
+  var tog = document.getElementById('ing-tog-'+safeId);
+  if (!det) return;
+  var open = det.style.display !== 'none';
+  det.style.display = open ? 'none' : '';
+  if (tog) tog.classList.toggle('open', !open);
+}
+
 function _ingSetPage(p) {
   _ingPage = p;
   _renderIngresosERP();
@@ -1848,6 +1857,14 @@ function _renderIngresosERP() {
     +'.ing-pag-btn{border:1px solid var(--color-divider,#e5e7eb);background:var(--card-bg,#fff);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;color:var(--text-primary,#111)}'
     +'.ing-pag-btn:hover{background:var(--color-surface,#f5f5f5)}'
     +'.ing-pag-btn:disabled{opacity:.4;cursor:default}'
+    +'.ing-op-row{cursor:pointer;transition:background .1s}'
+    +'.ing-op-row:hover td{background:var(--color-primary-hl,rgba(196,106,122,.06))!important}'
+    +'.ing-op-toggle{display:inline-flex;width:20px;height:20px;align-items:center;justify-content:center;border-radius:5px;background:var(--color-surface-offset,#f3f4f6);font-size:10px;color:var(--color-text-muted,#9ca3af);transition:transform .15s}'
+    +'.ing-op-toggle.open{transform:rotate(90deg);color:var(--color-primary,#c46a7a);background:var(--color-primary-hl,rgba(196,106,122,.1))}'
+    +'.ing-det-tbl{width:100%;border-collapse:collapse;font-size:11px;background:var(--color-surface,#fafafa)}'
+    +'.ing-det-tbl td{padding:5px 12px;border-bottom:1px solid var(--color-divider,#eee);color:var(--text-secondary,#6b7280)}'
+    +'.ing-det-tbl td:nth-child(n+4){text-align:right}'
+    +'.ing-items-badge{font-size:9.5px;padding:2px 7px;border-radius:12px;background:var(--color-surface-offset,#f0f0f0);color:var(--text-secondary,#6b7280);font-weight:600;margin-left:4px}'
     // Sidebar cards
     +'.ing-sc{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:14px 16px;margin-bottom:14px}'
     +'.ing-sh{font-size:9.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:10px}'
@@ -1895,33 +1912,75 @@ function _renderIngresosERP() {
   // ── Layout: tabla + sidebar ──
   h.push('<div class="ing-grid">');
 
-  // Tabla de detalle
+  // Agrupar por OP
+  var _opsMap = {}, _opsOrder = [];
+  filtered.forEach(function(r) {
+    var opId = r.id || 'sin-op';
+    if (!_opsMap[opId]) {
+      _opsMap[opId] = { id:opId, fecha:r.fecha, paciente:r.paciente, formaPago:r.formaPago, items:[], total:0, pagado:0, cats:[] };
+      _opsOrder.push(opId);
+    }
+    var op = _opsMap[opId];
+    op.items.push(r);
+    op.total += r.totalPagar || 0;
+    op.pagado += r.pagado || 0;
+    if (r.categoria && op.cats.indexOf(r.categoria) === -1) op.cats.push(r.categoria);
+  });
+
+  var totalOps = _opsOrder.length;
   var start = (_ingPage-1)*_ingPerPage;
-  var pageRows = filtered.slice(start, start+_ingPerPage);
-  var totalPages = Math.ceil(filtered.length/_ingPerPage)||1;
+  var pageOps = _opsOrder.slice(start, start+_ingPerPage);
+  var totalPages = Math.ceil(totalOps/_ingPerPage)||1;
 
   h.push('<div class="ing-panel">'
     +'<div class="ing-ph"><div class="ing-pt">Detalle de operaciones</div><div style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Página '+_ingPage+' de '+totalPages+'</div></div>'
-    +'<div style="overflow-x:auto;max-height:60vh;overflow-y:auto">'
+    +'<div style="overflow-x:auto;max-height:65vh;overflow-y:auto">'
     +'<table class="ing-tbl"><thead><tr>'
-    +'<th>Fecha</th><th>Paciente</th><th>Categoría / Producto</th><th>P.V.P.</th><th>Desc.</th><th>Cant.</th><th>Total</th><th>Pagado</th><th>F. Pago</th>'
+    +'<th style="width:30px"></th><th>Fecha</th><th>OP</th><th>Paciente</th><th>Categoría</th><th>Items</th><th>Total</th><th>Pagado</th><th>F. Pago</th>'
     +'</tr></thead><tbody>');
 
-  if(pageRows.length){
-    pageRows.forEach(function(r){
-      var isPaid = (r.pagado||0)>=(r.totalPagar||1);
-      h.push('<tr>'
-        +'<td style="color:var(--text-secondary,#6b7280)">'+((r.fecha||'').substring(0,10)||'—')+'</td>'
-        +'<td style="font-weight:600;color:var(--text-primary,#111);max-width:160px;overflow:hidden;text-overflow:ellipsis">'+(r.paciente||'—')+'</td>'
-        +'<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis"><span style="color:var(--text-primary,#374151)">'+(r.categoria||'')+'</span>'
-          +(r.producto?' <span style="color:var(--text-secondary,#9ca3af);font-size:10px">· '+r.producto+'</span>':'')+'</td>'
-        +'<td>'+fC(r.pvp)+'</td>'
-        +'<td style="text-align:center;color:var(--text-secondary,#6b7280)">'+(r.descuento?r.descuento+'%':'—')+'</td>'
-        +'<td style="text-align:center">'+(r.cantidad||1)+'</td>'
-        +'<td style="font-weight:700">'+fC(r.totalPagar)+'</td>'
-        +'<td style="font-weight:600;color:'+(isPaid?'#166534':'#b45309')+'">'+fC(r.pagado)+'</td>'
-        +'<td style="font-size:10.5px;color:var(--text-secondary,#6b7280)">'+(r.formaPago||'—')+'</td>'
+  if(pageOps.length){
+    pageOps.forEach(function(opId){
+      var op = _opsMap[opId];
+      var isPaid = op.pagado >= op.total && op.total > 0;
+      var catText = op.cats.length > 2 ? op.cats.slice(0,2).join(', ')+' +' +(op.cats.length-2) : op.cats.join(', ');
+      var safeId = opId.replace(/[^a-zA-Z0-9_-]/g,'_');
+      h.push('<tr class="ing-op-row" onclick="ingToggleOp(\''+safeId+'\')">'
+        +'<td style="text-align:center"><span class="ing-op-toggle" id="ing-tog-'+safeId+'">▶</span></td>'
+        +'<td style="color:var(--text-secondary,#6b7280)">'+((op.fecha||'').substring(0,10)||'—')+'</td>'
+        +'<td style="font-family:monospace;font-size:10px;color:var(--color-primary,#c46a7a);font-weight:700">'+opId+'</td>'
+        +'<td style="font-weight:600;color:var(--text-primary,#111);max-width:180px;overflow:hidden;text-overflow:ellipsis">'+(op.paciente||'—')+'</td>'
+        +'<td style="font-size:10.5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;color:var(--text-secondary,#374151)">'+catText+'</td>'
+        +'<td style="text-align:center"><span class="ing-items-badge">'+op.items.length+'</span></td>'
+        +'<td style="font-weight:700">'+fC(op.total)+'</td>'
+        +'<td style="font-weight:600;color:'+(isPaid?'#166534':'#b45309')+'">'+fC(op.pagado)+'</td>'
+        +'<td style="font-size:10.5px;color:var(--text-secondary,#6b7280)">'+(op.formaPago||'—')+'</td>'
         +'</tr>');
+      // Fila expandible con detalle de líneas
+      h.push('<tr id="ing-det-'+safeId+'" style="display:none"><td colspan="9" style="padding:0;background:var(--color-surface,#fafafa)">'
+        +'<table class="ing-det-tbl"><thead><tr style="background:var(--color-surface-offset,#eee)">'
+        +'<td style="font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Línea</td>'
+        +'<td style="font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Categoría</td>'
+        +'<td style="font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Producto</td>'
+        +'<td style="font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af);text-align:right">P.V.P.</td>'
+        +'<td style="font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af);text-align:right">Desc.</td>'
+        +'<td style="font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af);text-align:right">Cant.</td>'
+        +'<td style="font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af);text-align:right">Subtotal</td>'
+        +'<td style="font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Ciclo</td>'
+        +'</tr></thead><tbody>');
+      op.items.forEach(function(r,idx){
+        h.push('<tr>'
+          +'<td style="text-align:center;font-weight:600">'+(r.linea||idx+1)+'</td>'
+          +'<td>'+(r.categoria||'—')+'</td>'
+          +'<td style="color:var(--text-primary,#374151);font-weight:500">'+(r.producto||'—')+'</td>'
+          +'<td style="text-align:right">'+fC(r.pvp)+'</td>'
+          +'<td style="text-align:right">'+(r.descuento?r.descuento+'%':'—')+'</td>'
+          +'<td style="text-align:right">'+(r.cantidad||1)+'</td>'
+          +'<td style="text-align:right;font-weight:600">'+fC(r.totalPagar)+'</td>'
+          +'<td style="font-size:10px">'+(r.ciclo||'—')+'</td>'
+          +'</tr>');
+      });
+      h.push('</tbody></table></td></tr>');
     });
   } else {
     h.push('<tr><td colspan="9" style="text-align:center;padding:2rem;color:var(--text-secondary,#9ca3af)">Sin registros con los filtros seleccionados</td></tr>');
@@ -1930,7 +1989,7 @@ function _renderIngresosERP() {
   h.push('</tbody></table></div>');
   // Paginación
   h.push('<div class="ing-pag">'
-    +'<span>'+filtered.length+' registros</span>'
+    +'<span>'+totalOps+' operaciones · '+filtered.length+' líneas</span>'
     +'<div style="display:flex;gap:6px">'
     +'<button class="ing-pag-btn" onclick="_ingSetPage('+(_ingPage-1)+')"'+(_ingPage<=1?' disabled':'')+'>← Anterior</button>'
     +'<button class="ing-pag-btn" onclick="_ingSetPage('+(_ingPage+1)+')"'+(_ingPage>=totalPages?' disabled':'')+'>Siguiente →</button>'
@@ -3040,13 +3099,17 @@ function _ingCollectPayload() {
     var pvp = parseFloat(pvpEl.value) || 0;
     if (pvp === 0) continue;
     var prodSel = document.getElementById('ing-prod-'+i);
+    var lineCat = (document.getElementById('ing-cat-'+i)||{}).value || '';
+    var lineCiclo = _ING_CAT_TO_CICLO[lineCat.toLowerCase()] || '';
+    if (!lineCiclo) { for (var ci=0;ci<ING_CICLOS.length;ci++){if(ING_CICLOS[ci].toLowerCase()===lineCat.toLowerCase()){lineCiclo=ING_CICLOS[ci];break;}} }
     lineas.push({
-      categoria:  (document.getElementById('ing-cat-'+i)||{}).value || '',
+      categoria:  lineCat,
       producto:   prodSel ? prodSel.value : '',
       pvp:        pvp,
       descuento:  parseFloat((document.getElementById('ing-desc-'+i)||{}).value) || 0,
       cantidad:   parseFloat((document.getElementById('ing-cant-'+i)||{}).value) || 1,
-      pagado:     0
+      pagado:     0,
+      ciclo:      lineCiclo
     });
   }
   if (!lineas.length) { alert('Agrega al menos un producto con precio'); return null; }
