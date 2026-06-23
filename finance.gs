@@ -523,6 +523,12 @@ function doPost(e) {
     if (body.action === 'updateProductoID') {
       return jsonResponse(updateProductoID(body.productoIdViejo, body.productoIdNuevo, body.usuario));
     }
+    if (body.action === 'saveEgreso') {
+      return jsonResponse(saveEgreso(body));
+    }
+    if (body.action === 'updateEgresoField') {
+      return jsonResponse(updateEgresoField(body));
+    }
     if (body.action === 'updateIngreso') {
       return jsonResponse(updateIngreso(body));
     }
@@ -897,6 +903,260 @@ var INGRESOS_SS_2025 = '17gNzXavMbQ8DhFEIxCqzCJ6z-wTZgIwL4ibEDyVKE2w';
 var INGRESOS_SS_2024 = '1Zx4QWulAgrrVBeI8nfTR10EiYL-l3crJsaZSYDbWSug';
 var PRODUCTOS_SS_ID = '1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY';
 var PACIENTES_SS_ID = '1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio';
+
+/* ══════════════════════════════════════════════════════════════
+   EGRESOS — lectura y captura de gastos/costos
+   ══════════════════════════════════════════════════════════════ */
+var EGRESOS_SS_2026 = '1iRjpYtkcqx-3NRwlVK-UYx09I0gVyiTDRtIA9X9RAQw';
+var EGRESOS_SS_2025 = '18Wf4tD6CYBMTGVLPkEw_5YOtJncOAAeCyfeKMe--M1g';
+var EGRESOS_SS_2024 = '18DOfh1CvMyY3ZntjXGEqw6mjzhhBYZkatygxvnck2Is';
+var EGRESOS_TABS = { 2026:'Egresos2026', 2025:'Egresos2025', 2024:'Egresos2024' };
+var EGRESOS_IDS  = { 2026:EGRESOS_SS_2026, 2025:EGRESOS_SS_2025, 2024:EGRESOS_SS_2024 };
+
+function readEgresosData(anio) {
+  try {
+    anio = anio || new Date().getFullYear();
+    var ssId = EGRESOS_IDS[anio] || EGRESOS_SS_2026;
+    var tabName = EGRESOS_TABS[anio] || 'Egresos' + anio;
+    var ss = SpreadsheetApp.openById(ssId);
+    var sheet = null;
+    var sheets = ss.getSheets();
+    for (var i = 0; i < sheets.length; i++) {
+      if (sheets[i].getName() === tabName) { sheet = sheets[i]; break; }
+    }
+    if (!sheet) sheet = sheets[0];
+
+    var raw = sheet.getDataRange().getValues();
+    if (raw.length < 2) return {ok:true, view:'egresos', rows:[], totalRows:0, proveedores:[], subtipos:[], anio:anio};
+
+    // Detectar headers (fila 0)
+    var headers = raw[0].map(function(h){ return String(h).trim(); });
+    function col(name) {
+      var lc = name.toLowerCase();
+      for (var c = 0; c < headers.length; c++) { if (headers[c].toLowerCase().indexOf(lc) > -1) return c; }
+      return -1;
+    }
+    var iFecha=col('fecha'), iMes=col('mes'), iProveedor=col('proveedor'), iContable=col('contable'),
+        iTipo=col('tipo'), iSubtipo=col('subtipo'), iConcepto=col('concepto'), iEgresos=col('egresos'),
+        iNotas=col('notas'), iVenc=col('vencimiento'), iFact=col('facturación'), iPagado=col('pagado'),
+        iCont=col('contabilidad'), iPoliza=col('póliza')===-1?col('poliza'):col('póliza'),
+        iFPago=col('forma de pago'), iObs=col('observaciones'), iLinkFact=col('link factura'),
+        iLinkPago=col('link pago');
+
+    function num(v) { if (typeof v==='number') return v; var n=parseFloat(String(v||'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
+    function dt(v) { if(!v)return''; if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0'); return String(v); }
+    function bool(v) { return v===true||String(v).toUpperCase()==='TRUE'; }
+
+    var allRows = [];
+    var provSet = {}, subtipoSet = {}, contableSet = {}, fpSet = {};
+
+    for (var r = 1; r < raw.length; r++) {
+      var row = raw[r];
+      var proveedor = iProveedor>-1 ? String(row[iProveedor]||'').trim() : '';
+      var concepto  = iConcepto>-1 ? String(row[iConcepto]||'').trim() : '';
+      if (!proveedor && !concepto) continue; // skip empty/summary rows
+      var monto = iEgresos>-1 ? num(row[iEgresos]) : 0;
+
+      var fecha = iFecha>-1 ? dt(row[iFecha]) : '';
+      var subtipo = iSubtipo>-1 ? String(row[iSubtipo]||'').trim() : '';
+      var contable = iContable>-1 ? String(row[iContable]||'').trim() : '';
+      var tipo = iTipo>-1 ? String(row[iTipo]||'').trim() : '';
+      var fp = iFPago>-1 ? String(row[iFPago]||'').trim() : '';
+
+      if (proveedor) provSet[proveedor] = 1;
+      if (subtipo) subtipoSet[subtipo] = 1;
+      if (contable) contableSet[contable] = 1;
+      if (fp) fpSet[fp] = 1;
+
+      allRows.push({
+        _rowNum: r + 1,
+        fecha: fecha,
+        mes: iMes>-1 ? String(row[iMes]||'').trim() : '',
+        proveedor: proveedor,
+        contable: contable,
+        tipo: tipo,
+        subtipo: subtipo,
+        concepto: concepto,
+        monto: monto,
+        notas: iNotas>-1 ? String(row[iNotas]||'').trim() : '',
+        vencimiento: iVenc>-1 ? dt(row[iVenc]) : '',
+        facturacion: iFact>-1 ? bool(row[iFact]) : false,
+        pagado: iPagado>-1 ? bool(row[iPagado]) : false,
+        contabilidad: iCont>-1 ? bool(row[iCont]) : false,
+        poliza: iPoliza>-1 ? String(row[iPoliza]||'').trim() : '',
+        formaPago: fp,
+        observaciones: iObs>-1 ? String(row[iObs]||'').trim() : '',
+        linkFactura: iLinkFact>-1 ? String(row[iLinkFact]||'').trim() : '',
+        linkPago: iLinkPago>-1 ? String(row[iLinkPago]||'').trim() : ''
+      });
+    }
+
+    // KPIs
+    var totalEgresos=0, totalPagado=0, totalPendiente=0, countPagado=0;
+    var subtipoMap={}, mesMap={}, provMap={}, contMap={};
+    allRows.forEach(function(r) {
+      totalEgresos += r.monto;
+      if (r.pagado) { totalPagado += r.monto; countPagado++; }
+      else { totalPendiente += r.monto; }
+      var st = r.subtipo||'Sin subtipo';
+      if(!subtipoMap[st]) subtipoMap[st]={nombre:st,total:0,count:0}; subtipoMap[st].total+=r.monto; subtipoMap[st].count++;
+      var m = r.mes||'Sin mes';
+      if(!mesMap[m]) mesMap[m]={mes:m,total:0,count:0}; mesMap[m].total+=r.monto; mesMap[m].count++;
+      var p = r.proveedor||'Sin proveedor';
+      if(!provMap[p]) provMap[p]={nombre:p,total:0,count:0}; provMap[p].total+=r.monto; provMap[p].count++;
+      var c = r.contable||'Sin clasificar';
+      if(!contMap[c]) contMap[c]={nombre:c,total:0}; contMap[c].total+=r.monto;
+    });
+
+    function topArr(map,limit) {
+      var arr=[]; for(var k in map) arr.push(map[k]);
+      arr.sort(function(a,b){return b.total-a.total;});
+      arr.forEach(function(i){i.pct=totalEgresos>0?(i.total/totalEgresos)*100:0;});
+      return arr.slice(0,limit||10);
+    }
+
+    return {
+      ok:true, view:'egresos', anio:anio,
+      rows: allRows.reverse(), // más reciente primero
+      totalRows: allRows.length,
+      totalEgresos: totalEgresos,
+      totalPagado: totalPagado,
+      totalPendiente: totalPendiente,
+      promedioMensual: Object.keys(mesMap).length>0 ? totalEgresos/Object.keys(mesMap).length : 0,
+      topSubtipos: topArr(subtipoMap, 15),
+      topProveedores: topArr(provMap, 15),
+      distribucionContable: topArr(contMap, 5),
+      resumenMensual: topArr(mesMap, 12),
+      proveedores: Object.keys(provSet).sort(),
+      subtipos: Object.keys(subtipoSet).sort(),
+      contables: Object.keys(contableSet).sort(),
+      formasPago: Object.keys(fpSet).sort()
+    };
+  } catch(ex) {
+    return {ok:false, error:ex.message, rows:[], totalRows:0};
+  }
+}
+
+function saveEgreso(payload) {
+  try {
+    var anio = payload.anio || new Date().getFullYear();
+    var ssId = EGRESOS_IDS[anio] || EGRESOS_SS_2026;
+    var tabName = EGRESOS_TABS[anio] || 'Egresos' + anio;
+    var ss = SpreadsheetApp.openById(ssId);
+    var sheet = null;
+    var sheets = ss.getSheets();
+    for (var i = 0; i < sheets.length; i++) {
+      if (sheets[i].getName() === tabName) { sheet = sheets[i]; break; }
+    }
+    if (!sheet) return {ok:false, error:'Pestaña ' + tabName + ' no encontrada'};
+
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(function(h){return String(h).trim();});
+    function col(name) {
+      var lc = name.toLowerCase();
+      for (var c=0;c<headers.length;c++) { if(headers[c].toLowerCase().indexOf(lc)>-1) return c; }
+      return -1;
+    }
+
+    // Encontrar última fila con datos reales (no resúmenes)
+    var lastDataRow = sheet.getLastRow();
+
+    // Construir nueva fila basada en headers
+    var newRow = [];
+    for (var h = 0; h < headers.length; h++) newRow.push('');
+
+    var iFecha=col('fecha'), iMes=col('mes'), iProveedor=col('proveedor'),
+        iContable=col('contable'), iTipo=col('tipo'), iSubtipo=col('subtipo'),
+        iConcepto=col('concepto'), iEgresos=col('egresos'), iNotas=col('notas'),
+        iVenc=col('vencimiento'), iFact=col('facturación')===-1?col('facturacion'):col('facturación'),
+        iPagado=col('pagado'), iCont=col('contabilidad'),
+        iPoliza=col('póliza')===-1?col('poliza'):col('póliza'),
+        iFPago=col('forma de pago'), iObs=col('observaciones'),
+        iLinkFact=col('link factura'), iLinkPago=col('link pago');
+
+    // Número de fila (#) en columna 0
+    var iNum = -1;
+    if (headers[0] && /^\d|#/i.test(headers[0])) iNum = 0;
+
+    if (iNum>-1) newRow[iNum] = lastDataRow; // auto-número
+    if (iFecha>-1) newRow[iFecha] = payload.fecha || '';
+    if (iMes>-1) {
+      var fd = new Date(payload.fecha);
+      var meses = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      newRow[iMes] = isNaN(fd)?'':(meses[fd.getMonth()]+'-'+String(fd.getFullYear()).slice(-2));
+    }
+    if (iProveedor>-1) newRow[iProveedor] = payload.proveedor || '';
+    if (iContable>-1) newRow[iContable] = payload.contable || '';
+    if (iTipo>-1) newRow[iTipo] = payload.tipo || '';
+    if (iSubtipo>-1) newRow[iSubtipo] = payload.subtipo || '';
+    if (iConcepto>-1) newRow[iConcepto] = payload.concepto || '';
+    if (iEgresos>-1) newRow[iEgresos] = parseFloat(String(payload.monto||'').replace(/[$,]/g,'')) || 0;
+    if (iNotas>-1) newRow[iNotas] = payload.notas || '';
+    if (iVenc>-1) newRow[iVenc] = payload.vencimiento || '';
+    if (iFact>-1) newRow[iFact] = payload.facturacion === true || payload.facturacion === 'true';
+    if (iPagado>-1) newRow[iPagado] = payload.pagado === true || payload.pagado === 'true';
+    if (iCont>-1) newRow[iCont] = payload.contabilidad === true || payload.contabilidad === 'true';
+    if (iPoliza>-1) newRow[iPoliza] = payload.poliza || '';
+    if (iFPago>-1) newRow[iFPago] = payload.formaPago || '';
+    if (iObs>-1) newRow[iObs] = payload.observaciones || '';
+    if (iLinkFact>-1) newRow[iLinkFact] = payload.linkFactura || '';
+    if (iLinkPago>-1) newRow[iLinkPago] = payload.linkPago || '';
+
+    // Column 1 (status) = 2 (capturado)
+    if (headers.length > 3) {
+      var iCol1 = -1;
+      for (var ci=0;ci<headers.length;ci++) { if(/column|col\s*1|status/i.test(headers[ci])){iCol1=ci;break;} }
+      if (iCol1 > -1) newRow[iCol1] = 2;
+    }
+
+    sheet.appendRow(newRow);
+    var insertedRow = sheet.getLastRow();
+
+    return {ok:true, rowNum:insertedRow, monto:newRow[iEgresos]};
+  } catch(ex) {
+    return {ok:false, error:ex.message};
+  }
+}
+
+function updateEgresoField(payload) {
+  try {
+    var anio = payload.anio || new Date().getFullYear();
+    var ssId = EGRESOS_IDS[anio] || EGRESOS_SS_2026;
+    var tabName = EGRESOS_TABS[anio] || 'Egresos' + anio;
+    var ss = SpreadsheetApp.openById(ssId);
+    var sheet = null;
+    var sheets = ss.getSheets();
+    for (var i = 0; i < sheets.length; i++) {
+      if (sheets[i].getName() === tabName) { sheet = sheets[i]; break; }
+    }
+    if (!sheet) return {ok:false, error:'Pestaña no encontrada'};
+
+    var rowNum = parseInt(payload.rowNum);
+    if (!rowNum || rowNum < 2) return {ok:false, error:'Fila inválida'};
+
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(function(h){return String(h).trim().toLowerCase();});
+
+    // Actualizar campos específicos
+    var fields = payload.fields || {};
+    for (var key in fields) {
+      var lk = key.toLowerCase();
+      for (var c = 0; c < headers.length; c++) {
+        if (headers[c].indexOf(lk) > -1) {
+          sheet.getRange(rowNum, c + 1).setValue(fields[key]);
+          break;
+        }
+      }
+    }
+
+    try {
+      logAudit(payload.usuario || 'sistema', 'Egresos', 'Editar campo', 'Fila '+rowNum,
+        Object.keys(fields).join(', '), '', JSON.stringify(fields));
+    } catch(ae) {}
+
+    return {ok:true, rowNum:rowNum};
+  } catch(ex) {
+    return {ok:false, error:ex.message};
+  }
+}
 var PAC_COL_LISTA = 10; // columna J (1-indexed) = Lista de Precios
 
 function _readFromBDIngresos(sheet) {

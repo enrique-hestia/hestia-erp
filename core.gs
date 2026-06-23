@@ -274,6 +274,11 @@ function doGet(e) {
       return jsonResponse(readListas());
     }
 
+    if (action === 'egresos') {
+      var anioEg = (e && e.parameter.anio) || '';
+      return jsonResponse(readEgresosData(anioEg ? parseInt(anioEg) : undefined));
+    }
+
     if (action === 'listaPacientes') {
       return jsonResponse(listaPacientesAll());
     }
