@@ -274,6 +274,10 @@ function doGet(e) {
       return jsonResponse(readListas());
     }
 
+    if (action === 'listaPacientes') {
+      return jsonResponse(listaPacientesAll());
+    }
+
     if (action === 'pacienteLista') {
       var pacNombre = (e && e.parameter.paciente) || '';
       return jsonResponse(readPacienteLista(decodeURIComponent(pacNombre)));

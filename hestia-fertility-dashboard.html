@@ -2704,23 +2704,30 @@ async function ingOnPacienteChange() {
   } catch(e) { _ingPacienteLista = 'General'; }
 }
 
+var _ingPacientesDB = []; // cache de pacientes desde Registro de Pacientes
+
+async function ingLoadPacientes() {
+  if (_ingPacientesDB.length) return;
+  try {
+    var tok = encodeURIComponent(getToken());
+    var r = await fetch(APPS_SCRIPT_URL + '?action=listaPacientes&token=' + tok + '&_t=' + Date.now(), {redirect:'follow'});
+    var d = await r.json();
+    if (d.ok && d.pacientes) _ingPacientesDB = d.pacientes;
+  } catch(e) { console.warn('Error cargando pacientes:', e); }
+}
+
 async function ingOpenDrawer() {
   _ingLineCount = 0;
   var view = document.getElementById('ing-form-view');
   var content = document.getElementById('ing-form-content');
   if (!view || !content) return;
   view.style.display = 'block';
-  await ingLoadProductos();
+  await Promise.all([ingLoadProductos(), ingLoadPacientes()]);
 
   var today = new Date().toISOString().substring(0,10);
-  // Autocomplete pacientes
-  var pacs = [];
-  if (_ingData && _ingData.rows) {
-    var seen = {};
-    _ingData.rows.forEach(function(r){ if(r.paciente && !seen[r.paciente]){seen[r.paciente]=1;pacs.push(r.paciente);} });
-  }
+  // Autocomplete pacientes — desde Registro de Pacientes (base real)
   var dl = '<datalist id="ing-pac-list">';
-  pacs.slice(0,300).forEach(function(p){ dl += '<option value="'+p.replace(/"/g,'&quot;')+'">'; });
+  _ingPacientesDB.forEach(function(p){ dl += '<option value="'+p.nombre.replace(/"/g,'&quot;')+'" data-lista="'+(p.lista||'General')+'">'; });
   dl += '</datalist>';
 
   function selOpts(arr,sel){return arr.map(function(v){return '<option value="'+v+'"'+(v===sel?' selected':'')+'>'+v+'</option>';}).join('');}
