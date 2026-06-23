@@ -2634,17 +2634,20 @@ function ingOnCatChange(lineNum) {
   var pvpEl = document.getElementById('ing-pvp-'+lineNum);
   if (!catEl || !prodEl) return;
   var cat = catEl.value;
-  var prods = ingGetProductosByCat(cat);
-  var h = '<option value="">— Seleccionar producto —</option>';
-  prods.forEach(function(p){
-    // Usar precio de la lista del paciente, fallback a General, luego a precio default
-    var precio = (p.precios && p.precios[_ingPacienteLista]) ? p.precios[_ingPacienteLista]
-               : (p.precios && p.precios['General']) ? p.precios['General']
-               : p.precio || 0;
-    var label = (p.sku?'['+p.sku+'] ':'')+p.descripcion+(precio?' — $'+precio.toLocaleString('en-US'):'');
-    h += '<option value="'+p.descripcion.replace(/"/g,'&quot;')+'" data-precio="'+precio+'" data-sku="'+(p.sku||'')+'" data-cat="'+(p.categoria||'').replace(/"/g,'&quot;')+'" data-tipo="'+(p.tipo||'').replace(/"/g,'&quot;')+'">'+label+'</option>';
-  });
-  prodEl.innerHTML = h;
+  var prods = cat ? ingGetProductosByCat(cat) : _ingProductos.filter(function(p){ return p.activo !== false; });
+  var dlEl = document.getElementById('ing-prodlist-'+lineNum);
+  if (dlEl) {
+    var h = '';
+    prods.forEach(function(p){
+      var precio = (p.precios && p.precios[_ingPacienteLista]) ? p.precios[_ingPacienteLista]
+                 : (p.precios && p.precios['General']) ? p.precios['General']
+                 : p.precio || 0;
+      var label = (p.sku?'['+p.sku+'] ':'')+p.descripcion+' — '+p.categoria+(precio?' — $'+precio.toLocaleString('en-US'):'');
+      h += '<option value="'+p.descripcion.replace(/"/g,'&quot;')+'" data-precio="'+precio+'">';
+    });
+    dlEl.innerHTML = h;
+  }
+  prodEl.value = '';
   if (pvpEl) pvpEl.value = '';
   ingCalcTotal();
 }
@@ -2695,8 +2698,10 @@ async function ingOnPacienteChange() {
     if (d.ok && d.lista) {
       _ingPacienteLista = d.lista;
       if (listaLabel) listaLabel.textContent = 'Lista: '+d.lista;
-      // Refrescar dropdowns de productos con nueva lista
+      // Refrescar datalists de productos con precios de la nueva lista
       for (var i=1;i<=_ingLineCount;i++) {
+        var dlEl = document.getElementById('ing-prodlist-'+i);
+        if (dlEl) dlEl.innerHTML = _ingBuildProdDatalist(i);
         var catEl = document.getElementById('ing-cat-'+i);
         if (catEl && catEl.value) ingOnCatChange(i);
       }
@@ -2830,6 +2835,52 @@ function ingCloseDrawer() {
   if (view) view.style.display = 'none';
 }
 
+function _ingBuildProdDatalist(lineNum) {
+  var prods = _ingProductos.filter(function(p){ return p.activo !== false; });
+  var h = '';
+  prods.forEach(function(p){
+    var precio = (p.precios && p.precios[_ingPacienteLista]) ? p.precios[_ingPacienteLista]
+               : (p.precios && p.precios['General']) ? p.precios['General']
+               : p.precio || 0;
+    var label = (p.sku?'['+p.sku+'] ':'')+p.descripcion+' — '+p.categoria+(precio?' — $'+precio.toLocaleString('en-US'):'');
+    h += '<option value="'+p.descripcion.replace(/"/g,'&quot;')+'" data-precio="'+precio+'" data-cat="'+(p.categoria||'')+'" data-tipo="'+(p.tipo||'')+'" data-sku="'+(p.sku||'')+'">';
+  });
+  return h;
+}
+
+function ingOnProdSearch(lineNum) {
+  var inp = document.getElementById('ing-prod-'+lineNum);
+  if (!inp) return;
+  var val = inp.value.trim();
+  if (!val) return;
+  var found = _ingProductos.find(function(p){ return p.descripcion === val; });
+  if (!found) return;
+  var precio = (found.precios && found.precios[_ingPacienteLista]) ? found.precios[_ingPacienteLista]
+             : (found.precios && found.precios['General']) ? found.precios['General']
+             : found.precio || 0;
+  // Auto-llenar categoría
+  var catEl = document.getElementById('ing-cat-'+lineNum);
+  if (catEl && found.categoria) {
+    catEl.value = found.categoria;
+    if (!catEl.value) {
+      catEl.innerHTML += '<option value="'+found.categoria+'">'+found.categoria+'</option>';
+      catEl.value = found.categoria;
+    }
+  }
+  // Auto-llenar PVP
+  var pvpEl = document.getElementById('ing-pvp-'+lineNum);
+  if (pvpEl) pvpEl.value = precio;
+  // Auto-llenar Ciclo
+  var cicloEl = document.getElementById('ing-ciclo');
+  if (cicloEl && found.categoria) {
+    var cat = found.categoria.toLowerCase();
+    var mapped = _ING_CAT_TO_CICLO[cat];
+    if (!mapped) { for (var c=0;c<ING_CICLOS.length;c++){if(ING_CICLOS[c].toLowerCase()===cat){mapped=ING_CICLOS[c];break;}} }
+    if (mapped) cicloEl.value = mapped;
+  }
+  ingCalcTotal();
+}
+
 function ingAddLine() {
   _ingLineCount++;
   var n = _ingLineCount;
@@ -2837,11 +2888,13 @@ function ingAddLine() {
   if (!el) return;
   var IS = 'width:100%;box-sizing:border-box;padding:6px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)';
   var catOpts = ING_CATEGORIAS.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join('');
+  var dlId = 'ing-prodlist-'+n;
   var div = document.createElement('div');
   div.id = 'ing-line-'+n;
   div.style.cssText = 'display:grid;grid-template-columns:170px 1fr 100px 80px 60px 110px 30px;gap:8px;padding:8px 4px;align-items:center;border-bottom:1px solid var(--color-divider,#f0f0f0)';
   div.innerHTML = '<select id="ing-cat-'+n+'" style="'+IS+'" onchange="ingOnCatChange('+n+')"><option value="">— Categoría —</option>'+catOpts+'</select>'
-    +'<select id="ing-prod-'+n+'" style="'+IS+'" onchange="ingOnProdChange('+n+')"><option value="">— Producto —</option></select>'
+    +'<div style="position:relative"><input id="ing-prod-'+n+'" list="'+dlId+'" style="'+IS+'" placeholder="Buscar producto…" onchange="ingOnProdSearch('+n+')" oninput="ingOnProdSearch('+n+')">'
+    +'<datalist id="'+dlId+'">'+_ingBuildProdDatalist(n)+'</datalist></div>'
     +'<input type="number" id="ing-pvp-'+n+'" style="text-align:right;'+IS+'" placeholder="0.00" step="0.01" oninput="ingCalcTotal()">'
     +'<input type="number" id="ing-desc-'+n+'" style="text-align:right;'+IS+'" placeholder="0" step="1" min="0" max="100" oninput="ingCalcTotal()">'
     +'<input type="number" id="ing-cant-'+n+'" style="text-align:center;'+IS+'" value="1" min="1" oninput="ingCalcTotal()">'
