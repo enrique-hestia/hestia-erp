@@ -2686,6 +2686,24 @@ function ingOnProdChange(lineNum) {
 // ── Lista de precios por paciente ──
 var _ingPacienteLista = 'General';
 
+var _ingPacienteCallback = null; // se activa al guardar paciente desde ingreso
+
+function ingNuevoPaciente() {
+  _ingPacienteCallback = function(nombre) {
+    var pacEl = document.getElementById('ing-paciente');
+    if (pacEl && nombre) {
+      pacEl.value = nombre;
+      // Agregar al datalist local
+      var dl = document.getElementById('ing-pac-list');
+      if (dl) { var o = document.createElement('option'); o.value = nombre; dl.appendChild(o); }
+      // Refrescar caché y obtener lista del paciente
+      _ingPacientesDB.push({ nombre: nombre, lista: 'General' });
+      ingOnPacienteChange();
+    }
+  };
+  openModal('cap-pacientes');
+}
+
 async function ingOnPacienteChange() {
   var pacEl = document.getElementById('ing-paciente');
   if (!pacEl || !pacEl.value.trim()) return;
@@ -2756,7 +2774,11 @@ async function ingOpenDrawer() {
   h += '<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:14px;display:flex;align-items:center;gap:8px">'
     +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Datos del paciente</div>';
   h += '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:14px">'
-    +'<div><label '+LBL+'>Paciente *</label><input id="ing-paciente" list="ing-pac-list" '+S+' placeholder="Nombre completo del paciente" onchange="ingOnPacienteChange()">'
+    +'<div><label '+LBL+'>Paciente *</label>'
+    +'<div style="display:flex;gap:6px;align-items:center">'
+    +'<input id="ing-paciente" list="ing-pac-list" '+S+' placeholder="Nombre completo del paciente" onchange="ingOnPacienteChange()" style="flex:1;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
+    +'<button onclick="ingNuevoPaciente()" type="button" title="Registrar nuevo paciente" style="width:34px;height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:18px;font-weight:700;line-height:1">+</button>'
+    +'</div>'
     +'<div id="ing-lista-label" style="font-size:10px;font-weight:600;color:#0369a1;margin-top:3px">Lista: General</div></div>'
     +'<div><label '+LBL+'>Fecha *</label><input type="date" id="ing-fecha" '+S+' value="'+today+'"></div>'
     +'<div><label '+LBL+'>Ciclo Alta/Baja</label><select id="ing-ciclo" '+S+'><option value="">— Seleccionar —</option>'+selOpts(ING_CICLOS)+'</select></div>'
@@ -8289,6 +8311,19 @@ function submitCaptura(tipo) {
     .then(function(res) {
       if (res.success) {
         showModalMsg(cfg.msgEl, 'ok', '✓ Registro guardado en Google Sheets.');
+        // Si se guardó un paciente desde el formulario de ingreso, inyectar nombre
+        if (tipo === 'cap-pacientes' && typeof _ingPacienteCallback === 'function') {
+          var nombreGuardado = (document.getElementById('pac-f-nombre') || {}).value || '';
+          var cb = _ingPacienteCallback;
+          _ingPacienteCallback = null;
+          cfg.fields.forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el && el.tagName === 'SELECT') el.selectedIndex = 0;
+            else if (el) el.value = '';
+          });
+          setTimeout(function() { closeModal(tipo); cb(nombreGuardado.trim()); }, 800);
+          return;
+        }
         // Limpiar campos (excepto periodo)
         cfg.fields.forEach(function(id) {
           var el = document.getElementById(id);
