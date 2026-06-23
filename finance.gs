@@ -1258,24 +1258,56 @@ function updateEgresoField(payload) {
     var rowNum = parseInt(payload.rowNum);
     if (!rowNum || rowNum < 2) return {ok:false, error:'Fila inválida'};
 
-    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(function(h){return String(h).trim().toLowerCase();});
+    var headersRaw = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var headers = headersRaw.map(function(h){return String(h).trim().toLowerCase();});
 
-    // Actualizar campos específicos
-    var fields = payload.fields || {};
-    for (var key in fields) {
-      var lk = key.toLowerCase();
-      for (var c = 0; c < headers.length; c++) {
-        if (headers[c].indexOf(lk) > -1) {
-          sheet.getRange(rowNum, c + 1).setValue(fields[key]);
-          break;
-        }
+    function findCol(name) {
+      var lc = name.toLowerCase().replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i').replace(/[óòö]/g,'o').replace(/[úùü]/g,'u');
+      for (var c=0;c<headers.length;c++) {
+        var hc = headers[c].replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i').replace(/[óòö]/g,'o').replace(/[úùü]/g,'u');
+        if (hc.indexOf(lc)>-1) return c;
       }
+      return -1;
     }
 
-    try {
-      logAudit(payload.usuario || 'sistema', 'Egresos', 'Editar campo', 'Fila '+rowNum,
-        Object.keys(fields).join(', '), '', JSON.stringify(fields));
-    } catch(ae) {}
+    // Modo 1: edición completa desde formulario (tiene payload.fecha, payload.proveedor, etc.)
+    if (payload.fecha && payload.proveedor) {
+      var colMap = {
+        'fecha':payload.fecha, 'proveedor':payload.proveedor, 'contable':payload.contable,
+        'tipo':payload.tipo, 'subtipo':payload.subtipo, 'concepto':payload.concepto,
+        'egresos':parseFloat(String(payload.monto||'').replace(/[$,]/g,''))||0,
+        'notas':payload.notas||'', 'vencimiento':payload.vencimiento||'',
+        'facturacion':payload.facturacion===true||payload.facturacion==='true',
+        'pagado':payload.pagado===true||payload.pagado==='true',
+        'contabilidad':payload.contabilidad===true||payload.contabilidad==='true',
+        'poliza':payload.poliza||'', 'forma de pago':payload.formaPago||'',
+        'observaciones':payload.observaciones||''
+      };
+      // Actualizar mes automáticamente
+      var fd = new Date(payload.fecha);
+      var meses = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      var iMes = findCol('mes');
+      if (iMes>-1 && !isNaN(fd)) sheet.getRange(rowNum, iMes+1).setValue(meses[fd.getMonth()]+'-'+String(fd.getFullYear()).slice(-2));
+
+      for (var field in colMap) {
+        var ci = findCol(field);
+        if (ci > -1) sheet.getRange(rowNum, ci+1).setValue(colMap[field]);
+      }
+
+      try {
+        logAudit(payload.usuario||'sistema', 'Egresos', 'Editar completo', 'Fila '+rowNum,
+          payload.proveedor+' · '+payload.concepto, '', '$'+(colMap.egresos||0));
+      } catch(ae){}
+
+      return {ok:true, rowNum:rowNum, edited:true};
+    }
+
+    // Modo 2: campos individuales (checkboxes inline)
+    var fields = payload.fields || {};
+    for (var key in fields) {
+      var ci2 = findCol(key);
+      if (ci2 > -1) sheet.getRange(rowNum, ci2+1).setValue(fields[key]);
+    }
 
     return {ok:true, rowNum:rowNum};
   } catch(ex) {

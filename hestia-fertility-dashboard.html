@@ -3510,6 +3510,7 @@ function _renderEgresosERP() {
     +'<div style="overflow-x:auto;max-height:65vh;overflow-y:auto">'
     +'<table class="eg-tbl"><thead><tr>'
     +'<th>Fecha</th><th>Proveedor</th><th>Concepto</th><th>Subtipo</th><th style="text-align:right">Monto</th><th>F. Pago</th><th style="text-align:center">Fact</th><th style="text-align:center">Pag</th><th style="text-align:center">Cont</th><th style="text-align:center">Docs</th>'
+    +(hasPermission('editar_egresos')?'<th style="width:50px"></th>':'')
     +'</tr></thead><tbody>');
 
   if (pageRows.length) {
@@ -3533,10 +3534,12 @@ function _renderEgresosERP() {
         +'<td style="text-align:center"><input type="checkbox" class="eg-chk"'+(r.pagado?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'pagado\',this.checked)"'+(r.linkPagoUrl?' title="Pago adjunto"':'')+'></td>'
         +'<td style="text-align:center"><input type="checkbox" class="eg-chk"'+(r.contabilidad?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'contabilidad\',this.checked)"></td>'
         +'<td style="text-align:center;white-space:nowrap">'+factIcon+' '+pagoIcon+'</td>'
+        +(hasPermission('editar_egresos')?'<td style="text-align:center"><button class="btn-edit-row" onclick="egEditRow('+r._rowNum+')">✎</button></td>':'')
         +'</tr>');
     });
   } else {
-    h.push('<tr><td colspan="10" style="text-align:center;padding:2rem;color:var(--text-secondary,#9ca3af)">Sin registros con los filtros seleccionados</td></tr>');
+    var egColSpan = hasPermission('editar_egresos') ? 11 : 10;
+    h.push('<tr><td colspan="'+egColSpan+'" style="text-align:center;padding:2rem;color:var(--text-secondary,#9ca3af)">Sin registros con los filtros seleccionados</td></tr>');
   }
   h.push('</tbody></table></div>');
   h.push('<div class="eg-pag"><span>'+filtered.length+' registros</span><div style="display:flex;gap:6px">'
@@ -3688,7 +3691,42 @@ async function egToggleField(rowNum, field, value) {
   } catch(e) { console.warn('Error actualizando campo:', e); }
 }
 
+var _egEditRowNum = null;
+
+function egEditRow(rowNum) {
+  if (!hasPermission('editar_egresos')) { alert('No tienes permisos para editar egresos.'); return; }
+  if (!_egData || !_egData.rows) return;
+  var row = _egData.rows.find(function(r){ return r._rowNum === rowNum; });
+  if (!row) { alert('Registro no encontrado'); return; }
+
+  _egEditRowNum = rowNum;
+  egOpenForm();
+
+  // Pre-llenar campos
+  setTimeout(function() {
+    var fields = {
+      'eg-fecha': (row.fecha||'').substring(0,10), 'eg-proveedor': row.proveedor,
+      'eg-monto': row.monto, 'eg-concepto': row.concepto,
+      'eg-contable': row.contable, 'eg-tipo': row.tipo, 'eg-subtipo': row.subtipo,
+      'eg-fpago': row.formaPago, 'eg-venc': (row.vencimiento||'').substring(0,10),
+      'eg-poliza': row.poliza, 'eg-notas': row.notas, 'eg-obs': row.observaciones
+    };
+    for (var id in fields) {
+      var el = document.getElementById(id);
+      if (el && fields[id] != null) el.value = fields[id];
+    }
+    var chks = {'eg-chk-fact': row.facturacion, 'eg-chk-pag': row.pagado, 'eg-chk-cont': row.contabilidad};
+    for (var cid in chks) { var ce = document.getElementById(cid); if (ce) ce.checked = !!chks[cid]; }
+
+    var titleEl = document.querySelector('#eg-form-content h1');
+    if (titleEl) titleEl.textContent = 'Editar egreso · Fila ' + rowNum;
+    var saveBtn = document.getElementById('eg-save-btn');
+    if (saveBtn) saveBtn.textContent = 'Actualizar egreso';
+  }, 50);
+}
+
 function egOpenForm() {
+  if (!_egEditRowNum) _egEditRowNum = null;
   var view = document.getElementById('eg-form-view');
   var content = document.getElementById('eg-form-content');
   if (!view || !content) return;
@@ -3750,6 +3788,7 @@ function egOpenForm() {
 function egCloseForm() {
   var view = document.getElementById('eg-form-view');
   if (view) view.style.display = 'none';
+  _egEditRowNum = null;
 }
 
 async function egSubmit() {
@@ -3762,8 +3801,10 @@ async function egSubmit() {
   var btn = document.getElementById('eg-save-btn');
   if (btn) { btn.disabled=true; btn.textContent='Guardando…'; }
 
+  var isEdit = !!_egEditRowNum;
   var payload = {
-    action:'saveEgreso',
+    action: isEdit ? 'updateEgresoField' : 'saveEgreso',
+    rowNum: isEdit ? _egEditRowNum : undefined,
     fecha:fecha, proveedor:proveedor, monto:monto, concepto:concepto,
     contable: (document.getElementById('eg-contable')||{}).value||'Gasto',
     tipo: (document.getElementById('eg-tipo')||{}).value||'Variable',
@@ -3782,17 +3823,19 @@ async function egSubmit() {
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(payload)});
     var res = await r.json();
     if (res.ok) {
-      // Auto-registrar en banco si aplica
-      var fp = payload.formaPago;
-      var amt = parseFloat(monto)||0;
-      var obs = payload.concepto + ' · ' + payload.proveedor;
-      var mesStr = fecha.substring(0,7);
-      var banco='', bankRow=null;
-      if (fp==='Santander') { banco='santander'; bankRow=[fecha,0,amt,0,obs,0,0,'','']; }
-      else if (fp==='AMEX') { banco='amex'; bankRow=[fecha,amt,0,obs,0,0,'','',mesStr]; }
-      else if (fp==='Mercado Pago') { banco='mercadopago'; bankRow=[mesStr,fecha,0,0,0,0,0,false,obs,'pago']; }
-      if (banco && bankRow) {
-        try { await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveBankRow',banco:banco,row:bankRow})}); } catch(be){}
+      // Auto-registrar en banco solo para egresos NUEVOS (no ediciones)
+      if (!isEdit) {
+        var fp = payload.formaPago;
+        var amt = parseFloat(monto)||0;
+        var obs = payload.concepto + ' · ' + payload.proveedor;
+        var mesStr = fecha.substring(0,7);
+        var banco='', bankRow=null;
+        if (fp==='Santander') { banco='santander'; bankRow=[fecha,0,amt,0,obs,0,0,'','']; }
+        else if (fp==='AMEX') { banco='amex'; bankRow=[fecha,amt,0,obs,0,0,'','',mesStr]; }
+        else if (fp==='Mercado Pago') { banco='mercadopago'; bankRow=[mesStr,fecha,0,0,0,0,0,false,obs,'pago']; }
+        if (banco && bankRow) {
+          try { await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveBankRow',banco:banco,row:bankRow})}); } catch(be){}
+        }
       }
       egCloseForm();
       loadEgresosERP();
@@ -7896,7 +7939,7 @@ var ROLE_PERMS_DEFAULT = {
   admin:    ['*'],
   director: ['*'],
   gerente:  ['bank_create','bank_edit','bank_delete','bank_capture','bank_liberado',
-             'sheets_access','cf_capture','export_data','editar_ingresos'],
+             'sheets_access','cf_capture','export_data','editar_ingresos','editar_egresos'],
   operador: ['bank_capture','bank_edit','bank_liberado','cf_capture'],
   captura:  ['bank_capture','cf_capture'],
   viewer:   []
