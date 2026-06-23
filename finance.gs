@@ -1006,16 +1006,16 @@ function readIngresosData() {
   try {
     var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
 
-    // Intentar leer de BD_Ingresos primero
+    // Leer siempre de BD_Ingresos (fuente única)
     var bdSheet = null;
     var allSheets = ss.getSheets();
     for (var bi = 0; bi < allSheets.length; bi++) {
       if (allSheets[bi].getName() === BD_INGRESOS_TAB) { bdSheet = allSheets[bi]; break; }
     }
-    if (bdSheet && bdSheet.getLastRow() > 1) {
+    if (bdSheet) {
       return _readFromBDIngresos(bdSheet);
     }
-    // Fallback: leer de pestañas mensuales
+    // Fallback: leer de pestañas mensuales si BD_Ingresos no existe
     var MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
                  'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
     var tz = Session.getScriptTimeZone();
