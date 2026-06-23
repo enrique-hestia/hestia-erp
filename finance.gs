@@ -523,6 +523,9 @@ function doPost(e) {
     if (body.action === 'updateProductoID') {
       return jsonResponse(updateProductoID(body.productoIdViejo, body.productoIdNuevo, body.usuario));
     }
+    if (body.action === 'updateCajaChica') {
+      return jsonResponse(updateCajaChicaRow(body));
+    }
     return jsonResponse({error:'Accion desconocida: ' + body.action});
   } catch(ex) { return jsonResponse({error: ex.message}); }
 }

@@ -281,6 +281,30 @@ function insertCajaChicaRow(e) {
   }
 }
 
+function updateCajaChicaRow(body) {
+  try {
+    var sh      = getCajaChicaSheet();
+    var rowNum  = parseInt(body.rowNum);
+    if (!rowNum || rowNum < 2) return { error: 'Número de fila inválido.' };
+    var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function(h){ return String(h).trim().toUpperCase(); });
+    var iFecha    = headers.indexOf('FECHA');
+    var iConcepto = headers.indexOf('CONCEPTO');
+    var iSalida   = headers.indexOf('SALIDA');
+    var iEntrada  = headers.indexOf('ENTRADA');
+    var iTotal    = headers.indexOf('TOTAL');
+
+    if (body.fecha)    sh.getRange(rowNum, iFecha + 1).setValue(body.fecha);
+    if (body.concepto) sh.getRange(rowNum, iConcepto + 1).setValue(body.concepto);
+    sh.getRange(rowNum, iSalida + 1).setValue(parseFloat(body.salida) || 0);
+    sh.getRange(rowNum, iEntrada + 1).setValue(parseFloat(body.entrada) || 0);
+    SpreadsheetApp.flush();
+    var nuevoTotal = sh.getRange(rowNum, iTotal + 1).getValue();
+    return { ok: true, rowNum: rowNum, saldoFinal: Number(nuevoTotal) || 0 };
+  } catch(ex) {
+    return { error: ex.message };
+  }
+}
+
 function getCapturaId(nombreHoja) {
   if (CAPTURA_SHEETS[nombreHoja]) return CAPTURA_SHEETS[nombreHoja];
   // Búsqueda tolerante a tildes

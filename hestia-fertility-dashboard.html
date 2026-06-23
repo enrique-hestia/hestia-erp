@@ -786,7 +786,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
         style="width:100%;max-width:320px;padding:7px 12px;border:1px solid var(--color-border);border-radius:var(--radius-full);font-size:var(--text-sm);background:var(--color-surface);color:var(--color-text)">
     </div>
     <div class="cap-table-wrap"><table class="services-table">
-      <thead><tr><th>Fecha</th><th>Concepto</th><th>Salida</th><th>Entrada</th><th>Saldo</th></tr></thead>
+      <thead><tr><th>Fecha</th><th>Concepto</th><th>Salida</th><th>Entrada</th><th>Saldo</th><th style="width:80px"></th></tr></thead>
       <tbody id="cc-tbody"></tbody>
     </table></div>
   </div>
@@ -8001,7 +8001,7 @@ function renderCajaChicaRows(rows) {
   if (subEl) subEl.textContent = rows.length + ' movimiento' + (rows.length === 1 ? '' : 's');
   var tbody = document.getElementById('cc-tbody');
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--color-text-muted)">Sin movimientos registrados.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--color-text-muted)">Sin movimientos registrados.</td></tr>';
     return;
   }
   tbody.innerHTML = rows.map(function(m) {
@@ -8009,7 +8009,10 @@ function renderCajaChicaRows(rows) {
     var entradaTxt = m.entrada ? ('<span style="color:#2d6a3f">+' + fmtMXN(m.entrada) + '</span>') : '—';
     var fechaTxt    = m.esRemanente ? '—' : (m.fecha||'').replace(/\//g,'-');
     var conceptoTxt = m.esRemanente ? ('<em>' + m.concepto + '</em>') : m.concepto;
-    return '<tr><td>' + fechaTxt + '</td><td>' + conceptoTxt + '</td><td>' + salidaTxt + '</td><td>' + entradaTxt + '</td><td><strong>' + fmtMXN(m.total) + '</strong></td></tr>';
+    var editBtn = m.esRemanente ? '' : '<button class="btn-edit-row" onclick=\'editCajaChica('
+      + JSON.stringify({rowNum:m._rowNum,fecha:m.fecha,concepto:m.concepto,salida:m.salida,entrada:m.entrada}).replace(/'/g,'&#39;')
+      + ')\'>✎ Editar</button>';
+    return '<tr><td>' + fechaTxt + '</td><td>' + conceptoTxt + '</td><td>' + salidaTxt + '</td><td>' + entradaTxt + '</td><td><strong>' + fmtMXN(m.total) + '</strong></td><td>' + editBtn + '</td></tr>';
   }).join('');
 }
 
@@ -8062,7 +8065,10 @@ function exportCajaChicaCSV() {
   URL.revokeObjectURL(url);
 }
 
+var _ccEditRowNum = null; // null = nuevo, número = editando fila existente
+
 function openCajaChicaModal() {
+  _ccEditRowNum = null;
   document.getElementById('cc-f-fecha').value    = new Date().toISOString().split('T')[0];
   document.getElementById('cc-f-tipo').value     = 'salida';
   document.getElementById('cc-f-concepto').value = '';
@@ -8070,6 +8076,25 @@ function openCajaChicaModal() {
   document.getElementById('modal-caja-chica').style.display = 'flex';
   document.getElementById('cc-modal-msg').className = 'modal-msg';
   document.getElementById('cc-modal-msg').textContent = '';
+  document.getElementById('cc-submit-btn').textContent = 'Guardar';
+}
+
+function editCajaChica(m) {
+  _ccEditRowNum = m.rowNum;
+  // Convertir fecha DD/MM/YYYY → YYYY-MM-DD para input[type=date]
+  var fechaVal = '';
+  if (m.fecha) {
+    var parts = m.fecha.split('/');
+    if (parts.length === 3) fechaVal = parts[2] + '-' + parts[1].padStart(2,'0') + '-' + parts[0].padStart(2,'0');
+  }
+  document.getElementById('cc-f-fecha').value    = fechaVal;
+  document.getElementById('cc-f-tipo').value     = m.entrada ? 'entrada' : 'salida';
+  document.getElementById('cc-f-concepto').value = m.concepto || '';
+  document.getElementById('cc-f-monto').value    = m.entrada || m.salida || '';
+  document.getElementById('modal-caja-chica').style.display = 'flex';
+  document.getElementById('cc-modal-msg').className = 'modal-msg';
+  document.getElementById('cc-modal-msg').textContent = '';
+  document.getElementById('cc-submit-btn').textContent = 'Actualizar';
 }
 
 function submitCajaChica() {
@@ -8084,33 +8109,56 @@ function submitCajaChica() {
   }
 
   var btn = document.getElementById('cc-submit-btn');
-  btn.disabled = true; btn.textContent = 'Guardando…';
+  var isEdit = !!_ccEditRowNum;
+  btn.disabled = true; btn.textContent = isEdit ? 'Actualizando…' : 'Guardando…';
 
-  // <input type=date> entrega YYYY-MM-DD; la hoja de Caja Chica usa DD/MM/YYYY
   var p = fecha.split('-');
   var fechaSheet = p[2] + '/' + p[1] + '/' + p[0];
 
-  var params = 'action=insert&sheet=' + encodeURIComponent('Caja Chica') +
-               '&FECHA='    + encodeURIComponent(fechaSheet) +
-               '&CONCEPTO=' + encodeURIComponent(concepto) +
-               '&' + (tipo === 'entrada' ? 'ENTRADA' : 'SALIDA') + '=' + encodeURIComponent(monto) +
-               '&token='    + encodeURIComponent(getToken());
+  if (isEdit) {
+    // ── Editar movimiento existente via POST ──
+    var body = {
+      action:   'updateCajaChica',
+      rowNum:   _ccEditRowNum,
+      fecha:    fechaSheet,
+      concepto: concepto,
+      salida:   tipo === 'salida'  ? monto : 0,
+      entrada:  tipo === 'entrada' ? monto : 0,
+      token:    getToken()
+    };
+    fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify(body) })
+      .then(function(r){ return r.json(); })
+      .then(function(res) {
+        if (res.ok) {
+          showModalMsg('cc-modal-msg', 'ok', '✓ Movimiento actualizado. Saldo: ' + fmtMXN(res.saldoFinal));
+          setTimeout(function() { closeModal('caja-chica'); loadCajaChicaData(); }, 1000);
+        } else {
+          showModalMsg('cc-modal-msg', 'err', 'Error: ' + (res.error || 'No se pudo actualizar.'));
+        }
+      })
+      .catch(function() { showModalMsg('cc-modal-msg', 'err', 'Error de conexión. Intenta de nuevo.'); })
+      .finally(function() { btn.disabled = false; btn.textContent = 'Actualizar'; });
+  } else {
+    // ── Nuevo movimiento via GET ──
+    var params = 'action=insert&sheet=' + encodeURIComponent('Caja Chica') +
+                 '&FECHA='    + encodeURIComponent(fechaSheet) +
+                 '&CONCEPTO=' + encodeURIComponent(concepto) +
+                 '&' + (tipo === 'entrada' ? 'ENTRADA' : 'SALIDA') + '=' + encodeURIComponent(monto) +
+                 '&token='    + encodeURIComponent(getToken());
 
-  fetch(APPS_SCRIPT_URL + '?' + params)
-    .then(function(r){ return r.json(); })
-    .then(function(res) {
-      if (res.success) {
-        showModalMsg('cc-modal-msg', 'ok', '✓ Movimiento guardado. Saldo: ' + fmtMXN(res.saldoFinal));
-        setTimeout(function() {
-          closeModal('caja-chica');
-          loadCajaChicaData();
-        }, 1300);
-      } else {
-        showModalMsg('cc-modal-msg', 'err', 'Error: ' + (res.error || 'No se pudo guardar.'));
-      }
-    })
-    .catch(function() { showModalMsg('cc-modal-msg', 'err', 'Error de conexión. Intenta de nuevo.'); })
-    .finally(function() { btn.disabled = false; btn.textContent = 'Guardar'; });
+    fetch(APPS_SCRIPT_URL + '?' + params)
+      .then(function(r){ return r.json(); })
+      .then(function(res) {
+        if (res.success) {
+          showModalMsg('cc-modal-msg', 'ok', '✓ Movimiento guardado. Saldo: ' + fmtMXN(res.saldoFinal));
+          setTimeout(function() { closeModal('caja-chica'); loadCajaChicaData(); }, 1300);
+        } else {
+          showModalMsg('cc-modal-msg', 'err', 'Error: ' + (res.error || 'No se pudo guardar.'));
+        }
+      })
+      .catch(function() { showModalMsg('cc-modal-msg', 'err', 'Error de conexión. Intenta de nuevo.'); })
+      .finally(function() { btn.disabled = false; btn.textContent = 'Guardar'; });
+  }
 }
 
 function submitCaptura(tipo) {
