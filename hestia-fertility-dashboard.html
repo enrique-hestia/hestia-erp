@@ -3509,12 +3509,19 @@ function _renderEgresosERP() {
     +'<div class="eg-ph"><div class="eg-pt">Detalle de egresos</div><div style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Pág. '+_egPage+' de '+totalPages+'</div></div>'
     +'<div style="overflow-x:auto;max-height:65vh;overflow-y:auto">'
     +'<table class="eg-tbl"><thead><tr>'
-    +'<th>Fecha</th><th>Proveedor</th><th>Concepto</th><th>Subtipo</th><th style="text-align:right">Monto</th><th>F. Pago</th><th style="text-align:center">Fact</th><th style="text-align:center">Pag</th><th style="text-align:center">Cont</th>'
+    +'<th>Fecha</th><th>Proveedor</th><th>Concepto</th><th>Subtipo</th><th style="text-align:right">Monto</th><th>F. Pago</th><th style="text-align:center">Fact</th><th style="text-align:center">Pag</th><th style="text-align:center">Cont</th><th style="text-align:center">Docs</th>'
     +'</tr></thead><tbody>');
 
   if (pageRows.length) {
     pageRows.forEach(function(r) {
       var contBadge = r.contable==='Gasto'?'eg-badge-g':r.contable==='Costo'?'eg-badge-c':'eg-badge-cr';
+      var provSafe = (r.proveedor||'').replace(/'/g,"\\'");
+      var factIcon = r.linkFacturaUrl
+        ? '<span onclick="egViewPDF(\''+r.linkFacturaUrl.replace(/'/g,"\\'")+'\',\'Factura · '+provSafe+'\')" style="cursor:pointer;font-size:13px" title="Ver factura">📄</span>'
+        : '<span onclick="egOpenUpload('+r._rowNum+',\'factura\',\''+provSafe+'\')" style="cursor:pointer;font-size:11px;color:var(--color-primary,#c46a7a)" title="Adjuntar factura">＋</span>';
+      var pagoIcon = r.linkPagoUrl
+        ? '<span onclick="egViewPDF(\''+r.linkPagoUrl.replace(/'/g,"\\'")+'\',\'Pago · '+provSafe+'\')" style="cursor:pointer;font-size:13px" title="Ver pago">📎</span>'
+        : '<span onclick="egOpenUpload('+r._rowNum+',\'pago\',\''+provSafe+'\')" style="cursor:pointer;font-size:11px;color:var(--color-primary,#c46a7a)" title="Adjuntar pago">＋</span>';
       h.push('<tr>'
         +'<td style="color:var(--text-secondary,#6b7280)">'+((r.fecha||'').substring(0,10)||'—')+'</td>'
         +'<td style="font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis" title="'+r.proveedor+'">'+(r.proveedor||'—')+'</td>'
@@ -3522,13 +3529,14 @@ function _renderEgresosERP() {
         +'<td><span class="eg-badge '+contBadge+'">'+(r.subtipo||'—')+'</span></td>'
         +'<td style="text-align:right;font-weight:700;color:#991b1b">'+fE(r.monto)+'</td>'
         +'<td style="font-size:10.5px;color:var(--text-secondary,#6b7280)">'+(r.formaPago||'—')+'</td>'
-        +'<td style="text-align:center"><input type="checkbox" class="eg-chk"'+(r.facturacion?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'facturación\',this.checked)"></td>'
-        +'<td style="text-align:center"><input type="checkbox" class="eg-chk"'+(r.pagado?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'pagado\',this.checked)"></td>'
+        +'<td style="text-align:center"><input type="checkbox" class="eg-chk"'+(r.facturacion?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'facturación\',this.checked)"'+(r.linkFacturaUrl?' title="Factura adjunta"':'')+'></td>'
+        +'<td style="text-align:center"><input type="checkbox" class="eg-chk"'+(r.pagado?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'pagado\',this.checked)"'+(r.linkPagoUrl?' title="Pago adjunto"':'')+'></td>'
         +'<td style="text-align:center"><input type="checkbox" class="eg-chk"'+(r.contabilidad?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'contabilidad\',this.checked)"></td>'
+        +'<td style="text-align:center;white-space:nowrap">'+factIcon+' '+pagoIcon+'</td>'
         +'</tr>');
     });
   } else {
-    h.push('<tr><td colspan="9" style="text-align:center;padding:2rem;color:var(--text-secondary,#9ca3af)">Sin registros con los filtros seleccionados</td></tr>');
+    h.push('<tr><td colspan="10" style="text-align:center;padding:2rem;color:var(--text-secondary,#9ca3af)">Sin registros con los filtros seleccionados</td></tr>');
   }
   h.push('</tbody></table></div>');
   h.push('<div class="eg-pag"><span>'+filtered.length+' registros</span><div style="display:flex;gap:6px">'
@@ -3580,6 +3588,95 @@ function _renderEgresosERP() {
   h.push('</div>'); // wrap
 
   root.innerHTML = h.join('');
+}
+
+/* ── Upload PDF y Visor ─────────────────────────────────────── */
+var _egUploadRowNum = 0;
+var _egUploadTipo = 'factura';
+var _egUploadFile = null;
+
+function egOpenUpload(rowNum, tipo, proveedor) {
+  _egUploadRowNum = rowNum;
+  _egUploadTipo = tipo;
+  _egUploadFile = null;
+  document.getElementById('eg-upload-title').textContent = tipo === 'pago' ? 'Adjuntar comprobante de pago' : 'Adjuntar factura';
+  document.getElementById('eg-upload-prov').textContent = proveedor || '—';
+  document.getElementById('eg-file-name').style.display = 'none';
+  document.getElementById('eg-file-input').value = '';
+  document.getElementById('eg-upload-btn').disabled = true;
+  document.getElementById('eg-upload-msg').className = 'modal-msg';
+  document.getElementById('eg-upload-msg').textContent = '';
+  document.getElementById('modal-eg-upload').style.display = 'flex';
+}
+
+function egCloseUpload() {
+  document.getElementById('modal-eg-upload').style.display = 'none';
+  _egUploadFile = null;
+}
+
+function egFileSelected(input) {
+  if (input.files && input.files[0]) {
+    _egUploadFile = input.files[0];
+    var nameEl = document.getElementById('eg-file-name');
+    nameEl.textContent = '📄 ' + _egUploadFile.name + ' (' + ((_egUploadFile.size / 1024).toFixed(0)) + ' KB)';
+    nameEl.style.display = '';
+    document.getElementById('eg-upload-btn').disabled = false;
+  }
+}
+
+async function egSubmitUpload() {
+  if (!_egUploadFile) return;
+  var btn = document.getElementById('eg-upload-btn');
+  btn.disabled = true; btn.textContent = 'Subiendo…';
+  var msgEl = document.getElementById('eg-upload-msg');
+
+  try {
+    var reader = new FileReader();
+    var base64 = await new Promise(function(resolve, reject) {
+      reader.onload = function() { resolve(reader.result.split(',')[1]); };
+      reader.onerror = reject;
+      reader.readAsDataURL(_egUploadFile);
+    });
+
+    var r = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'uploadEgresoPDF',
+        tipo: _egUploadTipo,
+        base64: base64,
+        fileName: _egUploadFile.name,
+        rowNum: _egUploadRowNum,
+        anio: new Date().getFullYear()
+      })
+    });
+    var res = await r.json();
+    if (res.ok) {
+      msgEl.className = 'modal-msg ok';
+      msgEl.textContent = '✓ Archivo subido a Drive · ' + (res.fileName || '');
+      setTimeout(function() { egCloseUpload(); loadEgresosERP(); }, 1200);
+    } else {
+      msgEl.className = 'modal-msg err';
+      msgEl.textContent = 'Error: ' + (res.error || 'No se pudo subir');
+      btn.disabled = false; btn.textContent = 'Subir archivo';
+    }
+  } catch(e) {
+    msgEl.className = 'modal-msg err';
+    msgEl.textContent = 'Error de conexión: ' + e.message;
+    btn.disabled = false; btn.textContent = 'Subir archivo';
+  }
+}
+
+function egViewPDF(url, title) {
+  if (!url) return;
+  var viewerUrl = url;
+  if (url.indexOf('drive.google.com') > -1) {
+    var fileId = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if (fileId) viewerUrl = 'https://drive.google.com/file/d/' + fileId[1] + '/preview';
+  }
+  document.getElementById('eg-viewer-title').textContent = title || 'Documento';
+  document.getElementById('eg-viewer-link').href = url;
+  document.getElementById('eg-viewer-iframe').src = viewerUrl;
+  document.getElementById('modal-eg-viewer').style.display = 'flex';
 }
 
 async function egToggleField(rowNum, field, value) {
@@ -8184,6 +8281,48 @@ function initTheme() {
 
 <!-- ══ MODAL: NUEVO MOVIMIENTO CAJA CHICA ══ -->
 <!-- Modal: Comisión Mercado Pago (desde Ingresos) -->
+<!-- Modal: Upload PDF Egresos -->
+<div id="modal-eg-upload" class="modal-overlay" style="display:none" onclick="if(event.target===this)egCloseUpload()">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <span class="modal-title" id="eg-upload-title">Adjuntar documento</span>
+      <button class="modal-close" onclick="egCloseUpload()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <div style="padding:20px 24px">
+      <div style="border:2px dashed var(--color-divider,#d1d5db);border-radius:12px;padding:32px;text-align:center;cursor:pointer;transition:border-color .2s" id="eg-drop-zone" onclick="document.getElementById('eg-file-input').click()">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary,#c46a7a)" stroke-width="1.5" style="margin-bottom:10px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 12 15 15"/></svg>
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary,#111);margin-bottom:4px">Clic para seleccionar PDF</div>
+        <div style="font-size:11px;color:var(--text-secondary,#9ca3af)">o arrastra el archivo aquí</div>
+        <div id="eg-file-name" style="font-size:12px;font-weight:700;color:var(--color-primary,#c46a7a);margin-top:10px;display:none"></div>
+      </div>
+      <input type="file" id="eg-file-input" accept=".pdf" style="display:none" onchange="egFileSelected(this)">
+      <div style="margin-top:14px;display:flex;align-items:center;gap:8px">
+        <div style="font-size:11px;color:var(--text-secondary,#9ca3af)">Proveedor:</div>
+        <div id="eg-upload-prov" style="font-size:12px;font-weight:600;color:var(--text-primary,#111)">—</div>
+      </div>
+    </div>
+    <div id="eg-upload-msg" class="modal-msg"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="egCloseUpload()">Cancelar</button>
+      <button class="btn btn-primary" id="eg-upload-btn" onclick="egSubmitUpload()" disabled>Subir archivo</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Visor PDF -->
+<div id="modal-eg-viewer" class="modal-overlay" style="display:none" onclick="if(event.target===this)document.getElementById('modal-eg-viewer').style.display='none'">
+  <div class="modal" style="max-width:900px;height:85vh;display:flex;flex-direction:column">
+    <div class="modal-header">
+      <span class="modal-title" id="eg-viewer-title">Documento</span>
+      <div style="display:flex;gap:8px">
+        <a id="eg-viewer-link" href="#" target="_blank" style="font-size:11px;font-weight:600;color:var(--color-primary);text-decoration:none;padding:4px 10px;border:1px solid var(--color-primary);border-radius:6px">Abrir en Drive</a>
+        <button class="modal-close" onclick="document.getElementById('modal-eg-viewer').style.display='none'"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </div>
+    </div>
+    <iframe id="eg-viewer-iframe" style="flex:1;border:none;border-radius:0 0 12px 12px" src="about:blank"></iframe>
+  </div>
+</div>
+
 <div id="modal-ing-comision" class="modal-overlay" style="display:none" onclick="if(event.target===this)ingCancelComision()">
   <div class="modal" style="max-width:420px">
     <div class="modal-header">

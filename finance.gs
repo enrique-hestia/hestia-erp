@@ -526,6 +526,9 @@ function doPost(e) {
     if (body.action === 'saveEgreso') {
       return jsonResponse(saveEgreso(body));
     }
+    if (body.action === 'uploadEgresoPDF') {
+      return jsonResponse(uploadEgresoPDF(body));
+    }
     if (body.action === 'updateEgresoField') {
       return jsonResponse(updateEgresoField(body));
     }
@@ -912,6 +915,105 @@ var EGRESOS_SS_2025 = '18Wf4tD6CYBMTGVLPkEw_5YOtJncOAAeCyfeKMe--M1g';
 var EGRESOS_SS_2024 = '18DOfh1CvMyY3ZntjXGEqw6mjzhhBYZkatygxvnck2Is';
 var EGRESOS_TABS = { 2026:'Egresos2026', 2025:'Egresos2025', 2024:'Egresos2024' };
 var EGRESOS_IDS  = { 2026:EGRESOS_SS_2026, 2025:EGRESOS_SS_2025, 2024:EGRESOS_SS_2024 };
+var EGRESOS_DRIVE_FACTURAS = '1QM1jaQPePeGKdeWfqPq3nUPyrkC3zEOD'; // Facturas 2026
+var EGRESOS_DRIVE_PAGOS    = '16wEqs2ZbR0j8EehDzlWcVFCR3HYMvo-F'; // Pagos 2026
+var EGRESOS_MESES_FOLDER = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+function _getOrCreateMonthFolder(parentFolderId, anio, mes) {
+  var parent = DriveApp.getFolderById(parentFolderId);
+  var mesName = EGRESOS_MESES_FOLDER[mes] || 'Mes' + (mes + 1);
+  // Buscar o crear carpeta del año
+  var yearName = String(anio);
+  var yearFolder = null;
+  var yearIter = parent.getFoldersByName(yearName);
+  if (yearIter.hasNext()) { yearFolder = yearIter.next(); }
+  else { yearFolder = parent.createFolder(yearName); }
+  // Buscar o crear carpeta del mes
+  var mesFolder = null;
+  var mesIter = yearFolder.getFoldersByName(mesName);
+  if (mesIter.hasNext()) { mesFolder = mesIter.next(); }
+  else { mesFolder = yearFolder.createFolder(mesName); }
+  return mesFolder;
+}
+
+function uploadEgresoPDF(payload) {
+  try {
+    var tipo = payload.tipo || 'factura'; // 'factura' o 'pago'
+    var parentId = tipo === 'pago' ? EGRESOS_DRIVE_PAGOS : EGRESOS_DRIVE_FACTURAS;
+    var base64 = payload.base64;
+    var fileName = payload.fileName || 'documento.pdf';
+    var rowNum = parseInt(payload.rowNum);
+    var anio = payload.anio || new Date().getFullYear();
+
+    if (!base64) return {ok:false, error:'No se recibió archivo'};
+    if (!rowNum || rowNum < 2) return {ok:false, error:'Fila inválida'};
+
+    // Determinar mes desde la fecha del egreso
+    var ssId = EGRESOS_IDS[anio] || EGRESOS_SS_2026;
+    var tabName = EGRESOS_TABS[anio] || 'Egresos' + anio;
+    var ss = SpreadsheetApp.openById(ssId);
+    var sheet = null;
+    var sheets = ss.getSheets();
+    for (var i = 0; i < sheets.length; i++) {
+      if (sheets[i].getName() === tabName) { sheet = sheets[i]; break; }
+    }
+    if (!sheet) return {ok:false, error:'Pestaña no encontrada'};
+
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(function(h){return String(h).trim().toLowerCase();});
+    var iFecha = -1;
+    for (var c = 0; c < headers.length; c++) { if (headers[c].indexOf('fecha') > -1) { iFecha = c; break; } }
+
+    var fechaVal = iFecha > -1 ? sheet.getRange(rowNum, iFecha + 1).getValue() : new Date();
+    var fechaObj = fechaVal instanceof Date ? fechaVal : new Date(fechaVal);
+    if (isNaN(fechaObj.getTime())) fechaObj = new Date();
+
+    var mes = fechaObj.getMonth();
+    var anioFile = fechaObj.getFullYear();
+
+    // Crear/obtener carpeta mes
+    var folder = _getOrCreateMonthFolder(parentId, anioFile, mes);
+
+    // Subir archivo
+    var decoded = Utilities.base64Decode(base64);
+    var blob = Utilities.newBlob(decoded, 'application/pdf', fileName);
+    var file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    var fileUrl = file.getUrl();
+
+    // Guardar URL como hipervínculo en la celda correspondiente
+    var iLinkCol = -1;
+    var linkHeader = tipo === 'pago' ? 'link pago' : 'link factura';
+    for (var lc = 0; lc < headers.length; lc++) {
+      if (headers[lc].indexOf(linkHeader) > -1) { iLinkCol = lc; break; }
+    }
+
+    var displayName = fileName.replace(/\.pdf$/i, '');
+    if (iLinkCol > -1) {
+      var richText = SpreadsheetApp.newRichTextValue()
+        .setText(displayName)
+        .setLinkUrl(fileUrl)
+        .build();
+      sheet.getRange(rowNum, iLinkCol + 1).setRichTextValue(richText);
+    }
+
+    // Auto-activar checkbox correspondiente
+    var checkHeader = tipo === 'pago' ? 'pagado' : 'facturación';
+    // Buscar con y sin tilde
+    var iCheck = -1;
+    for (var ch = 0; ch < headers.length; ch++) {
+      if (headers[ch].replace(/[áàä]/g,'a').replace(/[óòö]/g,'o').indexOf(checkHeader.replace(/[áàä]/g,'a').replace(/[óòö]/g,'o')) > -1) {
+        iCheck = ch; break;
+      }
+    }
+    if (iCheck > -1) {
+      sheet.getRange(rowNum, iCheck + 1).setValue(true);
+    }
+
+    return {ok:true, url:fileUrl, fileName:displayName, tipo:tipo, rowNum:rowNum};
+  } catch(ex) {
+    return {ok:false, error:ex.message};
+  }
+}
 
 function readEgresosData(anio) {
   try {
@@ -987,9 +1089,32 @@ function readEgresosData(anio) {
         formaPago: fp,
         observaciones: iObs>-1 ? String(row[iObs]||'').trim() : '',
         linkFactura: iLinkFact>-1 ? String(row[iLinkFact]||'').trim() : '',
-        linkPago: iLinkPago>-1 ? String(row[iLinkPago]||'').trim() : ''
+        linkFacturaUrl: '',
+        linkPago: iLinkPago>-1 ? String(row[iLinkPago]||'').trim() : '',
+        linkPagoUrl: ''
       });
     }
+
+    // Extraer URLs de hipervínculos (Link Factura / Link Pago)
+    try {
+      var lastDataRow = raw.length - 1;
+      if (lastDataRow > 0 && (iLinkFact > -1 || iLinkPago > -1)) {
+        if (iLinkFact > -1) {
+          var rtFact = sheet.getRange(2, iLinkFact + 1, lastDataRow, 1).getRichTextValues();
+          for (var rf = 0; rf < rtFact.length; rf++) {
+            var url = rtFact[rf][0] ? rtFact[rf][0].getLinkUrl() : '';
+            if (url && allRows[rf]) allRows[rf].linkFacturaUrl = url;
+          }
+        }
+        if (iLinkPago > -1) {
+          var rtPago = sheet.getRange(2, iLinkPago + 1, lastDataRow, 1).getRichTextValues();
+          for (var rp = 0; rp < rtPago.length; rp++) {
+            var url2 = rtPago[rp][0] ? rtPago[rp][0].getLinkUrl() : '';
+            if (url2 && allRows[rp]) allRows[rp].linkPagoUrl = url2;
+          }
+        }
+      }
+    } catch(rtErr) { /* getRichTextValues puede fallar en sheets muy grandes — continuamos sin URLs */ }
 
     // KPIs
     var totalEgresos=0, totalPagado=0, totalPendiente=0, countPagado=0;
