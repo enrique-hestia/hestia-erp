@@ -2812,31 +2812,46 @@ async function ingOpenDrawer() {
     +'</div></div>';
   h += '</div>';
 
-  // ── Sección: Pago y facturación ──
+  // ── Sección: Formas de pago (múltiples) ──
+  h += '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:20px;margin-bottom:16px">';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'
+    +'<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);display:flex;align-items:center;gap:8px">'
+      +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>Formas de pago</div>'
+    +'<button onclick="ingAddPay()" type="button" style="display:flex;align-items:center;gap:5px;font-size:11px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-weight:700">'
+      +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Agregar pago</button>'
+    +'</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr 30px;gap:8px;padding:0 4px 6px;border-bottom:2px solid var(--color-divider,#d1d5db)">'
+    +'<div style="font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Forma de pago</div>'
+    +'<div style="font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);text-align:right">Monto</div>'
+    +'<div></div></div>';
+  h += '<div id="ing-pay-lines" style="display:flex;flex-direction:column;gap:0"></div>';
+  h += '<div style="display:flex;justify-content:flex-end;margin-top:8px;padding-top:8px;border-top:1px solid var(--color-divider,#e5e7eb)">'
+    +'<div style="display:flex;align-items:center;gap:12px">'
+      +'<span style="font-size:11px;font-weight:600;color:var(--text-secondary,#6b7280)">Total pagos:</span>'
+      +'<span id="ing-pay-total" style="font-size:15px;font-weight:800;color:var(--text-primary,#111)">$0.00</span>'
+    +'</div></div>';
+  h += '</div>';
+
+  // ── Sección: Facturación y datos adicionales ──
   h += '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:20px;margin-bottom:16px">';
   h += '<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:14px;display:flex;align-items:center;gap:8px">'
-    +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>Pago y facturación</div>';
+    +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Facturación y datos</div>';
   h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
-    +'<div><label '+LBL+'>Forma de pago</label><select id="ing-fpago" '+S+'>'+selOpts(ING_FORMAS_PAGO)+'</select></div>'
-    +'<div><label '+LBL+'>Monto pagado</label><input type="number" id="ing-pagado" '+S+' placeholder="Auto = Total" step="0.01"></div>'
     +'<div><label '+LBL+'>Monto Fact/Mes</label><input type="number" id="ing-monto-fact" '+S+' placeholder="0.00" step="0.01"></div>'
     +'<div><label '+LBL+'>Moneda</label><select id="ing-moneda" '+S+'><option>MX</option><option>USD</option></select></div>'
-    +'</div>';
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
     +'<div><label '+LBL+'>No. Factura</label><input id="ing-factura" '+S+' placeholder="Número de factura"></div>'
     +'<div><label '+LBL+'>Póliza</label><input id="ing-poliza" '+S+' placeholder="Número de póliza"></div>'
+    +'</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'
     +'<div><label '+LBL+'>Sucursal</label><input id="ing-sucursal" '+S+' placeholder="CDMX"></div>'
-    +'</div>';
-  // Checkboxes
-  h += '<div style="display:flex;gap:24px;margin-bottom:14px">'
-    +'<label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--text-primary,#374151)">'
-      +'<input type="checkbox" id="ing-chk-fact" style="width:16px;height:16px;accent-color:var(--color-primary,#c46a7a)"> Facturación</label>'
-    +'<label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--text-primary,#374151)">'
-      +'<input type="checkbox" id="ing-chk-conc" style="width:16px;height:16px;accent-color:var(--color-primary,#c46a7a)"> Conciliación</label>'
-    +'<label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;color:var(--text-primary,#374151)">'
-      +'<input type="checkbox" id="ing-chk-cont" style="width:16px;height:16px;accent-color:var(--color-primary,#c46a7a)"> Contabilidad</label>'
-    +'</div>';
-  // Observaciones
+    +'<div style="display:flex;gap:18px;align-items:flex-end;padding-bottom:4px">'
+      +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:var(--text-primary,#374151)">'
+        +'<input type="checkbox" id="ing-chk-fact" style="width:15px;height:15px;accent-color:var(--color-primary,#c46a7a)"> Facturación</label>'
+      +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:var(--text-primary,#374151)">'
+        +'<input type="checkbox" id="ing-chk-conc" style="width:15px;height:15px;accent-color:var(--color-primary,#c46a7a)"> Conciliación</label>'
+      +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:var(--text-primary,#374151)">'
+        +'<input type="checkbox" id="ing-chk-cont" style="width:15px;height:15px;accent-color:var(--color-primary,#c46a7a)"> Contabilidad</label>'
+    +'</div></div>';
   h += '<div><label '+LBL+'>Observaciones</label><textarea id="ing-obs" '+S+' rows="2" placeholder="Notas adicionales sobre la operación…" style="resize:vertical"></textarea></div>';
   h += '</div>';
 
@@ -2848,7 +2863,9 @@ async function ingOpenDrawer() {
     +'</div>';
 
   content.innerHTML = h;
+  _ingPayCount = 0;
   ingAddLine();
+  ingAddPay();
   view.scrollTop = 0;
 }
 
@@ -2878,7 +2895,13 @@ function ingOnProdSearch(lineNum) {
   if (!inp) return;
   var val = inp.value.trim();
   if (!val) return;
-  var found = _ingProductos.find(function(p){ return p.descripcion === val; });
+  // Buscar primero dentro de la categoría seleccionada para evitar colisiones de nombre
+  var catEl = document.getElementById('ing-cat-'+lineNum);
+  var selCat = catEl ? catEl.value : '';
+  var found = selCat
+    ? _ingProductos.find(function(p){ return p.descripcion === val && p.categoria === selCat; })
+    : null;
+  if (!found) found = _ingProductos.find(function(p){ return p.descripcion === val; });
   if (!found) return;
   var precio = (found.precios && found.precios[_ingPacienteLista]) ? found.precios[_ingPacienteLista]
              : (found.precios && found.precios['General']) ? found.precios['General']
@@ -2952,7 +2975,57 @@ function ingCalcTotal() {
   if (valEl) valEl.textContent = '$' + total.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
 
-var _ingPendingBankData = null; // datos temporales para el movimiento bancario post-ingreso
+/* ── Líneas de pago múltiple ───────────────────────────── */
+var _ingPayCount = 0;
+
+function ingAddPay() {
+  _ingPayCount++;
+  var n = _ingPayCount;
+  var el = document.getElementById('ing-pay-lines');
+  if (!el) return;
+  var IS = 'width:100%;box-sizing:border-box;padding:6px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)';
+  var fpOpts = ING_FORMAS_PAGO.map(function(f){ return '<option value="'+f+'">'+f+'</option>'; }).join('');
+  var div = document.createElement('div');
+  div.id = 'ing-pay-'+n;
+  div.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 30px;gap:8px;padding:8px 4px;align-items:center;border-bottom:1px solid var(--color-divider,#f0f0f0)';
+  div.innerHTML = '<select id="ing-fp-'+n+'" style="'+IS+'">'+fpOpts+'</select>'
+    +'<input type="number" id="ing-fp-monto-'+n+'" style="text-align:right;'+IS+'" placeholder="0.00" step="0.01" oninput="ingCalcPayTotal()">'
+    +(n>1?'<button onclick="ingRemovePay('+n+')" type="button" style="font-size:16px;background:none;border:none;color:#dc2626;cursor:pointer;line-height:1;padding:0" title="Eliminar pago">×</button>':'<div></div>');
+  el.appendChild(div);
+}
+
+function ingRemovePay(n) {
+  var el = document.getElementById('ing-pay-'+n);
+  if (el) el.remove();
+  ingCalcPayTotal();
+}
+
+function ingCalcPayTotal() {
+  var total = 0;
+  for (var i = 1; i <= _ingPayCount; i++) {
+    var el = document.getElementById('ing-fp-monto-'+i);
+    if (!el) continue;
+    total += parseFloat(el.value) || 0;
+  }
+  var valEl = document.getElementById('ing-pay-total');
+  if (valEl) valEl.textContent = '$' + total.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+function _ingCollectPayments() {
+  var payments = [];
+  for (var i = 1; i <= _ingPayCount; i++) {
+    var fpEl = document.getElementById('ing-fp-'+i);
+    var mEl  = document.getElementById('ing-fp-monto-'+i);
+    if (!fpEl || !mEl) continue;
+    var monto = parseFloat(mEl.value) || 0;
+    if (monto <= 0) continue;
+    payments.push({ formaPago: fpEl.value, monto: monto });
+  }
+  return payments;
+}
+
+/* ── Recolectar payload + guardar ─────────────────────── */
+var _ingPendingBankData = null;
 
 function _ingCollectPayload() {
   var paciente = (document.getElementById('ing-paciente')||{}).value || '';
@@ -2985,11 +3058,19 @@ function _ingCollectPayload() {
     totalOp += sub;
   });
 
+  var payments = _ingCollectPayments();
+  if (!payments.length) { alert('Agrega al menos una forma de pago con monto'); return null; }
+
+  // Forma de pago principal = la de mayor monto (para BD_Ingresos)
+  var mainFP = payments.reduce(function(a,b){ return b.monto > a.monto ? b : a; });
+  var totalPagado = payments.reduce(function(s,p){ return s + p.monto; }, 0);
+
   return {
     action: 'saveIngreso',
     paciente: paciente,
     fecha: fecha,
-    formaPago:      (document.getElementById('ing-fpago')||{}).value || '',
+    formaPago:      mainFP.formaPago,
+    pagado:         totalPagado,
     sucursal:       (document.getElementById('ing-sucursal')||{}).value || '',
     moneda:         (document.getElementById('ing-moneda')||{}).value || 'MX',
     ciclo:          (document.getElementById('ing-ciclo')||{}).value || '',
@@ -3001,7 +3082,8 @@ function _ingCollectPayload() {
     conciliacion:   !!(document.getElementById('ing-chk-conc')||{}).checked,
     contabilidad:   !!(document.getElementById('ing-chk-cont')||{}).checked,
     lineas: lineas,
-    _totalOp: totalOp
+    _totalOp: totalOp,
+    _payments: payments
   };
 }
 
@@ -3009,33 +3091,30 @@ async function ingSubmit() {
   var payload = _ingCollectPayload();
   if (!payload) return;
 
-  var fp = payload.formaPago;
-  var isMP = (fp === 'TDC' || fp === 'TDD');
+  // Revisar si algún pago es TDC/TDD → pedir comisión
+  var mpPayments = payload._payments.filter(function(p){ return p.formaPago === 'TDC' || p.formaPago === 'TDD'; });
+  var mpTotal = mpPayments.reduce(function(s,p){ return s + p.monto; }, 0);
 
-  // Si es TDC/TDD → pedir comisión antes de guardar
-  if (isMP) {
+  if (mpTotal > 0) {
     _ingPendingBankData = payload;
     var display = document.getElementById('ing-com-cobro-display');
-    if (display) display.textContent = '$' + payload._totalOp.toLocaleString('en-US', {minimumFractionDigits:2});
+    if (display) display.textContent = '$' + mpTotal.toLocaleString('en-US', {minimumFractionDigits:2});
     var cobroVal = document.getElementById('ing-com-cobro-val');
-    if (cobroVal) cobroVal.textContent = '$' + payload._totalOp.toLocaleString('en-US', {minimumFractionDigits:2});
-    var comVal = document.getElementById('ing-com-com-val');
-    if (comVal) comVal.textContent = '$0.00';
-    var netoVal = document.getElementById('ing-com-neto-val');
-    if (netoVal) netoVal.textContent = '$' + payload._totalOp.toLocaleString('en-US', {minimumFractionDigits:2});
-    var inp = document.getElementById('ing-com-monto');
-    if (inp) inp.value = '';
+    if (cobroVal) cobroVal.textContent = '$' + mpTotal.toLocaleString('en-US', {minimumFractionDigits:2});
+    document.getElementById('ing-com-com-val').textContent = '$0.00';
+    document.getElementById('ing-com-neto-val').textContent = '$' + mpTotal.toLocaleString('en-US', {minimumFractionDigits:2});
+    document.getElementById('ing-com-monto').value = '';
     document.getElementById('modal-ing-comision').style.display = 'flex';
     return;
   }
 
-  // Guardar directo (sin modal de comisión)
   await _ingSaveAndBank(payload, 0);
 }
 
 function ingCalcComision() {
   if (!_ingPendingBankData) return;
-  var cobro = _ingPendingBankData._totalOp;
+  var mpPays = _ingPendingBankData._payments.filter(function(p){ return p.formaPago==='TDC'||p.formaPago==='TDD'; });
+  var cobro = mpPays.reduce(function(s,p){ return s+p.monto; }, 0);
   var com   = parseFloat((document.getElementById('ing-com-monto')||{}).value) || 0;
   var neto  = cobro - com;
   var el1 = document.getElementById('ing-com-cobro-val');
@@ -3076,37 +3155,42 @@ async function _ingSaveAndBank(payload, comisionMP) {
       return;
     }
 
-    // 2. Auto-registrar movimiento bancario según forma de pago
-    var fp      = payload.formaPago;
-    var total   = payload._totalOp;
-    var fecha   = payload.fecha;
-    var pac     = payload.paciente;
-    var obs     = (payload.observaciones ? payload.observaciones + ' · ' : '') + 'Px. ' + pac;
-    var mesStr  = fecha.substring(0, 7); // YYYY-MM
-    var bankRow = null;
-    var banco   = '';
+    // 2. Auto-registrar movimiento bancario por cada forma de pago
+    var fecha  = payload.fecha;
+    var pac    = payload.paciente;
+    var obs    = (payload.observaciones ? payload.observaciones + ' · ' : '') + 'Px. ' + pac;
+    var mesStr = fecha.substring(0, 7);
 
-    if (fp === 'Santander') {
-      banco = 'santander';
-      bankRow = [fecha, total, 0, 0, obs, 0, 0, '', ''];
-    } else if (fp === 'AMEX') {
-      banco = 'amex';
-      bankRow = [fecha, -total, 0, obs, 0, 0, '', '', mesStr];
-    } else if (fp === 'TDC' || fp === 'TDD' || fp === 'Transferencia') {
-      banco = 'mercadopago';
-      var com  = comisionMP ? -Math.abs(comisionMP) : 0;
-      var neto = total + com;
-      bankRow = [mesStr, fecha, total, com, 0, neto, 0, false, obs, 'CARGO'];
-    }
+    for (var pi = 0; pi < payload._payments.length; pi++) {
+      var pay = payload._payments[pi];
+      var fp  = pay.formaPago;
+      var amt = pay.monto;
+      var bankRow = null;
+      var banco   = '';
 
-    if (banco && bankRow) {
-      try {
-        await fetch(APPS_SCRIPT_URL, {
-          method: 'POST',
-          body: JSON.stringify({ action: 'saveBankRow', banco: banco, row: bankRow })
-        });
-      } catch(bankErr) {
-        console.warn('Ingreso guardado pero error en banco:', bankErr);
+      if (fp === 'Santander') {
+        banco = 'santander';
+        bankRow = [fecha, amt, 0, 0, obs, 0, 0, '', ''];
+      } else if (fp === 'AMEX') {
+        banco = 'amex';
+        bankRow = [fecha, -amt, 0, obs, 0, 0, '', '', mesStr];
+      } else if (fp === 'TDC' || fp === 'TDD' || fp === 'Transferencia') {
+        banco = 'mercadopago';
+        var com  = (fp === 'TDC' || fp === 'TDD') && comisionMP ? -Math.abs(comisionMP) : 0;
+        var neto = amt + com;
+        bankRow = [mesStr, fecha, amt, com, 0, neto, 0, false, obs, 'CARGO'];
+        comisionMP = 0; // solo aplicar comisión una vez
+      }
+
+      if (banco && bankRow) {
+        try {
+          await fetch(APPS_SCRIPT_URL, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'saveBankRow', banco: banco, row: bankRow })
+          });
+        } catch(bankErr) {
+          console.warn('Error registrando en ' + banco + ':', bankErr);
+        }
       }
     }
 
