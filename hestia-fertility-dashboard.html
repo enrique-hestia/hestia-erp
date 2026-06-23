@@ -2842,8 +2842,11 @@ function _ingBuildProdDatalist(lineNum) {
     var precio = (p.precios && p.precios[_ingPacienteLista]) ? p.precios[_ingPacienteLista]
                : (p.precios && p.precios['General']) ? p.precios['General']
                : p.precio || 0;
-    var label = (p.sku?'['+p.sku+'] ':'')+p.descripcion+' — '+p.categoria+(precio?' — $'+precio.toLocaleString('en-US'):'');
-    h += '<option value="'+p.descripcion.replace(/"/g,'&quot;')+'" data-precio="'+precio+'" data-cat="'+(p.categoria||'')+'" data-tipo="'+(p.tipo||'')+'" data-sku="'+(p.sku||'')+'">';
+    var precioFmt = '$' + precio.toLocaleString('en-US', {minimumFractionDigits:0});
+    h += '<option value="'+p.descripcion.replace(/"/g,'&quot;')+'">'
+       + p.categoria + ' — ' + precioFmt
+       + (p.sku ? ' — ' + p.sku : '')
+       + '</option>';
   });
   return h;
 }
