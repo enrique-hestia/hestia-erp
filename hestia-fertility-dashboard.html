@@ -2952,18 +2952,20 @@ function ingCalcTotal() {
   if (valEl) valEl.textContent = '$' + total.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
 
-async function ingSubmit() {
+var _ingPendingBankData = null; // datos temporales para el movimiento bancario post-ingreso
+
+function _ingCollectPayload() {
   var paciente = (document.getElementById('ing-paciente')||{}).value || '';
   var fecha    = (document.getElementById('ing-fecha')||{}).value || '';
-  if (!paciente) { alert('Ingresa el nombre del paciente'); return; }
-  if (!fecha)    { alert('Selecciona la fecha'); return; }
+  if (!paciente) { alert('Ingresa el nombre del paciente'); return null; }
+  if (!fecha)    { alert('Selecciona la fecha'); return null; }
 
   var lineas = [];
   for (var i = 1; i <= _ingLineCount; i++) {
     var pvpEl = document.getElementById('ing-pvp-'+i);
     if (!pvpEl) continue;
     var pvp = parseFloat(pvpEl.value) || 0;
-    if (pvp === 0) continue; // skip empty lines
+    if (pvp === 0) continue;
     var prodSel = document.getElementById('ing-prod-'+i);
     lineas.push({
       categoria:  (document.getElementById('ing-cat-'+i)||{}).value || '',
@@ -2971,44 +2973,149 @@ async function ingSubmit() {
       pvp:        pvp,
       descuento:  parseFloat((document.getElementById('ing-desc-'+i)||{}).value) || 0,
       cantidad:   parseFloat((document.getElementById('ing-cant-'+i)||{}).value) || 1,
-      pagado:     0 // will use header-level pagado
+      pagado:     0
     });
   }
-  if (!lineas.length) { alert('Agrega al menos un producto con precio'); return; }
+  if (!lineas.length) { alert('Agrega al menos un producto con precio'); return null; }
 
+  var totalOp = 0;
+  lineas.forEach(function(l) {
+    var sub = l.pvp * l.cantidad;
+    if (l.descuento) sub -= sub * l.descuento / 100;
+    totalOp += sub;
+  });
+
+  return {
+    action: 'saveIngreso',
+    paciente: paciente,
+    fecha: fecha,
+    formaPago:      (document.getElementById('ing-fpago')||{}).value || '',
+    sucursal:       (document.getElementById('ing-sucursal')||{}).value || '',
+    moneda:         (document.getElementById('ing-moneda')||{}).value || 'MX',
+    ciclo:          (document.getElementById('ing-ciclo')||{}).value || '',
+    observaciones:  (document.getElementById('ing-obs')||{}).value || '',
+    factura:        (document.getElementById('ing-factura')||{}).value || '',
+    poliza:         (document.getElementById('ing-poliza')||{}).value || '',
+    montoFactMes:   (document.getElementById('ing-monto-fact')||{}).value || '0',
+    facturacion:    !!(document.getElementById('ing-chk-fact')||{}).checked,
+    conciliacion:   !!(document.getElementById('ing-chk-conc')||{}).checked,
+    contabilidad:   !!(document.getElementById('ing-chk-cont')||{}).checked,
+    lineas: lineas,
+    _totalOp: totalOp
+  };
+}
+
+async function ingSubmit() {
+  var payload = _ingCollectPayload();
+  if (!payload) return;
+
+  var fp = payload.formaPago;
+  var isMP = (fp === 'TDC' || fp === 'TDD');
+
+  // Si es TDC/TDD → pedir comisión antes de guardar
+  if (isMP) {
+    _ingPendingBankData = payload;
+    var display = document.getElementById('ing-com-cobro-display');
+    if (display) display.textContent = '$' + payload._totalOp.toLocaleString('en-US', {minimumFractionDigits:2});
+    var cobroVal = document.getElementById('ing-com-cobro-val');
+    if (cobroVal) cobroVal.textContent = '$' + payload._totalOp.toLocaleString('en-US', {minimumFractionDigits:2});
+    var comVal = document.getElementById('ing-com-com-val');
+    if (comVal) comVal.textContent = '$0.00';
+    var netoVal = document.getElementById('ing-com-neto-val');
+    if (netoVal) netoVal.textContent = '$' + payload._totalOp.toLocaleString('en-US', {minimumFractionDigits:2});
+    var inp = document.getElementById('ing-com-monto');
+    if (inp) inp.value = '';
+    document.getElementById('modal-ing-comision').style.display = 'flex';
+    return;
+  }
+
+  // Guardar directo (sin modal de comisión)
+  await _ingSaveAndBank(payload, 0);
+}
+
+function ingCalcComision() {
+  if (!_ingPendingBankData) return;
+  var cobro = _ingPendingBankData._totalOp;
+  var com   = parseFloat((document.getElementById('ing-com-monto')||{}).value) || 0;
+  var neto  = cobro - com;
+  var el1 = document.getElementById('ing-com-cobro-val');
+  var el2 = document.getElementById('ing-com-com-val');
+  var el3 = document.getElementById('ing-com-neto-val');
+  if (el1) el1.textContent = '$' + cobro.toLocaleString('en-US', {minimumFractionDigits:2});
+  if (el2) el2.textContent = '($' + com.toLocaleString('en-US', {minimumFractionDigits:2}) + ')';
+  if (el3) el3.textContent = '$' + neto.toLocaleString('en-US', {minimumFractionDigits:2});
+}
+
+function ingCancelComision() {
+  document.getElementById('modal-ing-comision').style.display = 'none';
+  _ingPendingBankData = null;
+}
+
+async function ingConfirmComision() {
+  if (!_ingPendingBankData) return;
+  var com = parseFloat((document.getElementById('ing-com-monto')||{}).value) || 0;
+  var comBtn = document.getElementById('ing-com-save-btn');
+  if (comBtn) { comBtn.disabled = true; comBtn.textContent = 'Guardando…'; }
+  document.getElementById('modal-ing-comision').style.display = 'none';
+  await _ingSaveAndBank(_ingPendingBankData, com);
+  _ingPendingBankData = null;
+  if (comBtn) { comBtn.disabled = false; comBtn.textContent = 'Guardar en Mercado Pago'; }
+}
+
+async function _ingSaveAndBank(payload, comisionMP) {
   var btn = document.getElementById('ing-save-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
 
   try {
-    var payload = {
-      action: 'saveIngreso',
-      paciente: paciente,
-      fecha: fecha,
-      formaPago:      (document.getElementById('ing-fpago')||{}).value || '',
-      sucursal:       (document.getElementById('ing-sucursal')||{}).value || '',
-      moneda:         (document.getElementById('ing-moneda')||{}).value || 'MX',
-      ciclo:          (document.getElementById('ing-ciclo')||{}).value || '',
-      observaciones:  (document.getElementById('ing-obs')||{}).value || '',
-      factura:        (document.getElementById('ing-factura')||{}).value || '',
-      poliza:         (document.getElementById('ing-poliza')||{}).value || '',
-      montoFactMes:   (document.getElementById('ing-monto-fact')||{}).value || '0',
-      facturacion:    !!(document.getElementById('ing-chk-fact')||{}).checked,
-      conciliacion:   !!(document.getElementById('ing-chk-conc')||{}).checked,
-      contabilidad:   !!(document.getElementById('ing-chk-cont')||{}).checked,
-      lineas: lineas
-    };
+    // 1. Guardar ingreso en BD_Ingresos
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(payload)});
     var res = await r.json();
-    if (res.ok) {
-      ingCloseDrawer();
-      loadIngresosERP(); // regresa a la lista de ingresos
-    } else {
-      alert('Error: '+(res.error||'No se pudo guardar'));
-      if(btn){btn.disabled=false;btn.textContent='Guardar operación';}
+    if (!res.ok) {
+      alert('Error guardando ingreso: ' + (res.error || 'No se pudo guardar'));
+      if (btn) { btn.disabled = false; btn.textContent = 'Guardar operación'; }
+      return;
     }
+
+    // 2. Auto-registrar movimiento bancario según forma de pago
+    var fp      = payload.formaPago;
+    var total   = payload._totalOp;
+    var fecha   = payload.fecha;
+    var pac     = payload.paciente;
+    var obs     = (payload.observaciones ? payload.observaciones + ' · ' : '') + 'Px. ' + pac;
+    var mesStr  = fecha.substring(0, 7); // YYYY-MM
+    var bankRow = null;
+    var banco   = '';
+
+    if (fp === 'Santander') {
+      banco = 'santander';
+      bankRow = [fecha, total, 0, 0, obs, 0, 0, '', ''];
+    } else if (fp === 'AMEX') {
+      banco = 'amex';
+      bankRow = [fecha, -total, 0, obs, 0, 0, '', '', mesStr];
+    } else if (fp === 'TDC' || fp === 'TDD' || fp === 'Transferencia') {
+      banco = 'mercadopago';
+      var com  = comisionMP ? -Math.abs(comisionMP) : 0;
+      var neto = total + com;
+      bankRow = [mesStr, fecha, total, com, 0, neto, 0, false, obs, 'CARGO'];
+    }
+
+    if (banco && bankRow) {
+      try {
+        await fetch(APPS_SCRIPT_URL, {
+          method: 'POST',
+          body: JSON.stringify({ action: 'saveBankRow', banco: banco, row: bankRow })
+        });
+      } catch(bankErr) {
+        console.warn('Ingreso guardado pero error en banco:', bankErr);
+      }
+    }
+
+    // 3. Cerrar y refrescar
+    ingCloseDrawer();
+    loadIngresosERP();
   } catch(e) {
-    alert('Error de conexión: '+e.message);
-    if(btn){btn.disabled=false;btn.textContent='Guardar operación';}
+    alert('Error de conexión: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Guardar operación'; }
   }
 }
 
@@ -7502,6 +7609,41 @@ function initTheme() {
 </div>
 
 <!-- ══ MODAL: NUEVO MOVIMIENTO CAJA CHICA ══ -->
+<!-- Modal: Comisión Mercado Pago (desde Ingresos) -->
+<div id="modal-ing-comision" class="modal-overlay" style="display:none" onclick="if(event.target===this)ingCancelComision()">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header">
+      <span class="modal-title">Comisión Mercado Pago</span>
+      <button class="modal-close" onclick="ingCancelComision()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <div style="padding:16px 24px 0">
+      <div style="background:linear-gradient(135deg,#009ee3,#00b4f0);color:#fff;border-radius:12px;padding:16px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+        <div style="width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,.2);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px">MP</div>
+        <div><div style="font-weight:700;font-size:14px">Mercado Pago</div><div style="font-size:11px;opacity:.8">Registro automático desde Ingresos</div></div>
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted);margin-bottom:4px">Cobro bruto al paciente</div>
+        <div style="font-size:22px;font-weight:800;color:var(--text-primary,#111)" id="ing-com-cobro-display">$0.00</div>
+      </div>
+      <div style="margin-bottom:14px">
+        <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted);display:block;margin-bottom:5px">Comisión Mercado Pago (importe $)</label>
+        <input type="number" id="ing-com-monto" step="0.01" min="0" placeholder="0.00" oninput="ingCalcComision()"
+          style="width:100%;padding:10px 12px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:16px;font-weight:600;background:var(--color-surface);color:var(--text-primary,#111);box-sizing:border-box">
+        <div style="font-size:10px;color:var(--color-text-muted);margin-top:3px">Se resta automáticamente del cobro bruto</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;padding:12px;background:var(--color-surface-offset,#f3f4f6);border-radius:10px;margin-bottom:16px;text-align:center">
+        <div><div style="font-size:9px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Cobro</div><div style="font-size:14px;font-weight:700;color:#009ee3" id="ing-com-cobro-val">—</div></div>
+        <div><div style="font-size:9px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Comisión</div><div style="font-size:14px;font-weight:700;color:#b45309" id="ing-com-com-val">—</div></div>
+        <div><div style="font-size:9px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Neto recibido</div><div style="font-size:14px;font-weight:700;color:#16a34a" id="ing-com-neto-val">—</div></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="ingCancelComision()">Cancelar</button>
+      <button class="btn btn-primary" id="ing-com-save-btn" onclick="ingConfirmComision()" style="background:#009ee3">Guardar en Mercado Pago</button>
+    </div>
+  </div>
+</div>
+
 <div id="modal-caja-chica" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal('caja-chica')">
   <div class="modal">
     <div class="modal-header">
