@@ -3155,7 +3155,7 @@ async function ingSubmit() {
   if (!payload) return;
 
   // Revisar si algún pago es TDC/TDD → pedir comisión
-  var mpPayments = payload._payments.filter(function(p){ return p.formaPago === 'TDC' || p.formaPago === 'TDD'; });
+  var mpPayments = payload._payments.filter(function(p){ return p.formaPago === 'TDC' || p.formaPago === 'TDD' || p.formaPago === 'AMEX'; });
   var mpTotal = mpPayments.reduce(function(s,p){ return s + p.monto; }, 0);
 
   if (mpTotal > 0) {
@@ -3234,12 +3234,9 @@ async function _ingSaveAndBank(payload, comisionMP) {
       if (fp === 'Santander') {
         banco = 'santander';
         bankRow = [fecha, amt, 0, 0, obs, 0, 0, '', ''];
-      } else if (fp === 'AMEX') {
-        banco = 'amex';
-        bankRow = [fecha, -amt, 0, obs, 0, 0, '', '', mesStr];
-      } else if (fp === 'TDC' || fp === 'TDD' || fp === 'Transferencia') {
+      } else if (fp === 'TDC' || fp === 'TDD' || fp === 'AMEX' || fp === 'Transferencia') {
         banco = 'mercadopago';
-        var com  = (fp === 'TDC' || fp === 'TDD') && comisionMP ? -Math.abs(comisionMP) : 0;
+        var com  = (fp === 'TDC' || fp === 'TDD' || fp === 'AMEX') && comisionMP ? -Math.abs(comisionMP) : 0;
         var neto = amt + com;
         bankRow = [mesStr, fecha, amt, com, 0, neto, 0, false, obs, 'CARGO'];
         comisionMP = 0; // solo aplicar comisión una vez
