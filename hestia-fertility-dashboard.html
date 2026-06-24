@@ -7344,19 +7344,33 @@ function _renderPresupuesto(){
     +(canEdit?'<button class="pr-btn" onclick="presOpenMeta()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Fijar / editar meta</button>':'')
     +'</div>');
 
-  // Hero semáforo (trimestre en curso)
+  // Hero semáforo + simulador interactivo (trimestre en curso)
+  var _baseMeta = a.meta>0 ? a.meta : (a.proyeccionCierre||0);
+  var _simMin = Math.round(Math.max(a.realAcumulado||0, 1));
+  var _simMax = Math.round(Math.max(_baseMeta*1.6, (a.proyeccionCierre||0)*1.4, (a.realAcumulado||0)*1.3, _simMin+1));
+  window._presSim = { real:a.realAcumulado||0, diasT:a.diasTranscurridos||0, diasTot:a.diasTotales||0, proyCierre:a.proyeccionCierre||0, savedMeta:a.meta||0, periodo:a.periodo };
   h.push('<div class="pr-hero" style="flex-direction:column;align-items:stretch">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">'
-      +'<div style="display:flex;align-items:center;gap:10px"><span style="width:11px;height:11px;border-radius:50%;background:'+sem.dot+'"></span>'
-        +'<span style="font-size:15px;font-weight:700;color:var(--text-primary,#111)">'+sem.txt+'</span>'
+      +'<div style="display:flex;align-items:center;gap:10px"><span id="pr-sem-dot" style="width:11px;height:11px;border-radius:50%;background:'+sem.dot+'"></span>'
+        +'<span id="pr-sem-txt" style="font-size:15px;font-weight:700;color:var(--text-primary,#111)">'+sem.txt+'</span>'
         +'<span style="font-size:11px;color:var(--text-secondary,#9ca3af)">'+a.periodo+' · día '+a.diasTranscurridos+' de '+a.diasTotales+'</span></div>'
-      +'<span class="pr-pill" style="background:'+sem.bg+';color:'+sem.c+'">'+(a.cumplimientoPct!=null?Math.round(a.cumplimientoPct*100)+'% proyectado':'sin meta')+'</span>'
+      +'<span id="pr-sem-pill" class="pr-pill" style="background:'+sem.bg+';color:'+sem.c+'">'+(a.cumplimientoPct!=null?Math.round(a.cumplimientoPct*100)+'% proyectado':'sin meta')+'</span>'
     +'</div>'
-    +'<div class="pr-bar"><div style="position:absolute;left:0;top:0;bottom:0;width:'+(pctReal*100).toFixed(0)+'%;background:'+sem.dot+';border-radius:999px"></div>'
-      +'<div style="position:absolute;left:'+(pctMeta*100).toFixed(0)+'%;top:-3px;bottom:-3px;width:2px;background:var(--text-primary,#111);transform:translateX(-2px)"></div></div>'
+    +'<div class="pr-bar"><div id="pr-bar-fill" style="position:absolute;left:0;top:0;bottom:0;width:'+(pctReal*100).toFixed(0)+'%;background:'+sem.dot+';border-radius:999px;transition:width .12s ease"></div>'
+      +'<div style="position:absolute;left:100%;top:-3px;bottom:-3px;width:2px;background:var(--text-primary,#111);transform:translateX(-2px)"></div></div>'
     +'<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-secondary,#9ca3af);margin-top:5px">'
-      +'<span>Real acumulado '+fM(a.realAcumulado)+(a.meta>0?(' ('+Math.round(a.realAcumulado/a.meta*100)+'%)'):'')+'</span>'
-      +'<span>Meta '+(a.meta>0?fM(a.meta):'—')+'</span></div>'
+      +'<span id="pr-bar-real">Real acumulado '+fM(a.realAcumulado)+'</span>'
+      +'<span>Meta <b id="pr-bar-meta">'+(_baseMeta>0?fM(_baseMeta):'—')+'</b></span></div>'
+    +'<div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--color-divider,#e5e7eb)">'
+      +'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
+        +'<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af);white-space:nowrap">Simular meta</span>'
+        +'<input type="range" id="pr-sim" min="'+_simMin+'" max="'+_simMax+'" step="1000" value="'+Math.round(_baseMeta||_simMin)+'" oninput="presSimUpdate()" style="flex:1;min-width:150px;accent-color:#c46a7a;cursor:pointer">'
+        +'<span id="pr-sim-val" style="font-size:15px;font-weight:800;color:var(--text-primary,#111);white-space:nowrap;min-width:84px;text-align:right">'+fM(_baseMeta)+'</span>'
+        +(canEdit?'<button onclick="presSimReset()" title="Volver a la meta guardada" style="border:1.5px solid var(--color-divider,#e5e7eb);background:var(--card-bg,#fff);border-radius:8px;padding:6px 12px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">Restablecer</button>'
+          +'<button class="pr-btn" id="pr-sim-save" style="padding:6px 12px;font-size:11px" onclick="presSimSave()">Guardar como meta</button>':'')
+      +'</div>'
+      +'<div id="pr-sim-out" style="font-size:12px;color:var(--text-secondary,#6b7280);margin-top:9px;line-height:1.5"></div>'
+    +'</div>'
     +'</div>');
 
   // KPIs
@@ -7422,6 +7436,7 @@ function _renderPresupuesto(){
 
   h.push('</div>');
   root.innerHTML = h.join('');
+  try { presSimUpdate(); } catch(e){}
 
   // Gráfica
   try {
@@ -7455,6 +7470,49 @@ function presChartToggle(){
   if(ds[0]) ds[0].hidden=!ing; if(ds[1]) ds[1].hidden=!ing;
   if(ds[2]) ds[2].hidden=!eg;  if(ds[3]) ds[3].hidden=!eg;
   _presChart.update();
+}
+
+/* ── Simulador de meta en la barra del hero ─────────────────────── */
+function presSimUpdate(){
+  var s=window._presSim, sl=document.getElementById('pr-sim'); if(!s||!sl) return;
+  var t=parseFloat(sl.value)||0, fM=_presFM;
+  var pctReal = t>0 ? Math.min(s.real/t,1) : 0;
+  var gap = t - s.real;
+  var diasRest = Math.max(s.diasTot - s.diasT, 0);
+  var porDia = (gap>0 && diasRest>0) ? gap/diasRest : 0;
+  var cumpl = t>0 ? s.proyCierre/t : null;
+  var st = cumpl==null ? {c:'#6b7280',bg:'rgba(107,114,128,.12)',dot:'#9ca3af',txt:'Captura una meta'}
+        : cumpl>=1   ? {c:'#166534',bg:'rgba(16,185,129,.12)',dot:'#16a34a',txt:'Vas a llegar a la meta'}
+        : cumpl>=0.9 ? {c:'#b45309',bg:'rgba(245,158,11,.15)',dot:'#f59e0b',txt:'Vas justo — riesgo de no llegar'}
+                     : {c:'#991b1b',bg:'rgba(239,68,68,.12)',dot:'#ef4444',txt:'No vas a llegar a la meta'};
+  function set(id,fn){ var e=document.getElementById(id); if(e) fn(e); }
+  set('pr-bar-fill',function(e){ e.style.width=(pctReal*100).toFixed(1)+'%'; e.style.background=st.dot; });
+  set('pr-sem-dot',function(e){ e.style.background=st.dot; });
+  set('pr-sem-txt',function(e){ e.textContent=st.txt; });
+  set('pr-sem-pill',function(e){ e.style.background=st.bg; e.style.color=st.c; e.textContent=(cumpl!=null?Math.round(cumpl*100)+'% proyectado':'sin meta'); });
+  set('pr-bar-meta',function(e){ e.textContent=fM(t); });
+  set('pr-bar-real',function(e){ e.textContent='Real acumulado '+fM(s.real)+(t>0?(' ('+Math.round(s.real/t*100)+'%)'):''); });
+  set('pr-sim-val',function(e){ e.textContent=fM(t); });
+  set('pr-sim-out',function(e){
+    if(gap<=0){ e.innerHTML='✓ Esta meta ya está cubierta — excedente <b style="color:#166534">'+fM(-gap)+'</b>.'; return; }
+    e.innerHTML='Para llegar a <b>'+fM(t)+'</b> te faltan <b style="color:#991b1b">'+fM(gap)+'</b>'
+      +(diasRest>0 ? (' · necesitas <b>'+fM(porDia)+'/día</b> en los '+diasRest+' días restantes') : ' · trimestre cerrado')
+      +' · cierre proyectado al ritmo actual: <b>'+fM(s.proyCierre)+'</b>.';
+  });
+}
+function presSimReset(){
+  var s=window._presSim, sl=document.getElementById('pr-sim'); if(!s||!sl) return;
+  sl.value=Math.round(s.savedMeta>0?s.savedMeta:s.proyCierre); presSimUpdate();
+}
+async function presSimSave(){
+  var s=window._presSim, sl=document.getElementById('pr-sim'); if(!s||!sl) return;
+  var t=parseFloat(sl.value)||0;
+  var btn=document.getElementById('pr-sim-save'); if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  var ses=getSession()||{};
+  try {
+    await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMeta',periodo:s.periodo,linea:'TOTAL',metaIngreso:t,usuario:ses.email||''})});
+    await loadPresupuesto();
+  } catch(e){ if(btn){ btn.disabled=false; btn.textContent='Guardar como meta'; } }
 }
 
 /* ── Modal: fijar meta del trimestre (con estimado del modelo) ─────── */
