@@ -9012,9 +9012,9 @@ function renderCxP(data) {
 
   var kpis = [
     {cls:'cxp-k-vencido', ico:'🔴', lbl:'Vencido', n:r.vencido||0, total:r.totalVencido||0},
-    {cls:'cxp-k-d3',      ico:'🟠', lbl:'Vence ≤ 3 días', n:r.d3||0, total:r.totalD3||0},
-    {cls:'cxp-k-d7',      ico:'🟡', lbl:'Vence ≤ 7 días', n:r.d7||0, total:r.totalD7||0},
-    {cls:'cxp-k-d30',     ico:'🔵', lbl:'Vence ≤ 30 días', n:r.d30||0, total:r.totalD30||0}
+    {cls:'cxp-k-d3',      ico:'🟠', lbl:'Vence hoy', n:r.hoy||0, total:r.totalHoy||0},
+    {cls:'cxp-k-d7',      ico:'🟡', lbl:'Vence esta semana', n:r.semana||0, total:r.totalSemana||0},
+    {cls:'cxp-k-d30',     ico:'🔵', lbl:'Vence este mes', n:r.mes||0, total:r.totalMes||0}
   ];
   html += '<div class="cxp-kg">';
   kpis.forEach(function(k){
@@ -9049,10 +9049,13 @@ function renderCxP(data) {
   html += '</div>'; // cxp-wrap
 
   // Pagar modal (hidden)
-  html += '<div id="cxp-pay-ovl" class="cb-ovl" onclick="cxpClosePay()"></div>';
-  html += '<div id="cxp-pay-drw" class="cb-drw" style="width:min(440px,100vw)">'
-    + '<div class="cb-dt"><div class="cb-dtl" id="cxp-pay-title">Registrar pago</div><button class="cb-dx" onclick="cxpClosePay()">×</button></div>'
-    + '<div class="cb-dbb" id="cxp-pay-body"></div></div>';
+  html += '<div id="cxp-pay-ovl" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;backdrop-filter:blur(3px);animation:cfFI .2s ease" onclick="cxpClosePay()"></div>';
+  html += '<div id="cxp-pay-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(480px,92vw);max-height:85vh;overflow-y:auto">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--color-divider,#e5e7eb)">'
+      + '<div id="cxp-pay-title" style="font-size:15px;font-weight:800;color:var(--text-primary,#111)">Registrar pago</div>'
+      + '<button onclick="cxpClosePay()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary,#6b7280);line-height:1">×</button>'
+    + '</div>'
+    + '<div id="cxp-pay-body" style="padding:20px"></div></div>';
 
   root.innerHTML = html;
 
@@ -9100,8 +9103,8 @@ function _cxpBuildNewRows(rows) {
 
 // ── CxP Payment modal ──
 window.cxpOpenPay = function(rowNum, proveedor, monto) {
-  var d=document.getElementById('cxp-pay-drw'),o=document.getElementById('cxp-pay-ovl');
-  if(d)d.classList.add('open'); if(o)o.classList.add('open');
+  var m=document.getElementById('cxp-pay-modal'),o=document.getElementById('cxp-pay-ovl');
+  if(m)m.style.display='block'; if(o)o.style.display='block';
   var title = document.getElementById('cxp-pay-title');
   if(title) title.textContent = 'Pagar a ' + proveedor;
   var body = document.getElementById('cxp-pay-body');
@@ -9144,8 +9147,8 @@ window.cxpOpenPay = function(rowNum, proveedor, monto) {
 };
 
 window.cxpClosePay = function() {
-  var d=document.getElementById('cxp-pay-drw'),o=document.getElementById('cxp-pay-ovl');
-  if(d)d.classList.remove('open'); if(o)o.classList.remove('open');
+  var m=document.getElementById('cxp-pay-modal'),o=document.getElementById('cxp-pay-ovl');
+  if(m)m.style.display='none'; if(o)o.style.display='none';
 };
 
 window.cxpSubmitPay = async function(rowNum) {
@@ -9267,8 +9270,8 @@ function _cxpBuildForm(data) {
 }
 
 window.cxpOpenCapture = function() {
-  var d=document.getElementById('cxp-pay-drw'),o=document.getElementById('cxp-pay-ovl');
-  if(d)d.classList.add('open'); if(o)o.classList.add('open');
+  var m=document.getElementById('cxp-pay-modal'),o=document.getElementById('cxp-pay-ovl');
+  if(m)m.style.display='block'; if(o)o.style.display='block';
   var title = document.getElementById('cxp-pay-title');
   if(title) title.textContent = 'Registrar cuenta por pagar';
   var body = document.getElementById('cxp-pay-body');
@@ -9282,8 +9285,8 @@ window.cxpOpenCapture = function() {
 
 window.cxpOpenEdit = function(rowNum, jsonStr) {
   var data = typeof jsonStr==='string' ? JSON.parse(jsonStr) : jsonStr;
-  var d=document.getElementById('cxp-pay-drw'),o=document.getElementById('cxp-pay-ovl');
-  if(d)d.classList.add('open'); if(o)o.classList.add('open');
+  var m=document.getElementById('cxp-pay-modal'),o=document.getElementById('cxp-pay-ovl');
+  if(m)m.style.display='block'; if(o)o.style.display='block';
   var title = document.getElementById('cxp-pay-title');
   if(title) title.textContent = 'Editar — '+data.proveedor;
   var body = document.getElementById('cxp-pay-body');
