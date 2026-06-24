@@ -36,6 +36,23 @@ function _presQKey(y, q) { return y + '-Q' + q; }
 function _presPrevQ(y, q) { return q > 1 ? { y: y, q: q - 1 } : { y: y - 1, q: 4 }; }
 function _presNextQ(y, q) { return q < 4 ? { y: y, q: q + 1 } : { y: y + 1, q: 1 }; }
 
+/* ── Diagnóstico: vuelca la estructura real de la pestaña Budget ──
+   Correr desde el editor y revisar "Registro de ejecución" (Ctrl+Enter).
+   Sirve para mapear qué columna tiene el presupuesto por periodo/línea. */
+function peekBudget() {
+  var ss = SpreadsheetApp.openById(ER_SS_ID);
+  var sh = ss.getSheetByName('Budget');
+  if (!sh) { Logger.log('No existe la pestaña "Budget".'); return; }
+  var nr = Math.min(sh.getLastRow(), 30), nc = Math.min(sh.getLastColumn(), 16);
+  var vals = sh.getRange(1, 1, nr, nc).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    Logger.log((i + 1) + ': ' + vals[i].map(function (v) {
+      if (v instanceof Date) return v.getFullYear() + '-' + (v.getMonth() + 1);
+      return String(v);
+    }).join(' | '));
+  }
+}
+
 /* ── Setup de la hoja de metas ──────────────────────────────────── */
 function setupPresupuesto() {
   try {
