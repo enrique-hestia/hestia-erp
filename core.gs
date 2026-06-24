@@ -285,6 +285,11 @@ function doGet(e) {
       return jsonResponse(readPresupuesto());
     }
 
+    // Análisis de Egresos: histórico, ranking, recomendaciones
+    if (action === 'analisisEgresos') {
+      return jsonResponse(readAnalisisEgresos());
+    }
+
     if (action === 'ingresos') {
       return jsonResponse(readIngresosData());
     }

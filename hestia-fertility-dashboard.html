@@ -833,6 +833,16 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
   </div>
 </div>
 
+<!-- ══ VISTA: ANÁLISIS DE EGRESOS ══ -->
+<div id="view-analisis-egresos" class="view" style="display:none">
+  <div id="ae-root">
+    <div style="padding:32px;text-align:center;color:var(--color-text-muted,#9ca3af);font-size:13px">
+      <div style="width:32px;height:32px;border:3px solid var(--color-border,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 12px"></div>
+      Analizando egresos…
+    </div>
+  </div>
+</div>
+
 <!-- ══ VISTA: SERVICIOS ══ -->
 <div id="view-servicios" class="view" style="display:none">
   <div class="card">
@@ -4632,6 +4642,15 @@ async function loadMenu() {
         });
       }
     }
+    // Inyectar "Egresos" (análisis) en la sección Análisis, debajo de Ingresos
+    var ingAna = menuItems.filter(function(i){ return i.padre && /ingreso/i.test((i.id||'')+' '+(i.label||'')); })[0];
+    if (ingAna && !menuItems.some(function(i){ return i.id==='analisis-egresos'; })) {
+      menuItems.push({
+        id:'analisis-egresos', label:'Egresos', padre:ingAna.padre,
+        icono:'trending-down', tipo:'vista', orden:(ingAna.orden||0)+0.5,
+        seccion:ingAna.seccion, fuente:'analisis-egresos'
+      });
+    }
     // Default: mes en curso (no año completo)
     var _now = new Date();
     var _y = _now.getFullYear();
@@ -7161,6 +7180,14 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     loadPresupuesto();
     return;
   }
+  // Análisis de Egresos — centro de inteligencia de gastos
+  if (viewId === 'analisis-egresos') {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _aeEl = document.getElementById('view-analisis-egresos');
+    if (_aeEl) _aeEl.style.display = '';
+    loadAnalisisEgresos();
+    return;
+  }
   // Productos — Catálogo General o categorías individuales
   var _vidLow = viewId.toLowerCase();
   var _prodCatPairs = [
@@ -7256,6 +7283,149 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
       setStatus('Error: ' + e.message, 'err');
     }
   }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ANÁLISIS DE EGRESOS — centro de inteligencia de gastos
+   ══════════════════════════════════════════════════════════════ */
+var _aeData = null, _aeChart = null;
+function _aeFM(v){ v=Number(v)||0; var s=v<0?'-':''; var a=Math.abs(v); if(a>=1e6) return s+'$'+(a/1e6).toFixed(2)+'M'; if(a>=1e3) return s+'$'+Math.round(a/1e3)+'K'; return s+'$'+Math.round(a); }
+function _aeMesLbl(mk){ var M=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']; var p=String(mk).split('-'); return (M[parseInt(p[1],10)-1]||'')+' '+String(p[0]).slice(2); }
+
+async function loadAnalisisEgresos(){
+  var root=document.getElementById('ae-root'); if(!root) return;
+  root.innerHTML='<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px"><div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Analizando egresos…</div>';
+  try {
+    var tok=encodeURIComponent(getToken());
+    var r=await fetch(APPS_SCRIPT_URL+'?action=analisisEgresos&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
+    _aeData=await r.json();
+    if(!_aeData.ok) throw new Error(_aeData.error||'No se pudo analizar.');
+    _renderAnalisisEgresos();
+  } catch(e){
+    root.innerHTML='<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px;line-height:1.6">⚠ '+e.message+'<br><span style="color:#6b7280">Si es la primera vez: agrega <b>analisis.gs</b> en Apps Script y vuelve a desplegar el backend.</span></div>';
+  }
+}
+
+function _renderAnalisisEgresos(){
+  var root=document.getElementById('ae-root'); if(!root||!_aeData) return;
+  var d=_aeData, fM=_aeFM;
+  var costos=d.contable&&(d.contable.Costo||0)||0;
+  var gastos=(d.contable&&(d.contable.Gasto||0)||0)+(d.contable&&(d.contable['Crédito']||0)||0);
+  var pctFijo=d.totalActual>0?(d.fijo/d.totalActual*100):0;
+
+  if(!document.getElementById('ae-styles')){
+    var s=document.createElement('style'); s.id='ae-styles';
+    s.textContent='.ae-w{max-width:1280px;margin:0 auto;padding:20px}'
+      +'.ae-hdr{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px;padding-bottom:14px;border-bottom:2px solid var(--text-primary,#111)}'
+      +'.ae-kstrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:18px}'
+      +'.ae-ks{background:var(--color-surface,#fafafa);border-radius:12px;padding:14px 16px}'
+      +'.ae-ks-l{font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:5px}'
+      +'.ae-ks-v{font-size:23px;font-weight:800;letter-spacing:-.5px}'
+      +'.ae-ks-s{font-size:10.5px;color:var(--text-secondary,#6b7280);margin-top:3px}'
+      +'.ae-sc{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:16px 18px;margin-bottom:16px}'
+      +'.ae-sh{font-size:13px;font-weight:700;color:var(--text-primary,#111);margin-bottom:12px}'
+      +'.ae-ins{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}'
+      +'.ae-ic{border-radius:12px;padding:13px 15px;border:1px solid var(--color-divider,#eee)}'
+      +'.ae-ic-t{font-size:12.5px;font-weight:800;margin-bottom:3px;display:flex;align-items:center;gap:7px}'
+      +'.ae-ic-d{font-size:11px;color:var(--text-secondary,#6b7280);line-height:1.5}'
+      +'.ae-tbl{width:100%;border-collapse:collapse;font-size:11.5px}'
+      +'.ae-tbl th{padding:7px 10px;font-size:8.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);background:var(--color-surface,#fafafa);border-bottom:2px solid var(--color-divider,#d1d5db);text-align:right;white-space:nowrap}'
+      +'.ae-tbl th:first-child{text-align:left}'
+      +'.ae-tbl td{padding:7px 10px;border-bottom:1px solid var(--color-divider,#f0f0f0);text-align:right;white-space:nowrap}'
+      +'.ae-tbl td:first-child{text-align:left}'
+      +'.ae-bar{height:5px;background:var(--color-divider,#eee);border-radius:3px;overflow:hidden;margin-top:4px}'
+      +'.ae-grid2{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:start}@media(max-width:900px){.ae-grid2{grid-template-columns:1fr}}';
+    document.head.appendChild(s);
+  }
+
+  var insBg={warn:{bg:'rgba(245,158,11,.08)',bd:'rgba(245,158,11,.3)',c:'#b45309'},info:{bg:'rgba(59,130,246,.07)',bd:'rgba(59,130,246,.25)',c:'#2563eb'},ok:{bg:'rgba(16,185,129,.07)',bd:'rgba(16,185,129,.25)',c:'#166534'}};
+
+  var h=[];
+  h.push('<div class="ae-w">');
+  h.push('<div class="ae-hdr"><div>'
+    +'<div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility · Análisis</div>'
+    +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Análisis de Egresos</h1>'
+    +'<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">Dónde se gasta más, qué creció y dónde se puede ahorrar · '+d.anioActual+'</div>'
+    +'</div></div>');
+
+  // KPIs
+  var crecTxt = d.crecTotal!=null ? ((d.crecTotal>=0?'+':'')+d.crecTotal.toFixed(0)+'% vs '+d.anioAnterior) : 'sin comparativo';
+  var crecCol = d.crecTotal!=null ? (d.crecTotal>10?'#991b1b':(d.crecTotal<0?'#166534':'#b45309')) : '#9ca3af';
+  h.push('<div class="ae-kstrip">'
+    +'<div class="ae-ks"><div class="ae-ks-l">Egresos '+d.anioActual+'</div><div class="ae-ks-v" style="color:#991b1b">'+fM(d.totalActual)+'</div><div class="ae-ks-s" style="color:'+crecCol+'">'+crecTxt+'</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">Costos directos</div><div class="ae-ks-v" style="color:#0f6e56">'+fM(costos)+'</div><div class="ae-ks-s">'+(d.totalActual>0?(costos/d.totalActual*100).toFixed(0):'0')+'% del total</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">Gastos</div><div class="ae-ks-v" style="color:#b45309">'+fM(gastos)+'</div><div class="ae-ks-s">'+(d.totalActual>0?(gastos/d.totalActual*100).toFixed(0):'0')+'% del total</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">Egresos fijos</div><div class="ae-ks-v">'+pctFijo.toFixed(0)+'%</div><div class="ae-ks-s">'+fM(d.fijo)+' fijos · '+fM(d.variable)+' variables</div></div>'
+    +'</div>');
+
+  // Recomendaciones
+  if((d.insights||[]).length){
+    h.push('<div class="ae-sc"><div class="ae-sh">💡 Recomendaciones del análisis</div><div class="ae-ins">');
+    d.insights.forEach(function(ins){
+      var cf=insBg[ins.tipo]||insBg.info;
+      h.push('<div class="ae-ic" style="background:'+cf.bg+';border-color:'+cf.bd+'">'
+        +'<div class="ae-ic-t" style="color:'+cf.c+'"><i data-lucide="'+(ins.icono||'info')+'" style="width:15px;height:15px"></i>'+ins.titulo+'</div>'
+        +'<div class="ae-ic-d">'+ins.detalle+'</div></div>');
+    });
+    h.push('</div></div>');
+  }
+
+  // Tendencia mensual
+  h.push('<div class="ae-sc"><div class="ae-sh">Tendencia mensual — Costos vs Gastos</div>'
+    +'<div style="position:relative;height:250px"><canvas id="aeChart"></canvas></div></div>');
+
+  // Grid: categorías + proveedores
+  h.push('<div class="ae-grid2">');
+  // Categorías
+  h.push('<div class="ae-sc"><div class="ae-sh">¿En qué gastas más? · '+d.anioActual+'</div>'
+    +'<div style="overflow-x:auto;max-height:420px;overflow-y:auto"><table class="ae-tbl"><thead><tr>'
+    +'<th>Categoría</th><th>Total</th><th>%</th><th>Crec. a/a</th></tr></thead><tbody>');
+  (d.subtipos||[]).slice(0,18).forEach(function(s){
+    var crecH = s.crec==null?'<span style="color:#2563eb;font-size:10px">nuevo</span>':'<span style="color:'+(s.crec>0?'#991b1b':'#166534')+';font-weight:700">'+(s.crec>0?'+':'')+s.crec.toFixed(0)+'%</span>';
+    var barC = /costo/i.test(s.contable)?'#0f6e56':'#b45309';
+    h.push('<tr><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="'+s.subtipo+'"><span style="font-weight:600">'+s.subtipo+'</span>'
+      +'<div class="ae-bar"><div style="height:100%;width:'+Math.min(s.pct,100)+'%;background:'+barC+'"></div></div></td>'
+      +'<td style="font-weight:700;color:#991b1b">'+fM(s.total)+'</td>'
+      +'<td style="color:var(--text-secondary,#6b7280)">'+s.pct.toFixed(1)+'%</td>'
+      +'<td>'+crecH+'</td></tr>');
+  });
+  h.push('</tbody></table></div></div>');
+  // Proveedores
+  h.push('<div class="ae-sc"><div class="ae-sh">Top proveedores</div>');
+  (d.proveedores||[]).forEach(function(p,i){
+    h.push('<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--color-divider,#f0f0f0)">'
+      +'<div style="width:18px;height:18px;border-radius:5px;background:var(--color-primary-hl,rgba(196,106,122,.1));display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--color-primary,#c46a7a)">'+(i+1)+'</div>'
+      +'<div style="flex:1;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+p.proveedor+'">'+p.proveedor+'</div>'
+      +'<div style="font-size:11px;font-weight:700;white-space:nowrap">'+fM(p.total)+'</div>'
+      +'<div style="font-size:10px;color:var(--text-secondary,#9ca3af);width:34px;text-align:right">'+p.pct.toFixed(0)+'%</div>'
+      +'</div>');
+  });
+  h.push('</div>');
+  h.push('</div>'); // grid2
+  h.push('</div>'); // wrap
+  root.innerHTML=h.join('');
+  try { if(window.lucide) lucide.createIcons(); } catch(e){}
+
+  // Gráfica
+  try {
+    var meses=(d.meses||[]).slice(-18);
+    var ctx=document.getElementById('aeChart');
+    if(ctx && typeof Chart!=='undefined'){
+      if(_aeChart){ _aeChart.destroy(); _aeChart=null; }
+      _aeChart=new Chart(ctx.getContext('2d'),{
+        type:'bar',
+        data:{ labels:meses.map(function(m){return _aeMesLbl(m.mes);}), datasets:[
+          { label:'Costos', data:meses.map(function(m){return m.costo;}), backgroundColor:'#0f6e56', stack:'s' },
+          { label:'Gastos', data:meses.map(function(m){return m.gasto+m.credito;}), backgroundColor:'#b45309', stack:'s' }
+        ]},
+        options:{ responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{ display:true, labels:{ boxWidth:12, font:{size:11} } } },
+          scales:{ x:{ stacked:true, ticks:{ font:{size:9}, maxRotation:45 }, grid:{ display:false } },
+                   y:{ stacked:true, ticks:{ callback:function(v){return _aeFM(v);}, font:{size:10} }, grid:{ color:'rgba(128,128,128,0.1)' } } }
+        }
+      });
+    }
+  } catch(e){}
 }
 
 /* ══════════════════════════════════════════════════════════════

@@ -1,0 +1,160 @@
+/* ==============================================================
+   analisis.gs — Centro de Análisis de Egresos
+   --------------------------------------------------------------
+   Lee TODO el histórico de egresos (EGRESOS_IDS por año) y genera
+   un análisis para detectar dónde se gasta más, qué creció y dónde
+   se puede recortar. Incluye recomendaciones automáticas.
+
+   Ruta:  GET ?action=analisisEgresos
+   ============================================================== */
+
+function _anNum(v) { if (typeof v === 'number') return v; var n = parseFloat(String(v || '').replace(/[$,\s]/g, '')); return isNaN(n) ? 0 : n; }
+function _anFM(v) { v = Math.abs(Number(v) || 0); if (v >= 1e6) return '$' + (v / 1e6).toFixed(2) + 'M'; if (v >= 1e3) return '$' + Math.round(v / 1e3) + 'K'; return '$' + Math.round(v); }
+
+function readAnalisisEgresos() {
+  try {
+    var anioActual = new Date().getFullYear();
+    var anioAnterior = anioActual - 1;
+
+    var porMes = {};          // 'YYYY-MM' -> {costo,gasto,credito,total}
+    var porAnio = {};         // year -> total
+    var curContable = { Costo: 0, Gasto: 0, 'Crédito': 0 };
+    var curTipo = {};         // Fijo/Variable -> total (año actual)
+    var curSub = {};          // subtipo -> {total, contable}
+    var prevSub = {};         // subtipo -> total (año anterior)
+    var curProv = {};         // proveedor -> total (año actual)
+    var curTotal = 0, prevTotal = 0;
+
+    Object.keys(EGRESOS_IDS).forEach(function (anio) {
+      try {
+        var ss = SpreadsheetApp.openById(EGRESOS_IDS[anio]);
+        var sh = ss.getSheetByName(EGRESOS_TABS[anio]) || ss.getSheets()[0];
+        if (!sh) return;
+        var raw = sh.getDataRange().getValues();
+        if (raw.length < 2) return;
+        var H = raw[0].map(function (h) { return String(h).trim().toLowerCase(); });
+        function col(kw) { for (var c = 0; c < H.length; c++) if (H[c].indexOf(kw) > -1) return c; return -1; }
+        var iF = col('fecha'), iV = col('vencimiento'), iE = col('egresos'),
+            iC = col('contable'), iT = col('tipo'), iS = col('subtipo'), iP = col('proveedor');
+
+        for (var r = 1; r < raw.length; r++) {
+          var row = raw[r];
+          var f = (iF > -1 ? row[iF] : '') || (iV > -1 ? row[iV] : '');
+          var d = (f instanceof Date) ? f : new Date(f);
+          if (!d || isNaN(d.getTime())) continue;
+          var monto = _anNum(iE > -1 ? row[iE] : 0);
+          if (!monto) continue;
+          var y = d.getFullYear();
+          var mk = y + '-' + String(d.getMonth() + 1).padStart(2, '0');
+          var cont = (iC > -1 ? String(row[iC] || '').trim() : '') || 'Gasto';
+          var tip = (iT > -1 ? String(row[iT] || '').trim() : '') || 'Variable';
+          var sub = (iS > -1 ? String(row[iS] || '').trim() : '') || 'Otros';
+          var prov = (iP > -1 ? String(row[iP] || '').trim() : '') || 'Sin proveedor';
+
+          if (!porMes[mk]) porMes[mk] = { costo: 0, gasto: 0, credito: 0, total: 0 };
+          var bucket = /costo/i.test(cont) ? 'costo' : (/cr[ée]dito/i.test(cont) ? 'credito' : 'gasto');
+          porMes[mk][bucket] += monto; porMes[mk].total += monto;
+          porAnio[y] = (porAnio[y] || 0) + monto;
+
+          if (y === anioActual) {
+            if (curContable[cont] == null) curContable[cont] = 0;
+            curContable[cont] += monto;
+            curTipo[tip] = (curTipo[tip] || 0) + monto;
+            if (!curSub[sub]) curSub[sub] = { total: 0, contable: cont };
+            curSub[sub].total += monto;
+            curProv[prov] = (curProv[prov] || 0) + monto;
+            curTotal += monto;
+          } else if (y === anioAnterior) {
+            prevSub[sub] = (prevSub[sub] || 0) + monto;
+            prevTotal += monto;
+          }
+        }
+      } catch (e) {}
+    });
+
+    // ── Series mensual ordenada ──
+    var mesesArr = Object.keys(porMes).sort().map(function (mk) {
+      return { mes: mk, costo: porMes[mk].costo, gasto: porMes[mk].gasto, credito: porMes[mk].credito, total: porMes[mk].total };
+    });
+
+    // ── Ranking de subtipos (año actual) con crecimiento vs anterior ──
+    var subArr = Object.keys(curSub).map(function (s) {
+      var tot = curSub[s].total, ant = prevSub[s] || 0;
+      return {
+        subtipo: s, contable: curSub[s].contable, total: tot,
+        pct: curTotal > 0 ? (tot / curTotal) * 100 : 0,
+        totalAnt: ant, crec: ant > 0 ? ((tot - ant) / ant) * 100 : null, delta: tot - ant
+      };
+    }).sort(function (a, b) { return b.total - a.total; });
+
+    // ── Top proveedores (año actual) ──
+    var provArr = Object.keys(curProv).map(function (p) {
+      return { proveedor: p, total: curProv[p], pct: curTotal > 0 ? (curProv[p] / curTotal) * 100 : 0 };
+    }).sort(function (a, b) { return b.total - a.total; }).slice(0, 12);
+
+    // ── Fijo vs Variable ──
+    var fijo = curTipo['Fijo'] || curTipo['fijo'] || 0;
+    var variable = curTotal - fijo;
+
+    // ── Recomendaciones automáticas ──
+    var insights = [];
+    var crecTotal = prevTotal > 0 ? ((curTotal - prevTotal) / prevTotal) * 100 : null;
+
+    if (subArr.length) {
+      var top = subArr[0];
+      insights.push({ tipo: top.pct > 25 ? 'warn' : 'info', icono: 'pie-chart',
+        titulo: top.subtipo + ' concentra ' + top.pct.toFixed(0) + '% de tus egresos',
+        detalle: _anFM(top.total) + ' en el año. ' + (top.pct > 25 ? 'Alta concentración: una mejora aquí mueve mucho la aguja.' : 'Es tu categoría más grande.') });
+    }
+    // Mayor incremento absoluto vs año anterior
+    var crecientes = subArr.filter(function (s) { return s.crec != null && s.delta > 0; }).sort(function (a, b) { return b.delta - a.delta; });
+    if (crecientes.length && crecientes[0].crec > 10) {
+      var g = crecientes[0];
+      insights.push({ tipo: 'warn', icono: 'trending-up',
+        titulo: g.subtipo + ' subió +' + g.crec.toFixed(0) + '% vs el año pasado',
+        detalle: '+' + _anFM(g.delta) + ' más que en ' + anioAnterior + '. El mayor aumento — vale la pena revisar y renegociar.' });
+    }
+    // Fijo vs variable
+    if (curTotal > 0) {
+      var pctFijo = (fijo / curTotal) * 100;
+      insights.push({ tipo: pctFijo > 70 ? 'warn' : 'ok', icono: 'lock',
+        titulo: pctFijo.toFixed(0) + '% de tus egresos son fijos',
+        detalle: pctFijo > 70 ? 'Poca flexibilidad para recortar rápido: enfócate en renegociar contratos (renta, software, nómina).' : 'Tienes margen variable para ajustar gasto según la demanda.' });
+    }
+    // Costos vs gastos
+    if (curTotal > 0) {
+      var pctCosto = ((curContable['Costo'] || 0) / curTotal) * 100;
+      insights.push({ tipo: 'info', icono: 'layers',
+        titulo: pctCosto.toFixed(0) + '% costos directos · ' + (100 - pctCosto).toFixed(0) + '% gastos',
+        detalle: 'Los costos suben con más pacientes (variable sano); los gastos fijos no — ahí está el ahorro estructural.' });
+    }
+    // Candidatos a recortar: crecieron >25% y pesan >3%
+    var candidatos = subArr.filter(function (s) { return s.crec != null && s.crec > 25 && s.pct > 3; }).slice(0, 3);
+    if (candidatos.length) {
+      insights.push({ tipo: 'warn', icono: 'scissors',
+        titulo: 'Candidatos a revisar para ahorrar',
+        detalle: candidatos.map(function (c) { return c.subtipo + ' (+' + c.crec.toFixed(0) + '%)'; }).join(' · ') + '. Crecieron fuerte y pesan en el total.' });
+    }
+    // Concentración de proveedor
+    if (provArr.length && provArr[0].pct > 20) {
+      insights.push({ tipo: 'info', icono: 'briefcase',
+        titulo: provArr[0].proveedor + ' es ' + provArr[0].pct.toFixed(0) + '% de tu gasto',
+        detalle: 'Alta dependencia de un proveedor — buen punto para negociar volumen o buscar alternativa.' });
+    }
+
+    return {
+      ok: true,
+      anioActual: anioActual, anioAnterior: anioAnterior,
+      totalActual: curTotal, totalAnterior: prevTotal, crecTotal: crecTotal,
+      porAnio: porAnio,
+      contable: curContable,
+      fijo: fijo, variable: variable,
+      meses: mesesArr,
+      subtipos: subArr,
+      proveedores: provArr,
+      insights: insights
+    };
+  } catch (ex) {
+    return { ok: false, error: ex.message };
+  }
+}
