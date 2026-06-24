@@ -7372,9 +7372,14 @@ function _renderPresupuesto(){
   var _crecAp = (d.crecimientoAplicado!=null?d.crecimientoAplicado:d.crecimientoRealTotal);
   var _crecNota = (d.crecimientoTope!=null && d.crecimientoRealTotal>d.crecimientoTope)
     ? ' <span title="El crecimiento real fue '+fP(d.crecimientoRealTotal)+' por el arranque 2024; se aplica el techo">(real '+fP(d.crecimientoRealTotal)+', con techo)</span>' : '';
-  h.push('<div class="pr-sc"><div class="pr-sh"><span>Ventas mensuales — real y proyección</span>'
+  h.push('<div class="pr-sc"><div class="pr-sh"><span>Tendencia mensual — real y proyección</span>'
     +'<span style="font-size:11px;font-weight:400;color:var(--text-secondary,#9ca3af)">crecimiento aplicado: '+fP(_crecAp)+_crecNota+'</span></div>'
-    +'<div style="position:relative;height:240px"><canvas id="presChart"></canvas></div></div>');
+    +'<div style="display:flex;gap:18px;align-items:center;margin-bottom:8px;font-size:12px;flex-wrap:wrap">'
+      +'<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Mostrar:</span>'
+      +'<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="pr-ck-ing" checked onchange="presChartToggle()" style="width:14px;height:14px;accent-color:#c46a7a"> <span style="color:#c46a7a;font-weight:600">Income</span></label>'
+      +'<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="pr-ck-eg" checked onchange="presChartToggle()" style="width:14px;height:14px;accent-color:#b45309"> <span style="color:#b45309;font-weight:600">Expenses</span></label>'
+    +'</div>'
+    +'<div style="position:relative;height:250px"><canvas id="presChart"></canvas></div></div>');
 
   // Proyección siguiente trimestre — escenarios
   h.push('<div class="pr-sc"><div class="pr-sh">Proyección '+sg.periodo+' · con base en el comportamiento de ventas</div>'
@@ -7420,15 +7425,17 @@ function _renderPresupuesto(){
 
   // Gráfica
   try {
-    var t = d.tendencia||{meses:[],real:[],proyeccion:[]};
+    var t = d.tendencia||{meses:[],real:[],proyeccion:[],egresoReal:[],egresoProy:[]};
     var ctx = document.getElementById('presChart');
     if (ctx && typeof Chart!=='undefined'){
       if (_presChart) { _presChart.destroy(); _presChart=null; }
       _presChart = new Chart(ctx.getContext('2d'), {
         type:'line',
         data:{ labels:t.meses, datasets:[
-          { label:'Real', data:t.real, borderColor:'#c46a7a', backgroundColor:'#c46a7a', borderWidth:2.5, tension:0.3, pointRadius:3, spanGaps:false },
-          { label:'Proyección', data:t.proyeccion, borderColor:'#888780', borderDash:[6,4], borderWidth:2, tension:0.3, pointRadius:3, spanGaps:false }
+          { label:'Income real', data:t.real, borderColor:'#c46a7a', backgroundColor:'#c46a7a', borderWidth:2.5, tension:0.3, pointRadius:3, spanGaps:false },
+          { label:'Income proy.', data:t.proyeccion, borderColor:'#c46a7a', borderDash:[6,4], borderWidth:2, tension:0.3, pointRadius:3, spanGaps:false },
+          { label:'Expenses real', data:t.egresoReal, borderColor:'#b45309', backgroundColor:'#b45309', borderWidth:2.5, tension:0.3, pointRadius:3, spanGaps:false },
+          { label:'Expenses proy.', data:t.egresoProy, borderColor:'#b45309', borderDash:[6,4], borderWidth:2, tension:0.3, pointRadius:3, spanGaps:false }
         ]},
         options:{ responsive:true, maintainAspectRatio:false,
           plugins:{ legend:{ display:true, labels:{ boxWidth:12, font:{size:11} } } },
@@ -7436,8 +7443,18 @@ function _renderPresupuesto(){
                    x:{ ticks:{ font:{size:10} }, grid:{ display:false } } }
         }
       });
+      presChartToggle();
     }
   } catch(e){ /* sin gráfica */ }
+}
+function presChartToggle(){
+  if(!_presChart) return;
+  var ing=((document.getElementById('pr-ck-ing')||{}).checked)!==false;
+  var eg=((document.getElementById('pr-ck-eg')||{}).checked)!==false;
+  var ds=_presChart.data.datasets;
+  if(ds[0]) ds[0].hidden=!ing; if(ds[1]) ds[1].hidden=!ing;
+  if(ds[2]) ds[2].hidden=!eg;  if(ds[3]) ds[3].hidden=!eg;
+  _presChart.update();
 }
 
 /* ── Modal: fijar meta del trimestre (con estimado del modelo) ─────── */

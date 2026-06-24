@@ -105,7 +105,7 @@ function _presHistoricoIngresos() {
 
 /* ── Histórico de egresos por trimestre, por subtipo + contable ─── */
 function _presHistoricoEgresos() {
-  var q = {}, subSet = {}, contableBySub = {};
+  var q = {}, m = {}, subSet = {}, contableBySub = {};
   Object.keys(EGRESOS_IDS).forEach(function (anio) {
     try {
       var ss = SpreadsheetApp.openById(EGRESOS_IDS[anio]);
@@ -126,16 +126,19 @@ function _presHistoricoEgresos() {
         var monto = _presNum(iE > -1 ? row[iE] : 0);
         if (!monto) continue;
         var qk = _presQKey(d.getFullYear(), _presQ(d.getMonth() + 1));
+        var mk = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
         var sub = (iS > -1 ? String(row[iS] || '').trim() : '') || 'Otros';
         var cont = (iC > -1 ? String(row[iC] || '').trim() : '') || 'Gasto';
         if (!q[qk]) q[qk] = { __total: 0 };
         q[qk][sub] = (q[qk][sub] || 0) + monto; q[qk].__total += monto;
+        if (!m[mk]) m[mk] = { __total: 0 };
+        m[mk].__total += monto;
         subSet[sub] = 1;
         if (cont) contableBySub[sub] = cont;
       }
     } catch (e) {}
   });
-  return { q: q, subtipos: Object.keys(subSet), contableBySub: contableBySub };
+  return { q: q, m: m, subtipos: Object.keys(subSet), contableBySub: contableBySub };
 }
 
 /* ── Lee metas del almacén que administra la PÁGINA (Presupuesto_Metas) ─
@@ -252,9 +255,6 @@ function readPresupuesto() {
     var cumplimiento = metaActualTotal > 0 ? proyCierre / metaActualTotal : null;
     var semaforo = cumplimiento === null ? 'sin-meta' : (cumplimiento >= 1 ? 'verde' : (cumplimiento >= 0.9 ? 'amarillo' : 'rojo'));
 
-    // ── Tendencia mensual: últimos 12 meses reales + 3 proyectados ──
-    var tendencia = _presTendencia(histM, curY, curQ, tgtY, tgtQ, totProy, histQ, kAnioAnt);
-
     // ── Egresos POR LÍNEA (subtipo) con el mismo modelo ratchet ──
     var egHistQ = egQ.q;
     var egMetaSig = (metas[perSig] && metas[perSig]._egLineas) || {};
@@ -276,6 +276,9 @@ function readPresupuesto() {
     var egProy = egTotProy;
     var margenProy = totProy - egProy;
     var margenPct = totProy > 0 ? (margenProy / totProy) * 100 : 0;
+
+    // ── Tendencia mensual (income + egresos) para la gráfica ──
+    var tendencia = _presTendencia(histM, egQ.m || {}, tgtY, tgtQ, totProy, egProy);
 
     return {
       ok: true,
@@ -316,14 +319,12 @@ function _presCrecimientoLinea(histQ, cat, refY, refQ) {
   return (ult - prev) / prev;
 }
 
-/* ── Serie mensual para la gráfica ──────────────────────────────── */
-function _presTendencia(histM, curY, curQ, tgtY, tgtQ, totProySig, histQ, kAnioAnt) {
+/* ── Serie mensual para la gráfica: income + egresos ────────────── */
+function _presTendencia(histM, egM, tgtY, tgtQ, totProySig, egProySig) {
   var MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-  // Construir 12 meses hacia atrás desde el mes actual + 3 meses del trimestre objetivo
-  var meses = [], real = [], proy = [];
+  var meses = [], real = [], proy = [], egReal = [], egProy = [];
   var hoy = new Date();
   var y = hoy.getFullYear(), mo = hoy.getMonth() + 1;
-  // arrancar 9 meses atrás
   var startY = y, startM = mo - 9;
   while (startM <= 0) { startM += 12; startY--; }
   var yy = startY, mm = startM;
@@ -331,24 +332,24 @@ function _presTendencia(histM, curY, curQ, tgtY, tgtQ, totProySig, histQ, kAnioA
     var mk = yy + '-' + String(mm).padStart(2, '0');
     meses.push(MESES[mm - 1] + ' ' + String(yy).slice(2));
     real.push((histM[mk] && histM[mk].__total) || 0);
-    proy.push(null);
+    egReal.push((egM[mk] && egM[mk].__total) || 0);
+    proy.push(null); egProy.push(null);
     mm++; if (mm > 12) { mm = 1; yy++; }
   }
-  // Distribuir la proyección del trimestre objetivo entre sus 3 meses,
-  // usando la forma mensual del mismo trimestre del año anterior.
   var qMonths = [(tgtQ - 1) * 3 + 1, (tgtQ - 1) * 3 + 2, (tgtQ - 1) * 3 + 3];
-  var shapePrev = qMonths.map(function (m2) { var mk2 = (tgtY - 1) + '-' + String(m2).padStart(2, '0'); return (histM[mk2] && histM[mk2].__total) || 0; });
-  var shapeSum = shapePrev.reduce(function (a, b) { return a + b; }, 0);
-  var lastReal = real[real.length - 1] || 0;
-  // conectar la línea de proyección desde el último real
-  proy[proy.length - 1] = lastReal;
+  function shape(map) { return qMonths.map(function (m2) { var k = (tgtY - 1) + '-' + String(m2).padStart(2, '0'); return (map[k] && map[k].__total) || 0; }); }
+  var shInc = shape(histM), shEg = shape(egM);
+  var sumInc = shInc.reduce(function (a, b) { return a + b; }, 0), sumEg = shEg.reduce(function (a, b) { return a + b; }, 0);
+  // conectar las proyecciones desde el último real
+  proy[proy.length - 1] = real[real.length - 1] || 0;
+  egProy[egProy.length - 1] = egReal[egReal.length - 1] || 0;
   qMonths.forEach(function (m2, idx) {
     meses.push(MESES[m2 - 1] + ' ' + String(tgtY).slice(2));
-    real.push(null);
-    var parte = shapeSum > 0 ? (shapePrev[idx] / shapeSum) : (1 / 3);
-    proy.push(totProySig * parte);
+    real.push(null); egReal.push(null);
+    proy.push(totProySig * (sumInc > 0 ? shInc[idx] / sumInc : 1 / 3));
+    egProy.push(egProySig * (sumEg > 0 ? shEg[idx] / sumEg : 1 / 3));
   });
-  return { meses: meses, real: real, proyeccion: proy };
+  return { meses: meses, real: real, proyeccion: proy, egresoReal: egReal, egresoProy: egProy };
 }
 
 /* ── Guardar / actualizar una meta ──────────────────────────────── */
