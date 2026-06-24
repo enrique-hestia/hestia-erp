@@ -8991,10 +8991,9 @@ function renderCxP(data) {
   // KPI cards
   html += '<div class="cxp-wrap">';
   html += '<div class="cxp-top"><div class="cxp-top-row">'
-    + '<div><h2 class="cxp-h1">Cuentas por Pagar</h2><div class="cxp-h1s">Reporte de vencimientos · Solo lectura · ' + rows.length + ' registros</div></div>'
+    + '<div><h2 class="cxp-h1">Cuentas por Pagar</h2><div class="cxp-h1s">Reporte de vencimientos · ' + rows.length + ' registros pendientes</div></div>'
     + '<div style="display:flex;gap:8px;align-items:center">'
-    + '<a href="https://docs.google.com/spreadsheets/d/1iRjpYtkcqx-3NRwlVK-UYx09I0gVyiTDRtIA9X9RAQw/edit?gid=1448371071" target="_blank" class="cxp-link">'
-    + '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Ver en Sheets</a>'
+    + '<button onclick="cxpOpenCapture()" style="display:inline-flex;align-items:center;gap:6px;padding:7px 16px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Registrar CxP</button>'
     + '<button onclick="loadCxPData()" style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--text-secondary,#6b7280);background:transparent;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:20px;padding:5px 11px;cursor:pointer">↺ Actualizar</button>'
     + '</div></div></div>';
 
@@ -9078,7 +9077,10 @@ function _cxpBuildNewRows(rows) {
       + '<td style="text-align:right;font-weight:700;font-size:13px">'+fMXN(row.monto)+'</td>'
       + '<td style="font-size:11px">'+(row.vencimiento||'—')+'</td>'
       + '<td style="text-align:center;font-size:12px">'+factIcon+'</td>'
-      + '<td style="text-align:center"><button onclick="cxpOpenPay('+row.rowNum+','+JSON.stringify(row.proveedor).replace(/"/g,'&quot;')+','+row.monto+')" style="padding:4px 12px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Pagar</button></td>'
+      + '<td style="text-align:center;white-space:nowrap">'
+        + '<button onclick="cxpOpenPay('+row.rowNum+','+JSON.stringify(row.proveedor).replace(/"/g,'&quot;')+','+row.monto+')" style="padding:4px 10px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;margin-right:4px">Pagar</button>'
+        + '<button onclick="cxpOpenEdit('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(JSON.stringify(row))+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:6px;font-size:12px;cursor:pointer" title="Editar">✎</button>'
+      + '</td>'
       + '</tr>';
   }).join('');
 }
@@ -9133,6 +9135,114 @@ window.cxpSubmitPay = async function(rowNum) {
     if (res.ok) { cxpClosePay(); loadCxPData(); }
     else { alert('Error: '+(res.error||'No se pudo procesar')); if(btn){btn.disabled=false;btn.textContent='Confirmar pago';} }
   } catch(e) { alert('Error: '+e.message); if(btn){btn.disabled=false;btn.textContent='Confirmar pago';} }
+};
+
+// ── CxP Capture & Edit ──
+var _cxpSubtipos = ['Renta','Mantenimiento','Nomina','Contabilidad','Honorarios','Impuestos','Medicamentos','Laboratorios','Gases','Software','Insumos Qx','Insumos Lab','Insumos Oficina','Insumos Limpieza','Marketing','Servicios','RPBI','Lavanderia','Comisiones','Seguro','Envíos','Reportes','Equipo','Mobiliario','Otros Gastos'];
+
+function _cxpBuildForm(data) {
+  var S = 'style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"';
+  var LBL = 'style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px"';
+  var subOpts = _cxpSubtipos.map(function(s){return '<option value="'+s+'"'+(s===(data&&data.subtipo||'')?'selected':'')+'>'+s+'</option>';}).join('');
+  var h = '<div style="padding:4px">'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'
+      + '<div><label '+LBL+'>Proveedor *</label><input id="cxp-f-prov" '+S+' placeholder="Nombre del proveedor" value="'+(data&&data.proveedor||'').replace(/"/g,'&quot;')+'"></div>'
+      + '<div><label '+LBL+'>Monto *</label><input type="number" id="cxp-f-monto" '+S+' placeholder="0.00" step="0.01" value="'+(data&&data.monto||'')+'"></div>'
+    + '</div>'
+    + '<div style="margin-bottom:12px"><label '+LBL+'>Concepto *</label><input id="cxp-f-concepto" '+S+' placeholder="Descripción del gasto" value="'+(data&&data.concepto||'').replace(/"/g,'&quot;')+'"></div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">'
+      + '<div><label '+LBL+'>Contable</label><select id="cxp-f-contable" '+S+'><option'+(data&&data.contable==='Gasto'?' selected':'')+'>Gasto</option><option'+(data&&data.contable==='Costo'?' selected':'')+'>Costo</option><option'+(data&&data.contable==='Crédito'?' selected':'')+'>Crédito</option></select></div>'
+      + '<div><label '+LBL+'>Tipo</label><select id="cxp-f-tipo" '+S+'><option'+(data&&data.tipo==='Fijo'?' selected':'')+'>Fijo</option><option'+(data&&data.tipo==='Variable'?' selected':'')+'>Variable</option></select></div>'
+      + '<div><label '+LBL+'>Subtipo</label><select id="cxp-f-subtipo" '+S+'><option value="">—</option>'+subOpts+'</select></div>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">'
+      + '<div><label '+LBL+'>Vencimiento *</label><input type="date" id="cxp-f-venc" '+S+' value="'+(data&&data.vencimiento||'')+'"></div>'
+      + '<div><label '+LBL+'>Póliza</label><input id="cxp-f-poliza" '+S+' placeholder="Número" value="'+(data&&data.poliza||'')+'"></div>'
+      + '<div><label '+LBL+'>Notas</label><input id="cxp-f-notas" '+S+' placeholder="Notas" value="'+(data&&data.notas||'').replace(/"/g,'&quot;')+'"></div>'
+    + '</div>'
+    + '<div style="margin-bottom:14px"><label '+LBL+'>Observaciones</label><textarea id="cxp-f-obs" '+S+' rows="2" style="resize:vertical">'+(data&&data.observaciones||'')+'</textarea></div>';
+  return h;
+}
+
+window.cxpOpenCapture = function() {
+  var d=document.getElementById('cxp-pay-drw'),o=document.getElementById('cxp-pay-ovl');
+  if(d)d.classList.add('open'); if(o)o.classList.add('open');
+  var title = document.getElementById('cxp-pay-title');
+  if(title) title.textContent = 'Registrar cuenta por pagar';
+  var body = document.getElementById('cxp-pay-body');
+  if(!body) return;
+  body.innerHTML = _cxpBuildForm(null)
+    + '<div style="display:flex;gap:10px;margin-top:16px">'
+    + '<button id="cxp-cap-btn" onclick="cxpSubmitCapture()" style="flex:1;padding:12px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">Guardar</button>'
+    + '<button onclick="cxpClosePay()" style="padding:12px 20px;background:var(--color-surface,#f3f4f6);color:var(--text-primary);border:1px solid var(--color-divider);border-radius:10px;font-size:13px;cursor:pointer">Cancelar</button>'
+    + '</div></div>';
+};
+
+window.cxpOpenEdit = function(rowNum, jsonStr) {
+  var data = typeof jsonStr==='string' ? JSON.parse(jsonStr) : jsonStr;
+  var d=document.getElementById('cxp-pay-drw'),o=document.getElementById('cxp-pay-ovl');
+  if(d)d.classList.add('open'); if(o)o.classList.add('open');
+  var title = document.getElementById('cxp-pay-title');
+  if(title) title.textContent = 'Editar — '+data.proveedor;
+  var body = document.getElementById('cxp-pay-body');
+  if(!body) return;
+  body.innerHTML = _cxpBuildForm(data)
+    + '<div style="display:flex;gap:10px;margin-top:16px">'
+    + '<button id="cxp-edit-btn" onclick="cxpSubmitEdit('+rowNum+')" style="flex:1;padding:12px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">Actualizar</button>'
+    + '<button onclick="cxpClosePay()" style="padding:12px 20px;background:var(--color-surface,#f3f4f6);color:var(--text-primary);border:1px solid var(--color-divider);border-radius:10px;font-size:13px;cursor:pointer">Cancelar</button>'
+    + '</div></div>';
+};
+
+window.cxpSubmitCapture = async function() {
+  var prov = (document.getElementById('cxp-f-prov')||{}).value||'';
+  var monto = (document.getElementById('cxp-f-monto')||{}).value||'';
+  var concepto = (document.getElementById('cxp-f-concepto')||{}).value||'';
+  var venc = (document.getElementById('cxp-f-venc')||{}).value||'';
+  if(!prov||!monto||!concepto||!venc){alert('Completa proveedor, monto, concepto y vencimiento');return;}
+  var btn = document.getElementById('cxp-cap-btn');
+  if(btn){btn.disabled=true;btn.textContent='Guardando…';}
+  try {
+    var s=getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'saveCxP', proveedor:prov, monto:monto, concepto:concepto, vencimiento:venc,
+      contable:(document.getElementById('cxp-f-contable')||{}).value||'Gasto',
+      tipo:(document.getElementById('cxp-f-tipo')||{}).value||'Variable',
+      subtipo:(document.getElementById('cxp-f-subtipo')||{}).value||'',
+      poliza:(document.getElementById('cxp-f-poliza')||{}).value||'',
+      notas:(document.getElementById('cxp-f-notas')||{}).value||'',
+      observaciones:(document.getElementById('cxp-f-obs')||{}).value||'',
+      mes:venc.substring(0,7), prioridad:1, usuario:s.email||'sistema'
+    })});
+    var res = await r.json();
+    if(res.ok){cxpClosePay();loadCxPData();}
+    else{alert('Error: '+(res.error||''));if(btn){btn.disabled=false;btn.textContent='Guardar';}}
+  }catch(e){alert('Error: '+e.message);if(btn){btn.disabled=false;btn.textContent='Guardar';}}
+};
+
+window.cxpSubmitEdit = async function(rowNum) {
+  var prov = (document.getElementById('cxp-f-prov')||{}).value||'';
+  var monto = (document.getElementById('cxp-f-monto')||{}).value||'';
+  var concepto = (document.getElementById('cxp-f-concepto')||{}).value||'';
+  var venc = (document.getElementById('cxp-f-venc')||{}).value||'';
+  if(!prov||!monto||!concepto){alert('Completa proveedor, monto y concepto');return;}
+  var btn = document.getElementById('cxp-edit-btn');
+  if(btn){btn.disabled=true;btn.textContent='Actualizando…';}
+  try {
+    var s=getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'updateCxP', rowNum:rowNum, proveedor:prov, monto:monto, concepto:concepto, vencimiento:venc,
+      contable:(document.getElementById('cxp-f-contable')||{}).value||'',
+      tipo:(document.getElementById('cxp-f-tipo')||{}).value||'',
+      subtipo:(document.getElementById('cxp-f-subtipo')||{}).value||'',
+      poliza:(document.getElementById('cxp-f-poliza')||{}).value||'',
+      notas:(document.getElementById('cxp-f-notas')||{}).value||'',
+      observaciones:(document.getElementById('cxp-f-obs')||{}).value||'',
+      usuario:s.email||'sistema'
+    })});
+    var res = await r.json();
+    if(res.ok){cxpClosePay();loadCxPData();}
+    else{alert('Error: '+(res.error||''));if(btn){btn.disabled=false;btn.textContent='Actualizar';}}
+  }catch(e){alert('Error: '+e.message);if(btn){btn.disabled=false;btn.textContent='Actualizar';}}
 };
 
 /* ══ CAJA CHICA ══ */

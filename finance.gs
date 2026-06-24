@@ -514,6 +514,9 @@ function doPost(e) {
     if (body.action === 'saveCxP') {
       return jsonResponse(saveCxP(body));
     }
+    if (body.action === 'updateCxP') {
+      return jsonResponse(updateCxP(body));
+    }
     if (body.action === 'pagarCxP') {
       return jsonResponse(pagarCxP(body));
     }
@@ -1023,6 +1026,31 @@ function readBDCxP() {
 
     return {ok:true, rows:rows, resumen:resumen};
   } catch(ex) { return {ok:false, error:ex.message, rows:[], resumen:{}}; }
+}
+
+function updateCxP(body) {
+  try {
+    var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
+    var sh = ss.getSheetByName(BD_CXP_TAB);
+    if (!sh) return {ok:false, error:'BD_CxP no encontrada'};
+    var rn = body.rowNum;
+    if (!rn || rn < 2) return {ok:false, error:'Fila inválida'};
+    var oldRow = sh.getRange(rn, 1, 1, BD_CXP_HEADERS.length).getValues()[0];
+    var oldProv = String(oldRow[3]||'');
+    // Actualizar campos: Proveedor(3),Contable(4),Tipo(5),Subtipo(6),Concepto(7),Monto(8),Notas(9),Vencimiento(10),Poliza(14),Observaciones(16)
+    if (body.proveedor!==undefined) sh.getRange(rn,4).setValue(body.proveedor);
+    if (body.contable!==undefined) sh.getRange(rn,5).setValue(body.contable);
+    if (body.tipo!==undefined) sh.getRange(rn,6).setValue(body.tipo);
+    if (body.subtipo!==undefined) sh.getRange(rn,7).setValue(body.subtipo);
+    if (body.concepto!==undefined) sh.getRange(rn,8).setValue(body.concepto);
+    if (body.monto!==undefined) sh.getRange(rn,9).setValue(parseFloat(String(body.monto||'').replace(/[$,]/g,''))||0);
+    if (body.notas!==undefined) sh.getRange(rn,10).setValue(body.notas);
+    if (body.vencimiento!==undefined) sh.getRange(rn,11).setValue(body.vencimiento);
+    if (body.poliza!==undefined) sh.getRange(rn,15).setValue(body.poliza);
+    if (body.observaciones!==undefined) sh.getRange(rn,17).setValue(body.observaciones);
+    logAudit(body.usuario||'sistema','CxP','Editar',String(oldRow[0]),'',(oldProv),body.proveedor||oldProv);
+    return {ok:true, rowNum:rn};
+  } catch(ex) { return {ok:false, error:ex.message}; }
 }
 
 function pagarCxP(body) {
