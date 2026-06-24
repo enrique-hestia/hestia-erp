@@ -7265,7 +7265,7 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
 var _presData = null;
 var _presChart = null;
 
-function _presFM(v){ v=Number(v)||0; var s=v<0?'-':''; var a=Math.abs(v); if(a>=1e6) return s+'$'+(a/1e6).toFixed(2)+'M'; return s+'$'+a.toLocaleString('en-US',{maximumFractionDigits:0}); }
+function _presFM(v){ return (typeof fmtMoney==='function') ? fmtMoney(v, 'Presupuesto') : ('$'+(Number(v)||0).toLocaleString('en-US')); }
 function _presFP(v){ return ((Number(v)||0)*100).toFixed(1)+'%'; }
 
 async function loadPresupuesto(){
@@ -8281,6 +8281,8 @@ async function fmtLoadConfig() {
     try { _fmtConfig = JSON.parse(localStorage.getItem(_fmtUserKey())); } catch(e){}
   }
   if (!_fmtConfig) _fmtConfig = {};
+  // Default de Presupuesto: Millones (se ve compacto), configurable por el usuario.
+  if (!_fmtConfig['Presupuesto']) _fmtConfig['Presupuesto'] = {area:'Presupuesto',escala:'Millones',moneda:'MXN',decimales:2,simbolo:'$',activo:true};
   fmtRenderPanel();
 }
 
@@ -8313,7 +8315,7 @@ function fmtMoney(value, area) {
 function fmtRenderPanel() {
   var el = document.getElementById('fmt-config-grid');
   if (!el) return;
-  var areas = ['Finanzas','Ingresos','Conciliacion','Operaciones'];
+  var areas = ['Finanzas','Ingresos','Conciliacion','Operaciones','Presupuesto'];
   var escalas = ['Completo','Miles','Millones'];
   var monedas = ['MXN','USD','EUR'];
   var decimales = [0,1,2,3,4];
@@ -8379,7 +8381,7 @@ function fmtUpdatePreview(area) {
 }
 
 async function fmtSaveConfig() {
-  var areas = ['Finanzas','Ingresos','Conciliacion','Operaciones'];
+  var areas = ['Finanzas','Ingresos','Conciliacion','Operaciones','Presupuesto'];
   var simbolos = {MXN:'$',USD:'US$',EUR:'€'};
   var formatos = [];
   areas.forEach(function(area) {
