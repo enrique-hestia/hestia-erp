@@ -163,6 +163,19 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 @keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}
 /* Liberado checkbox — compartido entre CF y Conciliación */
 .cf-chk{width:18px;height:18px;border:2px solid var(--color-divider,#d1d5db);border-radius:4px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;flex-shrink:0;font-size:11px;font-weight:700}
+/* ── ERP Dropzone (reutilizable) ── */
+.erp-dropzone{border:2px dashed var(--color-divider,#d1d5db);border-radius:10px;padding:16px;text-align:center;cursor:pointer;transition:all .2s;position:relative;background:var(--color-surface,#fafafa)}
+.erp-dropzone:hover,.erp-dropzone.drag-over{border-color:var(--color-primary,#c46a7a);background:rgba(196,106,122,.04)}
+.erp-dropzone.uploading{border-color:#3b82f6;background:rgba(59,130,246,.04);pointer-events:none}
+.erp-dropzone.done{border-color:#16a34a;background:rgba(22,163,74,.04)}
+.erp-dz-icon{font-size:24px;margin-bottom:6px}
+.erp-dz-text{font-size:12px;color:var(--text-primary,#374151)}
+.erp-dz-link{color:var(--color-primary,#c46a7a);font-weight:700;text-decoration:underline;cursor:pointer}
+.erp-dz-sub{font-size:10px;color:var(--text-secondary,#9ca3af);margin-top:3px}
+.erp-dz-input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.erp-dz-file{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;margin-top:6px}
+.erp-dz-fname{font-size:11px;font-weight:600;color:var(--text-primary,#111);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.erp-dz-fstatus{font-size:10px;font-weight:600}
 .cf-chk.on{background:#009ee3;border-color:#009ee3;color:#fff}
 .cf-chk:hover{border-color:#009ee3;background:rgba(0,158,227,.08)}
 .sidebar-spacer{flex:1}
@@ -9105,8 +9118,24 @@ window.cxpOpenPay = function(rowNum, proveedor, monto) {
         + '<input type="date" id="cxp-pay-fecha" '+S+' value="'+today+'"></div>'
       + '<div><label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Forma de pago *</label>'
         + '<select id="cxp-pay-fp" '+S+'><option>Mercado Pago</option><option>Santander</option><option>AMEX</option><option>Transferencia</option><option>Efectivo</option></select></div>'
-      + '<div><label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Link comprobante de pago</label>'
-        + '<input id="cxp-pay-link" '+S+' placeholder="URL o referencia del pago"></div>'
+      + '<div><label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Comprobante de pago</label>'
+        + '<div id="cxp-drop-pago" class="erp-dropzone" data-tipo="pago" data-prefix="CXP-'+rowNum+'">'
+          + '<div class="erp-dz-icon">📄</div>'
+          + '<div class="erp-dz-text">Arrastra tu PDF aquí o <span class="erp-dz-link">selecciona archivo</span></div>'
+          + '<div class="erp-dz-sub">PDF, JPG, PNG · Máx 10MB</div>'
+          + '<input type="file" class="erp-dz-input" accept=".pdf,.jpg,.jpeg,.png" onchange="erpHandleFile(this,\'cxp-drop-pago\')">'
+        + '</div>'
+        + '<input type="hidden" id="cxp-pay-link" value="">'
+        + '<div id="cxp-pay-link-status" style="font-size:10px;margin-top:4px;color:var(--text-secondary,#9ca3af)"></div></div>'
+      + '<div><label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Factura</label>'
+        + '<div id="cxp-drop-fact" class="erp-dropzone" data-tipo="factura" data-prefix="CXP-'+rowNum+'">'
+          + '<div class="erp-dz-icon">🧾</div>'
+          + '<div class="erp-dz-text">Arrastra factura o <span class="erp-dz-link">selecciona</span></div>'
+          + '<div class="erp-dz-sub">PDF · Máx 10MB</div>'
+          + '<input type="file" class="erp-dz-input" accept=".pdf,.xml" onchange="erpHandleFile(this,\'cxp-drop-fact\')">'
+        + '</div>'
+        + '<input type="hidden" id="cxp-pay-fact-link" value="">'
+        + '<div id="cxp-pay-fact-status" style="font-size:10px;margin-top:4px;color:var(--text-secondary,#9ca3af)"></div></div>'
     + '</div>'
     + '<div style="display:flex;gap:10px;margin-top:18px">'
       + '<button id="cxp-pay-btn" onclick="cxpSubmitPay('+rowNum+')" style="flex:1;padding:12px;background:#166534;color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">Confirmar pago</button>'
@@ -9136,6 +9165,79 @@ window.cxpSubmitPay = async function(rowNum) {
     else { alert('Error: '+(res.error||'No se pudo procesar')); if(btn){btn.disabled=false;btn.textContent='Confirmar pago';} }
   } catch(e) { alert('Error: '+e.message); if(btn){btn.disabled=false;btn.textContent='Confirmar pago';} }
 };
+
+// ── ERP File Upload (drag & drop + click) ──
+document.addEventListener('dragover', function(e){ e.preventDefault(); });
+document.addEventListener('drop', function(e){
+  e.preventDefault();
+  var dz = e.target.closest('.erp-dropzone');
+  if (!dz) return;
+  dz.classList.remove('drag-over');
+  var files = e.dataTransfer.files;
+  if (files.length) _erpUploadFile(dz, files[0]);
+});
+document.addEventListener('dragenter', function(e){
+  var dz = e.target.closest('.erp-dropzone');
+  if (dz) dz.classList.add('drag-over');
+});
+document.addEventListener('dragleave', function(e){
+  var dz = e.target.closest('.erp-dropzone');
+  if (dz && !dz.contains(e.relatedTarget)) dz.classList.remove('drag-over');
+});
+
+window.erpHandleFile = function(input, dzId) {
+  var dz = document.getElementById(dzId);
+  if (!dz || !input.files.length) return;
+  _erpUploadFile(dz, input.files[0]);
+};
+
+async function _erpUploadFile(dz, file) {
+  if (file.size > 10*1024*1024) { alert('Archivo demasiado grande (máx 10MB)'); return; }
+  var tipo = dz.dataset.tipo || 'factura';
+  var prefix = dz.dataset.prefix || '';
+
+  // UI: uploading
+  dz.classList.add('uploading');
+  dz.innerHTML = '<div class="erp-dz-icon">⏳</div><div class="erp-dz-text" style="color:#3b82f6">Subiendo '+file.name+'…</div><div class="erp-dz-sub">Espera un momento</div>';
+
+  try {
+    var base64 = await _fileToBase64(file);
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'uploadFile', tipo:tipo, prefix:prefix,
+      fileName:file.name, base64:base64, mimeType:file.type,
+      usuario:s.email||'sistema'
+    })});
+    var res = await r.json();
+    if (res.ok) {
+      dz.classList.remove('uploading');
+      dz.classList.add('done');
+      dz.innerHTML = '<div class="erp-dz-icon">✅</div><div class="erp-dz-text" style="color:#16a34a;font-weight:700">Archivo subido</div>'
+        + '<div class="erp-dz-file"><span class="erp-dz-fname">'+file.name+'</span><a href="'+res.url+'" target="_blank" style="font-size:10px;color:var(--color-primary,#c46a7a);font-weight:600">Ver ↗</a></div>';
+      // Guardar URL en el hidden input correspondiente
+      var linkInput = dz.parentElement.querySelector('input[type=hidden]');
+      if (linkInput) linkInput.value = res.url;
+      var statusEl = dz.parentElement.querySelector('[id$="-status"]');
+      if (statusEl) statusEl.innerHTML = '<span style="color:#16a34a">✓ '+file.name+' subido</span>';
+    } else {
+      dz.classList.remove('uploading');
+      dz.innerHTML = '<div class="erp-dz-icon">❌</div><div class="erp-dz-text" style="color:#dc2626">Error: '+(res.error||'No se pudo subir')+'</div>'
+        + '<div class="erp-dz-sub" style="cursor:pointer;color:var(--color-primary)" onclick="this.parentElement.classList.remove(\'done\')">Reintentar</div>';
+    }
+  } catch(e) {
+    dz.classList.remove('uploading');
+    dz.innerHTML = '<div class="erp-dz-icon">❌</div><div class="erp-dz-text" style="color:#dc2626">Error de conexión</div>';
+  }
+}
+
+function _fileToBase64(file) {
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function() { resolve(reader.result.split(',')[1]); };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 // ── CxP Capture & Edit ──
 var _cxpSubtipos = ['Renta','Mantenimiento','Nomina','Contabilidad','Honorarios','Impuestos','Medicamentos','Laboratorios','Gases','Software','Insumos Qx','Insumos Lab','Insumos Oficina','Insumos Limpieza','Marketing','Servicios','RPBI','Lavanderia','Comisiones','Seguro','Envíos','Reportes','Equipo','Mobiliario','Otros Gastos'];

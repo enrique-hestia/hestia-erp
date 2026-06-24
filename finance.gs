@@ -496,6 +496,9 @@ function doPost(e) {
     if (body.action === 'saveIngreso') {
       return jsonResponse(saveIngreso(body));
     }
+    if (body.action === 'uploadFile') {
+      return jsonResponse(uploadFile(body));
+    }
     if (body.action === 'uploadIngresoPDF') {
       return jsonResponse(uploadIngresoPDF(body.opId, body.tipo||'factura', body.fileName, body.base64, body.mimeType));
     }
@@ -2724,6 +2727,29 @@ function updateIngreso(payload) {
   } catch(ex) {
     return {ok:false, error:ex.message};
   }
+}
+
+function uploadFile(body) {
+  try {
+    var tipo = body.tipo || 'factura'; // factura o pago
+    var folderId = (tipo === 'pago') ? INGRESOS_FOLDER_PAGOS : INGRESOS_FOLDER_FACTURAS;
+    if (!folderId) return {ok:false, error:'Carpeta no configurada para '+tipo};
+    var folder = DriveApp.getFolderById(folderId);
+    var fileName = body.fileName || 'archivo.pdf';
+    var prefix = body.prefix || ''; // ej: "EG-563_" o "CXP-00001_"
+    var fullName = prefix ? (prefix + '_' + fileName) : fileName;
+    var blob = Utilities.newBlob(Utilities.base64Decode(body.base64), body.mimeType || 'application/pdf', fullName);
+    var file = folder.createFile(blob);
+    var url = file.getUrl();
+    // Si hay referencia a hoja+fila, actualizar el link
+    if (body.sheetName && body.rowNum && body.colNum) {
+      var ss = SpreadsheetApp.openById(body.ssId || EGRESOS_SS_2026);
+      var sh = ss.getSheetByName(body.sheetName);
+      if (sh) sh.getRange(body.rowNum, body.colNum).setValue(url);
+    }
+    logAudit(body.usuario||'sistema', 'Upload', 'Subir '+tipo, body.prefix||'', 'Archivo', '', fullName);
+    return {ok:true, url:url, fileName:fullName};
+  } catch(ex) { return {ok:false, error:ex.message}; }
 }
 
 function uploadIngresoPDF(opId, tipo, fileName, base64Data, mimeType) {
