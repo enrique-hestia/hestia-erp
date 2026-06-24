@@ -26,6 +26,26 @@ function verifyToken(token) {
     return (generateToken(email, day) === token) ? email : null;
   } catch(ex){ return null; }
 }
+// Valida credenciales y devuelve token + permisos. Compartida por doGet y doPost.
+function handleLogin(email, password) {
+  email = email || '';
+  if (!email) return { error: 'Email requerido.' };
+  var ss  = SpreadsheetApp.openById(SHEET_ID);
+  var shU = ss.getSheetByName('Usuarios');
+  if (!shU) return { error: 'Módulo de usuarios no configurado.' };
+  var user = getUserRow(ss, email);
+  if (!user)        return { error: 'Usuario no encontrado.' };
+  if (!user.activo) return { error: 'Usuario inactivo. Contacta al administrador.' };
+  if (user.password && user.password !== password)
+                    return { error: 'Contraseña incorrecta.' };
+  var rolCfg = getRolConfig(ss, user.rol);
+  return {
+    success: true, token: generateToken(user.email),
+    email: user.email, nombre: user.nombre, rol: user.rol,
+    vistasBloqueadas: rolCfg.vistasBloqueadas,
+    soloLectura:      rolCfg.soloLectura
+  };
+}
 function getUserRow(ss, email) {
   var sh = ss.getSheetByName('Usuarios');
   if (!sh) return null;
@@ -110,24 +130,13 @@ function doGet(e) {
     var plPrevYear  = (e && e.parameter.plPrevYear)  || '';
 
     // ── LOGIN: valida credenciales y devuelve token + permisos ──
+    // Se mantiene por GET por compatibilidad, pero el frontend ahora usa POST
+    // (la contraseña no debe viajar en la URL). Ver handleLogin() abajo.
     if (action === 'login') {
-      var email    = (e && e.parameter.email)    || '';
-      var password = (e && e.parameter.password) || '';
-      if (!email) return jsonResponse({ error: 'Email requerido.' });
-      var shU = ss.getSheetByName('Usuarios');
-      if (!shU) return jsonResponse({ error: 'Módulo de usuarios no configurado.' });
-      var user = getUserRow(ss, email);
-      if (!user)        return jsonResponse({ error: 'Usuario no encontrado.' });
-      if (!user.activo) return jsonResponse({ error: 'Usuario inactivo. Contacta al administrador.' });
-      if (user.password && user.password !== password)
-                        return jsonResponse({ error: 'Contraseña incorrecta.' });
-      var rolCfg = getRolConfig(ss, user.rol);
-      return jsonResponse({
-        success: true, token: generateToken(user.email),
-        email: user.email, nombre: user.nombre, rol: user.rol,
-        vistasBloqueadas: rolCfg.vistasBloqueadas,
-        soloLectura:      rolCfg.soloLectura
-      });
+      return jsonResponse(handleLogin(
+        (e && e.parameter.email)    || '',
+        (e && e.parameter.password) || ''
+      ));
     }
 
     // ── VALIDAR TOKEN en todas las acciones (si la hoja Usuarios existe) ──

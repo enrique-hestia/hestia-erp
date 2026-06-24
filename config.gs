@@ -15,7 +15,14 @@
    ══════════════════════════════════════════════════════════════ */
 
 var API_VERSION  = 'v2026-06-15';
-var AUTH_SECRET  = 'hestia2026erp-secret'; // ← Cambia este valor por algo único y secreto
+// Secreto de firma de tokens. Vive SOLO en Script Properties
+// (Configuración del proyecto → Propiedades del script → clave: AUTH_SECRET).
+// Ya no hay literal en el código: si falta la propiedad, falla con un error claro.
+var AUTH_SECRET  = (function() {
+  var p = PropertiesService.getScriptProperties().getProperty('AUTH_SECRET');
+  if (!p) throw new Error('Falta la propiedad de script AUTH_SECRET. Configúrala en: Configuración del proyecto → Propiedades del script.');
+  return p;
+})();
 
 /* ── IDs de Spreadsheets ──────────────────────────────────── */
 var SHEET_ID    = '1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4'; // ERP principal

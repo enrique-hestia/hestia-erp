@@ -469,6 +469,9 @@ function doPost(e) {
     var raw = e && e.postData && e.postData.contents;
     if (!raw) return jsonResponse({error:'Sin datos POST'});
     var body = JSON.parse(raw);
+    if (body.action === 'login') {
+      return jsonResponse(handleLogin(body.email || '', body.password || ''));
+    }
     if (body.action === 'saveBankRow') {
       var result = saveBankRow(body.banco, body.row);
       try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
