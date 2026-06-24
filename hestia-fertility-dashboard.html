@@ -8522,7 +8522,16 @@ async function initApp() {
   setTimeout(checkCxPAlerts, 3000);
 }
 
+// ¿El usuario tiene un módulo visible en su menú? (respeta vistasBloqueadas por rol)
+function _hasModule(re) {
+  try { return (menuItems||[]).some(function(it){ return re.test(it.id||'') || re.test(it.label||''); }); }
+  catch(e) { return false; }
+}
+
 async function checkCxPAlerts() {
+  // La alerta de pagos vencidos solo se muestra a quienes tienen habilitado
+  // el módulo de Cuentas por Pagar (no a todos los usuarios).
+  if (!_hasModule(/cuentas?.?por.?pagar|cxp|fin\.cxp/i)) return;
   try {
     var tok = encodeURIComponent(getToken());
     var r = await fetch(APPS_SCRIPT_URL+'?action=bdcxp&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
