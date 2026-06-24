@@ -3426,19 +3426,25 @@ function _renderEgresosERP() {
 
   function fE(v){return '$'+Math.abs(Number(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
 
-  // ── Total del RANGO DE FECHAS seleccionado (Del/al del topbar) ──
-  // La tabla y los KPIs muestran todo el año; este bloque reporta SOLO el
-  // periodo elegido. Fechas en formato ISO (YYYY-MM-DD) → comparación directa.
+  // ── Cifras del RANGO DE FECHAS seleccionado (Del/al del topbar) ──
+  // Protagonista de la vista. Fechas ISO (YYYY-MM-DD) → comparación directa.
+  //   · Pagado    = filas pagadas cuya FECHA de pago cae en el rango.
+  //   · Pendiente = filas NO pagadas (CxP) cuyo VENCIMIENTO cae en el rango
+  //                 (las CxP no tienen fecha de pago; se ubican por vencimiento).
   // Se expone en window._egPeriodo para reutilizarlo en otros reportes.
   var _pIni = currentFechaInicio || '', _pFin = currentFechaFin || '';
-  var _periodoRows = (data.rows||[]).filter(function(r){
-    var f = (r.fecha||'').substring(0,10);
-    return f && (!_pIni || f >= _pIni) && (!_pFin || f <= _pFin);
-  });
-  var periodoTotal  = _periodoRows.reduce(function(s,r){return s+(r.monto||0);},0);
-  var periodoPagado = _periodoRows.filter(function(r){return r.pagado;}).reduce(function(s,r){return s+(r.monto||0);},0);
-  var periodoPend   = periodoTotal - periodoPagado;
-  window._egPeriodo = { inicio:_pIni, fin:_pFin, total:periodoTotal, pagado:periodoPagado, pendiente:periodoPend, registros:_periodoRows.length };
+  function _inRange(f){ return f && (!_pIni || f >= _pIni) && (!_pFin || f <= _pFin); }
+  var _rowsAll = data.rows || [];
+  var _pagRows = _rowsAll.filter(function(r){ return  r.pagado && _inRange((r.fecha||'').substring(0,10)); });
+  var _penRows = _rowsAll.filter(function(r){ return !r.pagado && _inRange((r.vencimiento||'').substring(0,10)); });
+  function _sum(a){ return a.reduce(function(s,r){return s+(r.monto||0);},0); }
+  var periodoPagado = _sum(_pagRows);
+  var periodoPend   = _sum(_penRows);
+  var periodoTotal  = periodoPagado + periodoPend;
+  var _periodoRegs  = _pagRows.length + _penRows.length;
+  window._egPeriodo = { inicio:_pIni, fin:_pFin, total:periodoTotal, pagado:periodoPagado,
+                        pendiente:periodoPend, regsPagados:_pagRows.length,
+                        regsPendientes:_penRows.length, registros:_periodoRegs };
 
   // Opciones para filtros
   var meses=[],contables=[],subtipos=[],provs=[],fps=[];
@@ -3488,7 +3494,27 @@ function _renderEgresosERP() {
       +'.eg-badge{display:inline-block;padding:2px 7px;border-radius:12px;font-size:9.5px;font-weight:600}'
       +'.eg-badge-g{background:rgba(59,130,246,.1);color:#2563eb}'
       +'.eg-badge-c{background:rgba(16,185,129,.1);color:#059669}'
-      +'.eg-badge-cr{background:rgba(245,158,11,.1);color:#d97706}';
+      +'.eg-badge-cr{background:rgba(245,158,11,.1);color:#d97706}'
+      // ── Hero del periodo (protagonista) ──
+      +'.eg-hero{display:flex;flex-wrap:wrap;align-items:stretch;gap:20px;margin-bottom:14px;padding:20px 24px;border-radius:16px;background:linear-gradient(135deg,var(--card-bg,#fff),var(--color-primary-hl,rgba(196,106,122,.06)));border:1px solid var(--color-divider,#e5e7eb);box-shadow:0 1px 3px rgba(0,0,0,.04)}'
+      +'.eg-hero-l{display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:180px}'
+      +'.eg-hero-tag{display:inline-flex;align-items:center;gap:6px;font-size:9.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--color-primary,#c46a7a)}'
+      +'.eg-hero-dot{width:6px;height:6px;border-radius:50%;background:var(--color-primary,#c46a7a)}'
+      +'.eg-hero-range{font-size:17px;font-weight:800;color:var(--text-primary,#111);letter-spacing:-.3px}'
+      +'.eg-hero-regs{font-size:11px;color:var(--text-secondary,#9ca3af)}'
+      +'.eg-hero-stats{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:0;flex:1;min-width:340px;align-items:center}'
+      +'.eg-hero-stat{padding:0 22px;border-left:1px solid var(--color-divider,#ececec)}'
+      +'.eg-hero-stat:first-child{border-left:none;padding-left:0}'
+      +'.eg-hero-stat-lbl{font-size:9.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:5px}'
+      +'.eg-hero-val{font-size:26px;font-weight:800;letter-spacing:-.8px;line-height:1}'
+      +'.eg-hero-val-sm{font-size:19px;font-weight:800;letter-spacing:-.5px;line-height:1}'
+      +'.eg-hero-sub{font-size:10px;color:var(--text-secondary,#9ca3af);margin-top:4px}'
+      +'@media(max-width:720px){.eg-hero-stats{grid-template-columns:1fr 1fr;min-width:0}.eg-hero-stat:nth-child(1){grid-column:1/-1;border-left:none;padding-left:0;margin-bottom:10px}.eg-hero-stat:nth-child(2){padding-left:0;border-left:none}}'
+      // ── Línea de año (secundaria) ──
+      +'.eg-year{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;margin-bottom:20px;padding:9px 16px;border:1px dashed var(--color-divider,#e0e0e0);border-radius:10px}'
+      +'.eg-year-tag{font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#b0b0b0)}'
+      +'.eg-year-item{font-size:11.5px;color:var(--text-secondary,#6b7280)}'
+      +'.eg-year-item b{font-weight:700;color:var(--text-primary,#374151)}';
     document.head.appendChild(s);
   }
 
@@ -3500,31 +3526,38 @@ function _renderEgresosERP() {
     +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Egresos</h1>'
     +'<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">Egresos pagados (validados en PAG) · Lo pendiente está en Cuentas por Pagar · MXN</div>'
     +'</div><div style="display:flex;align-items:center;gap:12px">'
-    +'<div style="text-align:right"><div style="font-size:12px;font-weight:700">'+(data.anio||new Date().getFullYear())+'</div>'
-    +'<div style="font-size:10px;color:var(--text-secondary,#6b7280);text-transform:uppercase;letter-spacing:.5px">'+filtered.length+' de '+(data.totalRows||0)+' registros</div></div>'
     +(hasPermission('bank_capture')?'<button onclick="egOpenForm()" style="display:inline-flex;align-items:center;gap:6px;padding:10px 18px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(196,106,122,.25)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Registrar egreso</button>':'')
     +'</div></div>');
 
-  // Banner del periodo seleccionado (rango Del/al del topbar)
-  h.push('<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 16px;padding:11px 16px;background:var(--color-primary-hl,rgba(196,106,122,.08));border:1px solid var(--color-divider,#e5e7eb);border-radius:10px">'
-    +'<div style="font-size:9.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a)">Periodo seleccionado</div>'
-    +'<div style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280)">'+(_pIni?fmtDisplayDate(_pIni):'—')+' → '+(_pFin?fmtDisplayDate(_pFin):'—')+'</div>'
-    +'<div style="margin-left:auto;display:flex;gap:22px;align-items:baseline;flex-wrap:wrap">'
-      +'<div><span style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Total </span><span style="font-size:16px;font-weight:800;color:var(--text-primary,#111)">'+fE(periodoTotal)+'</span></div>'
-      +'<div><span style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Pagado </span><span style="font-size:13px;font-weight:700;color:#166534">'+fE(periodoPagado)+'</span></div>'
-      +'<div><span style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Pendiente </span><span style="font-size:13px;font-weight:700;color:#b45309">'+fE(periodoPend)+'</span></div>'
-      +'<div style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">'+_periodoRows.length+' reg.</div>'
+  // ── HERO: cifras del periodo seleccionado (protagonista) ──
+  h.push('<div class="eg-hero">'
+    +'<div class="eg-hero-l">'
+      +'<div class="eg-hero-tag"><span class="eg-hero-dot"></span>Periodo seleccionado</div>'
+      +'<div class="eg-hero-range">'+(_pIni?fmtDisplayDate(_pIni):'—')+' → '+(_pFin?fmtDisplayDate(_pFin):'—')+'</div>'
+      +'<div class="eg-hero-regs">'+_periodoRegs+' movimiento'+(_periodoRegs===1?'':'s')+' en el rango</div>'
+    +'</div>'
+    +'<div class="eg-hero-stats">'
+      +'<div class="eg-hero-stat"><div class="eg-hero-stat-lbl">Total del periodo</div>'
+        +'<div class="eg-hero-val" style="color:var(--text-primary,#111)">'+fE(periodoTotal)+'</div>'
+        +'<div class="eg-hero-sub">Pagado + por pagar</div></div>'
+      +'<div class="eg-hero-stat"><div class="eg-hero-stat-lbl">Pagado</div>'
+        +'<div class="eg-hero-val-sm" style="color:#166534">'+fE(periodoPagado)+'</div>'
+        +'<div class="eg-hero-sub">'+_pagRows.length+' pagado'+(_pagRows.length===1?'':'s')+'</div></div>'
+      +'<div class="eg-hero-stat"><div class="eg-hero-stat-lbl">Pendiente por pagar</div>'
+        +'<div class="eg-hero-val-sm" style="color:#b45309">'+fE(periodoPend)+'</div>'
+        +'<div class="eg-hero-sub">'+_penRows.length+' por vencer/vencido</div></div>'
     +'</div>'
   +'</div>');
 
-  // KPIs
+  // ── Año (secundaria, discreta) ──
   var tEg=data.totalEgresos||0, tPag=data.totalPagado||0, tPend=data.totalPendiente||0, prom=data.promedioMensual||0;
-  h.push('<div class="eg-kstrip">'
-    +'<div class="eg-ks"><div class="eg-ks-lbl">Egresos totales</div><div class="eg-ks-val" style="color:#991b1b">'+fE(tEg)+'</div><div class="eg-ks-sub">Acumulado del año</div><div class="eg-ks-bar" style="background:#991b1b"></div></div>'
-    +'<div class="eg-ks"><div class="eg-ks-lbl">Pagado</div><div class="eg-ks-val" style="color:#166534">'+fE(tPag)+'</div><div class="eg-ks-sub">'+(tEg>0?((tPag/tEg)*100).toFixed(1):'0')+'% del total</div><div class="eg-ks-bar" style="background:#166534"></div></div>'
-    +'<div class="eg-ks"><div class="eg-ks-lbl">Pendiente</div><div class="eg-ks-val" style="color:#b45309">'+fE(tPend)+'</div><div class="eg-ks-sub">Sin pagar</div><div class="eg-ks-bar" style="background:#b45309"></div></div>'
-    +'<div class="eg-ks"><div class="eg-ks-lbl">Promedio mensual</div><div class="eg-ks-val" style="color:var(--text-primary,#111)">'+fE(prom)+'</div><div class="eg-ks-sub">Gasto por mes</div><div class="eg-ks-bar" style="background:var(--color-primary,#c46a7a)"></div></div>'
-    +'</div>');
+  h.push('<div class="eg-year">'
+    +'<span class="eg-year-tag">Acumulado '+(data.anio||new Date().getFullYear())+'</span>'
+    +'<span class="eg-year-item">Egresos <b>'+fE(tEg)+'</b></span>'
+    +'<span class="eg-year-item">Pagado <b style="color:#166534">'+fE(tPag)+'</b></span>'
+    +'<span class="eg-year-item">Pendiente <b style="color:#b45309">'+fE(tPend)+'</b></span>'
+    +'<span class="eg-year-item">Prom. mensual <b>'+fE(prom)+'</b></span>'
+  +'</div>');
 
   // Filtros
   function selOpts(arr,selected,allLabel){
