@@ -511,6 +511,12 @@ function doPost(e) {
     if (body.action === 'saveProductoPrecio') {
       return jsonResponse(saveProductoPrecio(body.productoId, body.precio, body.vigencia, body.usuario));
     }
+    if (body.action === 'saveCxP') {
+      return jsonResponse(saveCxP(body));
+    }
+    if (body.action === 'pagarCxP') {
+      return jsonResponse(pagarCxP(body));
+    }
     if (body.action === 'updateProducto') {
       return jsonResponse(updateProducto(body));
     }
@@ -896,6 +902,241 @@ function readCxPData() {
   } catch(ex) {
     return {view:'cxp', error:ex.message, headers:[], rows:[], resumen:{}};
   }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   BD_CxP — Cuentas por Pagar separadas de Egresos
+   ══════════════════════════════════════════════════════════════ */
+var BD_CXP_TAB = 'BD_CxP';
+var BD_CXP_HEADERS = ['ID','Mes','Prioridad','Proveedor','Contable','Tipo','Subtipo','Concepto',
+  'Monto','Notas','Vencimiento','Facturacion','Pagado','Contabilidad','Poliza',
+  'FormaPago','Observaciones','LinkFactura','LinkPago','FechaRegistro'];
+
+function setupBDCxP() {
+  var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
+  var sh = ss.getSheetByName(BD_CXP_TAB);
+  if (!sh) {
+    sh = ss.insertSheet(BD_CXP_TAB);
+    sh.getRange(1,1,1,BD_CXP_HEADERS.length).setValues([BD_CXP_HEADERS]);
+    sh.getRange(1,1,1,BD_CXP_HEADERS.length).setFontWeight('bold').setBackground('#fef3c7');
+    sh.setFrozenRows(1);
+  }
+  return {ok:true, msg:'BD_CxP creada'};
+}
+
+function _getNextCxPID(sheet) {
+  var lr = sheet.getLastRow();
+  if (lr < 2) return 'CXP-00001';
+  var last = String(sheet.getRange(lr,1).getValue()||'');
+  var m = last.match(/CXP-(\d+)/);
+  return 'CXP-' + String((m ? parseInt(m[1],10) : 0) + 1).padStart(5,'0');
+}
+
+function saveCxP(body) {
+  try {
+    var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
+    var sh = ss.getSheetByName(BD_CXP_TAB);
+    if (!sh) { setupBDCxP(); sh = ss.getSheetByName(BD_CXP_TAB); }
+    var id = _getNextCxPID(sh);
+    var monto = parseFloat(String(body.monto||'').replace(/[$,]/g,''))||0;
+    var row = [
+      id,
+      body.mes||'',
+      body.prioridad||1,
+      body.proveedor||'',
+      body.contable||'Gasto',
+      body.tipo||'Variable',
+      body.subtipo||'',
+      body.concepto||'',
+      monto,
+      body.notas||'',
+      body.vencimiento||'',
+      body.facturacion===true||body.facturacion==='true',
+      false, // pagado = false (pendiente)
+      false, // contabilidad
+      body.poliza||'',
+      '', // forma pago (se llena al pagar)
+      body.observaciones||'',
+      body.linkFactura||'',
+      '', // link pago (se llena al pagar)
+      new Date()
+    ];
+    sh.appendRow(row);
+    logAudit(body.usuario||'sistema','CxP','Crear',id,'','',body.proveedor+' | $'+monto+' | Vence: '+body.vencimiento);
+    return {ok:true, id:id, monto:monto};
+  } catch(ex) { return {ok:false, error:ex.message}; }
+}
+
+function readBDCxP() {
+  try {
+    var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
+    var sh = ss.getSheetByName(BD_CXP_TAB);
+    if (!sh) return {ok:true, rows:[], resumen:{vencido:0,hoy:0,semana:0,mes:0,totalVencido:0,totalHoy:0,totalSemana:0,totalMes:0,totalPendiente:0}};
+    var raw = sh.getDataRange().getValues();
+    if (raw.length < 2) return {ok:true, rows:[], resumen:{vencido:0,hoy:0,semana:0,mes:0,totalVencido:0,totalHoy:0,totalSemana:0,totalMes:0,totalPendiente:0}};
+
+    var hoy = new Date(); hoy.setHours(0,0,0,0);
+    function dt(v){if(!v)return'';if(v instanceof Date)return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0');return String(v);}
+    function parseD(v){if(!v)return null;if(v instanceof Date){var d=new Date(v);d.setHours(0,0,0,0);return d;}var s=String(v).trim();var d=new Date(s);return isNaN(d)?null:d;}
+    function num(v){var n=parseFloat(String(v||'').replace(/[$,\s]/g,''));return isNaN(n)?0:n;}
+
+    var resumen = {vencido:0,hoy:0,semana:0,mes:0,totalVencido:0,totalHoy:0,totalSemana:0,totalMes:0,totalPendiente:0};
+    var rows = [];
+
+    for (var i=1;i<raw.length;i++) {
+      var r = raw[i];
+      var id = String(r[0]||'').trim();
+      if (!id) continue;
+      var pagado = r[12]===true||String(r[12]).toUpperCase()==='TRUE';
+      if (pagado) continue; // solo pendientes
+      var venc = parseD(r[10]);
+      var monto = num(r[8]);
+      var dias = venc ? Math.round((venc-hoy)/86400000) : null;
+      var urgencia = dias===null?'sin-fecha':dias<0?'vencido':dias===0?'hoy':dias<=7?'semana':dias<=30?'mes':'ok';
+
+      if(urgencia==='vencido'){resumen.vencido++;resumen.totalVencido+=monto;}
+      else if(urgencia==='hoy'){resumen.hoy++;resumen.totalHoy+=monto;}
+      else if(urgencia==='semana'){resumen.semana++;resumen.totalSemana+=monto;}
+      else if(urgencia==='mes'){resumen.mes++;resumen.totalMes+=monto;}
+      resumen.totalPendiente+=monto;
+
+      rows.push({
+        rowNum:i+1, id:id, mes:String(r[1]||''), prioridad:num(r[2]),
+        proveedor:String(r[3]||''), contable:String(r[4]||''), tipo:String(r[5]||''),
+        subtipo:String(r[6]||''), concepto:String(r[7]||''), monto:monto,
+        notas:String(r[9]||''), vencimiento:dt(r[10]),
+        facturacion:r[11]===true||String(r[11]).toUpperCase()==='TRUE',
+        pagado:false, contabilidad:r[13]===true||String(r[13]).toUpperCase()==='TRUE',
+        poliza:String(r[14]||''), formaPago:String(r[15]||''),
+        observaciones:String(r[16]||''), linkFactura:String(r[17]||''),
+        linkPago:String(r[18]||''),
+        dias:dias, urgencia:urgencia
+      });
+    }
+    // Ordenar: vencidos primero, luego hoy, semana, mes, ok
+    var urgOrder = {vencido:0,hoy:1,semana:2,mes:3,ok:4,'sin-fecha':5};
+    rows.sort(function(a,b){
+      var ua=urgOrder[a.urgencia]||4, ub=urgOrder[b.urgencia]||4;
+      if(ua!==ub) return ua-ub;
+      return (a.dias||999)-(b.dias||999);
+    });
+
+    return {ok:true, rows:rows, resumen:resumen};
+  } catch(ex) { return {ok:false, error:ex.message, rows:[], resumen:{}}; }
+}
+
+function pagarCxP(body) {
+  try {
+    var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
+    var cxpSh = ss.getSheetByName(BD_CXP_TAB);
+    if (!cxpSh) return {ok:false, error:'BD_CxP no encontrada'};
+    var rowNum = body.rowNum;
+    if (!rowNum || rowNum < 2) return {ok:false, error:'Fila inválida'};
+
+    var cxpRow = cxpSh.getRange(rowNum, 1, 1, BD_CXP_HEADERS.length).getValues()[0];
+    var cxpId = String(cxpRow[0]);
+
+    // Marcar como pagado en BD_CxP
+    cxpSh.getRange(rowNum, 13).setValue(true); // Pagado = TRUE
+    if (body.formaPago) cxpSh.getRange(rowNum, 16).setValue(body.formaPago);
+    if (body.linkPago) cxpSh.getRange(rowNum, 19).setValue(body.linkPago);
+
+    // Insertar en Egresos con fecha de pago
+    var egTab = EGRESOS_TABS[2026] || 'Egresos2026';
+    var egSh = ss.getSheetByName(egTab);
+    if (!egSh) return {ok:false, error:'Hoja '+egTab+' no encontrada'};
+
+    // Obtener siguiente ID consecutivo de Egresos
+    var egLr = egSh.getLastRow();
+    var lastEgId = 0;
+    if (egLr > 1) {
+      var ids = egSh.getRange(2, 1, egLr-1, 1).getValues();
+      for (var i=0;i<ids.length;i++) { var n=parseInt(ids[i][0]); if(n>lastEgId) lastEgId=n; }
+    }
+    var newEgId = lastEgId + 1;
+
+    var fechaPago = body.fechaPago || new Date();
+    if (typeof fechaPago === 'string') fechaPago = new Date(fechaPago);
+    var meses = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var mesStr = meses[fechaPago.getMonth()] + '-' + String(fechaPago.getFullYear()).substring(2);
+
+    // Formato Egresos: ID, Fecha, Mes, col1(2), Proveedor, Contable, Tipo, Subtipo, Concepto, Egresos,
+    //                   Notas, Vencimiento, Facturacion, Pagado, Contabilidad, Poliza, FormaPago, Obs, LinkFact, LinkPago
+    var egRow = [
+      newEgId, fechaPago, mesStr, 2,
+      cxpRow[3]||'', // Proveedor
+      cxpRow[4]||'', // Contable
+      cxpRow[5]||'', // Tipo
+      cxpRow[6]||'', // Subtipo
+      cxpRow[7]||'', // Concepto
+      parseFloat(cxpRow[8])||0, // Monto
+      cxpRow[9]||'', // Notas
+      cxpRow[10]||'', // Vencimiento
+      cxpRow[11]===true, // Facturacion
+      true, // Pagado
+      cxpRow[13]===true, // Contabilidad
+      cxpRow[14]||'', // Poliza
+      body.formaPago||'', // Forma de Pago
+      cxpRow[16]||'', // Observaciones
+      cxpRow[17]||'', // Link Factura
+      body.linkPago||'' // Link Pago
+    ];
+    egSh.appendRow(egRow);
+
+    logAudit(body.usuario||'sistema','CxP','Pagar',cxpId,'','Pendiente','Pagado | '+body.formaPago+' | ID Egreso: '+newEgId);
+    return {ok:true, cxpId:cxpId, egresoId:newEgId};
+  } catch(ex) { return {ok:false, error:ex.message}; }
+}
+
+function migrateCxPFromEgresos() {
+  try {
+    var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
+    var egTab = EGRESOS_TABS[2026] || 'Egresos2026';
+    var egSh = ss.getSheetByName(egTab);
+    if (!egSh) return {ok:false, error:'Hoja Egresos no encontrada'};
+    setupBDCxP();
+    var cxpSh = ss.getSheetByName(BD_CXP_TAB);
+
+    var raw = egSh.getDataRange().getValues();
+    function dt(v){if(!v)return'';if(v instanceof Date)return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0');return String(v);}
+    function num(v){var n=parseFloat(String(v||'').replace(/[$,\s]/g,''));return isNaN(n)?0:n;}
+
+    var counter = 0;
+    var lr = cxpSh.getLastRow();
+    if (lr > 1) {
+      var last = String(cxpSh.getRange(lr,1).getValue()||'');
+      var m = last.match(/CXP-(\d+)/);
+      if (m) counter = parseInt(m[1],10);
+    }
+
+    var batchRows = [];
+    for (var i=1;i<raw.length;i++) {
+      var r = raw[i];
+      var fecha = r[1]; // col B = Fecha de pago
+      var pagado = r[13]===true||String(r[13]).toUpperCase()==='TRUE';
+      // Si no tiene fecha Y no está pagado → es CxP
+      if (!fecha && !pagado && String(r[0]||'').trim()) {
+        counter++;
+        var cxpId = 'CXP-'+String(counter).padStart(5,'0');
+        batchRows.push([
+          cxpId, String(r[2]||''), num(r[3]),
+          String(r[4]||''), String(r[5]||''), String(r[6]||''), String(r[7]||''),
+          String(r[8]||''), num(r[9]), String(r[10]||''),
+          dt(r[11]), // Vencimiento
+          r[12]===true||String(r[12]).toUpperCase()==='TRUE', // Facturacion
+          false, // Pagado
+          r[14]===true||String(r[14]).toUpperCase()==='TRUE', // Contabilidad
+          String(r[15]||''), String(r[16]||''), String(r[17]||''),
+          String(r[18]||''), String(r[19]||''),
+          new Date()
+        ]);
+      }
+    }
+    if (batchRows.length) {
+      cxpSh.getRange(cxpSh.getLastRow()+1, 1, batchRows.length, batchRows[0].length).setValues(batchRows);
+    }
+    return {ok:true, migrated:batchRows.length, lastId:'CXP-'+String(counter).padStart(5,'0')};
+  } catch(ex) { return {ok:false, error:ex.message}; }
 }
 
 /* ══════════════════════════════════════════════════════════════

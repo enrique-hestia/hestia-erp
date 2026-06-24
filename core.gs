@@ -262,6 +262,10 @@ function doGet(e) {
       return jsonResponse(readCxPData());
     }
 
+    if (action === 'bdcxp') {
+      return jsonResponse(readBDCxP());
+    }
+
     if (action === 'ingresos') {
       return jsonResponse(readIngresosData());
     }
