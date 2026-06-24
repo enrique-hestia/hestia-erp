@@ -61,6 +61,46 @@ function setupProveedores() {
   }
 }
 
+/* ── Importa nombres sueltos de la columna A → filas válidas ─────
+   Caso de uso: se pegó una lista de proveedores en la columna A (ID).
+   Esta función los mueve a la col B (Nombre/Razón social), les asigna
+   un ID PROV-#####, Estatus=Activo y Fecha alta. Correr UNA vez.       */
+function importProveedoresDesdeColA() {
+  try {
+    var ss = SpreadsheetApp.openById(CXP_SS_ID);
+    var sh = ss.getSheetByName(PROV_TAB);
+    if (!sh) return { ok: false, error: 'No existe la hoja "' + PROV_TAB + '". Corre setupProveedores() primero.' };
+    var lr = sh.getLastRow();
+    if (lr < 2) return { ok: true, migrados: 0, message: 'No hay filas que importar.' };
+
+    var rng = sh.getRange(2, 1, lr - 1, PROV_HEADERS.length);
+    var vals = rng.getValues();
+    var maxId = 0;
+    vals.forEach(function (r) { var m = String(r[0] || '').match(/PROV-(\d+)/i); if (m) { var n = parseInt(m[1], 10); if (n > maxId) maxId = n; } });
+
+    var fecha = new Date();
+    var fechaStr = fecha.getFullYear() + '-' + String(fecha.getMonth() + 1).padStart(2, '0') + '-' + String(fecha.getDate()).padStart(2, '0');
+    var migrados = 0;
+    for (var i = 0; i < vals.length; i++) {
+      var colA = String(vals[i][0] || '').trim();
+      var colB = String(vals[i][1] || '').trim();
+      // Promover solo si hay texto en A, B está vacío y A no es ya un PROV-id
+      if (colA && !colB && !/^PROV-/i.test(colA)) {
+        maxId++;
+        vals[i][0] = 'PROV-' + String(maxId).padStart(5, '0');   // ID
+        vals[i][1] = colA;                                        // Nombre / Razón social
+        if (!String(vals[i][11] || '').trim()) vals[i][11] = 'Activo'; // Estatus
+        if (!vals[i][13]) vals[i][13] = fechaStr;                 // Fecha alta
+        migrados++;
+      }
+    }
+    if (migrados > 0) rng.setValues(vals);
+    return { ok: true, migrados: migrados, message: migrados + ' proveedor(es) importados (nombre → columna B, ID asignado).' };
+  } catch (ex) {
+    return { ok: false, error: ex.message };
+  }
+}
+
 /* ── Lee todos los proveedores + KPIs ──────────────────────────── */
 function readProveedores() {
   try {
