@@ -103,9 +103,9 @@ function _presHistoricoIngresos() {
   return { ok: true, q: q, m: m, lineas: Object.keys(lineSet).sort() };
 }
 
-/* ── Lee histórico de egresos por trimestre (total) ─────────────── */
+/* ── Histórico de egresos por trimestre, por subtipo + contable ─── */
 function _presHistoricoEgresos() {
-  var q = {};
+  var q = {}, subSet = {}, contableBySub = {};
   Object.keys(EGRESOS_IDS).forEach(function (anio) {
     try {
       var ss = SpreadsheetApp.openById(EGRESOS_IDS[anio]);
@@ -116,21 +116,26 @@ function _presHistoricoEgresos() {
       if (raw.length < 2) return;
       var H = raw[0].map(function (h) { return String(h).trim().toLowerCase(); });
       function col(kw) { for (var c = 0; c < H.length; c++) if (H[c].indexOf(kw) > -1) return c; return -1; }
-      var iF = col('fecha'), iE = col('egresos'), iV = col('vencimiento');
+      var iF = col('fecha'), iE = col('egresos'), iV = col('vencimiento'),
+          iS = col('subtipo'), iC = col('contable');
       for (var r = 1; r < raw.length; r++) {
         var row = raw[r];
         var f = (iF > -1 ? row[iF] : '') || (iV > -1 ? row[iV] : '');
         var d = (f instanceof Date) ? f : new Date(f);
         if (!d || isNaN(d.getTime())) continue;
-        var y = d.getFullYear(), qq = _presQ(d.getMonth() + 1);
         var monto = _presNum(iE > -1 ? row[iE] : 0);
         if (!monto) continue;
-        var qk = _presQKey(y, qq);
-        q[qk] = (q[qk] || 0) + monto;
+        var qk = _presQKey(d.getFullYear(), _presQ(d.getMonth() + 1));
+        var sub = (iS > -1 ? String(row[iS] || '').trim() : '') || 'Otros';
+        var cont = (iC > -1 ? String(row[iC] || '').trim() : '') || 'Gasto';
+        if (!q[qk]) q[qk] = { __total: 0 };
+        q[qk][sub] = (q[qk][sub] || 0) + monto; q[qk].__total += monto;
+        subSet[sub] = 1;
+        if (cont) contableBySub[sub] = cont;
       }
     } catch (e) {}
   });
-  return q;
+  return { q: q, subtipos: Object.keys(subSet), contableBySub: contableBySub };
 }
 
 /* ── Lee metas del almacén que administra la PÁGINA (Presupuesto_Metas) ─
@@ -149,17 +154,21 @@ function _presLeerMetas() {
       var lin = String(raw[r][1] || '').trim();
       if (!per || !lin) continue;
       var meta = _presNum(raw[r][2]);
-      if (!map[per]) map[per] = { __total: 0, __tot: null, _lineas: {} };
+      if (!map[per]) map[per] = { __total: 0, __totalEg: 0, __tot: null, _lineas: {}, _egLineas: {} };
       if (lin.toUpperCase() === 'TOTAL') {
         map[per].__tot = meta;
+      } else if (lin.substring(0, 3).toUpperCase() === 'EG:') {
+        // Meta de EGRESO (prefijo EG:)
+        map[per]._egLineas[lin.substring(3)] = meta;
+        map[per].__totalEg += meta;
       } else {
         map[per]._lineas[lin] = { metaIngreso: meta, metaMargen: _presNum(raw[r][3]), crecObjetivo: _presNum(raw[r][4]) / 100 };
         map[per].__total += meta;
       }
     }
-    // Precedencia: si hay metas POR LÍNEA, su suma manda; si no, la fila TOTAL.
+    // Income total: suma por línea si hay; si no, la fila TOTAL.
     Object.keys(map).forEach(function (p) {
-      if (map[p].__total > 0) return;               // suma por línea
+      if (map[p].__total > 0) return;
       if (map[p].__tot != null) map[p].__total = map[p].__tot;
     });
     return { map: map, _setup: true };
@@ -246,12 +255,25 @@ function readPresupuesto() {
     // ── Tendencia mensual: últimos 12 meses reales + 3 proyectados ──
     var tendencia = _presTendencia(histM, curY, curQ, tgtY, tgtQ, totProy, histQ, kAnioAnt);
 
-    // ── Egresos + margen (nivel total, mismo ratchet) ──
-    var egAnioAnt = egQ[kAnioAnt] || 0, egReciente = egQ[kReciente] || 0;
-    var gEg = _presCrecimientoEgresos(egQ, curY, curQ);
-    var egBase = egAnioAnt > 0 ? egAnioAnt : egReciente;
-    var gEgAplicado = Math.min(Math.max(gEg, 0), PRES_CREC_MAX);
-    var egProy = Math.max(egBase * (1 + gEgAplicado), Math.max(egAnioAnt, egReciente));
+    // ── Egresos POR LÍNEA (subtipo) con el mismo modelo ratchet ──
+    var egHistQ = egQ.q;
+    var egMetaSig = (metas[perSig] && metas[perSig]._egLineas) || {};
+    var gEgTotal = _presCrecimientoLinea(egHistQ, '__total', curY, curQ); if (gEgTotal === null) gEgTotal = 0;
+    var egLineasProy = [], egTotAnioAnt = 0, egTotReciente = 0, egTotProy = 0, egTotMeta = 0;
+    (egQ.subtipos || []).forEach(function (sub) {
+      var aa = (egHistQ[kAnioAnt] && egHistQ[kAnioAnt][sub]) || 0;
+      var rec = (egHistQ[kReciente] && egHistQ[kReciente][sub]) || 0;
+      var gL = _presCrecimientoLinea(egHistQ, sub, curY, curQ); if (gL === null) gL = gEgTotal;
+      var g = Math.min(Math.max(gL, 0), PRES_CREC_MAX);
+      var base = aa > 0 ? aa : rec;
+      var proy = Math.max(base * (1 + g), Math.max(aa, rec));
+      if (proy <= 0 && rec <= 0 && aa <= 0) return;
+      var meta = egMetaSig[sub] || 0;
+      egLineasProy.push({ linea: sub, grupo: (egQ.contableBySub[sub] || 'Gasto'), anioAnterior: aa, reciente: rec, crecimientoUsado: g, proyeccion: proy, meta: meta });
+      egTotAnioAnt += aa; egTotReciente += rec; egTotProy += proy; egTotMeta += meta;
+    });
+    egLineasProy.sort(function (a, b) { return b.proyeccion - a.proyeccion; });
+    var egProy = egTotProy;
     var margenProy = totProy - egProy;
     var margenPct = totProy > 0 ? (margenProy / totProy) * 100 : 0;
 
@@ -274,7 +296,12 @@ function readPresupuesto() {
         lineas: lineasProy,
         totales: { anioAnterior: totAnioAnt, reciente: totReciente, base: totBase, conservador: totCons, proyeccion: totProy, optimista: totOpt, meta: (metas[perSig] && metas[perSig].__total) || 0 }
       },
-      egresos: { anioAnterior: egAnioAnt, reciente: egReciente, proyeccion: egProy, margenProyectado: margenProy, margenPct: margenPct },
+      egresos: {
+        reciente: egTotReciente, proyeccion: egProy,
+        margenProyectado: margenProy, margenPct: margenPct,
+        lineas: egLineasProy,
+        totales: { anioAnterior: egTotAnioAnt, reciente: egTotReciente, proyeccion: egTotProy, meta: egTotMeta }
+      },
       tendencia: tendencia,
       lineasDisponibles: lineas
     };
@@ -286,14 +313,6 @@ function _presCrecimientoLinea(histQ, cat, refY, refQ) {
   for (var i = 0; i < 4; i++) { var p = _presPrevQ(yy, qq); var k = _presQKey(p.y, p.q); ult += (histQ[k] && histQ[k][cat]) || 0; yy = p.y; qq = p.q; }
   for (var j = 0; j < 4; j++) { var p2 = _presPrevQ(yy, qq); var k2 = _presQKey(p2.y, p2.q); prev += (histQ[k2] && histQ[k2][cat]) || 0; yy = p2.y; qq = p2.q; }
   if (prev <= 0) return null;
-  return (ult - prev) / prev;
-}
-
-function _presCrecimientoEgresos(egQ, refY, refQ) {
-  var ult = 0, prev = 0, yy = refY, qq = refQ;
-  for (var i = 0; i < 4; i++) { var p = _presPrevQ(yy, qq); ult += egQ[_presQKey(p.y, p.q)] || 0; yy = p.y; qq = p.q; }
-  for (var j = 0; j < 4; j++) { var p2 = _presPrevQ(yy, qq); prev += egQ[_presQKey(p2.y, p2.q)] || 0; yy = p2.y; qq = p2.q; }
-  if (prev <= 0) return 0;
   return (ult - prev) / prev;
 }
 
