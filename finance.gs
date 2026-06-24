@@ -532,6 +532,15 @@ function doPost(e) {
     if (body.action === 'saveLista') {
       return jsonResponse(saveLista(body));
     }
+    if (body.action === 'setupProveedores') {
+      return jsonResponse(setupProveedores());
+    }
+    if (body.action === 'saveProveedor') {
+      return jsonResponse(saveProveedor(body));
+    }
+    if (body.action === 'updateProveedor') {
+      return jsonResponse(updateProveedor(body));
+    }
     if (body.action === 'updateProductoSKU') {
       return jsonResponse(updateProductoSKU(body.productoId, body.sku, body.usuario));
     }

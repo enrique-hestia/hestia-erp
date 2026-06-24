@@ -275,6 +275,11 @@ function doGet(e) {
       return jsonResponse(readBDCxP());
     }
 
+    // Catálogo de proveedores (fuente única para dropdowns)
+    if (action === 'proveedores') {
+      return jsonResponse(readProveedores());
+    }
+
     if (action === 'ingresos') {
       return jsonResponse(readIngresosData());
     }
