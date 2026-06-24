@@ -7382,35 +7382,42 @@ function _renderPresupuesto(){
       +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Conservador</div><div style="font-size:21px;font-weight:800">'+fM(tt.conservador)+'</div></div>'
       +'<div class="pr-card base"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Base (esperado)</div><div style="font-size:21px;font-weight:800;color:var(--color-primary,#c46a7a)">'+fM(tt.proyeccion)+'</div></div>'
       +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Optimista</div><div style="font-size:21px;font-weight:800">'+fM(tt.optimista)+'</div></div>'
-      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Meta capturada</div><div style="font-size:21px;font-weight:800">'+(tt.meta>0?fM(tt.meta):'—')+'</div></div>'
+      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Meta capturada</div><div id="pr-scen-meta" style="font-size:21px;font-weight:800">'+(tt.meta>0?fM(tt.meta):'—')+'</div></div>'
     +'</div></div>');
 
-  // Tabla por línea
-  h.push('<div class="pr-sc"><div class="pr-sh">Detalle por línea de servicio · '+sg.periodo+'</div>'
+  // ── Reporte editable: Real vs Budget por línea ──
+  var _sumRec=0,_sumProy=0,_sumMeta=0;
+  (sg.lineas||[]).forEach(function(l){ _sumRec+=l.reciente||0; _sumProy+=l.proyeccion||0; _sumMeta+=l.meta||0; });
+  h.push('<div class="pr-sc"><div class="pr-sh"><span>Real vs Budget por línea · '+sg.periodo+'</span>'
+    +(canEdit?'<button class="pr-btn" style="padding:6px 12px;font-size:11px" onclick="presApplyAllProj()">Usar proyección como budget (todas)</button>':'')
+    +'</div>'
     +'<div style="overflow-x:auto"><table class="pr-tbl"><thead><tr>'
-    +'<th>Línea</th><th>Año ant.</th><th>Reciente</th><th>Crec.</th><th>Proyección</th><th>Meta</th><th>Brecha</th>'
+    +'<th>Línea</th><th>Reciente</th><th>Proyección</th><th>Budget</th><th style="text-align:center">Estado</th><th>Δ vs proy.</th>'
     +'</tr></thead><tbody>');
-  (sg.lineas||[]).forEach(function(l){
-    var gap=(l.proyeccion||0)-(l.meta||0);
+  (sg.lineas||[]).forEach(function(l,i){
+    var st=_presLineState(l.meta,l.proyeccion);
+    var dl=l.meta>0?(l.meta-l.proyeccion):null;
     h.push('<tr>'
-      +'<td title="'+l.linea+'" style="max-width:200px;overflow:hidden;text-overflow:ellipsis">'+l.linea+'</td>'
-      +'<td style="color:var(--text-secondary,#6b7280)">'+fM(l.anioAnterior)+'</td>'
+      +'<td title="'+l.linea+'" style="max-width:210px;overflow:hidden;text-overflow:ellipsis">'+l.linea+'</td>'
       +'<td style="color:var(--text-secondary,#6b7280)">'+fM(l.reciente)+'</td>'
-      +'<td style="color:var(--text-secondary,#9ca3af)">'+fP(l.crecimientoUsado)+'</td>'
-      +'<td style="font-weight:800;color:var(--color-primary,#c46a7a)">'+fM(l.proyeccion)+'</td>'
-      +'<td>'+(l.meta>0?fM(l.meta):'—')+'</td>'
-      +'<td style="color:'+(l.meta<=0?'#9ca3af':(gap>=0?'#166534':'#991b1b'))+'">'+(l.meta>0?fM(gap):'—')+'</td>'
+      +'<td style="color:var(--color-primary,#c46a7a);font-weight:700">'+fM(l.proyeccion)+'</td>'
+      +'<td style="text-align:right">'+(canEdit
+          ? '<input id="pl-in-'+i+'" type="number" step="1000" value="'+(l.meta>0?Math.round(l.meta):'')+'" placeholder="—" onchange="presSaveLineMeta('+i+',this.value)" style="width:106px;text-align:right;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;padding:5px 8px;font-size:11.5px;background:var(--color-surface,#fafafa);color:var(--text-primary,#111)">'
+          : (l.meta>0?fM(l.meta):'—'))+'</td>'
+      +'<td id="pl-st-'+i+'" style="text-align:center">'+_presBadgeHtml(st,i,canEdit)+'</td>'
+      +'<td id="pl-dl-'+i+'" style="color:'+(dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b'))+'">'+(dl==null?'—':fM(dl))+'</td>'
       +'</tr>');
   });
   h.push('<tr style="border-top:2px solid var(--color-divider,#d1d5db)">'
     +'<td style="font-weight:800">TOTAL</td>'
-    +'<td style="font-weight:700;color:var(--text-secondary,#6b7280)">'+fM(tt.anioAnterior)+'</td>'
-    +'<td style="font-weight:700;color:var(--text-secondary,#6b7280)">'+fM(tt.reciente)+'</td><td></td>'
-    +'<td style="font-weight:800;color:var(--color-primary,#c46a7a)">'+fM(tt.proyeccion)+'</td>'
-    +'<td style="font-weight:800">'+(tt.meta>0?fM(tt.meta):'—')+'</td>'
-    +'<td style="font-weight:800;color:'+(tt.meta<=0?'#9ca3af':((tt.proyeccion-tt.meta)>=0?'#166534':'#991b1b'))+'">'+(tt.meta>0?fM(tt.proyeccion-tt.meta):'—')+'</td>'
+    +'<td style="font-weight:700;color:var(--text-secondary,#6b7280)">'+fM(_sumRec)+'</td>'
+    +'<td style="font-weight:800;color:var(--color-primary,#c46a7a)">'+fM(_sumProy)+'</td>'
+    +'<td id="pl-ttl-budget" style="font-weight:800">'+(_sumMeta>0?fM(_sumMeta):'—')+'</td><td></td>'
+    +'<td id="pl-ttl-delta" style="font-weight:800;color:'+(_sumMeta<=0?'#9ca3af':((_sumMeta-_sumProy)>=0?'#166534':'#991b1b'))+'">'+(_sumMeta>0?fM(_sumMeta-_sumProy):'—')+'</td>'
     +'</tr>');
-  h.push('</tbody></table></div></div>');
+  h.push('</tbody></table></div>'
+    +'<div style="font-size:10.5px;color:var(--text-secondary,#9ca3af);margin-top:8px">Proyección = recomendación del modelo. Edita el Budget por línea — <b>Bajo</b> = por debajo de la recomendación, <b>Ambicioso</b> = arriba. Se guarda solo.</div>'
+    +'</div>');
 
   // Egresos + margen
   h.push('<div class="pr-kstrip">'
@@ -7511,6 +7518,60 @@ async function presSaveMeta(){
     presCloseMeta();
     await loadPresupuesto();
   } catch(e){ if(msg){msg.style.color='#991b1b';msg.textContent='Error: '+e.message;} if(btn){btn.disabled=false;btn.textContent='Guardar meta';} }
+}
+
+/* ── Reporte Real vs Budget por línea: estado + edición en vivo ─── */
+function _presLineState(meta, proy){
+  if (!meta || meta<=0) return {txt:'Sin budget', c:'#6b7280', bg:'rgba(107,114,128,.12)'};
+  if (proy>0 && meta < proy*0.9)  return {txt:'Bajo',      c:'#b45309', bg:'rgba(245,158,11,.15)'};
+  if (proy>0 && meta > proy*1.1)  return {txt:'Ambicioso', c:'#2563eb', bg:'rgba(59,130,246,.12)'};
+  return {txt:'En línea', c:'#166534', bg:'rgba(16,185,129,.12)'};
+}
+function _presBadgeHtml(st, i, canEdit){
+  var base='display:inline-block;padding:2px 9px;border-radius:12px;font-size:9.5px;font-weight:700;background:'+st.bg+';color:'+st.c;
+  if (st.txt==='Sin budget' && canEdit) return '<span onclick="presUseLineProj('+i+')" title="Usar la proyección como budget" style="cursor:pointer;'+base+'">Usar proy. →</span>';
+  return '<span style="'+base+'">'+st.txt+'</span>';
+}
+function _presRowUI(i){
+  if (!_presData||!_presData.siguiente) return;
+  var L=_presData.siguiente.lineas[i]; if(!L) return;
+  var st=_presLineState(L.meta,L.proyeccion);
+  var stc=document.getElementById('pl-st-'+i); if(stc) stc.innerHTML=_presBadgeHtml(st,i,true);
+  var dl=L.meta>0?(L.meta-L.proyeccion):null;
+  var dc=document.getElementById('pl-dl-'+i); if(dc){ dc.textContent=dl==null?'—':_presFM(dl); dc.style.color=dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b'); }
+}
+function _presMetaTotalsUI(){
+  if (!_presData||!_presData.siguiente) return;
+  var lines=_presData.siguiente.lineas||[], sumProy=0, sumMeta=0;
+  lines.forEach(function(l){ sumProy+=l.proyeccion||0; sumMeta+=l.meta||0; });
+  _presData.siguiente.totales.meta=sumMeta;
+  var tb=document.getElementById('pl-ttl-budget'); if(tb) tb.textContent=sumMeta>0?_presFM(sumMeta):'—';
+  var td=document.getElementById('pl-ttl-delta'); if(td){ td.textContent=sumMeta>0?_presFM(sumMeta-sumProy):'—'; td.style.color=sumMeta<=0?'#9ca3af':((sumMeta-sumProy)>=0?'#166534':'#991b1b'); }
+  var sc=document.getElementById('pr-scen-meta'); if(sc) sc.textContent=sumMeta>0?_presFM(sumMeta):'—';
+}
+function presSaveLineMeta(i, val){
+  if (!_presData||!_presData.siguiente) return;
+  var L=_presData.siguiente.lineas[i]; if(!L) return;
+  L.meta=parseFloat(val)||0;
+  _presRowUI(i); _presMetaTotalsUI();
+  var s=getSession()||{};
+  fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMeta',periodo:_presData.siguiente.periodo,linea:L.linea,metaIngreso:L.meta,usuario:s.email||''})}).catch(function(){});
+}
+function presUseLineProj(i){
+  if (!_presData||!_presData.siguiente) return;
+  var L=_presData.siguiente.lineas[i]; if(!L) return;
+  var inp=document.getElementById('pl-in-'+i); if(inp) inp.value=Math.round(L.proyeccion||0);
+  presSaveLineMeta(i, L.proyeccion||0);
+}
+async function presApplyAllProj(){
+  if (!_presData||!_presData.siguiente) return;
+  if (!confirm('¿Usar la proyección del modelo como budget en TODAS las líneas? Puedes ajustar después.')) return;
+  var lines=_presData.siguiente.lineas||[];
+  var metas=lines.map(function(l){ l.meta=l.proyeccion||0; return {linea:l.linea, metaIngreso:l.meta}; });
+  lines.forEach(function(l,i){ var inp=document.getElementById('pl-in-'+i); if(inp) inp.value=Math.round(l.meta); _presRowUI(i); });
+  _presMetaTotalsUI();
+  var s=getSession()||{};
+  try { await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMetasBatch',periodo:_presData.siguiente.periodo,metas:metas,usuario:s.email||''})}); } catch(e){}
 }
 
 /* ══════════════════════════════════════════════════════════════

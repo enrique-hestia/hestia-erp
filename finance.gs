@@ -547,6 +547,9 @@ function doPost(e) {
     if (body.action === 'savePresupuestoMeta') {
       return jsonResponse(savePresupuestoMeta(body));
     }
+    if (body.action === 'savePresupuestoMetasBatch') {
+      return jsonResponse(savePresupuestoMetasBatch(body));
+    }
     if (body.action === 'updateProductoSKU') {
       return jsonResponse(updateProductoSKU(body.productoId, body.sku, body.usuario));
     }

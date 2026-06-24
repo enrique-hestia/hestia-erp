@@ -157,7 +157,11 @@ function _presLeerMetas() {
         map[per].__total += meta;
       }
     }
-    Object.keys(map).forEach(function (p) { if (map[p].__tot != null) map[p].__total = map[p].__tot; });
+    // Precedencia: si hay metas POR LÍNEA, su suma manda; si no, la fila TOTAL.
+    Object.keys(map).forEach(function (p) {
+      if (map[p].__total > 0) return;               // suma por línea
+      if (map[p].__tot != null) map[p].__total = map[p].__tot;
+    });
     return { map: map, _setup: true };
   } catch (e) { return { map: map, _setup: false }; }
 }
@@ -350,5 +354,34 @@ function savePresupuestoMeta(body) {
     else sh.appendRow(fila);
     try { logAudit(body.usuario || '', 'Presupuesto', found ? 'Edición meta' : 'Alta meta', per + ' · ' + lin, 'meta', '', body.metaIngreso); } catch (e) {}
     return { ok: true, message: 'Meta guardada.' };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+/* ── Guarda varias metas por línea de un periodo (una sola llamada) ── */
+function savePresupuestoMetasBatch(body) {
+  try {
+    if (!body || !String(body.periodo || '').trim() || !Array.isArray(body.metas))
+      return { ok: false, error: 'Datos incompletos.' };
+    var ss = SpreadsheetApp.openById(ER_SS_ID);
+    var sh = ss.getSheetByName(PRES_METAS_TAB);
+    if (!sh) { setupPresupuesto(); sh = ss.getSheetByName(PRES_METAS_TAB); }
+    var per = String(body.periodo).trim();
+    var lr = sh.getLastRow(), existing = {};
+    if (lr > 1) {
+      var vals = sh.getRange(2, 1, lr - 1, 2).getValues();
+      for (var i = 0; i < vals.length; i++) {
+        if (String(vals[i][0]).trim() === per) existing[String(vals[i][1]).trim().toLowerCase()] = i + 2;
+      }
+    }
+    var appends = [];
+    body.metas.forEach(function (m) {
+      var lin = String(m.linea || '').trim(); if (!lin) return;
+      var row = [per, lin, _presNum(m.metaIngreso), 0, 0, ''];
+      var found = existing[lin.toLowerCase()];
+      if (found) sh.getRange(found, 1, 1, row.length).setValues([row]);
+      else appends.push(row);
+    });
+    if (appends.length) sh.getRange(sh.getLastRow() + 1, 1, appends.length, appends[0].length).setValues(appends);
+    return { ok: true, message: body.metas.length + ' metas guardadas.' };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
