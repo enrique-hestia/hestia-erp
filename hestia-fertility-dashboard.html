@@ -3628,39 +3628,55 @@ function _renderEgresosERP() {
 
   // Sidebar
   h.push('<div>');
-  // Top subtipos
-  var topST = data.topSubtipos || [];
-  h.push('<div class="eg-sc"><div class="eg-sh">Distribución por subtipo</div>');
+  // ── Agregaciones del PERIODO seleccionado (responden al filtro de fechas) ──
+  // El histórico anual del backend (data.*) se muestra en gris pequeño al lado.
+  var _periodoRowsAll = _pagRows.concat(_penRows);
+  function _aggBy(rows, keyFn){
+    var m={}; rows.forEach(function(r){ var k=((keyFn(r)||'').trim())||'—'; m[k]=(m[k]||0)+(r.monto||0); });
+    return Object.keys(m).map(function(k){ return {nombre:k, total:m[k], pct:(periodoTotal>0?m[k]/periodoTotal*100:0)}; })
+                         .sort(function(a,b){ return b.total-a.total; });
+  }
+  function _annMap(arr){ var m={}; (arr||[]).forEach(function(x){ m[x.nombre]=x.total; }); return m; }
+  var annSub=_annMap(data.topSubtipos), annProv=_annMap(data.topProveedores), annCont=_annMap(data.distribucionContable);
+  function annNote(map, nombre){ return (map[nombre]!=null) ? '<span style="font-size:9px;color:var(--text-secondary,#bbb);font-weight:500"> · año '+fE(map[nombre])+'</span>' : ''; }
+  var _sideTag = '<span style="font-size:8.5px;color:var(--text-secondary,#b0b0b0);text-transform:none;letter-spacing:0;font-weight:600"> · periodo</span>';
+
+  // Distribución por subtipo (periodo)
+  var topST = _aggBy(_periodoRowsAll, function(r){ return r.subtipo; });
+  h.push('<div class="eg-sc"><div class="eg-sh">Distribución por subtipo'+_sideTag+'</div>');
+  if(!topST.length) h.push('<div style="font-size:11px;color:var(--text-secondary,#9ca3af);padding:4px 0">Sin egresos en el rango.</div>');
   topST.slice(0,10).forEach(function(st){
     var pct = st.pct||0;
     h.push('<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
       +'<div style="flex:1;font-size:11px;color:var(--text-primary,#374151);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+st.nombre+'</div>'
-      +'<div style="font-size:10.5px;font-weight:700;color:var(--text-primary,#111);white-space:nowrap">'+fE(st.total)+'</div>'
+      +'<div style="font-size:10.5px;font-weight:700;color:var(--text-primary,#111);white-space:nowrap">'+fE(st.total)+annNote(annSub,st.nombre)+'</div>'
       +'<div style="font-size:10px;color:var(--text-secondary,#9ca3af);width:36px;text-align:right">'+pct.toFixed(1)+'%</div>'
       +'</div>'
       +'<div style="height:3px;background:var(--color-divider,#eee);border-radius:2px;margin-bottom:8px"><div style="height:100%;width:'+Math.min(pct,100)+'%;background:var(--color-primary,#c46a7a);border-radius:2px"></div></div>');
   });
   h.push('</div>');
-  // Top proveedores
-  var topProv = data.topProveedores || [];
-  h.push('<div class="eg-sc"><div class="eg-sh">Top proveedores</div>');
+  // Top proveedores (periodo)
+  var topProv = _aggBy(_periodoRowsAll, function(r){ return r.proveedor; });
+  h.push('<div class="eg-sc"><div class="eg-sh">Top proveedores'+_sideTag+'</div>');
+  if(!topProv.length) h.push('<div style="font-size:11px;color:var(--text-secondary,#9ca3af);padding:4px 0">Sin proveedores en el rango.</div>');
   topProv.slice(0,8).forEach(function(p,i){
     h.push('<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--color-divider,#f0f0f0)">'
       +'<div style="width:18px;height:18px;border-radius:5px;background:var(--color-primary-hl,rgba(196,106,122,.1));display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--color-primary,#c46a7a)">'+(i+1)+'</div>'
       +'<div style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+p.nombre+'</div>'
-      +'<div style="font-size:10.5px;font-weight:700;white-space:nowrap">'+fE(p.total)+'</div>'
+      +'<div style="font-size:10.5px;font-weight:700;white-space:nowrap;text-align:right">'+fE(p.total)+annNote(annProv,p.nombre)+'</div>'
       +'</div>');
   });
   h.push('</div>');
-  // Gasto vs Costo
-  var distCont = data.distribucionContable || [];
-  h.push('<div class="eg-sc"><div class="eg-sh">Gasto vs Costo</div>');
+  // Gasto vs Costo (periodo)
+  var distCont = _aggBy(_periodoRowsAll, function(r){ return r.contable; });
+  h.push('<div class="eg-sc"><div class="eg-sh">Gasto vs Costo'+_sideTag+'</div>');
+  if(!distCont.length) h.push('<div style="font-size:11px;color:var(--text-secondary,#9ca3af);padding:4px 0">Sin datos en el rango.</div>');
   distCont.forEach(function(c){
     var color = c.nombre==='Gasto'?'#2563eb':c.nombre==='Costo'?'#059669':'#d97706';
     h.push('<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--color-divider,#f0f0f0)">'
       +'<div style="display:flex;align-items:center;gap:6px"><div style="width:8px;height:8px;border-radius:50%;background:'+color+'"></div>'
       +'<span style="font-size:12px;font-weight:600">'+c.nombre+'</span></div>'
-      +'<div style="font-size:12px;font-weight:700">'+fE(c.total)+' <span style="font-size:10px;color:var(--text-secondary,#9ca3af)">'+(c.pct||0).toFixed(1)+'%</span></div>'
+      +'<div style="font-size:12px;font-weight:700">'+fE(c.total)+' <span style="font-size:10px;color:var(--text-secondary,#9ca3af)">'+(c.pct||0).toFixed(1)+'%</span>'+annNote(annCont,c.nombre)+'</div>'
       +'</div>');
   });
   h.push('</div>');
