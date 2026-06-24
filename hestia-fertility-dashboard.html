@@ -5,6 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hestia Fertility — Dashboard Financiero</title>
 <meta name="description" content="Dashboard financiero de Hestia Fertility: seguimiento de ingresos, gastos y métricas clave de la clínica.">
+<!-- Resource hints: abre conexiones a CDNs y al endpoint de datos antes de usarlas -->
+<link rel="preconnect" href="https://script.google.com" crossorigin>
+<link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
+<link rel="preconnect" href="https://api.fontshare.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="dns-prefetch" href="https://unpkg.com">
 <link href="https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
@@ -7037,7 +7043,6 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     return;
   }
   // Ingresos ERP
-  console.log('[loadView] viewId:', viewId); // debug — remover después
   if (/ingreso/i.test(viewId)) {
     document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
     var _ingEl = document.getElementById('view-ingresos');
@@ -8112,15 +8117,33 @@ window.addEventListener('DOMContentLoaded', function() {
 
 var _refreshIntervalId = null;
 var _refreshCurrentMs  = null; // null = manual
+var _visHooked         = false;
+
+// Arranca/detiene el setInterval real según el estado de visibilidad.
+// En segundo plano no tiene sentido golpear el Apps Script (gasta cuota y red).
+function _applyRefreshInterval() {
+  if (_refreshIntervalId) { clearInterval(_refreshIntervalId); _refreshIntervalId = null; }
+  if (_refreshCurrentMs && _refreshCurrentMs > 0 && !document.hidden) {
+    _refreshIntervalId = setInterval(function() {
+      if (document.hidden) return; // doble seguro
+      loadView(currentView, currentFechaInicio, currentFechaFin, true);
+    }, _refreshCurrentMs);
+  }
+  if (!_visHooked) {
+    _visHooked = true;
+    document.addEventListener('visibilitychange', function() {
+      _applyRefreshInterval();
+      // Al volver al primer plano, refresca de inmediato para no mostrar datos viejos.
+      if (!document.hidden && _refreshCurrentMs && _refreshCurrentMs > 0) {
+        loadView(currentView, currentFechaInicio, currentFechaFin, true);
+      }
+    });
+  }
+}
 
 function startAutoRefresh(ms) {
-  if (_refreshIntervalId) { clearInterval(_refreshIntervalId); _refreshIntervalId = null; }
   _refreshCurrentMs = ms;
-  if (ms && ms > 0) {
-    _refreshIntervalId = setInterval(function() {
-      loadView(currentView, currentFechaInicio, currentFechaFin, true);
-    }, ms);
-  }
+  _applyRefreshInterval();   // arranca el polling solo si la pestaña está visible
   // Persistir en localStorage
   localStorage.setItem('hestia_refresh_ms', ms ? String(ms) : 'manual');
   // Actualizar etiquetas en Configuración y Panel de Control
