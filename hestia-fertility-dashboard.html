@@ -823,6 +823,16 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
   </div>
 </div>
 
+<!-- ══ VISTA: PRESUPUESTO ══ -->
+<div id="view-presupuesto" class="view" style="display:none">
+  <div id="pres-root">
+    <div style="padding:32px;text-align:center;color:var(--color-text-muted,#9ca3af);font-size:13px">
+      <div style="width:32px;height:32px;border:3px solid var(--color-border,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 12px"></div>
+      Calculando proyección…
+    </div>
+  </div>
+</div>
+
 <!-- ══ VISTA: SERVICIOS ══ -->
 <div id="view-servicios" class="view" style="display:none">
   <div class="card">
@@ -7143,6 +7153,14 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     loadProveedores();
     return;
   }
+  // Presupuesto — proyección y meta (página dedicada)
+  if (/presupuesto|budget/i.test(viewId)) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _prEl2 = document.getElementById('view-presupuesto');
+    if (_prEl2) _prEl2.style.display = '';
+    loadPresupuesto();
+    return;
+  }
   // Productos — Catálogo General o categorías individuales
   var _vidLow = viewId.toLowerCase();
   var _prodCatPairs = [
@@ -7238,6 +7256,239 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
       setStatus('Error: ' + e.message, 'err');
     }
   }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PRESUPUESTO — proyección del siguiente trimestre + meta
+   Modelo "estacional con piso creciente" (backend presupuesto.gs).
+   ══════════════════════════════════════════════════════════════ */
+var _presData = null;
+var _presChart = null;
+
+function _presFM(v){ v=Number(v)||0; var s=v<0?'-':''; var a=Math.abs(v); if(a>=1e6) return s+'$'+(a/1e6).toFixed(2)+'M'; return s+'$'+a.toLocaleString('en-US',{maximumFractionDigits:0}); }
+function _presFP(v){ return ((Number(v)||0)*100).toFixed(1)+'%'; }
+
+async function loadPresupuesto(){
+  var root = document.getElementById('pres-root');
+  if (!root) return;
+  root.innerHTML = '<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px"><div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Calculando proyección…</div>';
+  try {
+    var tok = encodeURIComponent(getToken());
+    var resp = await fetch(APPS_SCRIPT_URL+'?action=presupuesto&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+    _presData = await resp.json();
+    if (!_presData.ok) throw new Error(_presData.error||'No se pudo calcular el presupuesto.');
+    _renderPresupuesto();
+  } catch(e){
+    root.innerHTML = '<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px;line-height:1.6">⚠ '+e.message+'<br><span style="color:#6b7280">Si es la primera vez: agrega <b>presupuesto.gs</b> en Apps Script, corre <b>setupPresupuesto()</b> y vuelve a desplegar el backend.</span></div>';
+  }
+}
+
+function _renderPresupuesto(){
+  var root = document.getElementById('pres-root');
+  if (!root || !_presData) return;
+  var d = _presData;
+  var a = d.actual||{}, sg = d.siguiente||{}, eg = d.egresos||{}, tt = (sg.totales||{});
+  var canEdit = hasPermission('bank_capture');
+  var fM=_presFM, fP=_presFP;
+
+  if (!document.getElementById('pres-styles')){
+    var s=document.createElement('style'); s.id='pres-styles';
+    s.textContent=
+      '.pr-w{max-width:1280px;margin:0 auto;padding:20px}'
+      +'.pr-hdr{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;padding-bottom:14px;border-bottom:2px solid var(--text-primary,#111)}'
+      +'.pr-hero{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;border-radius:16px;border:1px solid var(--color-divider,#e5e7eb);background:var(--card-bg,#fff);margin-bottom:14px}'
+      +'.pr-pill{font-size:12px;font-weight:700;padding:5px 14px;border-radius:999px}'
+      +'.pr-bar{height:10px;background:var(--color-surface,#f1f1f1);border-radius:999px;overflow:hidden;position:relative;margin-top:12px}'
+      +'.pr-kstrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}'
+      +'.pr-ks{background:var(--color-surface,#fafafa);border-radius:12px;padding:14px 16px}'
+      +'.pr-ks-l{font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:5px}'
+      +'.pr-ks-v{font-size:23px;font-weight:800;letter-spacing:-.5px}'
+      +'.pr-sc{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:16px 18px;margin-bottom:16px}'
+      +'.pr-sh{font-size:13px;font-weight:700;color:var(--text-primary,#111);margin-bottom:12px;display:flex;align-items:center;justify-content:space-between}'
+      +'.pr-scen{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}'
+      +'.pr-card{border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:14px}'
+      +'.pr-card.base{border:2px solid var(--color-primary,#c46a7a)}'
+      +'.pr-tbl{width:100%;border-collapse:collapse;font-size:11.5px}'
+      +'.pr-tbl th{padding:8px 10px;font-size:8.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);background:var(--color-surface,#fafafa);border-bottom:2px solid var(--color-divider,#d1d5db);text-align:right;white-space:nowrap}'
+      +'.pr-tbl th:first-child{text-align:left}'
+      +'.pr-tbl td{padding:7px 10px;border-bottom:1px solid var(--color-divider,#f0f0f0);text-align:right;white-space:nowrap}'
+      +'.pr-tbl td:first-child{text-align:left;font-weight:600}'
+      +'.pr-tbl tr:hover td{background:rgba(0,0,0,.012)}'
+      +'.pr-btn{display:inline-flex;align-items:center;gap:6px;padding:9px 16px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer}'
+      +'.pr-mov{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9998;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)}'
+      +'.pr-modal{background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);max-width:520px;width:95%;max-height:88vh;overflow:auto}'
+      +'.pr-inp{width:100%;box-sizing:border-box;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:8px 10px;font-size:12.5px;background:var(--color-surface,#fafafa);color:var(--text-primary,#111)}'
+      +'.pr-fl{font-size:10px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:4px;display:block}';
+    document.head.appendChild(s);
+  }
+
+  // Semáforo
+  var semCfg = {
+    verde:    {c:'#166534', bg:'rgba(16,185,129,.12)', dot:'#16a34a', txt:'Vas a llegar a la meta'},
+    amarillo: {c:'#b45309', bg:'rgba(245,158,11,.15)', dot:'#f59e0b', txt:'Vas justo — riesgo de no llegar'},
+    rojo:     {c:'#991b1b', bg:'rgba(239,68,68,.12)',  dot:'#ef4444', txt:'No vas a llegar a la meta'},
+    'sin-meta':{c:'#6b7280',bg:'rgba(107,114,128,.12)',dot:'#9ca3af', txt:'Captura una meta para evaluar el avance'}
+  };
+  var sem = semCfg[a.semaforo] || semCfg['sin-meta'];
+  var pctReal = a.meta>0 ? Math.max(Math.min(a.realAcumulado/a.meta,1.15),0) : 0;
+  var pctMeta = 1;
+
+  var h=[];
+  h.push('<div class="pr-w">');
+  // Header
+  h.push('<div class="pr-hdr"><div>'
+    +'<div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility · Finanzas</div>'
+    +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Presupuesto y meta</h1>'
+    +'<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">Trimestre en curso '+a.periodo+' · proyección '+sg.periodo+' · modelo estacional con piso creciente</div>'
+    +'</div>'
+    +(canEdit?'<button class="pr-btn" onclick="presOpenMeta()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Capturar meta</button>':'')
+    +'</div>');
+
+  // Hero semáforo (trimestre en curso)
+  h.push('<div class="pr-hero" style="flex-direction:column;align-items:stretch">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">'
+      +'<div style="display:flex;align-items:center;gap:10px"><span style="width:11px;height:11px;border-radius:50%;background:'+sem.dot+'"></span>'
+        +'<span style="font-size:15px;font-weight:700;color:var(--text-primary,#111)">'+sem.txt+'</span>'
+        +'<span style="font-size:11px;color:var(--text-secondary,#9ca3af)">'+a.periodo+' · día '+a.diasTranscurridos+' de '+a.diasTotales+'</span></div>'
+      +'<span class="pr-pill" style="background:'+sem.bg+';color:'+sem.c+'">'+(a.cumplimientoPct!=null?Math.round(a.cumplimientoPct*100)+'% proyectado':'sin meta')+'</span>'
+    +'</div>'
+    +'<div class="pr-bar"><div style="position:absolute;left:0;top:0;bottom:0;width:'+(pctReal*100).toFixed(0)+'%;background:'+sem.dot+';border-radius:999px"></div>'
+      +'<div style="position:absolute;left:'+(pctMeta*100).toFixed(0)+'%;top:-3px;bottom:-3px;width:2px;background:var(--text-primary,#111);transform:translateX(-2px)"></div></div>'
+    +'<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-secondary,#9ca3af);margin-top:5px">'
+      +'<span>Real acumulado '+fM(a.realAcumulado)+(a.meta>0?(' ('+Math.round(a.realAcumulado/a.meta*100)+'%)'):'')+'</span>'
+      +'<span>Meta '+(a.meta>0?fM(a.meta):'—')+'</span></div>'
+    +'</div>');
+
+  // KPIs
+  var brecha = (a.proyeccionCierre||0) - (a.meta||0);
+  h.push('<div class="pr-kstrip">'
+    +'<div class="pr-ks"><div class="pr-ks-l">Meta del trimestre</div><div class="pr-ks-v">'+(a.meta>0?fM(a.meta):'—')+'</div></div>'
+    +'<div class="pr-ks"><div class="pr-ks-l">Real acumulado</div><div class="pr-ks-v">'+fM(a.realAcumulado)+'</div></div>'
+    +'<div class="pr-ks"><div class="pr-ks-l">Proyección de cierre</div><div class="pr-ks-v" style="color:'+sem.c+'">'+fM(a.proyeccionCierre)+'</div></div>'
+    +'<div class="pr-ks"><div class="pr-ks-l">Brecha vs meta</div><div class="pr-ks-v" style="color:'+(brecha>=0?'#166534':'#991b1b')+'">'+(a.meta>0?fM(brecha):'—')+'</div></div>'
+    +'</div>');
+
+  // Gráfica tendencia
+  h.push('<div class="pr-sc"><div class="pr-sh"><span>Ventas mensuales — real y proyección</span>'
+    +'<span style="font-size:11px;font-weight:400;color:var(--text-secondary,#9ca3af)">crecimiento real a/a: '+fP(d.crecimientoRealTotal)+'</span></div>'
+    +'<div style="position:relative;height:240px"><canvas id="presChart"></canvas></div></div>');
+
+  // Proyección siguiente trimestre — escenarios
+  h.push('<div class="pr-sc"><div class="pr-sh">Proyección '+sg.periodo+' · con base en el comportamiento de ventas</div>'
+    +'<div class="pr-scen">'
+      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Conservador</div><div style="font-size:21px;font-weight:800">'+fM(tt.conservador)+'</div></div>'
+      +'<div class="pr-card base"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Base (esperado)</div><div style="font-size:21px;font-weight:800;color:var(--color-primary,#c46a7a)">'+fM(tt.proyeccion)+'</div></div>'
+      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Optimista</div><div style="font-size:21px;font-weight:800">'+fM(tt.optimista)+'</div></div>'
+      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Meta capturada</div><div style="font-size:21px;font-weight:800">'+(tt.meta>0?fM(tt.meta):'—')+'</div></div>'
+    +'</div></div>');
+
+  // Tabla por línea
+  h.push('<div class="pr-sc"><div class="pr-sh">Detalle por línea de servicio · '+sg.periodo+'</div>'
+    +'<div style="overflow-x:auto"><table class="pr-tbl"><thead><tr>'
+    +'<th>Línea</th><th>Año ant.</th><th>Reciente</th><th>Crec.</th><th>Proyección</th><th>Meta</th><th>Brecha</th>'
+    +'</tr></thead><tbody>');
+  (sg.lineas||[]).forEach(function(l){
+    var gap=(l.proyeccion||0)-(l.meta||0);
+    h.push('<tr>'
+      +'<td title="'+l.linea+'" style="max-width:200px;overflow:hidden;text-overflow:ellipsis">'+l.linea+'</td>'
+      +'<td style="color:var(--text-secondary,#6b7280)">'+fM(l.anioAnterior)+'</td>'
+      +'<td style="color:var(--text-secondary,#6b7280)">'+fM(l.reciente)+'</td>'
+      +'<td style="color:var(--text-secondary,#9ca3af)">'+fP(l.crecimientoUsado)+'</td>'
+      +'<td style="font-weight:800;color:var(--color-primary,#c46a7a)">'+fM(l.proyeccion)+'</td>'
+      +'<td>'+(l.meta>0?fM(l.meta):'—')+'</td>'
+      +'<td style="color:'+(l.meta<=0?'#9ca3af':(gap>=0?'#166534':'#991b1b'))+'">'+(l.meta>0?fM(gap):'—')+'</td>'
+      +'</tr>');
+  });
+  h.push('<tr style="border-top:2px solid var(--color-divider,#d1d5db)">'
+    +'<td style="font-weight:800">TOTAL</td>'
+    +'<td style="font-weight:700;color:var(--text-secondary,#6b7280)">'+fM(tt.anioAnterior)+'</td>'
+    +'<td style="font-weight:700;color:var(--text-secondary,#6b7280)">'+fM(tt.reciente)+'</td><td></td>'
+    +'<td style="font-weight:800;color:var(--color-primary,#c46a7a)">'+fM(tt.proyeccion)+'</td>'
+    +'<td style="font-weight:800">'+(tt.meta>0?fM(tt.meta):'—')+'</td>'
+    +'<td style="font-weight:800;color:'+(tt.meta<=0?'#9ca3af':((tt.proyeccion-tt.meta)>=0?'#166534':'#991b1b'))+'">'+(tt.meta>0?fM(tt.proyeccion-tt.meta):'—')+'</td>'
+    +'</tr>');
+  h.push('</tbody></table></div></div>');
+
+  // Egresos + margen
+  h.push('<div class="pr-kstrip">'
+    +'<div class="pr-ks"><div class="pr-ks-l">Ingresos proyectados '+sg.periodo+'</div><div class="pr-ks-v" style="color:#166534">'+fM(tt.proyeccion)+'</div></div>'
+    +'<div class="pr-ks"><div class="pr-ks-l">Egresos proyectados</div><div class="pr-ks-v" style="color:#991b1b">'+fM(eg.proyeccion)+'</div></div>'
+    +'<div class="pr-ks"><div class="pr-ks-l">Margen proyectado</div><div class="pr-ks-v">'+fM(eg.margenProyectado)+'</div></div>'
+    +'<div class="pr-ks"><div class="pr-ks-l">% Margen</div><div class="pr-ks-v">'+(Number(eg.margenPct)||0).toFixed(1)+'%</div></div>'
+    +'</div>');
+
+  if (!tt.meta || tt.meta<=0){
+    h.push('<div style="font-size:11.5px;color:var(--text-secondary,#9ca3af);background:var(--color-surface,#fafafa);border:1px dashed var(--color-divider,#e0e0e0);border-radius:10px;padding:12px 14px">Aún no capturas metas para '+sg.periodo+'. Usa <b>Capturar meta</b> para fijar el objetivo por línea y activar el semáforo.</div>');
+  }
+
+  h.push('</div>');
+  root.innerHTML = h.join('');
+
+  // Gráfica
+  try {
+    var t = d.tendencia||{meses:[],real:[],proyeccion:[]};
+    var ctx = document.getElementById('presChart');
+    if (ctx && typeof Chart!=='undefined'){
+      if (_presChart) { _presChart.destroy(); _presChart=null; }
+      _presChart = new Chart(ctx.getContext('2d'), {
+        type:'line',
+        data:{ labels:t.meses, datasets:[
+          { label:'Real', data:t.real, borderColor:'#c46a7a', backgroundColor:'#c46a7a', borderWidth:2.5, tension:0.3, pointRadius:3, spanGaps:false },
+          { label:'Proyección', data:t.proyeccion, borderColor:'#888780', borderDash:[6,4], borderWidth:2, tension:0.3, pointRadius:3, spanGaps:false }
+        ]},
+        options:{ responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{ display:true, labels:{ boxWidth:12, font:{size:11} } } },
+          scales:{ y:{ ticks:{ callback:function(v){return _presFM(v);}, font:{size:10} }, grid:{ color:'rgba(128,128,128,0.1)' } },
+                   x:{ ticks:{ font:{size:10} }, grid:{ display:false } } }
+        }
+      });
+    }
+  } catch(e){ /* sin gráfica */ }
+}
+
+/* ── Modal: capturar / editar meta ──────────────────────────────── */
+function presOpenMeta(){
+  if (!_presData) return;
+  var d=_presData;
+  function esc(v){return String(v==null?'':v).replace(/"/g,'&quot;');}
+  var periodos=[d.trimestreSiguiente, d.trimestreActual];
+  var lineas=(d.lineasDisponibles||[]);
+  var ovl=document.createElement('div'); ovl.className='pr-mov'; ovl.id='pr-meta-ovl';
+  ovl.onclick=function(e){ if(e.target===ovl) presCloseMeta(); };
+  ovl.innerHTML='<div class="pr-modal">'
+    +'<div style="padding:16px 22px;border-bottom:1px solid var(--color-divider,#e5e7eb);display:flex;align-items:center;justify-content:space-between">'
+      +'<div style="font-size:15px;font-weight:800">Capturar meta</div>'
+      +'<button onclick="presCloseMeta()" style="border:1.5px solid var(--color-divider,#e5e7eb);background:var(--card-bg,#fff);border-radius:8px;padding:4px 10px;cursor:pointer;font-size:13px">✕</button></div>'
+    +'<div style="padding:18px 22px;display:grid;grid-template-columns:1fr 1fr;gap:12px 14px">'
+      +'<div><label class="pr-fl">Periodo</label><select class="pr-inp" id="pm-periodo">'+periodos.map(function(p){return '<option value="'+esc(p)+'">'+esc(p)+'</option>';}).join('')+'</select></div>'
+      +'<div><label class="pr-fl">Línea de servicio</label><select class="pr-inp" id="pm-linea">'+lineas.map(function(l){return '<option value="'+esc(l)+'">'+esc(l)+'</option>';}).join('')+'</select></div>'
+      +'<div><label class="pr-fl">Meta ingresos ($)</label><input class="pr-inp" id="pm-meta" type="number" step="0.01" placeholder="0.00"></div>'
+      +'<div><label class="pr-fl">Crecimiento objetivo (%)</label><input class="pr-inp" id="pm-crec" type="number" step="0.1" placeholder="0"></div>'
+      +'<div><label class="pr-fl">Meta margen (%)</label><input class="pr-inp" id="pm-margen" type="number" step="0.1" placeholder="0"></div>'
+      +'<div><label class="pr-fl">Notas</label><input class="pr-inp" id="pm-notas" placeholder="opcional"></div>'
+    +'</div>'
+    +'<div style="padding:14px 22px;border-top:1px solid var(--color-divider,#e5e7eb);display:flex;justify-content:flex-end;gap:10px"><div id="pm-msg" style="margin-right:auto;font-size:12px;align-self:center;color:#991b1b"></div>'
+      +'<button onclick="presCloseMeta()" style="border:1.5px solid var(--color-divider,#e5e7eb);background:var(--card-bg,#fff);border-radius:9px;padding:9px 18px;font-size:12px;font-weight:600;cursor:pointer">Cancelar</button>'
+      +'<button class="pr-btn" id="pm-save" onclick="presSaveMeta()">Guardar meta</button></div>'
+    +'</div>';
+  document.body.appendChild(ovl);
+}
+function presCloseMeta(){ var o=document.getElementById('pr-meta-ovl'); if(o) o.remove(); }
+async function presSaveMeta(){
+  function v(id){var e=document.getElementById('pm-'+id);return e?e.value:'';}
+  var msg=document.getElementById('pm-msg'), btn=document.getElementById('pm-save');
+  if (!v('linea')){ if(msg) msg.textContent='Elige una línea.'; return; }
+  var s=getSession()||{};
+  var payload={ action:'savePresupuestoMeta', periodo:v('periodo'), linea:v('linea'),
+    metaIngreso:v('meta'), crecimiento:v('crec'), metaMargen:v('margen'), notas:v('notas'), usuario:s.email||'' };
+  if (btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  try {
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify(payload)});
+    var dd=await r.json();
+    if (!dd.ok){ if(msg){msg.style.color='#991b1b';msg.textContent=dd.error||'No se pudo guardar.';} if(btn){btn.disabled=false;btn.textContent='Guardar meta';} return; }
+    presCloseMeta();
+    await loadPresupuesto();
+  } catch(e){ if(msg){msg.style.color='#991b1b';msg.textContent='Error: '+e.message;} if(btn){btn.disabled=false;btn.textContent='Guardar meta';} }
 }
 
 /* ══════════════════════════════════════════════════════════════
