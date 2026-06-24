@@ -3751,7 +3751,7 @@ function egOpenForm() {
     +'<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:14px">Datos del egreso</div>'
     +'<datalist id="eg-prov-list">'+provOpts+'</datalist>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
-    +'<div><label '+LBL+'>Fecha *</label><input type="date" id="eg-fecha" '+S+' value="'+today+'"></div>'
+    +'<div><label '+LBL+'>Fecha de pago <span style="font-weight:400;color:var(--text-secondary,#9ca3af)">(si ya se pagó)</span></label><input type="date" id="eg-fecha" '+S+'></div>'
     +'<div><label '+LBL+'>Proveedor *</label><input id="eg-proveedor" list="eg-prov-list" '+S+' placeholder="Nombre del proveedor"></div>'
     +'<div><label '+LBL+'>Monto *</label><input type="number" id="eg-monto" '+S+' placeholder="0.00" step="0.01"></div>'
     +'</div>'
@@ -3763,14 +3763,14 @@ function egOpenForm() {
     +'</div>'
     +'<div style="margin-bottom:14px"><label '+LBL+'>Concepto *</label><input id="eg-concepto" '+S+' placeholder="Descripción del egreso"></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
-    +'<div><label '+LBL+'>Vencimiento</label><input type="date" id="eg-venc" '+S+'></div>'
+    +'<div><label '+LBL+'>Vencimiento <span style="font-weight:400;color:var(--text-secondary,#9ca3af)">(si no se ha pagado)</span></label><input type="date" id="eg-venc" '+S+'></div>'
     +'<div><label '+LBL+'>Póliza</label><input id="eg-poliza" '+S+' placeholder="Número de póliza"></div>'
     +'<div><label '+LBL+'>Notas</label><input id="eg-notas" '+S+' placeholder="Notas adicionales"></div>'
     +'</div>'
     +'<div style="display:flex;gap:18px;margin-bottom:14px">'
-    +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px"><input type="checkbox" id="eg-chk-fact" class="eg-chk"> Facturación</label>'
-    +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px"><input type="checkbox" id="eg-chk-pag" class="eg-chk"> Pagado</label>'
-    +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px"><input type="checkbox" id="eg-chk-cont" class="eg-chk"> Contabilidad</label>'
+    +'<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary,#9ca3af)" title="Se activa al subir factura"><input type="checkbox" id="eg-chk-fact" class="eg-chk" disabled> Facturación <span style="font-size:9px">(auto: link factura)</span></label>'
+    +'<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary,#9ca3af)" title="Se activa al subir comprobante de pago"><input type="checkbox" id="eg-chk-pag" class="eg-chk" disabled> Pagado <span style="font-size:9px">(auto: link pago)</span></label>'
+    +'<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary,#9ca3af)" title="Se activa al capturar póliza"><input type="checkbox" id="eg-chk-cont" class="eg-chk" disabled> Contabilidad <span style="font-size:9px">(auto: póliza)</span></label>'
     +'</div>'
     +'<div><label '+LBL+'>Observaciones</label><textarea id="eg-obs" '+S+' rows="2" placeholder="Observaciones…" style="resize:vertical"></textarea></div>'
     +'</div>';
@@ -3794,37 +3794,71 @@ function egCloseForm() {
 async function egSubmit() {
   var proveedor = (document.getElementById('eg-proveedor')||{}).value||'';
   var fecha = (document.getElementById('eg-fecha')||{}).value||'';
+  var vencimiento = (document.getElementById('eg-venc')||{}).value||'';
   var monto = (document.getElementById('eg-monto')||{}).value||'';
   var concepto = (document.getElementById('eg-concepto')||{}).value||'';
-  if (!proveedor||!fecha||!monto||!concepto) { alert('Completa proveedor, fecha, monto y concepto'); return; }
+  if (!proveedor||!monto||!concepto) { alert('Completa proveedor, monto y concepto'); return; }
+  if (!fecha && !vencimiento) { alert('Ingresa al menos una fecha: Fecha de pago o Vencimiento'); return; }
 
   var btn = document.getElementById('eg-save-btn');
   if (btn) { btn.disabled=true; btn.textContent='Guardando…'; }
 
+  // Checkboxes automáticos basados en documentos
+  var linkFactura = ''; // se llena al subir docs
+  var linkPago = '';
+  var poliza = (document.getElementById('eg-poliza')||{}).value||'';
+  var autoFact = false; // se activa al subir factura
+  var autoPagado = !!fecha; // si tiene fecha de pago = pagado
+  var autoCont = !!poliza; // si tiene póliza = contabilizado
+
   var isEdit = !!_egEditRowNum;
-  var payload = {
-    action: isEdit ? 'updateEgresoField' : 'saveEgreso',
-    rowNum: isEdit ? _egEditRowNum : undefined,
-    fecha:fecha, proveedor:proveedor, monto:monto, concepto:concepto,
-    contable: (document.getElementById('eg-contable')||{}).value||'Gasto',
-    tipo: (document.getElementById('eg-tipo')||{}).value||'Variable',
-    subtipo: (document.getElementById('eg-subtipo')||{}).value||'',
-    formaPago: (document.getElementById('eg-fpago')||{}).value||'',
-    vencimiento: (document.getElementById('eg-venc')||{}).value||'',
-    poliza: (document.getElementById('eg-poliza')||{}).value||'',
-    notas: (document.getElementById('eg-notas')||{}).value||'',
-    facturacion: !!(document.getElementById('eg-chk-fact')||{}).checked,
-    pagado: !!(document.getElementById('eg-chk-pag')||{}).checked,
-    contabilidad: !!(document.getElementById('eg-chk-cont')||{}).checked,
-    observaciones: (document.getElementById('eg-obs')||{}).value||''
-  };
+
+  // Si no tiene fecha de pago → va a CxP
+  var isCxP = !fecha && !!vencimiento;
+  var payload;
+
+  if (isCxP && !isEdit) {
+    // Guardar como CxP
+    payload = {
+      action: 'saveCxP',
+      proveedor:proveedor, monto:monto, concepto:concepto,
+      contable: (document.getElementById('eg-contable')||{}).value||'Gasto',
+      tipo: (document.getElementById('eg-tipo')||{}).value||'Variable',
+      subtipo: (document.getElementById('eg-subtipo')||{}).value||'',
+      vencimiento: vencimiento,
+      poliza: poliza,
+      notas: (document.getElementById('eg-notas')||{}).value||'',
+      facturacion: autoFact,
+      observaciones: (document.getElementById('eg-obs')||{}).value||'',
+      mes: vencimiento ? vencimiento.substring(0,7) : '',
+      prioridad: 1,
+      usuario: (getSession()||{}).email||'sistema'
+    };
+  } else {
+    payload = {
+      action: isEdit ? 'updateEgresoField' : 'saveEgreso',
+      rowNum: isEdit ? _egEditRowNum : undefined,
+      fecha:fecha, proveedor:proveedor, monto:monto, concepto:concepto,
+      contable: (document.getElementById('eg-contable')||{}).value||'Gasto',
+      tipo: (document.getElementById('eg-tipo')||{}).value||'Variable',
+      subtipo: (document.getElementById('eg-subtipo')||{}).value||'',
+      formaPago: (document.getElementById('eg-fpago')||{}).value||'',
+      vencimiento: vencimiento,
+      poliza: poliza,
+      notas: (document.getElementById('eg-notas')||{}).value||'',
+      facturacion: autoFact,
+      pagado: autoPagado,
+      contabilidad: autoCont,
+      observaciones: (document.getElementById('eg-obs')||{}).value||''
+    };
+  }
 
   try {
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(payload)});
     var res = await r.json();
     if (res.ok) {
-      // Auto-registrar en banco solo para egresos NUEVOS (no ediciones)
-      if (!isEdit) {
+      // Auto-registrar en banco solo para egresos NUEVOS pagados (no ediciones ni CxP)
+      if (!isEdit && !isCxP && fecha) {
         var fp = payload.formaPago;
         var amt = parseFloat(monto)||0;
         var obs = payload.concepto + ' · ' + payload.proveedor;
