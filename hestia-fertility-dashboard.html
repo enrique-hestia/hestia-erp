@@ -3426,6 +3426,20 @@ function _renderEgresosERP() {
 
   function fE(v){return '$'+Math.abs(Number(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
 
+  // ── Total del RANGO DE FECHAS seleccionado (Del/al del topbar) ──
+  // La tabla y los KPIs muestran todo el año; este bloque reporta SOLO el
+  // periodo elegido. Fechas en formato ISO (YYYY-MM-DD) → comparación directa.
+  // Se expone en window._egPeriodo para reutilizarlo en otros reportes.
+  var _pIni = currentFechaInicio || '', _pFin = currentFechaFin || '';
+  var _periodoRows = (data.rows||[]).filter(function(r){
+    var f = (r.fecha||'').substring(0,10);
+    return f && (!_pIni || f >= _pIni) && (!_pFin || f <= _pFin);
+  });
+  var periodoTotal  = _periodoRows.reduce(function(s,r){return s+(r.monto||0);},0);
+  var periodoPagado = _periodoRows.filter(function(r){return r.pagado;}).reduce(function(s,r){return s+(r.monto||0);},0);
+  var periodoPend   = periodoTotal - periodoPagado;
+  window._egPeriodo = { inicio:_pIni, fin:_pFin, total:periodoTotal, pagado:periodoPagado, pendiente:periodoPend, registros:_periodoRows.length };
+
   // Opciones para filtros
   var meses=[],contables=[],subtipos=[],provs=[],fps=[];
   (data.rows||[]).forEach(function(r){
@@ -3490,6 +3504,18 @@ function _renderEgresosERP() {
     +'<div style="font-size:10px;color:var(--text-secondary,#6b7280);text-transform:uppercase;letter-spacing:.5px">'+filtered.length+' de '+(data.totalRows||0)+' registros</div></div>'
     +(hasPermission('bank_capture')?'<button onclick="egOpenForm()" style="display:inline-flex;align-items:center;gap:6px;padding:10px 18px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(196,106,122,.25)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Registrar egreso</button>':'')
     +'</div></div>');
+
+  // Banner del periodo seleccionado (rango Del/al del topbar)
+  h.push('<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 16px;padding:11px 16px;background:var(--color-primary-hl,rgba(196,106,122,.08));border:1px solid var(--color-divider,#e5e7eb);border-radius:10px">'
+    +'<div style="font-size:9.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a)">Periodo seleccionado</div>'
+    +'<div style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280)">'+(_pIni?fmtDisplayDate(_pIni):'—')+' → '+(_pFin?fmtDisplayDate(_pFin):'—')+'</div>'
+    +'<div style="margin-left:auto;display:flex;gap:22px;align-items:baseline;flex-wrap:wrap">'
+      +'<div><span style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Total </span><span style="font-size:16px;font-weight:800;color:var(--text-primary,#111)">'+fE(periodoTotal)+'</span></div>'
+      +'<div><span style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Pagado </span><span style="font-size:13px;font-weight:700;color:#166534">'+fE(periodoPagado)+'</span></div>'
+      +'<div><span style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Pendiente </span><span style="font-size:13px;font-weight:700;color:#b45309">'+fE(periodoPend)+'</span></div>'
+      +'<div style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">'+_periodoRows.length+' reg.</div>'
+    +'</div>'
+  +'</div>');
 
   // KPIs
   var tEg=data.totalEgresos||0, tPag=data.totalPagado||0, tPend=data.totalPendiente||0, prom=data.promedioMensual||0;
