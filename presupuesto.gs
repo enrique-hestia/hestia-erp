@@ -133,57 +133,33 @@ function _presHistoricoEgresos() {
   return q;
 }
 
-/* ── Lee metas DIRECTO de la pestaña Budget (P&L bottom-up) ───────
-   Estructura: fila "Period" tiene los meses (YYYY-M) por columna.
-   Líneas de ingreso de nivel superior y su renglón "Total" mensual:
-     Alta, Baja, Externos, Surrogacy  → fila con col C = "Total"
-     Other Income → fila "Consulta - Laboratorio - Suplementos"
-   La meta del trimestre = suma de esas líneas en sus 3 meses.        */
-var PRES_TOPS = { 'alta': 'Alta', 'baja': 'Baja', 'externos': 'Externos', 'surrogacy': 'Surrogacy' };
+/* ── Lee metas del almacén que administra la PÁGINA (Presupuesto_Metas) ─
+   El usuario nunca edita esta hoja a mano: la página escribe vía
+   savePresupuestoMeta. Una fila con Línea = "TOTAL" fija el total del
+   trimestre; filas por línea suman al total si no hay TOTAL.            */
 function _presLeerMetas() {
   var map = {};
   try {
     var ss = SpreadsheetApp.openById(ER_SS_ID);
-    var sh = ss.getSheetByName('Budget');
-    if (!sh) return { map: map, _setup: false, _src: 'sin-budget' };
+    var sh = ss.getSheetByName(PRES_METAS_TAB);
+    if (!sh) return { map: map, _setup: false };
     var raw = sh.getDataRange().getValues();
-
-    // Fila de periodos (col A === "Period")
-    var hdr = -1;
-    for (var r = 0; r < Math.min(raw.length, 8); r++) {
-      if (String(raw[r][0] || '').trim().toLowerCase() === 'period') { hdr = r; break; }
-    }
-    if (hdr < 0) return { map: map, _setup: false, _src: 'sin-fila-period' };
-
-    // Columna → 'YYYY-Qn'
-    var colQ = {};
-    for (var c = 3; c < raw[hdr].length; c++) {
-      var pm = String(raw[hdr][c] || '').trim().match(/^(\d{4})-(\d{1,2})$/);
-      if (pm) { var y = parseInt(pm[1], 10), mo = parseInt(pm[2], 10); colQ[c] = y + '-Q' + (Math.floor((mo - 1) / 3) + 1); }
-    }
-
-    var currentTop = null;
-    for (var rr = hdr + 1; rr < raw.length; rr++) {
-      var c1 = String(raw[rr][1] || '').trim();
-      var c2 = String(raw[rr][2] || '').trim();
-      var lc1 = c1.toLowerCase();
-      if (PRES_TOPS[lc1]) currentTop = PRES_TOPS[lc1];
-      var lineName = null;
-      if (c2.toLowerCase() === 'total' && currentTop) { lineName = currentTop; currentTop = null; }
-      else if (/consulta.*suplementos/i.test(c1)) { lineName = 'Other Income'; }
-      if (!lineName) continue;
-      for (var cc in colQ) {
-        var val = _presNum(raw[rr][cc]);
-        if (!val) continue;
-        var qk = colQ[cc];
-        if (!map[qk]) map[qk] = { __total: 0, _lineas: {} };
-        if (!map[qk]._lineas[lineName]) map[qk]._lineas[lineName] = { metaIngreso: 0, metaMargen: 0, crecObjetivo: 0 };
-        map[qk]._lineas[lineName].metaIngreso += val;
-        map[qk].__total += val;
+    for (var r = 1; r < raw.length; r++) {
+      var per = String(raw[r][0] || '').trim();
+      var lin = String(raw[r][1] || '').trim();
+      if (!per || !lin) continue;
+      var meta = _presNum(raw[r][2]);
+      if (!map[per]) map[per] = { __total: 0, __tot: null, _lineas: {} };
+      if (lin.toUpperCase() === 'TOTAL') {
+        map[per].__tot = meta;
+      } else {
+        map[per]._lineas[lin] = { metaIngreso: meta, metaMargen: _presNum(raw[r][3]), crecObjetivo: _presNum(raw[r][4]) / 100 };
+        map[per].__total += meta;
       }
     }
-    return { map: map, _setup: Object.keys(map).length > 0, _src: 'budget' };
-  } catch (e) { return { map: map, _setup: false, _src: 'err:' + e.message }; }
+    Object.keys(map).forEach(function (p) { if (map[p].__tot != null) map[p].__total = map[p].__tot; });
+    return { map: map, _setup: true };
+  } catch (e) { return { map: map, _setup: false }; }
 }
 
 /* ── Crecimiento real interanual (últimos 4 trim. vs 4 previos) ── */
