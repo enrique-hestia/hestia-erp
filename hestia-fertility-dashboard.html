@@ -3387,13 +3387,14 @@ function _egFilterRows() {
   if (!_egData || !_egData.rows) return [];
   var f = _egFilters;
   return _egData.rows.filter(function(r) {
+    // El menú de Egresos solo muestra lo PAGADO (validado en checkbox PAG).
+    // Lo pendiente de pago vive en Cuentas por Pagar.
+    if (!r.pagado) return false;
     if (f.mes && r.mes !== f.mes) return false;
     if (f.contable && r.contable !== f.contable) return false;
     if (f.subtipo && r.subtipo !== f.subtipo) return false;
     if (f.proveedor && r.proveedor !== f.proveedor) return false;
     if (f.formaPago && r.formaPago !== f.formaPago) return false;
-    if (f.pagado === 'si' && !r.pagado) return false;
-    if (f.pagado === 'no' && r.pagado) return false;
     if (f.buscar) {
       var q = f.buscar.toLowerCase();
       var haystack = (r.proveedor+' '+r.concepto+' '+r.subtipo+' '+r.observaciones).toLowerCase();
@@ -3477,7 +3478,7 @@ function _renderEgresosERP() {
   h.push('<div class="eg-hdr"><div>'
     +'<div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility</div>'
     +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Egresos</h1>'
-    +'<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">Gastos y costos operativos · Cifras en MXN</div>'
+    +'<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">Egresos pagados (validados en PAG) · Lo pendiente está en Cuentas por Pagar · MXN</div>'
     +'</div><div style="display:flex;align-items:center;gap:12px">'
     +'<div style="text-align:right"><div style="font-size:12px;font-weight:700">'+(data.anio||new Date().getFullYear())+'</div>'
     +'<div style="font-size:10px;color:var(--text-secondary,#6b7280);text-transform:uppercase;letter-spacing:.5px">'+filtered.length+' de '+(data.totalRows||0)+' registros</div></div>'
@@ -3504,7 +3505,6 @@ function _renderEgresosERP() {
     +'<div class="eg-fg"><div class="eg-fl">Contable</div><select class="eg-sel" onchange="_egSetFilter(\'contable\',this.value)">'+selOpts(contables,_egFilters.contable,'Todos')+'</select></div>'
     +'<div class="eg-fg"><div class="eg-fl">Subtipo</div><select class="eg-sel" onchange="_egSetFilter(\'subtipo\',this.value)">'+selOpts(subtipos,_egFilters.subtipo,'Todos')+'</select></div>'
     +'<div class="eg-fg"><div class="eg-fl">Forma pago</div><select class="eg-sel" onchange="_egSetFilter(\'formaPago\',this.value)">'+selOpts(fps,_egFilters.formaPago,'Todas')+'</select></div>'
-    +'<div class="eg-fg"><div class="eg-fl">Estado</div><select class="eg-sel" onchange="_egSetFilter(\'pagado\',this.value)"><option value="">Todos</option><option value="si"'+((_egFilters.pagado==='si')?' selected':'')+'>Pagado</option><option value="no"'+((_egFilters.pagado==='no')?' selected':'')+'>Pendiente</option></select></div>'
     +'<div class="eg-fg"><div class="eg-fl">Buscar</div><input class="eg-search" placeholder="Proveedor, concepto…" value="'+(_egFilters.buscar||'')+'" oninput="_egSearchDebounce(this.value)"></div>'
     +'<div style="margin-left:auto;font-size:11px;font-weight:700;color:var(--text-primary,#111)">Filtrado: '+fE(totalFiltered)+'</div>'
     +'</div>');
@@ -3696,6 +3696,14 @@ function egViewPDF(url, title) {
 }
 
 async function egToggleField(rowNum, field, value) {
+  // Reflejar el cambio en el estado local. Al desmarcar PAG, la partida
+  // queda pendiente y debe salir de la vista de Egresos (pasa a Cuentas por Pagar).
+  var localKey = ({'pagado':'pagado','facturación':'facturacion','contabilidad':'contabilidad'})[field] || field;
+  if (_egData && _egData.rows) {
+    var lr = _egData.rows.find(function(r){ return r._rowNum === rowNum; });
+    if (lr) lr[localKey] = value;
+  }
+  if (field === 'pagado') _renderEgresosERP();
   try {
     var s = getSession() || {};
     await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
