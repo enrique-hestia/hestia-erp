@@ -3845,11 +3845,8 @@ function egOpenForm() {
   view.style.display = 'block';
 
   var today = new Date().toISOString().substring(0, 10);
-  // Proveedores: catálogo central (window._proveedores) + nombres ya usados en egresos
-  var _provNames = (window._proveedores || []).map(function(p){ return p.nombre; });
-  ((_egData && _egData.proveedores) || []).forEach(function(n){ if (n && _provNames.indexOf(n) === -1) _provNames.push(n); });
-  _provNames.sort(function(a,b){ return String(a).toLowerCase()<String(b).toLowerCase()?-1:1; });
-  var provOpts = _provNames.map(function(p){ return '<option value="'+String(p).replace(/"/g,'&quot;')+'">'; }).join('');
+  // Proveedores: usa el datalist GLOBAL (catálogo central + nombres ya usados).
+  try { _renderProvDatalist(); } catch(e){}
   var subOpts = ((_egData && _egData.subtipos) || []).map(function(s){ return '<option value="'+s.replace(/"/g,'&quot;')+'">'+s+'</option>'; }).join('');
   var fpOpts = ['Santander','Mercado Pago','AMEX','Efectivo','TDC','TDD','Transferencia'].map(function(f){ return '<option value="'+f+'">'+f+'</option>'; }).join('');
 
@@ -3865,10 +3862,9 @@ function egOpenForm() {
   // Datos principales
   h += '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:20px;margin-bottom:16px">'
     +'<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:14px">Datos del egreso</div>'
-    +'<datalist id="eg-prov-list">'+provOpts+'</datalist>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
     +'<div><label '+LBL+'>Fecha de pago <span style="font-weight:400;color:var(--text-secondary,#9ca3af)">(si ya se pagó)</span></label><input type="date" id="eg-fecha" '+S+'></div>'
-    +'<div><label '+LBL+'>Proveedor *</label><input id="eg-proveedor" list="eg-prov-list" '+S+' placeholder="Nombre del proveedor"></div>'
+    +'<div><label '+LBL+'>Proveedor *</label><input id="eg-proveedor" list="prov-datalist" '+S+' placeholder="Nombre del proveedor"></div>'
     +'<div><label '+LBL+'>Monto *</label><input type="number" id="eg-monto" '+S+' placeholder="0.00" step="0.01"></div>'
     +'</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
@@ -7260,13 +7256,24 @@ function _provCache(rows){
   _renderProvDatalist();
 }
 
-// Datalist global reutilizable por cualquier input con list="prov-datalist"
+// Datalist global reutilizable por cualquier input con list="prov-datalist".
+// Combina el CATÁLOGO central (window._proveedores, con su categoría) + los
+// nombres ya usados en Egresos y CxP (fallback mientras el catálogo se puebla).
 function _renderProvDatalist(){
   var dl = document.getElementById('prov-datalist');
   if (!dl){ dl = document.createElement('datalist'); dl.id='prov-datalist'; document.body.appendChild(dl); }
-  dl.innerHTML = (window._proveedores||[]).map(function(p){
-    var label = p.categoria ? (p.nombre+' — '+p.categoria) : p.nombre;
-    return '<option value="'+String(p.nombre).replace(/"/g,'&quot;')+'">'+label+'</option>';
+  var seen = {}, items = [];
+  (window._proveedores||[]).forEach(function(p){
+    var n=String(p.nombre||'').trim(); if(!n||seen[n.toLowerCase()]) return;
+    seen[n.toLowerCase()]=1; items.push({nombre:n, cat:p.categoria||''});
+  });
+  function addLegacy(n){ n=String(n||'').trim(); if(!n||seen[n.toLowerCase()]) return; seen[n.toLowerCase()]=1; items.push({nombre:n, cat:''}); }
+  try { ((typeof _egData!=='undefined' && _egData && _egData.proveedores)||[]).forEach(addLegacy); } catch(e){}
+  try { (window._cxpNewRows||[]).forEach(function(r){ addLegacy(r&&r.proveedor); }); } catch(e){}
+  items.sort(function(a,b){ return a.nombre.toLowerCase()<b.nombre.toLowerCase()?-1:1; });
+  dl.innerHTML = items.map(function(p){
+    var label = p.cat ? (p.nombre+' — '+p.cat) : p.nombre;
+    return '<option value="'+p.nombre.replace(/"/g,'&quot;')+'">'+label+'</option>';
   }).join('');
 }
 
