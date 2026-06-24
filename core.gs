@@ -280,6 +280,11 @@ function doGet(e) {
       return jsonResponse(readProveedores());
     }
 
+    // Presupuesto: proyección del siguiente trimestre + meta + pace
+    if (action === 'presupuesto') {
+      return jsonResponse(readPresupuesto());
+    }
+
     if (action === 'ingresos') {
       return jsonResponse(readIngresosData());
     }
