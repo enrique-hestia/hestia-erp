@@ -23,6 +23,10 @@
      POST {action:'savePresupuestoMeta', periodo, linea, metaIngreso, crecimiento, ...}
    ============================================================== */
 
+// Techo de crecimiento: la clínica arrancó a mediados de 2024 con ventas
+// muy bajas, así que el crecimiento interanual crudo se dispara (>200%).
+// Este tope mantiene la proyección realista (el piso ya cuida el mínimo).
+var PRES_CREC_MAX = 0.30;   // 30% — ajustable
 var PRES_METAS_TAB = 'Presupuesto_Metas';
 var PRES_METAS_HEADERS = ['Periodo', 'Línea de servicio', 'Meta ingresos', 'Meta margen %', 'Crecimiento objetivo %', 'Notas'];
 
@@ -182,7 +186,9 @@ function readPresupuesto() {
       var gLin = _presCrecimientoLinea(histQ, cat, curY, curQ);
       if (gLin === null) gLin = gRealTotal;
       var gObj = (metaSig[cat] && metaSig[cat].crecObjetivo) || 0;
-      var g = Math.max(gLin, gObj, 0);
+      // crecimiento = el mayor entre real y objetivo, pero con techo (evita
+      // que el arranque 2024 dispare la proyección) y nunca negativo.
+      var g = Math.min(Math.max(gLin, gObj, 0), PRES_CREC_MAX);
       var baseEstacional = anioAnt > 0 ? anioAnt : reciente; // si no hay año anterior, usa reciente
       var proyEstacional = baseEstacional * (1 + g);
       var piso = Math.max(anioAnt, reciente);
@@ -219,7 +225,8 @@ function readPresupuesto() {
     var egAnioAnt = egQ[kAnioAnt] || 0, egReciente = egQ[kReciente] || 0;
     var gEg = _presCrecimientoEgresos(egQ, curY, curQ);
     var egBase = egAnioAnt > 0 ? egAnioAnt : egReciente;
-    var egProy = Math.max(egBase * (1 + Math.max(gEg, 0)), Math.max(egAnioAnt, egReciente));
+    var gEgAplicado = Math.min(Math.max(gEg, 0), PRES_CREC_MAX);
+    var egProy = Math.max(egBase * (1 + gEgAplicado), Math.max(egAnioAnt, egReciente));
     var margenProy = totProy - egProy;
     var margenPct = totProy > 0 ? (margenProy / totProy) * 100 : 0;
 
@@ -230,6 +237,8 @@ function readPresupuesto() {
       trimestreActual: perActual,
       trimestreSiguiente: perSig,
       crecimientoRealTotal: gRealTotal,
+      crecimientoAplicado: Math.min(Math.max(gRealTotal, 0), PRES_CREC_MAX),
+      crecimientoTope: PRES_CREC_MAX,
       actual: {
         periodo: perActual, meta: metaActualTotal, realAcumulado: realActual,
         diasTranscurridos: diasTransc, diasTotales: diasTotales,
