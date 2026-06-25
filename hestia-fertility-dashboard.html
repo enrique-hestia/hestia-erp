@@ -7887,6 +7887,7 @@ async function loadAnalisisIngresos(){
     var tok=encodeURIComponent(getToken());
     var r=await fetch(APPS_SCRIPT_URL+'?action=analisisIngresos&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
     _aiData=await r.json();
+    if(_aiData._debug) console.log('[AnalisisIngresos DEBUG]', JSON.stringify(_aiData._debug,null,2));
     if(!_aiData.ok) throw new Error(_aiData.error||'No se pudo analizar.');
     _renderAnalisisIngresos();
   } catch(e){
@@ -7899,6 +7900,19 @@ function _renderAnalisisIngresos(){
   var d=_aiData, fM=_aeFM;
   _aeEnsureStyles();
   var INS={warn:{bg:'rgba(245,158,11,.08)',bd:'rgba(245,158,11,.3)',c:'#b45309'},info:{bg:'rgba(59,130,246,.07)',bd:'rgba(59,130,246,.25)',c:'#2563eb'},ok:{bg:'rgba(16,185,129,.07)',bd:'rgba(16,185,129,.25)',c:'#166534'}};
+  // Render debug panel (solo cuando hay _debug del backend)
+  var _dbgEl=document.getElementById('ai-debug-panel');
+  if(d._debug){
+    var _dbg=d._debug;
+    var _dbgHtml='<div style="background:rgba(0,0,0,.06);border:1px solid rgba(0,0,0,.12);border-radius:8px;padding:10px 14px;font-size:11px;font-family:monospace;margin-bottom:16px;color:var(--text-muted)">';
+    _dbgHtml+='<b style="color:var(--text-primary)">DEBUG ER:</b> '+(_dbg.erDebug||'')+'<br>';
+    _dbgHtml+='<b>ER keys ('+(_dbg.erKeys||[]).length+'):</b> '+(_dbg.erKeys||[]).join(', ')+'<br>';
+    _dbgHtml+='<b>Budget keys ('+(_dbg.budgetKeys||[]).length+'+):</b> '+(_dbg.budgetKeys||[]).join(', ')+'<br>';
+    _dbgHtml+='<b>Meses en array:</b> '+(_dbg.mesesCount||0);
+    _dbgHtml+='</div>';
+    if(!_dbgEl){_dbgEl=document.createElement('div');_dbgEl.id='ai-debug-panel';root.prepend(_dbgEl);}
+    _dbgEl.innerHTML=_dbgHtml;
+  } else if(_dbgEl){ _dbgEl.innerHTML=''; }
   var SEM={verde:'#166534',amarillo:'#b45309',rojo:'#991b1b','sin-meta':'#9ca3af'};
   var semColor=SEM[d.semaforo]||'#9ca3af';
   var budgBadge='';
