@@ -20,38 +20,107 @@ function _anFM(v) { v = Math.abs(Number(v) || 0); if (v >= 1e6) return '$' + (v 
 /* ── Helpers comunes ──────────────────────────────────────────── */
 
 // Lee "Total Income" y por-categoría del Estado de Resultados → {'2026-04': 1500000}
+// Robusto: acepta Date objects, Mmm-YY, Mmm-YYYY; busca Total Income en cols A/B/C
 function _anReadErSheetMonthly(sh) {
-  if (!sh) return { income: {}, byLine: {} };
+  if (!sh) return { income: {}, byLine: {}, debug: 'sin hoja' };
   var MON = {jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12'};
+
+  function _parseYM(v) {
+    if (!v && v !== 0) return null;
+    // Date object de Google Sheets — puede ser primer día del mes
+    if (v instanceof Date) {
+      var yr = v.getFullYear(), mo = v.getMonth() + 1;
+      // Ignorar fechas de año base (1899/1900) o muy lejanas
+      if (yr < 2020 || yr > 2035) return null;
+      return yr + '-' + String(mo).padStart(2, '0');
+    }
+    var s = String(v).trim();
+    if (!s) return null;
+    // Formato Mmm-YY  (e.g. "Apr-26")
+    var m2 = s.match(/^([A-Za-z]{3})[- ](\d{2})$/);
+    if (m2) { var mo2 = MON[m2[1].toLowerCase()]; if (mo2) return '20' + m2[2] + '-' + mo2; }
+    // Formato Mmm-YYYY  (e.g. "Apr-2026")
+    var m4 = s.match(/^([A-Za-z]{3})[- ](\d{4})$/);
+    if (m4) { var mo4 = MON[m4[1].toLowerCase()]; if (mo4) return m4[2] + '-' + mo4; }
+    // Formato YYYY-MM
+    var my = s.match(/^(\d{4})-(\d{2})$/);
+    if (my) return s;
+    return null;
+  }
+
   var raw = sh.getDataRange().getValues();
-  var hdr = raw.length > 1 ? raw[1] : [];
-  var colMap = [];
-  for (var j = 3; j < hdr.length; j++) {
-    var v = hdr[j];
-    if (v instanceof Date) { colMap.push({idx:j, ym: v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')}); continue; }
-    var s = String(v||'').trim(); var m = s.match(/^([A-Za-z]{3})-(\d{2})$/);
-    if (m) { var mo = MON[m[1].toLowerCase()]; if (mo) colMap.push({idx:j, ym:'20'+m[2]+'-'+mo}); }
+  // Buscar la fila de encabezado de meses: puede estar en row 1 (índice 1) o 0
+  var colMap = [], hdrRowIdx = -1;
+  for (var hi = 0; hi <= Math.min(3, raw.length - 1); hi++) {
+    var hdr = raw[hi];
+    var found = [];
+    for (var j = 0; j < hdr.length; j++) {
+      var ym = _parseYM(hdr[j]);
+      if (ym) found.push({ idx: j, ym: ym });
+    }
+    if (found.length >= 2) { colMap = found; hdrRowIdx = hi; break; }
   }
-  var income = {}, byLine = {}, inIncome = false;
-  for (var ri = 4; ri < raw.length; ri++) {
+  if (!colMap.length) return { income: {}, byLine: {}, debug: 'no colMap (hoja: ' + sh.getName() + ')' };
+
+  var income = {}, byLine = {}, inIncome = false, incomeFoundDirect = false;
+  var dataStart = hdrRowIdx + 1;
+
+  for (var ri = dataStart; ri < raw.length; ri++) {
     var r = raw[ri];
-    var a = String(r[0]||'').trim(), b = String(r[1]||'').trim(), c = String(r[2]||'').trim();
-    if (!a && !b && !c) continue;
-    // Detect section start: col A alone = section header
-    if (a && !b && !c) { inIncome = (a.toLowerCase() === 'income'); continue; }
-    // Category row (col B)
-    if (inIncome && b && !a && !c) {
-      var catData = {};
-      colMap.forEach(function(col) { var v2 = r[col.idx]; catData[col.ym] = (v2 instanceof Date) ? 0 : (Number(v2)||0); });
-      byLine[b] = catData;
+    // Leer las primeras 4 columnas como posibles etiquetas
+    var labels = [String(r[0]||'').trim(), String(r[1]||'').trim(), String(r[2]||'').trim(), String(r[3]||'').trim()];
+    var allEmpty = !labels[0] && !labels[1] && !labels[2] && !labels[3];
+    if (allEmpty) continue;
+
+    // Normalizar etiqueta unificada (buscar en cualquier col de las primeras 4)
+    var rowLabel = '';
+    for (var li = 0; li < labels.length; li++) { if (labels[li]) { rowLabel = labels[li]; break; } }
+
+    // Detectar sección Income/Revenue
+    if (!labels[1] && !labels[2] && !labels[3] && labels[0]) {
+      inIncome = /^(income|revenue|ingresos)/i.test(labels[0]);
+      continue;
     }
-    // Total Income row (col C)
-    if (c.toLowerCase() === 'total income') {
-      colMap.forEach(function(col) { var v2 = r[col.idx]; income[col.ym] = (v2 instanceof Date) ? 0 : (Number(v2)||0); });
+
+    // Fila "Total Income" en cualquiera de las primeras 4 cols
+    var isTotalIncome = /total\s+income|ingresos\s+totales/i.test(rowLabel);
+    if (isTotalIncome) {
+      colMap.forEach(function(col) {
+        var v2 = r[col.idx];
+        income[col.ym] = (v2 instanceof Date) ? 0 : (_anNum(v2));
+      });
+      incomeFoundDirect = true;
       inIncome = false;
+      continue;
+    }
+
+    // Fila de categoría dentro de Income
+    if (inIncome && rowLabel) {
+      var catData = {};
+      colMap.forEach(function(col) {
+        var v2 = r[col.idx];
+        catData[col.ym] = (v2 instanceof Date) ? 0 : (_anNum(v2));
+      });
+      byLine[rowLabel] = catData;
     }
   }
-  return { income: income, byLine: byLine };
+
+  // Fallback: si no encontramos "Total Income" directamente, sumamos todas las líneas de Income
+  if (!incomeFoundDirect && Object.keys(byLine).length > 0) {
+    Object.keys(byLine).forEach(function(cat) {
+      Object.keys(byLine[cat]).forEach(function(ym) {
+        income[ym] = (income[ym] || 0) + (byLine[cat][ym] || 0);
+      });
+    });
+  }
+
+  // Filtrar meses con valor cero (probable que sea columna vacía/futura sin datos)
+  // NO filtramos — dejamos todos los meses para que el frontend distinga real de proyección
+  return {
+    income: income,
+    byLine: byLine,
+    debug: 'cols=' + colMap.length + ' hdrRow=' + hdrRowIdx + ' directTotal=' + incomeFoundDirect + ' hoja=' + sh.getName()
+  };
 }
 
 // Abre ER y Budget en una sola llamada (evita 2 open del mismo SS)
@@ -221,6 +290,8 @@ function readAnalisisIngresos() {
 
     return {
       ok:true, fuente:'Estado de Resultados (ER) + BD_Ingresos',
+      _debug: { erKeys: Object.keys(erIncome).sort(), budgetKeys: Object.keys(eb.budget).sort().slice(0,6),
+                erDebug: eb.er.debug, bgDebug: eb.er.debug, mesesCount: mesesArr.length },
       anioActual:anioActual, anioAnterior:anioAnterior,
       ytdActual:ytdActual, ytdBudget:ytdBudget, ytdPrev:ytdPrev, ytdBudgetFull:ytdBudgetFull,
       crecYoY:crecYoY, pctCumplimiento:pctCumplimiento, semaforo:semaforo,

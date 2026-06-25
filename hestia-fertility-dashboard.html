@@ -7970,7 +7970,13 @@ function _renderAnalisisIngresos(){
   root.innerHTML=h.join('');
   try { if(window.lucide) lucide.createIcons(); } catch(e){}
   try {
-    var meses=(d.meses||[]).filter(function(m){ return m.total||m.budget; }).slice(-20);
+    // Reales: todos con ER > 0. Proyección: hasta 6 meses del budget después del último real.
+    var _hoyYm=(function(){var h=new Date();return h.getFullYear()+'-'+String(h.getMonth()+1).padStart(2,'0');})();
+    var _todosM=(d.meses||[]).slice().sort(function(a,b){return a.mes<b.mes?-1:1;});
+    var _reales=_todosM.filter(function(m){return (m.total||0)>0;});
+    var _ultimoReal=_reales.length?_reales[_reales.length-1].mes:_hoyYm;
+    var _proyec=_todosM.filter(function(m){return m.mes>_ultimoReal&&(m.budget||0)>0;}).slice(0,6);
+    var meses=_reales.concat(_proyec);
     var ctx=document.getElementById('aiChart');
     if(ctx && typeof Chart!=='undefined'){
       if(_aiChart){ _aiChart.destroy(); _aiChart=null; }
@@ -7978,8 +7984,12 @@ function _renderAnalisisIngresos(){
         type:'bar',
         data:{ labels:meses.map(function(m){ return _aeMesLbl(m.mes); }),
           datasets:[
-            { label:'Real (ER)', data:meses.map(function(m){ return m.total||null; }), backgroundColor:'#166534', borderRadius:3, order:2 },
-            { label:'Budget', data:meses.map(function(m){ return m.budget||null; }), type:'line', borderColor:'#c46a7a', backgroundColor:'transparent', borderWidth:2.5, pointRadius:3, pointBackgroundColor:'#c46a7a', tension:0.3, order:1 }
+            { label:'Real (ER)', data:meses.map(function(m){ return m.total>0?m.total:null; }),
+              backgroundColor:meses.map(function(m){return m.total>0?'#166534':'#dcfce7';}), borderRadius:3, order:2 },
+            { label:'Proyección budget', data:meses.map(function(m){ return m.budget>0?m.budget:null; }),
+              type:'line', borderColor:'#c46a7a', backgroundColor:'transparent', borderWidth:2.5,
+              borderDash:meses.map(function(m){return m.total>0?[]:[];}).length?[]:[], // solid
+              pointRadius:3, pointBackgroundColor:'#c46a7a', tension:0.3, order:1 }
           ]},
         options:{ responsive:true, maintainAspectRatio:false,
           interaction:{ mode:'index', intersect:false },
