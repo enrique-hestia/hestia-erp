@@ -9789,18 +9789,26 @@ function pcToggleDark(isDark) {
 /* ── Menú ───────────────────────────────────────────────────── */
 
 function pcLoadMenu() {
-  var wrap  = document.getElementById('pc-menu-table-wrap');
   var empty = document.getElementById('pc-menu-empty');
-  if (empty) empty.style.display = '';
-  if (empty) empty.textContent = 'Cargando menú…';
-  _pcMenuAll = (menuItems || []).slice();
-  if (_pcMenuAll.length) { pcRenderMenuTable(_pcMenuAll); return; }
-  // Si aún no hay menuItems, usar caché de localStorage
-  try {
-    var cached = JSON.parse(localStorage.getItem(LS_PREFIX + 'menu') || 'null');
-    if (cached && cached.items) { _pcMenuAll = cached.items; pcRenderMenuTable(_pcMenuAll); return; }
-  } catch(e2){}
-  if (empty) empty.textContent = 'El menú aún no ha cargado. Navega a otra vista y regresa.';
+  if (empty) { empty.style.display = ''; empty.textContent = 'Recargando menú desde servidor…'; }
+  var tok = getToken();
+  fetch(APPS_SCRIPT_URL + '?action=clearcache&token=' + encodeURIComponent(tok) + '&_t=' + Date.now(), {redirect:'follow'})
+    .catch(function(){}).finally(function(){
+      fetch(APPS_SCRIPT_URL + '?action=menu&token=' + encodeURIComponent(tok) + '&_t=' + Date.now(), {redirect:'follow'})
+        .then(function(r){ return r.json(); })
+        .then(function(data){
+          if (data && data.menu) {
+            menuItems = data.menu;
+            try { localStorage.setItem(LS_PREFIX+'menu', JSON.stringify({items:data.menu,ts:Date.now()})); } catch(e){}
+            _pcMenuAll = menuItems.slice();
+            pcRenderMenuTable(_pcMenuAll);
+            renderSidebar(menuItems);
+          } else {
+            if (empty) empty.textContent = 'Error al cargar menú: ' + (data&&data.error||'respuesta inválida');
+          }
+        })
+        .catch(function(e){ if (empty) empty.textContent = 'Error de red: ' + e.message; });
+    });
 }
 
 function pcFilterMenu() {
