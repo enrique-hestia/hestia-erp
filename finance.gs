@@ -571,6 +571,30 @@ function doPost(e) {
     if (body.action === 'updateCajaChica') {
       return jsonResponse(updateCajaChicaRow(body));
     }
+    if (body.action === 'saveuser') {
+      var ss      = SpreadsheetApp.openById(SHEET_ID);
+      var tkEmail = verifyToken(body.token || '');
+      if (!tkEmail) return jsonResponse({ error: 'Sesión inválida.', code: 401 });
+      var cu = getUserRow(ss, tkEmail);
+      if (!cu || cu.rol !== 'admin') return jsonResponse({ error: 'Sin permisos de administrador.' });
+      var shU  = ss.getSheetByName('Usuarios');
+      if (!shU) return jsonResponse({ error: 'Hoja Usuarios no encontrada.' });
+      var hdrs = shU.getRange(1,1,1,shU.getLastColumn()).getValues()[0];
+      var rowNum = parseInt(body.rowNum || '0');
+      var newRow = hdrs.map(function(h, i) {
+        var key = String(h).trim();
+        if (key === 'Contraseña' && !body[key] && rowNum > 1) {
+          return shU.getRange(rowNum, i+1).getValue();
+        }
+        return body[key] !== undefined ? body[key] : '';
+      });
+      if (rowNum > 1) {
+        shU.getRange(rowNum, 1, 1, hdrs.length).setValues([newRow]);
+      } else {
+        shU.appendRow(newRow);
+      }
+      return jsonResponse({ success: true });
+    }
     return jsonResponse({error:'Accion desconocida: ' + body.action});
   } catch(ex) { return jsonResponse({error: ex.message}); }
 }
