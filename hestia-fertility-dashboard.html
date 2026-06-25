@@ -4643,13 +4643,22 @@ async function loadMenu() {
       }
     }
     // Inyectar "Egresos" (análisis) en la sección Análisis, debajo de Ingresos
-    var ingAna = menuItems.filter(function(i){ return i.padre && /ingreso/i.test((i.id||'')+' '+(i.label||'')); })[0];
-    if (ingAna && !menuItems.some(function(i){ return i.id==='analisis-egresos'; })) {
-      menuItems.push({
-        id:'analisis-egresos', label:'Egresos', padre:ingAna.padre,
-        icono:'trending-down', tipo:'vista', orden:(ingAna.orden||0)+0.5,
-        seccion:ingAna.seccion, fuente:'analisis-egresos'
-      });
+    if (!menuItems.some(function(i){ return i.id==='analisis-egresos'; })) {
+      // Detectar el grupo Análisis: padre de cualquier hijo de análisis,
+      // o un grupo cuyo label/id sea "Análisis".
+      var anaChild = menuItems.filter(function(i){ return i.padre && /paciente|servicio|rentabilidad|surrogacy|ingreso/i.test((i.id||'')+' '+(i.label||'')); })[0];
+      var grpId = anaChild ? anaChild.padre : ((menuItems.filter(function(i){ return /an[aá]lisis/i.test((i.label||'')+' '+(i.id||'')); })[0]||{}).id);
+      if (grpId) {
+        var _grp = menuItems.filter(function(i){ return i.id===grpId; })[0] || {};
+        var _ords = menuItems.filter(function(i){ return i.padre===grpId; }).map(function(i){ return Number(i.orden)||0; });
+        var _ordIng = menuItems.filter(function(i){ return i.padre===grpId && /ingreso/i.test((i.id||'')+(i.label||'')); })[0];
+        var _orden = ((_ordIng?Number(_ordIng.orden):0) || (_ords.length?Math.max.apply(null,_ords):0) || 1) + 0.5;
+        menuItems.push({
+          id:'analisis-egresos', label:'Egresos', padre:grpId,
+          icono:'trending-down', tipo:'vista', orden:_orden,
+          seccion:_grp.seccion, fuente:'analisis-egresos'
+        });
+      } else { try{ console.warn('[menu] no encontré el grupo Análisis para inyectar Egresos'); }catch(e){} }
     }
     // Default: mes en curso (no año completo)
     var _now = new Date();
