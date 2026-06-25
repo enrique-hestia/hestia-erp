@@ -7984,6 +7984,8 @@ function _renderAnalisisIngresos(){
   root.innerHTML=h.join('');
   try { if(window.lucide) lucide.createIcons(); } catch(e){}
   try {
+    // Debug: imprimir meses raw para diagnóstico
+    if(d.meses&&d.meses.length) console.log('[meses RAW primeros 8]', JSON.stringify((d.meses||[]).slice(0,8)));
     // Reales: todos con ER > 0. Proyección: hasta 6 meses del budget después del último real.
     var _hoyYm=(function(){var h=new Date();return h.getFullYear()+'-'+String(h.getMonth()+1).padStart(2,'0');})();
     var _todosM=(d.meses||[]).slice().sort(function(a,b){return a.mes<b.mes?-1:1;});
@@ -7991,6 +7993,26 @@ function _renderAnalisisIngresos(){
     var _ultimoReal=_reales.length?_reales[_reales.length-1].mes:_hoyYm;
     var _proyec=_todosM.filter(function(m){return m.mes>_ultimoReal&&(m.budget||0)>0;}).slice(0,6);
     var meses=_reales.concat(_proyec);
+    // Tabla diagnóstica rápida (se oculta si todo bien)
+    (function(){
+      var _dtEl=document.getElementById('ai-diag-table');
+      if(!_dtEl){_dtEl=document.createElement('div');_dtEl.id='ai-diag-table';}
+      var _sm=d.meses||[];var _mok=_sm.filter(function(m){return (m.total||0)>0;});
+      var _html='<details style="margin-bottom:12px;font-size:11px;font-family:monospace;background:rgba(0,0,0,.04);border:1px solid rgba(0,0,0,.1);border-radius:8px;padding:8px 12px">';
+      _html+='<summary style="cursor:pointer;font-weight:700;color:var(--text-primary)">Diagnóstico meses (' +_sm.length+ ' total, '+_mok.length+' con total&gt;0) — click para expandir</summary>';
+      _html+='<table style="margin-top:8px;width:100%;border-collapse:collapse">';
+      _html+='<tr><th>mes</th><th>total(ER)</th><th>budget</th></tr>';
+      _sm.forEach(function(m){
+        var clr=m.total>0?'color:green':'color:gray';
+        _html+='<tr style="'+clr+'"><td>'+m.mes+'</td><td>'+((m.total||0).toLocaleString())+'</td><td>'+((m.budget||0).toLocaleString())+'</td></tr>';
+      });
+      _html+='</table></details>';
+      _dtEl.innerHTML=_html;
+      var _chartWrap=document.getElementById('aiChart');
+      if(_chartWrap&&_chartWrap.parentNode&&!document.getElementById('ai-diag-table')){
+        _chartWrap.parentNode.insertBefore(_dtEl,_chartWrap);
+      }
+    })();
     var ctx=document.getElementById('aiChart');
     if(ctx && typeof Chart!=='undefined'){
       if(_aiChart){ _aiChart.destroy(); _aiChart=null; }
