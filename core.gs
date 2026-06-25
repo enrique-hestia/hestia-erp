@@ -229,26 +229,6 @@ function doGet(e) {
       return jsonResponse({ success: true });
     }
 
-    // ── MODO MANTENIMIENTO: bloquea si el parámetro está activo ──────
-    if (getParamBool('sistema_mantenimiento', false) && action !== 'config') {
-      return jsonResponse({ error: 'Sistema en mantenimiento. Por favor intenta más tarde.', code: 503 });
-    }
-
-    // ── CONFIG: estado del sistema y caché ────────────────────────
-    if (action === 'config') {
-      if (!currentUser || currentUser.rol !== 'admin')
-        return jsonResponse({ error: 'Sin permisos de administrador.' });
-      return jsonResponse(Object.assign(estadoScheduler(), {
-        apiVersion: API_VERSION,
-        params: (function() {
-          var p = PropertiesService.getScriptProperties().getProperties();
-          var out = {};
-          Object.keys(p).forEach(function(k){ if (k.indexOf('cfg_') === 0 && k !== 'cfg__usuarios') out[k.replace('cfg_','')] = p[k]; });
-          return out;
-        })()
-      }));
-    }
-
     if (action === 'banks') {
       var banksCache    = CacheService.getScriptCache();
       var banksCacheKey = 'erp_banks_v1';
@@ -308,32 +288,6 @@ function doGet(e) {
     // Análisis de Egresos: histórico, ranking, recomendaciones
     if (action === 'analisisEgresos') {
       return jsonResponse(readAnalisisEgresos());
-    }
-    // DEBUG temporal: ver qué columnas/filas lee el ER sheet
-    if (action === 'debugER') {
-      if (!currentUser || currentUser.rol !== 'admin') return jsonResponse({error:'Admin only'});
-      try {
-        var ssEr2 = SpreadsheetApp.openById(ER_SS_ID);
-        var allSh = ssEr2.getSheets();
-        var erSh2 = null, bgSh2 = null;
-        for (var di = 0; di < allSh.length; di++) {
-          if (allSh[di].getSheetId() === ER_GID)     erSh2 = allSh[di];
-          if (allSh[di].getSheetId() === BUDGET_GID) bgSh2 = allSh[di];
-        }
-        var erRaw = erSh2 ? erSh2.getRange(1,1,4,30).getValues() : [];
-        var bgRaw = bgSh2 ? bgSh2.getRange(1,1,4,30).getValues() : [];
-        var erResult = _anLoadErBudget();
-        return jsonResponse({
-          er_sheet: erSh2 ? erSh2.getName() : 'NOT FOUND',
-          budget_sheet: bgSh2 ? bgSh2.getName() : 'NOT FOUND',
-          er_row2: erRaw[1] ? erRaw[1].map(function(v){ return v instanceof Date ? 'DATE:'+v.getFullYear()+'-'+(v.getMonth()+1) : String(v); }).slice(0,15) : [],
-          budget_row2: bgRaw[1] ? bgRaw[1].map(function(v){ return v instanceof Date ? 'DATE:'+v.getFullYear()+'-'+(v.getMonth()+1) : String(v); }).slice(0,15) : [],
-          er_income_keys: Object.keys(erResult.er.income).sort(),
-          er_income_sample: (function(){ var o={}; Object.keys(erResult.er.income).sort().forEach(function(k){ o[k]=erResult.er.income[k]; }); return o; })(),
-          budget_keys: Object.keys(erResult.budget).sort(),
-          er_debug: erResult.er.debug
-        });
-      } catch(ex2) { return jsonResponse({error: ex2.message}); }
     }
     // Análisis de Ingresos: mejores y más vendidos por grupo/tipo
     if (action === 'analisisIngresos') {
