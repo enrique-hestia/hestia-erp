@@ -1306,6 +1306,8 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 
 <div id="view-gestion-roles" class="view" style="display:none"></div>
 
+<div id="view-gestion-usuarios" class="view" style="display:none"></div>
+
 <!-- ══════════════════════════════════════════════════════════
      PANEL DE CONTROL
      ══════════════════════════════════════════════════════════ -->
@@ -7211,6 +7213,321 @@ async function grLoadRoles() {
   } catch(e) { setStatus('Error cargando roles: ' + e.message, 'err'); }
 }
 
+/* ════════════════════════════════════════════════════════════════
+   GESTIÓN DE USUARIOS — Admin only (CRUD completo)
+   ════════════════════════════════════════════════════════════════ */
+var _guData     = null;  // {usuarios:[], roles:[]}
+var _guSelIdx   = -1;    // índice del usuario seleccionado en la lista
+var _guChart    = null;  // (reservado para future)
+
+async function loadGestionUsuarios() {
+  document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+  var el = document.getElementById('view-gestion-usuarios');
+  if (!el) return;
+  el.style.display = '';
+  var s = getSession() || {};
+  if (!s.rol || s.rol.toLowerCase() !== 'admin') {
+    el.innerHTML = '<div style="padding:3rem;text-align:center"><div style="font-size:2rem;margin-bottom:1rem">🔒</div><div style="font-weight:700;color:var(--color-danger)">Acceso solo para administradores</div></div>';
+    return;
+  }
+  el.innerHTML = '<div style="padding:2rem;color:var(--color-text-muted);font-size:13px">Cargando usuarios…</div>';
+  try {
+    var url = APPS_SCRIPT_URL + '?action=usuarios&token=' + encodeURIComponent(getToken() || '');
+    var res  = await fetch(url);
+    var data = await res.json();
+    if (data.error) { el.innerHTML = '<div style="padding:2rem;color:var(--color-danger)">' + data.error + '</div>'; return; }
+    renderGestionUsuarios(data);
+  } catch(e) {
+    el.innerHTML = '<div style="padding:2rem;color:var(--color-danger)">Error: ' + e.message + '</div>';
+  }
+}
+
+function renderGestionUsuarios(data) {
+  var el = document.getElementById('view-gestion-usuarios');
+  if (!el) return;
+  var s = getSession() || {};
+  if (!s.rol || s.rol.toLowerCase() !== 'admin') {
+    el.innerHTML = '<div style="padding:2rem;color:var(--color-danger);font-weight:600">Solo administradores pueden gestionar usuarios.</div>';
+    return;
+  }
+  if (data && (data.usuarios || data.roles)) _guData = data;
+  if (!_guData) { loadGestionUsuarios(); return; }
+
+  var usuarios = _guData.usuarios || [];
+  var roles    = _guData.roles    || [];
+
+  el.innerHTML =
+    '<div style="display:flex;flex-direction:column;height:calc(100vh - 56px);min-height:500px">'
+    // ── Header ──
+    + '<div style="display:flex;align-items:center;justify-content:space-between;padding:18px 24px 14px;border-bottom:1px solid var(--color-divider);background:var(--color-surface);flex-shrink:0">'
+      + '<div style="display:flex;align-items:center;gap:12px">'
+        + '<div style="width:36px;height:36px;border-radius:10px;background:#fde8ec;display:flex;align-items:center;justify-content:center">'
+          + '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c46a7a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'
+        + '</div>'
+        + '<div>'
+          + '<div style="font-size:15px;font-weight:700;color:var(--color-text)">Gestión de Usuarios</div>'
+          + '<div style="font-size:11px;color:var(--color-text-muted)">' + usuarios.length + ' usuario(s) registrado(s)</div>'
+        + '</div>'
+      + '</div>'
+      + '<button onclick="guNewUser()" style="display:flex;align-items:center;gap:6px;padding:8px 16px;background:#c46a7a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">'
+        + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>'
+        + 'Nuevo usuario'
+      + '</button>'
+    + '</div>'
+    // ── Body: 2 columnas ──
+    + '<div style="display:grid;grid-template-columns:260px 1fr;flex:1;overflow:hidden">'
+      // Left: lista
+      + '<div style="border-right:1px solid var(--color-divider);overflow-y:auto;background:var(--color-surface)">'
+        + '<div id="gu-list" style="padding:8px;display:flex;flex-direction:column;gap:3px"></div>'
+      + '</div>'
+      // Right: form
+      + '<div style="overflow-y:auto;padding:0;background:var(--color-surface-2)">'
+        + '<div id="gu-form-wrap" style="max-width:580px;margin:0 auto;padding:28px 24px">'
+          + '<div style="color:var(--color-text-muted);font-size:13px;text-align:center;margin-top:80px">'
+            + '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--color-divider)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:block;margin:0 auto 12px"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'
+            + 'Selecciona un usuario para editar<br>o crea uno nuevo.'
+          + '</div>'
+        + '</div>'
+      + '</div>'
+    + '</div>'
+  + '</div>';
+
+  _guSelIdx = -1;
+  _guRenderList(usuarios);
+}
+
+function _guRenderList(usuarios) {
+  var el = document.getElementById('gu-list');
+  if (!el) return;
+  if (!usuarios || !usuarios.length) {
+    el.innerHTML = '<div style="padding:20px;text-align:center;font-size:12px;color:var(--color-text-muted)">Sin usuarios registrados.<br>Crea el primero →</div>';
+    return;
+  }
+  el.innerHTML = usuarios.map(function(u, i) {
+    var nombre  = u['Nombre'] || u['nombre'] || (u['Email'] || '').split('@')[0];
+    var email   = u['Email']  || u['email']  || '';
+    var rol     = u['Rol']    || u['rol']    || 'viewer';
+    var activo  = u['Activo'] !== undefined ? u['Activo'] : true;
+    var isActive= activo === true || activo === 'TRUE' || activo === 1 || String(activo).toLowerCase() === 'true';
+    var initials= nombre.split(' ').map(function(p){ return p[0]||''; }).join('').substring(0,2).toUpperCase() || '??';
+    var rolColor= rol.toLowerCase()==='admin' ? '#c46a7a' : rol.toLowerCase()==='editor' ? '#7c6aed' : '#6b7280';
+    var selected= i === _guSelIdx;
+    return '<div onclick="guSelectUser(' + i + ')" style="display:flex;align-items:center;gap:10px;padding:9px 10px;'
+      + 'border-radius:8px;cursor:pointer;transition:background .15s;'
+      + (selected ? 'background:var(--color-primary-subtle,#fde8ec);' : 'background:transparent;')
+      + 'border:1px solid ' + (selected ? 'var(--color-primary,#c46a7a)' : 'transparent') + '"'
+      + ' onmouseover="if(' + i + '!==_guSelIdx)this.style.background='var(--color-surface-offset,#f5f5f5)'"'
+      + ' onmouseout="if(' + i + '!==_guSelIdx)this.style.background='transparent'">'
+      + '<div style="width:34px;height:34px;border-radius:50%;background:' + rolColor + '20;border:2px solid ' + rolColor + '40;'
+        + 'display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:' + rolColor + ';flex-shrink:0">'
+        + initials
+      + '</div>'
+      + '<div style="flex:1;overflow:hidden">'
+        + '<div style="font-size:12px;font-weight:600;color:var(--color-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + nombre + '</div>'
+        + '<div style="font-size:10px;color:var(--color-text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + email + '</div>'
+      + '</div>'
+      + '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0">'
+        + '<span style="font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:' + rolColor + '15;color:' + rolColor + '">' + rol + '</span>'
+        + '<span style="width:7px;height:7px;border-radius:50%;background:' + (isActive ? '#22c55e' : '#d1d5db') + ';display:inline-block"></span>'
+      + '</div>'
+    + '</div>';
+  }).join('');
+}
+
+function guSelectUser(idx) {
+  if (!_guData) return;
+  var usuarios = _guData.usuarios || [];
+  if (idx < 0 || idx >= usuarios.length) return;
+  _guSelIdx = idx;
+  _guRenderList(usuarios);
+  var u    = usuarios[idx];
+  var roles= _guData.roles || [];
+  _guRenderForm(u, roles, false);
+}
+
+function guNewUser() {
+  if (!_guData) { loadGestionUsuarios(); return; }
+  _guSelIdx = -1;
+  _guRenderList(_guData.usuarios || []);
+  _guRenderForm({}, _guData.roles || [], true);
+}
+
+function _guRenderForm(u, roles, isNew) {
+  var wrap = document.getElementById('gu-form-wrap');
+  if (!wrap) return;
+  var nombre  = u['Nombre']  || u['nombre']  || '';
+  var email   = u['Email']   || u['email']   || '';
+  var rol     = u['Rol']     || u['rol']     || 'viewer';
+  var activo  = u['Activo']  !== undefined ? u['Activo'] : true;
+  var rowNum  = u['_rowNum'] || 0;
+  var isActive= activo === true || activo === 'TRUE' || activo === 1 || String(activo).toLowerCase() === 'true';
+
+  var rolesOptions = roles.map(function(r) {
+    return '<option value="' + r + '"' + (r === rol ? ' selected' : '') + '>' + r + '</option>';
+  }).join('');
+  if (!roles.length) rolesOptions = '<option value="admin">admin</option><option value="editor">editor</option><option value="viewer">viewer</option>';
+
+  wrap.innerHTML =
+    '<div style="font-size:13px;font-weight:700;color:var(--color-text);margin-bottom:20px;display:flex;align-items:center;gap:8px">'
+      + '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary,#c46a7a)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        + (isNew ? '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>' : '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>')
+      + '</svg>'
+      + (isNew ? 'Nuevo usuario' : 'Editar usuario')
+    + '</div>'
+    // ── Nombre ──
+    + _guField('Nombre completo', 'gu-nombre', 'text', nombre, 'Ej. María García')
+    // ── Email ──
+    + '<div style="margin-bottom:16px">'
+      + '<label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:4px">Email</label>'
+      + '<input id="gu-email" type="email" value="' + email + '" ' + (isNew ? '' : 'readonly style="opacity:.6;background:var(--color-surface-offset);cursor:not-allowed;"') + ' placeholder="correo@hestiafertility.com"'
+        + ' style="width:100%;padding:9px 12px;border:1px solid var(--color-divider);border-radius:8px;font-size:13px;background:var(--color-surface);color:var(--color-text);box-sizing:border-box' + (isNew ? '' : ';opacity:.7;background:var(--color-surface-offset)') + '">'
+    + '</div>'
+    // ── Contraseña ──
+    + '<div style="margin-bottom:16px">'
+      + '<label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:4px">'
+        + 'Contraseña' + (isNew ? '' : ' <span style="font-size:9px;font-weight:400;color:var(--color-text-muted)">(dejar vacío para no cambiar)</span>')
+      + '</label>'
+      + '<div style="position:relative">'
+        + '<input id="gu-pass" type="password" placeholder="' + (isNew ? 'Contraseña inicial' : '••••••••') + '"'
+          + ' style="width:100%;padding:9px 40px 9px 12px;border:1px solid var(--color-divider);border-radius:8px;font-size:13px;background:var(--color-surface);color:var(--color-text);box-sizing:border-box">'
+        + '<button type="button" onclick="_guTogglePass()" tabindex="-1"'
+          + ' style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--color-text-muted);padding:2px">'
+          + '<svg id="gu-eye" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
+        + '</button>'
+      + '</div>'
+    + '</div>'
+    // ── Rol ──
+    + '<div style="margin-bottom:16px">'
+      + '<label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:4px">Rol</label>'
+      + '<select id="gu-rol" style="width:100%;padding:9px 12px;border:1px solid var(--color-divider);border-radius:8px;font-size:13px;background:var(--color-surface);color:var(--color-text);box-sizing:border-box">'
+        + rolesOptions
+      + '</select>'
+    + '</div>'
+    // ── Activo toggle ──
+    + '<div style="margin-bottom:24px;display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:8px">'
+      + '<div style="flex:1">'
+        + '<div style="font-size:12px;font-weight:700;color:var(--color-text)">Usuario activo</div>'
+        + '<div style="font-size:11px;color:var(--color-text-muted)">Los usuarios inactivos no pueden iniciar sesión</div>'
+      + '</div>'
+      + '<label style="display:flex;align-items:center;cursor:pointer;user-select:none">'
+        + '<input type="checkbox" id="gu-activo"' + (isActive ? ' checked' : '') + ' onchange="_guUpdateToggle(this)"'
+          + ' style="appearance:none;width:38px;height:22px;border-radius:11px;background:' + (isActive ? '#22c55e' : '#d1d5db') + ';border:none;cursor:pointer;position:relative;flex-shrink:0;transition:background .2s">'
+        + '<span id="gu-toggle-dot" style="position:absolute;margin-left:' + (isActive ? '18px' : '3px') + ';width:16px;height:16px;background:#fff;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:margin .2s;pointer-events:none"></span>'
+      + '</label>'
+    + '</div>'
+    // ── Footer de botones ──
+    + '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+      + '<button onclick="guSaveUser(' + rowNum + ')" id="gu-save-btn"'
+        + ' style="flex:1;padding:10px 20px;background:#c46a7a;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Guardar cambios</button>'
+      + '<button onclick="guCancelEdit()"'
+        + ' style="padding:10px 20px;background:var(--color-surface);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">Cancelar</button>'
+      + (!isNew && isActive ? '<button onclick="guToggleActive(' + rowNum + ', false)" title="Desactivar usuario"'
+        + ' style="padding:10px 16px;background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Desactivar</button>' : '')
+      + (!isNew && !isActive ? '<button onclick="guToggleActive(' + rowNum + ', true)"'
+        + ' style="padding:10px 16px;background:#d1fae5;color:#065f46;border:1px solid #6ee7b7;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Reactivar</button>' : '')
+    + '</div>'
+    + '<div id="gu-msg" style="margin-top:14px;font-size:12px;font-weight:600;text-align:center;min-height:18px"></div>';
+}
+
+function _guField(label, id, type, value, placeholder) {
+  return '<div style="margin-bottom:16px">'
+    + '<label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:4px">' + label + '</label>'
+    + '<input id="' + id + '" type="' + type + '" value="' + (value||'').replace(/"/g,'&quot;') + '" placeholder="' + placeholder + '"'
+      + ' style="width:100%;padding:9px 12px;border:1px solid var(--color-divider);border-radius:8px;font-size:13px;background:var(--color-surface);color:var(--color-text);box-sizing:border-box">'
+  + '</div>';
+}
+
+function _guTogglePass() {
+  var inp = document.getElementById('gu-pass');
+  var eye = document.getElementById('gu-eye');
+  if (!inp) return;
+  var show = inp.type === 'password';
+  inp.type = show ? 'text' : 'password';
+  if (eye) eye.innerHTML = show
+    ? '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>'
+    : '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+}
+function _guUpdateToggle(cb) {
+  cb.style.background = cb.checked ? '#22c55e' : '#d1d5db';
+  var dot = document.getElementById('gu-toggle-dot');
+  if (dot) dot.style.marginLeft = cb.checked ? '18px' : '3px';
+}
+
+async function guSaveUser(rowNum) {
+  var btn  = document.getElementById('gu-save-btn');
+  var msg  = document.getElementById('gu-msg');
+  var nombre = (document.getElementById('gu-nombre')  || {}).value || '';
+  var email  = (document.getElementById('gu-email')   || {}).value || '';
+  var pass   = (document.getElementById('gu-pass')    || {}).value || '';
+  var rol    = (document.getElementById('gu-rol')     || {}).value || 'viewer';
+  var activo = !!(document.getElementById('gu-activo')|| {}).checked;
+  if (!email) { if(msg){msg.style.color='#c46a7a';msg.textContent='El email es requerido.';} return; }
+  if (!nombre){ if(msg){msg.style.color='#c46a7a';msg.textContent='El nombre es requerido.';} return; }
+  if (!rowNum && !pass) { if(msg){msg.style.color='#c46a7a';msg.textContent='La contraseña es requerida para nuevos usuarios.';} return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+  try {
+    var body = {
+      action: 'saveuser',
+      token:  getToken() || '',
+      rowNum: rowNum || 0,
+      'Nombre': nombre,
+      'Email':  email,
+      'Contraseña': pass,
+      'Rol': rol,
+      'Activo': activo
+    };
+    var res  = await fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify(body) });
+    var data = await res.json();
+    if (data.error) throw new Error(data.error);
+    if (msg) { msg.style.color = '#166534'; msg.textContent = '✓ Usuario guardado correctamente.'; }
+    // Recargar la lista
+    setTimeout(function() {
+      _guData = null;
+      loadGestionUsuarios();
+    }, 900);
+  } catch(e) {
+    if (msg) { msg.style.color = '#c46a7a'; msg.textContent = 'Error: ' + e.message; }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Guardar cambios'; }
+  }
+}
+
+async function guToggleActive(rowNum, nuevoEstado) {
+  // Quick toggle sin abrir el form completo
+  if (!_guData || !_guData.usuarios) return;
+  var u = _guData.usuarios.find(function(u){ return u._rowNum === rowNum; });
+  if (!u) return;
+  var confirmed = nuevoEstado
+    ? confirm('¿Reactivar al usuario ' + (u['Nombre']||u['Email']) + '?')
+    : confirm('¿Desactivar al usuario ' + (u['Nombre']||u['Email']) + '? No podrá iniciar sesión.');
+  if (!confirmed) return;
+  var msg = document.getElementById('gu-msg');
+  try {
+    var body = {
+      action: 'saveuser', token: getToken() || '', rowNum: rowNum,
+      'Nombre': u['Nombre']||'', 'Email': u['Email']||'',
+      'Contraseña': '',  // vacío = conservar
+      'Rol': u['Rol']||'viewer', 'Activo': nuevoEstado
+    };
+    var res  = await fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify(body) });
+    var data = await res.json();
+    if (data.error) throw new Error(data.error);
+    _guData = null;
+    loadGestionUsuarios();
+  } catch(e) {
+    if (msg) { msg.style.color='#c46a7a'; msg.textContent='Error: '+e.message; }
+  }
+}
+
+function guCancelEdit() {
+  _guSelIdx = -1;
+  if (_guData) _guRenderList(_guData.usuarios || []);
+  var wrap = document.getElementById('gu-form-wrap');
+  if (wrap) wrap.innerHTML = '<div style="color:var(--color-text-muted);font-size:13px;text-align:center;margin-top:80px">'
+    + '<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--color-divider)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:block;margin:0 auto 12px"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'
+    + 'Selecciona un usuario para editar<br>o crea uno nuevo.</div>';
+}
+
 async function loadView(viewId, fechaInicio, fechaFin, force) {
   // Ajustes es local — no necesita fetch al API
   if (/^(configuracion|ajustes|config)$/i.test(viewId) || isConfigFuente(viewId)) { renderAjustes(); return; }
@@ -7348,7 +7665,9 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     return;
   }
   // Gestión de roles (acceso directo desde Configuración): mostrar shell + cargar roles
-  if (viewId === 'gestion-roles') { renderGestionRoles({}); grLoadRoles(); return; }
+  // Gestión de usuarios (CRUD admin)
+  if (/^(usuarios|gestion-usuarios)$/i.test(viewId)) { loadGestionUsuarios(); return; }
+    if (viewId === 'gestion-roles') { renderGestionRoles({}); grLoadRoles(); return; }
   // Si el API devolverá fuente=Roles, renderViewData lo interceptará automáticamente
 
   // Egresos — módulo ERP propio
@@ -8763,6 +9082,13 @@ function renderViewData(viewId, data) {
     var _grEl = document.getElementById('view-gestion-roles');
     if (_grEl) _grEl.style.display = '';
     renderGestionRoles(data);
+    return;
+  }
+  if (_matchFuente(data && data.fuente, 'usuarios')) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _guEl = document.getElementById('view-gestion-usuarios');
+    if (_guEl) _guEl.style.display = '';
+    renderGestionUsuarios(data);
     return;
   }
   if (_matchFuente(data && data.fuente, 'estado', 'result')) {
