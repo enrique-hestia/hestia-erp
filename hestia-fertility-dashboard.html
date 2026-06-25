@@ -10017,10 +10017,7 @@ async function handleLogin() {
   msg.textContent = '';
   try {
     // POST para que la contraseña NO viaje en la URL (no queda en logs/historial).
-    var res  = await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'login', email: email, password: password })
-    });
+    var res  = await fetch(APPS_SCRIPT_URL + '?action=login&email=' + encodeURIComponent(email) + '&password=' + encodeURIComponent(password) + '&_t=' + Date.now(), {redirect:'follow'});
     var text = await res.text();
     var data;
     try { data = JSON.parse(text); }
