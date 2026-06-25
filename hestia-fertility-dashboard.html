@@ -853,6 +853,46 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
   </div>
 </div>
 
+<!-- ══ VISTA: ANÁLISIS DE PACIENTES ══ -->
+<div id="view-analisis-pacientes" class="view" style="display:none">
+  <div id="apac-root">
+    <div style="padding:32px;text-align:center;color:var(--color-text-muted,#9ca3af);font-size:13px">
+      <div style="width:32px;height:32px;border:3px solid var(--color-border,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 12px"></div>
+      Analizando pacientes…
+    </div>
+  </div>
+</div>
+
+<!-- ══ VISTA: ANÁLISIS DE SERVICIOS ══ -->
+<div id="view-analisis-servicios" class="view" style="display:none">
+  <div id="asvc-root">
+    <div style="padding:32px;text-align:center;color:var(--color-text-muted,#9ca3af);font-size:13px">
+      <div style="width:32px;height:32px;border:3px solid var(--color-border,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 12px"></div>
+      Analizando servicios…
+    </div>
+  </div>
+</div>
+
+<!-- ══ VISTA: ANÁLISIS DE SURROGACY ══ -->
+<div id="view-analisis-surrogacy" class="view" style="display:none">
+  <div id="asurr-root">
+    <div style="padding:32px;text-align:center;color:var(--color-text-muted,#9ca3af);font-size:13px">
+      <div style="width:32px;height:32px;border:3px solid var(--color-border,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 12px"></div>
+      Analizando programa Surrogacy…
+    </div>
+  </div>
+</div>
+
+<!-- ══ VISTA: ANÁLISIS DE RENTABILIDAD ══ -->
+<div id="view-analisis-rentabilidad" class="view" style="display:none">
+  <div id="arent-root">
+    <div style="padding:32px;text-align:center;color:var(--color-text-muted,#9ca3af);font-size:13px">
+      <div style="width:32px;height:32px;border:3px solid var(--color-border,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 12px"></div>
+      Calculando rentabilidad…
+    </div>
+  </div>
+</div>
+
 <!-- ══ VISTA: SERVICIOS ══ -->
 <div id="view-servicios" class="view" style="display:none">
   <div class="card">
@@ -4671,6 +4711,26 @@ async function loadMenu() {
           icono:'trending-down', tipo:'vista', orden:_orden,
           seccion:anaGrp.seccion, fuente:'analisis-egresos'
         });
+        menuItems.push({
+          id:'analisis-pacientes', label:'Pacientes', padre:grpId,
+          icono:'users', tipo:'vista', orden:_orden+0.5,
+          seccion:anaGrp.seccion, fuente:'analisis-pacientes'
+        });
+        menuItems.push({
+          id:'analisis-servicios', label:'Servicios', padre:grpId,
+          icono:'layers', tipo:'vista', orden:_orden+1,
+          seccion:anaGrp.seccion, fuente:'analisis-servicios'
+        });
+        menuItems.push({
+          id:'analisis-surrogacy', label:'Surrogacy', padre:grpId,
+          icono:'heart', tipo:'vista', orden:_orden+1.5,
+          seccion:anaGrp.seccion, fuente:'analisis-surrogacy'
+        });
+        menuItems.push({
+          id:'analisis-rentabilidad', label:'Rentabilidad', padre:grpId,
+          icono:'percent', tipo:'vista', orden:_orden+2,
+          seccion:anaGrp.seccion, fuente:'analisis-rentabilidad'
+        });
       } else { try{ console.warn('[menu] grupo Análisis no encontrado'); }catch(e){} }
     }
     // Default: mes en curso (no año completo)
@@ -7218,6 +7278,38 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     loadAnalisisIngresos();
     return;
   }
+  // Análisis de Pacientes
+  if (viewId === 'analisis-pacientes') {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _apEl = document.getElementById('view-analisis-pacientes');
+    if (_apEl) _apEl.style.display = '';
+    loadAnalisisPacientes();
+    return;
+  }
+  // Análisis de Servicios
+  if (viewId === 'analisis-servicios' || (viewId === 'servicios' && document.getElementById('view-analisis-servicios'))) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _asEl = document.getElementById('view-analisis-servicios');
+    if (_asEl) _asEl.style.display = '';
+    loadAnalisisServicios();
+    return;
+  }
+  // Análisis de Surrogacy
+  if (viewId === 'analisis-surrogacy') {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _assEl = document.getElementById('view-analisis-surrogacy');
+    if (_assEl) _assEl.style.display = '';
+    loadAnalisisSurrogacy();
+    return;
+  }
+  // Análisis de Rentabilidad
+  if (viewId === 'analisis-rentabilidad') {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _arEl = document.getElementById('view-analisis-rentabilidad');
+    if (_arEl) _arEl.style.display = '';
+    loadAnalisisRentabilidad();
+    return;
+  }
   // Productos — Catálogo General o categorías individuales
   var _vidLow = viewId.toLowerCase();
   var _prodCatPairs = [
@@ -7482,85 +7574,419 @@ function _renderAnalisisIngresos(){
   var root=document.getElementById('ai-root'); if(!root||!_aiData) return;
   var d=_aiData, fM=_aeFM;
   _aeEnsureStyles();
-  var insBg={warn:{bg:'rgba(245,158,11,.08)',bd:'rgba(245,158,11,.3)',c:'#b45309'},info:{bg:'rgba(59,130,246,.07)',bd:'rgba(59,130,246,.25)',c:'#2563eb'},ok:{bg:'rgba(16,185,129,.07)',bd:'rgba(16,185,129,.25)',c:'#166534'}};
-
+  var INS={warn:{bg:'rgba(245,158,11,.08)',bd:'rgba(245,158,11,.3)',c:'#b45309'},info:{bg:'rgba(59,130,246,.07)',bd:'rgba(59,130,246,.25)',c:'#2563eb'},ok:{bg:'rgba(16,185,129,.07)',bd:'rgba(16,185,129,.25)',c:'#166534'}};
+  var SEM={verde:'#166534',amarillo:'#b45309',rojo:'#991b1b','sin-meta':'#9ca3af'};
+  var semColor=SEM[d.semaforo]||'#9ca3af';
+  var budgBadge='';
+  if(d.pctCumplimiento!=null){
+    var pct=(d.pctCumplimiento*100).toFixed(0)+'%';
+    var bc=d.semaforo==='verde'?'#dcfce7,#166534':d.semaforo==='amarillo'?'#fef3c7,#b45309':'#fee2e2,#991b1b';
+    budgBadge='<span style="font-size:11px;font-weight:800;padding:3px 10px;border-radius:999px;background:'+bc.split(',')[0]+';color:'+bc.split(',')[1]+'">'+pct+' budget</span>';
+  }
+  var crecTxt=d.crecYoY!=null?((d.crecYoY>=0?'+':'')+(d.crecYoY*100).toFixed(0)+'% vs '+d.anioAnterior):'';
   var h=[];
   h.push('<div class="ae-w">');
   h.push('<div class="ae-hdr"><div>'
     +'<div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility · Análisis</div>'
-    +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Análisis de Ingresos</h1>'
-    +'<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">Qué vende más, el mejor servicio y el más vendido por grupo · '+d.anioActual+'</div>'
+    +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0;display:flex;align-items:center;gap:10px">Análisis de Ingresos '+budgBadge+'</h1>'
+    +'<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-top:4px">Fuente: Estado de Resultados (datos reales) · Mix operativo: BD_Ingresos · '+d.anioActual+'</div>'
+    +'</div>'
+    +'<div style="text-align:right;font-size:10.5px;color:var(--text-secondary,#6b7280)">'
+      +(d.credibilidadTxt?'<div style="font-weight:700;color:'+semColor+'">Budget: '+d.credibilidadTxt+'</div>':'')
+      +(d.paceAnualizado?'<div>Ritmo anualizado: '+fM(d.paceAnualizado)+'</div>':'')
     +'</div></div>');
-
-  var crecTxt=d.crecTotal!=null?((d.crecTotal>=0?'+':'')+d.crecTotal.toFixed(0)+'% vs '+d.anioAnterior):'sin comparativo';
-  var crecCol=d.crecTotal!=null?(d.crecTotal>=0?'#166534':'#991b1b'):'#9ca3af';
+  var crecCol=d.crecYoY!=null?(d.crecYoY>=0?'#166534':'#991b1b'):'#9ca3af';
   h.push('<div class="ae-kstrip">'
-    +'<div class="ae-ks"><div class="ae-ks-l">Ingresos '+d.anioActual+'</div><div class="ae-ks-v" style="color:#166534">'+fM(d.totalActual)+'</div><div class="ae-ks-s" style="color:'+crecCol+'">'+crecTxt+'</div></div>'
-    +'<div class="ae-ks"><div class="ae-ks-l">Operaciones</div><div class="ae-ks-v" style="color:var(--text-primary,#111)">'+(d.numOperaciones||0).toLocaleString('en-US')+'</div><div class="ae-ks-s">ventas registradas</div></div>'
-    +'<div class="ae-ks"><div class="ae-ks-l">Ticket promedio</div><div class="ae-ks-v">'+fM(d.ticketPromedio)+'</div><div class="ae-ks-s">por operación</div></div>'
-    +'<div class="ae-ks"><div class="ae-ks-l">Servicios activos</div><div class="ae-ks-v">'+((d.categorias||[]).length)+'</div><div class="ae-ks-s">categorías con venta</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">YTD Ingresos '+d.anioActual+'</div><div class="ae-ks-v" style="color:#166534">'+fM(d.ytdActual||d.totalActual)+'</div><div class="ae-ks-s" style="color:'+crecCol+'">'+crecTxt+'</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">YTD Budget</div><div class="ae-ks-v" style="color:'+semColor+'">'+fM(d.ytdBudget||0)+'</div><div class="ae-ks-s">Plan acumulado</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">Ritmo mensual reciente</div><div class="ae-ks-v">'+fM(d.avgMensualReciente||0)+'</div><div class="ae-ks-s">vs '+fM(d.avgMensualNecesario||0)+' necesario</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">Operaciones (BD)</div><div class="ae-ks-v">'+(d.numOperaciones||0)+'</div><div class="ae-ks-s">Ticket: '+fM(d.ticketPromedio||0)+'</div></div>'
     +'</div>');
-
   if((d.insights||[]).length){
-    h.push('<div class="ae-sc"><div class="ae-sh">💡 Lo que dice tu mezcla de ventas</div><div class="ae-ins">');
-    d.insights.forEach(function(ins){ var cf=insBg[ins.tipo]||insBg.info;
+    h.push('<div class="ae-sc"><div class="ae-sh">📊 Indicadores clave para la toma de decisiones</div><div class="ae-ins">');
+    d.insights.forEach(function(ins){ var cf=INS[ins.tipo]||INS.info;
       h.push('<div class="ae-ic" style="background:'+cf.bg+';border-color:'+cf.bd+'"><div class="ae-ic-t" style="color:'+cf.c+'"><i data-lucide="'+(ins.icono||'info')+'" style="width:15px;height:15px"></i>'+ins.titulo+'</div><div class="ae-ic-d">'+ins.detalle+'</div></div>'); });
     h.push('</div></div>');
   }
-
-  h.push('<div class="ae-sc"><div class="ae-sh">Tendencia mensual de ingresos</div>'
-    +'<div style="position:relative;height:240px"><canvas id="aiChart"></canvas></div></div>');
-
+  h.push('<div class="ae-sc">'
+    +'<div class="ae-sh" style="display:flex;justify-content:space-between;align-items:center">Tendencia mensual de ingresos · Real vs Budget'
+    +'<div style="display:flex;gap:14px;font-size:10.5px"><span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:#166534;border-radius:2px;display:inline-block"></span>Real (ER)</span><span style="display:flex;align-items:center;gap:4px"><span style="width:20px;height:2px;background:#c46a7a;display:inline-block;border-radius:1px"></span>Budget</span></div>'
+    +'</div>'
+    +'<div style="position:relative;height:260px"><canvas id="aiChart"></canvas></div></div>');
   h.push('<div class="ae-grid2">');
-  // Mejores por ingreso (categorías)
-  h.push('<div class="ae-sc"><div class="ae-sh">Mejores servicios (por ingreso) · '+d.anioActual+'</div>'
+  h.push('<div class="ae-sc"><div class="ae-sh">Mix de ingresos por categoría · '+d.anioActual+' <span style="font-size:10px;font-weight:400;color:var(--text-secondary,#6b7280)">(datos operativos)</span></div>'
     +'<div style="overflow-x:auto;max-height:430px;overflow-y:auto"><table class="ae-tbl"><thead><tr>'
-    +'<th>Servicio / grupo</th><th>Ingreso</th><th>%</th><th>Ticket</th><th>Crec.</th></tr></thead><tbody>');
+    +'<th>Categoría</th><th>Ingreso</th><th>%</th><th>Ticket</th><th>Crec.</th></tr></thead><tbody>');
   (d.categorias||[]).slice(0,15).forEach(function(c){
     var crecH=c.crec==null?'<span style="color:#2563eb;font-size:10px">nuevo</span>':'<span style="color:'+(c.crec>=0?'#166534':'#991b1b')+';font-weight:700">'+(c.crec>=0?'+':'')+c.crec.toFixed(0)+'%</span>';
-    h.push('<tr><td style="max-width:190px;overflow:hidden;text-overflow:ellipsis" title="'+c.categoria+'"><span style="font-weight:600">'+c.categoria+'</span>'
-      +'<div class="ae-bar"><div style="height:100%;width:'+Math.min(c.pct,100)+'%;background:#166534"></div></div></td>'
-      +'<td style="font-weight:700;color:#166534">'+fM(c.total)+'</td>'
-      +'<td style="color:var(--text-secondary,#6b7280)">'+c.pct.toFixed(1)+'%</td>'
-      +'<td style="color:var(--text-secondary,#6b7280)">'+fM(c.ticket)+'</td>'
-      +'<td>'+crecH+'</td></tr>');
+    h.push('<tr><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis" title="'+c.categoria+'"><span style="font-weight:600">'+c.categoria+'</span>'
+      +'<div class="ae-bar"><div style="height:100%;width:'+Math.min(c.pct,100)+'%;background:linear-gradient(90deg,#166534,#4ade80)"></div></div></td>'
+      +'<td style="font-weight:700;color:#166534">'+fM(c.total)+'</td><td>'+c.pct.toFixed(1)+'%</td><td>'+fM(c.ticket)+'</td><td>'+crecH+'</td></tr>');
   });
   h.push('</tbody></table></div></div>');
-  // Más vendidos (por volumen)
-  h.push('<div class="ae-sc"><div class="ae-sh">Más vendidos (por volumen)</div>'
+  h.push('<div class="ae-sc"><div class="ae-sh">Top productos por ingreso</div>'
     +'<div style="overflow-x:auto;max-height:430px;overflow-y:auto"><table class="ae-tbl"><thead><tr>'
-    +'<th>Producto</th><th>Unidades</th><th>Ingreso</th></tr></thead><tbody>');
-  (d.masVendidos||[]).forEach(function(p,i){
-    h.push('<tr><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="'+p.producto+'"><span style="color:var(--text-secondary,#9ca3af);font-size:9px;font-weight:700">'+(i+1)+'.</span> '+p.producto+'</td>'
-      +'<td style="font-weight:800;color:var(--color-primary,#c46a7a)">'+Math.round(p.cantidad).toLocaleString('en-US')+'</td>'
-      +'<td style="color:var(--text-secondary,#6b7280)">'+fM(p.total)+'</td></tr>');
+    +'<th>#</th><th>Producto</th><th>Ingreso</th><th>Ticket</th></tr></thead><tbody>');
+  (d.topRevenue||[]).slice(0,12).forEach(function(p,i){
+    h.push('<tr><td style="color:#9ca3af;font-size:10px;font-weight:700">'+(i+1)+'</td>'
+      +'<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis" title="'+p.producto+'">'+p.producto+'<div style="font-size:9px;color:#9ca3af">'+p.categoria+'</div></td>'
+      +'<td style="font-weight:700;color:#166534">'+fM(p.total)+'</td><td style="color:#6b7280">'+fM(p.ticket)+'</td></tr>');
   });
   h.push('</tbody></table></div></div>');
-  h.push('</div>'); // grid2
-  h.push('</div>'); // wrap
+  h.push('</div>');
+  h.push('<div class="ae-sc"><div class="ae-sh">Más vendidos por volumen (unidades)</div>'
+    +'<div style="overflow-x:auto"><table class="ae-tbl"><thead><tr><th>#</th><th>Producto</th><th>Unidades</th><th>Ingreso</th></tr></thead><tbody>');
+  (d.masVendidos||[]).slice(0,10).forEach(function(p,i){
+    h.push('<tr><td style="color:#9ca3af;font-size:10px;font-weight:700">'+(i+1)+'</td>'
+      +'<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="'+p.producto+'">'+p.producto+'<div style="font-size:9px;color:#9ca3af">'+p.categoria+'</div></td>'
+      +'<td style="font-weight:800;color:var(--color-primary,#c46a7a)">'+Math.round(p.cantidad).toLocaleString('en-US')+'</td><td style="color:#6b7280">'+fM(p.total)+'</td></tr>');
+  });
+  h.push('</tbody></table></div></div>');
+  h.push('</div>');
   root.innerHTML=h.join('');
   try { if(window.lucide) lucide.createIcons(); } catch(e){}
-
   try {
-    var meses=(d.meses||[]).slice(-18);
+    var meses=(d.meses||[]).filter(function(m){ return m.total||m.budget; }).slice(-20);
     var ctx=document.getElementById('aiChart');
     if(ctx && typeof Chart!=='undefined'){
       if(_aiChart){ _aiChart.destroy(); _aiChart=null; }
       _aiChart=new Chart(ctx.getContext('2d'),{
         type:'bar',
-        data:{ labels:meses.map(function(m){return _aeMesLbl(m.mes);}), datasets:[
-          { label:'Ingresos', data:meses.map(function(m){return m.total;}), backgroundColor:'#166534', borderRadius:3 }
-        ]},
+        data:{ labels:meses.map(function(m){ return _aeMesLbl(m.mes); }),
+          datasets:[
+            { label:'Real (ER)', data:meses.map(function(m){ return m.total||null; }), backgroundColor:'#166534', borderRadius:3, order:2 },
+            { label:'Budget', data:meses.map(function(m){ return m.budget||null; }), type:'line', borderColor:'#c46a7a', backgroundColor:'transparent', borderWidth:2.5, pointRadius:3, pointBackgroundColor:'#c46a7a', tension:0.3, order:1 }
+          ]},
         options:{ responsive:true, maintainAspectRatio:false,
-          plugins:{ legend:{ display:false } },
-          scales:{ x:{ ticks:{ font:{size:9}, maxRotation:45 }, grid:{ display:false } },
-                   y:{ ticks:{ callback:function(v){return _aeFM(v);}, font:{size:10} }, grid:{ color:'rgba(128,128,128,0.1)' } } }
+          interaction:{ mode:'index', intersect:false },
+          plugins:{ legend:{ display:false },
+            tooltip:{ callbacks:{ label:function(ctx){ return ' '+ctx.dataset.label+': '+_aeFM(ctx.parsed.y); } } } },
+          scales:{
+            x:{ ticks:{ font:{size:9}, maxRotation:45 }, grid:{ display:false } },
+            y:{ ticks:{ callback:function(v){ return _aeFM(v); }, font:{size:10} }, grid:{ color:'rgba(128,128,128,0.1)' } } }
         }
       });
     }
   } catch(e){}
 }
 
+/* ══════════════════════════════════════════════════════════════
+   ANÁLISIS DE PACIENTES
+   ══════════════════════════════════════════════════════════════ */
+var _apacData=null, _apacChart=null;
+async function loadAnalisisPacientes(){
+  var root=document.getElementById('apac-root'); if(!root) return;
+  root.innerHTML='<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px"><div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Analizando pacientes…</div>';
+  try {
+    var tok=encodeURIComponent(getToken());
+    var r=await fetch(APPS_SCRIPT_URL+'?action=analisisPacientes&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
+    _apacData=await r.json();
+    if(!_apacData.ok) throw new Error(_apacData.error||'Error al cargar pacientes.');
+    _renderAnalisisPacientes();
+  } catch(e){
+    root.innerHTML='<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px">⚠ '+e.message+'</div>';
+  }
+}
+function _renderAnalisisPacientes(){
+  var root=document.getElementById('apac-root'); if(!root||!_apacData) return;
+  var d=_apacData, fM=_aeFM;
+  _aeEnsureStyles();
+  var INS={warn:{bg:'rgba(245,158,11,.08)',bd:'rgba(245,158,11,.3)',c:'#b45309'},info:{bg:'rgba(59,130,246,.07)',bd:'rgba(59,130,246,.25)',c:'#2563eb'},ok:{bg:'rgba(16,185,129,.07)',bd:'rgba(16,185,129,.25)',c:'#166534'}};
+  var crecTxt=d.crecAnual!=null?((d.crecAnual>=0?'+':'')+(d.crecAnual*100).toFixed(0)+'% vs año anterior'):'';
+  var crecCol=d.crecAnual!=null?(d.crecAnual>=0?'#166534':'#991b1b'):'#9ca3af';
+  var h=[];
+  h.push('<div class="ae-w">');
+  h.push('<div class="ae-hdr"><div>'
+    +'<div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility · Análisis</div>'
+    +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Análisis de Pacientes</h1>'
+    +'<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-top:4px">Adquisición, segmentación y tendencia de crecimiento</div>'
+    +'</div></div>');
+  h.push('<div class="ae-kstrip">'
+    +'<div class="ae-ks"><div class="ae-ks-l">Total en base de datos</div><div class="ae-ks-v" style="color:var(--color-primary,#c46a7a)">'+(d.total||0).toLocaleString('en-US')+'</div><div class="ae-ks-s">pacientes registrados</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">Nuevos '+d.anioActual+'</div><div class="ae-ks-v" style="color:#166534">'+(d.nuevosActual||0)+'</div><div class="ae-ks-s" style="color:'+crecCol+'">'+crecTxt+'</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">Promedio mensual (reciente)</div><div class="ae-ks-v">'+((d.avgNuevosMes||0).toFixed(1))+'</div><div class="ae-ks-s">nuevos por mes</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">Año anterior</div><div class="ae-ks-v" style="color:#6b7280">'+(d.nuevosAnterior||0)+'</div><div class="ae-ks-s">nuevos '+(d.anioActual-1)+'</div></div>'
+    +'</div>');
+  if((d.insights||[]).length){
+    h.push('<div class="ae-sc"><div class="ae-sh">📊 Indicadores de adquisición de pacientes</div><div class="ae-ins">');
+    d.insights.forEach(function(ins){ var cf=INS[ins.tipo]||INS.info;
+      h.push('<div class="ae-ic" style="background:'+cf.bg+';border-color:'+cf.bd+'"><div class="ae-ic-t" style="color:'+cf.c+'"><i data-lucide="'+(ins.icono||'info')+'" style="width:15px;height:15px"></i>'+ins.titulo+'</div><div class="ae-ic-d">'+ins.detalle+'</div></div>'); });
+    h.push('</div></div>');
+  }
+  h.push('<div class="ae-sc"><div class="ae-sh">Nuevos pacientes por mes</div><div style="position:relative;height:220px"><canvas id="apacChart"></canvas></div></div>');
+  if((d.listas||[]).length){
+    h.push('<div class="ae-grid2">');
+    h.push('<div class="ae-sc"><div class="ae-sh">Segmentación por lista de precios</div><table class="ae-tbl"><thead><tr><th>Lista</th><th>Pacientes</th><th>%</th></tr></thead><tbody>');
+    d.listas.forEach(function(l){
+      h.push('<tr><td><span style="font-weight:600">'+l.lista+'</span><div class="ae-bar"><div style="height:100%;width:'+Math.min(l.pct,100)+'%;background:#c46a7a"></div></div></td>'
+        +'<td style="font-weight:700">'+l.count+'</td><td style="color:#6b7280">'+l.pct.toFixed(1)+'%</td></tr>');
+    });
+    h.push('</tbody></table></div>');
+    if((d.estados||[]).length){
+      h.push('<div class="ae-sc"><div class="ae-sh">Por estatus</div><table class="ae-tbl"><thead><tr><th>Estatus</th><th>Pacientes</th></tr></thead><tbody>');
+      d.estados.forEach(function(e){ h.push('<tr><td>'+e.estado+'</td><td style="font-weight:700">'+e.count+'</td></tr>'); });
+      h.push('</tbody></table></div>');
+    }
+    h.push('</div>');
+  }
+  h.push('</div>');
+  root.innerHTML=h.join('');
+  try { if(window.lucide) lucide.createIcons(); } catch(e){}
+  try {
+    var meses=(d.meses||[]).slice(-18);
+    var ctx=document.getElementById('apacChart');
+    if(ctx&&typeof Chart!=='undefined'){
+      if(_apacChart){ _apacChart.destroy(); _apacChart=null; }
+      _apacChart=new Chart(ctx.getContext('2d'),{
+        type:'bar', data:{ labels:meses.map(function(m){ return _aeMesLbl(m.mes); }),
+          datasets:[{ label:'Nuevos pacientes', data:meses.map(function(m){ return m.count; }), backgroundColor:'#c46a7a', borderRadius:4 }]},
+        options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} },
+          scales:{ x:{ ticks:{font:{size:9},maxRotation:45}, grid:{display:false} },
+                   y:{ ticks:{font:{size:10},stepSize:1}, grid:{color:'rgba(128,128,128,0.1)'} } } }
+      });
+    }
+  } catch(e){}
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ANÁLISIS DE SERVICIOS
+   ══════════════════════════════════════════════════════════════ */
+var _asvcData=null, _asvcChart=null;
+async function loadAnalisisServicios(){
+  var root=document.getElementById('asvc-root'); if(!root) return;
+  root.innerHTML='<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px"><div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Analizando servicios…</div>';
+  try {
+    var tok=encodeURIComponent(getToken());
+    var r=await fetch(APPS_SCRIPT_URL+'?action=analisisServicios&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
+    _asvcData=await r.json();
+    if(!_asvcData.ok) throw new Error(_asvcData.error||'Error al cargar servicios.');
+    _renderAnalisisServicios();
+  } catch(e){
+    root.innerHTML='<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px">⚠ '+e.message+'</div>';
+  }
+}
+function _renderAnalisisServicios(){
+  var root=document.getElementById('asvc-root'); if(!root||!_asvcData) return;
+  var d=_asvcData, fM=_aeFM;
+  _aeEnsureStyles();
+  var INS={warn:{bg:'rgba(245,158,11,.08)',bd:'rgba(245,158,11,.3)',c:'#b45309'},info:{bg:'rgba(59,130,246,.07)',bd:'rgba(59,130,246,.25)',c:'#2563eb'},ok:{bg:'rgba(16,185,129,.07)',bd:'rgba(16,185,129,.25)',c:'#166534'}};
+  var h=[];
+  h.push('<div class="ae-w">');
+  h.push('<div class="ae-hdr"><div>'
+    +'<div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility · Análisis</div>'
+    +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Análisis de Servicios</h1>'
+    +'<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-top:4px">Rendimiento por línea de servicio · Fuente: Estado de Resultados + BD_Ingresos · '+d.anioActual+'</div>'
+    +'</div></div>');
+  h.push('<div class="ae-kstrip">'
+    +'<div class="ae-ks"><div class="ae-ks-l">Total ingresos ER '+d.anioActual+'</div><div class="ae-ks-v" style="color:#166534">'+fM(d.totalER)+'</div><div class="ae-ks-s">Estado de Resultados</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">Líneas activas</div><div class="ae-ks-v">'+((d.lineas||[]).length)+'</div><div class="ae-ks-s">con ingresos</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">Línea líder</div><div class="ae-ks-v" style="font-size:16px;color:var(--color-primary,#c46a7a)">'+(((d.lineas||[])[0]||{}).linea||'—')+'</div><div class="ae-ks-s">'+fM(((d.lineas||[])[0]||{}).total||0)+'</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">Categorías operativas</div><div class="ae-ks-v">'+((d.opMix||[]).length)+'</div><div class="ae-ks-s">en BD_Ingresos</div></div>'
+    +'</div>');
+  if((d.insights||[]).length){
+    h.push('<div class="ae-sc"><div class="ae-sh">📊 Indicadores por línea de servicio</div><div class="ae-ins">');
+    d.insights.forEach(function(ins){ var cf=INS[ins.tipo]||INS.info;
+      h.push('<div class="ae-ic" style="background:'+cf.bg+';border-color:'+cf.bd+'"><div class="ae-ic-t" style="color:'+cf.c+'"><i data-lucide="'+(ins.icono||'info')+'" style="width:15px;height:15px"></i>'+ins.titulo+'</div><div class="ae-ic-d">'+ins.detalle+'</div></div>'); });
+    h.push('</div></div>');
+  }
+  h.push('<div class="ae-sc"><div class="ae-sh">Ingresos por línea · Estado de Resultados (autoritativo)</div>'
+    +'<div style="overflow-x:auto"><table class="ae-tbl"><thead><tr><th>Línea de servicio</th><th>'+d.anioActual+'</th><th>%</th><th>Budget</th><th>Cum. %</th><th>Crec. YoY</th></tr></thead><tbody>');
+  (d.lineas||[]).forEach(function(l){
+    var cH=l.crec==null?'<span style="color:#9ca3af;font-size:10px">—</span>':'<span style="color:'+(l.crec>=0?'#166534':'#991b1b')+';font-weight:700">'+(l.crec>=0?'+':'')+(l.crec*100).toFixed(0)+'%</span>';
+    var budH=l.budget>0?fM(l.budget):'—';
+    var cumH=l.pctBudget!=null?((l.pctBudget*100).toFixed(0)+'%'):'—';
+    var cumC=l.pctBudget!=null?(l.pctBudget>=1?'#166534':l.pctBudget>=0.9?'#b45309':'#991b1b'):'#9ca3af';
+    h.push('<tr><td><span style="font-weight:600">'+l.linea+'</span><div class="ae-bar"><div style="height:100%;width:'+Math.min(l.pct,100)+'%;background:linear-gradient(90deg,#3a72a8,#60a5fa)"></div></div></td>'
+      +'<td style="font-weight:700;color:#166534">'+fM(l.total)+'</td><td>'+l.pct.toFixed(1)+'%</td>'
+      +'<td style="color:#6b7280">'+budH+'</td><td style="font-weight:700;color:'+cumC+'">'+cumH+'</td><td>'+cH+'</td></tr>');
+  });
+  h.push('</tbody></table></div></div>');
+  if((d.opMix||[]).length){
+    h.push('<div class="ae-sc"><div class="ae-sh">Mix operativo por categoría · BD_Ingresos</div>'
+      +'<div style="overflow-x:auto"><table class="ae-tbl"><thead><tr><th>Categoría</th><th>Ingreso</th><th>%</th><th>OPs</th><th>Ticket</th></tr></thead><tbody>');
+    d.opMix.forEach(function(c){
+      h.push('<tr><td><span style="font-weight:600">'+c.categoria+'</span><div class="ae-bar"><div style="height:100%;width:'+Math.min(c.pct,100)+'%;background:#c46a7a"></div></div></td>'
+        +'<td style="font-weight:700;color:#c46a7a">'+fM(c.total)+'</td><td>'+c.pct.toFixed(1)+'%</td>'
+        +'<td style="color:#6b7280">'+c.operaciones+'</td><td style="color:#6b7280">'+fM(c.ticket)+'</td></tr>');
+    });
+    h.push('</tbody></table></div></div>');
+  }
+  h.push('</div>');
+  root.innerHTML=h.join('');
+  try { if(window.lucide) lucide.createIcons(); } catch(e){}
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ANÁLISIS DE SURROGACY
+   ══════════════════════════════════════════════════════════════ */
+var _asurrData=null, _asurrChart=null;
+async function loadAnalisisSurrogacy(){
+  var root=document.getElementById('asurr-root'); if(!root) return;
+  root.innerHTML='<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px"><div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Analizando programa Surrogacy…</div>';
+  try {
+    var tok=encodeURIComponent(getToken());
+    var r=await fetch(APPS_SCRIPT_URL+'?action=analisisSurrogacy&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
+    _asurrData=await r.json();
+    if(!_asurrData.ok) throw new Error(_asurrData.error||'Error al cargar datos Surrogacy.');
+    _renderAnalisisSurrogacy();
+  } catch(e){
+    root.innerHTML='<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px">⚠ '+e.message+'</div>';
+  }
+}
+function _renderAnalisisSurrogacy(){
+  var root=document.getElementById('asurr-root'); if(!root||!_asurrData) return;
+  var d=_asurrData, fM=_aeFM;
+  _aeEnsureStyles();
+  var INS={warn:{bg:'rgba(245,158,11,.08)',bd:'rgba(245,158,11,.3)',c:'#b45309'},info:{bg:'rgba(59,130,246,.07)',bd:'rgba(59,130,246,.25)',c:'#2563eb'},ok:{bg:'rgba(16,185,129,.07)',bd:'rgba(16,185,129,.25)',c:'#166534'}};
+  var crecTxt=d.crecYoY!=null?((d.crecYoY>=0?'+':'')+(d.crecYoY*100).toFixed(0)+'% vs '+(d.anioActual-1)):'';
+  var h=[];
+  h.push('<div class="ae-w">');
+  h.push('<div class="ae-hdr"><div>'
+    +'<div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility · Análisis</div>'
+    +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Programa Surrogacy</h1>'
+    +'<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-top:4px">Métricas del programa de maternidad subrogada · '+d.anioActual+'</div>'
+    +'</div></div>');
+  h.push('<div class="ae-kstrip">'
+    +'<div class="ae-ks"><div class="ae-ks-l">Ingresos ER Surrogacy '+d.anioActual+'</div><div class="ae-ks-v" style="color:#c46a7a">'+fM(d.totalER||0)+'</div><div class="ae-ks-s">Estado de Resultados</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">Casos registrados</div><div class="ae-ks-v">'+(d.numCasos||0)+'</div><div class="ae-ks-s">operaciones BD_Ingresos</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">Ticket promedio</div><div class="ae-ks-v">'+fM(d.ticketPromedio||0)+'</div><div class="ae-ks-s">por caso</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">Crecimiento YoY</div><div class="ae-ks-v" style="color:'+(d.crecYoY!=null&&d.crecYoY>=0?'#166534':'#991b1b')+'">'+crecTxt+'</div><div class="ae-ks-s">vs año anterior</div></div>'
+    +'</div>');
+  if((d.insights||[]).length){
+    h.push('<div class="ae-sc"><div class="ae-sh">📊 Indicadores del programa Surrogacy</div><div class="ae-ins">');
+    d.insights.forEach(function(ins){ var cf=INS[ins.tipo]||INS.info;
+      h.push('<div class="ae-ic" style="background:'+cf.bg+';border-color:'+cf.bd+'"><div class="ae-ic-t" style="color:'+cf.c+'"><i data-lucide="'+(ins.icono||'info')+'" style="width:15px;height:15px"></i>'+ins.titulo+'</div><div class="ae-ic-d">'+ins.detalle+'</div></div>'); });
+    h.push('</div></div>');
+  }
+  if((d.meses||[]).filter(function(m){ return m.total>0; }).length){
+    h.push('<div class="ae-sc"><div class="ae-sh">Tendencia mensual ingresos Surrogacy (ER)</div><div style="position:relative;height:220px"><canvas id="asurrChart"></canvas></div></div>');
+  }
+  if((d.productos||[]).length){
+    h.push('<div class="ae-sc"><div class="ae-sh">Servicios del programa</div>'
+      +'<div style="overflow-x:auto"><table class="ae-tbl"><thead><tr><th>Servicio</th><th>Ingresos</th><th>Casos</th><th>Ticket</th></tr></thead><tbody>');
+    d.productos.forEach(function(p){
+      h.push('<tr><td style="font-weight:600;max-width:220px;overflow:hidden;text-overflow:ellipsis">'+p.prod+'</td>'
+        +'<td style="font-weight:700;color:#c46a7a">'+fM(p.total)+'</td>'
+        +'<td>'+p.ops+'</td><td style="color:#6b7280">'+fM(p.ticket)+'</td></tr>');
+    });
+    h.push('</tbody></table></div></div>');
+  }
+  h.push('</div>');
+  root.innerHTML=h.join('');
+  try { if(window.lucide) lucide.createIcons(); } catch(e){}
+  try {
+    var meses=(d.meses||[]).filter(function(m){ return m.total>0; }).slice(-18);
+    var ctx=document.getElementById('asurrChart');
+    if(ctx&&meses.length&&typeof Chart!=='undefined'){
+      if(_asurrChart){ _asurrChart.destroy(); _asurrChart=null; }
+      _asurrChart=new Chart(ctx.getContext('2d'),{
+        type:'bar', data:{ labels:meses.map(function(m){ return _aeMesLbl(m.mes); }),
+          datasets:[{ label:'Surrogacy (ER)', data:meses.map(function(m){ return m.total; }), backgroundColor:'#c46a7a', borderRadius:4 }]},
+        options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{display:false} },
+          scales:{ x:{ ticks:{font:{size:9},maxRotation:45}, grid:{display:false} },
+                   y:{ ticks:{ callback:function(v){ return _aeFM(v); }, font:{size:10} }, grid:{color:'rgba(128,128,128,0.1)'} } } }
+      });
+    }
+  } catch(e){}
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ANÁLISIS DE RENTABILIDAD
+   ══════════════════════════════════════════════════════════════ */
+var _arentData=null, _arentChart=null;
+async function loadAnalisisRentabilidad(){
+  var root=document.getElementById('arent-root'); if(!root) return;
+  root.innerHTML='<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px"><div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Calculando rentabilidad…</div>';
+  try {
+    var tok=encodeURIComponent(getToken());
+    var r=await fetch(APPS_SCRIPT_URL+'?action=analisisRentabilidad&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
+    _arentData=await r.json();
+    if(!_arentData.ok) throw new Error(_arentData.error||'Error al calcular rentabilidad.');
+    _renderAnalisisRentabilidad();
+  } catch(e){
+    root.innerHTML='<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px">⚠ '+e.message+'</div>';
+  }
+}
+function _renderAnalisisRentabilidad(){
+  var root=document.getElementById('arent-root'); if(!root||!_arentData) return;
+  var d=_arentData, fM=_aeFM;
+  _aeEnsureStyles();
+  var INS={warn:{bg:'rgba(245,158,11,.08)',bd:'rgba(245,158,11,.3)',c:'#b45309'},info:{bg:'rgba(59,130,246,.07)',bd:'rgba(59,130,246,.25)',c:'#2563eb'},ok:{bg:'rgba(16,185,129,.07)',bd:'rgba(16,185,129,.25)',c:'#166534'}};
+  var margenCol=d.ytdMargenPct>=30?'#166534':d.ytdMargenPct>=15?'#b45309':'#991b1b';
+  var h=[];
+  h.push('<div class="ae-w">');
+  h.push('<div class="ae-hdr"><div>'
+    +'<div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility · Análisis</div>'
+    +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Rentabilidad</h1>'
+    +'<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-top:4px">P&amp;L mensual · Fuente: Estado de Resultados + Egresos · '+d.anioActual+'</div>'
+    +'</div>'
+    +'<div style="text-align:right"><div style="font-size:28px;font-weight:900;color:'+margenCol+'">'+d.ytdMargenPct.toFixed(1)+'%</div><div style="font-size:11px;color:#9ca3af">margen operativo YTD</div></div>'
+    +'</div>');
+  h.push('<div class="ae-kstrip">'
+    +'<div class="ae-ks"><div class="ae-ks-l">Ingresos YTD (ER)</div><div class="ae-ks-v" style="color:#166534">'+fM(d.ytdIngresos)+'</div><div class="ae-ks-s">real contable '+d.anioActual+'</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">Egresos YTD</div><div class="ae-ks-v" style="color:#991b1b">'+fM(d.ytdEgresos)+'</div><div class="ae-ks-s">gastos acumulados</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">Margen bruto YTD</div><div class="ae-ks-v" style="color:'+margenCol+'">'+fM(d.ytdMargen)+'</div><div class="ae-ks-s">'+d.ytdMargenPct.toFixed(1)+'%</div></div>'
+    +'<div class="ae-ks"><div class="ae-ks-l">Budget ingresos</div><div class="ae-ks-v" style="color:#6b7280">'+fM(d.ytdBudget)+'</div><div class="ae-ks-s">'+(d.ytdBudget>0?(d.ytdIngresos/d.ytdBudget*100).toFixed(0)+'% cumplido':'sin budget')+'</div></div>'
+    +'</div>');
+  if((d.insights||[]).length){
+    h.push('<div class="ae-sc"><div class="ae-sh">📊 Indicadores de rentabilidad</div><div class="ae-ins">');
+    d.insights.forEach(function(ins){ var cf=INS[ins.tipo]||INS.info;
+      h.push('<div class="ae-ic" style="background:'+cf.bg+';border-color:'+cf.bd+'"><div class="ae-ic-t" style="color:'+cf.c+'"><i data-lucide="'+(ins.icono||'info')+'" style="width:15px;height:15px"></i>'+ins.titulo+'</div><div class="ae-ic-d">'+ins.detalle+'</div></div>'); });
+    h.push('</div></div>');
+  }
+  h.push('<div class="ae-sc">'
+    +'<div class="ae-sh" style="display:flex;justify-content:space-between;align-items:center">P&amp;L mensual · Ingresos, Egresos y Margen'
+    +'<div style="display:flex;gap:14px;font-size:10.5px">'
+    +'<span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:#166534;border-radius:2px;display:inline-block"></span>Ingresos</span>'
+    +'<span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;background:#991b1b;border-radius:2px;display:inline-block"></span>Egresos</span>'
+    +'<span style="display:flex;align-items:center;gap:4px"><span style="width:20px;height:2px;background:#c46a7a;display:inline-block"></span>Margen</span>'
+    +'</div></div>'
+    +'<div style="position:relative;height:260px"><canvas id="arentChart"></canvas></div></div>');
+  var mesesAnio=(d.meses||[]).filter(function(m){ return m.mes.substring(0,4)==d.anioActual; });
+  if(mesesAnio.length){
+    h.push('<div class="ae-sc"><div class="ae-sh">Detalle mensual '+d.anioActual+'</div>'
+      +'<div style="overflow-x:auto"><table class="ae-tbl"><thead><tr>'
+      +'<th>Mes</th><th>Ingresos</th><th>Egresos</th><th>Margen</th><th>%</th></tr></thead><tbody>');
+    mesesAnio.forEach(function(m){
+      if(!m.ingresos&&!m.egresos) return;
+      var mc=m.margenPct>=30?'#166534':m.margenPct>=15?'#b45309':'#991b1b';
+      h.push('<tr><td style="font-weight:600">'+_aeMesLbl(m.mes)+'</td>'
+        +'<td style="color:#166534;font-weight:700">'+fM(m.ingresos)+'</td>'
+        +'<td style="color:#991b1b">'+fM(m.egresos)+'</td>'
+        +'<td style="font-weight:700;color:'+mc+'">'+fM(m.margen)+'</td>'
+        +'<td style="font-weight:700;color:'+mc+'">'+m.margenPct.toFixed(1)+'%</td></tr>');
+    });
+    h.push('</tbody></table></div></div>');
+  }
+  h.push('</div>');
+  root.innerHTML=h.join('');
+  try { if(window.lucide) lucide.createIcons(); } catch(e){}
+  try {
+    var meses=(d.meses||[]).filter(function(m){ return m.ingresos||m.egresos; }).slice(-18);
+    var ctx=document.getElementById('arentChart');
+    if(ctx&&typeof Chart!=='undefined'){
+      if(_arentChart){ _arentChart.destroy(); _arentChart=null; }
+      _arentChart=new Chart(ctx.getContext('2d'),{
+        type:'bar',
+        data:{ labels:meses.map(function(m){ return _aeMesLbl(m.mes); }),
+          datasets:[
+            { label:'Ingresos', data:meses.map(function(m){ return m.ingresos||null; }), backgroundColor:'rgba(22,101,52,0.75)', borderRadius:3, order:2 },
+            { label:'Egresos', data:meses.map(function(m){ return m.egresos||null; }), backgroundColor:'rgba(153,27,27,0.65)', borderRadius:3, order:3 },
+            { label:'Margen', data:meses.map(function(m){ return m.margen||null; }), type:'line', borderColor:'#c46a7a', backgroundColor:'rgba(196,106,122,0.08)', borderWidth:2.5, pointRadius:3, pointBackgroundColor:'#c46a7a', tension:0.3, fill:true, order:1 }
+          ]},
+        options:{ responsive:true, maintainAspectRatio:false,
+          interaction:{ mode:'index', intersect:false },
+          plugins:{ legend:{ display:false },
+            tooltip:{ callbacks:{ label:function(ctx){ return ' '+ctx.dataset.label+': '+_aeFM(ctx.parsed.y); } } } },
+          scales:{
+            x:{ ticks:{ font:{size:9}, maxRotation:45 }, grid:{ display:false } },
+            y:{ ticks:{ callback:function(v){ return _aeFM(v); }, font:{size:10} }, grid:{ color:'rgba(128,128,128,0.1)' } }
+          }
+        }
+      });
+    }
+  } catch(e){}
+}
 /* ══════════════════════════════════════════════════════════════
    PRESUPUESTO — proyección del siguiente trimestre + meta
    Modelo "estacional con piso creciente" (backend presupuesto.gs).

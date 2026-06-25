@@ -293,6 +293,18 @@ function doGet(e) {
     if (action === 'analisisIngresos') {
       return jsonResponse(readAnalisisIngresos());
     }
+    if (action === 'analisisPacientes') {
+      return jsonResponse(readAnalisisPacientes());
+    }
+    if (action === 'analisisServicios') {
+      return jsonResponse(readAnalisisServicios());
+    }
+    if (action === 'analisisSurrogacy') {
+      return jsonResponse(readAnalisisSurrogacy());
+    }
+    if (action === 'analisisRentabilidad') {
+      return jsonResponse(readAnalisisRentabilidad());
+    }
 
     if (action === 'ingresos') {
       return jsonResponse(readIngresosData());
