@@ -289,6 +289,10 @@ function doGet(e) {
     if (action === 'analisisEgresos') {
       return jsonResponse(readAnalisisEgresos());
     }
+    // Análisis de Ingresos: mejores y más vendidos por grupo/tipo
+    if (action === 'analisisIngresos') {
+      return jsonResponse(readAnalisisIngresos());
+    }
 
     if (action === 'ingresos') {
       return jsonResponse(readIngresosData());

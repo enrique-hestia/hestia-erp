@@ -11,6 +11,90 @@
 function _anNum(v) { if (typeof v === 'number') return v; var n = parseFloat(String(v || '').replace(/[$,\s]/g, '')); return isNaN(n) ? 0 : n; }
 function _anFM(v) { v = Math.abs(Number(v) || 0); if (v >= 1e6) return '$' + (v / 1e6).toFixed(2) + 'M'; if (v >= 1e3) return '$' + Math.round(v / 1e3) + 'K'; return '$' + Math.round(v); }
 
+function readAnalisisIngresos() {
+  try {
+    var anioActual = new Date().getFullYear();
+    var anioAnterior = anioActual - 1;
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sh = null, all = ss.getSheets();
+    for (var i = 0; i < all.length; i++) if (all[i].getName() === BD_INGRESOS_TAB) { sh = all[i]; break; }
+    if (!sh) return { ok: false, error: 'No existe ' + BD_INGRESOS_TAB };
+    var raw = sh.getDataRange().getValues();
+
+    var porMes = {}, porAnio = {};
+    var curCat = {}, prevCat = {}, curProd = {}, curOps = {};
+    var curTotal = 0, prevTotal = 0;
+
+    for (var r = 1; r < raw.length; r++) {
+      var row = raw[r];
+      var op = String(row[0] || '').trim(); if (!op) continue;
+      var f = row[2]; var d = (f instanceof Date) ? f : new Date(f); if (!d || isNaN(d.getTime())) continue;
+      var monto = _anNum(row[9]);                 // TotalPagar
+      var cant = _anNum(row[8]) || 0;             // Cantidad
+      var cat = String(row[4] || '').trim() || 'Sin categoría';
+      var prod = String(row[5] || '').trim() || cat;
+      var y = d.getFullYear();
+      var mk = y + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      if (!porMes[mk]) porMes[mk] = { total: 0 };
+      porMes[mk].total += monto; porAnio[y] = (porAnio[y] || 0) + monto;
+
+      if (y === anioActual) {
+        if (!curCat[cat]) curCat[cat] = { total: 0, cant: 0, ops: {} };
+        curCat[cat].total += monto; curCat[cat].cant += cant; curCat[cat].ops[op] = 1;
+        if (!curProd[prod]) curProd[prod] = { total: 0, cant: 0, categoria: cat };
+        curProd[prod].total += monto; curProd[prod].cant += cant;
+        curTotal += monto; curOps[op] = 1;
+      } else if (y === anioAnterior) {
+        prevCat[cat] = (prevCat[cat] || 0) + monto; prevTotal += monto;
+      }
+    }
+
+    var categorias = Object.keys(curCat).map(function (c) {
+      var t = curCat[c].total, ant = prevCat[c] || 0, ops = Object.keys(curCat[c].ops).length;
+      return { categoria: c, total: t, pct: curTotal > 0 ? t / curTotal * 100 : 0, cantidad: curCat[c].cant, operaciones: ops, ticket: ops > 0 ? t / ops : 0, totalAnt: ant, crec: ant > 0 ? ((t - ant) / ant * 100) : null };
+    }).sort(function (a, b) { return b.total - a.total; });
+
+    var productos = Object.keys(curProd).map(function (p) {
+      return { producto: p, categoria: curProd[p].categoria, total: curProd[p].total, cantidad: curProd[p].cant, ticket: curProd[p].cant > 0 ? curProd[p].total / curProd[p].cant : 0 };
+    });
+    var topRevenue = productos.slice().sort(function (a, b) { return b.total - a.total; }).slice(0, 12);
+    var masVendidos = productos.slice().filter(function (p) { return p.cantidad > 0; }).sort(function (a, b) { return b.cantidad - a.cantidad; }).slice(0, 12);
+    var mesesArr = Object.keys(porMes).sort().map(function (mk) { return { mes: mk, total: porMes[mk].total }; });
+    var crecTotal = prevTotal > 0 ? ((curTotal - prevTotal) / prevTotal * 100) : null;
+    var numOps = Object.keys(curOps).length;
+
+    var insights = [];
+    if (categorias.length) {
+      var top = categorias[0];
+      insights.push({ tipo: 'ok', icono: 'award', titulo: top.categoria + ' es tu mayor ingreso: ' + top.pct.toFixed(0) + '% del total', detalle: _anFM(top.total) + ' en ' + anioActual + '. Tu motor principal de ingresos.' });
+    }
+    if (masVendidos.length) {
+      var mv = masVendidos[0];
+      insights.push({ tipo: 'info', icono: 'package', titulo: 'El más vendido por volumen: ' + mv.producto, detalle: Math.round(mv.cantidad) + ' unidades · ' + _anFM(mv.total) + ' en ingresos.' });
+    }
+    var crecientes = categorias.filter(function (c) { return c.crec != null; }).sort(function (a, b) { return b.crec - a.crec; });
+    if (crecientes.length && crecientes[0].crec > 10) {
+      insights.push({ tipo: 'ok', icono: 'trending-up', titulo: crecientes[0].categoria + ' creció +' + crecientes[0].crec.toFixed(0) + '% vs ' + anioAnterior, detalle: 'El servicio con mayor crecimiento — buen candidato para impulsar más.' });
+    }
+    var cayendo = categorias.filter(function (c) { return c.crec != null && c.crec < -5; }).sort(function (a, b) { return a.crec - b.crec; });
+    if (cayendo.length) {
+      insights.push({ tipo: 'warn', icono: 'trending-down', titulo: cayendo[0].categoria + ' cayó ' + cayendo[0].crec.toFixed(0) + '% vs el año pasado', detalle: 'Revisa por qué bajó — ¿precio, demanda o competencia?' });
+    }
+    var conTicket = categorias.filter(function (c) { return c.operaciones >= 3; }).sort(function (a, b) { return b.ticket - a.ticket; });
+    if (conTicket.length) {
+      insights.push({ tipo: 'info', icono: 'gem', titulo: 'Mejor ticket promedio: ' + conTicket[0].categoria, detalle: _anFM(conTicket[0].ticket) + ' por operación — servicio de alto valor para priorizar en ventas.' });
+    }
+
+    return {
+      ok: true, anioActual: anioActual, anioAnterior: anioAnterior,
+      totalActual: curTotal, totalAnterior: prevTotal, crecTotal: crecTotal,
+      numOperaciones: numOps, ticketPromedio: numOps > 0 ? curTotal / numOps : 0,
+      porAnio: porAnio, meses: mesesArr, categorias: categorias,
+      topRevenue: topRevenue, masVendidos: masVendidos, insights: insights
+    };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 function readAnalisisEgresos() {
   try {
     var anioActual = new Date().getFullYear();
