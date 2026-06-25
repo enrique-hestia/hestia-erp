@@ -229,6 +229,26 @@ function doGet(e) {
       return jsonResponse({ success: true });
     }
 
+    // ── MODO MANTENIMIENTO: bloquea si el parámetro está activo ──────
+    if (getParamBool('sistema_mantenimiento', false) && action !== 'config') {
+      return jsonResponse({ error: 'Sistema en mantenimiento. Por favor intenta más tarde.', code: 503 });
+    }
+
+    // ── CONFIG: estado del sistema y caché ────────────────────────
+    if (action === 'config') {
+      if (!currentUser || currentUser.rol !== 'admin')
+        return jsonResponse({ error: 'Sin permisos de administrador.' });
+      return jsonResponse(Object.assign(estadoScheduler(), {
+        apiVersion: API_VERSION,
+        params: (function() {
+          var p = PropertiesService.getScriptProperties().getProperties();
+          var out = {};
+          Object.keys(p).forEach(function(k){ if (k.indexOf('cfg_') === 0 && k !== 'cfg__usuarios') out[k.replace('cfg_','')] = p[k]; });
+          return out;
+        })()
+      }));
+    }
+
     if (action === 'banks') {
       var banksCache    = CacheService.getScriptCache();
       var banksCacheKey = 'erp_banks_v1';
