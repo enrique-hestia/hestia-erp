@@ -7529,7 +7529,14 @@ function guCancelEdit() {
 }
 
 async function loadView(viewId, fechaInicio, fechaFin, force) {
+  // Lookup del item de menú para usar fuente en decisiones de routing
+  var _foundViewItem = null;
+  for (var _fvi = 0; _fvi < menuItems.length; _fvi++) {
+    if (menuItems[_fvi].id === viewId) { _foundViewItem = menuItems[_fvi]; break; }
+  }
   // Ajustes es local — no necesita fetch al API
+  // Gestión de usuarios — debe ir ANTES de isConfigFuente para no ser absorbido
+  if (/usuarios/i.test(viewId) || (_foundViewItem && /usuarios/i.test(_foundViewItem.fuente || ''))) { loadGestionUsuarios(); return; }
   if (/^(configuracion|ajustes|config)$/i.test(viewId) || isConfigFuente(viewId)) { renderAjustes(); return; }
   // Cash Flow — render local inmediato (datos de ejemplo, sin API)
   if (/flujo|cashflow|cash.flow|efectivo|fin.cf/i.test(viewId)) {
@@ -7665,9 +7672,7 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     return;
   }
   // Gestión de roles (acceso directo desde Configuración): mostrar shell + cargar roles
-  // Gestión de usuarios (CRUD admin)
-  if (/^(usuarios|gestion-usuarios)$/i.test(viewId)) { loadGestionUsuarios(); return; }
-    if (viewId === 'gestion-roles') { renderGestionRoles({}); grLoadRoles(); return; }
+     if (viewId === 'gestion-roles') { renderGestionRoles({}); grLoadRoles(); return; }
   // Si el API devolverá fuente=Roles, renderViewData lo interceptará automáticamente
 
   // Egresos — módulo ERP propio
@@ -9139,6 +9144,9 @@ function navigateTo(viewId) {
   }
   if (_foundItem && String(_foundItem.fuente || '').toLowerCase() === 'roles') {
     displayId = 'gestion-roles';
+  }
+  if (_foundItem && /usuarios/i.test(_foundItem.fuente || '')) {
+    displayId = 'gestion-usuarios';
   }
   if (/caja.?chica/i.test(viewId) || (_foundItem && /caja.?chica/i.test(_foundItem.fuente || ''))) {
     displayId = 'caja-chica';
