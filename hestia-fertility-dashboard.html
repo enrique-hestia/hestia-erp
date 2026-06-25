@@ -4642,23 +4642,24 @@ async function loadMenu() {
         });
       }
     }
-    // Inyectar "Egresos" (análisis) en la sección Análisis, debajo de Ingresos
+    // Inyectar "Egresos" (análisis) en el grupo Análisis, debajo de Ingresos
     if (!menuItems.some(function(i){ return i.id==='analisis-egresos'; })) {
-      // Detectar el grupo Análisis: padre de cualquier hijo de análisis,
-      // o un grupo cuyo label/id sea "Análisis".
-      var anaChild = menuItems.filter(function(i){ return i.padre && /paciente|servicio|rentabilidad|surrogacy|ingreso/i.test((i.id||'')+' '+(i.label||'')); })[0];
-      var grpId = anaChild ? anaChild.padre : ((menuItems.filter(function(i){ return /an[aá]lisis/i.test((i.label||'')+' '+(i.id||'')); })[0]||{}).id);
-      if (grpId) {
-        var _grp = menuItems.filter(function(i){ return i.id===grpId; })[0] || {};
-        var _ords = menuItems.filter(function(i){ return i.padre===grpId; }).map(function(i){ return Number(i.orden)||0; });
-        var _ordIng = menuItems.filter(function(i){ return i.padre===grpId && /ingreso/i.test((i.id||'')+(i.label||'')); })[0];
-        var _orden = ((_ordIng?Number(_ordIng.orden):0) || (_ords.length?Math.max.apply(null,_ords):0) || 1) + 0.5;
+      // Apuntar al GRUPO de análisis por su id/label (no por un hijo, para no
+      // confundirlo con "Ingresos" de Finanzas que aparece antes).
+      var anaGrp = menuItems.filter(function(i){
+        return /^an[aá]lisis$/i.test(String(i.id||'')) ||
+               (i.tipo==='grupo' && /^an[aá]lisis$/i.test(String(i.label||'').trim()));
+      })[0];
+      if (anaGrp) {
+        var grpId = anaGrp.id;
+        var ingChild = menuItems.filter(function(i){ return i.padre===grpId && /^ingresos?$/i.test(String(i.id||'')); })[0];
+        var _orden = ((ingChild ? Number(ingChild.orden) : 0) || 2) + 0.5;
         menuItems.push({
           id:'analisis-egresos', label:'Egresos', padre:grpId,
           icono:'trending-down', tipo:'vista', orden:_orden,
-          seccion:_grp.seccion, fuente:'analisis-egresos'
+          seccion:anaGrp.seccion, fuente:'analisis-egresos'
         });
-      } else { try{ console.warn('[menu] no encontré el grupo Análisis para inyectar Egresos'); }catch(e){} }
+      } else { try{ console.warn('[menu] grupo Análisis no encontrado'); }catch(e){} }
     }
     // Default: mes en curso (no año completo)
     var _now = new Date();
