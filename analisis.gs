@@ -684,3 +684,102 @@ function readAnalisisRentabilidad() {
     };
   } catch(ex) { return { ok:false, error:ex.message }; }
 }
+
+/* ==============================================================
+   ESTADO DE CUENTA POR PACIENTE
+   Lee BD_Ingresos de todos los años disponibles y filtra por nombre
+   ============================================================== */
+
+function readEstadoCuentaPaciente(pacienteNombre) {
+  try {
+    if (!pacienteNombre) return { ok: false, error: 'Nombre de paciente requerido' };
+    var nombreBuscar = String(pacienteNombre).trim().toLowerCase();
+
+    var anios = [
+      { id: INGRESOS_SS_2024, label: '2024' },
+      { id: INGRESOS_SS_2025, label: '2025' },
+      { id: INGRESOS_SS_ID,   label: '2026' }
+    ];
+
+    var movimientos = [];
+    var totalGeneral = 0;
+
+    anios.forEach(function(anio) {
+      try {
+        var ss = SpreadsheetApp.openById(anio.id);
+        var sh = null;
+        var sheets = ss.getSheets();
+        for (var i = 0; i < sheets.length; i++) {
+          if (sheets[i].getName() === BD_INGRESOS_TAB) { sh = sheets[i]; break; }
+        }
+        if (!sh) return;
+        var data = sh.getDataRange().getValues();
+        var hdr = data[0];
+        var iOp   = hdr.indexOf('OP');
+        var iFecha = hdr.indexOf('Fecha');
+        var iPac  = hdr.indexOf('Paciente');
+        var iCat  = hdr.indexOf('Categoria');
+        var iProd = hdr.indexOf('Producto');
+        var iDesc = hdr.indexOf('Descripcion');
+        var iCant = hdr.indexOf('Cantidad');
+        var iTotal= hdr.indexOf('TotalPagar');
+        var iEst  = hdr.indexOf('Estatus');
+        var iPago = hdr.indexOf('FormaPago');
+        if (iPac < 0 || iTotal < 0) return;
+        for (var r = 1; r < data.length; r++) {
+          var row = data[r];
+          var pac = String(row[iPac] || '').trim().toLowerCase();
+          if (pac !== nombreBuscar) continue;
+          var rawFecha = row[iFecha];
+          var fechaStr = '';
+          if (rawFecha instanceof Date) {
+            fechaStr = Utilities.formatDate(rawFecha, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+          } else {
+            fechaStr = String(rawFecha || '').substring(0, 10);
+          }
+          var total = parseFloat(String(row[iTotal] || '0').replace(/[$,]/g, '')) || 0;
+          totalGeneral += total;
+          movimientos.push({
+            op:       String(row[iOp]   || '').trim(),
+            fecha:    fechaStr,
+            anio:     anio.label,
+            cat:      String(row[iCat]  || '').trim(),
+            producto: String(row[iProd] || '').trim(),
+            desc:     iDesc >= 0 ? String(row[iDesc] || '').trim() : '',
+            cant:     iCant >= 0 ? (parseFloat(String(row[iCant]||'1'))||1) : 1,
+            total:    total,
+            estatus:  iEst  >= 0 ? String(row[iEst]  || '').trim() : '',
+            pago:     iPago >= 0 ? String(row[iPago]  || '').trim() : ''
+          });
+        }
+      } catch(ex) { /* skip year if fails */ }
+    });
+
+    movimientos.sort(function(a, b) { return a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0; });
+
+    // Agrupar por categoría
+    var porCategoria = {};
+    movimientos.forEach(function(m) {
+      var k = m.cat || 'Sin categoría';
+      porCategoria[k] = (porCategoria[k] || 0) + m.total;
+    });
+
+    // Totales por año
+    var porAnio = {};
+    movimientos.forEach(function(m) {
+      porAnio[m.anio] = (porAnio[m.anio] || 0) + m.total;
+    });
+
+    return {
+      ok: true,
+      paciente: String(pacienteNombre).trim(),
+      totalGeneral: totalGeneral,
+      totalMovimientos: movimientos.length,
+      movimientos: movimientos,
+      porCategoria: porCategoria,
+      porAnio: porAnio
+    };
+  } catch(ex) {
+    return { ok: false, error: ex.message };
+  }
+}

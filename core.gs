@@ -92,6 +92,13 @@ function doGet(e) {
     var action = (e && e.parameter.action) || 'menu';
     var view   = (e && e.parameter.view)   || 'resumen';
 
+    // login via GET (POST body se pierde en redirect de GAS)
+    if (action === 'login') {
+      var loginEmail = (e && e.parameter.email) || '';
+      var loginPass  = (e && e.parameter.password) || '';
+      return jsonResponse(handleLogin(loginEmail, loginPass));
+    }
+
     // tabs: muestra pestañas de cualquier spreadsheet (sin auth, solo para debug)
     if (action === 'tabs') {
       var sid = (e && e.parameter.sid) || CAPTURA_SHEETS['Medicamentos'];
@@ -325,6 +332,11 @@ function doGet(e) {
 
     if (action === 'listaPacientes') {
       return jsonResponse(listaPacientesAll());
+    }
+
+    if (action === 'estadoCuenta') {
+      var ec = e && e.parameter.paciente ? decodeURIComponent(e.parameter.paciente) : '';
+      return jsonResponse(readEstadoCuentaPaciente(ec));
     }
 
     if (action === 'pacienteLista') {
