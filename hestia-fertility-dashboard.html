@@ -2140,6 +2140,7 @@ async function loadIngresosERP() {
     }
     _ingData = data;
     _ingPage = 1;
+    await hfFinish();
     _renderIngresosERP();
   } catch(e) {
     el.innerHTML = '<div style="padding:40px;text-align:center;color:#dc2626">Error cargando ingresos: '+e.message+'</div>';
@@ -2591,6 +2592,7 @@ async function loadProductosView(catFilter, isCatalog) {
       el.innerHTML = '<div style="padding:40px;text-align:center;color:#dc2626">Error del servidor: '+_prodData.error+'</div>';
       return;
     }
+    await hfFinish();
     _renderProductosView();
   } catch(e) {
     el.innerHTML = '<div style="padding:40px;text-align:center;color:#dc2626">Error: '+e.message+'</div>';
@@ -3769,6 +3771,7 @@ async function loadEgresosERP() {
     _egData = await resp.json();
     if (_egData.error) throw new Error(_egData.error);
     _egPage = 1;
+    await hfFinish();
     _renderEgresosERP();
   } catch(e) {
     root.innerHTML = '<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px">⚠ '+e.message+'</div>';
@@ -5221,6 +5224,7 @@ async function loadCashFlowData() {
       data.cxpTotalMes = cxpMes.reduce(function(s,r){ return s+(parseFloat(r[monHdr])||0); }, 0);
     } catch(e3) { data.cxpMes=[]; data.cxpTotalMes=0; }
     _cfLiveData = data;
+    await hfFinish();
     renderCashFlow(data);
   } catch(e) {
     renderCashFlow({error: e.message, bancos:{}, totalSaldo:0, cajachicaSaldo:0});
@@ -5243,6 +5247,7 @@ async function loadConciliacionData() {
     var resp = await fetch(APPS_SCRIPT_URL + '?action=banks&token=' + tok + '&_t=' + Date.now(), {redirect:'follow'});
     var data = await resp.json();
     _cbLiveData = data;
+    await hfFinish();
     renderConciliacion(data);
   } catch(e) {
     renderConciliacion({error: e.message, bancos:{}});
@@ -8084,6 +8089,20 @@ function hestiaLoader(texto){
     +'<text x="120" y="178" text-anchor="middle" font-family="var(--font-body),sans-serif" font-size="12.5" fill="var(--text-secondary,#9ca3af)">'+t+'</text>'
     +'</svg></div>';
 }
+// Cierra el anillo a 100% EXACTAMENTE cuando los datos ya llegaron, y resuelve
+// tras la breve animación de cierre. Llamar con `await hfFinish();` justo antes
+// de renderizar el contenido. Si el loader ya no está, resuelve de inmediato.
+function hfFinish(){
+  return new Promise(function(resolve){
+    if(window._hfRAF){ cancelAnimationFrame(window._hfRAF); window._hfRAF=null; }
+    var arc=document.getElementById('hf-arc'), pct=document.getElementById('hf-pct');
+    if(!arc||!pct){ resolve(); return; }
+    arc.style.transition='stroke-dashoffset .3s cubic-bezier(.4,0,.2,1)';
+    arc.style.strokeDashoffset='0';   // 100% → círculo cerrado
+    pct.textContent='100%';
+    setTimeout(resolve, 330);
+  });
+}
 
 /* ══════════════════════════════════════════════════════════════
    ANÁLISIS DE EGRESOS — centro de inteligencia de gastos
@@ -8125,6 +8144,7 @@ async function loadAnalisisEgresos(){
     var r=await fetch(APPS_SCRIPT_URL+'?action=analisisEgresos&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
     _aeData=await r.json();
     if(!_aeData.ok) throw new Error(_aeData.error||'No se pudo analizar.');
+    await hfFinish();
     _renderAnalisisEgresos();
   } catch(e){
     root.innerHTML='<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px;line-height:1.6">⚠ '+e.message+'<br><span style="color:#6b7280">Si es la primera vez: agrega <b>analisis.gs</b> en Apps Script y vuelve a desplegar el backend.</span></div>';
@@ -8243,6 +8263,7 @@ async function loadAnalisisIngresos(){
     _aiData=await r.json();
     if(_aiData._debug) console.log('[AnalisisIngresos DEBUG]', JSON.stringify(_aiData._debug,null,2));
     if(!_aiData.ok) throw new Error(_aiData.error||'No se pudo analizar.');
+    await hfFinish();
     _renderAnalisisIngresos();
   } catch(e){
     root.innerHTML='<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px;line-height:1.6">⚠ '+e.message+'<br><span style="color:#6b7280">Si es la primera vez: agrega <b>analisis.gs</b> en Apps Script y vuelve a desplegar el backend.</span></div>';
@@ -8406,6 +8427,7 @@ async function loadAnalisisPacientes(){
     var r=await fetch(APPS_SCRIPT_URL+'?action=analisisPacientes&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
     _apacData=await r.json();
     if(!_apacData.ok) throw new Error(_apacData.error||'Error al cargar pacientes.');
+    await hfFinish();
     _renderAnalisisPacientes();
   } catch(e){
     root.innerHTML='<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px">⚠ '+e.message+'</div>';
@@ -8484,6 +8506,7 @@ async function loadAnalisisServicios(){
     var r=await fetch(APPS_SCRIPT_URL+'?action=analisisServicios&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
     _asvcData=await r.json();
     if(!_asvcData.ok) throw new Error(_asvcData.error||'Error al cargar servicios.');
+    await hfFinish();
     _renderAnalisisServicios();
   } catch(e){
     root.innerHTML='<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px">⚠ '+e.message+'</div>';
@@ -8552,6 +8575,7 @@ async function loadAnalisisSurrogacy(){
     var r=await fetch(APPS_SCRIPT_URL+'?action=analisisSurrogacy&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
     _asurrData=await r.json();
     if(!_asurrData.ok) throw new Error(_asurrData.error||'Error al cargar datos Surrogacy.');
+    await hfFinish();
     _renderAnalisisSurrogacy();
   } catch(e){
     root.innerHTML='<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px">⚠ '+e.message+'</div>';
@@ -8626,6 +8650,7 @@ async function loadAnalisisRentabilidad(){
     var r=await fetch(APPS_SCRIPT_URL+'?action=analisisRentabilidad&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
     _arentData=await r.json();
     if(!_arentData.ok) throw new Error(_arentData.error||'Error al calcular rentabilidad.');
+    await hfFinish();
     _renderAnalisisRentabilidad();
   } catch(e){
     root.innerHTML='<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px">⚠ '+e.message+'</div>';
@@ -8730,6 +8755,7 @@ async function loadPresupuesto(){
     var resp = await fetch(APPS_SCRIPT_URL+'?action=presupuesto&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
     _presData = await resp.json();
     if (!_presData.ok) throw new Error(_presData.error||'No se pudo calcular el presupuesto.');
+    await hfFinish();
     _renderPresupuesto();
   } catch(e){
     root.innerHTML = '<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px;line-height:1.6">⚠ '+e.message+'<br><span style="color:#6b7280">Si es la primera vez: agrega <b>presupuesto.gs</b> en Apps Script, corre <b>setupPresupuesto()</b> y vuelve a desplegar el backend.</span></div>';
@@ -9252,6 +9278,7 @@ async function loadProveedores(){
     _provData = await resp.json();
     if (_provData.error) throw new Error(_provData.error);
     _provCache(_provData.rows||[]);
+    await hfFinish();
     _renderProveedores();
   } catch(e){
     root.innerHTML = '<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px;line-height:1.6">⚠ '+e.message+'<br><span style="color:#6b7280">Si es la primera vez: corre <b>setupProveedores()</b> en Apps Script y vuelve a desplegar el backend.</span></div>';
@@ -11363,6 +11390,7 @@ async function loadCxPData() {
     var res  = await fetch(url, {redirect:'follow'});
     var data = await res.json();
     if (data.error) throw new Error(data.error);
+    await hfFinish();
     renderCxP(data);
     setStatus('Actualizado ' + new Date().toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}));
   } catch(e) {
