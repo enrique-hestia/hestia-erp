@@ -2080,8 +2080,7 @@ function renderIngresos(data) {
 async function loadIngresosERP() {
   var el = document.getElementById('view-ingresos');
   if (!el) return;
-  el.innerHTML = '<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px">'
-    +'<div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Cargando ingresos…</div>';
+  el.innerHTML = hestiaLoader('Cargando ingresos…');
   try {
     var tok = encodeURIComponent(getToken());
     var resp = await fetch(APPS_SCRIPT_URL+'?action=ingresos&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
@@ -2567,8 +2566,7 @@ async function loadProductosView(catFilter, isCatalog) {
   _prodSearch = '';
   var el = document.getElementById('view-productos-catalogo');
   if (!el) return;
-  el.innerHTML = '<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px">'
-    +'<div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Cargando catálogo…</div>';
+  el.innerHTML = hestiaLoader('Cargando catálogo…');
   try {
     if (!_prodData || _prodData.error) {
       _prodData = null;
@@ -3752,8 +3750,7 @@ var _egPage = 1, _egPerPage = 30;
 async function loadEgresosERP() {
   var root = document.getElementById('eg-root');
   if (!root) return;
-  root.innerHTML = '<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px">'
-    +'<div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Cargando egresos…</div>';
+  root.innerHTML = hestiaLoader('Cargando egresos…');
   try {
     var tok = encodeURIComponent(getToken());
     var resp = await fetch(APPS_SCRIPT_URL+'?action=egresos&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
@@ -5169,9 +5166,7 @@ var _cfLiveData    = null;
 async function loadCashFlowData() {
   var el = document.getElementById('view-cashflow');
   if (!el) return;
-  el.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px">' +
-    '<div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;' +
-    'border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Cargando cuentas bancarias…</div>';
+  el.innerHTML = hestiaLoader('Cargando cuentas bancarias…');
   try {
     var tok = encodeURIComponent(getToken());
     var _t = Date.now();
@@ -5230,8 +5225,7 @@ var _cbDrawerOpen  = false;
 async function loadConciliacionData() {
   var el = document.getElementById('view-conciliacion');
   if (!el) return;
-  el.innerHTML = '<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px">'
-    +'<div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Cargando conciliación bancaria…</div>';
+  el.innerHTML = hestiaLoader('Cargando conciliación bancaria…');
   try {
     var tok = encodeURIComponent(getToken());
     var resp = await fetch(APPS_SCRIPT_URL + '?action=banks&token=' + tok + '&_t=' + Date.now(), {redirect:'follow'});
@@ -8027,6 +8021,58 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   LOADER TEMÁTICO — ICSI (inyección in vitro) con anillo de progreso
+   Uso: root.innerHTML = hestiaLoader('Analizando datos…');
+   El anillo se llena (ease-out) hasta cerrar el 100% y se queda; al
+   reemplazar el contenido, el motor se detiene solo.
+   ══════════════════════════════════════════════════════════════ */
+function _hfEnsureStyles(){
+  if(document.getElementById('hf-loader-styles')) return;
+  var s=document.createElement('style'); s.id='hf-loader-styles';
+  s.textContent=
+    '@keyframes hf-pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}'
+    +'@keyframes hf-needle{0%,100%{transform:translateX(18px)}38%,52%{transform:translateX(-14px)}}'
+    +'@keyframes hf-sperm{0%,30%{opacity:0;transform:translateX(0)}40%{opacity:1}52%{opacity:1;transform:translateX(-44px)}60%,100%{opacity:0;transform:translateX(-44px)}}'
+    +'@keyframes hf-spark{0%,50%{opacity:0;transform:scale(0)}57%{opacity:.9;transform:scale(1)}72%,100%{opacity:0;transform:scale(1.4)}}'
+    +'.hf-egg{transform-box:fill-box;transform-origin:center;animation:hf-pulse 3.2s ease-in-out infinite}'
+    +'.hf-needle{animation:hf-needle 3.2s ease-in-out infinite}'
+    +'.hf-sperm{transform-box:fill-box;transform-origin:center;animation:hf-sperm 3.2s ease-in-out infinite}'
+    +'.hf-spark{transform-box:fill-box;transform-origin:center;animation:hf-spark 3.2s ease-in-out infinite}';
+  document.head.appendChild(s);
+}
+function _hfTick(ts){
+  var arc=document.getElementById('hf-arc'), pct=document.getElementById('hf-pct');
+  if(!arc||!pct){ window._hfRAF=null; return; }      // contenido ya reemplazó el loader → detener
+  if(window._hfT0==null) window._hfT0=ts;
+  var t=(ts-window._hfT0)/1000;
+  var C=2*Math.PI*52;
+  var x=Math.min(t/2.6,1);
+  var p=100*(1-Math.pow(1-x,3));                       // ease-out: llega a 100% (~2.6s) y se queda cerrado
+  arc.style.strokeDashoffset=C*(1-p/100);
+  pct.textContent=Math.round(p)+'%';
+  window._hfRAF=requestAnimationFrame(_hfTick);
+}
+function hestiaLoader(texto){
+  _hfEnsureStyles();
+  if(window._hfRAF){ cancelAnimationFrame(window._hfRAF); window._hfRAF=null; }
+  window._hfT0=null;
+  setTimeout(function(){ window._hfRAF=requestAnimationFrame(_hfTick); }, 30);
+  var t=String(texto||'Cargando…').replace(/</g,'&lt;');
+  return '<div style="padding:34px 16px;text-align:center">'
+    +'<svg width="240" height="200" viewBox="0 0 240 200" style="max-width:100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cargando">'
+    +'<circle cx="120" cy="78" r="52" fill="none" stroke="var(--color-divider,#e7e1da)" stroke-width="4"/>'
+    +'<circle id="hf-arc" cx="120" cy="78" r="52" fill="none" stroke="#c46a7a" stroke-width="4" stroke-linecap="round" transform="rotate(-90 120 78)" stroke-dasharray="326.7" stroke-dashoffset="326.7"/>'
+    +'<path d="M18,72 L74,74 Q86,74 90,78 Q86,82 74,82 L18,84 Z" fill="#d8d3cc" stroke="#b3ada4" stroke-width="0.6"/>'
+    +'<g class="hf-egg"><circle cx="120" cy="78" r="34" fill="#efd9de" stroke="#c46a7a" stroke-width="1.5"/><circle cx="120" cy="78" r="26" fill="#e6c2cb"/><circle cx="110" cy="69" r="4" fill="#f1dde1" opacity="0.8"/><circle cx="129" cy="88" r="3" fill="#f1dde1" opacity="0.7"/><circle cx="120" cy="78" r="8" fill="#cf94a1" opacity="0.85"/></g>'
+    +'<g class="hf-spark"><circle cx="120" cy="78" r="7" fill="none" stroke="#c46a7a" stroke-width="1.8"/><line x1="120" y1="66" x2="120" y2="60" stroke="#c46a7a" stroke-width="1.8" stroke-linecap="round"/><line x1="120" y1="90" x2="120" y2="96" stroke="#c46a7a" stroke-width="1.8" stroke-linecap="round"/><line x1="108" y1="78" x2="102" y2="78" stroke="#c46a7a" stroke-width="1.8" stroke-linecap="round"/><line x1="132" y1="78" x2="138" y2="78" stroke="#c46a7a" stroke-width="1.8" stroke-linecap="round"/></g>'
+    +'<g class="hf-needle"><path d="M222,72 L164,76 L164,80 L222,84 Z" fill="#cdc8c1" stroke="#a9a39a" stroke-width="0.6"/><line x1="222" y1="78" x2="165" y2="78" stroke="#8d877f" stroke-width="0.7"/></g>'
+    +'<g class="hf-sperm"><path d="M164,78 q-8,-3 -14,0 q8,3 14,0" fill="none" stroke="#9c5462" stroke-width="1.2"/><ellipse cx="166" cy="78" rx="4" ry="3" fill="#8a3f4c"/></g>'
+    +'<text id="hf-pct" x="120" y="156" text-anchor="middle" font-family="var(--font-body),sans-serif" font-size="15" font-weight="700" fill="#c46a7a">0%</text>'
+    +'<text x="120" y="178" text-anchor="middle" font-family="var(--font-body),sans-serif" font-size="12.5" fill="var(--text-secondary,#9ca3af)">'+t+'</text>'
+    +'</svg></div>';
+}
+
+/* ══════════════════════════════════════════════════════════════
    ANÁLISIS DE EGRESOS — centro de inteligencia de gastos
    ══════════════════════════════════════════════════════════════ */
 var _aeData = null, _aeChart = null;
@@ -8060,7 +8106,7 @@ function _aeEnsureStyles(){
 
 async function loadAnalisisEgresos(){
   var root=document.getElementById('ae-root'); if(!root) return;
-  root.innerHTML='<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px"><div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Analizando egresos…</div>';
+  root.innerHTML=hestiaLoader('Analizando egresos…');
   try {
     var tok=encodeURIComponent(getToken());
     var r=await fetch(APPS_SCRIPT_URL+'?action=analisisEgresos&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
@@ -8177,7 +8223,7 @@ var _aiData = null, _aiChart = null;
 
 async function loadAnalisisIngresos(){
   var root=document.getElementById('ai-root'); if(!root) return;
-  root.innerHTML='<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px"><div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Analizando ingresos…</div>';
+  root.innerHTML=hestiaLoader('Analizando ingresos…');
   try {
     var tok=encodeURIComponent(getToken());
     var r=await fetch(APPS_SCRIPT_URL+'?action=analisisIngresos&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
@@ -8341,7 +8387,7 @@ function _renderAnalisisIngresos(){
 var _apacData=null, _apacChart=null;
 async function loadAnalisisPacientes(){
   var root=document.getElementById('apac-root'); if(!root) return;
-  root.innerHTML='<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px"><div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Analizando pacientes…</div>';
+  root.innerHTML=hestiaLoader('Analizando pacientes…');
   try {
     var tok=encodeURIComponent(getToken());
     var r=await fetch(APPS_SCRIPT_URL+'?action=analisisPacientes&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
@@ -8419,7 +8465,7 @@ function _renderAnalisisPacientes(){
 var _asvcData=null, _asvcChart=null;
 async function loadAnalisisServicios(){
   var root=document.getElementById('asvc-root'); if(!root) return;
-  root.innerHTML='<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px"><div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Analizando servicios…</div>';
+  root.innerHTML=hestiaLoader('Analizando servicios…');
   try {
     var tok=encodeURIComponent(getToken());
     var r=await fetch(APPS_SCRIPT_URL+'?action=analisisServicios&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
@@ -8487,7 +8533,7 @@ function _renderAnalisisServicios(){
 var _asurrData=null, _asurrChart=null;
 async function loadAnalisisSurrogacy(){
   var root=document.getElementById('asurr-root'); if(!root) return;
-  root.innerHTML='<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px"><div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Analizando programa Surrogacy…</div>';
+  root.innerHTML=hestiaLoader('Analizando programa Surrogacy…');
   try {
     var tok=encodeURIComponent(getToken());
     var r=await fetch(APPS_SCRIPT_URL+'?action=analisisSurrogacy&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
@@ -8561,7 +8607,7 @@ function _renderAnalisisSurrogacy(){
 var _arentData=null, _arentChart=null;
 async function loadAnalisisRentabilidad(){
   var root=document.getElementById('arent-root'); if(!root) return;
-  root.innerHTML='<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px"><div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Calculando rentabilidad…</div>';
+  root.innerHTML=hestiaLoader('Calculando rentabilidad…');
   try {
     var tok=encodeURIComponent(getToken());
     var r=await fetch(APPS_SCRIPT_URL+'?action=analisisRentabilidad&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
@@ -8665,7 +8711,7 @@ function _presFP(v){ return ((Number(v)||0)*100).toFixed(1)+'%'; }
 async function loadPresupuesto(){
   var root = document.getElementById('pres-root');
   if (!root) return;
-  root.innerHTML = '<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px"><div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Calculando proyección…</div>';
+  root.innerHTML = hestiaLoader('Calculando proyección…');
   try {
     var tok = encodeURIComponent(getToken());
     var resp = await fetch(APPS_SCRIPT_URL+'?action=presupuesto&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
@@ -9186,7 +9232,7 @@ async function preloadProveedores(){
 async function loadProveedores(){
   var root = document.getElementById('prov-root');
   if (!root) return;
-  root.innerHTML = '<div style="padding:48px;text-align:center;color:var(--text-secondary,#6b7280);font-size:13px"><div style="width:36px;height:36px;border:3px solid var(--color-divider,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px"></div>Cargando proveedores…</div>';
+  root.innerHTML = hestiaLoader('Cargando proveedores…');
   try {
     var tok = encodeURIComponent(getToken());
     var resp = await fetch(APPS_SCRIPT_URL+'?action=proveedores&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
@@ -11298,9 +11344,7 @@ function closeModal(tipo) {
 async function loadCxPData() {
   var root = document.getElementById('cxp-root');
   if (!root) return;
-  root.innerHTML = '<div style="padding:32px;text-align:center;color:var(--color-text-muted,#9ca3af);font-size:13px">'
-    + '<div style="width:32px;height:32px;border:3px solid var(--color-border,#e5e7eb);border-top-color:#c46a7a;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 12px"></div>'
-    + 'Cargando cuentas por pagar…</div>';
+  root.innerHTML = hestiaLoader('Cargando cuentas por pagar…');
   try {
     var url = APPS_SCRIPT_URL + '?action=bdcxp&token=' + encodeURIComponent(getToken()) + '&_t=' + Date.now();
     var res  = await fetch(url, {redirect:'follow'});
