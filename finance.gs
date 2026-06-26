@@ -2843,6 +2843,15 @@ function uploadFile(body) {
             sh.getRange(rowNum, iCol + 1).setRichTextValue(
               SpreadsheetApp.newRichTextValue().setText(displayName).setLinkUrl(url).build());
           }
+          // Si es factura, marcar el check de Facturación (no tocar PAGADO: eso lo
+          // confirma pagarCxP para no marcar pagado prematuramente).
+          if (tipo === 'factura') {
+            var iChk = -1;
+            for (var k = 0; k < hdrs.length; k++) {
+              if (hdrs[k].replace(/[áàä]/g,'a').indexOf('facturaci') > -1) { iChk = k; break; }
+            }
+            if (iChk > -1) sh.getRange(rowNum, iChk + 1).setValue(true);
+          }
         }
       } catch(wErr) { /* no romper el upload si falla la escritura del link */ }
     }

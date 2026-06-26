@@ -4077,79 +4077,34 @@ function _renderEgresosERP() {
 }
 
 /* ── Upload PDF y Visor ─────────────────────────────────────── */
-var _egUploadRowNum = 0;
-var _egUploadTipo = 'factura';
-var _egUploadFile = null;
-
+// Modal de Egresos: ahora usa el dropzone genérico (drag & drop, sube solo)
 function egOpenUpload(rowNum, tipo, proveedor) {
-  _egUploadRowNum = rowNum;
-  _egUploadTipo = tipo;
-  _egUploadFile = null;
+  var dz = document.getElementById('eg-erp-drop');
+  if (dz) {
+    dz.dataset.tipo = tipo;
+    dz.dataset.prefix = 'EG-' + rowNum;
+    dz.dataset.onupload = 'egAfterUpload';
+    dz.classList.remove('uploading','done','drag-over');
+    dz.innerHTML = '<div class="erp-dz-icon">📄</div>'
+      + '<div class="erp-dz-text">Arrastra tu PDF aquí o <span class="erp-dz-link">selecciona archivo</span></div>'
+      + '<div class="erp-dz-sub">PDF, JPG, PNG · Máx 10MB</div>'
+      + '<input type="file" class="erp-dz-input" accept=".pdf,.jpg,.jpeg,.png" onchange="erpHandleFile(this,\'eg-erp-drop\')">';
+  }
+  var st = document.getElementById('eg-upload-status'); if (st) st.innerHTML = '';
   document.getElementById('eg-upload-title').textContent = tipo === 'pago' ? 'Adjuntar comprobante de pago' : 'Adjuntar factura';
   document.getElementById('eg-upload-prov').textContent = proveedor || '—';
-  document.getElementById('eg-file-name').style.display = 'none';
-  document.getElementById('eg-file-input').value = '';
-  document.getElementById('eg-upload-btn').disabled = true;
-  document.getElementById('eg-upload-msg').className = 'modal-msg';
-  document.getElementById('eg-upload-msg').textContent = '';
   document.getElementById('modal-eg-upload').style.display = 'flex';
 }
 
 function egCloseUpload() {
   document.getElementById('modal-eg-upload').style.display = 'none';
-  _egUploadFile = null;
 }
 
-function egFileSelected(input) {
-  if (input.files && input.files[0]) {
-    _egUploadFile = input.files[0];
-    var nameEl = document.getElementById('eg-file-name');
-    nameEl.textContent = '📄 ' + _egUploadFile.name + ' (' + ((_egUploadFile.size / 1024).toFixed(0)) + ' KB)';
-    nameEl.style.display = '';
-    document.getElementById('eg-upload-btn').disabled = false;
-  }
-}
-
-async function egSubmitUpload() {
-  if (!_egUploadFile) return;
-  var btn = document.getElementById('eg-upload-btn');
-  btn.disabled = true; btn.textContent = 'Subiendo…';
-  var msgEl = document.getElementById('eg-upload-msg');
-
-  try {
-    var reader = new FileReader();
-    var base64 = await new Promise(function(resolve, reject) {
-      reader.onload = function() { resolve(reader.result.split(',')[1]); };
-      reader.onerror = reject;
-      reader.readAsDataURL(_egUploadFile);
-    });
-
-    var r = await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      body: JSON.stringify({
-        action: 'uploadEgresoPDF',
-        tipo: _egUploadTipo,
-        base64: base64,
-        fileName: _egUploadFile.name,
-        rowNum: _egUploadRowNum,
-        anio: new Date().getFullYear()
-      })
-    });
-    var res = await r.json();
-    if (res.ok) {
-      msgEl.className = 'modal-msg ok';
-      msgEl.textContent = '✓ Archivo subido a Drive · ' + (res.fileName || '');
-      setTimeout(function() { egCloseUpload(); loadEgresosERP(); }, 1200);
-    } else {
-      msgEl.className = 'modal-msg err';
-      msgEl.textContent = 'Error: ' + (res.error || 'No se pudo subir');
-      btn.disabled = false; btn.textContent = 'Subir archivo';
-    }
-  } catch(e) {
-    msgEl.className = 'modal-msg err';
-    msgEl.textContent = 'Error de conexión: ' + e.message;
-    btn.disabled = false; btn.textContent = 'Subir archivo';
-  }
+// Llamado por _erpUploadFile al terminar de subir (data-onupload)
+function egAfterUpload(res) {
+  var st = document.getElementById('eg-upload-status');
+  if (st) st.innerHTML = '<span style="color:#16a34a;font-weight:600">✓ Subido. Actualizando…</span>';
+  setTimeout(function() { egCloseUpload(); if (typeof loadEgresosERP === 'function') loadEgresosERP(); }, 900);
 }
 
 function egViewPDF(url, title) {
@@ -10922,22 +10877,20 @@ function initTheme() {
       <button class="modal-close" onclick="egCloseUpload()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
     </div>
     <div style="padding:20px 24px">
-      <div style="border:2px dashed var(--color-divider,#d1d5db);border-radius:12px;padding:32px;text-align:center;cursor:pointer;transition:border-color .2s" id="eg-drop-zone" onclick="document.getElementById('eg-file-input').click()">
-        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary,#c46a7a)" stroke-width="1.5" style="margin-bottom:10px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><polyline points="9 15 12 12 15 15"/></svg>
-        <div style="font-size:13px;font-weight:600;color:var(--text-primary,#111);margin-bottom:4px">Clic para seleccionar PDF</div>
-        <div style="font-size:11px;color:var(--text-secondary,#9ca3af)">o arrastra el archivo aquí</div>
-        <div id="eg-file-name" style="font-size:12px;font-weight:700;color:var(--color-primary,#c46a7a);margin-top:10px;display:none"></div>
+      <div id="eg-erp-drop" class="erp-dropzone" data-tipo="pago" data-prefix="EG-0" data-onupload="egAfterUpload">
+        <div class="erp-dz-icon">📄</div>
+        <div class="erp-dz-text">Arrastra tu PDF aquí o <span class="erp-dz-link">selecciona archivo</span></div>
+        <div class="erp-dz-sub">PDF, JPG, PNG · Máx 10MB</div>
+        <input type="file" class="erp-dz-input" accept=".pdf,.jpg,.jpeg,.png" onchange="erpHandleFile(this,'eg-erp-drop')">
       </div>
-      <input type="file" id="eg-file-input" accept=".pdf" style="display:none" onchange="egFileSelected(this)">
+      <div id="eg-upload-status" style="font-size:11px;margin-top:6px;color:var(--text-secondary,#9ca3af)"></div>
       <div style="margin-top:14px;display:flex;align-items:center;gap:8px">
         <div style="font-size:11px;color:var(--text-secondary,#9ca3af)">Proveedor:</div>
         <div id="eg-upload-prov" style="font-size:12px;font-weight:600;color:var(--text-primary,#111)">—</div>
       </div>
     </div>
-    <div id="eg-upload-msg" class="modal-msg"></div>
     <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="egCloseUpload()">Cancelar</button>
-      <button class="btn btn-primary" id="eg-upload-btn" onclick="egSubmitUpload()" disabled>Subir archivo</button>
+      <button class="btn btn-secondary" onclick="egCloseUpload()">Cerrar</button>
     </div>
   </div>
 </div>
@@ -11741,6 +11694,9 @@ async function _erpUploadFile(dz, file) {
       if (linkInput) linkInput.value = res.url;
       var statusEl = dz.parentElement.querySelector('[id$="-status"]');
       if (statusEl) statusEl.innerHTML = '<span style="color:#16a34a">✓ '+file.name+' subido</span>';
+      // Callback opcional (ej. refrescar tabla de Egresos tras subir)
+      var cb = dz.dataset.onupload;
+      if (cb && typeof window[cb] === 'function') { try { window[cb](res); } catch(_e){} }
     } else {
       dz.classList.remove('uploading');
       dz.innerHTML = '<div class="erp-dz-icon">❌</div><div class="erp-dz-text" style="color:#dc2626">Error: '+(res.error||'No se pudo subir')+'</div>'
