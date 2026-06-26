@@ -1447,22 +1447,26 @@ function readEgresosData(anio) {
       });
     }
 
-    // Extraer URLs de hipervínculos (Link Factura / Link Pago)
+    // Extraer URLs de hipervínculos (Link Factura / Link Pago).
+    // IMPORTANTE: el bucle de arriba se salta filas vacías, así que NO se puede mapear
+    // por posición de array. Mapeamos por fila REAL de la hoja usando _rowNum.
     try {
       var lastDataRow = raw.length - 1;
       if (lastDataRow > 0 && (iLinkFact > -1 || iLinkPago > -1)) {
+        var byRow = {};
+        for (var ar = 0; ar < allRows.length; ar++) byRow[allRows[ar]._rowNum] = allRows[ar];
         if (iLinkFact > -1) {
           var rtFact = sheet.getRange(2, iLinkFact + 1, lastDataRow, 1).getRichTextValues();
           for (var rf = 0; rf < rtFact.length; rf++) {
             var url = rtFact[rf][0] ? rtFact[rf][0].getLinkUrl() : '';
-            if (url && allRows[rf]) allRows[rf].linkFacturaUrl = url;
+            if (url && byRow[rf + 2]) byRow[rf + 2].linkFacturaUrl = url; // rf+2 = fila real
           }
         }
         if (iLinkPago > -1) {
           var rtPago = sheet.getRange(2, iLinkPago + 1, lastDataRow, 1).getRichTextValues();
           for (var rp = 0; rp < rtPago.length; rp++) {
             var url2 = rtPago[rp][0] ? rtPago[rp][0].getLinkUrl() : '';
-            if (url2 && allRows[rp]) allRows[rp].linkPagoUrl = url2;
+            if (url2 && byRow[rp + 2]) byRow[rp + 2].linkPagoUrl = url2; // rp+2 = fila real
           }
         }
       }
@@ -2820,53 +2824,53 @@ function uploadFile(body) {
     var fileName = body.fileName || 'archivo.pdf';
     var prefix = body.prefix || ''; // ej: "EG-563" o "CXP-75"
     var fullName = prefix ? (prefix + '_' + fileName) : fileName;
-    var blob = Utilities.newBlob(Utilities.base64Decode(body.base64), body.mimeType || 'application/pdf', fullName);
-    var file = folder.createFile(blob);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); // visible para cualquiera con acceso al módulo
-    var url = file.getUrl();
     var displayName = fileName.replace(/\.(pdf|jpe?g|png|xml)$/i, '');
-
-    // Escribir el link como HIPERVÍNCULO en la fila del egreso (columna detectada por header).
     // rowNum puede venir explícito o dentro del prefix tipo "CXP-75".
     var rowNum = parseInt(body.rowNum || (String(prefix).match(/(\d+)/) || [])[1] || 0);
+
+    // 1) Resolver hoja/fila/columna y mandar a papelera el comprobante anterior ANTES de
+    //    crear el nuevo (evita acumular archivos y el sufijo "(1)" por nombre repetido).
+    var sh = null, hdrs = null, iCol = -1;
     if (rowNum && rowNum > 1) {
       try {
         var ss = SpreadsheetApp.openById(body.ssId || EGRESOS_SS_2026);
-        var sh = ss.getSheetByName(body.sheetName || (EGRESOS_TABS[2026] || 'Egresos2026'));
+        sh = ss.getSheetByName(body.sheetName || (EGRESOS_TABS[2026] || 'Egresos2026'));
         if (sh) {
-          var hdrs = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0]
-                       .map(function(h){ return String(h).trim().toLowerCase(); });
+          hdrs = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0]
+                   .map(function(h){ return String(h).trim().toLowerCase(); });
           var want = (tipo === 'pago') ? 'link pago' : 'link factura';
-          var iCol = -1;
           for (var c = 0; c < hdrs.length; c++) { if (hdrs[c].indexOf(want) > -1) { iCol = c; break; } }
           if (iCol > -1) {
-            // Anti-duplicados: si la celda ya apunta a un archivo de Drive, mandarlo a la
-            // papelera antes de poner el nuevo. Así esta fila siempre tiene UN solo
-            // comprobante (el mismo archivo que se ve en CxP y en Egresos).
             try {
               var cellRange = sh.getRange(rowNum, iCol + 1);
               var prevRich = cellRange.getRichTextValue();
               var prevUrl = (prevRich && prevRich.getLinkUrl()) ? prevRich.getLinkUrl()
                             : String(cellRange.getValue() || '');
               var mId = prevUrl.match(/[-\w]{25,}/);
-              if (mId && mId[0] !== file.getId()) {
-                DriveApp.getFileById(mId[0]).setTrashed(true);
-              }
-            } catch(_dup) { /* si el archivo previo ya no existe, ignorar */ }
-            sh.getRange(rowNum, iCol + 1).setRichTextValue(
-              SpreadsheetApp.newRichTextValue().setText(displayName).setLinkUrl(url).build());
-          }
-          // Si es factura, marcar el check de Facturación (no tocar PAGADO: eso lo
-          // confirma pagarCxP para no marcar pagado prematuramente).
-          if (tipo === 'factura') {
-            var iChk = -1;
-            for (var k = 0; k < hdrs.length; k++) {
-              if (hdrs[k].replace(/[áàä]/g,'a').indexOf('facturaci') > -1) { iChk = k; break; }
-            }
-            if (iChk > -1) sh.getRange(rowNum, iChk + 1).setValue(true);
+              if (mId) DriveApp.getFileById(mId[0]).setTrashed(true);
+            } catch(_dup) { /* el archivo previo ya no existe: ignorar */ }
           }
         }
-      } catch(wErr) { /* no romper el upload si falla la escritura del link */ }
+      } catch(_sh) { sh = null; }
+    }
+
+    // 2) Crear el nuevo archivo (ya sin el viejo del mismo nombre → nombre limpio)
+    var blob = Utilities.newBlob(Utilities.base64Decode(body.base64), body.mimeType || 'application/pdf', fullName);
+    var file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); // visible para cualquiera con acceso
+    var url = file.getUrl();
+
+    // 3) Escribir el hipervínculo en la fila + (si factura) marcar Facturación
+    if (sh && iCol > -1) {
+      sh.getRange(rowNum, iCol + 1).setRichTextValue(
+        SpreadsheetApp.newRichTextValue().setText(displayName).setLinkUrl(url).build());
+    }
+    if (sh && tipo === 'factura' && hdrs) {
+      var iChk = -1;
+      for (var k = 0; k < hdrs.length; k++) {
+        if (hdrs[k].replace(/[áàä]/g,'a').indexOf('facturaci') > -1) { iChk = k; break; }
+      }
+      if (iChk > -1) sh.getRange(rowNum, iChk + 1).setValue(true);
     }
     logAudit(body.usuario||'sistema', 'Upload', 'Subir '+tipo, prefix||'', 'Archivo', '', fullName);
     return {ok:true, url:url, fileName:fullName};
