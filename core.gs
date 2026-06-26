@@ -282,6 +282,14 @@ function doGet(e) {
       return jsonResponse(readScheduledTasks());
     }
 
+    // Recordatorios (agenda personal)
+    if (action === 'recordatorios') {
+      return jsonResponse(readRecordatorios(e.parameter.usuario || ''));
+    }
+    if (action === 'recordatoriosPend') {
+      return jsonResponse(readRecordatoriosPendientes(e.parameter.usuario || ''));
+    }
+
     // Catálogo de proveedores (fuente única para dropdowns)
     if (action === 'proveedores') {
       return jsonResponse(readProveedores());

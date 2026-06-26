@@ -519,7 +519,11 @@ function _schedTasks() {
     { id:'recordatorio_gastos_fijos', handler:'recordatorioGastosFijos',
       nombre:'Recordatorio de gastos fijos',
       desc:'El día 1 de cada mes envía un correo con los gastos fijos pendientes de programar.',
-      tipo:'mensual', dia:1, horaDefault:8, minuto:0 }
+      tipo:'mensual', dia:1, horaDefault:8, minuto:0 },
+    { id:'recordatorios_del_dia', handler:'recordatoriosDelDia',
+      nombre:'Recordatorios del día',
+      desc:'Cada mañana envía a cada usuario un correo con sus recordatorios (agenda) del día.',
+      tipo:'diaria', horaDefault:7, minuto:30 }
   ];
 }
 function _schedGetCfg(id, key, def){

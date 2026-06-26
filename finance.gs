@@ -537,6 +537,11 @@ function doPost(e) {
     // Tareas programadas (scheduler)
     if (body.action === 'updateScheduledTask')     return jsonResponse(updateScheduledTask(body));
     if (body.action === 'setupScheduledTriggers')  return jsonResponse(setupScheduledTriggers());
+    // Recordatorios (agenda personal) — abierto a cualquier área
+    if (body.action === 'setupRecordatorios')      return jsonResponse(setupRecordatorios());
+    if (body.action === 'saveRecordatorio')        return jsonResponse(saveRecordatorio(body));
+    if (body.action === 'updateRecordatorioEstado') return jsonResponse(updateRecordatorioEstado(body));
+    if (body.action === 'deleteRecordatorio')      return jsonResponse(deleteRecordatorio(body));
     if (body.action === 'updateProducto') {
       return jsonResponse(updateProducto(body));
     }
