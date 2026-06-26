@@ -1123,24 +1123,14 @@ function pagarCxP(body) {
 
     var fechaPago = body.fechaPago || new Date().toISOString().substring(0,10);
     var formaPago = body.formaPago || '';
-    var linkPago = body.linkPago || '';
-    var linkFactura = body.linkFactura || '';
 
-    // Col B = Fecha (2), Col M = FACTURACION (13), Col N = PAGADO (14),
-    // Col Q = FormaPago (17), Col S = LinkFactura (19), Col T = LinkPago (20)
+    // Col B = Fecha (2), Col N = PAGADO (14), Col Q = FormaPago (17)
     sh.getRange(rowNum, 2).setValue(new Date(fechaPago)); // Fecha de pago
     sh.getRange(rowNum, 14).setValue(true); // PAGADO = TRUE
     if (formaPago) sh.getRange(rowNum, 17).setValue(formaPago);
-    // Los links DEBEN ir como hipervínculo (RichText): Egresos los lee con getLinkUrl().
-    if (linkPago) {
-      sh.getRange(rowNum, 20).setRichTextValue(
-        SpreadsheetApp.newRichTextValue().setText('Comprobante').setLinkUrl(linkPago).build());
-    }
-    if (linkFactura) {
-      sh.getRange(rowNum, 19).setRichTextValue(
-        SpreadsheetApp.newRichTextValue().setText('Factura').setLinkUrl(linkFactura).build());
-      sh.getRange(rowNum, 13).setValue(true); // FACTURACION = TRUE
-    }
+    // NOTA: el comprobante/factura y su hipervínculo los escribe uploadFile al subir el
+    // archivo (único escritor del link). pagarCxP ya NO toca esas columnas, para no
+    // sobrescribir con un link viejo (que el anti-duplicados pudo mandar a papelera).
 
     // Divisa (solo aplica a Santander / AMEX)
     var divisa = body.divisa || 'MXN';
