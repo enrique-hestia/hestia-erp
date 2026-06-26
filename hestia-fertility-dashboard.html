@@ -9350,7 +9350,7 @@ function _renderProvDatalist(){
   });
   function addLegacy(n){ n=String(n||'').trim(); if(!n||seen[n.toLowerCase()]) return; seen[n.toLowerCase()]=1; items.push({nombre:n, cat:''}); }
   try { ((typeof _egData!=='undefined' && _egData && _egData.proveedores)||[]).forEach(addLegacy); } catch(e){}
-  try { (window._cxpNewRows||[]).forEach(function(r){ addLegacy(r&&r.proveedor); }); } catch(e){}
+  try { (window._cxpAllRows||[]).forEach(function(r){ addLegacy(r&&r.proveedor); }); } catch(e){}
   items.sort(function(a,b){ return a.nombre.toLowerCase()<b.nombre.toLowerCase()?-1:1; });
   dl.innerHTML = items.map(function(p){
     var label = p.cat ? (p.nombre+' — '+p.cat) : p.nombre;
@@ -11546,6 +11546,21 @@ function renderCxP(data) {
       +'.cxp-card-sub{font-size:10.5px;color:var(--text-secondary,#9ca3af);margin-top:1px}'
       +'.cxp-srch{padding:7px 12px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:20px;font-size:12px;font-family:inherit;background:var(--card-bg,#fff);color:var(--text-primary,#111);width:220px;transition:border-color .15s}'
       +'.cxp-srch:focus{outline:none;border-color:#c46a7a}'
+      +'.cxp-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:12px 14px;margin-bottom:16px}'
+      +'.cxp-fg{display:flex;flex-direction:column;gap:3px}'
+      +'.cxp-fg>label{font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)}'
+      +'.cxp-fg input,.cxp-fg select{border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:6px 9px;font-size:12px;background:var(--color-surface,#fafafa);color:var(--text-primary,#111);font-family:inherit}'
+      +'.cxp-fg input[type=date]{min-width:140px}'
+      +'.cxp-dist{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:13px 16px;margin-bottom:16px}'
+      +'.cxp-dist-h{font-size:11px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text-secondary,#6b7280);margin-bottom:10px;display:flex;justify-content:space-between}'
+      +'.cxp-dist-row{display:grid;grid-template-columns:140px 1fr 120px 42px;align-items:center;gap:10px;padding:3px 0;font-size:11.5px}'
+      +'@media(max-width:600px){.cxp-dist-row{grid-template-columns:100px 1fr 90px}.cxp-dist-row>span:last-child{display:none}}'
+      +'.cxp-dist-bar{height:7px;border-radius:4px;background:var(--color-divider,#eee);overflow:hidden}'
+      +'.cxp-dist-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,#c46a7a,#d98a98)}'
+      +'.cxp-grp{cursor:pointer}'
+      +'.cxp-grp td{font-size:12px;padding:9px 12px;background:var(--color-surface,#f3f4f6);border-bottom:1px solid var(--color-divider,#e5e7eb);white-space:normal}'
+      +'.cxp-grp:hover td{background:var(--color-surface,#ececec)}'
+      +'.cxp-caret{display:inline-block;width:12px;color:var(--color-primary,#c46a7a)}'
       +'.cxp-tbl-wrap{overflow-x:auto}'
       +'.cxp-tbl{width:100%;border-collapse:collapse;font-size:12px}'
       +'.cxp-tbl th{padding:8px 12px;font-size:9.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#6b7280);background:var(--color-surface,#f3f4f6);border-bottom:1px solid var(--color-divider,#e5e7eb);white-space:nowrap;text-align:left}'
@@ -11570,48 +11585,38 @@ function renderCxP(data) {
   // KPI cards
   html += '<div class="cxp-wrap">';
   html += '<div class="cxp-top"><div class="cxp-top-row">'
-    + '<div><h2 class="cxp-h1">Cuentas por Pagar</h2><div class="cxp-h1s">Reporte de vencimientos · ' + rows.length + ' registros pendientes</div></div>'
+    + '<div><h2 class="cxp-h1">Cuentas por Pagar</h2><div class="cxp-h1s">Reporte de vencimientos · filtra por fecha y agrupa por categoría</div></div>'
     + '<div style="display:flex;gap:8px;align-items:center">'
     + '<button onclick="cxpOpenCapture()" style="display:inline-flex;align-items:center;gap:6px;padding:7px 16px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Registrar CxP</button>'
     + '<button onclick="loadCxPData()" style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--text-secondary,#6b7280);background:transparent;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:20px;padding:5px 11px;cursor:pointer">↺ Actualizar</button>'
     + '</div></div></div>';
 
-  var kpis = [
-    {cls:'cxp-k-vencido', ico:'🔴', lbl:'Vencido', n:r.vencido||0, total:r.totalVencido||0},
-    {cls:'cxp-k-d3',      ico:'🟠', lbl:'Vence hoy', n:r.hoy||0, total:r.totalHoy||0},
-    {cls:'cxp-k-d7',      ico:'🟡', lbl:'Vence esta semana', n:r.semana||0, total:r.totalSemana||0},
-    {cls:'cxp-k-d30',     ico:'🔵', lbl:'Vence este mes', n:r.mes||0, total:r.totalMes||0}
-  ];
-  html += '<div class="cxp-kg">';
-  kpis.forEach(function(k){
-    html += '<div class="cxp-k '+k.cls+'">'
-      + '<div class="cxp-kico">'+k.ico+'</div>'
-      + '<div class="cxp-klbl">'+k.lbl+'</div>'
-      + '<div class="cxp-kval">'+k.n+'</div>'
-      + '<div class="cxp-ksub">'+(k.total>0?fM(k.total):'Sin monto')+'</div>'
-      + '</div>';
-  });
-  html += '</div>';
+  // ── Filtros + estado (fecha por vencimiento, agrupación, búsqueda) ──
+  window._cxpAllRows = rows;
+  if (!window._cxpState) window._cxpState = {fechaIni:'', fechaFin:_cxpEndOfMonth(), group:'', buscar:''};
 
-  // Total pendiente
-  var totalPend = r.totalPendiente||0;
-  html += '<div style="background:linear-gradient(135deg,#fef2f2,#fff7ed);border:1.5px solid #fecaca;border-radius:12px;padding:14px 20px;margin-bottom:18px;display:flex;align-items:center;justify-content:space-between">'
-    + '<div><div style="font-size:11px;font-weight:700;color:#991b1b;text-transform:uppercase;letter-spacing:.5px">Total pendiente de pago</div>'
-    + '<div style="font-size:10px;color:#9a3412;margin-top:2px">'+rows.length+' compromisos activos</div></div>'
-    + '<div style="font-size:24px;font-weight:800;color:#dc2626">'+fM(totalPend)+'</div></div>';
-
-  // Table
-  html += '<div class="cxp-card">';
-  html += '<div class="cxp-card-hdr">'
-    + '<div><div class="cxp-card-title">Detalle de cuentas por pagar</div>'
-    + '<div class="cxp-card-sub">Ordenado por urgencia · Más vencido primero</div></div>'
-    + '<input class="cxp-srch" id="cxp-srch" placeholder="Buscar proveedor o concepto…" oninput="cxpFilter()" type="text">'
+  html += '<div class="cxp-filters">'
+    + '<div class="cxp-fg"><label>Desde (venc.)</label><input type="date" id="cxp-fi" value="'+(_cxpState.fechaIni||'')+'" onchange="_cxpSetDate(\'fechaIni\',this.value)"></div>'
+    + '<div class="cxp-fg"><label>Hasta (venc.)</label><input type="date" id="cxp-ff" value="'+(_cxpState.fechaFin||'')+'" onchange="_cxpSetDate(\'fechaFin\',this.value)"></div>'
+    + '<div class="cxp-fg"><label>Atajo</label><select id="cxp-quick" onchange="_cxpQuick(this.value)"><option value="">— rango —</option><option value="mes">Este mes</option><option value="tri">Este trimestre</option><option value="venc">Solo vencidos</option><option value="todo">Todo (año)</option></select></div>'
+    + '<div class="cxp-fg"><label>Agrupar por</label><select id="cxp-grp" onchange="_cxpSetGroup(this.value)">'
+      + '<option value=""'+(!_cxpState.group?' selected':'')+'>Sin agrupar</option>'
+      + '<option value="subtipo"'+(_cxpState.group==='subtipo'?' selected':'')+'>Categoría</option>'
+      + '<option value="contable"'+(_cxpState.group==='contable'?' selected':'')+'>Contable</option>'
+      + '<option value="proveedor"'+(_cxpState.group==='proveedor'?' selected':'')+'>Proveedor</option>'
+      + '</select></div>'
+    + '<div class="cxp-fg" style="flex:1;min-width:170px"><label>Buscar</label><input class="cxp-srch" id="cxp-srch" placeholder="Proveedor o concepto…" value="'+(_cxpState.buscar||'').replace(/"/g,'&quot;')+'" oninput="_cxpSearch(this.value)"></div>'
     + '</div>';
+
+  html += '<div class="cxp-kg" id="cxp-kpis"></div>';
+  html += '<div id="cxp-total"></div>';
+  html += '<div id="cxp-dist"></div>';
+
+  html += '<div class="cxp-card">';
+  html += '<div class="cxp-card-hdr"><div><div class="cxp-card-title">Detalle de cuentas por pagar</div><div class="cxp-card-sub" id="cxp-detsub"></div></div></div>';
   html += '<div class="cxp-tbl-wrap"><table class="cxp-tbl" id="cxp-tbl">';
-  html += '<thead><tr><th>Estado</th><th>Proveedor</th><th>Concepto</th><th>Tipo</th><th style="text-align:right">Monto</th><th>Vencimiento</th><th>Factura</th><th style="text-align:center;width:90px">Acción</th></tr></thead>';
-  html += '<tbody id="cxp-tbody">';
-  html += _cxpBuildNewRows(rows);
-  html += '</tbody></table></div></div>';
+  html += '<thead><tr><th>Estado</th><th>Proveedor</th><th>Concepto</th><th>Categoría</th><th style="text-align:right">Monto</th><th>Vencimiento</th><th>Fact.</th><th style="text-align:center;width:90px">Acción</th></tr></thead>';
+  html += '<tbody id="cxp-tbody"></tbody></table></div></div>';
   html += '</div>'; // cxp-wrap
 
   // Pagar modal (hidden)
@@ -11624,17 +11629,114 @@ function renderCxP(data) {
     + '<div id="cxp-pay-body" style="padding:20px"></div></div>';
 
   root.innerHTML = html;
-
-  window._cxpNewRows = rows;
-  window.cxpFilter = function() {
-    var q = (document.getElementById('cxp-srch').value||'').toLowerCase().trim();
-    var filtered = q ? _cxpNewRows.filter(function(row){
-      return (row.proveedor||'').toLowerCase().indexOf(q)>-1 || (row.concepto||'').toLowerCase().indexOf(q)>-1 || (row.subtipo||'').toLowerCase().indexOf(q)>-1;
-    }) : _cxpNewRows;
-    var tb = document.getElementById('cxp-tbody');
-    if(tb) tb.innerHTML = _cxpBuildNewRows(filtered);
-  };
+  _cxpApply();
 }
+
+// ── CxP: filtro por fecha de vencimiento + agrupación por categoría ──
+function _cxpFM(v){ var n=parseFloat(v)||0; return '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function _cxpEsc(s){ return String(s==null?'':s).replace(/</g,'&lt;'); }
+function _cxpEndOfMonth(){ var d=new Date(); return new Date(d.getFullYear(), d.getMonth()+1, 0).toISOString().substring(0,10); }
+function _cxpFilteredRows(){
+  var f=_cxpState||{}, all=window._cxpAllRows||[];
+  return all.filter(function(r){
+    if (f.buscar){ var q=f.buscar.toLowerCase(); if((r.proveedor||'').toLowerCase().indexOf(q)===-1 && (r.concepto||'').toLowerCase().indexOf(q)===-1 && (r.subtipo||'').toLowerCase().indexOf(q)===-1) return false; }
+    var v=(r.vencimiento||'').substring(0,10);
+    if (v){ if (f.fechaIni && v < f.fechaIni) return false; if (f.fechaFin && v > f.fechaFin) return false; }
+    return true; // las filas sin vencimiento siempre se muestran (siguen pendientes)
+  });
+}
+function _cxpResumen(rows){
+  var R={vencido:0,hoy:0,semana:0,mes:0,totalVencido:0,totalHoy:0,totalSemana:0,totalMes:0,totalPendiente:0};
+  rows.forEach(function(r){ var m=parseFloat(r.monto)||0; R.totalPendiente+=m;
+    var u=r.urgencia;
+    if(u==='vencido'){R.vencido++;R.totalVencido+=m;}
+    else if(u==='hoy'){R.hoy++;R.totalHoy+=m;}
+    else if(u==='semana'){R.semana++;R.totalSemana+=m;}
+    else if(u==='mes'){R.mes++;R.totalMes+=m;}
+  });
+  return R;
+}
+function _cxpDistribucion(rows, key){
+  var map={}, total=0;
+  rows.forEach(function(r){ var k=(r[key]||'—'); var m=parseFloat(r.monto)||0; if(!map[k])map[k]={nombre:k,total:0,count:0}; map[k].total+=m; map[k].count++; total+=m; });
+  var arr=Object.keys(map).map(function(k){return map[k];});
+  arr.sort(function(a,b){return b.total-a.total;});
+  arr.forEach(function(c){ c.pct=total>0?c.total/total*100:0; });
+  return {arr:arr, total:total};
+}
+function _cxpKpiHTML(R){
+  var kpis=[{cls:'cxp-k-vencido',ico:'🔴',lbl:'Vencido',n:R.vencido,total:R.totalVencido},
+    {cls:'cxp-k-d3',ico:'🟠',lbl:'Vence hoy',n:R.hoy,total:R.totalHoy},
+    {cls:'cxp-k-d7',ico:'🟡',lbl:'Vence esta semana',n:R.semana,total:R.totalSemana},
+    {cls:'cxp-k-d30',ico:'🔵',lbl:'Vence este mes',n:R.mes,total:R.totalMes}];
+  return kpis.map(function(k){ return '<div class="cxp-k '+k.cls+'"><div class="cxp-kico">'+k.ico+'</div><div class="cxp-klbl">'+k.lbl+'</div><div class="cxp-kval">'+k.n+'</div><div class="cxp-ksub">'+(k.total>0?_cxpFM(k.total):'Sin monto')+'</div></div>'; }).join('');
+}
+function _cxpTotalHTML(R,n){
+  return '<div style="background:linear-gradient(135deg,#fef2f2,#fff7ed);border:1.5px solid #fecaca;border-radius:12px;padding:14px 20px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between">'
+    +'<div><div style="font-size:11px;font-weight:700;color:#991b1b;text-transform:uppercase;letter-spacing:.5px">Total en el periodo</div>'
+    +'<div style="font-size:10px;color:#9a3412;margin-top:2px">'+n+' compromisos en el rango</div></div>'
+    +'<div style="font-size:24px;font-weight:800;color:#dc2626">'+_cxpFM(R.totalPendiente)+'</div></div>';
+}
+function _cxpDistHTML(rows){
+  var d=_cxpDistribucion(rows,'subtipo');
+  if(!d.arr.length) return '';
+  var top=d.arr.slice(0,8);
+  var rowsH=top.map(function(c){
+    return '<div class="cxp-dist-row"><span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+_cxpEsc(c.nombre)+'">'+_cxpEsc(c.nombre)+'</span>'
+      +'<div class="cxp-dist-bar"><div class="cxp-dist-fill" style="width:'+Math.max(2,c.pct).toFixed(1)+'%"></div></div>'
+      +'<span style="text-align:right;font-weight:700">'+_cxpFM(c.total)+'</span>'
+      +'<span style="text-align:right;color:var(--text-secondary,#9ca3af);font-size:10px">'+c.pct.toFixed(0)+'%</span></div>';
+  }).join('');
+  var otras=d.arr.length>8 ? '<div style="font-size:10px;color:var(--text-secondary,#9ca3af);margin-top:6px">+'+(d.arr.length-8)+' categorías más</div>' : '';
+  return '<div class="cxp-dist"><div class="cxp-dist-h"><span>Distribución por categoría (periodo)</span><span>'+_cxpFM(d.total)+'</span></div>'+rowsH+otras+'</div>';
+}
+function _cxpTableHTML(rows){
+  if(!rows.length) return '<tr><td colspan="8" class="cxp-empty">Sin cuentas en el periodo seleccionado</td></tr>';
+  var g=_cxpState.group;
+  if(!g) return _cxpBuildNewRows(rows);
+  var d=_cxpDistribucion(rows,g), byCat={};
+  rows.forEach(function(r){ var k=(r[g]||'—'); (byCat[k]=byCat[k]||[]).push(r); });
+  var html='';
+  d.arr.forEach(function(c,gi){
+    var cr=byCat[c.nombre]||[];
+    html += '<tr class="cxp-grp" data-h="'+gi+'" onclick="_cxpToggleGrp('+gi+')"><td colspan="8">'
+      +'<span class="cxp-caret">▾</span> <b>'+_cxpEsc(c.nombre)+'</b> · '+cr.length+' partida'+(cr.length===1?'':'s')
+      +' · <b style="color:#dc2626">'+_cxpFM(c.total)+'</b>'
+      +'<span style="float:right;color:var(--text-secondary,#9ca3af)">'+c.pct.toFixed(1)+'%</span></td></tr>';
+    html += _cxpBuildNewRows(cr).replace(/<tr/g,'<tr data-grp="'+gi+'"');
+  });
+  return html;
+}
+function _cxpApply(){
+  var rows=_cxpFilteredRows(), R=_cxpResumen(rows);
+  var k=document.getElementById('cxp-kpis'); if(k)k.innerHTML=_cxpKpiHTML(R);
+  var t=document.getElementById('cxp-total'); if(t)t.innerHTML=_cxpTotalHTML(R,rows.length);
+  var dd=document.getElementById('cxp-dist'); if(dd)dd.innerHTML=_cxpDistHTML(rows);
+  var tb=document.getElementById('cxp-tbody'); if(tb)tb.innerHTML=_cxpTableHTML(rows);
+  var ds=document.getElementById('cxp-detsub'); if(ds)ds.textContent=_cxpState.group?('Agrupado por '+(_cxpState.group==='subtipo'?'categoría':_cxpState.group)+' · subtotales por grupo'):'Ordenado por urgencia · Más vencido primero';
+}
+function _cxpSetDate(k,v){ _cxpState[k]=v; var q=document.getElementById('cxp-quick'); if(q)q.value=''; _cxpApply(); }
+function _cxpSetGroup(v){ _cxpState.group=v; _cxpApply(); }
+function _cxpSearch(v){ _cxpState.buscar=v; _cxpApply(); }
+function _cxpQuick(v){
+  var d=new Date(), y=d.getFullYear(), m=d.getMonth();
+  if(v==='mes'){ _cxpState.fechaIni=''; _cxpState.fechaFin=new Date(y,m+1,0).toISOString().substring(0,10); }
+  else if(v==='tri'){ var q=Math.floor(m/3); _cxpState.fechaIni=''; _cxpState.fechaFin=new Date(y,q*3+3,0).toISOString().substring(0,10); }
+  else if(v==='venc'){ _cxpState.fechaIni=''; _cxpState.fechaFin=new Date(d.getTime()-86400000).toISOString().substring(0,10); }
+  else if(v==='todo'){ _cxpState.fechaIni=''; _cxpState.fechaFin=''; }
+  else return;
+  var fi=document.getElementById('cxp-fi'), ff=document.getElementById('cxp-ff');
+  if(fi)fi.value=_cxpState.fechaIni; if(ff)ff.value=_cxpState.fechaFin;
+  _cxpApply();
+}
+window._cxpToggleGrp=function(gi){
+  var els=document.querySelectorAll('#cxp-tbody tr[data-grp="'+gi+'"]');
+  if(!els.length) return;
+  var hide=els[0].style.display!=='none';
+  for(var i=0;i<els.length;i++) els[i].style.display=hide?'none':'';
+  var c=document.querySelector('#cxp-tbody tr.cxp-grp[data-h="'+gi+'"] .cxp-caret');
+  if(c) c.textContent=hide?'▸':'▾';
+};
 
 function _cxpBuildNewRows(rows) {
   if (!rows.length) return '<tr><td colspan="8" class="cxp-empty">🎉 Sin cuentas pendientes — todo al corriente</td></tr>';
