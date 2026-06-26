@@ -1406,6 +1406,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
       <button class="pc-tab" onclick="pcTab('menu',this)">Menú</button>
       <button class="pc-tab" onclick="pcTab('conexiones',this)">Conexiones</button>
       <button class="pc-tab" onclick="pcTab('general',this)">General</button>
+      <button class="pc-tab" onclick="pcTab('programacion',this)">Programación</button>
       <button class="pc-tab" onclick="pcTab('formato',this)">Formato impresión</button>
     </div>
 
@@ -1572,6 +1573,18 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
         <div class="pc-card-title">Sesión activa</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px" id="pc-session-info"></div>
       </div>    </div>
+<!-- ── Programación (tareas automáticas) ─────────────── -->
+    <div id="pc-programacion" class="pc-section" style="display:none">
+      <div class="pc-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div class="pc-card-title" style="margin-bottom:0">Tareas programadas</div>
+          <button onclick="pcLoadScheduled()" style="padding:6px 12px;font-size:12px;font-weight:600;background:var(--color-surface-offset);border:1px solid var(--color-divider);border-radius:7px;cursor:pointer;color:var(--color-text);font-family:inherit">↺ Recargar</button>
+        </div>
+        <div style="font-size:11.5px;color:var(--color-text-muted);margin-bottom:14px">Procesos que el sistema corre solo en el servidor (Apps Script). Ajusta la hora y actívalos/desactívalos. Los cambios se aplican al guardar.</div>
+        <div id="pc-sched-list"><div style="padding:24px;text-align:center;color:var(--color-text-muted);font-size:13px">Cargando…</div></div>
+        <div style="margin-top:14px;font-size:11px;color:var(--color-text-muted);line-height:1.6">⚙ Si es la primera vez, corre <b>setupScheduledTriggers()</b> en Apps Script para instalar los disparadores. Después puedes ajustar las horas desde aquí.</div>
+      </div>
+    </div>
 <!-- ── Formato de Impresión ──────────────────────────── -->
     <div id="pc-formato" class="pc-section" style="display:none">
       <div class="pc-card">
@@ -10287,7 +10300,7 @@ function fmtSyncColor(type) {
 
 function pcTab(tab, btn, silent) {
   _pcActiveTab = tab;
-  ['apariencia','menu','conexiones','general','formato'].forEach(function(t) {
+  ['apariencia','menu','conexiones','general','programacion','formato'].forEach(function(t) {
     var el = document.getElementById('pc-' + t);
     if (el) el.style.display = (t === tab) ? '' : 'none';
   });
@@ -10295,6 +10308,52 @@ function pcTab(tab, btn, silent) {
     b.classList.toggle('active', b.getAttribute('onclick') && b.getAttribute('onclick').indexOf("'" + tab + "'") > -1);
   });
   if (tab === 'formato') { fmtLoad(); fmtSyncColor('primary'); fmtSyncColor('text'); fmtSyncColor('accent'); }
+  if (tab === 'programacion') { pcLoadScheduled(); }
+}
+
+/* ── Tareas programadas (scheduler) ─────────────────────────── */
+async function pcLoadScheduled() {
+  var box = document.getElementById('pc-sched-list'); if (!box) return;
+  box.innerHTML = '<div style="padding:24px;text-align:center;color:var(--color-text-muted);font-size:13px">Cargando…</div>';
+  try {
+    var tok = encodeURIComponent(getToken());
+    var d = await fetch(APPS_SCRIPT_URL+'?action=scheduledTasks&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();});
+    if (!d.ok) throw new Error(d.error||'No se pudo leer');
+    if (!d.tasks || !d.tasks.length) { box.innerHTML='<div style="padding:20px;color:var(--color-text-muted);font-size:13px">No hay tareas registradas.</div>'; return; }
+    box.innerHTML = d.tasks.map(_pcSchedRow).join('');
+  } catch(e){ box.innerHTML='<div style="padding:18px;color:#b91c1c;font-size:12.5px">⚠ '+e.message+'<br><span style="color:var(--color-text-muted)">Agrega/actualiza <b>scheduler.gs</b> y vuelve a desplegar el backend.</span></div>'; }
+}
+function _pcSchedRow(t){
+  var freq = t.tipo==='mensual' ? ('Mensual · día '+(t.dia||1)) : 'Diaria';
+  var estado = t.instalado ? (t.activo?'<span style="color:#16a34a;font-weight:700">● Activa</span>':'<span style="color:#b45309;font-weight:700">● Pausada</span>') : '<span style="color:#9ca3af;font-weight:700">○ Sin instalar</span>';
+  var last = t.lastRun ? ('<div style="font-size:10.5px;color:var(--color-text-muted);margin-top:3px">Última ejecución: '+String(t.lastRun).replace('T',' ').substring(0,16)+'</div>') : '';
+  return '<div style="border:1px solid var(--color-divider);border-radius:11px;padding:14px 16px;margin-bottom:12px;background:var(--color-surface-2)">'
+    + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">'
+    +   '<div style="flex:1;min-width:200px"><div style="font-size:13.5px;font-weight:700;color:var(--color-text)">'+t.nombre+'</div>'
+    +   '<div style="font-size:11.5px;color:var(--color-text-muted);margin-top:2px">'+t.desc+'</div>'
+    +   '<div style="font-size:11px;color:var(--color-text-muted);margin-top:5px">'+freq+' · '+estado+'</div>'+last+'</div>'
+    +   '<div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap">'
+    +     '<div><div style="font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:3px">Hora</div>'
+    +       '<select id="pc-sched-h-'+t.id+'" style="padding:6px 8px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:12px;background:var(--color-surface);color:var(--color-text)">'+_pcHourOpts(t.hora)+'</select></div>'
+    +     '<div><div style="font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:3px">Min</div>'
+    +       '<select id="pc-sched-m-'+t.id+'" style="padding:6px 8px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:12px;background:var(--color-surface);color:var(--color-text)">'+_pcMinOpts(t.minuto)+'</select></div>'
+    +     '<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-muted);padding-bottom:7px"><input type="checkbox" id="pc-sched-a-'+t.id+'" '+(t.activo?'checked':'')+'> Activa</label>'
+    +     '<button onclick="pcSaveScheduled(\''+t.id+'\')" style="padding:8px 15px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">Guardar</button>'
+    +   '</div>'
+    + '</div></div>';
+}
+function _pcHourOpts(sel){ var o=''; for(var h=0;h<24;h++){ o+='<option value="'+h+'"'+(h===sel?' selected':'')+'>'+String(h).padStart(2,'0')+':00</option>'; } return o; }
+function _pcMinOpts(sel){ var o=''; [0,15,30,45].forEach(function(m){ o+='<option value="'+m+'"'+(m===sel?' selected':'')+'>'+String(m).padStart(2,'0')+'</option>'; }); return o; }
+async function pcSaveScheduled(id){
+  var hora=parseInt((document.getElementById('pc-sched-h-'+id)||{}).value,10);
+  var minuto=parseInt((document.getElementById('pc-sched-m-'+id)||{}).value,10);
+  var activo=(document.getElementById('pc-sched-a-'+id)||{}).checked;
+  var s=getSession()||{};
+  try {
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'updateScheduledTask', id:id, hora:hora, minuto:minuto, activo:activo, usuario:s.email||'sistema'})});
+    var res=await r.json();
+    if(res.ok){ pcLoadScheduled(); setStatus('Tarea programada actualizada'); } else alert('Error: '+(res.error||''));
+  } catch(e){ alert('Error: '+e.message); }
 }
 
 /* ── Apariencia ─────────────────────────────────────────────── */

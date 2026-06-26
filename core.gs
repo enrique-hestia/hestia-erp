@@ -277,6 +277,11 @@ function doGet(e) {
       return jsonResponse(readProyeccionGastosFijos({periodo:e.parameter.periodo||'', meses:e.parameter.meses||3}));
     }
 
+    // Tareas programadas (scheduler) — Panel de Control
+    if (action === 'scheduledTasks') {
+      return jsonResponse(readScheduledTasks());
+    }
+
     // Catálogo de proveedores (fuente única para dropdowns)
     if (action === 'proveedores') {
       return jsonResponse(readProveedores());

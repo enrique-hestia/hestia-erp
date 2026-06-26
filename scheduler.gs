@@ -505,6 +505,108 @@ function estadoScheduler() {
    UTILITIES PRIVADAS
    ══════════════════════════════════════════════════════════════ */
 
+/* ══════════════════════════════════════════════════════════════
+   REGISTRO DE TAREAS PROGRAMADAS (extensible) — Panel de Control
+   Para agregar una tarea nueva: añade una entrada en _schedTasks()
+   con su handler (función real) y su tipo/hora default.
+   ══════════════════════════════════════════════════════════════ */
+function _schedTasks() {
+  return [
+    { id:'config_nocturna', handler:'actualizarConfiguracionSistema',
+      nombre:'Actualización nocturna de configuración',
+      desc:'Refresca caché de configuración, usuarios, períodos y valida conectividad de las hojas.',
+      tipo:'diaria', horaDefault:23, minuto:0 },
+    { id:'recordatorio_gastos_fijos', handler:'recordatorioGastosFijos',
+      nombre:'Recordatorio de gastos fijos',
+      desc:'El día 1 de cada mes envía un correo con los gastos fijos pendientes de programar.',
+      tipo:'mensual', dia:1, horaDefault:8, minuto:0 }
+  ];
+}
+function _schedGetCfg(id, key, def){
+  var v = PropertiesService.getScriptProperties().getProperty('sched_'+id+'_'+key);
+  return (v===null||v===undefined||v==='') ? def : v;
+}
+function _schedSetCfg(id, key, val){
+  PropertiesService.getScriptProperties().setProperty('sched_'+id+'_'+key, String(val));
+}
+
+function readScheduledTasks() {
+  try {
+    var tasks = _schedTasks();
+    var triggers = ScriptApp.getProjectTriggers();
+    var lastRun = PropertiesService.getScriptProperties().getProperty(CFG_LAST_RUN) || '';
+    var out = tasks.map(function(t){
+      var hora   = parseInt(_schedGetCfg(t.id,'hora',t.horaDefault),10);
+      var minuto = parseInt(_schedGetCfg(t.id,'minuto',t.minuto||0),10);
+      var activo = String(_schedGetCfg(t.id,'activo','true')) !== 'false';
+      var instalado = triggers.some(function(tr){ return tr.getHandlerFunction()===t.handler; });
+      return { id:t.id, nombre:t.nombre, desc:t.desc, tipo:t.tipo, handler:t.handler,
+               dia:t.dia||null, hora:hora, minuto:minuto, activo:activo, instalado:instalado,
+               lastRun: (t.handler==='actualizarConfiguracionSistema') ? lastRun : '' };
+    });
+    return { ok:true, tasks:out };
+  } catch(ex){ return { ok:false, error:ex.message, tasks:[] }; }
+}
+
+function _schedInstallTrigger(t, hora, minuto, activo) {
+  ScriptApp.getProjectTriggers().forEach(function(tr){
+    if (tr.getHandlerFunction()===t.handler) ScriptApp.deleteTrigger(tr);
+  });
+  if (!activo) return;
+  var b = ScriptApp.newTrigger(t.handler).timeBased();
+  if (t.tipo==='mensual') { b.onMonthDay(t.dia||1).atHour(hora).create(); }
+  else { b.everyDays(1).atHour(hora).nearMinute(minuto).create(); }
+}
+
+function updateScheduledTask(body) {
+  try {
+    var t = _schedTasks().filter(function(x){ return x.id===body.id; })[0];
+    if (!t) return { ok:false, error:'Tarea desconocida: '+body.id };
+    var hora   = Math.max(0, Math.min(23, parseInt(body.hora,10)));
+    if (isNaN(hora)) hora = t.horaDefault;
+    var minuto = Math.max(0, Math.min(59, parseInt(body.minuto,10)));
+    if (isNaN(minuto)) minuto = 0;
+    var activo = !(body.activo===false || String(body.activo)==='false');
+    _schedSetCfg(t.id,'hora',hora);
+    _schedSetCfg(t.id,'minuto',minuto);
+    _schedSetCfg(t.id,'activo',activo);
+    _schedInstallTrigger(t, hora, minuto, activo);
+    return { ok:true, id:t.id, hora:hora, minuto:minuto, activo:activo };
+  } catch(ex){ return { ok:false, error:ex.message }; }
+}
+
+/* Instala (o reinstala) TODOS los triggers según su configuración.
+   Correr UNA vez desde el editor; luego se ajusta desde el Panel de Control. */
+function setupScheduledTriggers() {
+  var tasks = _schedTasks(), res = [];
+  tasks.forEach(function(t){
+    var hora   = parseInt(_schedGetCfg(t.id,'hora',t.horaDefault),10);
+    var minuto = parseInt(_schedGetCfg(t.id,'minuto',t.minuto||0),10);
+    var activo = String(_schedGetCfg(t.id,'activo','true')) !== 'false';
+    _schedInstallTrigger(t, hora, minuto, activo);
+    res.push(t.id+' @ '+hora+':'+String(minuto).padStart(2,'0')+(activo?'':' (pausada)'));
+  });
+  Logger.log('[scheduler] Triggers instalados: '+res.join(', '));
+  return 'Instalados: '+res.join(', ');
+}
+
+/* Handler mensual: avisa por correo de los gastos fijos por programar. */
+function recordatorioGastosFijos() {
+  try {
+    if (typeof readGastosFijosPropuestas !== 'function') return;
+    var prop = readGastosFijosPropuestas('');
+    if (!prop || !prop.ok || !(prop.pendientes > 0)) return;
+    var email = getParam('notif_email_admin', 'enrique@hestiafertility.com');
+    var lista = prop.propuestas.map(function(p){
+      return '• ' + p.proveedor + ' — ' + p.concepto + '  (vence ' + p.vencimiento + ')';
+    }).join('\n');
+    MailApp.sendEmail(email,
+      'Gastos fijos por programar — ' + prop.periodo,
+      'Tienes ' + prop.pendientes + ' gasto(s) fijo(s) por programar este mes:\n\n' + lista +
+      '\n\nEntra al ERP → Gastos Fijos → Programación del mes para revisarlos y mandarlos a Cuentas por Pagar.');
+  } catch(e) { Logger.log('[scheduler] recordatorioGastosFijos: ' + e.message); }
+}
+
 function _fmtDateLocal(d) {
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
