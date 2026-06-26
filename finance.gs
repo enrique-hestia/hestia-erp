@@ -1265,8 +1265,10 @@ var EGRESOS_SS_2025 = '18Wf4tD6CYBMTGVLPkEw_5YOtJncOAAeCyfeKMe--M1g';
 var EGRESOS_SS_2024 = '18DOfh1CvMyY3ZntjXGEqw6mjzhhBYZkatygxvnck2Is';
 var EGRESOS_TABS = { 2026:'Egresos2026', 2025:'Egresos2025', 2024:'Egresos2024' };
 var EGRESOS_IDS  = { 2026:EGRESOS_SS_2026, 2025:EGRESOS_SS_2025, 2024:EGRESOS_SS_2024 };
-var EGRESOS_DRIVE_FACTURAS = '1QM1jaQPePeGKdeWfqPq3nUPyrkC3zEOD'; // Facturas 2026
-var EGRESOS_DRIVE_PAGOS    = '16wEqs2ZbR0j8EehDzlWcVFCR3HYMvo-F'; // Pagos 2026
+// Carpetas raíz en G:\...\01 Administración y Finanzas\01 Contabilidad
+// Dentro de cada una se crean subcarpetas <Año>\<Mes> automáticamente.
+var EGRESOS_DRIVE_FACTURAS = '1t8--HM1xymgqGyBbIsI2jhMVCgQUBm9n'; // Contabilidad\Facturas Recibidas
+var EGRESOS_DRIVE_PAGOS    = '1D9H3nNIrkgg2wqJtKXzhuSLDH6hIUoPk'; // Contabilidad\Pagos
 var EGRESOS_MESES_FOLDER = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 function _getOrCreateMonthFolder(parentFolderId, anio, mes) {
@@ -2810,22 +2812,41 @@ function updateIngreso(payload) {
 function uploadFile(body) {
   try {
     var tipo = body.tipo || 'factura'; // factura o pago
-    var folderId = (tipo === 'pago') ? INGRESOS_FOLDER_PAGOS : INGRESOS_FOLDER_FACTURAS;
-    if (!folderId) return {ok:false, error:'Carpeta no configurada para '+tipo};
-    var folder = DriveApp.getFolderById(folderId);
+    var parentId = (tipo === 'pago') ? EGRESOS_DRIVE_PAGOS : EGRESOS_DRIVE_FACTURAS;
+    if (!parentId) return {ok:false, error:'Carpeta no configurada para '+tipo};
+    // Organizar por <Año>\<Mes> dentro de la carpeta (Pagos / Facturas Recibidas)
+    var hoy = new Date();
+    var folder = _getOrCreateMonthFolder(parentId, hoy.getFullYear(), hoy.getMonth());
     var fileName = body.fileName || 'archivo.pdf';
-    var prefix = body.prefix || ''; // ej: "EG-563_" o "CXP-00001_"
+    var prefix = body.prefix || ''; // ej: "EG-563" o "CXP-75"
     var fullName = prefix ? (prefix + '_' + fileName) : fileName;
     var blob = Utilities.newBlob(Utilities.base64Decode(body.base64), body.mimeType || 'application/pdf', fullName);
     var file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); // visible para cualquiera con acceso al módulo
     var url = file.getUrl();
-    // Si hay referencia a hoja+fila, actualizar el link
-    if (body.sheetName && body.rowNum && body.colNum) {
-      var ss = SpreadsheetApp.openById(body.ssId || EGRESOS_SS_2026);
-      var sh = ss.getSheetByName(body.sheetName);
-      if (sh) sh.getRange(body.rowNum, body.colNum).setValue(url);
+    var displayName = fileName.replace(/\.(pdf|jpe?g|png|xml)$/i, '');
+
+    // Escribir el link como HIPERVÍNCULO en la fila del egreso (columna detectada por header).
+    // rowNum puede venir explícito o dentro del prefix tipo "CXP-75".
+    var rowNum = parseInt(body.rowNum || (String(prefix).match(/(\d+)/) || [])[1] || 0);
+    if (rowNum && rowNum > 1) {
+      try {
+        var ss = SpreadsheetApp.openById(body.ssId || EGRESOS_SS_2026);
+        var sh = ss.getSheetByName(body.sheetName || (EGRESOS_TABS[2026] || 'Egresos2026'));
+        if (sh) {
+          var hdrs = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0]
+                       .map(function(h){ return String(h).trim().toLowerCase(); });
+          var want = (tipo === 'pago') ? 'link pago' : 'link factura';
+          var iCol = -1;
+          for (var c = 0; c < hdrs.length; c++) { if (hdrs[c].indexOf(want) > -1) { iCol = c; break; } }
+          if (iCol > -1) {
+            sh.getRange(rowNum, iCol + 1).setRichTextValue(
+              SpreadsheetApp.newRichTextValue().setText(displayName).setLinkUrl(url).build());
+          }
+        }
+      } catch(wErr) { /* no romper el upload si falla la escritura del link */ }
     }
-    logAudit(body.usuario||'sistema', 'Upload', 'Subir '+tipo, body.prefix||'', 'Archivo', '', fullName);
+    logAudit(body.usuario||'sistema', 'Upload', 'Subir '+tipo, prefix||'', 'Archivo', '', fullName);
     return {ok:true, url:url, fileName:fullName};
   } catch(ex) { return {ok:false, error:ex.message}; }
 }
