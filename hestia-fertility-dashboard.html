@@ -11594,13 +11594,14 @@ window.cxpSubmitPay = async function(rowNum) {
   var fecha = (document.getElementById('cxp-pay-fecha')||{}).value||'';
   var fp = (document.getElementById('cxp-pay-fp')||{}).value||'';
   var link = (document.getElementById('cxp-pay-link')||{}).value||'';
+  var factLink = (document.getElementById('cxp-pay-fact-link')||{}).value||'';
   if (!fecha) { alert('Selecciona la fecha de pago'); return; }
   var btn = document.getElementById('cxp-pay-btn');
   if(btn){btn.disabled=true;btn.textContent='Procesando…';}
   try {
     var s = getSession()||{};
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
-      action:'pagarCxP', rowNum:rowNum, fechaPago:fecha, formaPago:fp, linkPago:link, usuario:s.email||'sistema'
+      action:'pagarCxP', rowNum:rowNum, fechaPago:fecha, formaPago:fp, linkPago:link, linkFactura:factLink, usuario:s.email||'sistema'
     })});
     var res = await r.json();
     if (res.ok) { cxpClosePay(); loadCxPData(); }
