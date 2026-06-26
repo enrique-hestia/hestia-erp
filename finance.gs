@@ -2840,6 +2840,19 @@ function uploadFile(body) {
           var iCol = -1;
           for (var c = 0; c < hdrs.length; c++) { if (hdrs[c].indexOf(want) > -1) { iCol = c; break; } }
           if (iCol > -1) {
+            // Anti-duplicados: si la celda ya apunta a un archivo de Drive, mandarlo a la
+            // papelera antes de poner el nuevo. Así esta fila siempre tiene UN solo
+            // comprobante (el mismo archivo que se ve en CxP y en Egresos).
+            try {
+              var cellRange = sh.getRange(rowNum, iCol + 1);
+              var prevRich = cellRange.getRichTextValue();
+              var prevUrl = (prevRich && prevRich.getLinkUrl()) ? prevRich.getLinkUrl()
+                            : String(cellRange.getValue() || '');
+              var mId = prevUrl.match(/[-\w]{25,}/);
+              if (mId && mId[0] !== file.getId()) {
+                DriveApp.getFileById(mId[0]).setTrashed(true);
+              }
+            } catch(_dup) { /* si el archivo previo ya no existe, ignorar */ }
             sh.getRange(rowNum, iCol + 1).setRichTextValue(
               SpreadsheetApp.newRichTextValue().setText(displayName).setLinkUrl(url).build());
           }
