@@ -2074,7 +2074,7 @@ function renderView(view, data) {
 /* ── INGRESOS ─── */
 var ingChart=null, ingDonutChart=null;
 var _ingChart=null, _ingDonutChart=null, _ingPage=1, _ingPerPage=50;
-var _ingFilters={mes:'',categoria:'',formaPago:'',sucursal:'',buscar:''};
+var _ingFilters={mes:[],categoria:[],formaPago:[],sucursal:[],buscar:''};
 var _ingData=null;
 
 function renderIngresos(data) {
@@ -2147,14 +2147,15 @@ async function loadIngresosERP() {
   }
 }
 
+function _ingInSel(sel, v) { return !sel || !sel.length || sel.indexOf(v) > -1; }
 function _ingFilterRows() {
   if (!_ingData || !_ingData.rows) return [];
   var f = _ingFilters;
   return _ingData.rows.filter(function(r) {
-    if (f.mes && r.mes !== f.mes) return false;
-    if (f.categoria && r.categoria !== f.categoria) return false;
-    if (f.formaPago && r.formaPago !== f.formaPago) return false;
-    if (f.sucursal && r.sucursal !== f.sucursal) return false;
+    if (!_ingInSel(f.mes, r.mes)) return false;
+    if (!_ingInSel(f.categoria, r.categoria)) return false;
+    if (!_ingInSel(f.formaPago, r.formaPago)) return false;
+    if (!_ingInSel(f.sucursal, r.sucursal)) return false;
     if (f.buscar) {
       var q = f.buscar.toLowerCase();
       if ((r.paciente||'').toLowerCase().indexOf(q)===-1
@@ -2182,6 +2183,65 @@ function _ingSetFilter(key, val) {
   _ingPage = 1;
   _renderIngresosERP();
 }
+
+// ── Filtros multi-selección (checkboxes dentro del dropdown) ──
+var _ingOpenFilter = null, _ingFilterTimer = null;
+var _ingAllLabels = {mes:'Todos', categoria:'Todas', formaPago:'Todas', sucursal:'Todas'};
+function _ingMSelSummary(key) {
+  var sel = _ingFilters[key] || [];
+  if (!sel.length) return _ingAllLabels[key] || 'Todas';
+  if (sel.length === 1) return sel[0];
+  return sel.length + ' seleccionadas';
+}
+function _ingMSelHTML(key, label, options) {
+  var sel = _ingFilters[key] || [];
+  var opts = (options || []).map(function(v) {
+    var ck = sel.indexOf(v) > -1 ? ' checked' : '';
+    var safe = String(v).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    var txt = String(v).replace(/</g,'&lt;');
+    return '<label class="ing-msel-opt"><input type="checkbox"'+ck+' onchange="_ingMSelToggle(\''+key+'\',\''+safe+'\')"><span>'+txt+'</span></label>';
+  }).join('');
+  return '<div class="ing-fg"><div class="ing-fl">'+label+'</div>'
+    + '<div class="ing-msel" data-key="'+key+'">'
+    + '<button type="button" class="ing-msel-btn" onclick="_ingMSelOpen(\''+key+'\')">'
+    +   '<span class="ing-msel-sum'+(sel.length?' on':'')+'">'+_ingMSelSummary(key)+'</span>'
+    +   '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"/></svg></button>'
+    + '<div class="ing-msel-panel" id="ing-msel-'+key+'">'
+    +   (sel.length ? '<div class="ing-msel-clear" onclick="_ingMSelClear(\''+key+'\')">✕ Limpiar</div>' : '')
+    +   opts
+    + '</div></div></div>';
+}
+function _ingMSelOpen(key) {
+  var panel = document.getElementById('ing-msel-'+key);
+  var isOpen = panel && panel.classList.contains('open');
+  var all = document.querySelectorAll('.ing-msel-panel.open');
+  for (var i=0;i<all.length;i++) all[i].classList.remove('open');
+  if (!isOpen && panel) { panel.classList.add('open'); _ingOpenFilter = key; }
+  else { _ingOpenFilter = null; }
+}
+function _ingMSelToggle(key, value) {
+  if (!Array.isArray(_ingFilters[key])) _ingFilters[key] = [];
+  var arr = _ingFilters[key];
+  var i = arr.indexOf(value);
+  if (i > -1) arr.splice(i,1); else arr.push(value);
+  _ingOpenFilter = key;
+  var sumEl = document.querySelector('.ing-msel[data-key="'+key+'"] .ing-msel-sum');
+  if (sumEl) { sumEl.textContent = _ingMSelSummary(key); sumEl.classList.toggle('on', arr.length>0); }
+  clearTimeout(_ingFilterTimer);
+  _ingFilterTimer = setTimeout(function(){ _ingPage = 1; _renderIngresosERP(); }, 350);
+}
+function _ingMSelClear(key) {
+  _ingFilters[key] = [];
+  _ingOpenFilter = key;
+  _ingPage = 1;
+  _renderIngresosERP();
+}
+// Cerrar los dropdowns al hacer clic fuera
+document.addEventListener('click', function(e) {
+  if (e.target.closest && e.target.closest('.ing-msel')) return;
+  var op = document.querySelectorAll('.ing-msel-panel.open');
+  if (op.length) { for (var i=0;i<op.length;i++) op[i].classList.remove('open'); _ingOpenFilter = null; }
+});
 
 function ingToggleOp(safeId) {
   var det = document.getElementById('ing-det-'+safeId);
@@ -2239,6 +2299,15 @@ function _renderIngresosERP() {
     +'.ing-fl{font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)}'
     +'.ing-sel{appearance:none;background:var(--color-surface,#fafafa);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:6px 28px 6px 10px;font-size:11.5px;font-weight:600;color:var(--text-primary,#111);cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'10\' height=\'10\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%23999\' stroke-width=\'2\'%3E%3Cpolyline points=\'6 9 12 15 18 9\'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center}'
     +'.ing-search{border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:6px 10px;font-size:11.5px;color:var(--text-primary,#111);background:var(--color-surface,#fafafa);min-width:180px}'
+    +'.ing-msel{position:relative}'
+    +'.ing-msel-btn{display:flex;align-items:center;gap:8px;min-width:118px;justify-content:space-between;background:var(--color-surface,#fafafa);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:6px 10px;font-size:11.5px;font-weight:600;color:var(--text-primary,#111);cursor:pointer}'
+    +'.ing-msel-sum.on{color:var(--color-primary,#c46a7a)}'
+    +'.ing-msel-panel{display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:60;min-width:190px;max-height:280px;overflow-y:auto;background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.16);padding:6px}'
+    +'.ing-msel-panel.open{display:block}'
+    +'.ing-msel-opt{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-size:12px;color:var(--text-primary,#111);cursor:pointer;white-space:nowrap}'
+    +'.ing-msel-opt:hover{background:var(--color-surface,#f3f3f3)}'
+    +'.ing-msel-opt input{accent-color:var(--color-primary,#c46a7a);cursor:pointer;width:14px;height:14px}'
+    +'.ing-msel-clear{font-size:10.5px;font-weight:700;color:var(--color-primary,#c46a7a);cursor:pointer;padding:4px 8px 6px;text-align:right;border-bottom:1px solid var(--color-divider,#f0f0f0);margin-bottom:4px}'
     +'.ing-grid{display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start}'
     +'@media(max-width:1024px){.ing-grid{grid-template-columns:1fr}.ing-kstrip{grid-template-columns:repeat(2,1fr)}.ing-ks:nth-child(2){border-right:none}}'
     +'.ing-panel{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;overflow:hidden}'
@@ -2298,10 +2367,10 @@ function _renderIngresosERP() {
     return o;
   }
   h.push('<div class="ing-filters">'
-    +'<div class="ing-fg"><div class="ing-fl">Mes</div><select class="ing-sel" onchange="_ingSetFilter(\'mes\',this.value)">'+selOpts(meses,_ingFilters.mes,'Todos')+'</select></div>'
-    +'<div class="ing-fg"><div class="ing-fl">Categoría</div><select class="ing-sel" onchange="_ingSetFilter(\'categoria\',this.value)">'+selOpts(cats,_ingFilters.categoria,'Todas')+'</select></div>'
-    +'<div class="ing-fg"><div class="ing-fl">Forma de pago</div><select class="ing-sel" onchange="_ingSetFilter(\'formaPago\',this.value)">'+selOpts(fps,_ingFilters.formaPago,'Todas')+'</select></div>'
-    +(sucs.length?'<div class="ing-fg"><div class="ing-fl">Sucursal</div><select class="ing-sel" onchange="_ingSetFilter(\'sucursal\',this.value)">'+selOpts(sucs,_ingFilters.sucursal,'Todas')+'</select></div>':'')
+    +_ingMSelHTML('mes','Mes',meses)
+    +_ingMSelHTML('categoria','Categoría',cats)
+    +_ingMSelHTML('formaPago','Forma de pago',fps)
+    +(sucs.length?_ingMSelHTML('sucursal','Sucursal',sucs):'')
     +'<div class="ing-fg"><div class="ing-fl">Buscar</div><input id="ing-buscar" class="ing-search" placeholder="Paciente, producto o ID…" value="'+(_ingFilters.buscar||'')+'" oninput="_ingBuscarDebounce(this.value)"></div>'
     +'<div style="margin-left:auto;font-size:11px;font-weight:700;color:var(--text-primary,#111)">Filtrado: '+fC(totalFiltered)+'</div>'
     +'</div>');
@@ -2546,6 +2615,9 @@ function _renderIngresosERP() {
   h.push('</div>'); // /ing-w
 
   el.innerHTML = h.join('');
+
+  // Reabrir el dropdown de filtro que estaba abierto (multi-select sin cerrarse)
+  if (_ingOpenFilter) { var _op = document.getElementById('ing-msel-'+_ingOpenFilter); if (_op) _op.classList.add('open'); }
 
   // Render chart
   setTimeout(function(){
