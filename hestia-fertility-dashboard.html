@@ -5136,8 +5136,8 @@ async function loadMenu() {
     lucide.createIcons();
     // Recordatorio de gastos fijos por programar (una vez por sesión)
     try { if (typeof gfCheckBanner === 'function') setTimeout(gfCheckBanner, 4000); } catch(e) {}
-    // Recordatorios personales del día (agenda)
-    try { if (typeof recCheckBanner === 'function') setTimeout(recCheckBanner, 5500); } catch(e) {}
+    // Saludo del día (1 vez al día) con tus pendientes — reemplaza al banner de recordatorios
+    try { if (typeof morningGreeting === 'function') setTimeout(morningGreeting, 5500); } catch(e) {}
   } catch(e) {
     setStatus('Error cargando menú: ' + e.message, 'err');
     console.error('loadMenu error:', e);
@@ -12323,6 +12323,47 @@ function showRecBanner(n){
   setTimeout(function(){ b.style.bottom=bottom; },80);
 }
 function hideRecBanner(){ var b=document.getElementById('rec-banner'); if(b){ b.style.bottom='-160px'; setTimeout(function(){ if(b.parentNode)b.parentNode.removeChild(b); },420);} }
+
+/* ── Saludo del día (1 vez al día, no satura) — reemplaza al banner de recordatorios ── */
+function _greetKey(){ return 'hestia_greet_'+new Date().toISOString().substring(0,10); }
+function _saludoHora(){ var h=new Date().getHours(); return h<12?'Buenos días':h<19?'Buenas tardes':'Buenas noches'; }
+function _firstName(){
+  var s=getSession()||{};
+  var nm=String(s.nombre||'').trim();
+  if(nm){ var f=nm.split(/\s+/)[0]; return f.charAt(0).toUpperCase()+f.slice(1); }
+  var local=String(s.email||'').split('@')[0].split(/[._-]/)[0];
+  return local ? local.charAt(0).toUpperCase()+local.slice(1) : '';
+}
+async function morningGreeting(){
+  try{
+    if(localStorage.getItem(_greetKey())) return; // ya saludamos hoy → no saturar
+    var n=0;
+    try{
+      var tok=encodeURIComponent(getToken()), u=encodeURIComponent(recCurrentUser());
+      if(u){ var d=await fetch(APPS_SCRIPT_URL+'?action=recordatoriosPend&usuario='+u+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();}); if(d&&d.ok) n=d.total||0; }
+    }catch(e){}
+    showGreeting(_firstName(), n);
+  }catch(e){}
+}
+function showGreeting(nombre, n){
+  if(document.getElementById('hestia-greet')) return;
+  try{ localStorage.setItem(_greetKey(),'1'); }catch(e){} // 1 sola vez al día
+  var icon=(new Date().getHours()<19)?'☀️':'🌙';
+  var sub = n>0 ? ('Tienes <b>'+n+'</b> pendiente'+(n===1?'':'s')+' para hoy. ¿Empezamos a organizar tu día?')
+                : '¿Quieres agendar tus pendientes de hoy y vas tachándolos?';
+  var cta = n>0 ? 'Empezar mi día' : 'Agendar pendientes';
+  var b=document.createElement('div'); b.id='hestia-greet';
+  b.style.cssText='position:fixed;right:20px;top:-180px;z-index:2147483000;background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.16);padding:15px 17px;width:min(340px,calc(100% - 24px));transition:top .45s cubic-bezier(.4,0,.2,1);font-family:var(--font-primary,sans-serif)';
+  b.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'
+    +'<div style="font-size:15px;font-weight:800;color:var(--text-primary,#111)">'+icon+' '+_saludoHora()+(nombre?(', '+_cxpEsc(nombre)):'')+'</div>'
+    +'<button onclick="hideGreeting()" style="background:none;border:none;font-size:18px;cursor:pointer;color:#9ca3af;line-height:1">×</button></div>'
+    +'<div style="font-size:12px;color:var(--text-secondary,#6b7280);margin:5px 0 12px;line-height:1.5">'+sub+'</div>'
+    +'<div style="display:flex;gap:8px"><button onclick="navigateTo(\'recordatorios\');hideGreeting()" style="flex:1;padding:9px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">'+cta+'</button>'
+    +'<button onclick="hideGreeting()" style="padding:9px 14px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider);border-radius:9px;font-size:12px;cursor:pointer">Ahora no</button></div>';
+  document.body.appendChild(b);
+  setTimeout(function(){ b.style.top='20px'; },120);
+}
+function hideGreeting(){ var b=document.getElementById('hestia-greet'); if(b){ b.style.top='-180px'; setTimeout(function(){ if(b.parentNode)b.parentNode.removeChild(b); },450);} }
 
 // ── CxP Payment modal ──
 window.cxpOpenPay = function(rowNum, proveedor, monto, divisa) {
