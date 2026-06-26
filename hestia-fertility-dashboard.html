@@ -8058,8 +8058,9 @@ function _hfTick(ts){
   if(window._hfT0==null) window._hfT0=ts;
   var t=(ts-window._hfT0)/1000;
   var C=2*Math.PI*52;
-  var x=Math.min(t/2.6,1);
-  var p=100*(1-Math.pow(1-x,3));                       // ease-out: llega a 100% (~2.6s) y se queda cerrado
+  // Se acerca asintóticamente a ~92% y NO cierra por tiempo: el círculo solo se
+  // completa cuando los datos reales reemplazan el loader (carga real, no un timer).
+  var p=92*(1-Math.exp(-t/1.15));
   arc.style.strokeDashoffset=C*(1-p/100);
   pct.textContent=Math.round(p)+'%';
   window._hfRAF=requestAnimationFrame(_hfTick);
@@ -11548,6 +11549,7 @@ window.cxpOpenPay = function(rowNum, proveedor, monto) {
   if(title) title.textContent = 'Pagar a ' + proveedor;
   var body = document.getElementById('cxp-pay-body');
   if (!body) return;
+  window._cxpPayMonto = monto;
   var today = new Date().toISOString().substring(0,10);
   var S = 'style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"';
   body.innerHTML = '<div style="padding:4px">'
@@ -11559,7 +11561,20 @@ window.cxpOpenPay = function(rowNum, proveedor, monto) {
       + '<div><label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Fecha de pago *</label>'
         + '<input type="date" id="cxp-pay-fecha" '+S+' value="'+today+'"></div>'
       + '<div><label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Forma de pago *</label>'
-        + '<select id="cxp-pay-fp" '+S+'><option>Mercado Pago</option><option>Santander</option><option>AMEX</option><option>Transferencia</option><option>Efectivo</option></select></div>'
+        + '<select id="cxp-pay-fp" '+S+' onchange="cxpPayDivisaToggle()"><option>Mercado Pago</option><option>Santander</option><option>AMEX</option><option>Transferencia</option><option>Efectivo</option></select></div>'
+      + '<div id="cxp-pay-divisa-wrap" style="display:none;background:var(--color-surface,#f8fafc);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:12px;gap:10px;flex-direction:column">'
+        + '<div style="display:flex;gap:10px">'
+          + '<div style="flex:1"><label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Divisa</label>'
+            + '<select id="cxp-pay-divisa" '+S+' onchange="cxpPayDivisaToggle()"><option value="MXN">MXN — Pesos</option><option value="USD">USD — Dólares</option></select></div>'
+          + '<div style="flex:1" id="cxp-pay-tc-wrap"><label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Tipo de cambio</label>'
+            + '<input type="number" id="cxp-pay-tc" step="0.0001" min="0" placeholder="Ej. 18.50" '+S+' oninput="cxpPayDivisaCalc()"></div>'
+        + '</div>'
+        + '<div id="cxp-pay-usd-wrap" style="display:none">'
+          + '<label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Importe en USD</label>'
+          + '<input type="number" id="cxp-pay-usd" step="0.01" min="0" '+S+' oninput="cxpPayDivisaCalc()">'
+          + '<div id="cxp-pay-mxn-calc" style="font-size:11px;margin-top:6px;color:#166534;font-weight:600"></div>'
+        + '</div>'
+      + '</div>'
       + '<div><label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Comprobante de pago</label>'
         + '<div id="cxp-drop-pago" class="erp-dropzone" data-tipo="pago" data-prefix="CXP-'+rowNum+'">'
           + '<div class="erp-dz-icon">📄</div>'
@@ -11590,18 +11605,53 @@ window.cxpClosePay = function() {
   if(m)m.style.display='none'; if(o)o.style.display='none';
 };
 
+// Muestra divisa/tipo de cambio solo para Santander y AMEX
+window.cxpPayDivisaToggle = function() {
+  var fp = (document.getElementById('cxp-pay-fp')||{}).value||'';
+  var wrap = document.getElementById('cxp-pay-divisa-wrap');
+  var esBanco = (fp === 'Santander' || fp === 'AMEX');
+  if (wrap) wrap.style.display = esBanco ? 'flex' : 'none';
+  var divisa = (document.getElementById('cxp-pay-divisa')||{}).value||'MXN';
+  var esUSD = esBanco && divisa === 'USD';
+  var tcWrap = document.getElementById('cxp-pay-tc-wrap');
+  var usdWrap = document.getElementById('cxp-pay-usd-wrap');
+  if (tcWrap) tcWrap.style.display = esUSD ? 'block' : 'none';
+  if (usdWrap) usdWrap.style.display = esUSD ? 'block' : 'none';
+  cxpPayDivisaCalc();
+};
+window.cxpPayDivisaCalc = function() {
+  var usd = parseFloat((document.getElementById('cxp-pay-usd')||{}).value)||0;
+  var tc = parseFloat((document.getElementById('cxp-pay-tc')||{}).value)||0;
+  var out = document.getElementById('cxp-pay-mxn-calc');
+  if (out) out.textContent = (usd>0 && tc>0)
+    ? '= $'+(usd*tc).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' MXN'
+    : '';
+};
+
 window.cxpSubmitPay = async function(rowNum) {
   var fecha = (document.getElementById('cxp-pay-fecha')||{}).value||'';
   var fp = (document.getElementById('cxp-pay-fp')||{}).value||'';
   var link = (document.getElementById('cxp-pay-link')||{}).value||'';
   var factLink = (document.getElementById('cxp-pay-fact-link')||{}).value||'';
   if (!fecha) { alert('Selecciona la fecha de pago'); return; }
+  // Divisa solo aplica a Santander / AMEX
+  var divisa = 'MXN', tipoCambio = 0, montoUSD = 0;
+  if (fp === 'Santander' || fp === 'AMEX') {
+    divisa = (document.getElementById('cxp-pay-divisa')||{}).value||'MXN';
+    if (divisa === 'USD') {
+      tipoCambio = parseFloat((document.getElementById('cxp-pay-tc')||{}).value)||0;
+      montoUSD = parseFloat((document.getElementById('cxp-pay-usd')||{}).value)||0;
+      if (!(tipoCambio > 0)) { alert('Captura el tipo de cambio'); return; }
+      if (!(montoUSD > 0)) { alert('Captura el importe en USD'); return; }
+    }
+  }
   var btn = document.getElementById('cxp-pay-btn');
   if(btn){btn.disabled=true;btn.textContent='Procesando…';}
   try {
     var s = getSession()||{};
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
-      action:'pagarCxP', rowNum:rowNum, fechaPago:fecha, formaPago:fp, linkPago:link, linkFactura:factLink, usuario:s.email||'sistema'
+      action:'pagarCxP', rowNum:rowNum, fechaPago:fecha, formaPago:fp, linkPago:link, linkFactura:factLink,
+      divisa:divisa, tipoCambio:tipoCambio, montoUSD:montoUSD, usuario:s.email||'sistema'
     })});
     var res = await r.json();
     if (res.ok) { cxpClosePay(); loadCxPData(); }

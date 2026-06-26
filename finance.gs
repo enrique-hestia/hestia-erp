@@ -1142,12 +1142,27 @@ function pagarCxP(body) {
       sh.getRange(rowNum, 13).setValue(true); // FACTURACION = TRUE
     }
 
+    // Divisa (solo aplica a Santander / AMEX)
+    var divisa = body.divisa || 'MXN';
+    var tipoCambio = parseFloat(body.tipoCambio) || 0;
+    var montoUSD = parseFloat(body.montoUSD) || 0;
+
     // Leer datos de la fila para banco routing
     var rowData = sh.getRange(rowNum, 1, 1, 20).getValues()[0];
     var monto = parseFloat(rowData[9]) || 0;
     var proveedor = String(rowData[4] || '');
     var concepto = String(rowData[8] || '');
     var egId = String(rowData[0] || '');
+
+    // Pago en USD: convertir a MXN, actualizar el monto del egreso y dejar nota
+    var esUSD = (formaPago === 'Santander' || formaPago === 'AMEX') && divisa === 'USD' && tipoCambio > 0 && montoUSD > 0;
+    if (esUSD) {
+      monto = Math.round(montoUSD * tipoCambio * 100) / 100;
+      sh.getRange(rowNum, 10).setValue(monto); // Monto del egreso en MXN (col J)
+      var notaPrev = String(rowData[10] || '');
+      var notaUSD = 'USD ' + montoUSD.toFixed(2) + ' @ TC ' + tipoCambio;
+      sh.getRange(rowNum, 11).setValue(notaPrev ? (notaPrev + ' · ' + notaUSD) : notaUSD); // Notas (col K)
+    }
 
     // Rutear a banco según forma de pago
     if (formaPago === 'Efectivo' && monto > 0) {
@@ -1164,11 +1179,13 @@ function pagarCxP(body) {
         }
       } catch(ccErr) { /* silencioso */ }
     } else if (formaPago && monto > 0) {
-      // Otros → banco correspondiente
+      // Otros → banco correspondiente. Tipo de cambio: Santander col F (idx 5), AMEX col E (idx 4)
       var banco = '', bankRow = null;
       var mesStr = fechaPago.substring(0, 7);
-      if (formaPago === 'Santander') { banco = 'santander'; bankRow = [fechaPago, 0, monto, 0, concepto + ' · ' + proveedor, 0, 0, '', '']; }
-      else if (formaPago === 'AMEX') { banco = 'amex'; bankRow = [fechaPago, monto, 0, concepto + ' · ' + proveedor, 0, 0, '', '', mesStr]; }
+      var tcSant = esUSD ? tipoCambio : '';
+      var tcAmex = esUSD ? tipoCambio : '';
+      if (formaPago === 'Santander') { banco = 'santander'; bankRow = [fechaPago, 0, monto, 0, concepto + ' · ' + proveedor, tcSant, 0, '', '']; }
+      else if (formaPago === 'AMEX') { banco = 'amex'; bankRow = [fechaPago, monto, 0, concepto + ' · ' + proveedor, tcAmex, 0, '', '', mesStr]; }
       else if (formaPago === 'Mercado Pago') { banco = 'mercadopago'; bankRow = [mesStr, fechaPago, 0, 0, 0, 0, 0, false, concepto + ' · ' + proveedor, 'pago']; }
       if (banco && bankRow) {
         try { saveBankRow(banco, bankRow); } catch(bErr) { /* silencioso */ }
