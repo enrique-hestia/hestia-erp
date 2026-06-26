@@ -73,7 +73,7 @@ function _anLoadErBudget() {
   if (!erSh) erSh = all[0];
   var er = _anReadErSheetMonthly(erSh);
   var bg = bgSh ? _anReadErSheetMonthly(bgSh) : { income: {}, byLine: {} };
-  return { er: er, budget: bg.income };
+  return { er: er, budget: bg.income, budgetByLine: bg.byLine };
 }
 
 // Lee BD_Ingresos y devuelve rollup por año/mes/cat/prod
@@ -144,22 +144,13 @@ function readAnalisisIngresos() {
 
     // 4. YTD
     var ytdActual=0, ytdBudget=0, ytdPrev=0;
-    var ytdBudgetFull=0;
     Object.keys(erIncome).sort().forEach(function(ym) {
       var y = ym.substring(0,4), mStr = ym.substring(5,7);
-      if (y == anioActual) {
-        if (ym <= mesActual) ytdActual += erIncome[ym]||0;
-        if (ym <= mesActual) ytdBudget += budget[ym]||0;
-        ytdBudgetFull += budget[ym]||0;
-      }
+      if (y == anioActual && ym <= mesActual) { ytdActual += erIncome[ym]||0; ytdBudget += budget[ym]||0; }
       if (y == anioAnterior && mStr <= mesActual.substring(5)) ytdPrev += erIncome[ym]||0;
     });
-    // complementa budget full de la pestaña budget
-    Object.keys(budget).forEach(function(ym) {
-      if (ym.substring(0,4) == anioActual) ytdBudgetFull = Math.max(ytdBudgetFull, (budget[ym]||0) + ytdBudgetFull);
-    });
-    // recalc budget full limpio
-    ytdBudgetFull = 0;
+    // Budget completo del año (todos los meses de la pestaña Budget)
+    var ytdBudgetFull = 0;
     Object.keys(budget).forEach(function(ym) { if (ym.substring(0,4) == anioActual) ytdBudgetFull += budget[ym]||0; });
 
     // 5. Mix por categoría desde BD_Ingresos (año actual)
@@ -446,14 +437,7 @@ function readAnalisisServicios() {
     var anioActual = new Date().getFullYear();
     var eb = _anLoadErBudget();
     var erByLine = eb.er.byLine;   // {'Surrogacy': {'2026-04':200000}, ...}
-    var bgByLine = _anReadErSheetMonthly(
-      (function() {
-        var ss = SpreadsheetApp.openById(ER_SS_ID);
-        var all = ss.getSheets();
-        for (var i=0;i<all.length;i++) if (all[i].getSheetId()===BUDGET_GID) return all[i];
-        return null;
-      })()
-    ).byLine;
+    var bgByLine = eb.budgetByLine || {};   // budget por línea (sin reabrir el ER)
     var bd = _anReadBDIngresos();
 
     // Totales anuales por línea desde ER (autoritativo)
@@ -714,17 +698,18 @@ function readEstadoCuentaPaciente(pacienteNombre) {
         }
         if (!sh) return;
         var data = sh.getDataRange().getValues();
-        var hdr = data[0];
-        var iOp   = hdr.indexOf('OP');
-        var iFecha = hdr.indexOf('Fecha');
-        var iPac  = hdr.indexOf('Paciente');
-        var iCat  = hdr.indexOf('Categoria');
-        var iProd = hdr.indexOf('Producto');
-        var iDesc = hdr.indexOf('Descripcion');
-        var iCant = hdr.indexOf('Cantidad');
-        var iTotal= hdr.indexOf('TotalPagar');
-        var iEst  = hdr.indexOf('Estatus');
-        var iPago = hdr.indexOf('FormaPago');
+        var H = data[0].map(function(x){ return String(x||'').trim().toLowerCase(); });
+        function hc(){ for (var a=0;a<arguments.length;a++){ var k=H.indexOf(arguments[a]); if(k>-1) return k; } return -1; }
+        var iOp    = hc('op');
+        var iFecha = hc('fecha');
+        var iPac   = hc('paciente');
+        var iCat   = hc('categoria','categoría');
+        var iProd  = hc('producto');
+        var iDesc  = hc('descripcion','descripción');
+        var iCant  = hc('cantidad');
+        var iTotal = hc('totalpagar','total a pagar','total');
+        var iEst   = hc('estatus','estado');
+        var iPago  = hc('formapago','forma de pago','forma pago');
         if (iPac < 0 || iTotal < 0) return;
         for (var r = 1; r < data.length; r++) {
           var row = data[r];

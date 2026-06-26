@@ -159,7 +159,7 @@ function doGet(e) {
 
     // ── USUARIOS: listado para admin ──
     if (action === 'usuarios') {
-      if (!currentUser || currentUser.rol !== 'admin')
+      if (!currentUser || String(currentUser.rol||'').toLowerCase() !== 'admin')
         return jsonResponse({ error: 'Sin permisos de administrador.' });
       var shU2 = ss.getSheetByName('Usuarios');
       var rowsU = shU2.getDataRange().getValues();
@@ -181,24 +181,8 @@ function doGet(e) {
       return jsonResponse({ usuarios: usuarios, roles: roles });
     }
 
-    // ── SAVEUSER: crear/actualizar usuario (solo admin) ──
-    if (action === 'saveuser') {
-      if (!currentUser || currentUser.rol !== 'admin')
-        return jsonResponse({ error: 'Sin permisos de administrador.' });
-      var shU3   = ss.getSheetByName('Usuarios');
-      var hdrs3  = shU3.getRange(1,1,1,shU3.getLastColumn()).getValues()[0];
-      var rowNum3= parseInt((e && e.parameter.rowNum) || '0');
-      var newRow = hdrs3.map(function(h) {
-        var key = String(h).trim();
-        return (e.parameter[key] !== undefined) ? e.parameter[key] : '';
-      });
-      if (rowNum3 > 1) {
-        shU3.getRange(rowNum3, 1, 1, hdrs3.length).setValues([newRow]);
-      } else {
-        shU3.appendRow(newRow);
-      }
-      return jsonResponse({ success: true });
-    }
+    // ── SAVEUSER: se maneja SOLO por POST (finance.gs doPost) para no
+    //    pasar la contraseña por la URL ni borrarla al editar. ──
 
     // ── SAVEROLE: crea o actualiza un rol (solo admin) ──
     if (action === 'saveRole') {

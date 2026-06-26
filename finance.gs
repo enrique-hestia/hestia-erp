@@ -576,7 +576,7 @@ function doPost(e) {
       var tkEmail = verifyToken(body.token || '');
       if (!tkEmail) return jsonResponse({ error: 'Sesión inválida.', code: 401 });
       var cu = getUserRow(ss, tkEmail);
-      if (!cu || cu.rol !== 'admin') return jsonResponse({ error: 'Sin permisos de administrador.' });
+      if (!cu || String(cu.rol||'').toLowerCase() !== 'admin') return jsonResponse({ error: 'Sin permisos de administrador.' });
       var shU  = ss.getSheetByName('Usuarios');
       if (!shU) return jsonResponse({ error: 'Hoja Usuarios no encontrada.' });
       var hdrs = shU.getRange(1,1,1,shU.getLastColumn()).getValues()[0];
