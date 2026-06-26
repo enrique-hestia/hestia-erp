@@ -10320,12 +10320,17 @@ async function pcLoadScheduled() {
     var d = await fetch(APPS_SCRIPT_URL+'?action=scheduledTasks&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();});
     if (!d.ok) throw new Error(d.error||'No se pudo leer');
     if (!d.tasks || !d.tasks.length) { box.innerHTML='<div style="padding:20px;color:var(--color-text-muted);font-size:13px">No hay tareas registradas.</div>'; return; }
-    box.innerHTML = d.tasks.map(_pcSchedRow).join('');
+    var note = (d.scopeOk===false)
+      ? '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:11px 14px;margin-bottom:12px;font-size:11.5px;color:#92400e;line-height:1.6">⚠ Falta autorizar el permiso <b>ScriptApp</b> para instalar/ver el estado de los disparadores. En Apps Script corre una vez <b>setupScheduledTriggers()</b> (acepta el permiso) y vuelve a desplegar. Mientras tanto puedes ajustar las horas aquí — se guardan y se aplican al autorizar.</div>'
+      : '';
+    box.innerHTML = note + d.tasks.map(_pcSchedRow).join('');
   } catch(e){ box.innerHTML='<div style="padding:18px;color:#b91c1c;font-size:12.5px">⚠ '+e.message+'<br><span style="color:var(--color-text-muted)">Agrega/actualiza <b>scheduler.gs</b> y vuelve a desplegar el backend.</span></div>'; }
 }
 function _pcSchedRow(t){
   var freq = t.tipo==='mensual' ? ('Mensual · día '+(t.dia||1)) : 'Diaria';
-  var estado = t.instalado ? (t.activo?'<span style="color:#16a34a;font-weight:700">● Activa</span>':'<span style="color:#b45309;font-weight:700">● Pausada</span>') : '<span style="color:#9ca3af;font-weight:700">○ Sin instalar</span>';
+  var estado = t.instalado===null ? '<span style="color:#9ca3af;font-weight:700">○ Estado no disponible</span>'
+    : t.instalado ? (t.activo?'<span style="color:#16a34a;font-weight:700">● Activa</span>':'<span style="color:#b45309;font-weight:700">● Pausada</span>')
+    : '<span style="color:#9ca3af;font-weight:700">○ Sin instalar</span>';
   var last = t.lastRun ? ('<div style="font-size:10.5px;color:var(--color-text-muted);margin-top:3px">Última ejecución: '+String(t.lastRun).replace('T',' ').substring(0,16)+'</div>') : '';
   return '<div style="border:1px solid var(--color-divider);border-radius:11px;padding:14px 16px;margin-bottom:12px;background:var(--color-surface-2)">'
     + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">'
@@ -10352,7 +10357,7 @@ async function pcSaveScheduled(id){
   try {
     var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'updateScheduledTask', id:id, hora:hora, minuto:minuto, activo:activo, usuario:s.email||'sistema'})});
     var res=await r.json();
-    if(res.ok){ pcLoadScheduled(); setStatus('Tarea programada actualizada'); } else alert('Error: '+(res.error||''));
+    if(res.ok){ pcLoadScheduled(); setStatus(res.scopeOk===false?'Hora guardada — autoriza ScriptApp (setupScheduledTriggers) para aplicar el disparador':'Tarea programada actualizada'); } else alert('Error: '+(res.error||''));
   } catch(e){ alert('Error: '+e.message); }
 }
 

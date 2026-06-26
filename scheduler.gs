@@ -533,18 +533,22 @@ function _schedSetCfg(id, key, val){
 function readScheduledTasks() {
   try {
     var tasks = _schedTasks();
-    var triggers = ScriptApp.getProjectTriggers();
+    // getProjectTriggers requiere el scope script.scriptapp. Si no está autorizado,
+    // NO tronamos: devolvemos las tareas con estado desconocido y un flag.
+    var triggers = [], scopeOk = true;
+    try { triggers = ScriptApp.getProjectTriggers(); }
+    catch(se) { scopeOk = false; }
     var lastRun = PropertiesService.getScriptProperties().getProperty(CFG_LAST_RUN) || '';
     var out = tasks.map(function(t){
       var hora   = parseInt(_schedGetCfg(t.id,'hora',t.horaDefault),10);
       var minuto = parseInt(_schedGetCfg(t.id,'minuto',t.minuto||0),10);
       var activo = String(_schedGetCfg(t.id,'activo','true')) !== 'false';
-      var instalado = triggers.some(function(tr){ return tr.getHandlerFunction()===t.handler; });
+      var instalado = scopeOk ? triggers.some(function(tr){ return tr.getHandlerFunction()===t.handler; }) : null;
       return { id:t.id, nombre:t.nombre, desc:t.desc, tipo:t.tipo, handler:t.handler,
                dia:t.dia||null, hora:hora, minuto:minuto, activo:activo, instalado:instalado,
                lastRun: (t.handler==='actualizarConfiguracionSistema') ? lastRun : '' };
     });
-    return { ok:true, tasks:out };
+    return { ok:true, tasks:out, scopeOk:scopeOk };
   } catch(ex){ return { ok:false, error:ex.message, tasks:[] }; }
 }
 
@@ -567,11 +571,16 @@ function updateScheduledTask(body) {
     var minuto = Math.max(0, Math.min(59, parseInt(body.minuto,10)));
     if (isNaN(minuto)) minuto = 0;
     var activo = !(body.activo===false || String(body.activo)==='false');
+    // La configuración (hora/min/activo) se guarda siempre (no requiere permisos especiales).
     _schedSetCfg(t.id,'hora',hora);
     _schedSetCfg(t.id,'minuto',minuto);
     _schedSetCfg(t.id,'activo',activo);
-    _schedInstallTrigger(t, hora, minuto, activo);
-    return { ok:true, id:t.id, hora:hora, minuto:minuto, activo:activo };
+    // Instalar el disparador SÍ requiere el scope script.scriptapp; si falta, lo reportamos
+    // sin tronar (la config queda guardada y se aplicará al autorizar/instalar).
+    var scopeOk = true, instErr = '';
+    try { _schedInstallTrigger(t, hora, minuto, activo); }
+    catch(se) { scopeOk = false; instErr = se.message; }
+    return { ok:true, id:t.id, hora:hora, minuto:minuto, activo:activo, scopeOk:scopeOk, instErr:instErr };
   } catch(ex){ return { ok:false, error:ex.message }; }
 }
 
