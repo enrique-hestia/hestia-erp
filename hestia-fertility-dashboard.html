@@ -886,6 +886,9 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 <!-- ══ VISTA: GASTOS FIJOS (recurrentes) ══ -->
 <div id="view-gastos-fijos" class="view" style="display:none"><div id="gf-root"></div></div>
 
+<!-- ══ VISTA: RECORDATORIOS (agenda personal) ══ -->
+<div id="view-recordatorios" class="view" style="display:none"><div id="rec-root"></div></div>
+
 <!-- ══ VISTA: CONCILIACIÓN BANCARIA ══ -->
 <div id="view-conciliacion" class="view" style="display:none"></div>
 
@@ -5110,6 +5113,14 @@ async function loadMenu() {
         });
       }
     }
+    // Inyectar "Recordatorios" (agenda personal) como ítem propio en la primera sección
+    if (!menuItems.some(function(i){ return i.id==='recordatorios'; })) {
+      var _secRef = (menuItems.filter(function(i){ return i.seccion; })[0]||{}).seccion || '';
+      menuItems.push({
+        id:'recordatorios', label:'Recordatorios', padre:'',
+        icono:'bell', tipo:'vista', orden:0.5, seccion:_secRef, fuente:'recordatorios'
+      });
+    }
     // Default: mes en curso (no año completo)
     var _now = new Date();
     var _y = _now.getFullYear();
@@ -5125,6 +5136,8 @@ async function loadMenu() {
     lucide.createIcons();
     // Recordatorio de gastos fijos por programar (una vez por sesión)
     try { if (typeof gfCheckBanner === 'function') setTimeout(gfCheckBanner, 4000); } catch(e) {}
+    // Recordatorios personales del día (agenda)
+    try { if (typeof recCheckBanner === 'function') setTimeout(recCheckBanner, 5500); } catch(e) {}
   } catch(e) {
     setStatus('Error cargando menú: ' + e.message, 'err');
     console.error('loadMenu error:', e);
@@ -7997,6 +8010,14 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     var _gfEl = document.getElementById('view-gastos-fijos');
     if (_gfEl) _gfEl.style.display = '';
     loadGastosFijos();
+    return;
+  }
+  // Recordatorios — agenda personal
+  if (viewId === 'recordatorios') {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _recEl = document.getElementById('view-recordatorios');
+    if (_recEl) _recEl.style.display = '';
+    loadRecordatorios();
     return;
   }
   // Cuentas por Pagar — reporte de vencimientos
@@ -12152,6 +12173,156 @@ function showGfBanner(n, per){
   setTimeout(function(){ b.style.bottom='20px'; },60);
 }
 function hideGfBanner(){ var b=document.getElementById('gf-banner'); if(b){ b.style.bottom='-140px'; setTimeout(function(){ if(b.parentNode) b.parentNode.removeChild(b); },420);} }
+
+/* ══════════════ RECORDATORIOS (agenda personal — abierta a todo el sistema) ══════════════ */
+function recCurrentUser(){ var s=getSession()||{}; return String(s.email||'').toLowerCase(); }
+function _recToday(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function _recAddDays(n){ var d=new Date(); d.setDate(d.getDate()+(n||0)); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+
+async function loadRecordatorios(){
+  var root=document.getElementById('rec-root'); if(!root) return;
+  root.innerHTML=hestiaLoader('Cargando recordatorios…');
+  try{
+    var tok=encodeURIComponent(getToken()), u=encodeURIComponent(recCurrentUser());
+    var d=await fetch(APPS_SCRIPT_URL+'?action=recordatorios&usuario='+u+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();});
+    if(d&&d.error) throw new Error(d.error);
+    window._recData=d||{pendientes:[],proximos:[],hechos:[],hoy:_recToday()};
+    await hfFinish();
+    _renderRecordatorios();
+  }catch(e){ root.innerHTML='<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px;line-height:1.6">⚠ '+e.message+'<br><span style="color:#6b7280">Primera vez: agrega <b>recordatorios.gs</b> en Apps Script, corre <b>setupRecordatorios()</b> y redesplega.</span></div>'; }
+}
+
+function _recCard(r, hoy){
+  var venc=r.fecha && r.fecha<hoy, esHoy=r.fecha===hoy;
+  var pend=r.estado==='pendiente';
+  var bdg = !pend ? '<span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:20px;background:#f3f4f6;color:#6b7280">'+(r.estado==='hecho'?'Hecho':'Descartado')+'</span>'
+    : venc ? '<span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:20px;background:#fee2e2;color:#991b1b">Vencido · '+r.fecha+'</span>'
+    : esHoy ? '<span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:20px;background:#fef9c3;color:#854d0e">Hoy</span>'
+    : '<span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:20px;background:#dbeafe;color:#1e40af">'+(r.fecha||'sin fecha')+'</span>';
+  var meta=[]; if(r.origen&&r.origen!=='manual') meta.push(_cxpEsc(r.origen)); if(r.referencia) meta.push(_cxpEsc(r.referencia));
+  var acc = pend
+    ? '<button onclick="recDone('+r.rowNum+')" style="padding:5px 11px;background:#166534;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">✓ Hecho</button>'
+      +'<button onclick="recEstado('+r.rowNum+',\'descartado\')" style="padding:5px 10px;background:var(--color-surface,#f3f4f6);color:var(--text-secondary,#6b7280);border:1px solid var(--color-divider);border-radius:7px;font-size:11px;cursor:pointer">Descartar</button>'
+    : '<button onclick="recEstado('+r.rowNum+',\'pendiente\')" style="padding:5px 10px;background:var(--color-surface,#f3f4f6);color:#2563eb;border:1px solid var(--color-divider);border-radius:7px;font-size:11px;cursor:pointer">Reabrir</button>';
+  acc+='<button onclick="recDelete('+r.rowNum+')" style="padding:5px 9px;background:rgba(220,38,38,.07);color:#dc2626;border:none;border-radius:7px;font-size:12px;cursor:pointer" title="Eliminar">🗑</button>';
+  return '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:12px 15px;margin-bottom:10px;'+(pend?'':'opacity:.7')+'">'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">'
+    +'<div style="flex:1;min-width:180px"><div style="font-size:13px;font-weight:700;color:var(--text-primary,#111)">'+_cxpEsc(r.titulo)+' '+bdg+'</div>'
+    +(r.detalle?'<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">'+_cxpEsc(r.detalle)+'</div>':'')
+    +(meta.length?'<div style="font-size:10.5px;color:var(--text-secondary,#9ca3af);margin-top:4px">'+meta.join(' · ')+'</div>':'')+'</div>'
+    +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'+acc+'</div></div></div>';
+}
+
+function _renderRecordatorios(){
+  var root=document.getElementById('rec-root'); if(!root) return;
+  var d=window._recData||{}; var hoy=d.hoy||_recToday();
+  var pend=d.pendientes||[], prox=d.proximos||[], hechos=d.hechos||[];
+  function sec(titulo,arr,color){
+    if(!arr.length) return '';
+    return '<div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:'+(color||'var(--text-secondary,#9ca3af)')+';margin:18px 0 8px">'+titulo+' ('+arr.length+')</div>'+arr.map(function(r){return _recCard(r,hoy);}).join('');
+  }
+  var h='<div style="max-width:760px;margin:0 auto;padding:4px 2px 44px">';
+  h+='<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px">'
+    +'<div><div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility</div>'
+    +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Recordatorios</h1>'
+    +'<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">Tu agenda personal · te avisamos el día (y si se vence)</div></div>'
+    +'<button onclick="recOpenForm()" style="padding:9px 16px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">+ Nuevo recordatorio</button></div>';
+  if(!pend.length && !prox.length && !hechos.length){
+    h+='<div style="background:var(--card-bg,#fff);border:1px dashed var(--color-divider,#e5e7eb);border-radius:14px;padding:40px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:13px;margin-top:16px">🔔 No tienes recordatorios. Crea uno con <b>+ Nuevo recordatorio</b>.<br><span style="font-size:11px">También aparecerán solos cuando el sistema te ofrezca recordarte algo (ej. al capturar inventario).</span></div>';
+  } else {
+    h+=sec('Hoy y vencidos',pend,'#dc2626')+sec('Próximos',prox,'#2563eb')+sec('Hechos / descartados',hechos);
+  }
+  h+='</div>'+_recModalHTML();
+  root.innerHTML=h;
+}
+
+function _recModalHTML(){
+  var S='style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"';
+  var L='style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px"';
+  return '<div id="rec-ovl" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;backdrop-filter:blur(3px)" onclick="recCloseForm()"></div>'
+    +'<div id="rec-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(460px,94vw);padding:20px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div style="font-size:15px;font-weight:800">Nuevo recordatorio</div><button onclick="recCloseForm()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary,#6b7280)">×</button></div>'
+    +'<div style="margin-bottom:12px"><label '+L+'>Título *</label><input id="rec-f-titulo" '+S+' placeholder="Ej. Recibir orden 1234"></div>'
+    +'<div style="margin-bottom:12px"><label '+L+'>Fecha *</label><input id="rec-f-fecha" type="date" '+S+' value="'+_recToday()+'"></div>'
+    +'<div style="margin-bottom:14px"><label '+L+'>Detalle</label><textarea id="rec-f-detalle" '+S+' rows="2" style="resize:vertical"></textarea></div>'
+    +'<div style="display:flex;gap:10px"><button id="rec-save-btn" onclick="recSaveForm()" style="flex:1;padding:12px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">Guardar</button>'
+    +'<button onclick="recCloseForm()" style="padding:12px 20px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider);border-radius:10px;font-size:13px;cursor:pointer">Cancelar</button></div></div>';
+}
+function recOpenForm(){ var t=document.getElementById('rec-f-titulo'); if(t)t.value=''; var de=document.getElementById('rec-f-detalle'); if(de)de.value=''; var f=document.getElementById('rec-f-fecha'); if(f)f.value=_recToday(); document.getElementById('rec-ovl').style.display='block'; document.getElementById('rec-modal').style.display='block'; }
+function recCloseForm(){ var m=document.getElementById('rec-modal'),o=document.getElementById('rec-ovl'); if(m)m.style.display='none'; if(o)o.style.display='none'; }
+async function recSaveForm(){
+  var titulo=(document.getElementById('rec-f-titulo')||{}).value||'';
+  var fecha=(document.getElementById('rec-f-fecha')||{}).value||'';
+  var detalle=(document.getElementById('rec-f-detalle')||{}).value||'';
+  if(!titulo||!fecha){ alert('Título y fecha son obligatorios'); return; }
+  var btn=document.getElementById('rec-save-btn'); if(btn){btn.disabled=true;btn.textContent='Guardando…';}
+  var res=await crearRecordatorio({titulo:titulo, fecha:fecha, detalle:detalle, origen:'manual'});
+  if(res&&res.ok){ recCloseForm(); loadRecordatorios(); } else { alert('Error: '+((res&&res.error)||'')); if(btn){btn.disabled=false;btn.textContent='Guardar';} }
+}
+async function recEstado(rowNum, estado){
+  var s=getSession()||{};
+  try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'updateRecordatorioEstado', rowNum:rowNum, estado:estado, usuario:s.email||''})}); var res=await r.json(); if(res.ok) loadRecordatorios(); else alert('Error: '+(res.error||'')); }catch(e){ alert('Error: '+e.message); }
+}
+function recDone(rowNum){ recEstado(rowNum,'hecho'); }
+async function recDelete(rowNum){
+  if(!confirm('¿Eliminar este recordatorio?')) return;
+  var s=getSession()||{};
+  try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'deleteRecordatorio', rowNum:rowNum, usuario:s.email||''})}); var res=await r.json(); if(res.ok) loadRecordatorios(); else alert('Error: '+(res.error||'')); }catch(e){ alert('Error: '+e.message); }
+}
+
+/* ── API ABIERTA: cualquier área llama a estas dos funciones ───────────── */
+// crearRecordatorio(opts): crea directo. opts={titulo,fecha,detalle,origen,referencia}
+window.crearRecordatorio = async function(opts){
+  opts=opts||{}; var s=getSession()||{};
+  try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveRecordatorio',
+    usuario:s.email||'', titulo:opts.titulo||'Recordatorio', detalle:opts.detalle||'',
+    fecha:opts.fecha||'', origen:opts.origen||'manual', referencia:opts.referencia||''})});
+    return await r.json(); }catch(e){ return {ok:false, error:e.message}; }
+};
+// ofrecerRecordatorio(opts): muestra una tarjeta opt-in con fecha editable (Sí/No).
+window.ofrecerRecordatorio = function(opts){
+  opts=opts||{};
+  var fecha=opts.fecha||_recAddDays(7);
+  hideRecOffer();
+  var b=document.createElement('div'); b.id='rec-offer';
+  b.style.cssText='position:fixed;right:20px;bottom:-220px;z-index:2147483000;background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.18);padding:14px 16px;width:min(340px,calc(100% - 24px));transition:bottom .4s cubic-bezier(.4,0,.2,1);font-family:var(--font-primary,sans-serif)';
+  b.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div style="font-size:13px;font-weight:700;color:var(--text-primary,#111)">🔔 ¿Te lo recuerdo?</div><button onclick="hideRecOffer()" style="background:none;border:none;font-size:18px;cursor:pointer;color:#9ca3af">×</button></div>'
+    +'<div style="font-size:12px;color:var(--text-secondary,#6b7280);margin:4px 0 10px">'+_cxpEsc(opts.titulo||'Recordatorio')+'</div>'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><span style="font-size:10px;font-weight:700;text-transform:uppercase;color:#9ca3af">Fecha</span><input type="date" id="rec-offer-date" value="'+fecha+'" style="flex:1;padding:6px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"></div>'
+    +'<div style="display:flex;gap:8px"><button onclick="recAcceptOffer(decodeURIComponent(\''+encodeURIComponent(JSON.stringify(opts))+'\'))" style="flex:1;padding:9px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">Sí, recuérdame</button><button onclick="hideRecOffer()" style="padding:9px 14px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider);border-radius:9px;font-size:12px;cursor:pointer">No</button></div>';
+  document.body.appendChild(b);
+  setTimeout(function(){ b.style.bottom='20px'; },50);
+};
+function hideRecOffer(){ var b=document.getElementById('rec-offer'); if(b){ b.style.bottom='-220px'; setTimeout(function(){ if(b.parentNode)b.parentNode.removeChild(b); },400);} }
+async function recAcceptOffer(json){
+  var opts=typeof json==='string'?JSON.parse(json):json;
+  var fecha=(document.getElementById('rec-offer-date')||{}).value||opts.fecha||_recAddDays(7);
+  var res=await crearRecordatorio({titulo:opts.titulo, detalle:opts.detalle, fecha:fecha, origen:opts.origen||'sistema', referencia:opts.referencia});
+  hideRecOffer();
+  if(res&&res.ok){ setStatus('Recordatorio programado para '+fecha); } else { alert('No se pudo guardar el recordatorio'); }
+}
+
+/* ── Banner al iniciar sesión ── */
+async function recCheckBanner(){
+  try{
+    var tok=encodeURIComponent(getToken()), u=encodeURIComponent(recCurrentUser());
+    if(!u) return;
+    var d=await fetch(APPS_SCRIPT_URL+'?action=recordatoriosPend&usuario='+u+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();});
+    if(d&&d.ok&&d.total>0) showRecBanner(d.total);
+  }catch(e){}
+}
+function showRecBanner(n){
+  if(document.getElementById('rec-banner')) return;
+  var b=document.createElement('div'); b.id='rec-banner';
+  var bottom=document.getElementById('gf-banner')?'92px':'20px';
+  b.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:-160px;z-index:2147482000;background:#0f766e;color:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.3);padding:13px 18px;display:flex;align-items:center;gap:14px;max-width:520px;width:calc(100% - 24px);transition:bottom .4s cubic-bezier(.4,0,.2,1);font-family:var(--font-primary,sans-serif)';
+  b.innerHTML='<div style="font-size:20px">🔔</div><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">Tienes '+n+' recordatorio'+(n===1?'':'s')+' para hoy</div><div style="font-size:11px;color:#ccfbf1">Revísalos en tu agenda</div></div>'
+    +'<button onclick="navigateTo(\'recordatorios\');hideRecBanner()" style="background:#fff;color:#0f766e;border:none;border-radius:8px;padding:9px 14px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">Ver agenda</button>'
+    +'<button onclick="hideRecBanner()" style="background:none;border:none;color:#99f6e4;font-size:20px;cursor:pointer;padding:2px 6px">×</button>';
+  document.body.appendChild(b);
+  setTimeout(function(){ b.style.bottom=bottom; },80);
+}
+function hideRecBanner(){ var b=document.getElementById('rec-banner'); if(b){ b.style.bottom='-160px'; setTimeout(function(){ if(b.parentNode)b.parentNode.removeChild(b); },420);} }
 
 // ── CxP Payment modal ──
 window.cxpOpenPay = function(rowNum, proveedor, monto, divisa) {
