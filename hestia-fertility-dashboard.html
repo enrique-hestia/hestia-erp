@@ -883,6 +883,9 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
   </div>
 </div>
 
+<!-- ══ VISTA: GASTOS FIJOS (recurrentes) ══ -->
+<div id="view-gastos-fijos" class="view" style="display:none"><div id="gf-root"></div></div>
+
 <!-- ══ VISTA: CONCILIACIÓN BANCARIA ══ -->
 <div id="view-conciliacion" class="view" style="display:none"></div>
 
@@ -5081,6 +5084,19 @@ async function loadMenu() {
         });
       } else { try{ console.warn('[menu] grupo Análisis no encontrado'); }catch(e){} }
     }
+    // Inyectar "Gastos Fijos" junto a Cuentas por Pagar
+    if (!menuItems.some(function(i){ return i.id==='gastos-fijos'; })) {
+      var cxpItem = menuItems.filter(function(i){
+        return /cxp|cuentas?.?por.?pagar/i.test(String(i.id||'')) || /cuentas?\s*por\s*pagar/i.test(String(i.label||''));
+      })[0];
+      if (cxpItem) {
+        menuItems.push({
+          id:'gastos-fijos', label:'Gastos Fijos', padre:cxpItem.padre,
+          icono:'repeat', tipo:'vista', orden:(Number(cxpItem.orden)||5)+0.5,
+          seccion:cxpItem.seccion, fuente:'gastos-fijos'
+        });
+      }
+    }
     // Default: mes en curso (no año completo)
     var _now = new Date();
     var _y = _now.getFullYear();
@@ -5094,6 +5110,8 @@ async function loadMenu() {
     buildSidebar(menuItems);
     populateSucursales(json.sucursales || []);
     lucide.createIcons();
+    // Recordatorio de gastos fijos por programar (una vez por sesión)
+    try { if (typeof gfCheckBanner === 'function') setTimeout(gfCheckBanner, 4000); } catch(e) {}
   } catch(e) {
     setStatus('Error cargando menú: ' + e.message, 'err');
     console.error('loadMenu error:', e);
@@ -7958,6 +7976,14 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     var _ccEl = document.getElementById('view-caja-chica');
     if (_ccEl) _ccEl.style.display = '';
     loadCajaChicaData();
+    return;
+  }
+  // Gastos Fijos (recurrentes) — programación mensual
+  if (viewId === 'gastos-fijos') {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _gfEl = document.getElementById('view-gastos-fijos');
+    if (_gfEl) _gfEl.style.display = '';
+    loadGastosFijos();
     return;
   }
   // Cuentas por Pagar — reporte de vencimientos
@@ -11775,6 +11801,249 @@ window.cxpCotiz = function(rowNum, prov, url) {
   if (url) { egViewPDF(url, 'Cotización · ' + prov); }
   else { egOpenUpload(rowNum, 'cotizacion', prov); }
 };
+
+/* ══════════════ GASTOS FIJOS (recurrentes) ══════════════ */
+var _gfData = {propuestas:[], generadas:[], periodo:''};
+var _gfCatalogo = [];
+var _gfTab = 'prog';
+function gfCurrentPeriodo(){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function _gfMesNombre(per){ var M=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']; var y=String(per).substring(0,4), m=parseInt(String(per).substring(5,7),10); return (M[m-1]||per)+' '+y; }
+function gfTab(t){ _gfTab=t; _renderGastosFijos(); }
+
+async function loadGastosFijos(){
+  var root=document.getElementById('gf-root'); if(!root) return;
+  root.innerHTML = hestiaLoader('Cargando gastos fijos…');
+  try {
+    var tok=encodeURIComponent(getToken());
+    var p = await fetch(APPS_SCRIPT_URL+'?action=gfPropuestas&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();});
+    var c = await fetch(APPS_SCRIPT_URL+'?action=gastosFijos&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();});
+    if(p && p.error) throw new Error(p.error);
+    _gfData = p||{propuestas:[],generadas:[],periodo:gfCurrentPeriodo()};
+    _gfCatalogo = (c&&c.rows)||[];
+    await hfFinish();
+    _renderGastosFijos();
+  } catch(e){
+    root.innerHTML='<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px;line-height:1.6">⚠ '+e.message+'<br><span style="color:#6b7280">Primera vez: agrega <b>gastosfijos.gs</b> en Apps Script, corre <b>setupGastosFijos()</b> y vuelve a desplegar.</span></div>';
+  }
+}
+
+function _gfEnsureStyles(){
+  if(document.getElementById('gf-styles')) return;
+  var st=document.createElement('style'); st.id='gf-styles';
+  st.textContent='.cxp-tbl{width:100%;border-collapse:collapse;font-size:12px}.cxp-tbl th{padding:8px 12px;font-size:9.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#6b7280);background:var(--color-surface,#f3f4f6);border-bottom:1px solid var(--color-divider,#e5e7eb);white-space:nowrap;text-align:left}.cxp-tbl td{padding:8px 12px;border-bottom:1px solid var(--color-divider,#f5f5f5);color:var(--text-primary,#374151)}.cxp-tbl tr:last-child td{border-bottom:none}';
+  document.head.appendChild(st);
+}
+
+function _renderGastosFijos(){
+  var root=document.getElementById('gf-root'); if(!root) return;
+  _gfEnsureStyles();
+  var per=_gfData.periodo||gfCurrentPeriodo(), tab=_gfTab||'prog';
+  var h='<div style="max-width:1100px;margin:0 auto;padding:4px 2px 44px">';
+  h+='<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px">'
+    +'<div><div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility</div>'
+    +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Gastos Fijos</h1>'
+    +'<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">Recurrentes · se programan mes a mes a Cuentas por Pagar tras tu validación</div></div>'
+    +'<button onclick="loadGastosFijos()" style="font-size:11.5px;font-weight:600;color:var(--text-secondary,#6b7280);background:transparent;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:20px;padding:5px 11px;cursor:pointer">↺ Actualizar</button></div>';
+  function tbb(id,lbl){ return '<button onclick="gfTab(\''+id+'\')" style="padding:8px 16px;border:none;background:none;border-bottom:2px solid '+(tab===id?'var(--color-primary,#c46a7a)':'transparent')+';color:'+(tab===id?'var(--text-primary,#111)':'var(--text-secondary,#6b7280)')+';font-size:12.5px;font-weight:700;cursor:pointer">'+lbl+'</button>'; }
+  h+='<div style="display:flex;gap:4px;border-bottom:1px solid var(--color-divider,#e5e7eb);margin-bottom:16px;flex-wrap:wrap">'+tbb('prog','Programación del mes')+tbb('cat','Catálogo')+tbb('proy','Proyección trimestre')+'</div>';
+  h+='<div id="gf-tabc">'+(tab==='prog'?_gfProgHTML(per):tab==='cat'?_gfCatHTML():'<div id="gf-proy-c" style="padding:30px;text-align:center;color:var(--text-secondary,#9ca3af)">Calculando proyección…</div>')+'</div>';
+  h+='</div>'+_gfModalHTML();
+  root.innerHTML=h;
+  try{ lucide.createIcons(); }catch(e){}
+  if(tab==='proy') _gfLoadProy(per);
+}
+
+function _gfProgHTML(per){
+  var props=_gfData.propuestas||[], gen=_gfData.generadas||[];
+  var totalSug=props.reduce(function(s,p){return s+(p.montoSugerido||0);},0);
+  var h='<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;overflow:hidden">';
+  h+='<div style="padding:14px 18px;border-bottom:1px solid var(--color-divider,#f0f0f0);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">'
+    +'<div><div style="font-size:14px;font-weight:800;color:var(--text-primary,#111)">'+_gfMesNombre(per)+'</div>'
+    +'<div style="font-size:11px;color:var(--text-secondary,#9ca3af)">'+props.length+' por programar · '+gen.length+' ya programadas · estimado '+_cxpFM(totalSug)+'</div></div>'
+    +(props.length?'<button onclick="gfProgramarTodos()" style="padding:9px 16px;background:#166534;color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">✓ Programar todos ('+props.length+')</button>':'')+'</div>';
+  if(!props.length){
+    h+='<div style="padding:30px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:13px">✅ No hay gastos fijos pendientes de programar este mes.</div>';
+  } else {
+    h+='<div style="overflow-x:auto"><table class="cxp-tbl"><thead><tr><th>Categoría</th><th>Proveedor</th><th>Concepto</th><th>Vencimiento</th><th style="text-align:right">Monto a programar</th><th style="text-align:center;width:120px">Acción</th></tr></thead><tbody>';
+    props.forEach(function(p){
+      var amber=p.montoVariable;
+      var ult=p.ultimoReal?(' · último: '+_cxpFM(p.ultimoReal.monto)+' ('+p.ultimoReal.mes+')'):' · sin histórico';
+      h+='<tr'+(amber?' style="background:rgba(245,158,11,.06)"':'')+'>'
+        +'<td><span style="font-size:11px;color:var(--text-secondary,#6b7280)">'+_cxpEsc(p.subtipo||'—')+'</span>'+(amber?' <span title="Monto variable: revísalo" style="color:#b45309">⚠</span>':'')+'</td>'
+        +'<td style="font-weight:600">'+_cxpEsc(p.proveedor)+'</td>'
+        +'<td style="max-width:230px;overflow:hidden;text-overflow:ellipsis" title="'+_cxpEsc(p.concepto)+_cxpEsc(ult)+'">'+_cxpEsc(p.concepto)+'</td>'
+        +'<td style="font-size:11px">'+(p.vencimiento||'—')+'</td>'
+        +'<td style="text-align:right"><input id="gf-monto-'+p.id+'" type="number" step="0.01" value="'+(p.montoSugerido||0)+'" style="width:120px;text-align:right;border:1.5px solid '+(amber?'#fcd34d':'var(--color-divider,#e5e7eb)')+';border-radius:8px;padding:5px 8px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"></td>'
+        +'<td style="text-align:center"><button onclick="gfProgramarUno(\''+p.id+'\')" style="padding:5px 12px;background:#166534;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Programar</button></td></tr>';
+    });
+    h+='</tbody></table></div>';
+  }
+  h+='</div>';
+  if(props.length){ h+='<div style="margin-top:10px;text-align:right"><button onclick="gfMarkDone(\''+per+'\')" style="font-size:11px;color:var(--text-secondary,#6b7280);background:none;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:18px;padding:5px 13px;cursor:pointer">Listo por este mes (silenciar aviso)</button></div>'; }
+  if(gen.length){ h+='<div style="margin-top:12px;font-size:11.5px;color:var(--text-secondary,#9ca3af)">Ya programadas: '+gen.map(function(g){return _cxpEsc(g.proveedor)+' ('+_cxpFM(g.montoSugerido)+')';}).join(' · ')+'</div>'; }
+  return h;
+}
+
+function _gfCatHTML(){
+  var rows=_gfCatalogo||[];
+  var h='<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button onclick="gfOpenForm()" style="padding:9px 16px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">+ Nuevo gasto fijo</button></div>';
+  h+='<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;overflow:hidden"><div style="overflow-x:auto"><table class="cxp-tbl"><thead><tr><th>Activo</th><th>Proveedor</th><th>Categoría</th><th>Concepto</th><th style="text-align:right">Estimado</th><th>Venc.</th><th>Meses</th><th>Vigencia</th><th style="text-align:center">Acción</th></tr></thead><tbody>';
+  if(!rows.length) h+='<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-secondary,#9ca3af)">Sin plantillas. Crea tu primer gasto fijo.</td></tr>';
+  rows.forEach(function(t){
+    var vig=(t.desde||t.hasta)?((t.desde||'…')+' → '+(t.hasta||'∞')):'Indefinida';
+    h+='<tr style="'+(t.activo?'':'opacity:.5')+'">'
+      +'<td style="text-align:center"><input type="checkbox" '+(t.activo?'checked':'')+' onchange="gfToggle('+t.rowNum+',this.checked)"></td>'
+      +'<td style="font-weight:600">'+_cxpEsc(t.proveedor)+'</td>'
+      +'<td style="font-size:11px;color:var(--text-secondary,#6b7280)">'+_cxpEsc(t.subtipo)+(t.montoVariable?' <span title="variable" style="color:#b45309">⚠</span>':'')+'</td>'
+      +'<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">'+_cxpEsc(t.concepto)+'</td>'
+      +'<td style="text-align:right">'+_cxpFM(t.montoEstimado)+'</td>'
+      +'<td style="font-size:11px">'+_cxpEsc(t.diaVencimiento||'—')+'</td>'
+      +'<td style="font-size:11px">'+_cxpEsc(t.meses||'Todos')+'</td>'
+      +'<td style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">'+_cxpEsc(vig)+'</td>'
+      +'<td style="text-align:center;white-space:nowrap"><button onclick="gfOpenForm(decodeURIComponent(\''+encodeURIComponent(JSON.stringify(t))+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:6px;font-size:12px;cursor:pointer">✎</button> <button onclick="gfDelete('+t.rowNum+',decodeURIComponent(\''+encodeURIComponent(t.proveedor||'')+'\'))" style="padding:4px 8px;background:rgba(220,38,38,.08);color:#dc2626;border:none;border-radius:6px;font-size:12px;cursor:pointer">✕</button></td></tr>';
+  });
+  h+='</tbody></table></div></div>';
+  return h;
+}
+
+async function _gfLoadProy(per){
+  var c=document.getElementById('gf-proy-c'); if(!c) return;
+  try {
+    var tok=encodeURIComponent(getToken());
+    var d=await fetch(APPS_SCRIPT_URL+'?action=gfProyeccion&periodo='+per+'&meses=3&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();});
+    if(!d.ok) throw new Error(d.error||'Error');
+    var h='<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-bottom:12px">Estimado de gastos fijos del trimestre (solo lectura, para budget — no crea CxP).</div>';
+    h+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">';
+    (d.periodos||[]).forEach(function(pm){
+      var cats=Object.keys(pm.porCategoria||{}).map(function(k){return {n:k,v:pm.porCategoria[k]};}).sort(function(a,b){return b.v-a.v;});
+      h+='<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:14px">'
+        +'<div style="font-size:13px;font-weight:800;color:var(--text-primary,#111)">'+_gfMesNombre(pm.periodo)+'</div>'
+        +'<div style="font-size:20px;font-weight:800;color:#dc2626;margin:4px 0 10px">'+_cxpFM(pm.total)+'</div>';
+      cats.forEach(function(c2){ h+='<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--text-secondary,#6b7280)">'+_cxpEsc(c2.n)+'</span><span style="font-weight:600">'+_cxpFM(c2.v)+'</span></div>'; });
+      h+='</div>';
+    });
+    h+='</div>';
+    c.innerHTML=h;
+  } catch(e){ c.innerHTML='<div style="padding:20px;color:#991b1b">⚠ '+e.message+'</div>'; }
+}
+
+async function gfProgramarUno(id){
+  var p=(_gfData.propuestas||[]).filter(function(x){return x.id===id;})[0]; if(!p) return;
+  var monto=(document.getElementById('gf-monto-'+id)||{}).value; if(monto==='') monto=p.montoSugerido;
+  var s=getSession()||{};
+  try {
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'programarGastoFijo', id:id, periodo:_gfData.periodo, proveedor:p.proveedor, contable:p.contable, subtipo:p.subtipo, concepto:p.concepto, monto:monto, vencimiento:p.vencimiento, formaPago:p.formaPago, usuario:s.email||'sistema'})});
+    var res=await r.json();
+    if(res.ok||res.dup){ loadGastosFijos(); } else alert('Error: '+(res.error||''));
+  } catch(e){ alert('Error: '+e.message); }
+}
+async function gfProgramarTodos(){
+  var props=_gfData.propuestas||[];
+  var items=props.map(function(p){ var m=(document.getElementById('gf-monto-'+p.id)||{}).value; if(m==='')m=p.montoSugerido; return {id:p.id, periodo:_gfData.periodo, proveedor:p.proveedor, contable:p.contable, subtipo:p.subtipo, concepto:p.concepto, monto:m, vencimiento:p.vencimiento, formaPago:p.formaPago}; });
+  if(!items.length){ alert('No hay propuestas por programar'); return; }
+  if(!confirm('¿Programar '+items.length+' gastos fijos a Cuentas por Pagar?')) return;
+  var s=getSession()||{};
+  try {
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'programarGastosFijosBatch', items:items, usuario:s.email||'sistema'})});
+    var res=await r.json();
+    if(res.ok){ gfMarkDone(_gfData.periodo); loadGastosFijos(); } else alert('Error: '+(res.error||''));
+  } catch(e){ alert('Error: '+e.message); }
+}
+
+// ── Catálogo: modal CRUD ──
+function _gfModalHTML(){
+  var S='style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"';
+  var L='style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px"';
+  var subOpts=(typeof _cxpSubtipos!=='undefined'?_cxpSubtipos:['Nomina','Renta','Otros Gastos']).map(function(x){return '<option value="'+x+'">'+x+'</option>';}).join('');
+  return '<div id="gf-ovl" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;backdrop-filter:blur(3px)" onclick="gfCloseForm()"></div>'
+    +'<div id="gf-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(560px,94vw);max-height:88vh;overflow-y:auto;padding:20px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div id="gf-modal-title" style="font-size:15px;font-weight:800">Nuevo gasto fijo</div><button onclick="gfCloseForm()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary,#6b7280)">×</button></div>'
+    +'<input type="hidden" id="gf-f-rownum"><input type="hidden" id="gf-f-id">'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'
+    +'<div><label '+L+'>Proveedor *</label><input id="gf-f-prov" list="prov-datalist" '+S+'></div>'
+    +'<div><label '+L+'>Monto estimado</label><input id="gf-f-monto" type="number" step="0.01" '+S+' placeholder="0.00"></div></div>'
+    +'<div style="margin-bottom:12px"><label '+L+'>Concepto *</label><input id="gf-f-concepto" '+S+' placeholder="Descripción"></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">'
+    +'<div><label '+L+'>Contable</label><select id="gf-f-contable" '+S+'><option>Gasto</option><option>Costo</option><option>Crédito</option></select></div>'
+    +'<div><label '+L+'>Categoría</label><select id="gf-f-subtipo" '+S+'>'+subOpts+'</select></div>'
+    +'<div><label '+L+'>Forma de pago</label><select id="gf-f-fp" '+S+'><option value=""></option><option>Santander</option><option>AMEX</option><option>Mercado Pago</option><option>Transferencia</option><option>Efectivo</option></select></div></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">'
+    +'<div><label '+L+'>Día de vencimiento</label><input id="gf-f-dia" '+S+' placeholder="5 o fin"></div>'
+    +'<div><label '+L+'>Meses</label><input id="gf-f-meses" '+S+' placeholder="Todos / 1,4,7,10"></div>'
+    +'<div style="display:flex;align-items:flex-end;gap:6px;padding-bottom:6px"><input type="checkbox" id="gf-f-variable"><label for="gf-f-variable" style="font-size:11px;color:var(--text-secondary,#6b7280)">Monto variable (revisar)</label></div></div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'
+    +'<div><label '+L+'>Desde (vigencia)</label><input id="gf-f-desde" type="month" '+S+'></div>'
+    +'<div><label '+L+'>Hasta (vigencia, créditos)</label><input id="gf-f-hasta" type="month" '+S+'></div></div>'
+    +'<div style="margin-bottom:14px"><label '+L+'>Notas</label><input id="gf-f-notas" '+S+'></div>'
+    +'<div style="display:flex;gap:10px"><button id="gf-save-btn" onclick="gfSaveForm()" style="flex:1;padding:12px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">Guardar</button>'
+    +'<button onclick="gfCloseForm()" style="padding:12px 20px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider);border-radius:10px;font-size:13px;cursor:pointer">Cancelar</button></div></div>';
+}
+function gfOpenForm(json){
+  try{ if(typeof _renderProvDatalist==='function') _renderProvDatalist(); }catch(e){}
+  var d = json ? (typeof json==='string'?JSON.parse(json):json) : null;
+  function set(id,v){ var el=document.getElementById(id); if(el) el.value=(v==null?'':v); }
+  set('gf-f-rownum', d?d.rowNum:''); set('gf-f-id', d?d.id:'');
+  set('gf-f-prov', d?d.proveedor:''); set('gf-f-monto', d?d.montoEstimado:'');
+  set('gf-f-concepto', d?d.concepto:''); set('gf-f-contable', d?d.contable:'Gasto');
+  set('gf-f-subtipo', d?d.subtipo:''); set('gf-f-fp', d?d.formaPago:'');
+  set('gf-f-dia', d?d.diaVencimiento:''); set('gf-f-meses', d?d.meses:'Todos');
+  set('gf-f-desde', d?d.desde:''); set('gf-f-hasta', d?d.hasta:''); set('gf-f-notas', d?d.notas:'');
+  var v=document.getElementById('gf-f-variable'); if(v) v.checked = d?!!d.montoVariable:false;
+  var t=document.getElementById('gf-modal-title'); if(t) t.textContent = d?'Editar gasto fijo':'Nuevo gasto fijo';
+  document.getElementById('gf-ovl').style.display='block'; document.getElementById('gf-modal').style.display='block';
+}
+function gfCloseForm(){ var m=document.getElementById('gf-modal'),o=document.getElementById('gf-ovl'); if(m)m.style.display='none'; if(o)o.style.display='none'; }
+async function gfSaveForm(){
+  function val(id){ var el=document.getElementById(id); return el?el.value:''; }
+  var prov=val('gf-f-prov'), concepto=val('gf-f-concepto');
+  if(!prov||!concepto){ alert('Proveedor y concepto son obligatorios'); return; }
+  var rowNum=val('gf-f-rownum');
+  var s=getSession()||{};
+  var body={ rowNum:rowNum||undefined, id:val('gf-f-id'),
+    activo:true, proveedor:prov, contable:val('gf-f-contable'), subtipo:val('gf-f-subtipo'),
+    concepto:concepto, montoEstimado:val('gf-f-monto'),
+    montoVariable:(document.getElementById('gf-f-variable')||{}).checked,
+    diaVencimiento:val('gf-f-dia'), meses:val('gf-f-meses')||'Todos',
+    desde:val('gf-f-desde'), hasta:val('gf-f-hasta'), formaPago:val('gf-f-fp'), notas:val('gf-f-notas'),
+    usuario:s.email||'sistema', action: rowNum?'updateGastoFijo':'saveGastoFijo' };
+  var btn=document.getElementById('gf-save-btn'); if(btn){btn.disabled=true;btn.textContent='Guardando…';}
+  try {
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify(body)}); var res=await r.json();
+    if(res.ok){ gfCloseForm(); loadGastosFijos(); } else { alert('Error: '+(res.error||'')); if(btn){btn.disabled=false;btn.textContent='Guardar';} }
+  } catch(e){ alert('Error: '+e.message); if(btn){btn.disabled=false;btn.textContent='Guardar';} }
+}
+async function gfToggle(rowNum, activo){
+  var s=getSession()||{};
+  try{ await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'toggleGastoFijo', rowNum:rowNum, activo:activo, usuario:s.email||'sistema'})}); }catch(e){}
+}
+async function gfDelete(rowNum, prov){
+  if(!confirm('¿Eliminar la plantilla de "'+prov+'"? (no afecta CxP ya creadas)')) return;
+  var s=getSession()||{};
+  try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'deleteGastoFijo', rowNum:rowNum, usuario:s.email||'sistema'})}); var res=await r.json(); if(res.ok) loadGastosFijos(); else alert('Error: '+(res.error||'')); }catch(e){ alert('Error: '+e.message); }
+}
+
+// ── Banner de recordatorio (al iniciar sesión) ──
+function gfMarkDone(per){ try{ localStorage.setItem('gf_done_'+per,'1'); }catch(e){} hideGfBanner(); }
+async function gfCheckBanner(){
+  try{
+    var per=gfCurrentPeriodo();
+    try{ if(localStorage.getItem('gf_done_'+per)) return; }catch(e){}
+    var tok=encodeURIComponent(getToken());
+    var p=await fetch(APPS_SCRIPT_URL+'?action=gfPropuestas&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();});
+    if(p && p.ok && p.pendientes>0) showGfBanner(p.pendientes, per);
+  }catch(e){}
+}
+function showGfBanner(n, per){
+  if(document.getElementById('gf-banner')) return;
+  var b=document.createElement('div'); b.id='gf-banner';
+  b.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:-140px;z-index:2147483000;background:#1f2937;color:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.3);padding:13px 18px;display:flex;align-items:center;gap:14px;max-width:540px;width:calc(100% - 24px);transition:bottom .4s cubic-bezier(.4,0,.2,1);font-family:var(--font-primary,sans-serif)';
+  b.innerHTML='<div style="font-size:22px">📌</div><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">Tienes '+n+' gasto'+(n===1?'':'s')+' fijo'+(n===1?'':'s')+' por programar</div><div style="font-size:11px;color:#cbd5e1">'+_gfMesNombre(per)+' · revísalos y mándalos a Cuentas por Pagar</div></div>'
+    +'<button onclick="navigateTo(\'gastos-fijos\');hideGfBanner()" style="background:#c46a7a;color:#fff;border:none;border-radius:8px;padding:9px 14px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">Programar ahora</button>'
+    +'<button onclick="hideGfBanner()" style="background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer;padding:2px 6px" title="Recordar al próximo inicio de sesión">×</button>';
+  document.body.appendChild(b);
+  setTimeout(function(){ b.style.bottom='20px'; },60);
+}
+function hideGfBanner(){ var b=document.getElementById('gf-banner'); if(b){ b.style.bottom='-140px'; setTimeout(function(){ if(b.parentNode) b.parentNode.removeChild(b); },420);} }
 
 // ── CxP Payment modal ──
 window.cxpOpenPay = function(rowNum, proveedor, monto) {
