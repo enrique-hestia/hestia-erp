@@ -11945,23 +11945,37 @@ function _gfProgHTML(per){
 
 function _gfCatHTML(){
   var rows=_gfCatalogo||[];
-  var h='<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button onclick="gfOpenForm()" style="padding:9px 16px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">+ Nuevo gasto fijo</button></div>';
-  h+='<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;overflow:hidden"><div style="overflow-x:auto"><table class="cxp-tbl"><thead><tr><th>Activo</th><th>Proveedor</th><th>Categoría</th><th>Concepto</th><th style="text-align:right">Estimado</th><th>Venc.</th><th>Meses</th><th>Vigencia</th><th style="text-align:center">Acción</th></tr></thead><tbody>';
-  if(!rows.length) h+='<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-secondary,#9ca3af)">Sin plantillas. Crea tu primer gasto fijo.</td></tr>';
-  rows.forEach(function(t){
-    var vig=(t.desde||t.hasta)?((t.desde||'…')+' → '+(t.hasta||'∞')):'Indefinida';
-    h+='<tr style="'+(t.activo?'':'opacity:.5')+'">'
-      +'<td style="text-align:center"><input type="checkbox" '+(t.activo?'checked':'')+' onchange="gfToggle('+t.rowNum+',this.checked)"></td>'
-      +'<td style="font-weight:600">'+_cxpEsc(t.proveedor)+'</td>'
-      +'<td style="font-size:11px;color:var(--text-secondary,#6b7280)">'+_cxpEsc(t.subtipo)+(t.montoVariable?' <span title="variable" style="color:#b45309">⚠</span>':'')+'</td>'
-      +'<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">'+_cxpEsc(t.concepto)+'</td>'
-      +'<td style="text-align:right">'+_cxpFM(t.montoEstimado)+'</td>'
-      +'<td style="font-size:11px">'+_cxpEsc(t.diaVencimiento||'—')+'</td>'
-      +'<td style="font-size:11px">'+_cxpEsc(t.meses||'Todos')+'</td>'
-      +'<td style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">'+_cxpEsc(vig)+'</td>'
-      +'<td style="text-align:center;white-space:nowrap"><button onclick="gfOpenForm(decodeURIComponent(\''+encodeURIComponent(JSON.stringify(t))+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:6px;font-size:12px;cursor:pointer">✎</button> <button onclick="gfDelete('+t.rowNum+',decodeURIComponent(\''+encodeURIComponent(t.proveedor||'')+'\'))" style="padding:4px 8px;background:rgba(220,38,38,.08);color:#dc2626;border:none;border-radius:6px;font-size:12px;cursor:pointer">✕</button></td></tr>';
+  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
+    +'<div style="font-size:12px;color:var(--text-secondary,#6b7280)">'+rows.length+' '+(rows.length===1?'operación':'operaciones')+' · agrupadas por categoría. Una categoría puede tener varias operaciones.</div>'
+    +'<button onclick="gfOpenForm()" style="padding:9px 16px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">+ Nuevo gasto fijo</button></div>';
+  if(!rows.length){
+    return h+'<div style="background:var(--card-bg,#fff);border:1px dashed var(--color-divider,#e5e7eb);border-radius:14px;padding:36px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:13px">Aún no hay gastos fijos.<br>Pulsa <b>+ Nuevo gasto fijo</b> para crear el primero (escribe la categoría que quieras).</div>';
+  }
+  var byCat={}; rows.forEach(function(t){ var k=t.subtipo||'Sin categoría'; (byCat[k]=byCat[k]||[]).push(t); });
+  Object.keys(byCat).sort().forEach(function(cat){
+    var items=byCat[cat];
+    var totalEst=items.reduce(function(s,t){return s+(t.montoEstimado||0);},0);
+    var catSafe=encodeURIComponent(cat);
+    h+='<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;overflow:hidden;margin-bottom:14px">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;padding:11px 16px;background:var(--color-surface,#f7f7f7);border-bottom:1px solid var(--color-divider,#e5e7eb)">'
+        +'<div style="font-size:13px;font-weight:800;color:var(--text-primary,#111)">'+_cxpEsc(cat)+' <span style="font-size:11px;font-weight:600;color:var(--text-secondary,#9ca3af)">· '+items.length+' '+(items.length===1?'operación':'operaciones')+' · '+_cxpFM(totalEst)+' est.</span></div>'
+        +'<button onclick="gfOpenForm(\'\',decodeURIComponent(\''+catSafe+'\'))" style="padding:5px 11px;background:rgba(196,106,122,.1);color:var(--color-primary,#c46a7a);border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">+ Agregar a '+_cxpEsc(cat)+'</button></div>'
+      +'<div style="overflow-x:auto"><table class="cxp-tbl"><thead><tr><th>Activa</th><th>Proveedor</th><th>Concepto</th><th style="text-align:right">Estimado</th><th>Venc.</th><th>Meses</th><th>Vigencia</th><th style="text-align:center">Var.</th><th style="text-align:center">Acción</th></tr></thead><tbody>';
+    items.forEach(function(t){
+      var vig=(t.desde||t.hasta)?((t.desde||'…')+' → '+(t.hasta||'∞')):'Indefinida';
+      h+='<tr style="'+(t.activo?'':'opacity:.5')+'">'
+        +'<td style="text-align:center"><input type="checkbox" '+(t.activo?'checked':'')+' onchange="gfToggle('+t.rowNum+',this.checked)"></td>'
+        +'<td style="font-weight:600">'+_cxpEsc(t.proveedor)+'</td>'
+        +'<td style="max-width:230px;overflow:hidden;text-overflow:ellipsis">'+_cxpEsc(t.concepto)+'</td>'
+        +'<td style="text-align:right">'+_cxpFM(t.montoEstimado)+'</td>'
+        +'<td style="font-size:11px">'+_cxpEsc(t.diaVencimiento||'—')+'</td>'
+        +'<td style="font-size:11px">'+_cxpEsc(t.meses||'Todos')+'</td>'
+        +'<td style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">'+_cxpEsc(vig)+'</td>'
+        +'<td style="text-align:center">'+(t.montoVariable?'<span title="Monto variable" style="color:#b45309">⚠</span>':'—')+'</td>'
+        +'<td style="text-align:center;white-space:nowrap"><button onclick="gfOpenForm(decodeURIComponent(\''+encodeURIComponent(JSON.stringify(t))+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:6px;font-size:12px;cursor:pointer" title="Editar">✎</button> <button onclick="gfDelete('+t.rowNum+',decodeURIComponent(\''+encodeURIComponent(t.proveedor||'')+'\'))" style="padding:4px 8px;background:rgba(220,38,38,.08);color:#dc2626;border:none;border-radius:6px;font-size:12px;cursor:pointer" title="Eliminar">✕</button></td></tr>';
+    });
+    h+='</tbody></table></div></div>';
   });
-  h+='</tbody></table></div></div>';
   return h;
 }
 
@@ -12013,8 +12027,10 @@ async function gfProgramarTodos(){
 function _gfModalHTML(){
   var S='style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"';
   var L='style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px"';
-  var subOpts=(typeof _cxpSubtipos!=='undefined'?_cxpSubtipos:['Nomina','Renta','Otros Gastos']).map(function(x){return '<option value="'+x+'">'+x+'</option>';}).join('');
-  return '<div id="gf-ovl" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;backdrop-filter:blur(3px)" onclick="gfCloseForm()"></div>'
+  var _cats={}; (_gfCatalogo||[]).forEach(function(t){ if(t.subtipo) _cats[t.subtipo]=1; });
+  (typeof _cxpSubtipos!=='undefined'?_cxpSubtipos:['Nomina','Renta','Otros Gastos']).forEach(function(s){ _cats[s]=1; });
+  var dl='<datalist id="gf-cat-datalist">'+Object.keys(_cats).sort().map(function(c){return '<option value="'+_cxpEsc(c)+'">';}).join('')+'</datalist>';
+  return dl+'<div id="gf-ovl" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;backdrop-filter:blur(3px)" onclick="gfCloseForm()"></div>'
     +'<div id="gf-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(560px,94vw);max-height:88vh;overflow-y:auto;padding:20px">'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div id="gf-modal-title" style="font-size:15px;font-weight:800">Nuevo gasto fijo</div><button onclick="gfCloseForm()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary,#6b7280)">×</button></div>'
     +'<input type="hidden" id="gf-f-rownum"><input type="hidden" id="gf-f-id">'
@@ -12024,7 +12040,7 @@ function _gfModalHTML(){
     +'<div style="margin-bottom:12px"><label '+L+'>Concepto *</label><input id="gf-f-concepto" '+S+' placeholder="Descripción"></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">'
     +'<div><label '+L+'>Contable</label><select id="gf-f-contable" '+S+'><option>Gasto</option><option>Costo</option><option>Crédito</option></select></div>'
-    +'<div><label '+L+'>Categoría</label><select id="gf-f-subtipo" '+S+'>'+subOpts+'</select></div>'
+    +'<div><label '+L+'>Categoría</label><input id="gf-f-subtipo" list="gf-cat-datalist" '+S+' placeholder="Nómina, Renta, Gases…"></div>'
     +'<div><label '+L+'>Forma de pago</label><select id="gf-f-fp" '+S+'><option value=""></option><option>Santander</option><option>AMEX</option><option>Mercado Pago</option><option>Transferencia</option><option>Efectivo</option></select></div></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">'
     +'<div><label '+L+'>Día de vencimiento</label><input id="gf-f-dia" '+S+' placeholder="5 o fin"></div>'
@@ -12037,14 +12053,14 @@ function _gfModalHTML(){
     +'<div style="display:flex;gap:10px"><button id="gf-save-btn" onclick="gfSaveForm()" style="flex:1;padding:12px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">Guardar</button>'
     +'<button onclick="gfCloseForm()" style="padding:12px 20px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider);border-radius:10px;font-size:13px;cursor:pointer">Cancelar</button></div></div>';
 }
-function gfOpenForm(json){
+function gfOpenForm(json, presetCat){
   try{ if(typeof _renderProvDatalist==='function') _renderProvDatalist(); }catch(e){}
   var d = json ? (typeof json==='string'?JSON.parse(json):json) : null;
   function set(id,v){ var el=document.getElementById(id); if(el) el.value=(v==null?'':v); }
   set('gf-f-rownum', d?d.rowNum:''); set('gf-f-id', d?d.id:'');
   set('gf-f-prov', d?d.proveedor:''); set('gf-f-monto', d?d.montoEstimado:'');
   set('gf-f-concepto', d?d.concepto:''); set('gf-f-contable', d?d.contable:'Gasto');
-  set('gf-f-subtipo', d?d.subtipo:''); set('gf-f-fp', d?d.formaPago:'');
+  set('gf-f-subtipo', d?d.subtipo:(presetCat||'')); set('gf-f-fp', d?d.formaPago:'');
   set('gf-f-dia', d?d.diaVencimiento:''); set('gf-f-meses', d?d.meses:'Todos');
   set('gf-f-desde', d?d.desde:''); set('gf-f-hasta', d?d.hasta:''); set('gf-f-notas', d?d.notas:'');
   var v=document.getElementById('gf-f-variable'); if(v) v.checked = d?!!d.montoVariable:false;
