@@ -11,7 +11,7 @@ var GF_TAB = 'GastosFijos';
 //           G MontoEstimado, H MontoVariable, I DiaVencimiento, J Meses,
 //           K Desde, L Hasta, M FormaPago, N Notas
 var GF_HEADERS = ['ID','Activo','Proveedor','Contable','Subtipo','Concepto',
-  'MontoEstimado','MontoVariable','DiaVencimiento','Meses','Desde','Hasta','FormaPago','Notas'];
+  'MontoEstimado','MontoVariable','DiaVencimiento','Meses','Desde','Hasta','FormaPago','Notas','Divisa'];
 
 function setupGastosFijos() {
   var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
@@ -21,10 +21,10 @@ function setupGastosFijos() {
   sh.getRange(1,1,1,GF_HEADERS.length).setValues([GF_HEADERS]).setFontWeight('bold');
   // Ejemplos
   var ej = [
-    ['GF-001', true, 'Arrendador',  'Gasto', 'Renta',    'Renta laboratorio', 41067.08, false, '5',   'Todos', '', '', 'Santander', ''],
-    ['GF-002', true, 'Nómina',      'Gasto', 'Nomina',   'Nómina 1ra quincena', 0,       true,  '15',  'Todos', '', '', 'Santander', 'Varía por bonos'],
-    ['GF-003', true, 'Nómina',      'Gasto', 'Nomina',   'Nómina 2da quincena', 0,       true,  'fin', 'Todos', '', '', 'Santander', ''],
-    ['GF-004', true, 'LIFEAIRE',    'Gasto', 'Mantenimiento', 'Servicio LIFEAIRE', 0,    false, '10',  'Todos', '', '', 'Santander', '']
+    ['GF-001', true, 'Arrendador',  'Gasto', 'Renta',    'Renta laboratorio', 41067.08, false, '5',   'Todos', '', '', 'Santander', '', 'MXN'],
+    ['GF-002', true, 'Nómina',      'Gasto', 'Nomina',   'Nómina 1ra quincena', 0,       true,  '15',  'Todos', '', '', 'Santander', 'Varía por bonos', 'MXN'],
+    ['GF-003', true, 'Nómina',      'Gasto', 'Nomina',   'Nómina 2da quincena', 0,       true,  'fin', 'Todos', '', '', 'Santander', '', 'MXN'],
+    ['GF-004', true, 'LIFEAIRE',    'Gasto', 'Mantenimiento', 'Servicio LIFEAIRE', 0,    false, '10',  'Todos', '', '', 'AMEX', 'Pago en dólares', 'USD']
   ];
   sh.getRange(2,1,ej.length,GF_HEADERS.length).setValues(ej);
   sh.setFrozenRows(1);
@@ -35,6 +35,8 @@ function _gfSheet() {
   var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
   var sh = ss.getSheetByName(GF_TAB);
   if (!sh) { setupGastosFijos(); sh = ss.getSheetByName(GF_TAB); }
+  // Asegura el header 'Divisa' (col O) en hojas creadas antes de esta columna — sin borrar datos.
+  try { if (sh.getLastColumn() < GF_HEADERS.length) sh.getRange(1, GF_HEADERS.length).setValue(GF_HEADERS[GF_HEADERS.length-1]); } catch(e){}
   return sh;
 }
 
@@ -53,7 +55,8 @@ function readGastosFijos() {
         montoVariable: t[7]===true||String(t[7]).toUpperCase()==='TRUE',
         diaVencimiento:String(t[8]||''), meses:String(t[9]||'Todos'),
         desde:String(t[10]||''), hasta:String(t[11]||''),
-        formaPago:String(t[12]||''), notas:String(t[13]||'')
+        formaPago:String(t[12]||''), notas:String(t[13]||''),
+        divisa:String(t[14]||'MXN').toUpperCase()==='USD'?'USD':'MXN'
       });
     }
     return {ok:true, rows:rows};
@@ -67,7 +70,8 @@ function _gfRowFromBody(b) {
     parseFloat(String(b.montoEstimado||'').replace(/[$,]/g,''))||0,
     b.montoVariable===true||String(b.montoVariable).toUpperCase()==='TRUE',
     String(b.diaVencimiento||''), String(b.meses||'Todos'),
-    String(b.desde||''), String(b.hasta||''), b.formaPago||'', b.notas||''
+    String(b.desde||''), String(b.hasta||''), b.formaPago||'', b.notas||'',
+    String(b.divisa||'MXN').toUpperCase()==='USD'?'USD':'MXN'
   ];
 }
 
@@ -168,6 +172,7 @@ function _gfItem(t, periodo, lastByGF) {
     montoVariable: t[7]===true||String(t[7]).toUpperCase()==='TRUE',
     diaVencimiento:String(t[8]||''), vencimiento:_gfVencimiento(periodo, String(t[8]||'')),
     formaPago:String(t[12]||''), notas:String(t[13]||''),
+    divisa:String(t[14]||'MXN').toUpperCase()==='USD'?'USD':'MXN',
     ultimoReal: lastByGF[id]||null
   };
 }
@@ -236,8 +241,13 @@ function _gfAppendCxP(egSh, iRec1, item, usuario) {
             item.concepto||'', monto, item.notas||'', item.vencimiento||'', false,false,false,'',
             item.formaPago||'', '', '', '' ];
   egSh.appendRow(row);
-  egSh.getRange(egSh.getLastRow(), iRec1).setValue(item.id); // RecurrenteID
-  logAudit(usuario||'sistema','GastoFijo','Programar',item.id,'Mes',periodo,(item.proveedor||'')+' $'+monto);
+  var newRow = egSh.getLastRow();
+  egSh.getRange(newRow, iRec1).setValue(item.id); // RecurrenteID
+  // Divisa de la partida (columna detectada/creada por header — no colisiona con otras)
+  var div = String(item.divisa||'MXN').toUpperCase()==='USD' ? 'USD' : 'MXN';
+  var iDiv = _egColEnsure(egSh, 'divisa', 'Divisa');
+  egSh.getRange(newRow, iDiv).setValue(div);
+  logAudit(usuario||'sistema','GastoFijo','Programar',item.id,'Mes',periodo,(item.proveedor||'')+' '+div+' '+monto);
   return {ok:true, id:newId};
 }
 

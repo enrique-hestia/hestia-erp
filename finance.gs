@@ -1058,8 +1058,12 @@ function readBDCxP() {
 
     var resumen = {vencido:0,hoy:0,semana:0,mes:0,totalVencido:0,totalHoy:0,totalSemana:0,totalMes:0,totalPendiente:0};
     var rows = [];
-    var iCotiz = -1, hdr0 = raw[0]||[];
-    for (var hc=0; hc<hdr0.length; hc++){ if(String(hdr0[hc]).toLowerCase().indexOf('cotiz')>-1){ iCotiz=hc; break; } }
+    var iCotiz = -1, iDiv = -1, hdr0 = raw[0]||[];
+    for (var hc=0; hc<hdr0.length; hc++){
+      var h0=String(hdr0[hc]).toLowerCase();
+      if(iCotiz<0 && h0.indexOf('cotiz')>-1) iCotiz=hc;
+      if(iDiv<0 && h0.indexOf('divisa')>-1) iDiv=hc;
+    }
 
     for (var i=1;i<raw.length;i++) {
       var r = raw[i];
@@ -1091,6 +1095,7 @@ function readBDCxP() {
         observaciones:String(r[17]||''), linkFactura:String(r[18]||''),
         linkPago:String(r[19]||''),
         linkCotizacion: iCotiz>-1 ? String(r[iCotiz]||'') : '', linkCotizacionUrl:'',
+        divisa: (iDiv>-1 && String(r[iDiv]||'').toUpperCase()==='USD') ? 'USD' : 'MXN',
         dias:dias, urgencia:urgencia
       });
     }

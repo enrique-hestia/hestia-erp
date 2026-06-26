@@ -11843,11 +11843,11 @@ function _cxpBuildNewRows(rows) {
       + '<td style="font-weight:600;color:var(--text-primary,#111)">'+row.proveedor+'</td>'
       + '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="'+row.concepto+'">'+row.concepto+'</td>'
       + '<td style="font-size:11px;color:var(--text-secondary,#6b7280)">'+row.subtipo+'</td>'
-      + '<td style="text-align:right;font-weight:700;font-size:13px">'+fMXN(row.monto)+'</td>'
+      + '<td style="text-align:right;font-weight:700;font-size:13px">'+fMXN(row.monto)+(row.divisa==='USD'?' <span style="font-size:9px;color:#0369a1;font-weight:800">USD</span>':'')+'</td>'
       + '<td style="font-size:11px">'+(row.vencimiento||'—')+'</td>'
       + '<td style="text-align:center;font-size:12px">'+factIcon+'</td>'
       + '<td style="text-align:center;white-space:nowrap">'
-        + '<button onclick="cxpOpenPay('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),'+row.monto+')" style="padding:4px 10px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;margin-right:4px">Pagar</button>'
+        + '<button onclick="cxpOpenPay('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),'+row.monto+',\''+(row.divisa||'MXN')+'\')" style="padding:4px 10px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;margin-right:4px">Pagar</button>'
         + '<button onclick="cxpOpenEdit('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(JSON.stringify(row))+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:6px;font-size:12px;cursor:pointer" title="Editar">✎</button>'
         + '<button onclick="cxpCotiz('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),decodeURIComponent(\''+encodeURIComponent(row.linkCotizacionUrl||'')+'\'))" style="padding:4px 8px;background:rgba(196,106,122,.1);border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px;opacity:'+(row.linkCotizacionUrl?'1':'.45')+'" title="'+(row.linkCotizacionUrl?'Ver cotización':'Adjuntar cotización')+'">📋</button>'
       + '</td>'
@@ -11928,7 +11928,7 @@ function _gfProgHTML(per){
       var amber=p.montoVariable;
       var ult=p.ultimoReal?(' · último: '+_cxpFM(p.ultimoReal.monto)+' ('+p.ultimoReal.mes+')'):' · sin histórico';
       h+='<tr'+(amber?' style="background:rgba(245,158,11,.06)"':'')+'>'
-        +'<td><span style="font-size:11px;color:var(--text-secondary,#6b7280)">'+_cxpEsc(p.subtipo||'—')+'</span>'+(amber?' <span title="Monto variable: revísalo" style="color:#b45309">⚠</span>':'')+'</td>'
+        +'<td><span style="font-size:11px;color:var(--text-secondary,#6b7280)">'+_cxpEsc(p.subtipo||'—')+'</span>'+(amber?' <span title="Monto variable: revísalo" style="color:#b45309">⚠</span>':'')+(p.divisa==='USD'?' <span style="font-size:9px;color:#0369a1;font-weight:800">USD</span>':'')+'</td>'
         +'<td style="font-weight:600">'+_cxpEsc(p.proveedor)+'</td>'
         +'<td style="max-width:230px;overflow:hidden;text-overflow:ellipsis" title="'+_cxpEsc(p.concepto)+_cxpEsc(ult)+'">'+_cxpEsc(p.concepto)+'</td>'
         +'<td style="font-size:11px">'+(p.vencimiento||'—')+'</td>'
@@ -11967,7 +11967,7 @@ function _gfCatHTML(){
         +'<td style="text-align:center"><input type="checkbox" '+(t.activo?'checked':'')+' onchange="gfToggle('+t.rowNum+',this.checked)"></td>'
         +'<td style="font-weight:600">'+_cxpEsc(t.proveedor)+'</td>'
         +'<td style="max-width:230px;overflow:hidden;text-overflow:ellipsis">'+_cxpEsc(t.concepto)+'</td>'
-        +'<td style="text-align:right">'+_cxpFM(t.montoEstimado)+'</td>'
+        +'<td style="text-align:right">'+_cxpFM(t.montoEstimado)+(t.divisa==='USD'?' <span style="font-size:9px;color:#0369a1;font-weight:800">USD</span>':'')+'</td>'
         +'<td style="font-size:11px">'+_cxpEsc(t.diaVencimiento||'—')+'</td>'
         +'<td style="font-size:11px">'+_cxpEsc(t.meses||'Todos')+'</td>'
         +'<td style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">'+_cxpEsc(vig)+'</td>'
@@ -12005,14 +12005,14 @@ async function gfProgramarUno(id){
   var monto=(document.getElementById('gf-monto-'+id)||{}).value; if(monto==='') monto=p.montoSugerido;
   var s=getSession()||{};
   try {
-    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'programarGastoFijo', id:id, periodo:_gfData.periodo, proveedor:p.proveedor, contable:p.contable, subtipo:p.subtipo, concepto:p.concepto, monto:monto, vencimiento:p.vencimiento, formaPago:p.formaPago, usuario:s.email||'sistema'})});
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'programarGastoFijo', id:id, periodo:_gfData.periodo, proveedor:p.proveedor, contable:p.contable, subtipo:p.subtipo, concepto:p.concepto, monto:monto, vencimiento:p.vencimiento, formaPago:p.formaPago, divisa:p.divisa, usuario:s.email||'sistema'})});
     var res=await r.json();
     if(res.ok||res.dup){ loadGastosFijos(); } else alert('Error: '+(res.error||''));
   } catch(e){ alert('Error: '+e.message); }
 }
 async function gfProgramarTodos(){
   var props=_gfData.propuestas||[];
-  var items=props.map(function(p){ var m=(document.getElementById('gf-monto-'+p.id)||{}).value; if(m==='')m=p.montoSugerido; return {id:p.id, periodo:_gfData.periodo, proveedor:p.proveedor, contable:p.contable, subtipo:p.subtipo, concepto:p.concepto, monto:m, vencimiento:p.vencimiento, formaPago:p.formaPago}; });
+  var items=props.map(function(p){ var m=(document.getElementById('gf-monto-'+p.id)||{}).value; if(m==='')m=p.montoSugerido; return {id:p.id, periodo:_gfData.periodo, proveedor:p.proveedor, contable:p.contable, subtipo:p.subtipo, concepto:p.concepto, monto:m, vencimiento:p.vencimiento, formaPago:p.formaPago, divisa:p.divisa}; });
   if(!items.length){ alert('No hay propuestas por programar'); return; }
   if(!confirm('¿Programar '+items.length+' gastos fijos a Cuentas por Pagar?')) return;
   var s=getSession()||{};
@@ -12034,9 +12034,10 @@ function _gfModalHTML(){
     +'<div id="gf-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(560px,94vw);max-height:88vh;overflow-y:auto;padding:20px">'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div id="gf-modal-title" style="font-size:15px;font-weight:800">Nuevo gasto fijo</div><button onclick="gfCloseForm()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary,#6b7280)">×</button></div>'
     +'<input type="hidden" id="gf-f-rownum"><input type="hidden" id="gf-f-id">'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'
+    +'<div style="display:grid;grid-template-columns:1.5fr 1fr .8fr;gap:12px;margin-bottom:12px">'
     +'<div><label '+L+'>Proveedor *</label><input id="gf-f-prov" list="prov-datalist" '+S+'></div>'
-    +'<div><label '+L+'>Monto estimado</label><input id="gf-f-monto" type="number" step="0.01" '+S+' placeholder="0.00"></div></div>'
+    +'<div><label '+L+'>Monto estimado</label><input id="gf-f-monto" type="number" step="0.01" '+S+' placeholder="0.00"></div>'
+    +'<div><label '+L+'>Divisa</label><select id="gf-f-divisa" '+S+'><option value="MXN">MXN</option><option value="USD">USD</option></select></div></div>'
     +'<div style="margin-bottom:12px"><label '+L+'>Concepto *</label><input id="gf-f-concepto" '+S+' placeholder="Descripción"></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">'
     +'<div><label '+L+'>Contable</label><select id="gf-f-contable" '+S+'><option>Gasto</option><option>Costo</option><option>Crédito</option></select></div>'
@@ -12061,6 +12062,7 @@ function gfOpenForm(json, presetCat){
   set('gf-f-prov', d?d.proveedor:''); set('gf-f-monto', d?d.montoEstimado:'');
   set('gf-f-concepto', d?d.concepto:''); set('gf-f-contable', d?d.contable:'Gasto');
   set('gf-f-subtipo', d?d.subtipo:(presetCat||'')); set('gf-f-fp', d?d.formaPago:'');
+  set('gf-f-divisa', d?(d.divisa||'MXN'):'MXN');
   set('gf-f-dia', d?d.diaVencimiento:''); set('gf-f-meses', d?d.meses:'Todos');
   set('gf-f-desde', d?d.desde:''); set('gf-f-hasta', d?d.hasta:''); set('gf-f-notas', d?d.notas:'');
   var v=document.getElementById('gf-f-variable'); if(v) v.checked = d?!!d.montoVariable:false;
@@ -12080,6 +12082,7 @@ async function gfSaveForm(){
     montoVariable:(document.getElementById('gf-f-variable')||{}).checked,
     diaVencimiento:val('gf-f-dia'), meses:val('gf-f-meses')||'Todos',
     desde:val('gf-f-desde'), hasta:val('gf-f-hasta'), formaPago:val('gf-f-fp'), notas:val('gf-f-notas'),
+    divisa:val('gf-f-divisa')||'MXN',
     usuario:s.email||'sistema', action: rowNum?'updateGastoFijo':'saveGastoFijo' };
   var btn=document.getElementById('gf-save-btn'); if(btn){btn.disabled=true;btn.textContent='Guardando…';}
   try {
@@ -12121,7 +12124,7 @@ function showGfBanner(n, per){
 function hideGfBanner(){ var b=document.getElementById('gf-banner'); if(b){ b.style.bottom='-140px'; setTimeout(function(){ if(b.parentNode) b.parentNode.removeChild(b); },420);} }
 
 // ── CxP Payment modal ──
-window.cxpOpenPay = function(rowNum, proveedor, monto) {
+window.cxpOpenPay = function(rowNum, proveedor, monto, divisa) {
   var m=document.getElementById('cxp-pay-modal'),o=document.getElementById('cxp-pay-ovl');
   if(m)m.style.display='block'; if(o)o.style.display='block';
   var title = document.getElementById('cxp-pay-title');
@@ -12129,12 +12132,14 @@ window.cxpOpenPay = function(rowNum, proveedor, monto) {
   var body = document.getElementById('cxp-pay-body');
   if (!body) return;
   window._cxpPayMonto = monto;
+  divisa = (String(divisa).toUpperCase()==='USD') ? 'USD' : 'MXN';
   var today = new Date().toISOString().substring(0,10);
   var S = 'style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"';
   body.innerHTML = '<div style="padding:4px">'
     + '<div style="background:linear-gradient(135deg,#166534,#15803d);border-radius:12px;padding:16px;color:#fff;margin-bottom:16px">'
       + '<div style="font-size:13px;font-weight:700">'+proveedor+'</div>'
-      + '<div style="font-size:24px;font-weight:800;margin-top:4px">$'+monto.toLocaleString('en-US',{minimumFractionDigits:2})+'</div>'
+      + '<div style="font-size:24px;font-weight:800;margin-top:4px">$'+monto.toLocaleString('en-US',{minimumFractionDigits:2})+(divisa==='USD'?' <span style="font-size:13px;font-weight:700;opacity:.9">USD</span>':'')+'</div>'
+      + (divisa==='USD'?'<div style="font-size:10.5px;margin-top:5px;opacity:.92;line-height:1.4">Partida en dólares — elige Santander o AMEX y captura el tipo de cambio; el sistema lo manda a su columna correcta.</div>':'')
     + '</div>'
     + '<div style="display:flex;flex-direction:column;gap:12px">'
       + '<div><label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Fecha de pago *</label>'
@@ -12144,13 +12149,13 @@ window.cxpOpenPay = function(rowNum, proveedor, monto) {
       + '<div id="cxp-pay-divisa-wrap" style="display:none;background:var(--color-surface,#f8fafc);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:12px;gap:10px;flex-direction:column">'
         + '<div style="display:flex;gap:10px">'
           + '<div style="flex:1"><label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Divisa</label>'
-            + '<select id="cxp-pay-divisa" '+S+' onchange="cxpPayDivisaToggle()"><option value="MXN">MXN — Pesos</option><option value="USD">USD — Dólares</option></select></div>'
+            + '<select id="cxp-pay-divisa" '+S+' onchange="cxpPayDivisaToggle()"><option value="MXN"'+(divisa==='USD'?'':' selected')+'>MXN — Pesos</option><option value="USD"'+(divisa==='USD'?' selected':'')+'>USD — Dólares</option></select></div>'
           + '<div style="flex:1" id="cxp-pay-tc-wrap"><label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Tipo de cambio</label>'
             + '<input type="number" id="cxp-pay-tc" step="0.0001" min="0" placeholder="Ej. 18.50" '+S+' oninput="cxpPayDivisaCalc()"></div>'
         + '</div>'
         + '<div id="cxp-pay-usd-wrap" style="display:none">'
           + '<label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Importe en USD</label>'
-          + '<input type="number" id="cxp-pay-usd" step="0.01" min="0" '+S+' oninput="cxpPayDivisaCalc()">'
+          + '<input type="number" id="cxp-pay-usd" step="0.01" min="0" '+S+' value="'+(divisa==='USD'?monto:'')+'" oninput="cxpPayDivisaCalc()">'
           + '<div id="cxp-pay-mxn-calc" style="font-size:11px;margin-top:6px;color:#166534;font-weight:600"></div>'
         + '</div>'
       + '</div>'
