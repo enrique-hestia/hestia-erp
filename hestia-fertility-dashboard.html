@@ -13385,6 +13385,24 @@ function submitLabPanel() {
     if (d.success || d.ok) {
       msgEl.className = 'lp-msg lp-ok';
       msgEl.textContent = rowNum ? 'Registro actualizado.' : 'Registro creado.';
+      // Si es un registro nuevo con fecha estimada de recepción/entrega → ofrecer recordatorio (opt-in)
+      if (!rowNum && typeof ofrecerRecordatorio === 'function') {
+        try {
+          var _fechaRec='', _ref='', _prod='';
+          Object.keys(values).forEach(function(k){
+            var kl=k.toLowerCase();
+            if(!_fechaRec && /(estimad|recib|llegad|entrega)/.test(kl) && /^\d{4}-\d{2}-\d{2}/.test(String(values[k]||''))) _fechaRec=String(values[k]).substring(0,10);
+            if(!_ref && /(no\.?\s*orden|folio|orden)/.test(kl) && values[k]) _ref=String(values[k]);
+            if(!_prod && /(producto|insumo|descrip|item|nombre)/.test(kl) && values[k]) _prod=String(values[k]);
+          });
+          if(_fechaRec){
+            setTimeout(function(){
+              ofrecerRecordatorio({ titulo:'Recibir '+(_prod||'producto')+(_ref?' ('+_ref+')':''),
+                detalle:'Recepción estimada de inventario.', fecha:_fechaRec, origen:'inventario', referencia:_ref });
+            }, 1100);
+          }
+        } catch(_e){}
+      }
       setTimeout(function(){
         closeLabPanel();
         loadView(viewId, currentFechaInicio, currentFechaFin, true);
