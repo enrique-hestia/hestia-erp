@@ -266,6 +266,17 @@ function doGet(e) {
       return jsonResponse(readBDCxP());
     }
 
+    // Gastos fijos (recurrentes): catálogo, propuestas del mes, proyección
+    if (action === 'gastosFijos') {
+      return jsonResponse(readGastosFijos());
+    }
+    if (action === 'gfPropuestas') {
+      return jsonResponse(readGastosFijosPropuestas(e.parameter.periodo || ''));
+    }
+    if (action === 'gfProyeccion') {
+      return jsonResponse(readProyeccionGastosFijos({periodo:e.parameter.periodo||'', meses:e.parameter.meses||3}));
+    }
+
     // Catálogo de proveedores (fuente única para dropdowns)
     if (action === 'proveedores') {
       return jsonResponse(readProveedores());

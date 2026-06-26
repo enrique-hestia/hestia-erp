@@ -526,6 +526,14 @@ function doPost(e) {
     if (body.action === 'pagarCxP') {
       return jsonResponse(pagarCxP(body));
     }
+    // Gastos fijos (recurrentes)
+    if (body.action === 'setupGastosFijos')        return jsonResponse(setupGastosFijos());
+    if (body.action === 'saveGastoFijo')           return jsonResponse(saveGastoFijo(body));
+    if (body.action === 'updateGastoFijo')         return jsonResponse(updateGastoFijo(body));
+    if (body.action === 'toggleGastoFijo')         return jsonResponse(toggleGastoFijo(body));
+    if (body.action === 'deleteGastoFijo')         return jsonResponse(deleteGastoFijo(body));
+    if (body.action === 'programarGastoFijo')      return jsonResponse(programarGastoFijo(body));
+    if (body.action === 'programarGastosFijosBatch') return jsonResponse(programarGastosFijosBatch(body));
     if (body.action === 'updateProducto') {
       return jsonResponse(updateProducto(body));
     }
