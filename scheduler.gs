@@ -543,23 +543,36 @@ function readScheduledTasks() {
       var hora   = parseInt(_schedGetCfg(t.id,'hora',t.horaDefault),10);
       var minuto = parseInt(_schedGetCfg(t.id,'minuto',t.minuto||0),10);
       var activo = String(_schedGetCfg(t.id,'activo','true')) !== 'false';
+      var tipo   = _schedGetCfg(t.id,'tipo', t.tipo||'diaria');
+      var dia    = parseInt(_schedGetCfg(t.id,'dia', t.dia||1),10); if (isNaN(dia)) dia = t.dia||1;
       var instalado = scopeOk ? triggers.some(function(tr){ return tr.getHandlerFunction()===t.handler; }) : null;
-      return { id:t.id, nombre:t.nombre, desc:t.desc, tipo:t.tipo, handler:t.handler,
-               dia:t.dia||null, hora:hora, minuto:minuto, activo:activo, instalado:instalado,
+      return { id:t.id, nombre:t.nombre, desc:t.desc, tipo:tipo, handler:t.handler,
+               dia:dia, hora:hora, minuto:minuto, activo:activo, instalado:instalado,
                lastRun: (t.handler==='actualizarConfiguracionSistema') ? lastRun : '' };
     });
     return { ok:true, tasks:out, scopeOk:scopeOk };
   } catch(ex){ return { ok:false, error:ex.message, tasks:[] }; }
 }
 
-function _schedInstallTrigger(t, hora, minuto, activo) {
+function _schedWeekDay(n) {
+  var W = [null, ScriptApp.WeekDay.MONDAY, ScriptApp.WeekDay.TUESDAY, ScriptApp.WeekDay.WEDNESDAY,
+           ScriptApp.WeekDay.THURSDAY, ScriptApp.WeekDay.FRIDAY, ScriptApp.WeekDay.SATURDAY, ScriptApp.WeekDay.SUNDAY];
+  return W[parseInt(n,10)] || ScriptApp.WeekDay.MONDAY;
+}
+// cfg = {tipo:'diaria'|'semanal'|'mensual', dia, hora, minuto, activo}
+function _schedInstallTrigger(t, cfg) {
   ScriptApp.getProjectTriggers().forEach(function(tr){
     if (tr.getHandlerFunction()===t.handler) ScriptApp.deleteTrigger(tr);
   });
-  if (!activo) return;
+  if (!cfg.activo) return;
   var b = ScriptApp.newTrigger(t.handler).timeBased();
-  if (t.tipo==='mensual') { b.onMonthDay(t.dia||1).atHour(hora).create(); }
-  else { b.everyDays(1).atHour(hora).nearMinute(minuto).create(); }
+  if (cfg.tipo==='mensual') {
+    b.onMonthDay(Math.max(1, Math.min(28, parseInt(cfg.dia,10)||1))).atHour(cfg.hora).create();
+  } else if (cfg.tipo==='semanal') {
+    b.onWeekDay(_schedWeekDay(cfg.dia)).atHour(cfg.hora).create();
+  } else {
+    b.everyDays(1).atHour(cfg.hora).nearMinute(cfg.minuto).create();
+  }
 }
 
 function updateScheduledTask(body) {
@@ -571,16 +584,21 @@ function updateScheduledTask(body) {
     var minuto = Math.max(0, Math.min(59, parseInt(body.minuto,10)));
     if (isNaN(minuto)) minuto = 0;
     var activo = !(body.activo===false || String(body.activo)==='false');
-    // La configuración (hora/min/activo) se guarda siempre (no requiere permisos especiales).
+    var tipo = (body.tipo==='mensual'||body.tipo==='semanal'||body.tipo==='diaria') ? body.tipo : (t.tipo||'diaria');
+    var dia = parseInt(body.dia,10); if (isNaN(dia)) dia = t.dia||1;
+    // La configuración (tipo/día/hora/min/activo) se guarda siempre (no requiere permisos).
     _schedSetCfg(t.id,'hora',hora);
     _schedSetCfg(t.id,'minuto',minuto);
+    _schedSetCfg(t.id,'tipo',tipo);
+    _schedSetCfg(t.id,'dia',dia);
     _schedSetCfg(t.id,'activo',activo);
     // Instalar el disparador SÍ requiere el scope script.scriptapp; si falta, lo reportamos
     // sin tronar (la config queda guardada y se aplicará al autorizar/instalar).
+    var cfg = {tipo:tipo, dia:dia, hora:hora, minuto:minuto, activo:activo};
     var scopeOk = true, instErr = '';
-    try { _schedInstallTrigger(t, hora, minuto, activo); }
+    try { _schedInstallTrigger(t, cfg); }
     catch(se) { scopeOk = false; instErr = se.message; }
-    return { ok:true, id:t.id, hora:hora, minuto:minuto, activo:activo, scopeOk:scopeOk, instErr:instErr };
+    return { ok:true, id:t.id, tipo:tipo, dia:dia, hora:hora, minuto:minuto, activo:activo, scopeOk:scopeOk, instErr:instErr };
   } catch(ex){ return { ok:false, error:ex.message }; }
 }
 
@@ -589,11 +607,15 @@ function updateScheduledTask(body) {
 function setupScheduledTriggers() {
   var tasks = _schedTasks(), res = [];
   tasks.forEach(function(t){
-    var hora   = parseInt(_schedGetCfg(t.id,'hora',t.horaDefault),10);
-    var minuto = parseInt(_schedGetCfg(t.id,'minuto',t.minuto||0),10);
-    var activo = String(_schedGetCfg(t.id,'activo','true')) !== 'false';
-    _schedInstallTrigger(t, hora, minuto, activo);
-    res.push(t.id+' @ '+hora+':'+String(minuto).padStart(2,'0')+(activo?'':' (pausada)'));
+    var cfg = {
+      tipo:   _schedGetCfg(t.id,'tipo', t.tipo||'diaria'),
+      dia:    parseInt(_schedGetCfg(t.id,'dia', t.dia||1),10) || 1,
+      hora:   parseInt(_schedGetCfg(t.id,'hora', t.horaDefault),10),
+      minuto: parseInt(_schedGetCfg(t.id,'minuto', t.minuto||0),10),
+      activo: String(_schedGetCfg(t.id,'activo','true')) !== 'false'
+    };
+    _schedInstallTrigger(t, cfg);
+    res.push(t.id+' ('+cfg.tipo+') @ '+cfg.hora+':'+String(cfg.minuto).padStart(2,'0')+(cfg.activo?'':' (pausada)'));
   });
   Logger.log('[scheduler] Triggers instalados: '+res.join(', '));
   return 'Instalados: '+res.join(', ');

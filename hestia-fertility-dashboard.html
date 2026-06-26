@@ -10326,22 +10326,45 @@ async function pcLoadScheduled() {
     box.innerHTML = note + d.tasks.map(_pcSchedRow).join('');
   } catch(e){ box.innerHTML='<div style="padding:18px;color:#b91c1c;font-size:12.5px">⚠ '+e.message+'<br><span style="color:var(--color-text-muted)">Agrega/actualiza <b>scheduler.gs</b> y vuelve a desplegar el backend.</span></div>'; }
 }
+function _pcFreqLabel(t){
+  if(t.tipo==='mensual') return 'Mensual · día '+(t.dia||1);
+  if(t.tipo==='semanal'){ var W=['','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo']; return 'Semanal · '+(W[t.dia]||'Lunes'); }
+  return 'Diaria';
+}
+function _pcWeekOpts(sel){ var W=['','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo']; var o=''; for(var i=1;i<=7;i++){ o+='<option value="'+i+'"'+(i===sel?' selected':'')+'>'+W[i]+'</option>'; } return o; }
+function _pcMonthDayOpts(sel){ var o=''; for(var i=1;i<=28;i++){ o+='<option value="'+i+'"'+(i===sel?' selected':'')+'>'+i+'</option>'; } return o; }
+function pcSchedFreqChange(id){
+  var freq=(document.getElementById('pc-sched-t-'+id)||{}).value;
+  var wrap=document.getElementById('pc-sched-dwrap-'+id), sel=document.getElementById('pc-sched-d-'+id);
+  if(!wrap||!sel) return;
+  if(freq==='diaria'){ wrap.style.display='none'; return; }
+  wrap.style.display='';
+  var cur=parseInt(sel.value,10)||1;
+  if(freq==='semanal'){ if(cur>7)cur=1; sel.innerHTML=_pcWeekOpts(cur); }
+  else { sel.innerHTML=_pcMonthDayOpts(cur>28?1:cur); }
+}
 function _pcSchedRow(t){
-  var freq = t.tipo==='mensual' ? ('Mensual · día '+(t.dia||1)) : 'Diaria';
+  var SS='style="padding:6px 8px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:12px;background:var(--color-surface);color:var(--color-text)"';
+  var LB='style="font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:3px"';
   var estado = t.instalado===null ? '<span style="color:#9ca3af;font-weight:700">○ Estado no disponible</span>'
     : t.instalado ? (t.activo?'<span style="color:#16a34a;font-weight:700">● Activa</span>':'<span style="color:#b45309;font-weight:700">● Pausada</span>')
     : '<span style="color:#9ca3af;font-weight:700">○ Sin instalar</span>';
   var last = t.lastRun ? ('<div style="font-size:10.5px;color:var(--color-text-muted);margin-top:3px">Última ejecución: '+String(t.lastRun).replace('T',' ').substring(0,16)+'</div>') : '';
+  var diaDisplay = (t.tipo==='diaria') ? 'none' : '';
+  var diaOpts = t.tipo==='semanal' ? _pcWeekOpts(t.dia||1) : _pcMonthDayOpts(t.dia||1);
   return '<div style="border:1px solid var(--color-divider);border-radius:11px;padding:14px 16px;margin-bottom:12px;background:var(--color-surface-2)">'
     + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">'
-    +   '<div style="flex:1;min-width:200px"><div style="font-size:13.5px;font-weight:700;color:var(--color-text)">'+t.nombre+'</div>'
+    +   '<div style="flex:1;min-width:190px"><div style="font-size:13.5px;font-weight:700;color:var(--color-text)">'+t.nombre+'</div>'
     +   '<div style="font-size:11.5px;color:var(--color-text-muted);margin-top:2px">'+t.desc+'</div>'
-    +   '<div style="font-size:11px;color:var(--color-text-muted);margin-top:5px">'+freq+' · '+estado+'</div>'+last+'</div>'
-    +   '<div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap">'
-    +     '<div><div style="font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:3px">Hora</div>'
-    +       '<select id="pc-sched-h-'+t.id+'" style="padding:6px 8px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:12px;background:var(--color-surface);color:var(--color-text)">'+_pcHourOpts(t.hora)+'</select></div>'
-    +     '<div><div style="font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:3px">Min</div>'
-    +       '<select id="pc-sched-m-'+t.id+'" style="padding:6px 8px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:12px;background:var(--color-surface);color:var(--color-text)">'+_pcMinOpts(t.minuto)+'</select></div>'
+    +   '<div style="font-size:11px;color:var(--color-text-muted);margin-top:5px">'+_pcFreqLabel(t)+' · '+estado+'</div>'+last+'</div>'
+    +   '<div style="display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap">'
+    +     '<div><div '+LB+'>Frecuencia</div><select id="pc-sched-t-'+t.id+'" onchange="pcSchedFreqChange(\''+t.id+'\')" '+SS+'>'
+    +       '<option value="diaria"'+(t.tipo==='diaria'?' selected':'')+'>Diaria</option>'
+    +       '<option value="semanal"'+(t.tipo==='semanal'?' selected':'')+'>Semanal</option>'
+    +       '<option value="mensual"'+(t.tipo==='mensual'?' selected':'')+'>Mensual</option></select></div>'
+    +     '<div id="pc-sched-dwrap-'+t.id+'" style="display:'+diaDisplay+'"><div '+LB+'>Día</div><select id="pc-sched-d-'+t.id+'" '+SS+'>'+diaOpts+'</select></div>'
+    +     '<div><div '+LB+'>Hora</div><select id="pc-sched-h-'+t.id+'" '+SS+'>'+_pcHourOpts(t.hora)+'</select></div>'
+    +     '<div><div '+LB+'>Min</div><select id="pc-sched-m-'+t.id+'" '+SS+'>'+_pcMinOpts(t.minuto)+'</select></div>'
     +     '<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--color-text-muted);padding-bottom:7px"><input type="checkbox" id="pc-sched-a-'+t.id+'" '+(t.activo?'checked':'')+'> Activa</label>'
     +     '<button onclick="pcSaveScheduled(\''+t.id+'\')" style="padding:8px 15px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">Guardar</button>'
     +   '</div>'
@@ -10350,14 +10373,16 @@ function _pcSchedRow(t){
 function _pcHourOpts(sel){ var o=''; for(var h=0;h<24;h++){ o+='<option value="'+h+'"'+(h===sel?' selected':'')+'>'+String(h).padStart(2,'0')+':00</option>'; } return o; }
 function _pcMinOpts(sel){ var o=''; [0,15,30,45].forEach(function(m){ o+='<option value="'+m+'"'+(m===sel?' selected':'')+'>'+String(m).padStart(2,'0')+'</option>'; }); return o; }
 async function pcSaveScheduled(id){
+  var tipo=(document.getElementById('pc-sched-t-'+id)||{}).value||'diaria';
+  var dia=parseInt((document.getElementById('pc-sched-d-'+id)||{}).value,10)||1;
   var hora=parseInt((document.getElementById('pc-sched-h-'+id)||{}).value,10);
   var minuto=parseInt((document.getElementById('pc-sched-m-'+id)||{}).value,10);
   var activo=(document.getElementById('pc-sched-a-'+id)||{}).checked;
   var s=getSession()||{};
   try {
-    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'updateScheduledTask', id:id, hora:hora, minuto:minuto, activo:activo, usuario:s.email||'sistema'})});
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'updateScheduledTask', id:id, tipo:tipo, dia:dia, hora:hora, minuto:minuto, activo:activo, usuario:s.email||'sistema'})});
     var res=await r.json();
-    if(res.ok){ pcLoadScheduled(); setStatus(res.scopeOk===false?'Hora guardada — autoriza ScriptApp (setupScheduledTriggers) para aplicar el disparador':'Tarea programada actualizada'); } else alert('Error: '+(res.error||''));
+    if(res.ok){ pcLoadScheduled(); setStatus(res.scopeOk===false?'Guardado — autoriza ScriptApp (setupScheduledTriggers) para aplicar':'Tarea programada actualizada'); } else alert('Error: '+(res.error||''));
   } catch(e){ alert('Error: '+e.message); }
 }
 
