@@ -5672,6 +5672,56 @@ window.cbCrearBanco = async function() {
 };
 
 var APP_VERSION = '2026.06.19.3';
+
+// Detalle expandible de un movimiento bancario: muestra TODOS los campos
+function cbDetailHTML(m, bankId) {
+  if (!m || typeof m !== 'object') return '';
+  var LBL = {
+    fecha:'Fecha', mes:'Mes', tipo:'Tipo',
+    deposito:'Depósito (MXN)', retiro:'Retiro (MXN)', monto:'Monto', saldo:'Saldo',
+    referencia:'Descripción / Referencia', establecimiento:'Establecimiento',
+    importe:'Importe', depositoUSD:'Depósito USD', usd:'USD', tipoCambio:'Tipo de cambio',
+    poliza:'Póliza', notas:'Notas', observaciones:'Observaciones',
+    cobro:'Cobro', totalBruto:'Total bruto', comisiones:'Comisiones',
+    totalVenta:'Neto', pctComision:'% Comisión', liberado:'Liberado'
+  };
+  var moneyKeys = {deposito:1,retiro:1,monto:1,saldo:1,importe:1,depositoUSD:1,usd:1,cobro:1,totalBruto:1,comisiones:1,totalVenta:1};
+  var usdKeys = {depositoUSD:1, usd:1, tipoCambio:1};
+  var skip = {rowNum:1};
+  function fmtVal(k, v) {
+    if (v === '' || v === null || v === undefined) return '—';
+    if (k === 'liberado') return v ? 'Sí' : 'No';
+    if (k === 'tipoCambio') { var t=parseFloat(v)||0; return t>0 ? t.toFixed(4) : '—'; }
+    if (k === 'pctComision') { var p=parseFloat(v)||0; if(p>0&&p<1)p*=100; return p>0 ? p.toFixed(2)+'%' : '—'; }
+    if (moneyKeys[k]) { var n=parseFloat(v)||0; return n!==0 ? '$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2}) : '—'; }
+    return String(v).replace(/</g,'&lt;');
+  }
+  var order = ['fecha','mes','tipo','deposito','retiro','importe','cobro','comisiones','totalVenta','pctComision','saldo','usd','depositoUSD','tipoCambio','referencia','establecimiento','poliza','observaciones','notas','liberado'];
+  var keys = Object.keys(m).filter(function(k){ return !skip[k]; });
+  keys.sort(function(a,b){ var ia=order.indexOf(a), ib=order.indexOf(b); return (ia<0?99:ia)-(ib<0?99:ib); });
+  var items = keys.map(function(k){
+    var label = LBL[k] || (k.charAt(0).toUpperCase()+k.slice(1));
+    var vcls = (usdKeys[k] && (parseFloat(m[k])||0) > 0) ? ' usd' : '';
+    return '<div class="cb-det-item"><div class="cb-det-k">'+label+'</div><div class="cb-det-v'+vcls+'">'+fmtVal(k, m[k])+'</div></div>';
+  }).join('');
+  var tc = parseFloat(m.tipoCambio)||0, usdAmt = parseFloat(m.usd||m.depositoUSD)||0;
+  var usdNote = '';
+  if (tc > 0 || usdAmt > 0) {
+    usdNote = '<div style="grid-column:1/-1;font-size:11.5px;color:#0369a1;font-weight:600;background:rgba(3,105,161,.07);border:1px solid rgba(3,105,161,.18);border-radius:8px;padding:8px 11px">💵 Operación en USD'
+      + (usdAmt>0 ? ' · $'+usdAmt.toLocaleString('en-US',{minimumFractionDigits:2})+' USD' : '')
+      + (tc>0 ? ' · T.C. '+tc.toFixed(4) : '') + '</div>';
+  }
+  return '<div class="cb-det">'+usdNote+items+'</div>';
+}
+function cbToggleDet(bank, rn) {
+  var d = document.getElementById('cb-det-'+bank+'-'+rn);
+  var r = document.getElementById('cb-r-'+bank+'-'+rn);
+  if (!d) return;
+  var show = d.style.display === 'none';
+  d.style.display = show ? '' : 'none';
+  if (r) r.classList.toggle('open', show);
+}
+
 function renderConciliacion(data) {
   var el = document.getElementById('view-conciliacion');
   if (!el) return;
@@ -5725,6 +5775,15 @@ function renderConciliacion(data) {
     +'.cb-tbl th{padding:8px 14px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);background:var(--color-surface,#f9f9f9);border-bottom:1px solid var(--color-divider,#e5e7eb);white-space:nowrap}'
     +'.cb-tbl td{padding:9px 14px;border-bottom:1px solid var(--color-divider,#f4f4f5);vertical-align:middle}'
     +'.cb-tbl tr:last-child td{border-bottom:none}'
+    +'.cb-row{cursor:pointer;transition:background .12s}'
+    +'.cb-row:hover{background:var(--color-surface,#faf7f8)}'
+    +'.cb-row.open{background:color-mix(in srgb,var(--color-primary,#c46a7a) 7%,transparent)}'
+    +'.cb-detrow>td{padding:0 !important;background:var(--color-surface,#fafafa);border-bottom:1px solid var(--color-divider,#e5e7eb)}'
+    +'.cb-det{padding:14px 18px;display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:11px 18px}'
+    +'.cb-det-item{display:flex;flex-direction:column;gap:2px;min-width:0}'
+    +'.cb-det-k{font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)}'
+    +'.cb-det-v{font-size:12.5px;font-weight:600;color:var(--text-primary,#111);word-break:break-word}'
+    +'.cb-det-v.usd{color:#0369a1}'
     +'.cb-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700}'
     +'.cb-dep{background:#dcfce7;color:#166534}'
     +'.cb-ret{background:#fee2e2;color:#991b1b}'
@@ -5833,10 +5892,11 @@ function renderConciliacion(data) {
       var rn = m.rowNum || 0;
       var mj = encodeURIComponent(JSON.stringify(m));
       var actCells = '<td style="text-align:center;white-space:nowrap">'
-        +(hasPermission('bank_edit')?'<button class="cb-act-btn cb-act-edit" title="Editar" onclick="cbEditRow(\''+aB.id+'\','+rn+',decodeURIComponent(\''+mj+'\'))">✎</button>':'')
-        +(hasPermission('bank_delete')?'<button class="cb-act-btn cb-act-del"  title="Eliminar" onclick="cbDeleteRow(\''+aB.id+'\','+rn+')">✕</button>':'')
+        +(hasPermission('bank_edit')?'<button class="cb-act-btn cb-act-edit" title="Editar" onclick="event.stopPropagation();cbEditRow(\''+aB.id+'\','+rn+',decodeURIComponent(\''+mj+'\'))">✎</button>':'')
+        +(hasPermission('bank_delete')?'<button class="cb-act-btn cb-act-del"  title="Eliminar" onclick="event.stopPropagation();cbDeleteRow(\''+aB.id+'\','+rn+')">✕</button>':'')
         +'</td>';
-      hh.push('<tr>');
+      var detColSpan = aB.id==='santander'?7 : aB.id==='amex'?8 : 9;
+      hh.push('<tr class="cb-row" id="cb-r-'+aB.id+'-'+rn+'" onclick="cbToggleDet(\''+aB.id+'\','+rn+')" title="Clic para ver el detalle completo">');
       hh.push('<td style="white-space:nowrap;color:var(--text-secondary,#6b7280)">'+((m.fecha||m.mes)||'—')+'</td>');
       if (aB.id==='santander') {
         var dep=parseFloat(m.deposito||0), ret=parseFloat(m.retiro||0);
@@ -5869,9 +5929,10 @@ function renderConciliacion(data) {
         var pctVal = (pctDisp > 0 && pctDisp < 1) ? (pctDisp*100) : pctDisp;
         hh.push('<td style="text-align:right;color:#b45309;font-weight:600">'+(pctVal>0?pctVal.toFixed(2)+'%':'—')+'</td>');
         hh.push('<td style="color:var(--text-secondary,#374151);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(m.observaciones||'—')+'</td>');
-        hh.push('<td style="text-align:center"><div class="'+cbChkCls+'" onclick="cfToggleLib('+rn+','+(!(m.liberado))+') " title="'+(m.liberado?'Marcar como NO liberado':'Marcar como liberado')+'">'+(m.liberado?'✓':'')+'</div></td>');
+        hh.push('<td style="text-align:center"><div class="'+cbChkCls+'" onclick="event.stopPropagation();cfToggleLib('+rn+','+(!(m.liberado))+') " title="'+(m.liberado?'Marcar como NO liberado':'Marcar como liberado')+'">'+(m.liberado?'✓':'')+'</div></td>');
       }
       hh.push(actCells+'</tr>');
+      hh.push('<tr class="cb-detrow" id="cb-det-'+aB.id+'-'+rn+'" style="display:none"><td colspan="'+detColSpan+'">'+cbDetailHTML(m, aB.id)+'</td></tr>');
     });
     hh.push('</tbody></table></div>');
   } else {

@@ -1169,14 +1169,17 @@ function pagarCxP(body) {
         }
       } catch(ccErr) { /* silencioso */ }
     } else if (formaPago && monto > 0) {
-      // Otros → banco correspondiente. Tipo de cambio: Santander col F (idx 5), AMEX col E (idx 4)
+      // Otros → banco correspondiente.
+      // Columnas reales: Santander → F(idx5)=Depósito USD, G(idx6)=T.Cambio.
+      //                  AMEX      → E(idx4)=USD,          F(idx5)=Tipo de cambio.
       var banco = '', bankRow = null;
       var mesStr = fechaPago.substring(0, 7);
-      var tcSant = esUSD ? tipoCambio : '';
-      var tcAmex = esUSD ? tipoCambio : '';
-      if (formaPago === 'Santander') { banco = 'santander'; bankRow = [fechaPago, 0, monto, 0, concepto + ' · ' + proveedor, tcSant, 0, '', '']; }
-      else if (formaPago === 'AMEX') { banco = 'amex'; bankRow = [fechaPago, monto, 0, concepto + ' · ' + proveedor, tcAmex, 0, '', '', mesStr]; }
-      else if (formaPago === 'Mercado Pago') { banco = 'mercadopago'; bankRow = [mesStr, fechaPago, 0, 0, 0, 0, 0, false, concepto + ' · ' + proveedor, 'pago']; }
+      var usdAmt = esUSD ? montoUSD : '';   // monto en dólares
+      var tc     = esUSD ? tipoCambio : '';  // tipo de cambio
+      var ref = concepto + ' · ' + proveedor;
+      if (formaPago === 'Santander') { banco = 'santander'; bankRow = [fechaPago, 0, monto, 0, ref, usdAmt, tc, '', '']; }
+      else if (formaPago === 'AMEX') { banco = 'amex'; bankRow = [fechaPago, monto, 0, ref, usdAmt, tc, '', '', mesStr]; }
+      else if (formaPago === 'Mercado Pago') { banco = 'mercadopago'; bankRow = [mesStr, fechaPago, 0, 0, 0, 0, 0, false, ref, 'pago']; }
       if (banco && bankRow) {
         try { saveBankRow(banco, bankRow); } catch(bErr) { /* silencioso */ }
       }
