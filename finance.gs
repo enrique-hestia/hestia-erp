@@ -1011,8 +1011,17 @@ function saveCxP(body) {
       body.linkFactura||'', ''
     ];
     sh.appendRow(row);
+    var newRowNum = sh.getLastRow();
+    // Cotización adjunta al registrar (link ya subido a Drive por uploadFile)
+    if (body.linkCotizacion) {
+      try {
+        var iCot = _egColEnsure(sh, 'cotiz', 'Link Cotizacion');
+        sh.getRange(newRowNum, iCot).setRichTextValue(
+          SpreadsheetApp.newRichTextValue().setText('Cotización').setLinkUrl(body.linkCotizacion).build());
+      } catch(_c) { /* no romper el guardado si falla el link */ }
+    }
     logAudit(body.usuario||'sistema','CxP','Crear',String(newId),'','',body.proveedor+' | $'+monto+' | Vence: '+body.vencimiento);
-    return {ok:true, id:newId, monto:monto};
+    return {ok:true, id:newId, monto:monto, rowNum:newRowNum};
   } catch(ex) { return {ok:false, error:ex.message}; }
 }
 
@@ -1038,6 +1047,8 @@ function readBDCxP() {
 
     var resumen = {vencido:0,hoy:0,semana:0,mes:0,totalVencido:0,totalHoy:0,totalSemana:0,totalMes:0,totalPendiente:0};
     var rows = [];
+    var iCotiz = -1, hdr0 = raw[0]||[];
+    for (var hc=0; hc<hdr0.length; hc++){ if(String(hdr0[hc]).toLowerCase().indexOf('cotiz')>-1){ iCotiz=hc; break; } }
 
     for (var i=1;i<raw.length;i++) {
       var r = raw[i];
@@ -1068,8 +1079,21 @@ function readBDCxP() {
         poliza:String(r[15]||''), formaPago:String(r[16]||''),
         observaciones:String(r[17]||''), linkFactura:String(r[18]||''),
         linkPago:String(r[19]||''),
+        linkCotizacion: iCotiz>-1 ? String(r[iCotiz]||'') : '', linkCotizacionUrl:'',
         dias:dias, urgencia:urgencia
       });
+    }
+    // Hipervínculo de cotización (mapeado por fila real, igual que Egresos)
+    if (iCotiz > -1 && rows.length) {
+      try {
+        var byRowC = {};
+        for (var bc=0; bc<rows.length; bc++) byRowC[rows[bc].rowNum] = rows[bc];
+        var rtC = sh.getRange(2, iCotiz+1, raw.length-1, 1).getRichTextValues();
+        for (var rcc=0; rcc<rtC.length; rcc++){
+          var uC = rtC[rcc][0] ? rtC[rcc][0].getLinkUrl() : '';
+          if (uC && byRowC[rcc+2]) byRowC[rcc+2].linkCotizacionUrl = uC;
+        }
+      } catch(_eC){}
     }
     var urgOrder = {vencido:0,hoy:1,semana:2,mes:3,ok:4,'sin-fecha':5};
     rows.sort(function(a,b){
@@ -1262,6 +1286,16 @@ var EGRESOS_IDS  = { 2026:EGRESOS_SS_2026, 2025:EGRESOS_SS_2025, 2024:EGRESOS_SS
 // Dentro de cada una se crean subcarpetas <Año>\<Mes> automáticamente.
 var EGRESOS_DRIVE_FACTURAS = '1t8--HM1xymgqGyBbIsI2jhMVCgQUBm9n'; // Contabilidad\Facturas Recibidas
 var EGRESOS_DRIVE_PAGOS    = '1D9H3nNIrkgg2wqJtKXzhuSLDH6hIUoPk'; // Contabilidad\Pagos
+var EGRESOS_DRIVE_COTIZACIONES = '1o8J61IsrlaTBoENtwQlIA_ADTZeOLas1'; // Contabilidad\Cotizaciones
+
+// Devuelve la columna (1-indexed) cuyo header contiene `want`; si no existe, la crea al final.
+function _egColEnsure(sh, want, headerText) {
+  var lastCol = sh.getLastColumn();
+  var hdrs = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h){ return String(h).trim().toLowerCase(); });
+  for (var c = 0; c < hdrs.length; c++) { if (hdrs[c].indexOf(want) > -1) return c + 1; }
+  sh.getRange(1, lastCol + 1).setValue(headerText);
+  return lastCol + 1;
+}
 var EGRESOS_MESES_FOLDER = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 function _getOrCreateMonthFolder(parentFolderId, anio, mes) {
@@ -1388,7 +1422,7 @@ function readEgresosData(anio) {
         iNotas=col('notas'), iVenc=col('vencimiento'), iFact=col('facturación'), iPagado=col('pagado'),
         iCont=col('contabilidad'), iPoliza=col('póliza')===-1?col('poliza'):col('póliza'),
         iFPago=col('forma de pago'), iObs=col('observaciones'), iLinkFact=col('link factura'),
-        iLinkPago=col('link pago');
+        iLinkPago=col('link pago'), iLinkCotiz=col('cotiz');
 
     function num(v) { if (typeof v==='number') return v; var n=parseFloat(String(v||'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
     function dt(v) { if(!v)return''; if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0'); return String(v); }
@@ -1436,7 +1470,9 @@ function readEgresosData(anio) {
         linkFactura: iLinkFact>-1 ? String(row[iLinkFact]||'').trim() : '',
         linkFacturaUrl: '',
         linkPago: iLinkPago>-1 ? String(row[iLinkPago]||'').trim() : '',
-        linkPagoUrl: ''
+        linkPagoUrl: '',
+        linkCotizacion: iLinkCotiz>-1 ? String(row[iLinkCotiz]||'').trim() : '',
+        linkCotizacionUrl: ''
       });
     }
 
@@ -1445,9 +1481,16 @@ function readEgresosData(anio) {
     // por posición de array. Mapeamos por fila REAL de la hoja usando _rowNum.
     try {
       var lastDataRow = raw.length - 1;
-      if (lastDataRow > 0 && (iLinkFact > -1 || iLinkPago > -1)) {
+      if (lastDataRow > 0 && (iLinkFact > -1 || iLinkPago > -1 || iLinkCotiz > -1)) {
         var byRow = {};
         for (var ar = 0; ar < allRows.length; ar++) byRow[allRows[ar]._rowNum] = allRows[ar];
+        if (iLinkCotiz > -1) {
+          var rtCot = sheet.getRange(2, iLinkCotiz + 1, lastDataRow, 1).getRichTextValues();
+          for (var rc = 0; rc < rtCot.length; rc++) {
+            var urlC = rtCot[rc][0] ? rtCot[rc][0].getLinkUrl() : '';
+            if (urlC && byRow[rc + 2]) byRow[rc + 2].linkCotizacionUrl = urlC; // rc+2 = fila real
+          }
+        }
         if (iLinkFact > -1) {
           var rtFact = sheet.getRange(2, iLinkFact + 1, lastDataRow, 1).getRichTextValues();
           for (var rf = 0; rf < rtFact.length; rf++) {
@@ -2808,10 +2851,12 @@ function updateIngreso(payload) {
 
 function uploadFile(body) {
   try {
-    var tipo = body.tipo || 'factura'; // factura o pago
-    var parentId = (tipo === 'pago') ? EGRESOS_DRIVE_PAGOS : EGRESOS_DRIVE_FACTURAS;
+    var tipo = body.tipo || 'factura'; // factura | pago | cotizacion
+    var parentId = (tipo === 'pago') ? EGRESOS_DRIVE_PAGOS
+                 : (tipo === 'cotizacion') ? EGRESOS_DRIVE_COTIZACIONES
+                 : EGRESOS_DRIVE_FACTURAS;
     if (!parentId) return {ok:false, error:'Carpeta no configurada para '+tipo};
-    // Organizar por <Año>\<Mes> dentro de la carpeta (Pagos / Facturas Recibidas)
+    // Organizar por <Año>\<Mes> dentro de la carpeta (Pagos / Facturas / Cotizaciones)
     var hoy = new Date();
     var folder = _getOrCreateMonthFolder(parentId, hoy.getFullYear(), hoy.getMonth());
     var fileName = body.fileName || 'archivo.pdf';
@@ -2831,8 +2876,12 @@ function uploadFile(body) {
         if (sh) {
           hdrs = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0]
                    .map(function(h){ return String(h).trim().toLowerCase(); });
-          var want = (tipo === 'pago') ? 'link pago' : 'link factura';
-          for (var c = 0; c < hdrs.length; c++) { if (hdrs[c].indexOf(want) > -1) { iCol = c; break; } }
+          if (tipo === 'cotizacion') {
+            iCol = _egColEnsure(sh, 'cotiz', 'Link Cotizacion') - 1; // crea la columna si no existe
+          } else {
+            var want = (tipo === 'pago') ? 'link pago' : 'link factura';
+            for (var c = 0; c < hdrs.length; c++) { if (hdrs[c].indexOf(want) > -1) { iCol = c; break; } }
+          }
           if (iCol > -1) {
             try {
               var cellRange = sh.getRange(rowNum, iCol + 1);

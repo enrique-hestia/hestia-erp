@@ -4062,6 +4062,9 @@ function _renderEgresosERP() {
       var pagoIcon = r.linkPagoUrl
         ? '<span onclick="egViewPDF(\''+r.linkPagoUrl.replace(/'/g,"\\'")+'\',\'Pago · '+provSafe+'\')" style="cursor:pointer;font-size:13px" title="Ver pago">📎</span>'
         : '<span onclick="egOpenUpload('+r._rowNum+',\'pago\',\''+provSafe+'\')" style="cursor:pointer;font-size:11px;color:var(--color-primary,#c46a7a)" title="Adjuntar pago">＋</span>';
+      var cotizIcon = r.linkCotizacionUrl
+        ? '<span onclick="egViewPDF(\''+r.linkCotizacionUrl.replace(/'/g,"\\'")+'\',\'Cotización · '+provSafe+'\')" style="cursor:pointer;font-size:13px" title="Ver cotización">📋</span>'
+        : '<span onclick="egOpenUpload('+r._rowNum+',\'cotizacion\',\''+provSafe+'\')" style="cursor:pointer;font-size:11px;color:var(--color-primary,#c46a7a)" title="Adjuntar cotización">＋</span>';
       h.push('<tr>'
         +'<td style="color:var(--text-secondary,#6b7280)">'+((r.fecha||'').substring(0,10)||'—')+'</td>'
         +'<td style="font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis" title="'+r.proveedor+'">'+(r.proveedor||'—')+'</td>'
@@ -4072,7 +4075,7 @@ function _renderEgresosERP() {
         +'<td style="text-align:center"><input type="checkbox" class="eg-chk"'+(r.facturacion?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'facturación\',this.checked)"'+(r.linkFacturaUrl?' title="Factura adjunta"':'')+'></td>'
         +'<td style="text-align:center"><input type="checkbox" class="eg-chk"'+(r.pagado?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'pagado\',this.checked)"'+(r.linkPagoUrl?' title="Pago adjunto"':'')+'></td>'
         +'<td style="text-align:center"><input type="checkbox" class="eg-chk"'+(r.contabilidad?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'contabilidad\',this.checked)"></td>'
-        +'<td style="text-align:center;white-space:nowrap">'+factIcon+' '+pagoIcon+'</td>'
+        +'<td style="text-align:center;white-space:nowrap">'+cotizIcon+' '+factIcon+' '+pagoIcon+'</td>'
         +(hasPermission('editar_egresos')?'<td style="text-align:center"><button class="btn-edit-row" onclick="egEditRow('+r._rowNum+')">✎</button></td>':'')
         +'</tr>');
     });
@@ -4163,7 +4166,10 @@ function egOpenUpload(rowNum, tipo, proveedor) {
       + '<input type="file" class="erp-dz-input" accept=".pdf,.jpg,.jpeg,.png" onchange="erpHandleFile(this,\'eg-erp-drop\')">';
   }
   var st = document.getElementById('eg-upload-status'); if (st) st.innerHTML = '';
-  document.getElementById('eg-upload-title').textContent = tipo === 'pago' ? 'Adjuntar comprobante de pago' : 'Adjuntar factura';
+  document.getElementById('eg-upload-title').textContent =
+    tipo === 'pago' ? 'Adjuntar comprobante de pago'
+    : tipo === 'cotizacion' ? 'Adjuntar cotización del proveedor'
+    : 'Adjuntar factura';
   document.getElementById('eg-upload-prov').textContent = proveedor || '—';
   document.getElementById('modal-eg-upload').style.display = 'flex';
 }
@@ -4176,7 +4182,13 @@ function egCloseUpload() {
 function egAfterUpload(res) {
   var st = document.getElementById('eg-upload-status');
   if (st) st.innerHTML = '<span style="color:#16a34a;font-weight:600">✓ Subido. Actualizando…</span>';
-  setTimeout(function() { egCloseUpload(); if (typeof loadEgresosERP === 'function') loadEgresosERP(); }, 900);
+  setTimeout(function() {
+    egCloseUpload();
+    // Refrescar la vista que esté visible (CxP o Egresos)
+    var cxpRoot = document.getElementById('cxp-root');
+    if (cxpRoot && cxpRoot.offsetParent !== null && typeof loadCxPData === 'function') loadCxPData();
+    else if (typeof loadEgresosERP === 'function') loadEgresosERP();
+  }, 900);
 }
 
 function egViewPDF(url, title) {
@@ -11650,10 +11662,17 @@ function _cxpBuildNewRows(rows) {
       + '<td style="text-align:center;white-space:nowrap">'
         + '<button onclick="cxpOpenPay('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),'+row.monto+')" style="padding:4px 10px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;margin-right:4px">Pagar</button>'
         + '<button onclick="cxpOpenEdit('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(JSON.stringify(row))+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:6px;font-size:12px;cursor:pointer" title="Editar">✎</button>'
+        + '<button onclick="cxpCotiz('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),decodeURIComponent(\''+encodeURIComponent(row.linkCotizacionUrl||'')+'\'))" style="padding:4px 8px;background:rgba(196,106,122,.1);border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px;opacity:'+(row.linkCotizacionUrl?'1':'.45')+'" title="'+(row.linkCotizacionUrl?'Ver cotización':'Adjuntar cotización')+'">📋</button>'
       + '</td>'
       + '</tr>';
   }).join('');
 }
+
+// Cotización desde la tabla de CxP: ver si existe, o abrir el modal de subida si no.
+window.cxpCotiz = function(rowNum, prov, url) {
+  if (url) { egViewPDF(url, 'Cotización · ' + prov); }
+  else { egOpenUpload(rowNum, 'cotizacion', prov); }
+};
 
 // ── CxP Payment modal ──
 window.cxpOpenPay = function(rowNum, proveedor, monto) {
@@ -11876,6 +11895,21 @@ function _cxpBuildForm(data) {
       + '<div><label '+LBL+'>Notas</label><input id="cxp-f-notas" '+S+' placeholder="Notas" value="'+(data&&data.notas||'').replace(/"/g,'&quot;')+'"></div>'
     + '</div>'
     + '<div style="margin-bottom:14px"><label '+LBL+'>Observaciones</label><textarea id="cxp-f-obs" '+S+' rows="2" style="resize:vertical">'+(data&&data.observaciones||'')+'</textarea></div>';
+  // Cotización del proveedor (drag & drop). En edición sube directo a la fila; en alta se
+  // adjunta al guardar. Si ya hay una, muestra el enlace para verla.
+  var cotPrefix = (data && data.rowNum) ? ('EG-'+data.rowNum) : '';
+  var cotActual = (data && data.linkCotizacionUrl)
+    ? ' · <a href="'+data.linkCotizacionUrl+'" target="_blank" style="color:var(--color-primary,#c46a7a);font-weight:700">📋 Ver actual ↗</a>'
+    : '';
+  h += '<div style="margin-bottom:4px"><label '+LBL+'>Cotización del proveedor'+cotActual+'</label>'
+    + '<div id="cxp-f-cotiz" class="erp-dropzone" data-tipo="cotizacion" data-prefix="'+cotPrefix+'">'
+    +   '<div class="erp-dz-icon">📋</div>'
+    +   '<div class="erp-dz-text">Arrastra la cotización o <span class="erp-dz-link">selecciona archivo</span></div>'
+    +   '<div class="erp-dz-sub">PDF, JPG, PNG · Máx 10MB · opcional</div>'
+    +   '<input type="file" class="erp-dz-input" accept=".pdf,.jpg,.jpeg,.png" onchange="erpHandleFile(this,\'cxp-f-cotiz\')">'
+    + '</div>'
+    + '<input type="hidden" id="cxp-f-cotiz-link" value="">'
+    + '<div id="cxp-f-cotiz-status" style="font-size:10px;margin-top:4px;color:var(--text-secondary,#9ca3af)"></div></div>';
   return h;
 }
 
@@ -11926,6 +11960,7 @@ window.cxpSubmitCapture = async function() {
       poliza:(document.getElementById('cxp-f-poliza')||{}).value||'',
       notas:(document.getElementById('cxp-f-notas')||{}).value||'',
       observaciones:(document.getElementById('cxp-f-obs')||{}).value||'',
+      linkCotizacion:(document.getElementById('cxp-f-cotiz-link')||{}).value||'',
       mes:venc.substring(0,7), prioridad:1, usuario:s.email||'sistema'
     })});
     var res = await r.json();
