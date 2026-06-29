@@ -84,7 +84,6 @@ function _gfRowFromBody(b) {
 function saveGastoFijo(b) {
   try {
     var sh=_gfSheet();
-    // ID consecutivo GF-00X
     var lr=sh.getLastRow(), max=0;
     if(lr>1){ var ids=sh.getRange(2,1,lr-1,1).getValues();
       for(var i=0;i<ids.length;i++){ var m=String(ids[i][0]||'').match(/(\d+)/); if(m){var n=parseInt(m[1]); if(n>max)max=n;} } }
@@ -94,6 +93,27 @@ function saveGastoFijo(b) {
     logAudit(b.usuario||'sistema','GastoFijo','Crear',b.id,'',' ',b.proveedor+' | '+b.concepto);
     return {ok:true, id:b.id};
   } catch(ex){ return {ok:false, error:ex.message}; }
+}
+
+function saveGastosFijosBatch(b) {
+  try {
+    var items=b.items||[]; if(!items.length) return {ok:false,error:'Sin partidas'};
+    var sh=_gfSheet();
+    var lr=sh.getLastRow(), max=0;
+    if(lr>1){ var ids=sh.getRange(2,1,lr-1,1).getValues();
+      for(var i=0;i<ids.length;i++){ var m=String(ids[i][0]||'').match(/(\d+)/); if(m){var n=parseInt(m[1]);if(n>max)max=n;} } }
+    var saved=0, errors=[];
+    for(var j=0;j<items.length;j++){
+      try{
+        var it=items[j]; it.activo=true; max++;
+        it.id='GF-'+String(max).padStart(3,'0');
+        sh.appendRow(_gfRowFromBody(it));
+        saved++;
+      }catch(ex){ errors.push(ex.message); }
+    }
+    logAudit(b.usuario||'sistema','GastoFijo','CrearBatch','','','',saved+' partidas');
+    return {ok:true,saved:saved,errors:errors};
+  }catch(ex){ return {ok:false,error:ex.message}; }
 }
 
 function updateGastoFijo(b) {

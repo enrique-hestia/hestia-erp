@@ -12441,16 +12441,18 @@ async function gfProgramarTodos(){
   } catch(e){ alert('Error: '+e.message); }
 }
 
-// ── Catálogo: modal CRUD ──
+// ── Catálogo: modales CRUD ──
 function _gfModalHTML(){
   var S='style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"';
   var L='style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px"';
   var _cats={}; (_gfCatalogo||[]).forEach(function(t){ if(t.subtipo) _cats[t.subtipo]=1; });
   (typeof _cxpSubtipos!=='undefined'?_cxpSubtipos:['Nomina','Renta','Otros Gastos']).forEach(function(s){ _cats[s]=1; });
   var dl='<datalist id="gf-cat-datalist">'+Object.keys(_cats).sort().map(function(c){return '<option value="'+_cxpEsc(c)+'">';}).join('')+'</datalist>';
-  return dl+'<div id="gf-ovl" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;backdrop-filter:blur(3px)" onclick="gfCloseForm()"></div>'
+  // Modal de edición individual (para ✎ Editar)
+  var editModal = dl
+    +'<div id="gf-ovl" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;backdrop-filter:blur(3px)" onclick="gfCloseForm()"></div>'
     +'<div id="gf-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(560px,94vw);max-height:88vh;overflow-y:auto;padding:20px">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div id="gf-modal-title" style="font-size:15px;font-weight:800">Nuevo gasto fijo</div><button onclick="gfCloseForm()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary,#6b7280)">×</button></div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div id="gf-modal-title" style="font-size:15px;font-weight:800">Editar gasto fijo</div><button onclick="gfCloseForm()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary,#6b7280)">×</button></div>'
     +'<input type="hidden" id="gf-f-rownum"><input type="hidden" id="gf-f-id">'
     +'<div style="display:grid;grid-template-columns:1.5fr 1fr .8fr;gap:12px;margin-bottom:12px">'
     +'<div><label '+L+'>Proveedor *</label><input id="gf-f-prov" list="prov-datalist" '+S+'></div>'
@@ -12472,21 +12474,134 @@ function _gfModalHTML(){
     +'<div style="margin-bottom:14px"><label '+L+'>Notas</label><input id="gf-f-notas" '+S+'></div>'
     +'<div style="display:flex;gap:10px"><button id="gf-save-btn" onclick="gfSaveForm()" style="flex:1;padding:12px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">Guardar</button>'
     +'<button onclick="gfCloseForm()" style="padding:12px 20px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider);border-radius:10px;font-size:13px;cursor:pointer">Cancelar</button></div></div>';
+  // Modal de captura por lotes (para + Nuevo gasto fijo)
+  var batchModal
+    ='<div id="gf-batch-ovl" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;backdrop-filter:blur(3px)" onclick="gfCloseBatch()"></div>'
+    +'<div id="gf-batch-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(1060px,97vw);max-height:90vh;overflow-y:auto;padding:22px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+    +'<div><div style="font-size:15px;font-weight:800;color:var(--text-primary,#111)">Nuevos gastos fijos</div>'
+    +'<div style="font-size:11px;color:var(--text-secondary,#9ca3af);margin-top:2px">Agrega todas las partidas de un jalón — el sistema las ordena por categoría al guardar</div></div>'
+    +'<button onclick="gfCloseBatch()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary,#6b7280);line-height:1">×</button></div>'
+    +'<div id="gf-batch-tbl-wrap" style="overflow-x:auto;margin-bottom:10px"></div>'
+    +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+    +'<button onclick="gfAddBatchRow()" style="display:inline-flex;align-items:center;gap:5px;padding:7px 14px;background:rgba(196,106,122,.1);color:var(--color-primary,#c46a7a);border:1.5px solid rgba(196,106,122,.25);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">➕ Agregar fila</button>'
+    +'<span id="gf-batch-cnt" style="font-size:11.5px;color:var(--text-secondary,#9ca3af)"></span>'
+    +'<div style="flex:1"></div>'
+    +'<button onclick="gfCloseBatch()" style="padding:10px 18px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider);border-radius:10px;font-size:13px;cursor:pointer">Cancelar</button>'
+    +'<button id="gf-batch-save-btn" onclick="gfSaveBatch()" style="padding:10px 20px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">Guardar</button>'
+    +'</div></div>';
+  return editModal + batchModal;
 }
-function gfOpenForm(json, presetCat){
+
+// ── Batch create ──
+var _gfBatchRows = [];
+var _gfBatchRid = 0;
+var _gfBatchPresetCat = '';
+
+function gfOpenBatch(presetCat){
   try{ if(typeof _renderProvDatalist==='function') _renderProvDatalist(); }catch(e){}
-  var d = json ? (typeof json==='string'?JSON.parse(json):json) : null;
+  _gfBatchRows = [];
+  _gfBatchRid = 0;
+  _gfBatchPresetCat = presetCat||'';
+  gfAddBatchRow();
+  document.getElementById('gf-batch-ovl').style.display='block';
+  document.getElementById('gf-batch-modal').style.display='block';
+}
+function gfCloseBatch(){
+  var m=document.getElementById('gf-batch-modal'),o=document.getElementById('gf-batch-ovl');
+  if(m)m.style.display='none'; if(o)o.style.display='none';
+}
+function gfAddBatchRow(){
+  var id=++_gfBatchRid;
+  _gfBatchRows.push({_id:id,proveedor:'',concepto:'',montoEstimado:'',divisa:'MXN',subtipo:_gfBatchPresetCat,diaVencimiento:'',meses:'Todos',frecuencia:'mensual',formaPago:'',contable:'Gasto',montoVariable:false});
+  _gfRenderBatchRows();
+  setTimeout(function(){var el=document.getElementById('gfbr-p-'+id);if(el)el.focus();},30);
+}
+function gfRemoveBatchRow(id){
+  _gfBatchRows=_gfBatchRows.filter(function(r){return r._id!==id;});
+  if(!_gfBatchRows.length) gfAddBatchRow(); else _gfRenderBatchRows();
+}
+function _gfBrSet(id,field,value){
+  for(var i=0;i<_gfBatchRows.length;i++){if(_gfBatchRows[i]._id===id){_gfBatchRows[i][field]=value;break;}}
+}
+function _gfRenderBatchRows(){
+  var wrap=document.getElementById('gf-batch-tbl-wrap'); if(!wrap) return;
+  var thS='style="padding:6px 7px;font-size:9.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text-secondary,#6b7280);background:var(--color-surface,#f3f4f6);border-bottom:1px solid var(--color-divider,#e5e7eb);white-space:nowrap;text-align:left"';
+  var iS='style="width:100%;box-sizing:border-box;padding:5px 7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111);font-family:inherit"';
+  var sS=iS;
+  var thead='<thead><tr>'
+    +'<th '+thS+' style="min-width:160px">Proveedor *</th>'
+    +'<th '+thS+' style="min-width:200px">Concepto *</th>'
+    +'<th '+thS+' style="min-width:95px">Monto est.</th>'
+    +'<th '+thS+' style="min-width:68px">Div.</th>'
+    +'<th '+thS+' style="min-width:130px">Categoría</th>'
+    +'<th '+thS+' style="min-width:70px">Día venc.</th>'
+    +'<th '+thS+' style="min-width:145px">Frecuencia</th>'
+    +'<th '+thS+' style="min-width:120px">Forma pago</th>'
+    +'<th '+thS+' style="min-width:80px">Contable</th>'
+    +'<th '+thS+' style="text-align:center;width:42px">Var.</th>'
+    +'<th '+thS+' style="width:34px"></th>'
+    +'</tr></thead>';
+  var rows=_gfBatchRows.map(function(r){
+    var id=r._id;
+    function sel(fid,opts,cur){ return '<select id="'+fid+'" '+sS+' onchange="_gfBrSet('+id+',\''+fid.replace('gfbr-','').replace('-'+id,'').replace(/-/g,'_')+'\',this.value)">'+opts.map(function(o){return '<option value="'+o+'"'+(o===cur?' selected':'')+'>'+o+'</option>';}).join('')+'</select>'; }
+    return '<tr>'
+      +'<td style="padding:3px 4px 3px 0"><input id="gfbr-p-'+id+'" '+iS+' list="prov-datalist" placeholder="Proveedor" value="'+_cxpEsc(r.proveedor)+'" oninput="_gfBrSet('+id+',\'proveedor\',this.value)"></td>'
+      +'<td style="padding:3px 4px"><input id="gfbr-c-'+id+'" '+iS+' placeholder="Descripción" value="'+_cxpEsc(r.concepto)+'" oninput="_gfBrSet('+id+',\'concepto\',this.value)"></td>'
+      +'<td style="padding:3px 4px"><input id="gfbr-m-'+id+'" '+iS+' type="number" step="0.01" placeholder="0.00" value="'+(r.montoEstimado||'')+'" oninput="_gfBrSet('+id+',\'montoEstimado\',this.value)"></td>'
+      +'<td style="padding:3px 4px"><select id="gfbr-d-'+id+'" '+sS+' onchange="_gfBrSet('+id+',\'divisa\',this.value)"><option'+(r.divisa==='MXN'?' selected':'')+'>MXN</option><option'+(r.divisa==='USD'?' selected':'')+'>USD</option></select></td>'
+      +'<td style="padding:3px 4px"><input id="gfbr-s-'+id+'" '+iS+' list="gf-cat-datalist" placeholder="Categoría" value="'+_cxpEsc(r.subtipo)+'" oninput="_gfBrSet('+id+',\'subtipo\',this.value)"></td>'
+      +'<td style="padding:3px 4px"><input id="gfbr-dv-'+id+'" '+iS+' placeholder="5 / fin" value="'+_cxpEsc(r.diaVencimiento)+'" oninput="_gfBrSet('+id+',\'diaVencimiento\',this.value)"></td>'
+      +'<td style="padding:3px 4px"><select id="gfbr-f-'+id+'" '+sS+' onchange="_gfBrSet('+id+',\'frecuencia\',this.value)">'
+        +'<option value="mensual"'+(r.frecuencia==='mensual'?' selected':'')+'>Mensual</option>'
+        +'<option value="quincena-ambas"'+(r.frecuencia==='quincena-ambas'?' selected':'')+'>Quincenal ×2</option>'
+        +'<option value="quincena-15"'+(r.frecuencia==='quincena-15'?' selected':'')+'>Solo día 15</option>'
+        +'<option value="quincena-30"'+(r.frecuencia==='quincena-30'?' selected':'')+'>Solo día 30</option>'
+      +'</select></td>'
+      +'<td style="padding:3px 4px"><select id="gfbr-fp-'+id+'" '+sS+' onchange="_gfBrSet('+id+',\'formaPago\',this.value)"><option value="">—</option><option'+(r.formaPago==='Santander'?' selected':'')+'>Santander</option><option'+(r.formaPago==='AMEX'?' selected':'')+'>AMEX</option><option'+(r.formaPago==='Mercado Pago'?' selected':'')+'>Mercado Pago</option><option'+(r.formaPago==='Transferencia'?' selected':'')+'>Transferencia</option><option'+(r.formaPago==='Efectivo'?' selected':'')+'>Efectivo</option></select></td>'
+      +'<td style="padding:3px 4px"><select id="gfbr-ct-'+id+'" '+sS+' onchange="_gfBrSet('+id+',\'contable\',this.value)"><option'+(r.contable==='Gasto'?' selected':'')+'>Gasto</option><option'+(r.contable==='Costo'?' selected':'')+'>Costo</option><option'+(r.contable==='Crédito'?' selected':'')+'>Crédito</option></select></td>'
+      +'<td style="padding:3px 4px;text-align:center"><input type="checkbox" '+(r.montoVariable?'checked':'')+' title="Monto variable" onchange="_gfBrSet('+id+',\'montoVariable\',this.checked)"></td>'
+      +'<td style="padding:3px;text-align:center"><button onclick="gfRemoveBatchRow('+id+')" style="background:rgba(220,38,38,.08);color:#dc2626;border:none;border-radius:5px;padding:3px 8px;font-size:14px;line-height:1;cursor:pointer" title="Quitar">×</button></td>'
+    +'</tr>';
+  }).join('');
+  wrap.innerHTML='<table style="width:100%;border-collapse:collapse;font-size:12px">'+thead+'<tbody>'+rows+'</tbody></table>';
+  var cnt=document.getElementById('gf-batch-cnt');
+  if(cnt)cnt.textContent=_gfBatchRows.length+' partida'+(_gfBatchRows.length===1?'':'s');
+  var btn=document.getElementById('gf-batch-save-btn');
+  if(btn)btn.textContent='Guardar '+_gfBatchRows.length;
+}
+async function gfSaveBatch(){
+  var items=_gfBatchRows.map(function(r){
+    return {proveedor:r.proveedor,concepto:r.concepto,montoEstimado:r.montoEstimado,divisa:r.divisa,subtipo:r.subtipo,diaVencimiento:r.diaVencimiento,meses:r.meses||'Todos',frecuencia:r.frecuencia||'mensual',formaPago:r.formaPago,contable:r.contable||'Gasto',montoVariable:!!r.montoVariable,activo:true};
+  });
+  var bad=items.filter(function(x){return !x.proveedor||!x.concepto;});
+  if(bad.length){alert('Completa Proveedor y Concepto en todas las filas ('+bad.length+' incompleta'+(bad.length===1?'':'s')+')');return;}
+  var s=getSession()||{};
+  var btn=document.getElementById('gf-batch-save-btn');
+  if(btn){btn.disabled=true;btn.textContent='Guardando…';}
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveGastosFijosBatch',items:items,usuario:s.email||'sistema'})});
+    var res=await r.json();
+    if(res.ok){gfCloseBatch();loadGastosFijos();}
+    else{alert('Error: '+(res.error||''));if(btn){btn.disabled=false;btn.textContent='Guardar '+items.length;}}
+  }catch(e){alert('Error: '+e.message);if(btn){btn.disabled=false;btn.textContent='Guardar '+items.length;}}
+}
+
+function gfOpenForm(json, presetCat){
+  // Sin json = crear en lote; con json = editar individualmente
+  if(!json){ gfOpenBatch(presetCat||''); return; }
+  try{ if(typeof _renderProvDatalist==='function') _renderProvDatalist(); }catch(e){}
+  var d = typeof json==='string'?JSON.parse(json):json;
   function set(id,v){ var el=document.getElementById(id); if(el) el.value=(v==null?'':v); }
-  set('gf-f-rownum', d?d.rowNum:''); set('gf-f-id', d?d.id:'');
-  set('gf-f-prov', d?d.proveedor:''); set('gf-f-monto', d?d.montoEstimado:'');
-  set('gf-f-concepto', d?d.concepto:''); set('gf-f-contable', d?d.contable:'Gasto');
-  set('gf-f-subtipo', d?d.subtipo:(presetCat||'')); set('gf-f-fp', d?d.formaPago:'');
-  set('gf-f-divisa', d?(d.divisa||'MXN'):'MXN');
-  set('gf-f-dia', d?d.diaVencimiento:''); set('gf-f-meses', d?d.meses:'Todos');
-  set('gf-f-frecuencia', d?(d.frecuencia||'mensual'):'mensual');
-  set('gf-f-desde', d?d.desde:''); set('gf-f-hasta', d?d.hasta:''); set('gf-f-notas', d?d.notas:'');
-  var v=document.getElementById('gf-f-variable'); if(v) v.checked = d?!!d.montoVariable:false;
-  var t=document.getElementById('gf-modal-title'); if(t) t.textContent = d?'Editar gasto fijo':'Nuevo gasto fijo';
+  set('gf-f-rownum', d.rowNum); set('gf-f-id', d.id);
+  set('gf-f-prov', d.proveedor); set('gf-f-monto', d.montoEstimado);
+  set('gf-f-concepto', d.concepto); set('gf-f-contable', d.contable||'Gasto');
+  set('gf-f-subtipo', d.subtipo||''); set('gf-f-fp', d.formaPago||'');
+  set('gf-f-divisa', d.divisa||'MXN');
+  set('gf-f-dia', d.diaVencimiento); set('gf-f-meses', d.meses||'Todos');
+  set('gf-f-frecuencia', d.frecuencia||'mensual');
+  set('gf-f-desde', d.desde||''); set('gf-f-hasta', d.hasta||''); set('gf-f-notas', d.notas||'');
+  var v=document.getElementById('gf-f-variable'); if(v) v.checked=!!d.montoVariable;
   document.getElementById('gf-ovl').style.display='block'; document.getElementById('gf-modal').style.display='block';
 }
 function gfCloseForm(){ var m=document.getElementById('gf-modal'),o=document.getElementById('gf-ovl'); if(m)m.style.display='none'; if(o)o.style.display='none'; }

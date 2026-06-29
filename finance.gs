@@ -529,6 +529,7 @@ function doPost(e) {
     // Gastos fijos (recurrentes)
     if (body.action === 'setupGastosFijos')        return jsonResponse(setupGastosFijos());
     if (body.action === 'saveGastoFijo')           return jsonResponse(saveGastoFijo(body));
+    if (body.action === 'saveGastosFijosBatch')    return jsonResponse(saveGastosFijosBatch(body));
     if (body.action === 'updateGastoFijo')         return jsonResponse(updateGastoFijo(body));
     if (body.action === 'toggleGastoFijo')         return jsonResponse(toggleGastoFijo(body));
     if (body.action === 'deleteGastoFijo')         return jsonResponse(deleteGastoFijo(body));
