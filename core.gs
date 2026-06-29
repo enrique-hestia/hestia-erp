@@ -267,6 +267,10 @@ function doGet(e) {
     }
 
     // Gastos fijos (recurrentes): catálogo, propuestas del mes, proyección
+    if (action === 'gfAll') {
+      var _per = e.parameter.periodo || '';
+      return jsonResponse({ok:true, propuestas:readGastosFijosPropuestas(_per), catalogo:readGastosFijos()});
+    }
     if (action === 'gastosFijos') {
       return jsonResponse(readGastosFijos());
     }

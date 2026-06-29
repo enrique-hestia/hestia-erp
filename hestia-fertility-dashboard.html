@@ -12063,10 +12063,18 @@ function renderCxP(data) {
   html += '<div id="cxp-total"></div>';
   html += '<div id="cxp-dist"></div>';
 
+  html += '<div id="cxp-bulk-bar" style="display:none;position:sticky;bottom:64px;z-index:50;background:#1e3a8a;color:#fff;border-radius:12px;padding:10px 16px;margin-bottom:10px;align-items:center;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,.22);flex-wrap:wrap">'
+    + '<span id="cxp-bulk-cnt" style="font-size:13px;font-weight:700;white-space:nowrap"></span>'
+    + '<div style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-left:auto">'
+    + '<select id="cxp-bulk-accion" style="padding:5px 8px;border:none;border-radius:6px;font-size:12px;background:#fff;color:#111"><option value="set">Fijar monto en</option><option value="add">Sumar</option></select>'
+    + '<input type="number" id="cxp-bulk-monto" placeholder="0.00" step="0.01" style="width:110px;padding:5px 8px;border:none;border-radius:6px;font-size:12px">'
+    + '<button onclick="cxpBulkUpdateMonto()" style="padding:5px 14px;background:#fff;color:#1e3a8a;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Aplicar</button>'
+    + '<button onclick="_cxpClearSel()" style="padding:5px 10px;background:rgba(255,255,255,.18);color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer">✕ Limpiar</button>'
+    + '</div></div>';
   html += '<div class="cxp-card">';
   html += '<div class="cxp-card-hdr"><div><div class="cxp-card-title">Detalle de cuentas por pagar</div><div class="cxp-card-sub" id="cxp-detsub"></div></div></div>';
   html += '<div class="cxp-tbl-wrap"><table class="cxp-tbl" id="cxp-tbl">';
-  html += '<thead><tr><th>Estado</th><th>Proveedor</th><th>Concepto</th><th>Categoría</th><th style="text-align:right">Monto</th><th>Vencimiento</th><th>Fact.</th><th style="text-align:center;width:90px">Acción</th></tr></thead>';
+  html += '<thead><tr><th style="width:32px;padding:8px"><input type="checkbox" id="cxp-cb-all" title="Seleccionar todos" onchange="_cxpCbAll(this.checked)"></th><th>Estado</th><th>Proveedor</th><th>Concepto</th><th>Categoría</th><th style="text-align:right">Monto</th><th>Vencimiento</th><th>Fact.</th><th style="text-align:center;width:90px">Acción</th></tr></thead>';
   html += '<tbody id="cxp-tbody"></tbody></table></div></div>';
   html += '</div>'; // cxp-wrap
 
@@ -12142,7 +12150,7 @@ function _cxpDistHTML(rows){
   return '<div class="cxp-dist"><div class="cxp-dist-h"><span>Distribución por categoría (periodo)</span><span>'+_cxpFM(d.total)+'</span></div>'+rowsH+otras+'</div>';
 }
 function _cxpTableHTML(rows){
-  if(!rows.length) return '<tr><td colspan="8" class="cxp-empty">Sin cuentas en el periodo seleccionado</td></tr>';
+  if(!rows.length) return '<tr><td colspan="9" class="cxp-empty">Sin cuentas en el periodo seleccionado</td></tr>';
   var g=_cxpState.group;
   if(!g) return _cxpBuildNewRows(rows);
   var d=_cxpDistribucion(rows,g), byCat={};
@@ -12150,7 +12158,7 @@ function _cxpTableHTML(rows){
   var html='';
   d.arr.forEach(function(c,gi){
     var cr=byCat[c.nombre]||[];
-    html += '<tr class="cxp-grp" data-h="'+gi+'" onclick="_cxpToggleGrp('+gi+')"><td colspan="8">'
+    html += '<tr class="cxp-grp" data-h="'+gi+'" onclick="_cxpToggleGrp('+gi+')"><td colspan="9">'
       +'<span class="cxp-caret">▾</span> <b>'+_cxpEsc(c.nombre)+'</b> · '+cr.length+' partida'+(cr.length===1?'':'s')
       +' · <b style="color:#dc2626">'+_cxpFM(c.total)+'</b>'
       +'<span style="float:right;color:var(--text-secondary,#9ca3af)">'+c.pct.toFixed(1)+'%</span></td></tr>';
@@ -12190,7 +12198,7 @@ window._cxpToggleGrp=function(gi){
 };
 
 function _cxpBuildNewRows(rows) {
-  if (!rows.length) return '<tr><td colspan="8" class="cxp-empty">🎉 Sin cuentas pendientes — todo al corriente</td></tr>';
+  if (!rows.length) return '<tr><td colspan="9" class="cxp-empty">🎉 Sin cuentas pendientes — todo al corriente</td></tr>';
   function fMXN(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
   return rows.map(function(row){
     var urg = row.urgencia||'ok';
@@ -12205,6 +12213,7 @@ function _cxpBuildNewRows(rows) {
     else badge='<span class="cxp-badge cxp-na">Sin fecha</span>';
     var factIcon = row.facturacion ? '✓' : '—';
     return '<tr'+rowCls+'>'
+      + '<td style="padding:8px"><input type="checkbox" class="cxp-row-cb" data-rn="'+row.rowNum+'" onchange="_cxpCbChange()"></td>'
       + '<td>'+badge+'</td>'
       + '<td style="font-weight:600;color:var(--text-primary,#111)">'+row.proveedor+'</td>'
       + '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="'+row.concepto+'">'+row.concepto+'</td>'
@@ -12227,6 +12236,44 @@ window.cxpCotiz = function(rowNum, prov, url) {
   else { egOpenUpload(rowNum, 'cotizacion', prov); }
 };
 
+// ── CxP: selección y edición masiva de montos ──
+function _cxpCbChange(){
+  var cbs=document.querySelectorAll('.cxp-row-cb');
+  var sel=[]; cbs.forEach(function(cb){if(cb.checked)sel.push(parseInt(cb.dataset.rn));});
+  var bar=document.getElementById('cxp-bulk-bar');
+  if(bar){bar.style.display=sel.length?'flex':'none';}
+  var cnt=document.getElementById('cxp-bulk-cnt');
+  if(cnt)cnt.textContent=sel.length+' partida'+(sel.length===1?'':'s')+' seleccionada'+(sel.length===1?'':'s');
+  var all=document.getElementById('cxp-cb-all');
+  if(all){ all.checked=sel.length===cbs.length&&cbs.length>0; all.indeterminate=sel.length>0&&sel.length<cbs.length; }
+}
+function _cxpCbAll(v){
+  document.querySelectorAll('.cxp-row-cb').forEach(function(cb){cb.checked=v;});
+  _cxpCbChange();
+}
+function _cxpClearSel(){
+  document.querySelectorAll('.cxp-row-cb').forEach(function(cb){cb.checked=false;});
+  var all=document.getElementById('cxp-cb-all'); if(all){all.checked=false;all.indeterminate=false;}
+  var bar=document.getElementById('cxp-bulk-bar'); if(bar)bar.style.display='none';
+}
+window.cxpBulkUpdateMonto = async function(){
+  var cbs=document.querySelectorAll('.cxp-row-cb:checked');
+  var rowNums=[]; cbs.forEach(function(cb){rowNums.push(parseInt(cb.dataset.rn));});
+  if(!rowNums.length){alert('Selecciona al menos una partida');return;}
+  var accion=(document.getElementById('cxp-bulk-accion')||{}).value||'set';
+  var valor=parseFloat((document.getElementById('cxp-bulk-monto')||{}).value);
+  if(isNaN(valor)||valor<0){alert('Ingresa un monto válido');return;}
+  var label=accion==='add'?('Sumar $'+valor.toLocaleString('en-US',{minimumFractionDigits:2})):('Fijar en $'+valor.toLocaleString('en-US',{minimumFractionDigits:2}));
+  if(!confirm(label+' en '+rowNums.length+' partida'+(rowNums.length===1?'':'s')+'?')) return;
+  try {
+    var s=getSession()||{};
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'bulkUpdateCxPMonto',rowNums:rowNums,accion:accion,valor:valor,usuario:s.email||'sistema'})});
+    var res=await r.json();
+    if(res.ok){_cxpClearSel();loadCxPData();}
+    else alert('Error: '+(res.error||'sin detalle'));
+  }catch(e){alert('Error: '+e.message);}
+};
+
 /* ══════════════ GASTOS FIJOS (recurrentes) ══════════════ */
 var _gfData = {propuestas:[], generadas:[], periodo:''};
 var _gfCatalogo = [];
@@ -12240,11 +12287,11 @@ async function loadGastosFijos(){
   root.innerHTML = hestiaLoader('Cargando gastos fijos…');
   try {
     var tok=encodeURIComponent(getToken());
-    var p = await fetch(APPS_SCRIPT_URL+'?action=gfPropuestas&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();});
-    var c = await fetch(APPS_SCRIPT_URL+'?action=gastosFijos&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();});
-    if(p && p.error) throw new Error(p.error);
-    _gfData = p||{propuestas:[],generadas:[],periodo:gfCurrentPeriodo()};
-    _gfCatalogo = (c&&c.rows)||[];
+    var per=encodeURIComponent(gfCurrentPeriodo());
+    var d = await fetch(APPS_SCRIPT_URL+'?action=gfAll&periodo='+per+'&token='+tok,{redirect:'follow'}).then(function(r){return r.json();});
+    if(d && d.error) throw new Error(d.error);
+    _gfData = (d.propuestas)||{propuestas:[],generadas:[],periodo:gfCurrentPeriodo()};
+    _gfCatalogo = (d.catalogo&&d.catalogo.rows)||[];
     await hfFinish();
     _renderGastosFijos();
   } catch(e){
@@ -12293,10 +12340,14 @@ function _gfProgHTML(per){
     props.forEach(function(p){
       var amber=p.montoVariable;
       var ult=p.ultimoReal?(' · último: '+_cxpFM(p.ultimoReal.monto)+' ('+p.ultimoReal.mes+')'):' · sin histórico';
+      var fBadge='';
+      if(p.frecuencia==='quincena-ambas') fBadge=' <span style="font-size:9px;background:#dbeafe;color:#1e40af;padding:1px 5px;border-radius:8px;font-weight:700">×2/mes</span>';
+      else if(p.frecuencia==='quincena-15') fBadge=' <span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:8px;font-weight:700">Q15</span>';
+      else if(p.frecuencia==='quincena-30') fBadge=' <span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:8px;font-weight:700">Q30</span>';
       h+='<tr'+(amber?' style="background:rgba(245,158,11,.06)"':'')+'>'
         +'<td><span style="font-size:11px;color:var(--text-secondary,#6b7280)">'+_cxpEsc(p.subtipo||'—')+'</span>'+(amber?' <span title="Monto variable: revísalo" style="color:#b45309">⚠</span>':'')+(p.divisa==='USD'?' <span style="font-size:9px;color:#0369a1;font-weight:800">USD</span>':'')+'</td>'
         +'<td style="font-weight:600">'+_cxpEsc(p.proveedor)+'</td>'
-        +'<td style="max-width:230px;overflow:hidden;text-overflow:ellipsis" title="'+_cxpEsc(p.concepto)+_cxpEsc(ult)+'">'+_cxpEsc(p.concepto)+'</td>'
+        +'<td style="max-width:230px;overflow:hidden;text-overflow:ellipsis" title="'+_cxpEsc(p.concepto)+_cxpEsc(ult)+'">'+_cxpEsc(p.concepto)+fBadge+'</td>'
         +'<td style="font-size:11px">'+(p.vencimiento||'—')+'</td>'
         +'<td style="text-align:right"><input id="gf-monto-'+p.id+'" type="number" step="0.01" value="'+(p.montoSugerido||0)+'" style="width:120px;text-align:right;border:1.5px solid '+(amber?'#fcd34d':'var(--color-divider,#e5e7eb)')+';border-radius:8px;padding:5px 8px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"></td>'
         +'<td style="text-align:center"><button onclick="gfProgramarUno(\''+p.id+'\')" style="padding:5px 12px;background:#166534;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Programar</button></td></tr>';
@@ -12326,7 +12377,7 @@ function _gfCatHTML(){
       +'<div style="display:flex;align-items:center;justify-content:space-between;padding:11px 16px;background:var(--color-surface,#f7f7f7);border-bottom:1px solid var(--color-divider,#e5e7eb)">'
         +'<div style="font-size:13px;font-weight:800;color:var(--text-primary,#111)">'+_cxpEsc(cat)+' <span style="font-size:11px;font-weight:600;color:var(--text-secondary,#9ca3af)">· '+items.length+' '+(items.length===1?'operación':'operaciones')+' · '+_cxpFM(totalEst)+' est.</span></div>'
         +'<button onclick="gfOpenForm(\'\',decodeURIComponent(\''+catSafe+'\'))" style="padding:5px 11px;background:rgba(196,106,122,.1);color:var(--color-primary,#c46a7a);border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">+ Agregar a '+_cxpEsc(cat)+'</button></div>'
-      +'<div style="overflow-x:auto"><table class="cxp-tbl"><thead><tr><th>Activa</th><th>Proveedor</th><th>Concepto</th><th style="text-align:right">Estimado</th><th>Venc.</th><th>Meses</th><th>Vigencia</th><th style="text-align:center">Var.</th><th style="text-align:center">Acción</th></tr></thead><tbody>';
+      +'<div style="overflow-x:auto"><table class="cxp-tbl"><thead><tr><th>Activa</th><th>Proveedor</th><th>Concepto</th><th style="text-align:right">Estimado</th><th>Venc.</th><th>Frecuencia</th><th>Meses</th><th>Vigencia</th><th style="text-align:center">Var.</th><th style="text-align:center">Acción</th></tr></thead><tbody>';
     items.forEach(function(t){
       var vig=(t.desde||t.hasta)?((t.desde||'…')+' → '+(t.hasta||'∞')):'Indefinida';
       h+='<tr style="'+(t.activo?'':'opacity:.5')+'">'
@@ -12335,6 +12386,7 @@ function _gfCatHTML(){
         +'<td style="max-width:230px;overflow:hidden;text-overflow:ellipsis">'+_cxpEsc(t.concepto)+'</td>'
         +'<td style="text-align:right">'+_cxpFM(t.montoEstimado)+(t.divisa==='USD'?' <span style="font-size:9px;color:#0369a1;font-weight:800">USD</span>':'')+'</td>'
         +'<td style="font-size:11px">'+_cxpEsc(t.diaVencimiento||'—')+'</td>'
+        +'<td style="font-size:11px">'+(t.frecuencia==='quincena-ambas'?'<span style="background:#dbeafe;color:#1e40af;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700">×2/mes</span>':t.frecuencia==='quincena-15'?'<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700">Solo 15</span>':t.frecuencia==='quincena-30'?'<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700">Solo 30</span>':'Mensual')+'</td>'
         +'<td style="font-size:11px">'+_cxpEsc(t.meses||'Todos')+'</td>'
         +'<td style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">'+_cxpEsc(vig)+'</td>'
         +'<td style="text-align:center">'+(t.montoVariable?'<span title="Monto variable" style="color:#b45309">⚠</span>':'—')+'</td>'
@@ -12371,14 +12423,14 @@ async function gfProgramarUno(id){
   var monto=(document.getElementById('gf-monto-'+id)||{}).value; if(monto==='') monto=p.montoSugerido;
   var s=getSession()||{};
   try {
-    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'programarGastoFijo', id:id, periodo:_gfData.periodo, proveedor:p.proveedor, contable:p.contable, subtipo:p.subtipo, concepto:p.concepto, monto:monto, vencimiento:p.vencimiento, formaPago:p.formaPago, divisa:p.divisa, usuario:s.email||'sistema'})});
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'programarGastoFijo', id:id, periodo:_gfData.periodo, proveedor:p.proveedor, contable:p.contable, subtipo:p.subtipo, concepto:p.concepto, monto:monto, vencimiento:p.vencimiento, formaPago:p.formaPago, divisa:p.divisa, frecuencia:p.frecuencia||'mensual', notas:p.notas||'', usuario:s.email||'sistema'})});
     var res=await r.json();
     if(res.ok||res.dup){ loadGastosFijos(); } else alert('Error: '+(res.error||''));
   } catch(e){ alert('Error: '+e.message); }
 }
 async function gfProgramarTodos(){
   var props=_gfData.propuestas||[];
-  var items=props.map(function(p){ var m=(document.getElementById('gf-monto-'+p.id)||{}).value; if(m==='')m=p.montoSugerido; return {id:p.id, periodo:_gfData.periodo, proveedor:p.proveedor, contable:p.contable, subtipo:p.subtipo, concepto:p.concepto, monto:m, vencimiento:p.vencimiento, formaPago:p.formaPago, divisa:p.divisa}; });
+  var items=props.map(function(p){ var m=(document.getElementById('gf-monto-'+p.id)||{}).value; if(m==='')m=p.montoSugerido; return {id:p.id, periodo:_gfData.periodo, proveedor:p.proveedor, contable:p.contable, subtipo:p.subtipo, concepto:p.concepto, monto:m, vencimiento:p.vencimiento, formaPago:p.formaPago, divisa:p.divisa, frecuencia:p.frecuencia||'mensual', notas:p.notas||''}; });
   if(!items.length){ alert('No hay propuestas por programar'); return; }
   if(!confirm('¿Programar '+items.length+' gastos fijos a Cuentas por Pagar?')) return;
   var s=getSession()||{};
@@ -12412,7 +12464,8 @@ function _gfModalHTML(){
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">'
     +'<div><label '+L+'>Día de vencimiento</label><input id="gf-f-dia" '+S+' placeholder="5 o fin"></div>'
     +'<div><label '+L+'>Meses</label><input id="gf-f-meses" '+S+' placeholder="Todos / 1,4,7,10"></div>'
-    +'<div style="display:flex;align-items:flex-end;gap:6px;padding-bottom:6px"><input type="checkbox" id="gf-f-variable"><label for="gf-f-variable" style="font-size:11px;color:var(--text-secondary,#6b7280)">Monto variable (revisar)</label></div></div>'
+    +'<div><label '+L+'>Frecuencia</label><select id="gf-f-frecuencia" '+S+'><option value="mensual">Mensual (1 pago)</option><option value="quincena-ambas">Quincenal — 15 y 30 (2 pagos)</option><option value="quincena-15">Quincenal — solo día 15</option><option value="quincena-30">Quincenal — solo día 30</option></select></div></div>'
+    +'<div style="display:flex;align-items:center;gap:6px;margin-bottom:12px"><input type="checkbox" id="gf-f-variable"><label for="gf-f-variable" style="font-size:11px;color:var(--text-secondary,#6b7280)">Monto variable (revisar cada mes)</label></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'
     +'<div><label '+L+'>Desde (vigencia)</label><input id="gf-f-desde" type="month" '+S+'></div>'
     +'<div><label '+L+'>Hasta (vigencia, créditos)</label><input id="gf-f-hasta" type="month" '+S+'></div></div>'
@@ -12430,6 +12483,7 @@ function gfOpenForm(json, presetCat){
   set('gf-f-subtipo', d?d.subtipo:(presetCat||'')); set('gf-f-fp', d?d.formaPago:'');
   set('gf-f-divisa', d?(d.divisa||'MXN'):'MXN');
   set('gf-f-dia', d?d.diaVencimiento:''); set('gf-f-meses', d?d.meses:'Todos');
+  set('gf-f-frecuencia', d?(d.frecuencia||'mensual'):'mensual');
   set('gf-f-desde', d?d.desde:''); set('gf-f-hasta', d?d.hasta:''); set('gf-f-notas', d?d.notas:'');
   var v=document.getElementById('gf-f-variable'); if(v) v.checked = d?!!d.montoVariable:false;
   var t=document.getElementById('gf-modal-title'); if(t) t.textContent = d?'Editar gasto fijo':'Nuevo gasto fijo';
@@ -12448,7 +12502,7 @@ async function gfSaveForm(){
     montoVariable:(document.getElementById('gf-f-variable')||{}).checked,
     diaVencimiento:val('gf-f-dia'), meses:val('gf-f-meses')||'Todos',
     desde:val('gf-f-desde'), hasta:val('gf-f-hasta'), formaPago:val('gf-f-fp'), notas:val('gf-f-notas'),
-    divisa:val('gf-f-divisa')||'MXN',
+    divisa:val('gf-f-divisa')||'MXN', frecuencia:val('gf-f-frecuencia')||'mensual',
     usuario:s.email||'sistema', action: rowNum?'updateGastoFijo':'saveGastoFijo' };
   var btn=document.getElementById('gf-save-btn'); if(btn){btn.disabled=true;btn.textContent='Guardando…';}
   try {

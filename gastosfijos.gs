@@ -9,9 +9,9 @@
 var GF_TAB = 'GastosFijos';
 // Columnas: A ID, B Activo, C Proveedor, D Contable, E Subtipo, F Concepto,
 //           G MontoEstimado, H MontoVariable, I DiaVencimiento, J Meses,
-//           K Desde, L Hasta, M FormaPago, N Notas
+//           K Desde, L Hasta, M FormaPago, N Notas, O Divisa, P Frecuencia
 var GF_HEADERS = ['ID','Activo','Proveedor','Contable','Subtipo','Concepto',
-  'MontoEstimado','MontoVariable','DiaVencimiento','Meses','Desde','Hasta','FormaPago','Notas','Divisa'];
+  'MontoEstimado','MontoVariable','DiaVencimiento','Meses','Desde','Hasta','FormaPago','Notas','Divisa','Frecuencia'];
 
 function setupGastosFijos() {
   var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
@@ -21,10 +21,9 @@ function setupGastosFijos() {
   sh.getRange(1,1,1,GF_HEADERS.length).setValues([GF_HEADERS]).setFontWeight('bold');
   // Ejemplos
   var ej = [
-    ['GF-001', true, 'Arrendador',  'Gasto', 'Renta',    'Renta laboratorio', 41067.08, false, '5',   'Todos', '', '', 'Santander', '', 'MXN'],
-    ['GF-002', true, 'Nómina',      'Gasto', 'Nomina',   'Nómina 1ra quincena', 0,       true,  '15',  'Todos', '', '', 'Santander', 'Varía por bonos', 'MXN'],
-    ['GF-003', true, 'Nómina',      'Gasto', 'Nomina',   'Nómina 2da quincena', 0,       true,  'fin', 'Todos', '', '', 'Santander', '', 'MXN'],
-    ['GF-004', true, 'LIFEAIRE',    'Gasto', 'Mantenimiento', 'Servicio LIFEAIRE', 0,    false, '10',  'Todos', '', '', 'AMEX', 'Pago en dólares', 'USD']
+    ['GF-001', true, 'Arrendador',  'Gasto', 'Renta',    'Renta laboratorio', 41067.08, false, '5',   'Todos', '', '', 'Santander', '', 'MXN', 'mensual'],
+    ['GF-002', true, 'Nómina',      'Gasto', 'Nomina',   'Nómina quincenal',   0,       true,  '15',  'Todos', '', '', 'Santander', 'Varía por bonos', 'MXN', 'quincena-ambas'],
+    ['GF-004', true, 'LIFEAIRE',    'Gasto', 'Mantenimiento', 'Servicio LIFEAIRE', 0,  false, '10',  'Todos', '', '', 'AMEX', 'Pago en dólares', 'USD', 'mensual']
   ];
   sh.getRange(2,1,ej.length,GF_HEADERS.length).setValues(ej);
   sh.setFrozenRows(1);
@@ -35,8 +34,13 @@ function _gfSheet() {
   var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
   var sh = ss.getSheetByName(GF_TAB);
   if (!sh) { setupGastosFijos(); sh = ss.getSheetByName(GF_TAB); }
-  // Asegura el header 'Divisa' (col O) en hojas creadas antes de esta columna — sin borrar datos.
-  try { if (sh.getLastColumn() < GF_HEADERS.length) sh.getRange(1, GF_HEADERS.length).setValue(GF_HEADERS[GF_HEADERS.length-1]); } catch(e){}
+  // Asegura headers nuevos (Divisa col O, Frecuencia col P) en hojas creadas antes — sin borrar datos.
+  try {
+    var lc = sh.getLastColumn();
+    if (lc < GF_HEADERS.length) {
+      sh.getRange(1, lc+1, 1, GF_HEADERS.length-lc).setValues([GF_HEADERS.slice(lc)]);
+    }
+  } catch(e){}
   return sh;
 }
 
@@ -56,7 +60,8 @@ function readGastosFijos() {
         diaVencimiento:String(t[8]||''), meses:String(t[9]||'Todos'),
         desde:String(t[10]||''), hasta:String(t[11]||''),
         formaPago:String(t[12]||''), notas:String(t[13]||''),
-        divisa:String(t[14]||'MXN').toUpperCase()==='USD'?'USD':'MXN'
+        divisa:String(t[14]||'MXN').toUpperCase()==='USD'?'USD':'MXN',
+        frecuencia:String(t[15]||'mensual')
       });
     }
     return {ok:true, rows:rows};
@@ -71,7 +76,8 @@ function _gfRowFromBody(b) {
     b.montoVariable===true||String(b.montoVariable).toUpperCase()==='TRUE',
     String(b.diaVencimiento||''), String(b.meses||'Todos'),
     String(b.desde||''), String(b.hasta||''), b.formaPago||'', b.notas||'',
-    String(b.divisa||'MXN').toUpperCase()==='USD'?'USD':'MXN'
+    String(b.divisa||'MXN').toUpperCase()==='USD'?'USD':'MXN',
+    String(b.frecuencia||'mensual')
   ];
 }
 
@@ -142,6 +148,10 @@ function _gfEgContext() {
       genSet[rec+'|'+mes]=true;
       var monto=parseFloat(d[i][9])||0;
       if(!lastByGF[rec] || mes>lastByGF[rec].mes) lastByGF[rec]={mes:mes, monto:monto};
+      // Also index by base ID (strip _Q1/_Q2) so quincena items can find their historical monto
+      var baseRec = rec.replace(/_Q[12]$/, '');
+      if(baseRec !== rec && (!lastByGF[baseRec] || mes>lastByGF[baseRec].mes))
+        lastByGF[baseRec]={mes:mes, monto:monto};
     }
   }
   return {egSh:egSh, iRec:iRec, genSet:genSet, lastByGF:lastByGF};
@@ -163,8 +173,10 @@ function _gfAplica(t, periodo, mesNum) {
 
 function _gfItem(t, periodo, lastByGF) {
   var id=String(t[0]||'').trim();
+  var freq=String(t[15]||'mensual').trim();
   var estimado=parseFloat(t[6])||0;
-  var sugerido=(lastByGF[id]&&lastByGF[id].monto)?lastByGF[id].monto:estimado;
+  var last=lastByGF[id]||lastByGF[id+'_Q1']||lastByGF[id+'_Q2']||null;
+  var sugerido=(last&&last.monto)?last.monto:estimado;
   return {
     id:id, proveedor:String(t[2]||''), contable:String(t[3]||'Gasto'),
     subtipo:String(t[4]||''), concepto:String(t[5]||''),
@@ -173,7 +185,8 @@ function _gfItem(t, periodo, lastByGF) {
     diaVencimiento:String(t[8]||''), vencimiento:_gfVencimiento(periodo, String(t[8]||'')),
     formaPago:String(t[12]||''), notas:String(t[13]||''),
     divisa:String(t[14]||'MXN').toUpperCase()==='USD'?'USD':'MXN',
-    ultimoReal: lastByGF[id]||null
+    frecuencia:freq,
+    ultimoReal: last
   };
 }
 
@@ -189,7 +202,13 @@ function readGastosFijosPropuestas(periodo) {
       var t=gf[j]; if(!String(t[0]||'').trim()) continue;
       if(!_gfAplica(t, periodo, mesNum)) continue;
       var item=_gfItem(t, periodo, ctx.lastByGF);
-      if(ctx.genSet[item.id+'|'+periodo]) generadas.push(item); else propuestas.push(item);
+      var freq=item.frecuencia||'mensual';
+      var isGen;
+      if(freq==='quincena-ambas') isGen=!!ctx.genSet[item.id+'_Q1|'+periodo]&&!!ctx.genSet[item.id+'_Q2|'+periodo];
+      else if(freq==='quincena-15') isGen=!!ctx.genSet[item.id+'_Q1|'+periodo];
+      else if(freq==='quincena-30') isGen=!!ctx.genSet[item.id+'_Q2|'+periodo];
+      else isGen=!!ctx.genSet[item.id+'|'+periodo];
+      if(isGen) generadas.push(item); else propuestas.push(item);
     }
     return {ok:true, periodo:periodo, propuestas:propuestas, generadas:generadas,
             pendientes:propuestas.length};
@@ -251,13 +270,31 @@ function _gfAppendCxP(egSh, iRec1, item, usuario) {
   return {ok:true, id:newId};
 }
 
+// Crea las filas CxP de un gasto fijo respetando su frecuencia.
+function _gfProgramarConFrec(egSh, iRec1, b, usuario) {
+  var freq = String(b.frecuencia||'mensual').toLowerCase().trim();
+  var creadas=0, dups=0;
+  function clone(extra){ return Object.assign(JSON.parse(JSON.stringify(b)), extra); }
+  function run(item){ var r=_gfAppendCxP(egSh,iRec1,item,usuario); if(r.ok)creadas++; else if(r.dup)dups++; return r; }
+  if(freq==='quincena-ambas'){
+    run(clone({id:b.id+'_Q1', vencimiento:_gfVencimiento(b.periodo,'15'),  concepto:(b.concepto||'')+' (1ª quincena)'}));
+    run(clone({id:b.id+'_Q2', vencimiento:_gfVencimiento(b.periodo,'fin'), concepto:(b.concepto||'')+' (2ª quincena)'}));
+  } else if(freq==='quincena-15'){
+    run(clone({id:b.id+'_Q1', vencimiento:_gfVencimiento(b.periodo,'15'),  concepto:(b.concepto||'')+' (1ª quincena)'}));
+  } else if(freq==='quincena-30'){
+    run(clone({id:b.id+'_Q2', vencimiento:_gfVencimiento(b.periodo,'fin'), concepto:(b.concepto||'')+' (2ª quincena)'}));
+  } else {
+    run(b);
+  }
+  return {ok:creadas>0||dups>0, creadas:creadas, dup:dups>0&&creadas===0};
+}
+
 function programarGastoFijo(b) {
   try {
     var ss=SpreadsheetApp.openById(EGRESOS_SS_2026);
     var egSh=ss.getSheetByName(EGRESOS_TABS[2026]||'Egresos2026');
-    var iRec1=_egColEnsure(egSh,'recurrente','RecurrenteID'); // 1-indexed
-    var res=_gfAppendCxP(egSh, iRec1, b, b.usuario);
-    return res;
+    var iRec1=_egColEnsure(egSh,'recurrente','RecurrenteID');
+    return _gfProgramarConFrec(egSh, iRec1, b, b.usuario||'sistema');
   } catch(ex){ return {ok:false, error:ex.message}; }
 }
 
@@ -270,9 +307,34 @@ function programarGastosFijosBatch(b) {
     var creadas=0, dups=0, errores=0;
     for(var i=0;i<items.length;i++){
       items[i].usuario=b.usuario;
-      var r=_gfAppendCxP(egSh, iRec1, items[i], b.usuario);
-      if(r.ok) creadas++; else if(r.dup) dups++; else errores++;
+      var r=_gfProgramarConFrec(egSh, iRec1, items[i], b.usuario||'sistema');
+      creadas+=r.creadas||0; if(r.dup)dups++; if(!r.ok&&!r.dup)errores++;
     }
     return {ok:true, creadas:creadas, duplicadas:dups, errores:errores};
   } catch(ex){ return {ok:false, error:ex.message}; }
+}
+
+function bulkUpdateCxPMonto(body) {
+  try {
+    var rowNums=body.rowNums||[]; if(!rowNums.length) return {ok:false,error:'Sin filas'};
+    var accion=String(body.accion||'set'); // 'set' | 'add'
+    var valor=parseFloat(body.valor)||0;
+    var anio=new Date().getFullYear();
+    var ss=SpreadsheetApp.openById(EGRESOS_SS_2026);
+    var sh=ss.getSheetByName(EGRESOS_TABS[anio]||'Egresos2026');
+    if(!sh) return {ok:false,error:'Hoja no encontrada'};
+    var COL_MONTO=10; // col J
+    var updated=0;
+    for(var i=0;i<rowNums.length;i++){
+      var rn=parseInt(rowNums[i]); if(!rn||rn<2) continue;
+      var cell=sh.getRange(rn,COL_MONTO);
+      var cur=parseFloat(cell.getValue())||0;
+      var nv=accion==='add'?cur+valor:valor;
+      if(nv<0)nv=0;
+      cell.setValue(Math.round(nv*100)/100);
+      updated++;
+    }
+    try{CacheService.getScriptCache().remove('gas_egresos_v1_'+anio);}catch(e){}
+    return {ok:true, updated:updated};
+  } catch(ex){ return {ok:false,error:ex.message}; }
 }

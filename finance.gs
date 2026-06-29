@@ -534,6 +534,7 @@ function doPost(e) {
     if (body.action === 'deleteGastoFijo')         return jsonResponse(deleteGastoFijo(body));
     if (body.action === 'programarGastoFijo')      return jsonResponse(programarGastoFijo(body));
     if (body.action === 'programarGastosFijosBatch') return jsonResponse(programarGastosFijosBatch(body));
+    if (body.action === 'bulkUpdateCxPMonto')         return jsonResponse(bulkUpdateCxPMonto(body));
     // Tareas programadas (scheduler)
     if (body.action === 'updateScheduledTask')     return jsonResponse(updateScheduledTask(body));
     if (body.action === 'setupScheduledTriggers')  return jsonResponse(setupScheduledTriggers());
