@@ -584,6 +584,9 @@ function doPost(e) {
     if (body.action === 'updateIngreso') {
       return jsonResponse(updateIngreso(body));
     }
+    if (body.action === 'renamePacienteIngresos') {
+      return jsonResponse(renamePacienteIngresos(body.oldNombre, body.newNombre));
+    }
     if (body.action === 'updateCajaChica') {
       return jsonResponse(updateCajaChicaRow(body));
     }
@@ -2884,6 +2887,35 @@ function updateIngreso(payload) {
     } catch(ae) {}
 
     return {ok:true, op:opId, lineas:rows.length, total:totalOP, edited:true};
+  } catch(ex) {
+    return {ok:false, error:ex.message};
+  }
+}
+
+function renamePacienteIngresos(oldNombre, newNombre) {
+  try {
+    if (!oldNombre || !newNombre || String(oldNombre).trim() === String(newNombre).trim())
+      return {ok:true, updated:0, msg:'Sin cambios'};
+    var oldTrim = String(oldNombre).trim();
+    var newTrim = String(newNombre).trim();
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sheet = null;
+    var sheets = ss.getSheets();
+    for (var i = 0; i < sheets.length; i++) {
+      if (sheets[i].getName() === BD_INGRESOS_TAB) { sheet = sheets[i]; break; }
+    }
+    if (!sheet) return {ok:false, error:'BD_Ingresos no encontrada'};
+    var data = sheet.getDataRange().getValues();
+    var PAC_COL = 4; // columna D (1-indexed) = Paciente
+    var updated = 0;
+    for (var r = 1; r < data.length; r++) {
+      var current = String(data[r][PAC_COL - 1] || '').trim();
+      if (current.toLowerCase() === oldTrim.toLowerCase()) {
+        sheet.getRange(r + 1, PAC_COL).setValue(newTrim);
+        updated++;
+      }
+    }
+    return {ok:true, updated:updated, oldNombre:oldTrim, newNombre:newTrim};
   } catch(ex) {
     return {ok:false, error:ex.message};
   }

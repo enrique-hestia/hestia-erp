@@ -11669,6 +11669,7 @@ var CAPTURA_CONFIG = {
 };
 
 var _pacEditRowNum = null;
+var _pacOldNombre  = '';
 
 function openModal(tipo) {
   // Si la vista tiene fuente especializada, abrir su modal propio
@@ -11737,6 +11738,7 @@ function openEditModal(viewId, rowIdx) {
   var row = (_capturaRows[viewId] || [])[rowIdx];
   if (!row) return;
   _pacEditRowNum = row._rowNum;
+  _pacOldNombre  = String(row['Nombre Completo del Paciente'] || '').trim();
   // Pre-llenar todos los campos con los datos de la fila
   cfg.fields.forEach(function(fieldId, i) {
     var el  = document.getElementById(fieldId);
@@ -11780,21 +11782,58 @@ function submitEditCaptura(viewId) {
     var el = document.getElementById(id);
     params += '&' + encodeURIComponent(cfg.keys[i]) + '=' + encodeURIComponent(el ? el.value : '');
   });
+  var _newNombreCaptura = viewId === 'cap-pacientes'
+    ? String((document.getElementById('pac-f-nombre')||{}).value || '').trim()
+    : '';
   fetch(APPS_SCRIPT_URL + '?' + params)
     .then(function(r){ return r.json(); })
     .then(function(res) {
       if (res.success) {
-        showModalMsg(cfg.msgEl, 'ok', '✓ Registro actualizado correctamente.');
-        setTimeout(function() {
-          closeModal(viewId);
-          loadView(currentView, currentFechaInicio, currentFechaFin, true);
-        }, 1500);
+        // Si cambió el nombre del paciente, actualizar todos sus registros en ingresos
+        if (viewId === 'cap-pacientes' && _pacOldNombre && _newNombreCaptura && _pacOldNombre !== _newNombreCaptura) {
+          showModalMsg(cfg.msgEl, 'ok', '✓ Paciente actualizado. Actualizando historial de ingresos…');
+          _cascadeRenamePaciente(_pacOldNombre, _newNombreCaptura, cfg.msgEl).then(function(n) {
+            var extra = n > 0 ? ' Se actualizaron ' + n + ' registros de ingresos.' : '';
+            showModalMsg(cfg.msgEl, 'ok', '✓ Registro actualizado correctamente.' + extra);
+            setTimeout(function() {
+              closeModal(viewId);
+              _ingData = null; _ingPacientesDB = []; _ingPacientesTS = 0;
+              loadView(currentView, currentFechaInicio, currentFechaFin, true);
+            }, 2000);
+          });
+        } else {
+          showModalMsg(cfg.msgEl, 'ok', '✓ Registro actualizado correctamente.');
+          setTimeout(function() {
+            closeModal(viewId);
+            loadView(currentView, currentFechaInicio, currentFechaFin, true);
+          }, 1500);
+        }
       } else {
         showModalMsg(cfg.msgEl, 'err', 'Error: ' + (res.error || 'No se pudo actualizar.'));
       }
     })
     .catch(function() { showModalMsg(cfg.msgEl, 'err', 'Error de conexión. Intenta de nuevo.'); })
     .finally(function() { btn.disabled = false; btn.textContent = 'Guardar cambios'; });
+}
+
+async function _cascadeRenamePaciente(oldNombre, newNombre, msgEl) {
+  try {
+    var s = getSession() || {};
+    var r = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'renamePacienteIngresos',
+        oldNombre: oldNombre,
+        newNombre: newNombre,
+        usuario: s.email || 'sistema'
+      })
+    });
+    var res = await r.json();
+    return res.ok ? (res.updated || 0) : 0;
+  } catch(e) {
+    console.warn('[Paciente] Error al propagar renombre:', e);
+    return 0;
+  }
 }
 
 var _pacOptLoaded = false;
