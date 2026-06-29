@@ -12388,8 +12388,11 @@ async function loadGastosFijos(){
     var per=encodeURIComponent(gfCurrentPeriodo());
     var d = await fetch(APPS_SCRIPT_URL+'?action=gfAll&periodo='+per+'&token='+tok,{redirect:'follow'}).then(function(r){return r.json();});
     if(d && d.error) throw new Error(d.error);
+    // Surfacear error interno de readGastosFijos si existe
+    if(d && d.catalogo && !d.catalogo.ok && d.catalogo.error) throw new Error('Catálogo: '+d.catalogo.error);
     _gfData = (d.propuestas)||{propuestas:[],generadas:[],periodo:gfCurrentPeriodo()};
     _gfCatalogo = (d.catalogo&&d.catalogo.rows)||[];
+    console.log('[GF] catalogo rows:', _gfCatalogo.length, '| propuestas:', (_gfData.propuestas||[]).length, '| respuesta completa:', JSON.stringify(d).substring(0,400));
     await hfFinish();
     _renderGastosFijos();
   } catch(e){
