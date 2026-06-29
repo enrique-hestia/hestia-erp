@@ -16,18 +16,30 @@ var GF_HEADERS = ['ID','Activo','Proveedor','Contable','Subtipo','Concepto',
 function setupGastosFijos() {
   var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
   var sh = ss.getSheetByName(GF_TAB);
-  if (!sh) sh = ss.insertSheet(GF_TAB);
-  sh.clear();
-  sh.getRange(1,1,1,GF_HEADERS.length).setValues([GF_HEADERS]).setFontWeight('bold');
-  // Ejemplos
-  var ej = [
-    ['GF-001', true, 'Arrendador',  'Gasto', 'Renta',    'Renta laboratorio', 41067.08, false, '5',   'Todos', '', '', 'Santander', '', 'MXN', 'mensual'],
-    ['GF-002', true, 'Nómina',      'Gasto', 'Nomina',   'Nómina quincenal',   0,       true,  '15',  'Todos', '', '', 'Santander', 'Varía por bonos', 'MXN', 'quincena-ambas'],
-    ['GF-004', true, 'LIFEAIRE',    'Gasto', 'Mantenimiento', 'Servicio LIFEAIRE', 0,  false, '10',  'Todos', '', '', 'AMEX', 'Pago en dólares', 'USD', 'mensual']
-  ];
-  sh.getRange(2,1,ej.length,GF_HEADERS.length).setValues(ej);
-  sh.setFrozenRows(1);
-  return {ok:true, tab:GF_TAB};
+  var isNew = !sh;
+  if (isNew) sh = ss.insertSheet(GF_TAB);
+
+  if (isNew || sh.getLastRow() < 2) {
+    // Solo inicializa si la hoja es nueva o está vacía — NUNCA borra datos existentes
+    if (isNew) sh.getRange(1,1,1,GF_HEADERS.length).setValues([GF_HEADERS]).setFontWeight('bold');
+    var ej = [
+      ['GF-001', true, 'Arrendador',  'Gasto', 'Renta',    'Renta laboratorio', 41067.08, false, '5',   'Todos', '', '', 'Santander', '', 'MXN', 'mensual'],
+      ['GF-002', true, 'Nómina',      'Gasto', 'Nomina',   'Nómina quincenal',   0,       true,  '15',  'Todos', '', '', 'Santander', 'Varía por bonos', 'MXN', 'quincena-ambas'],
+      ['GF-004', true, 'LIFEAIRE',    'Gasto', 'Mantenimiento', 'Servicio LIFEAIRE', 0,  false, '10',  'Todos', '', '', 'AMEX', 'Pago en dólares', 'USD', 'mensual']
+    ];
+    sh.getRange(2,1,ej.length,GF_HEADERS.length).setValues(ej);
+    sh.setFrozenRows(1);
+    return {ok:true, tab:GF_TAB, created:true};
+  }
+
+  // La hoja ya tiene datos: solo asegura los headers nuevos sin tocar nada más
+  try {
+    var lc = sh.getLastColumn();
+    if (lc < GF_HEADERS.length) {
+      sh.getRange(1, lc+1, 1, GF_HEADERS.length-lc).setValues([GF_HEADERS.slice(lc)]);
+    }
+  } catch(e){}
+  return {ok:true, tab:GF_TAB, created:false, note:'Hoja existente — solo se actualizaron headers'};
 }
 
 function _gfSheet() {
