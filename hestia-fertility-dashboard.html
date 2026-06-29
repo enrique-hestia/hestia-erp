@@ -3107,7 +3107,8 @@ function prodOpenForm(defaultCat) {
     +'</div>';
 
   // Footer
-  h += '<div style="display:flex;gap:12px;justify-content:flex-end;padding:16px 0">'
+  h += '<div style="display:flex;align-items:center;gap:12px;justify-content:flex-end;padding:16px 0">'
+    +'<span id="prod-save-status" style="font-size:12px;font-weight:600;flex:1;text-align:right"></span>'
     +'<button onclick="prodCloseForm()" style="padding:10px 24px;background:var(--color-surface,#f3f4f6);color:var(--text-primary,#374151);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;font-size:13px;font-weight:600;cursor:pointer">Descartar</button>'
     +'<button id="prod-save-btn" onclick="prodSubmitForm()" style="padding:10px 28px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(196,106,122,.3)">Guardar producto</button>'
     +'</div>';
@@ -3143,7 +3144,11 @@ async function prodSubmitEdit(productoId) {
   var desc = (document.getElementById('prod-f-desc')||{}).value||'';
   if (!desc) { alert('Ingresa la descripción'); return; }
   var btn = document.getElementById('prod-save-btn');
+  var stEl = document.getElementById('prod-save-status');
+  function setSt(msg, color){ if(stEl){ stEl.textContent=msg; stEl.style.color=color||'#374151'; } }
   if(btn){btn.disabled=true;btn.textContent='Actualizando…';}
+  setSt('Enviando…','#6b7280');
+  console.log('[prodSubmitEdit] productoId=', productoId);
   try {
     var s = getSession()||{};
     var payload = {
@@ -3161,11 +3166,14 @@ async function prodSubmitEdit(productoId) {
       lista: (document.getElementById('prod-f-lista')||{}).value||'General',
       usuario: s.email||'sistema'
     };
-    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(payload)});
-    var res = await r.json();
-    if(res.ok) { _prodData=null; prodCloseForm(); }
-    else { alert('Error: '+(res.error||'No se pudo actualizar')); if(btn){btn.disabled=false;btn.textContent='Actualizar producto';} }
-  } catch(e) { alert('Error: '+e.message); if(btn){btn.disabled=false;btn.textContent='Actualizar producto';} }
+    console.log('[prodSubmitEdit] payload=', JSON.stringify(payload));
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify(payload)});
+    var text = await r.text();
+    console.log('[prodSubmitEdit] respuesta raw=', text);
+    var res; try{ res=JSON.parse(text); }catch(pe){ setSt('Error: respuesta no es JSON — '+text.substring(0,120),'#dc2626'); if(btn){btn.disabled=false;btn.textContent='Actualizar producto';} return; }
+    if(res.ok) { setSt('✓ Guardado','#166534'); setTimeout(function(){ _prodData=null; prodCloseForm(); },600); }
+    else { setSt('Error: '+(res.error||'No se pudo actualizar'),'#dc2626'); if(btn){btn.disabled=false;btn.textContent='Actualizar producto';} }
+  } catch(e) { console.error('[prodSubmitEdit] excepción:', e); setSt('Error de conexión: '+e.message,'#dc2626'); if(btn){btn.disabled=false;btn.textContent='Actualizar producto';} }
 }
 
 function prodCloseForm() {
