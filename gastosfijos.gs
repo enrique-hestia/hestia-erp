@@ -60,9 +60,12 @@ function readGastosFijos() {
   try {
     var sh = _gfSheet();
     var v = sh.getDataRange().getValues();
+    var ctx = null;
+    try { ctx = _gfEgContext(); } catch(e) {}
     var rows = [];
     for (var i=1;i<v.length;i++) {
       var t=v[i]; var id=String(t[0]||'').trim(); if(!id) continue;
+      var last = ctx ? (ctx.lastByGF[id]||ctx.lastByGF[id+'_Q1']||ctx.lastByGF[id+'_Q2']||null) : null;
       rows.push({
         rowNum:i+1, id:id,
         activo: t[1]===true||String(t[1]).toUpperCase()==='TRUE',
@@ -73,11 +76,103 @@ function readGastosFijos() {
         desde:String(t[10]||''), hasta:String(t[11]||''),
         formaPago:String(t[12]||''), notas:String(t[13]||''),
         divisa:String(t[14]||'MXN').toUpperCase()==='USD'?'USD':'MXN',
-        frecuencia:String(t[15]||'mensual')
+        frecuencia:String(t[15]||'mensual'),
+        lastProgramado: last ? last.mes : ''
       });
     }
     return {ok:true, rows:rows};
   } catch(ex) { return {ok:false, error:ex.message, rows:[]}; }
+}
+
+// Reconstruye el catálogo GastosFijos leyendo los RecurrenteID únicos en Egresos2026.
+// Solo crea entradas que aún no existen en GastosFijos — nunca sobreescribe.
+function reconstruirCatalogoGF(b) {
+  try {
+    var ss  = SpreadsheetApp.openById(EGRESOS_SS_2026);
+    var egSh = ss.getSheetByName(EGRESOS_TABS[2026]||'Egresos2026');
+    var gfSh = _gfSheet();
+
+    // Localizar columnas dinámicas en Egresos
+    var egHdr = egSh.getRange(1,1,1,egSh.getLastColumn()).getValues()[0]
+      .map(function(h){ return String(h).trim().toLowerCase(); });
+    var iRec=-1, iDiv=-1;
+    for(var c=0;c<egHdr.length;c++){
+      if(egHdr[c].indexOf('recurrente')>-1) iRec=c;
+      if(egHdr[c]==='divisa') iDiv=c;
+    }
+    if(iRec<0) return {ok:false,error:'No se encontró columna RecurrenteID en Egresos'};
+
+    // Leer y agrupar filas de Egresos por base-ID de RecurrenteID
+    var data = egSh.getDataRange().getValues();
+    var groups = {};
+    for(var i=1;i<data.length;i++){
+      var rec=String(data[i][iRec]||'').trim(); if(!rec) continue;
+      var base=rec.replace(/_Q[12]$/,'');
+      var isQ1=/_Q1$/.test(rec), isQ2=/_Q2$/.test(rec);
+      var mes=String(data[i][2]||'').trim();
+      if(!groups[base]) groups[base]={id:base,lastMes:'',lastRow:null,hasQ1:false,hasQ2:false};
+      var g=groups[base];
+      if(isQ1) g.hasQ1=true;
+      if(isQ2) g.hasQ2=true;
+      if(!g.lastMes||mes>g.lastMes){ g.lastMes=mes; g.lastRow=data[i]; }
+    }
+
+    // IDs que ya existen en GastosFijos
+    var existing={};
+    var gfData=gfSh.getDataRange().getValues();
+    var maxNum=0;
+    for(var j=1;j<gfData.length;j++){
+      var gid=String(gfData[j][0]||'').trim(); if(!gid) continue;
+      existing[gid]=true;
+      var mn=gid.match(/(\d+)/); if(mn){var n=parseInt(mn[1]);if(n>maxNum)maxNum=n;}
+    }
+
+    var created=0;
+    var sortedIds=Object.keys(groups).sort();
+    for(var k=0;k<sortedIds.length;k++){
+      var bid=sortedIds[k];
+      if(existing[bid]) continue; // Ya existe — no tocar
+
+      var g=groups[bid];
+      var row=g.lastRow;
+      var freq=g.hasQ1&&g.hasQ2?'quincena-ambas':g.hasQ1?'quincena-15':g.hasQ2?'quincena-30':'mensual';
+
+      // Inferir día de vencimiento del último registro
+      var venc=String(row[11]||'').trim(), diaVenc='';
+      if(venc&&venc.length>=10){
+        var dd=parseInt(venc.substring(8,10),10);
+        var lastDay=new Date(parseInt(venc.substring(0,4)),parseInt(venc.substring(5,7)),0).getDate();
+        diaVenc=(dd===lastDay)?'fin':String(dd);
+      }
+
+      var div=(iDiv>-1&&row[iDiv])?String(row[iDiv]).toUpperCase():'MXN';
+      var monto=parseFloat(row[9])||0;
+      // Limpiar sufijos de quincena del concepto
+      var concepto=String(row[8]||'').replace(/\s*\([12]ª quincena\)/gi,'').trim();
+
+      // Usar el ID original del RecurrenteID; si no tiene formato GF-NNN, asignar nuevo
+      var newId=bid.match(/^GF-\d+$/)?bid:('GF-'+String(++maxNum).padStart(3,'0'));
+
+      var gfRow=[
+        newId, true,
+        String(row[4]||''),         // Proveedor
+        String(row[5]||'Gasto'),    // Contable
+        String(row[7]||''),         // Subtipo
+        concepto,                    // Concepto
+        monto, false,                // MontoEstimado, MontoVariable
+        diaVenc, 'Todos', '', '',    // DiaVencimiento, Meses, Desde, Hasta
+        String(row[16]||''),         // FormaPago (col Q)
+        String(row[10]||''),         // Notas
+        div==='USD'?'USD':'MXN',     // Divisa
+        freq                          // Frecuencia
+      ];
+      gfSh.appendRow(gfRow);
+      existing[newId]=true;
+      created++;
+    }
+    logAudit(b&&b.usuario||'sistema','GastoFijo','Reconstruir','','','',created+' entradas desde BD_CxP');
+    return {ok:true,created:created,omitidos:sortedIds.length-created};
+  } catch(ex){ return {ok:false,error:ex.message}; }
 }
 
 function _gfRowFromBody(b) {

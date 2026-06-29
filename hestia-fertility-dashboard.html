@@ -12362,11 +12362,18 @@ function _gfProgHTML(per){
 
 function _gfCatHTML(){
   var rows=_gfCatalogo||[];
-  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
-    +'<div style="font-size:12px;color:var(--text-secondary,#6b7280)">'+rows.length+' '+(rows.length===1?'operación':'operaciones')+' · agrupadas por categoría. Una categoría puede tener varias operaciones.</div>'
-    +'<button onclick="gfOpenForm()" style="padding:9px 16px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">+ Nuevo gasto fijo</button></div>';
+  var h='<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+    +'<div style="font-size:12px;color:var(--text-secondary,#6b7280)">'+rows.length+' '+(rows.length===1?'operación':'operaciones')+' · agrupadas por categoría.</div>'
+    +'<div style="display:flex;gap:8px">'
+    +'<button onclick="gfReconstruir()" style="padding:8px 14px;background:rgba(59,130,246,.08);color:#2563eb;border:1.5px solid rgba(59,130,246,.2);border-radius:9px;font-size:11.5px;font-weight:700;cursor:pointer" title="Reconstruye el catálogo leyendo los RecurrenteID del historial de CxP/Egresos">↺ Reconstruir desde Egresos</button>'
+    +'<button onclick="gfOpenForm()" style="padding:8px 16px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">+ Nuevo gasto fijo</button>'
+    +'</div></div>';
   if(!rows.length){
-    return h+'<div style="background:var(--card-bg,#fff);border:1px dashed var(--color-divider,#e5e7eb);border-radius:14px;padding:36px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:13px">Aún no hay gastos fijos.<br>Pulsa <b>+ Nuevo gasto fijo</b> para crear el primero (escribe la categoría que quieras).</div>';
+    return h+'<div style="background:var(--card-bg,#fff);border:1px dashed var(--color-divider,#e5e7eb);border-radius:14px;padding:36px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:13px">'
+      +'El catálogo está vacío.<br><br>'
+      +'<button onclick="gfReconstruir()" style="padding:10px 20px;background:#2563eb;color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:10px">↺ Reconstruir catálogo desde historial de Egresos</button>'
+      +'<div style="font-size:11px;margin-top:8px">Lee los RecurrenteID del historial de CxP y recrea cada partida. Solo agrega — nunca borra.</div>'
+      +'<br><span style="font-size:11.5px">O pulsa <b>+ Nuevo gasto fijo</b> para crear desde cero.</span></div>';
   }
   var byCat={}; rows.forEach(function(t){ var k=t.subtipo||'Sin categoría'; (byCat[k]=byCat[k]||[]).push(t); });
   Object.keys(byCat).sort().forEach(function(cat){
@@ -12377,7 +12384,7 @@ function _gfCatHTML(){
       +'<div style="display:flex;align-items:center;justify-content:space-between;padding:11px 16px;background:var(--color-surface,#f7f7f7);border-bottom:1px solid var(--color-divider,#e5e7eb)">'
         +'<div style="font-size:13px;font-weight:800;color:var(--text-primary,#111)">'+_cxpEsc(cat)+' <span style="font-size:11px;font-weight:600;color:var(--text-secondary,#9ca3af)">· '+items.length+' '+(items.length===1?'operación':'operaciones')+' · '+_cxpFM(totalEst)+' est.</span></div>'
         +'<button onclick="gfOpenForm(\'\',decodeURIComponent(\''+catSafe+'\'))" style="padding:5px 11px;background:rgba(196,106,122,.1);color:var(--color-primary,#c46a7a);border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">+ Agregar a '+_cxpEsc(cat)+'</button></div>'
-      +'<div style="overflow-x:auto"><table class="cxp-tbl"><thead><tr><th>Activa</th><th>Proveedor</th><th>Concepto</th><th style="text-align:right">Estimado</th><th>Venc.</th><th>Frecuencia</th><th>Meses</th><th>Vigencia</th><th style="text-align:center">Var.</th><th style="text-align:center">Acción</th></tr></thead><tbody>';
+      +'<div style="overflow-x:auto"><table class="cxp-tbl"><thead><tr><th>Activa</th><th>Proveedor</th><th>Concepto</th><th style="text-align:right">Estimado</th><th>Venc.</th><th>Frecuencia</th><th>Meses</th><th>Vigencia</th><th>Último → Egresos</th><th style="text-align:center">Var.</th><th style="text-align:center">Acción</th></tr></thead><tbody>';
     items.forEach(function(t){
       var vig=(t.desde||t.hasta)?((t.desde||'…')+' → '+(t.hasta||'∞')):'Indefinida';
       h+='<tr style="'+(t.activo?'':'opacity:.5')+'">'
@@ -12389,6 +12396,7 @@ function _gfCatHTML(){
         +'<td style="font-size:11px">'+(t.frecuencia==='quincena-ambas'?'<span style="background:#dbeafe;color:#1e40af;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700">×2/mes</span>':t.frecuencia==='quincena-15'?'<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700">Solo 15</span>':t.frecuencia==='quincena-30'?'<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:700">Solo 30</span>':'Mensual')+'</td>'
         +'<td style="font-size:11px">'+_cxpEsc(t.meses||'Todos')+'</td>'
         +'<td style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">'+_cxpEsc(vig)+'</td>'
+        +'<td style="font-size:11px">'+(t.lastProgramado?'<span style="background:#dcfce7;color:#166534;padding:1px 7px;border-radius:8px;font-weight:700;font-size:10px">✓ '+_cxpEsc(t.lastProgramado)+'</span>':'<span style="color:var(--text-secondary,#d1d5db)">—</span>')+'</td>'
         +'<td style="text-align:center">'+(t.montoVariable?'<span title="Monto variable" style="color:#b45309">⚠</span>':'—')+'</td>'
         +'<td style="text-align:center;white-space:nowrap"><button onclick="gfOpenForm(decodeURIComponent(\''+encodeURIComponent(JSON.stringify(t))+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:6px;font-size:12px;cursor:pointer" title="Editar">✎</button> <button onclick="gfDelete('+t.rowNum+',decodeURIComponent(\''+encodeURIComponent(t.proveedor||'')+'\'))" style="padding:4px 8px;background:rgba(220,38,38,.08);color:#dc2626;border:none;border-radius:6px;font-size:12px;cursor:pointer" title="Eliminar">✕</button></td></tr>';
     });
@@ -12605,6 +12613,23 @@ function gfOpenForm(json, presetCat){
   document.getElementById('gf-ovl').style.display='block'; document.getElementById('gf-modal').style.display='block';
 }
 function gfCloseForm(){ var m=document.getElementById('gf-modal'),o=document.getElementById('gf-ovl'); if(m)m.style.display='none'; if(o)o.style.display='none'; }
+
+async function gfReconstruir(){
+  if(!confirm('Reconstruir catálogo desde el historial de CxP/Egresos?\n\nSolo agrega entradas faltantes — nunca borra ni sobreescribe.')) return;
+  var s=getSession()||{};
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'reconstruirCatalogoGF',usuario:s.email||'sistema'})});
+    var res=await r.json();
+    if(res.ok){
+      var msg=res.created?('✓ Se reconstruyeron '+res.created+' partida'+(res.created===1?'':'s')+' desde el historial de Egresos.'):'No se encontraron partidas nuevas — el catálogo ya está al día.';
+      if(res.omitidos>0) msg+=' ('+res.omitidos+' ya existían, sin cambios)';
+      alert(msg);
+      loadGastosFijos();
+    } else {
+      alert('Error: '+(res.error||'sin detalle'));
+    }
+  }catch(e){ alert('Error: '+e.message); }
+}
 async function gfSaveForm(){
   function val(id){ var el=document.getElementById(id); return el?el.value:''; }
   var prov=val('gf-f-prov'), concepto=val('gf-f-concepto');
