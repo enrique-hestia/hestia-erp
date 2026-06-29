@@ -3279,13 +3279,15 @@ async function ingOnPacienteChange() {
 
 var _ingPacientesDB = []; // cache de pacientes desde Registro de Pacientes
 
-async function ingLoadPacientes() {
-  if (_ingPacientesDB.length) return;
+var _ingPacientesTS = 0; // timestamp del último fetch
+async function ingLoadPacientes(force) {
+  var now = Date.now();
+  if (!force && _ingPacientesDB.length && (now - _ingPacientesTS) < 60000) return; // reusa si tiene <1 min
   try {
     var tok = encodeURIComponent(getToken());
-    var r = await fetch(APPS_SCRIPT_URL + '?action=listaPacientes&token=' + tok + '&_t=' + Date.now(), {redirect:'follow'});
+    var r = await fetch(APPS_SCRIPT_URL + '?action=listaPacientes&token=' + tok + '&_t=' + now, {redirect:'follow'});
     var d = await r.json();
-    if (d.ok && d.pacientes) _ingPacientesDB = d.pacientes;
+    if (d.ok && d.pacientes) { _ingPacientesDB = d.pacientes; _ingPacientesTS = now; }
   } catch(e) { console.warn('Error cargando pacientes:', e); }
 }
 
