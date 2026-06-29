@@ -12990,14 +12990,16 @@ function hideGreeting(){ var b=document.getElementById('hestia-greet'); if(b){ b
 
 // ── CxP Delete row ──
 window.cxpDeleteRow = async function(rowNum, proveedor) {
+  console.log('[CxP] cxpDeleteRow rowNum=', rowNum, 'proveedor=', proveedor);
+  if (!rowNum || rowNum < 2) { alert('Error: no se pudo identificar la fila (' + rowNum + '). Recarga la página e intenta de nuevo.'); return; }
   if (!confirm('¿Eliminar la CxP de "' + proveedor + '"?\n\nEsto borra el registro de la hoja, no afecta pagos ya realizados.')) return;
   try {
     var s = getSession()||{};
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify({action:'deleteCxPRow', rowNum:rowNum, usuario:s.email||''})});
     var res = await r.json();
-    if (res.ok) { renderCxP(sheetsData); }
+    if (res.ok) { loadCxPData(); }
     else { alert('Error al eliminar: ' + (res.error||'sin detalle')); }
-  } catch(e) { alert('Error: ' + e.message); }
+  } catch(e) { alert('Error al eliminar: ' + e.message); }
 };
 
 // ── CxP Payment modal ──
