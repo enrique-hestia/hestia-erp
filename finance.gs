@@ -2790,8 +2790,35 @@ function saveIngreso(payload) {
   }
 }
 
+function _tokenHasPermission(token, perm) {
+  try {
+    var email = verifyToken(token);
+    if (!email) return false;
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var userRow = getUserRow(ss, email);
+    if (!userRow) return false;
+    var rol = (userRow.rol || 'viewer').toLowerCase();
+    if (rol === 'admin' || rol === 'director') return true;
+    var rolesSh = ss.getSheetByName('Roles');
+    if (!rolesSh) return false;
+    var data = rolesSh.getDataRange().getValues();
+    var h = data[0].map(function(c){ return String(c).trim().toLowerCase(); });
+    var rI = h.indexOf('rol'), pI = h.indexOf('permisos_operativos');
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][rI] || '').trim().toLowerCase() === rol) {
+        var ops = pI > -1 ? String(data[i][pI] || '').split(',').map(function(v){ return v.trim(); }).filter(Boolean) : [];
+        return ops.indexOf('*') !== -1 || ops.indexOf(perm) !== -1;
+      }
+    }
+    return false;
+  } catch(ex) { return false; }
+}
+
 function updateIngreso(payload) {
   try {
+    if (!_tokenHasPermission(payload.token || '', 'editar_ingresos')) {
+      return {ok:false, error:'Sin autorización para editar ingresos. Solicita al administrador el permiso editar_ingresos.'};
+    }
     var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
     var sheet = null;
     var sheets = ss.getSheets();
