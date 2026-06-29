@@ -3301,6 +3301,38 @@ async function ingOnPacienteChange() {
 
 var _ingPacientesDB = []; // cache de pacientes desde Registro de Pacientes
 
+function ingOnPacienteInput(el) {
+  var val = (el.value || '').trim();
+  var dd = document.getElementById('ing-pac-dd');
+  if (!dd) return;
+  // Solo activar búsqueda por email cuando hay @ en el texto
+  if (val.indexOf('@') < 0) { dd.style.display = 'none'; return; }
+  var q = val.toLowerCase();
+  var matches = _ingPacientesDB.filter(function(p) {
+    return p.email && p.email.toLowerCase().indexOf(q) >= 0;
+  }).slice(0, 8);
+  if (!matches.length) {
+    dd.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--text-secondary,#9ca3af)">Sin coincidencias con ese correo</div>';
+  } else {
+    dd.innerHTML = matches.map(function(p) {
+      var nameEsc = p.nombre.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+      return '<div onmousedown="ingSelectPaciente(\''+nameEsc+'\')" style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--color-divider,#f0f0f0)">'
+        +'<div style="font-weight:600;font-size:13px;color:var(--text-primary,#111)">'+p.nombre+'</div>'
+        +'<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-top:2px">'+p.email+'</div>'
+      +'</div>';
+    }).join('');
+  }
+  dd.style.display = 'block';
+}
+
+function ingSelectPaciente(nombre) {
+  var el = document.getElementById('ing-paciente');
+  if (el) el.value = nombre;
+  var dd = document.getElementById('ing-pac-dd');
+  if (dd) dd.style.display = 'none';
+  ingOnPacienteChange();
+}
+
 var _ingPacientesTS = 0; // timestamp del último fetch
 async function ingLoadPacientes(force) {
   var now = Date.now();
@@ -3442,7 +3474,10 @@ async function ingOpenDrawer() {
   h += '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:14px">'
     +'<div><label '+LBL+'>Paciente *</label>'
     +'<div style="display:flex;gap:6px;align-items:center">'
-    +'<input id="ing-paciente" list="ing-pac-list" '+S+' placeholder="Nombre completo del paciente" onchange="ingOnPacienteChange()" style="flex:1;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
+    +'<div style="position:relative;flex:1">'
+    +'<input id="ing-paciente" list="ing-pac-list" '+S+' placeholder="Nombre o correo del paciente" onchange="ingOnPacienteChange()" oninput="ingOnPacienteInput(this)" onblur="setTimeout(function(){var d=document.getElementById(\'ing-pac-dd\');if(d)d.style.display=\'none\'},200)" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
+    +'<div id="ing-pac-dd" style="display:none;position:absolute;top:calc(100% + 3px);left:0;right:0;z-index:999;background:var(--card-bg,#fff);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.13);max-height:220px;overflow-y:auto"></div>'
+    +'</div>'
     +'<button onclick="ingNuevoPaciente()" type="button" title="Registrar nuevo paciente" style="width:34px;height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:18px;font-weight:700;line-height:1">+</button>'
     +'</div>'
     +'<div id="ing-lista-label" style="font-size:10px;font-weight:600;color:#0369a1;margin-top:3px">Lista: General</div></div>'

@@ -2617,8 +2617,9 @@ function listaPacientesAll() {
     for (var i = 1; i < data.length; i++) {
       var nombre = String(data[i][1] || '').trim();
       if (!nombre) continue;
-      var lista = String(data[i][PAC_COL_LISTA - 1] || '').trim() || 'General';
-      result.push({ nombre: nombre, lista: lista });
+      var lista  = String(data[i][PAC_COL_LISTA - 1] || '').trim() || 'General';
+      var email  = String(data[i][3] || '').trim();
+      result.push({ nombre: nombre, lista: lista, email: email });
     }
     return { ok: true, pacientes: result };
   } catch(e) { return { ok: false, error: e.message, pacientes: [] }; }
