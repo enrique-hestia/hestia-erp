@@ -523,6 +523,7 @@ function doPost(e) {
     if (body.action === 'saveCxP') {
       return jsonResponse(saveCxP(body));
     }
+    if (body.action === 'deleteCxPRow')            return jsonResponse(deleteCxPRow(body));
     if (body.action === 'updateCxP') {
       return jsonResponse(updateCxP(body));
     }
@@ -1162,6 +1163,23 @@ function updateCxP(body) {
     if (body.poliza!==undefined) sh.getRange(rn,16).setValue(body.poliza);
     if (body.observaciones!==undefined) sh.getRange(rn,18).setValue(body.observaciones);
     logAudit(body.usuario||'sistema','CxP','Editar',String(oldRow[0]),'Proveedor',oldProv,body.proveedor||oldProv);
+    return {ok:true, rowNum:rn};
+  } catch(ex) { return {ok:false, error:ex.message}; }
+}
+
+function deleteCxPRow(body) {
+  try {
+    var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
+    var egTab = EGRESOS_TABS[2026] || 'Egresos2026';
+    var sh = ss.getSheetByName(egTab);
+    if (!sh) return {ok:false, error:'Hoja Egresos no encontrada'};
+    var rn = parseInt(body.rowNum);
+    if (!rn || rn < 2) return {ok:false, error:'Fila inválida'};
+    var rowVals = sh.getRange(rn, 1, 1, 5).getValues()[0];
+    var prov = String(rowVals[4]||'');
+    sh.deleteRow(rn);
+    logAudit(body.usuario||'sistema','CxP','Borrar',String(rowVals[0]||rn),'Proveedor',prov,'—');
+    try { CacheService.getScriptCache().remove('gas_egresos_v1_2026'); } catch(e) {}
     return {ok:true, rowNum:rn};
   } catch(ex) { return {ok:false, error:ex.message}; }
 }

@@ -12323,6 +12323,7 @@ function _cxpBuildNewRows(rows) {
         + '<button onclick="cxpOpenPay('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),'+row.monto+',\''+(row.divisa||'MXN')+'\')" style="padding:4px 10px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;margin-right:4px">Pagar</button>'
         + '<button onclick="cxpOpenEdit('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(JSON.stringify(row))+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:6px;font-size:12px;cursor:pointer" title="Editar">✎</button>'
         + '<button onclick="cxpCotiz('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),decodeURIComponent(\''+encodeURIComponent(row.linkCotizacionUrl||'')+'\'))" style="padding:4px 8px;background:rgba(196,106,122,.1);border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px;opacity:'+(row.linkCotizacionUrl?'1':'.45')+'" title="'+(row.linkCotizacionUrl?'Ver cotización':'Adjuntar cotización')+'">📋</button>'
+        + '<button onclick="cxpDeleteRow('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor||'')+'\'))" style="padding:4px 8px;background:rgba(220,38,38,.08);color:#dc2626;border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px" title="Eliminar esta CxP">🗑</button>'
       + '</td>'
       + '</tr>';
   }).join('');
@@ -12986,6 +12987,18 @@ function showGreeting(nombre, n){
   setTimeout(function(){ b.style.top='20px'; },120);
 }
 function hideGreeting(){ var b=document.getElementById('hestia-greet'); if(b){ b.style.top='-180px'; setTimeout(function(){ if(b.parentNode)b.parentNode.removeChild(b); },450);} }
+
+// ── CxP Delete row ──
+window.cxpDeleteRow = async function(rowNum, proveedor) {
+  if (!confirm('¿Eliminar la CxP de "' + proveedor + '"?\n\nEsto borra el registro de la hoja, no afecta pagos ya realizados.')) return;
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify({action:'deleteCxPRow', rowNum:rowNum, usuario:s.email||''})});
+    var res = await r.json();
+    if (res.ok) { renderCxP(sheetsData); }
+    else { alert('Error al eliminar: ' + (res.error||'sin detalle')); }
+  } catch(e) { alert('Error: ' + e.message); }
+};
 
 // ── CxP Payment modal ──
 window.cxpOpenPay = function(rowNum, proveedor, monto, divisa) {
