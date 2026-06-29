@@ -2108,61 +2108,79 @@ function renderIngresos(data) {
   }
 }
 
+async function _fetchIngresosRaw() {
+  var tok = encodeURIComponent(getToken());
+  var resp = await fetch(APPS_SCRIPT_URL+'?action=ingresos&token='+tok, {redirect:'follow'});
+  return await resp.json();
+}
+
+function _ingApplyDateFilter(data) {
+  var fi = currentFechaInicio || '', ff = currentFechaFin || '';
+  if (!fi && !ff) return data;
+  var origRows = data.rows || [];
+  data = Object.assign({}, data);
+  data.rows = origRows.filter(function(r) {
+    var fd = (r.fecha||'').substring(0,10);
+    if (fi && fd < fi) return false;
+    if (ff && fd > ff) return false;
+    return true;
+  });
+  var tA=0,tP=0,cP=0,sP=0;
+  var catM={},fpM={},mesM={};
+  data.rows.forEach(function(r){
+    tA+=r.totalPagar||0; tP+=r.pagado||0;
+    if(r.totalPagar>0){cP++;sP+=r.totalPagar;}
+    var c=r.categoria||'Sin categoría';
+    if(!catM[c])catM[c]={nombre:c,total:0,count:0};catM[c].total+=r.totalPagar;catM[c].count++;
+    var f=r.formaPago||'Sin especificar';
+    if(!fpM[f])fpM[f]={nombre:f,total:0,count:0};fpM[f].total+=r.totalPagar;fpM[f].count++;
+    var m=r.mes;
+    if(!mesM[m])mesM[m]={mes:m,mesIdx:r.mesIdx,totalIngresos:0,totalPagado:0,numOperaciones:0};
+    mesM[m].totalIngresos+=r.totalPagar;mesM[m].totalPagado+=r.pagado;mesM[m].numOperaciones++;
+  });
+  data.totalAnual=tA; data.totalPagado=tP; data.numOperaciones=data.rows.length;
+  data.ticketPromedio=cP>0?sP/cP:0; data.totalRows=data.rows.length;
+  var catArr=[];for(var ck in catM)catArr.push(catM[ck]);
+  catArr.sort(function(a,b){return b.total-a.total;});
+  catArr.forEach(function(c){c.pct=tA>0?(c.total/tA)*100:0;});
+  data.topCategorias=catArr.slice(0,10);
+  var fpArr=[];for(var fk in fpM)fpArr.push(fpM[fk]);
+  fpArr.sort(function(a,b){return b.total-a.total;});
+  data.topFormasPago=fpArr.slice(0,10);
+  var rmArr=[];for(var mk in mesM)rmArr.push(mesM[mk]);
+  rmArr.sort(function(a,b){return a.mesIdx-b.mesIdx;});
+  data.resumenMensual=rmArr;
+  return data;
+}
+
 async function loadIngresosERP() {
   var el = document.getElementById('view-ingresos');
   if (!el) return;
+  var fi = currentFechaInicio || '', ff = currentFechaFin || '';
+  var swrHit = _swrGet('ingresos', fi, ff);
+  if (swrHit) {
+    _ingData = swrHit.data; _ingPage = 1;
+    await hfFinish(); _renderIngresosERP();
+    if (Date.now() - swrHit.ts > SWR_STALE_MS) {
+      _fetchIngresosRaw().then(function(raw){
+        var d = _ingApplyDateFilter(raw);
+        _swrSet('ingresos', d, fi, ff);
+        _ingData = d; _renderIngresosERP();
+      }).catch(function(){});
+    }
+    return;
+  }
   el.innerHTML = hestiaLoader('Cargando ingresos…');
   try {
-    var tok = encodeURIComponent(getToken());
-    var resp = await fetch(APPS_SCRIPT_URL+'?action=ingresos&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
-    var data = await resp.json();
-    console.log('[Ingresos] API response:', data.fuente, 'rows:', (data.rows||[]).length, 'totalAnual:', data.totalAnual, 'error:', data.error||'none');
-    // Filtrar por rango de fechas del topbar
-    var fi = currentFechaInicio || '', ff = currentFechaFin || '';
-    if (fi || ff) {
-      var origRows = data.rows || [];
-      data.rows = origRows.filter(function(r) {
-        var fd = (r.fecha||'').substring(0,10);
-        if (fi && fd < fi) return false;
-        if (ff && fd > ff) return false;
-        return true;
-      });
-      // Recalcular KPIs con datos filtrados
-      var tA=0,tP=0,cP=0,sP=0;
-      var catM={},fpM={},mesM={};
-      data.rows.forEach(function(r){
-        tA+=r.totalPagar||0; tP+=r.pagado||0;
-        if(r.totalPagar>0){cP++;sP+=r.totalPagar;}
-        var c=r.categoria||'Sin categoría';
-        if(!catM[c])catM[c]={nombre:c,total:0,count:0};catM[c].total+=r.totalPagar;catM[c].count++;
-        var f=r.formaPago||'Sin especificar';
-        if(!fpM[f])fpM[f]={nombre:f,total:0,count:0};fpM[f].total+=r.totalPagar;fpM[f].count++;
-        var m=r.mes;
-        if(!mesM[m])mesM[m]={mes:m,mesIdx:r.mesIdx,totalIngresos:0,totalPagado:0,numOperaciones:0};
-        mesM[m].totalIngresos+=r.totalPagar;mesM[m].totalPagado+=r.pagado;mesM[m].numOperaciones++;
-      });
-      data.totalAnual=tA; data.totalPagado=tP; data.numOperaciones=data.rows.length;
-      data.ticketPromedio=cP>0?sP/cP:0; data.totalRows=data.rows.length;
-      // Top categorías
-      var catArr=[];for(var ck in catM)catArr.push(catM[ck]);
-      catArr.sort(function(a,b){return b.total-a.total;});
-      catArr.forEach(function(c){c.pct=tA>0?(c.total/tA)*100:0;});
-      data.topCategorias=catArr.slice(0,10);
-      // Top formas de pago
-      var fpArr=[];for(var fk in fpM)fpArr.push(fpM[fk]);
-      fpArr.sort(function(a,b){return b.total-a.total;});
-      data.topFormasPago=fpArr.slice(0,10);
-      // Resumen mensual
-      var rmArr=[];for(var mk in mesM)rmArr.push(mesM[mk]);
-      rmArr.sort(function(a,b){return a.mesIdx-b.mesIdx;});
-      data.resumenMensual=rmArr;
-    }
+    var raw = await _fetchIngresosRaw();
+    var data = _ingApplyDateFilter(raw);
+    _swrSet('ingresos', data, fi, ff);
     _ingData = data;
     _ingPage = 1;
     await hfFinish();
     _renderIngresosERP();
   } catch(e) {
-    el.innerHTML = '<div style="padding:40px;text-align:center;color:#dc2626">Error cargando ingresos: '+e.message+'</div>';
+    if (!_ingData) el.innerHTML = '<div style="padding:40px;text-align:center;color:#dc2626">Error cargando ingresos: '+e.message+'</div>';
   }
 }
 
@@ -4003,6 +4021,7 @@ async function _ingSaveAndBank(payload, comisionMP) {
     }
 
     // 2. Auto-registrar movimiento bancario (solo operaciones nuevas, no ediciones)
+    _swrDel('ingresos'); // invalidar caché para que recargue datos frescos
     if (payload.action === 'updateIngreso') {
       ingCloseDrawer();
       loadIngresosERP();
@@ -4080,17 +4099,31 @@ var _egPage = 1, _egPerPage = 30;
 async function loadEgresosERP() {
   var root = document.getElementById('eg-root');
   if (!root) return;
+  var swrHit = _swrGet('egresos', '', '');
+  if (swrHit) {
+    _egData = swrHit.data; _egPage = 1;
+    await hfFinish(); _renderEgresosERP();
+    if (Date.now() - swrHit.ts > SWR_STALE_MS) {
+      var tok = encodeURIComponent(getToken());
+      fetch(APPS_SCRIPT_URL+'?action=egresos&token='+tok, {redirect:'follow'})
+        .then(function(r){ return r.json(); })
+        .then(function(d){ if (!d.error) { _swrSet('egresos',d,'',''); _egData=d; _renderEgresosERP(); } })
+        .catch(function(){});
+    }
+    return;
+  }
   root.innerHTML = hestiaLoader('Cargando egresos…');
   try {
     var tok = encodeURIComponent(getToken());
-    var resp = await fetch(APPS_SCRIPT_URL+'?action=egresos&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+    var resp = await fetch(APPS_SCRIPT_URL+'?action=egresos&token='+tok, {redirect:'follow'});
     _egData = await resp.json();
     if (_egData.error) throw new Error(_egData.error);
+    _swrSet('egresos', _egData, '', '');
     _egPage = 1;
     await hfFinish();
     _renderEgresosERP();
   } catch(e) {
-    root.innerHTML = '<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px">⚠ '+e.message+'</div>';
+    if (!_egData) root.innerHTML = '<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px">⚠ '+e.message+'</div>';
   }
 }
 
@@ -4645,6 +4678,7 @@ async function egSubmit() {
           try { await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveBankRow',banco:banco,row:bankRow})}); } catch(be){}
         }
       }
+      _swrDel('egresos');
       egCloseForm();
       loadEgresosERP();
     } else {
@@ -5194,6 +5228,21 @@ function setDateInputs(fi, ff) {
 var menuItems = [];
 var svgPlus = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
 var viewCache = {};  // { 'resumen_2026-Q2': { data, _ts } }
+
+// ── Caché SWR para vistas especializadas (ingresos, egresos, productos) ──
+// Permite mostrar datos anteriores instantáneamente mientras refresca en background.
+var _swrCache = {};  // { key: { data, ts, fi, ff } }
+var SWR_FRESH_MS  = 90000;  // 90 s — mostrar sin refrescar
+var SWR_STALE_MS  = 30000;  // 30 s — a partir de aquí refresca en background
+function _swrGet(key, fi, ff) {
+  var e = _swrCache[key];
+  if (!e || e.fi !== (fi||'') || e.ff !== (ff||'')) return null;
+  return (Date.now() - e.ts) < SWR_FRESH_MS ? e : null;
+}
+function _swrSet(key, data, fi, ff) {
+  _swrCache[key] = { data: data, ts: Date.now(), fi: fi||'', ff: ff||'' };
+}
+function _swrDel(key) { delete _swrCache[key]; }
 
 /* ── localStorage cache helpers ─────────────────────────── */
 function lsSet(key, data, ttlMs) {

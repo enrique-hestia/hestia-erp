@@ -1652,6 +1652,7 @@ function saveEgreso(payload) {
     sheet.appendRow(newRow);
     var insertedRow = sheet.getLastRow();
 
+    try { CacheService.getScriptCache().remove('gas_egresos_v1_' + anio); } catch(e) {}
     return {ok:true, rowNum:insertedRow, monto:newRow[iEgresos]};
   } catch(ex) {
     return {ok:false, error:ex.message};
@@ -2784,6 +2785,7 @@ function saveIngreso(payload) {
 
     sheet.getRange(sheet.getLastRow()+1, 1, rows.length, rows[0].length).setValues(rows);
 
+    try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch(e) {}
     return {ok:true, op:opId, lineas:rows.length, total:totalOP};
   } catch(ex) {
     return {ok:false, error:ex.message};
@@ -2913,6 +2915,7 @@ function updateIngreso(payload) {
         rowsToDelete.length + ' líneas anteriores', rows.length + ' líneas nuevas · Total: $' + totalOP.toFixed(2));
     } catch(ae) {}
 
+    try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch(e) {}
     return {ok:true, op:opId, lineas:rows.length, total:totalOP, edited:true};
   } catch(ex) {
     return {ok:false, error:ex.message};
@@ -2942,6 +2945,7 @@ function renamePacienteIngresos(oldNombre, newNombre) {
         updated++;
       }
     }
+    try { CacheService.getScriptCache().removeAll(['gas_ingresos_v1', 'gas_pacientes_v1']); } catch(e) {}
     return {ok:true, updated:updated, oldNombre:oldTrim, newNombre:newTrim};
   } catch(ex) {
     return {ok:false, error:ex.message};
