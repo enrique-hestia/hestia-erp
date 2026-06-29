@@ -2402,7 +2402,9 @@ function _renderIngresosERP() {
   filtered.forEach(function(r) {
     var opId = r.id || 'sin-op';
     if (!_opsMap[opId]) {
-      _opsMap[opId] = { id:opId, fecha:r.fecha, paciente:r.paciente, formaPago:r.formaPago, items:[], total:0, pagado:0, cats:[] };
+      _opsMap[opId] = { id:opId, fecha:r.fecha, paciente:r.paciente, formaPago:r.formaPago,
+        items:[], total:0, pagado:0, cats:[],
+        factura:'', poliza:'', facturacion:false, conciliacion:false, contabilidad:false, archivoURL:'' };
       _opsOrder.push(opId);
     }
     var op = _opsMap[opId];
@@ -2410,6 +2412,12 @@ function _renderIngresosERP() {
     op.total += r.totalPagar || 0;
     op.pagado += r.pagado || 0;
     if (r.categoria && op.cats.indexOf(r.categoria) === -1) op.cats.push(r.categoria);
+    if (r.factura)      op.factura      = r.factura;
+    if (r.poliza)       op.poliza       = r.poliza;
+    if (r.facturacion)  op.facturacion  = true;
+    if (r.conciliacion) op.conciliacion = true;
+    if (r.contabilidad) op.contabilidad = true;
+    if (r.archivoURL)   op.archivoURL   = r.archivoURL;
   });
 
   var totalOps = _opsOrder.length;
@@ -2421,7 +2429,7 @@ function _renderIngresosERP() {
     +'<div class="ing-ph"><div class="ing-pt">Detalle de operaciones</div><div style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Página '+_ingPage+' de '+totalPages+'</div></div>'
     +'<div style="overflow-x:auto;max-height:65vh;overflow-y:auto">'
     +'<table class="ing-tbl"><thead><tr>'
-    +'<th style="width:30px"></th><th>Fecha</th><th>OP</th><th>Paciente</th><th>Categoría</th><th>Items</th><th>Total</th><th>Pagado</th><th>F. Pago</th>'
+    +'<th style="width:30px"></th><th>Fecha</th><th>OP</th><th>Paciente</th><th>Categoría</th><th>Items</th><th>Total</th><th>Pagado</th><th>F. Pago</th><th style="min-width:120px">Estado fiscal</th>'
     +(hasPermission('editar_ingresos')?'<th style="width:50px"></th>':'')
     +'</tr></thead><tbody>');
 
@@ -2431,6 +2439,22 @@ function _renderIngresosERP() {
       var isPaid = op.pagado >= op.total && op.total > 0;
       var catText = op.cats.length > 2 ? op.cats.slice(0,2).join(', ')+' +' +(op.cats.length-2) : op.cats.join(', ');
       var safeId = opId.replace(/[^a-zA-Z0-9_-]/g,'_');
+      // Status badges
+      var _badges = '';
+      if (op.factura) {
+        _badges += '<span title="Factura: '+op.factura+'" style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px;background:#dcfce7;color:#166534;border:1px solid #86efac;cursor:default;white-space:nowrap">FAC '+op.factura+'</span> ';
+      } else if (op.facturacion) {
+        _badges += '<span title="Marcado como facturado" style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px;background:#dcfce7;color:#166534;border:1px solid #86efac;cursor:default">FAC ✓</span> ';
+      }
+      if (op.conciliacion) {
+        _badges += '<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;cursor:default;white-space:nowrap">CONC</span> ';
+      }
+      if (op.poliza) {
+        _badges += '<span title="Póliza: '+op.poliza+'" style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px;background:#f3e8ff;color:#7e22ce;border:1px solid #d8b4fe;cursor:default;white-space:nowrap">POL '+op.poliza+'</span>';
+      } else if (op.contabilidad) {
+        _badges += '<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px;background:#f3e8ff;color:#7e22ce;border:1px solid #d8b4fe;cursor:default">CONT ✓</span>';
+      }
+      if (!_badges) _badges = '<span style="font-size:9px;color:var(--text-secondary,#d1d5db)">—</span>';
       h.push('<tr class="ing-op-row" onclick="ingToggleOp(\''+safeId+'\')">'
         +'<td style="text-align:center"><span class="ing-op-toggle" id="ing-tog-'+safeId+'">▶</span></td>'
         +'<td style="color:var(--text-secondary,#6b7280)">'+((op.fecha||'').substring(0,10)||'—')+'</td>'
@@ -2441,11 +2465,41 @@ function _renderIngresosERP() {
         +'<td style="font-weight:700">'+fC(op.total)+'</td>'
         +'<td style="font-weight:600;color:'+(isPaid?'#166534':'#b45309')+'">'+fC(op.pagado)+'</td>'
         +'<td style="font-size:10.5px;color:var(--text-secondary,#6b7280)">'+(op.formaPago||'—')+'</td>'
+        +'<td style="white-space:nowrap">'+_badges+'</td>'
         +(hasPermission('editar_ingresos')?'<td style="text-align:center" onclick="event.stopPropagation()"><button class="btn-edit-row" onclick="ingEditOp(\''+opId.replace(/'/g,"\\'")+'\')">✎</button></td>':'')
         +'</tr>');
-      var colSpan = hasPermission('editar_ingresos') ? 10 : 9;
+      var colSpan = hasPermission('editar_ingresos') ? 11 : 10;
       // Fila expandible con detalle de líneas
+      var _fiscalBar = '<div style="display:flex;align-items:center;gap:16px;padding:8px 14px;background:var(--color-surface,#f3f4f6);border-bottom:1px solid var(--color-divider,#e5e7eb);flex-wrap:wrap">'
+        +'<div style="display:flex;align-items:center;gap:6px">'
+          +'<span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Factura</span>'
+          +(op.factura
+            ?'<span style="font-size:11.5px;font-weight:700;color:#166534">'+op.factura+'</span>'
+            :'<span style="font-size:10.5px;color:var(--text-secondary,#9ca3af);font-style:italic">Sin asignar</span>')
+        +'</div>'
+        +'<div style="width:1px;height:14px;background:var(--color-divider,#e5e7eb)"></div>'
+        +'<div style="display:flex;align-items:center;gap:6px">'
+          +'<span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Póliza</span>'
+          +(op.poliza
+            ?'<span style="font-size:11.5px;font-weight:700;color:#7e22ce">'+op.poliza+'</span>'
+            :'<span style="font-size:10.5px;color:var(--text-secondary,#9ca3af);font-style:italic">Sin asignar</span>')
+        +'</div>'
+        +(op.archivoURL
+          ?('<div style="width:1px;height:14px;background:var(--color-divider,#e5e7eb)"></div>'
+            +'<a href="'+op.archivoURL+'" target="_blank" style="display:flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;color:var(--color-primary,#c46a7a);text-decoration:none">'
+              +'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Ver factura PDF ↗</a>')
+          :'')
+        +'<div style="margin-left:auto">'
+          +'<label style="display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--text-secondary,#6b7280);cursor:pointer;padding:4px 10px;border:1.5px dashed var(--color-divider,#d1d5db);border-radius:6px;background:var(--card-bg,#fff)">'
+            +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
+            +(op.archivoURL?'Reemplazar PDF':'Subir factura PDF')
+            +'<input type="file" accept=".pdf,.xml,.jpg,.jpeg,.png" style="display:none" onchange="ingUploadFacturaOp(\''+opId.replace(/'/g,"\\'")+'\',this)">'
+          +'</label>'
+          +'<span id="ing-upload-st-'+safeId+'" style="font-size:9.5px;color:var(--text-secondary,#9ca3af);margin-top:2px;display:block"></span>'
+        +'</div>'
+      +'</div>';
       h.push('<tr id="ing-det-'+safeId+'" style="display:none"><td colspan="'+colSpan+'" style="padding:0;background:var(--color-surface,#fafafa)">'
+        +_fiscalBar
         +'<table class="ing-det-tbl"><thead><tr style="background:var(--color-surface-offset,#eee)">'
         +'<td style="font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Línea</td>'
         +'<td style="font-weight:700;font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Categoría</td>'
@@ -2471,7 +2525,7 @@ function _renderIngresosERP() {
       h.push('</tbody></table></td></tr>');
     });
   } else {
-    h.push('<tr><td colspan="'+(hasPermission('editar_ingresos')?10:9)+'" style="text-align:center;padding:2rem;color:var(--text-secondary,#9ca3af)">Sin registros con los filtros seleccionados</td></tr>');
+    h.push('<tr><td colspan="'+(hasPermission('editar_ingresos')?11:10)+'" style="text-align:center;padding:2rem;color:var(--text-secondary,#9ca3af)">Sin registros con los filtros seleccionados</td></tr>');
   }
 
   h.push('</tbody></table></div>');
@@ -3537,22 +3591,41 @@ async function ingOpenDrawer() {
   h += '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:20px;margin-bottom:16px">';
   h += '<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:14px;display:flex;align-items:center;gap:8px">'
     +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Facturación y datos</div>';
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
     +'<div><label '+LBL+'>Monto Fact/Mes</label><input type="number" id="ing-monto-fact" '+S+' placeholder="0.00" step="0.01"></div>'
     +'<div><label '+LBL+'>Moneda</label><select id="ing-moneda" '+S+'><option>MX</option><option>USD</option></select></div>'
-    +'<div><label '+LBL+'>No. Factura</label><input id="ing-factura" '+S+' placeholder="Número de factura"></div>'
-    +'<div><label '+LBL+'>Póliza</label><input id="ing-poliza" '+S+' placeholder="Número de póliza"></div>'
-    +'</div>';
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'
     +'<div><label '+LBL+'>Sucursal</label><input id="ing-sucursal" '+S+' placeholder="CDMX"></div>'
-    +'<div style="display:flex;gap:18px;align-items:flex-end;padding-bottom:4px">'
-      +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:var(--text-primary,#374151)">'
-        +'<input type="checkbox" id="ing-chk-fact" style="width:15px;height:15px;accent-color:var(--color-primary,#c46a7a)"> Facturación</label>'
-      +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:var(--text-primary,#374151)">'
-        +'<input type="checkbox" id="ing-chk-conc" style="width:15px;height:15px;accent-color:var(--color-primary,#c46a7a)"> Conciliación</label>'
-      +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:var(--text-primary,#374151)">'
-        +'<input type="checkbox" id="ing-chk-cont" style="width:15px;height:15px;accent-color:var(--color-primary,#c46a7a)"> Contabilidad</label>'
-    +'</div></div>';
+  +'</div>';
+  // Estado fiscal — diseño agrupado por concepto
+  var _CHK = 'width:15px;height:15px;accent-color:var(--color-primary,#c46a7a);cursor:pointer;flex-shrink:0';
+  var _IFS = S.replace('width:100%;','')+'flex:1;min-width:130px;';
+  h += '<div style="padding:14px 16px;background:var(--color-surface,#fafafa);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:10px;margin-bottom:14px">';
+  h += '<div style="font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:10px">Estado fiscal</div>';
+  // Fila 1: Factura
+  h += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">'
+    +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;font-weight:600;color:var(--text-primary,#374151);white-space:nowrap;min-width:110px">'
+      +'<input type="checkbox" id="ing-chk-fact" style="'+_CHK+'"> Facturado</label>'
+    +'<input id="ing-factura" '+S+' placeholder="Número de factura (ej. A-999)">'
+    +'<label id="ing-fact-upload-lbl" style="display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--text-secondary,#6b7280);cursor:pointer;padding:5px 12px;border:1.5px dashed var(--color-divider,#d1d5db);border-radius:7px;background:var(--card-bg,#fff);white-space:nowrap" title="Opcional — sube el PDF de la factura">'
+      +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
+      +'📎 PDF factura'
+      +'<input type="file" id="ing-fact-file" accept=".pdf,.xml,.jpg,.jpeg,.png" style="display:none" onchange="ingHandleFacturaFile(this)">'
+    +'</label>'
+    +'<span id="ing-fact-file-status" style="font-size:10px;color:var(--text-secondary,#9ca3af)"></span>'
+  +'</div>';
+  // Fila 2: Conciliación
+  h += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">'
+    +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;font-weight:600;color:var(--text-primary,#374151);white-space:nowrap;min-width:110px">'
+      +'<input type="checkbox" id="ing-chk-conc" style="'+_CHK+'"> Conciliado</label>'
+    +'<span style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Marcar cuando se concilie con estado bancario</span>'
+  +'</div>';
+  // Fila 3: Contabilidad + Póliza
+  h += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'
+    +'<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;font-weight:600;color:var(--text-primary,#374151);white-space:nowrap;min-width:110px">'
+      +'<input type="checkbox" id="ing-chk-cont" style="'+_CHK+'"> Contabilidad</label>'
+    +'<input id="ing-poliza" '+S+' placeholder="Número de póliza contable (ej. P-123)">'
+  +'</div>';
+  h += '</div>';
   h += '<div><label '+LBL+'>Observaciones</label><textarea id="ing-obs" '+S+' rows="2" placeholder="Notas adicionales sobre la operación…" style="resize:vertical"></textarea></div>';
   h += '</div>';
 
@@ -3728,6 +3801,45 @@ function _ingCollectPayments() {
 
 /* ── Recolectar payload + guardar ─────────────────────── */
 var _ingPendingBankData = null;
+var _ingPendingFacturaFile = null; // archivo de factura pendiente para subir tras guardar
+
+function ingHandleFacturaFile(input) {
+  if (!input.files.length) return;
+  var file = input.files[0];
+  var st = document.getElementById('ing-fact-file-status');
+  if (file.size > 10*1024*1024) { if(st) st.textContent = 'Archivo demasiado grande (máx 10MB)'; return; }
+  _ingPendingFacturaFile = file;
+  if (st) st.innerHTML = '<span style="color:#166534">✓ '+file.name+' listo para subir</span>';
+}
+
+async function ingUploadFacturaOp(opId, input) {
+  if (!input.files.length) return;
+  var file = input.files[0];
+  var safeId = opId.replace(/[^a-zA-Z0-9_-]/g,'_');
+  var stEl = document.getElementById('ing-upload-st-'+safeId);
+  if (file.size > 10*1024*1024) { if(stEl) stEl.textContent = 'Máx 10MB'; return; }
+  if (stEl) stEl.textContent = 'Subiendo…';
+  try {
+    var base64 = await _fileToBase64(file);
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'uploadIngresoPDF', opId:opId, tipo:'factura',
+      fileName:file.name, base64:base64, mimeType:file.type, usuario:s.email||'sistema'
+    })});
+    var res = await r.json();
+    if (res.ok) {
+      if (stEl) stEl.innerHTML = '<span style="color:#166534">✓ Subido — <a href="'+res.url+'" target="_blank" style="color:var(--color-primary,#c46a7a)">Ver ↗</a></span>';
+      // Actualizar el mapa local para mostrar el link sin recargar
+      if (_ingData && _ingData.rows) {
+        _ingData.rows.forEach(function(row){ if(row.id===opId) row.archivoURL = res.url; });
+      }
+    } else {
+      if (stEl) stEl.textContent = 'Error: '+(res.error||'No se pudo subir');
+    }
+  } catch(e) {
+    if (stEl) stEl.textContent = 'Error de conexión';
+  }
+}
 
 function _ingCollectPayload() {
   var paciente = (document.getElementById('ing-paciente')||{}).value || '';
@@ -3921,7 +4033,24 @@ async function _ingSaveAndBank(payload, comisionMP) {
       }
     }
 
-    // 3. Cerrar y refrescar
+    // 3. Subir factura pendiente si el usuario adjuntó un archivo
+    if (_ingPendingFacturaFile && (res.op || payload.id)) {
+      try {
+        var _pf = _ingPendingFacturaFile;
+        _ingPendingFacturaFile = null;
+        var _b64 = await _fileToBase64(_pf);
+        var _sess = getSession()||{};
+        var _ur = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+          action:'uploadIngresoPDF', opId:res.op||payload.id, tipo:'factura',
+          fileName:_pf.name, base64:_b64, mimeType:_pf.type, usuario:_sess.email||'sistema'
+        })});
+        var _ures = await _ur.json();
+        if (_ures.ok) console.log('[Ingreso] Factura subida:', _ures.url);
+      } catch(_fe) { console.warn('[Ingreso] Error subiendo factura:', _fe); }
+    }
+    _ingPendingFacturaFile = null;
+
+    // 4. Cerrar y refrescar
     ingCloseDrawer();
     loadIngresosERP();
   } catch(e) {
