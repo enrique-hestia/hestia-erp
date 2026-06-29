@@ -12468,10 +12468,11 @@ function _gfCatHTML(){
     +'</div></div>';
   if(!rows.length){
     return h+'<div style="background:var(--card-bg,#fff);border:1px dashed var(--color-divider,#e5e7eb);border-radius:14px;padding:36px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:13px">'
-      +'El catálogo está vacío.<br><br>'
-      +'<button onclick="gfReconstruir()" style="padding:10px 20px;background:#2563eb;color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:10px">↺ Reconstruir catálogo desde historial de Egresos</button>'
-      +'<div style="font-size:11px;margin-top:8px">Lee los RecurrenteID del historial de CxP y recrea cada partida. Solo agrega — nunca borra.</div>'
-      +'<br><span style="font-size:11.5px">O pulsa <b>+ Nuevo gasto fijo</b> para crear desde cero.</span></div>';
+      +'<div style="font-size:32px;margin-bottom:12px">📋</div>'
+      +'<div style="font-size:14px;font-weight:700;color:var(--text-primary,#111);margin-bottom:8px">El catálogo está vacío</div>'
+      +'<div style="font-size:12px;margin-bottom:20px;max-width:360px;margin-left:auto;margin-right:auto">Crea cada gasto recurrente (renta, nómina, IMSS, etc.) con <b>+ Nuevo gasto fijo</b>. Después los podrás programar mes a mes a Cuentas por Pagar.</div>'
+      +'<button onclick="gfOpenForm()" style="padding:12px 28px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">+ Nuevo gasto fijo</button>'
+      +'</div>';
   }
   var byCat={}; rows.forEach(function(t){ var k=t.subtipo||'Sin categoría'; (byCat[k]=byCat[k]||[]).push(t); });
   Object.keys(byCat).sort().forEach(function(cat){
@@ -12724,7 +12725,12 @@ async function gfReconstruir(){
       alert(msg);
       loadGastosFijos();
     } else {
-      alert('Error: '+(res.error||'sin detalle'));
+      var errMsg = res.error||'sin detalle';
+      if(errMsg.indexOf('RecurrenteID')>-1 || errMsg.indexOf('columna')>-1) {
+        alert('Sin historial para reconstruir.\n\nEsta función recupera gastos fijos desde el historial de Egresos, pero aún no se han programado partidas.\n\nUsa "+ Nuevo gasto fijo" para crear el catálogo desde cero.');
+      } else {
+        alert('Error: '+errMsg);
+      }
     }
   }catch(e){ alert('Error: '+e.message); }
 }
