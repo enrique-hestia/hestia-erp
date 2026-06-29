@@ -12437,7 +12437,7 @@ function _gfProgHTML(per){
   if(!props.length){
     h+='<div style="padding:30px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:13px">✅ No hay gastos fijos pendientes de programar este mes.</div>';
   } else {
-    h+='<div style="overflow-x:auto"><table class="cxp-tbl"><thead><tr><th>Categoría</th><th>Proveedor</th><th>Concepto</th><th>Vencimiento</th><th style="text-align:right">Monto a programar</th><th style="text-align:center;width:120px">Acción</th></tr></thead><tbody>';
+    h+='<div style="overflow-x:auto"><table class="cxp-tbl"><thead><tr><th>Categoría</th><th>Proveedor</th><th>Concepto</th><th>Vencimiento</th><th style="text-align:right">Monto a programar</th><th style="text-align:center;width:160px">Acción</th></tr></thead><tbody>';
     props.forEach(function(p){
       var amber=p.montoVariable;
       var ult=p.ultimoReal?(' · último: '+_cxpFM(p.ultimoReal.monto)+' ('+p.ultimoReal.mes+')'):' · sin histórico';
@@ -12451,7 +12451,11 @@ function _gfProgHTML(per){
         +'<td style="max-width:230px;overflow:hidden;text-overflow:ellipsis" title="'+_cxpEsc(p.concepto)+_cxpEsc(ult)+'">'+_cxpEsc(p.concepto)+fBadge+'</td>'
         +'<td style="font-size:11px">'+(p.vencimiento||'—')+'</td>'
         +'<td style="text-align:right"><input id="gf-monto-'+p.id+'" type="number" step="0.01" value="'+(p.montoSugerido||0)+'" style="width:120px;text-align:right;border:1.5px solid '+(amber?'#fcd34d':'var(--color-divider,#e5e7eb)')+';border-radius:8px;padding:5px 8px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"></td>'
-        +'<td style="text-align:center"><button onclick="gfProgramarUno(\''+p.id+'\')" style="padding:5px 12px;background:#166534;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Programar</button></td></tr>';
+        +'<td style="text-align:center;white-space:nowrap;display:flex;gap:4px;justify-content:center;align-items:center;padding:6px 4px">'
+        +'<button onclick="gfProgramarUno(\''+p.id+'\')" style="padding:5px 10px;background:#166534;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Programar</button>'
+        +'<button onclick="gfOpenForm(decodeURIComponent(\''+encodeURIComponent(JSON.stringify(p))+'\'))" style="padding:5px 8px;background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:7px;font-size:12px;cursor:pointer" title="Editar plantilla">✎</button>'
+        +'<button onclick="gfDelete('+p.rowNum+',decodeURIComponent(\''+encodeURIComponent(p.proveedor||'')+'\'))" style="padding:5px 8px;background:rgba(220,38,38,.08);color:#dc2626;border:none;border-radius:7px;font-size:12px;cursor:pointer" title="Eliminar plantilla">✕</button>'
+        +'</td></tr>';
     });
     h+='</tbody></table></div>';
   }
