@@ -2819,6 +2819,7 @@ function updateIngreso(payload) {
     var formaPago = payload.formaPago || '';
     var sucursal  = payload.sucursal || '';
     var moneda    = payload.moneda || 'MX';
+    var ciclo     = payload.ciclo || '';
     var obs       = payload.observaciones || '';
     var factura   = payload.factura || '';
     var poliza    = payload.poliza || '';
@@ -2828,21 +2829,38 @@ function updateIngreso(payload) {
 
     function num(v) { var n = parseFloat(String(v||'').replace(/[$,]/g,'')); return isNaN(n)?0:n; }
 
-    var rows = [];
+    var totalPagadoForm = num(payload.pagado) || 0;
+
+    // Primera pasada: calcular totalPagar por línea y total general
+    var lineCalcs = [];
     var totalOP = 0;
     for (var li = 0; li < lineas.length; li++) {
       var l = lineas[li];
       var pvp  = num(l.pvp);
       var descPct = num(l.descuento) / 100;
       var cant = num(l.cantidad) || 1;
-      var totalPagar = pvp * cant * (1 - descPct);
-      var pagado = num(l.pagado) || totalPagar;
-      totalOP += totalPagar;
+      var tp = pvp * cant * (1 - descPct);
+      totalOP += tp;
+      lineCalcs.push({ l: l, pvp: pvp, cant: cant, tp: tp });
+    }
+
+    // Segunda pasada: distribuir pagado proporcionalmente entre líneas
+    var rows = [];
+    var remainingPagado = totalPagadoForm;
+    for (var li = 0; li < lineCalcs.length; li++) {
+      var lc = lineCalcs[li];
+      var pagado;
+      if (li === lineCalcs.length - 1) {
+        pagado = Math.max(0, remainingPagado); // última línea absorbe el resto (evita errores de redondeo)
+      } else {
+        pagado = totalOP > 0 ? Math.round(totalPagadoForm * lc.tp / totalOP * 100) / 100 : 0;
+        remainingPagado -= pagado;
+      }
 
       rows.push([
         opId, li+1, fecha, paciente,
-        l.categoria||'', l.producto||'',
-        pvp, num(l.descuento), cant, totalPagar,
+        lc.l.categoria||'', lc.l.producto||'',
+        lc.pvp, num(lc.l.descuento), lc.cant, lc.tp,
         pagado, li===0 ? num(payload.montoFactMes) : 0,
         formaPago,
         li===0 ? facturacionChk : false,
@@ -2851,7 +2869,7 @@ function updateIngreso(payload) {
         li===0 ? obs : '',
         li===0 ? factura : '',
         li===0 ? poliza : '',
-        moneda, l.ciclo || '', sucursal,
+        moneda, lc.l.ciclo || ciclo, sucursal,
         ''
       ]);
     }

@@ -3292,6 +3292,9 @@ async function ingLoadPacientes(force) {
 }
 
 var _ingEditMode = null; // null = nuevo, 'OP-XXXXX' = editando
+var _ingOrigPagado = 0;
+var _ingOrigFormaPago = '';
+var _ingOrigFecha = '';
 
 function ingEditOp(opId) {
   if (!hasPermission('editar_ingresos')) { alert('No tienes permisos para editar operaciones.'); return; }
@@ -3312,6 +3315,11 @@ function ingEditOp(opId) {
     var cicloEl = document.getElementById('ing-ciclo');
     if (cicloEl) cicloEl.value = first.ciclo || '';
 
+    // Guardar valores originales para detectar cambios en pago
+    _ingOrigPagado = opRows.reduce(function(s,r){return s+(r.pagado||0);},0);
+    _ingOrigFormaPago = first.formaPago || '';
+    _ingOrigFecha = (first.fecha || '').substring(0,10);
+
     // Quitar la línea vacía inicial y cargar las líneas del OP
     var linesEl = document.getElementById('ing-lines');
     if (linesEl) linesEl.innerHTML = '';
@@ -3321,7 +3329,10 @@ function ingEditOp(opId) {
       ingAddLine();
       var n = _ingLineCount;
       var catEl = document.getElementById('ing-cat-' + n);
-      if (catEl) { catEl.value = r.categoria || ''; }
+      if (catEl) {
+        catEl.value = r.categoria || '';
+        ingOnCatChange(n); // refresca el datalist de productos filtrado por categoría
+      }
       var prodEl = document.getElementById('ing-prod-' + n);
       if (prodEl) prodEl.value = r.producto || '';
       var pvpEl = document.getElementById('ing-pvp-' + n);
@@ -3341,7 +3352,7 @@ function ingEditOp(opId) {
     var fpEl = document.getElementById('ing-fp-1');
     if (fpEl) fpEl.value = first.formaPago || 'TDC';
     var fpMontoEl = document.getElementById('ing-fp-monto-1');
-    if (fpMontoEl) fpMontoEl.value = opRows.reduce(function(s,r){return s+(r.pagado||0);},0) || '';
+    if (fpMontoEl) fpMontoEl.value = _ingOrigPagado || '';
     ingCalcPayTotal();
 
     // Pre-llenar facturación
@@ -3702,6 +3713,22 @@ function _ingCollectPayload() {
   // Forma de pago principal = la de mayor monto (para BD_Ingresos)
   var mainFP = payments.reduce(function(a,b){ return b.monto > a.monto ? b : a; });
   var totalPagado = payments.reduce(function(s,p){ return s + p.monto; }, 0);
+
+  // En modo edición: si cambia monto, forma de pago o fecha → desmarcar conciliación
+  if (_ingEditMode) {
+    var fechaEdit = (document.getElementById('ing-fecha')||{}).value || '';
+    var paymentChanged = Math.abs(totalPagado - _ingOrigPagado) > 0.01
+      || mainFP.formaPago !== _ingOrigFormaPago
+      || fechaEdit !== _ingOrigFecha;
+    if (paymentChanged) {
+      var concChk = document.getElementById('ing-chk-conc');
+      if (concChk && concChk.checked) {
+        concChk.checked = false;
+        var concLabel = concChk.closest ? concChk.closest('label') : null;
+        if (concLabel) concLabel.title = 'Desmarcado automáticamente: el pago cambió, re-conciliar con banco';
+      }
+    }
+  }
 
   var s = getSession() || {};
   return {
