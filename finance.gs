@@ -530,6 +530,7 @@ function doPost(e) {
       return jsonResponse(pagarCxP(body));
     }
     // Gastos fijos (recurrentes)
+    if (body.action === 'gfAll')                   return jsonResponse({ok:true, propuestas:readGastosFijosPropuestas(body.periodo||''), catalogo:readGastosFijos()});
     if (body.action === 'setupGastosFijos')        return jsonResponse(setupGastosFijos());
     if (body.action === 'saveGastoFijo')           return jsonResponse(saveGastoFijo(body));
     if (body.action === 'saveGastosFijosBatch')    return jsonResponse(saveGastosFijosBatch(body));

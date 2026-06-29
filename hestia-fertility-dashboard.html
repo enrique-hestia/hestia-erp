@@ -12384,9 +12384,9 @@ async function loadGastosFijos(){
   var root=document.getElementById('gf-root'); if(!root) return;
   root.innerHTML = hestiaLoader('Cargando gastos fijos…');
   try {
-    var tok=encodeURIComponent(getToken());
-    var per=encodeURIComponent(gfCurrentPeriodo());
-    var d = await fetch(APPS_SCRIPT_URL+'?action=gfAll&periodo='+per+'&token='+tok,{redirect:'follow'}).then(function(r){return r.json();});
+    var per=gfCurrentPeriodo();
+    var s=getSession()||{};
+    var d = await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'gfAll',periodo:per,usuario:s.email||''})}).then(function(r){return r.json();});
     if(d && d.error) throw new Error(d.error);
     // Surfacear error interno de readGastosFijos si existe
     if(d && d.catalogo && !d.catalogo.ok && d.catalogo.error) throw new Error('Catálogo: '+d.catalogo.error);
