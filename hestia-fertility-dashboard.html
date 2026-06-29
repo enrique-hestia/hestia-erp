@@ -3171,7 +3171,24 @@ async function prodSubmitEdit(productoId) {
     var text = await r.text();
     console.log('[prodSubmitEdit] respuesta raw=', text);
     var res; try{ res=JSON.parse(text); }catch(pe){ setSt('Error: respuesta no es JSON — '+text.substring(0,120),'#dc2626'); if(btn){btn.disabled=false;btn.textContent='Actualizar producto';} return; }
-    if(res.ok) { setSt('✓ Guardado','#166534'); setTimeout(function(){ _prodData=null; prodCloseForm(); },600); }
+    if(res.ok) {
+      setSt('✓ Guardado','#166534');
+      // Actualizar precio en cache local para reflejar el cambio inmediatamente
+      // sin depender de que el servidor devuelva el valor correcto
+      var newPrecio = parseFloat(String(payload.precio).replace(/[$,]/g,''))||0;
+      if (newPrecio > 0 && _prodData && _prodData.todosProductos) {
+        _prodData.todosProductos.forEach(function(p) {
+          if (p.id === productoId) {
+            p.precio = newPrecio;
+            p.precioVigencia = payload.vigencia||'';
+            if (!p.precios) p.precios = {};
+            p.precios[payload.lista||'General'] = newPrecio;
+          }
+        });
+      }
+      // Cerrar form y re-renderizar con los datos locales actualizados
+      setTimeout(function(){ prodCloseForm(); },600);
+    }
     else { setSt('Error: '+(res.error||'No se pudo actualizar'),'#dc2626'); if(btn){btn.disabled=false;btn.textContent='Actualizar producto';} }
   } catch(e) { console.error('[prodSubmitEdit] excepción:', e); setSt('Error de conexión: '+e.message,'#dc2626'); if(btn){btn.disabled=false;btn.textContent='Actualizar producto';} }
 }

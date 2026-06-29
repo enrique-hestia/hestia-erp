@@ -2487,7 +2487,8 @@ function updateProducto(body) {
     if (body.tipo !== undefined) prodSheet.getRange(found, 5).setValue(body.tipo);
     if (body.notas !== undefined) prodSheet.getRange(found, 6).setValue(body.notas);
     if (body.activo !== undefined) prodSheet.getRange(found, 7).setValue(body.activo!==false&&body.activo!=='false');
-    // Si hay nuevo precio, actualizar fila existente del mismo día o agregar nueva
+    // Si hay nuevo precio: borrar TODAS las filas existentes del mismo prodId+lista
+    // y agregar una sola fila nueva. Esto evita la acumulación de duplicados.
     var precio = parseFloat(String(body.precio||'').replace(/[$,]/g,''))||0;
     if (precio > 0) {
       var precSheet = ss.getSheetByName('BD_Precios');
@@ -2495,24 +2496,21 @@ function updateProducto(body) {
         var lista = body.lista || 'General';
         var vigencia = body.vigencia || new Date().toISOString().substring(0,10);
         var precData = precSheet.getDataRange().getValues();
-        var precFound = -1;
+        // Recolectar filas a borrar (en orden reverso para no desplazar índices)
+        var toDelete = [];
         for (var pi = 1; pi < precData.length; pi++) {
-          var pvig = precData[pi][1] instanceof Date
-            ? precData[pi][1].toISOString().substring(0,10)
-            : String(precData[pi][1]||'').substring(0,10);
           var plista = (precData[pi].length > 6 && precData[pi][6]) ? String(precData[pi][6]).trim() : 'General';
-          if (String(precData[pi][0]).trim() === prodId && pvig === vigencia && plista === lista) {
-            precFound = pi + 1; // 1-based row
+          if (!plista) plista = 'General';
+          if (String(precData[pi][0]).trim() === prodId && plista === lista) {
+            toDelete.push(pi + 1); // 1-based row number
           }
         }
-        if (precFound > 0) {
-          // Actualizar precio en la fila existente (col 3 = precio, col 5 = usuario, col 6 = fecha update)
-          precSheet.getRange(precFound, 3).setValue(precio);
-          precSheet.getRange(precFound, 5).setValue(body.usuario||'sistema');
-          precSheet.getRange(precFound, 6).setValue(new Date());
-        } else {
-          precSheet.appendRow([prodId, vigencia, precio, body.moneda||'MXN', body.usuario||'sistema', new Date(), lista]);
+        // Borrar de abajo hacia arriba para no alterar índices
+        for (var di = toDelete.length - 1; di >= 0; di--) {
+          precSheet.deleteRow(toDelete[di]);
         }
+        // Insertar única fila con el precio actualizado
+        precSheet.appendRow([prodId, vigencia, precio, body.moneda||'MXN', body.usuario||'sistema', new Date(), lista]);
       }
     }
     logAudit(body.usuario||'sistema','Productos','Editar',prodId,'Descripcion',oldDesc,body.descripcion||oldDesc);
