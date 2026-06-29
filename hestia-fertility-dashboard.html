@@ -3120,27 +3120,23 @@ function prodOpenForm(defaultCat) {
 function prodEditForm(jsonStr) {
   var p = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
   prodOpenForm(p.categoria || '');
-  // Pre-llenar campos después de que el form se renderice
-  setTimeout(function() {
-    var el = function(id){return document.getElementById(id);};
-    if(el('prod-f-desc')) el('prod-f-desc').value = p.descripcion||'';
-    if(el('prod-f-cat')) el('prod-f-cat').value = p.categoria||'';
-    if(el('prod-f-tipo')) el('prod-f-tipo').value = p.tipo||'';
-    if(el('prod-f-notas')) el('prod-f-notas').value = p.notas||'';
-    if(el('prod-f-precio')) el('prod-f-precio').value = p.precio||'';
-    if(el('prod-f-activo')) el('prod-f-activo').value = p.activo?'true':'false';
-    // Mostrar SKU editable
-    var skuEl = el('prod-f-sku');
-    if(skuEl) skuEl.value = p.sku||'';
-    // Cambiar título y botón a modo edición
-    var titleEl = document.querySelector('#view-productos-catalogo h1');
-    if(titleEl) titleEl.textContent = 'Editar producto — '+(p.sku||p.id);
-    var btn = el('prod-save-btn');
-    if(btn) {
-      btn.textContent = 'Actualizar producto';
-      btn.onclick = function(){ prodSubmitEdit(p.id); };
-    }
-  }, 50);
+  // prodOpenForm usa innerHTML síncrono — el DOM ya existe al regresar.
+  // Sobreescribir botón y título de inmediato, sin setTimeout.
+  var _el = function(id){ return document.getElementById(id); };
+  if(_el('prod-f-desc')) _el('prod-f-desc').value = p.descripcion||'';
+  if(_el('prod-f-cat')) _el('prod-f-cat').value = p.categoria||'';
+  if(_el('prod-f-tipo')) _el('prod-f-tipo').value = p.tipo||'';
+  if(_el('prod-f-notas')) _el('prod-f-notas').value = p.notas||'';
+  if(_el('prod-f-precio')) _el('prod-f-precio').value = p.precio||'';
+  if(_el('prod-f-activo')) _el('prod-f-activo').value = p.activo?'true':'false';
+  if(_el('prod-f-sku')) _el('prod-f-sku').value = p.sku||'';
+  var titleEl = document.querySelector('#view-productos-catalogo h1');
+  if(titleEl) titleEl.textContent = 'Editar producto — '+(p.sku||p.id);
+  var btn = _el('prod-save-btn');
+  if(btn) {
+    btn.textContent = 'Actualizar producto';
+    btn.onclick = function(){ prodSubmitEdit(p.id); };
+  }
 }
 
 async function prodSubmitEdit(productoId) {
