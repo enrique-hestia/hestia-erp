@@ -4030,7 +4030,14 @@ async function ingSubmit() {
   var payload = _ingCollectPayload();
   if (!payload) return;
 
-  // Revisar si algún pago es TDC/TDD → pedir comisión
+  // En modo edición la comisión ya fue registrada al crear el ingreso —
+  // no volver a pedirla. Solo se recaptura en ingresos NUEVOS.
+  if (_ingEditMode) {
+    await _ingSaveAndBank(payload, 0);
+    return;
+  }
+
+  // Nuevo ingreso con TDC/TDD/AMEX → pedir comisión
   var mpPayments = payload._payments.filter(function(p){ return p.formaPago === 'TDC' || p.formaPago === 'TDD' || p.formaPago === 'AMEX'; });
   var mpTotal = mpPayments.reduce(function(s,p){ return s + p.monto; }, 0);
 
