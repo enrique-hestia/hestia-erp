@@ -505,6 +505,9 @@ function doPost(e) {
     if (body.action === 'uploadIngresoPDF') {
       return jsonResponse(uploadIngresoPDF(body.opId, body.tipo||'factura', body.fileName, body.base64, body.mimeType));
     }
+    if (body.action === 'updateIngresoFiscal') {
+      return jsonResponse(updateIngresoFiscal(body));
+    }
     if (body.action === 'setupBDIngresos') {
       return jsonResponse(setupBDIngresos());
     }
@@ -3055,6 +3058,37 @@ function uploadIngresoPDF(opId, tipo, fileName, base64Data, mimeType) {
   } catch(ex) {
     return {ok:false, error:ex.message};
   }
+}
+
+// Actualiza SOLO campos fiscales de un OP (Factura#, Póliza) sin tocar items ni pagos.
+function updateIngresoFiscal(body) {
+  try {
+    var opId = String(body.opId||'').trim();
+    if (!opId) return {ok:false, error:'Sin opId'};
+
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sheet = null;
+    var sheets = ss.getSheets();
+    for (var i = 0; i < sheets.length; i++) {
+      if (sheets[i].getName() === BD_INGRESOS_TAB) { sheet = sheets[i]; break; }
+    }
+    if (!sheet) return {ok:false, error:'BD_Ingresos no encontrada'};
+
+    // Cols (1-based): Factura=18, Poliza=19
+    var COL_FACTURA = 18, COL_POLIZA = 19;
+    var data = sheet.getDataRange().getValues();
+    var updated = 0;
+    for (var ri = 1; ri < data.length; ri++) {
+      if (String(data[ri][0]) !== opId) continue;
+      if (body.hasOwnProperty('factura')) sheet.getRange(ri+1, COL_FACTURA).setValue(String(body.factura||'').trim());
+      if (body.hasOwnProperty('poliza'))  sheet.getRange(ri+1, COL_POLIZA).setValue(String(body.poliza||'').trim());
+      updated++;
+    }
+    try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch(e) {}
+    logAudit(body.usuario||'sistema','Ingreso','UpdateFiscal',opId,'','',
+      (body.hasOwnProperty('factura')?'factura='+body.factura+' ':'')+(body.hasOwnProperty('poliza')?'poliza='+body.poliza:''));
+    return {ok:true, updated:updated};
+  } catch(ex) { return {ok:false, error:ex.message}; }
 }
 
 function migrateIngresosToDBD() {
