@@ -12480,7 +12480,7 @@ function _gfProgHTML(per){
         +'<td style="text-align:center;white-space:nowrap;display:flex;gap:4px;justify-content:center;align-items:center;padding:6px 4px">'
         +'<button onclick="gfProgramarUno(\''+p.id+'\')" style="padding:5px 10px;background:#166534;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Programar</button>'
         +'<button onclick="gfOpenForm(decodeURIComponent(\''+encodeURIComponent(JSON.stringify(p))+'\'))" style="padding:5px 8px;background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:7px;font-size:12px;cursor:pointer" title="Editar plantilla">✎</button>'
-        +'<button onclick="gfDelete('+p.rowNum+',decodeURIComponent(\''+encodeURIComponent(p.proveedor||'')+'\'))" style="padding:5px 8px;background:rgba(220,38,38,.08);color:#dc2626;border:none;border-radius:7px;font-size:12px;cursor:pointer" title="Eliminar plantilla">✕</button>'
+        +'<button onclick="gfDeleteById(\''+p.id+'\',decodeURIComponent(\''+encodeURIComponent(p.proveedor||'')+'\'))" style="padding:5px 8px;background:rgba(220,38,38,.08);color:#dc2626;border:none;border-radius:7px;font-size:12px;cursor:pointer" title="Eliminar plantilla">✕</button>'
         +'</td></tr>';
     });
     h+='</tbody></table></div>';
@@ -12797,6 +12797,14 @@ async function gfDelete(rowNum, prov){
   if(!confirm('¿Eliminar la plantilla de "'+prov+'"? (no afecta CxP ya creadas)')) return;
   var s=getSession()||{};
   try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'deleteGastoFijo', rowNum:rowNum, usuario:s.email||'sistema'})}); var res=await r.json(); if(res.ok) loadGastosFijos(); else alert('Error: '+(res.error||'')); }catch(e){ alert('Error: '+e.message); }
+}
+async function gfDeleteById(gfId, prov){
+  // Las propuestas no traen rowNum — lo buscamos en el catálogo local
+  var cat=_gfCatalogo||[];
+  var entry=null;
+  for(var i=0;i<cat.length;i++){ if(cat[i].id===gfId){ entry=cat[i]; break; } }
+  if(!entry||!entry.rowNum){ alert('No se encontró la plantilla en el catálogo. Recarga e intenta de nuevo.'); return; }
+  await gfDelete(entry.rowNum, prov);
 }
 
 // ── Banner de recordatorio (al iniciar sesión) ──
