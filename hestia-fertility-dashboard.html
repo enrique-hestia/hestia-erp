@@ -12437,6 +12437,25 @@ function _amexFM(v){
 }
 function _amexEsc(s){ var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
+// Escanea localStorage para todos los gaps con status='conciliado'.
+// No depende de _amexGaps (en memoria), así persiste aunque el usuario navegue.
+function _amexGetLocalConciliados(){
+  var result=[]; var seen={};
+  try{
+    for(var i=0;i<localStorage.length;i++){
+      var k=localStorage.key(i);
+      if(!k||!k.startsWith('amex_gap_')) continue;
+      var v={}; try{v=JSON.parse(localStorage.getItem(k)||'{}');}catch(e){continue;}
+      if(v.status!=='conciliado'||!v.fecha||!v.monto) continue;
+      var dedup=v.fecha+'_'+v.monto;
+      if(seen[dedup]) continue; seen[dedup]=1;
+      result.push({fecha:v.fecha, monto:parseFloat(v.monto)||0, referencia:v.referencia||v.ref||'', usd:0, proveedorSugerido:v.proveedor||''});
+    }
+  }catch(e){}
+  result.sort(function(a,b){ return a.fecha<b.fecha?1:-1; });
+  return result;
+}
+
 function _amexProvExists(name){
   var dl=document.getElementById('prov-datalist'); if(!dl) return true;
   var lc=name.trim().toLowerCase();
@@ -12482,13 +12501,19 @@ function _amexRenderGaps(){
   var snoozeBtn = document.getElementById('amex-snooze-btn');
   var snoozeCnt = document.getElementById('amex-snooze-cnt');
 
-  var pending    = _amexGaps.filter(function(g){ return _amexGapState(g)==='pending'; });
-  var snoozed    = _amexGaps.filter(function(g){ return _amexGapState(g)==='snoozed'; });
-  var discarded  = _amexGaps.filter(function(g){ return _amexGapState(g)==='discarded'; });
-  // Conciliados locales = gaps validados esta sesión (localStorage 'conciliado')
-  var concLocals = _amexGaps.filter(function(g){ return _amexGapState(g)==='conciliado'; });
-  // Conciliados totales = locales + los que el backend ya encontró cruzados
-  var totalConc  = concLocals.length + (_amexConciliados||[]).length;
+  var pending   = _amexGaps.filter(function(g){ return _amexGapState(g)==='pending'; });
+  var snoozed   = _amexGaps.filter(function(g){ return _amexGapState(g)==='snoozed'; });
+  var discarded = _amexGaps.filter(function(g){ return _amexGapState(g)==='discarded'; });
+
+  // Conciliados: leer DIRECTO de localStorage (persiste aunque _amexGaps esté vacío)
+  var localConc = _amexGetLocalConciliados();
+  // Backend conciliados que no estén ya en localStorage (evitar duplicados)
+  var localConcSet = {};
+  localConc.forEach(function(g){ localConcSet[g.fecha+'_'+g.monto]=1; });
+  var backendConcNew = (_amexConciliados||[]).filter(function(c){
+    return !localConcSet[(c.fecha||'')+'_'+(c.monto||'')];
+  });
+  var totalConc = localConc.length + backendConcNew.length;
 
   if(badge){ if(pending.length){ badge.textContent=pending.length; badge.style.display='inline'; }else{ badge.style.display='none'; } }
   if(snoozeBtn){ snoozeBtn.style.display=(snoozed.length>0)?'inline-block':'none'; }
@@ -12512,16 +12537,14 @@ function _amexRenderGaps(){
     html+='</div>';
   }
 
-  // ── Conciliados ────────────────────────────────────────
+  // ── Conciliados (siempre visibles, vienen de localStorage) ─
   if(totalConc > 0){
-    html+='<details'+(pending.length?' ':'  open ')+'style="margin-bottom:12px">';
+    html+='<details '+(pending.length?'':'open ')+'style="margin-bottom:12px">';
     html+='<summary style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#166534;cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;gap:6px">'
       +'<span style="font-size:15px">✓</span> Conciliados ('+totalConc+')</summary>';
     html+='<div style="margin-top:8px">';
-    // Primero los validados esta sesión
-    concLocals.forEach(function(g){ html+=_amexGapCard(g,'conciliado'); });
-    // Luego los que el backend ya cruzó (venían con egreso previo)
-    (_amexConciliados||[]).forEach(function(c){ html+=_amexConciliadoCard(c); });
+    localConc.forEach(function(g){ html+=_amexGapCard(g,'conciliado'); });
+    backendConcNew.forEach(function(c){ html+=_amexConciliadoCard(c); });
     html+='</div></details>';
   }
 
@@ -12532,9 +12555,9 @@ function _amexRenderGaps(){
     html+='</div></details>';
   }
 
-  // ── Mensaje si no hay nada pendiente ──────────────────
+  // ── Mensaje si no hay nada ─────────────────────────────
   if(!pending.length && !snoozed.length && totalConc===0 && !discarded.length){
-    html+='<div style="font-size:12px;color:var(--text-secondary,#9ca3af)">No se encontraron cargos AMEX para el período.</div>';
+    html+='<div style="font-size:12px;color:var(--text-secondary,#9ca3af)">Haz clic en <b>🔍 Revisar gaps</b> para analizar los movimientos AMEX del mes.</div>';
   }
 
   body.innerHTML=html;
