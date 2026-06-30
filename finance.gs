@@ -627,7 +627,7 @@ function doPost(e) {
   } catch(ex) { return jsonResponse({error: ex.message}); }
 }
 
-function readBanksData(periodo) {
+function readBanksData(fechaInicio, fechaFin) {
   try {
     var ss = SpreadsheetApp.openById(BANKS_SS_ID);
     var sh = ss.getSheets();
@@ -635,16 +635,10 @@ function readBanksData(periodo) {
     function num(v){ if(typeof v==='number') return v; var n=parseFloat(String(v||'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
     function dt(v){ if(!v) return ''; if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0'); return String(v); }
 
-    // Calcula los meses YYYY-MM del trimestre dado "YYYY-QN"
-    function periodoMeses(p){
-      if(!p) return null;
-      var yr=parseInt(p.substring(0,4)); if(isNaN(yr)) return null;
-      var qm=p.match(/Q(\d)/); if(!qm) return null;
-      var q=parseInt(qm[1]); var ms=[];
-      for(var i=0;i<3;i++){var mo=(q-1)*3+1+i; ms.push(yr+'-'+String(mo).padStart(2,'0'));}
-      return ms;
-    }
-    var filterMeses = periodoMeses(periodo); // null = sin filtro (muestra todo)
+    // Filtro por rango de fechas (YYYY-MM-DD). Si no viene, muestra todo.
+    var fi = fechaInicio || '';
+    var ff = fechaFin    || '';
+    function inRange(f){ if(!fi&&!ff) return true; if(!f) return true; return (!fi||f>=fi) && (!ff||f<=ff); }
 
     function rSant(sheet) {
       var B={id:'santander',nombre:'Santander',color:'#ec0000',saldo:0,movimientos:[],totalRows:0};
@@ -657,8 +651,7 @@ function readBanksData(periodo) {
         return{rowNum:idx+2,fecha:dt(x[0]),deposito:d,retiro:t,monto:d>0?d:-t,saldo:num(x[3]),
                referencia:String(x[4]||''),depositoUSD:num(x[5]),tipoCambio:num(x[6]),
                poliza:String(x[7]||''),observaciones:String(x[8]||''),tipo:d>0?'deposito':'retiro'};
-      }).filter(function(m){ return !filterMeses||!m.fecha||filterMeses.indexOf(m.fecha.substring(0,7))>-1; })
-        .reverse();
+      }).filter(function(m){ return inRange(m.fecha); }).reverse();
       return B;
     }
     function rAmex(sheet) {
@@ -672,7 +665,7 @@ function readBanksData(periodo) {
         var m=num(r[i][1]);
         var f=dt(r[i][0]);
         if(!f&&m===0) continue; // saltar filas completamente vacías
-        if(filterMeses&&f&&filterMeses.indexOf(f.substring(0,7))===-1) continue; // filtrar por trimestre
+        if(!inRange(f)) continue; // respetar filtro de fechas
         amexRows.push({rowNum:i+1,fecha:f,monto:m,saldo:num(r[i][2]),referencia:String(r[i][3]||''),
                        usd:num(r[i][4]),tipoCambio:num(r[i][5]),notas:String(r[i][6]||''),
                        poliza:String(r[i][7]||''),mes:String(r[i][8]||''),tipo:m>=0?'cargo':'pago'});

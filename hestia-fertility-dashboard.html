@@ -5643,8 +5643,10 @@ async function loadCashFlowData() {
   try {
     var tok = encodeURIComponent(getToken());
     var _t = Date.now();
+    var bFi = encodeURIComponent(currentFechaInicio||'');
+    var bFf = encodeURIComponent(currentFechaFin||'');
     var [resp, ccResp, cxpResp] = await Promise.all([
-      fetch(APPS_SCRIPT_URL + '?action=banks&token='    + tok + '&_t=' + _t, {redirect:'follow'}),
+      fetch(APPS_SCRIPT_URL + '?action=banks&token=' + tok + '&fechaInicio=' + bFi + '&fechaFin=' + bFf + '&_t=' + _t, {redirect:'follow'}),
       fetch(APPS_SCRIPT_URL + '?action=cajachica&token='+ tok + '&_t=' + _t, {redirect:'follow'}),
       fetch(APPS_SCRIPT_URL + '?action=cxp&token='     + tok + '&_t=' + _t, {redirect:'follow'})
     ]);
@@ -5702,7 +5704,9 @@ async function loadConciliacionData() {
   el.innerHTML = hestiaLoader('Cargando conciliación bancaria…');
   try {
     var tok = encodeURIComponent(getToken());
-    var resp = await fetch(APPS_SCRIPT_URL + '?action=banks&token=' + tok + '&_t=' + Date.now(), {redirect:'follow'});
+    var bFi2 = encodeURIComponent(currentFechaInicio||'');
+    var bFf2 = encodeURIComponent(currentFechaFin||'');
+    var resp = await fetch(APPS_SCRIPT_URL + '?action=banks&token=' + tok + '&fechaInicio=' + bFi2 + '&fechaFin=' + bFf2 + '&_t=' + Date.now(), {redirect:'follow'});
     var data = await resp.json();
     _cbLiveData = data;
     await hfFinish();
