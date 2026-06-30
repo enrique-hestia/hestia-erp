@@ -710,7 +710,9 @@ function readBanksData(fechaInicio, fechaFin) {
         var d=new Date(s); if(!isNaN(d)&&s.length>6) return _mNames[d.getMonth()]+'-'+d.getFullYear();
         return s;
       }
-      B.movimientos=dataRows.slice(-30).reverse().map(function(entry){
+      B.movimientos=dataRows.filter(function(entry){
+        return inRange(dt(entry.row[1]));
+      }).reverse().map(function(entry){
         var x=entry.row;
         return{rowNum:entry.sheetRow,mes:fmtMes(x[0]),fecha:dt(x[1]),cobro:num(x[2]),comisiones:num(x[3]),
                pctComision:num(x[4]),totalVenta:num(x[5]),saldo:num(x[6]),
@@ -764,7 +766,7 @@ function readBanksData(fechaInicio, fechaFin) {
           var d=num(x[1]),t=num(x[2]);
           return{rowNum:idx+2,fecha:dt(x[0]),deposito:d,retiro:t,monto:d>0?d:-t,
                  saldo:num(x[3]),referencia:String(x[4]||''),tipo:d>0?'deposito':'retiro'};
-        }).slice(-30).reverse();
+        }).filter(function(m){ return inRange(m.fecha); }).reverse();
       }
       bancos[key]=EB;
     }
