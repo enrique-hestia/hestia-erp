@@ -5766,6 +5766,8 @@ async function loadCashFlowData() {
 var _cbLiveData = null;
 var _cbActiveBanco = 'santander';
 var _cbDrawerOpen  = false;
+var _cbPage        = 0;    // página actual (0-based)
+var _cbPageSize    = 50;   // movimientos por página
 
 async function loadConciliacionData() {
   var el = document.getElementById('view-conciliacion');
@@ -5785,8 +5787,16 @@ async function loadConciliacionData() {
   }
 }
 
+function cbGoPage(n) {
+  _cbPage = n;
+  renderConciliacion(_cbLiveData);
+  var cbBody = document.querySelector('.cb-body');
+  if (cbBody) cbBody.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
 function cbSB(id) {
   _cbActiveBanco = id;
+  _cbPage = 0;
   renderConciliacion(_cbLiveData);
   setTimeout(function(){ var d=document.getElementById('cb-drw'); if(d&&_cbDrawerOpen) d.classList.add('open'); },0);
 }
@@ -6387,7 +6397,34 @@ function renderConciliacion(data) {
     var f=m.fecha||'';
     return (!currentFechaInicio||f>=currentFechaInicio)&&(!currentFechaFin||f<=currentFechaFin);
   });
+  var _cbTotal = movs.length;
+  var _cbPages = Math.max(1, Math.ceil(_cbTotal / _cbPageSize));
+  if (_cbPage >= _cbPages) _cbPage = _cbPages - 1;
+  if (_cbPage < 0) _cbPage = 0;
+  var movsPage = movs.slice(_cbPage * _cbPageSize, (_cbPage + 1) * _cbPageSize);
+  // ── Helper: barra de paginación ──
+  function _cbPagBar(top) {
+    if (_cbTotal <= _cbPageSize) return '';
+    var pgFrom = _cbPage * _cbPageSize + 1;
+    var pgTo   = Math.min((_cbPage + 1) * _cbPageSize, _cbTotal);
+    var btnStyle  = 'padding:5px 14px;border:1px solid var(--color-divider,#d1d5db);border-radius:7px;background:var(--card-bg,#fff);cursor:pointer;font-size:12px;font-weight:600;color:var(--text-primary,#111)';
+    var btnDis    = 'padding:5px 14px;border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;background:var(--bg-secondary,#f5f5f5);cursor:default;font-size:12px;color:#bbb';
+    var btnNext   = 'padding:5px 16px;border:1px solid #c46a7a;border-radius:7px;background:#c46a7a;color:#fff;cursor:pointer;font-size:12px;font-weight:700';
+    var scrollCmd = top ? '' : ';document.querySelector(\'.cb-body\').scrollIntoView({behavior:\'smooth\'})';
+    var h = '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 18px;'
+      +(top?'border-bottom':'border-top')+':1px solid var(--color-divider,#e5e7eb);flex-wrap:wrap;gap:8px;background:var(--bg-secondary,#f9fafb)">';
+    h += '<span style="font-size:12px;color:var(--text-secondary,#6b7280)">Mostrando <strong>'+pgFrom+'–'+pgTo+'</strong> de <strong>'+_cbTotal+'</strong> movimientos</span>';
+    h += '<div style="display:flex;gap:6px;align-items:center">';
+    h += (_cbPage>0   ? '<button onclick="cbGoPage(0)"           style="'+btnStyle+'" title="Primera">«</button>' : '<button disabled style="'+btnDis+'">«</button>');
+    h += (_cbPage>0   ? '<button onclick="cbGoPage('+(_cbPage-1)+')'+scrollCmd+'" style="'+btnStyle+'">‹ Ant.</button>' : '<button disabled style="'+btnDis+'">‹ Ant.</button>');
+    h += '<span style="font-size:13px;font-weight:700;color:var(--text-primary,#111);min-width:64px;text-align:center">'+(_cbPage+1)+' / '+_cbPages+'</span>';
+    h += (_cbPage<_cbPages-1 ? '<button onclick="cbGoPage('+(_cbPage+1)+')'+scrollCmd+'" style="'+btnNext+'">Sig. ›</button>' : '<button disabled style="'+btnDis+'">Sig. ›</button>');
+    h += (_cbPage<_cbPages-1 ? '<button onclick="cbGoPage('+(_cbPages-1)+')" style="'+btnStyle+'" title="Última">»</button>' : '<button disabled style="'+btnDis+'">»</button>');
+    h += '</div></div>';
+    return h;
+  }
   if (movs.length) {
+    hh.push(_cbPagBar(true));
     hh.push('<div style="overflow-x:auto"><table class="cb-tbl"><thead><tr>');
     hh.push('<th>Fecha</th>');
     if (aB.id==='santander')    { hh.push('<th>Tipo</th><th style="text-align:right">Depósito</th><th style="text-align:right">Retiro</th><th style="text-align:right">Saldo</th><th>Referencia</th>'); }
@@ -6395,7 +6432,7 @@ function renderConciliacion(data) {
     else                        { hh.push('<th>Tipo</th><th style="text-align:right">Cobro</th><th style="text-align:right">Comisión</th><th style="text-align:right">Neto</th><th style="text-align:right">% Com.</th><th>Obs.</th><th style="text-align:center">Liberado</th>'); }
     hh.push('<th style="text-align:center;width:72px"></th>');
     hh.push('</tr></thead><tbody>');
-    movs.forEach(function(m) {
+    movsPage.forEach(function(m) {
       var rn = m.rowNum || 0;
       var mj = encodeURIComponent(JSON.stringify(m));
       var actCells = '<td style="text-align:center;white-space:nowrap">'
@@ -6442,6 +6479,7 @@ function renderConciliacion(data) {
       hh.push('<tr class="cb-detrow" id="cb-det-'+aB.id+'-'+rn+'" style="display:none"><td colspan="'+detColSpan+'">'+cbDetailHTML(m, aB.id)+'</td></tr>');
     });
     hh.push('</tbody></table></div>');
+    hh.push(_cbPagBar(false));
   } else {
     hh.push('<div class="cb-empty">Sin movimientos registrados para '+aB.nombre+'.<br>Usa el botón <strong>+ Agregar movimiento</strong> para capturar.</div>');
   }
@@ -10510,6 +10548,7 @@ function applyDateRange() {
   currentFechaInicio = fi;
   currentFechaFin    = ff;
   currentPeriodo     = fi.slice(0,7) + ' → ' + ff.slice(0,7);
+  _cbPage = 0;
   loadView(currentView, fi, ff, true);
 }
 

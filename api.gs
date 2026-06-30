@@ -479,11 +479,12 @@ function readBanksData() {
       var r=sheet.getDataRange().getValues(); if(r.length<2) return B;
       for(var i=r.length-1;i>=1;i--){ var s=num(r[i][3]); if(s!==0){B.saldo=s;break;} }
       B.totalRows=r.length-1;
-      B.movimientos=r.slice(1).slice(-30).reverse().map(function(x){
+      B.movimientos=r.slice(1).reverse().map(function(x,i){
         var d=num(x[1]),t=num(x[2]);
         return{fecha:dt(x[0]),deposito:d,retiro:t,monto:d>0?d:-t,saldo:num(x[3]),
                referencia:String(x[4]||''),depositoUSD:num(x[5]),tipoCambio:num(x[6]),
-               poliza:String(x[7]||''),observaciones:String(x[8]||''),tipo:d>0?'deposito':'retiro'};
+               poliza:String(x[7]||''),observaciones:String(x[8]||''),tipo:d>0?'deposito':'retiro',
+               rowNum:r.length-i};
       });
       return B;
     }
@@ -493,11 +494,12 @@ function readBanksData() {
       var r=sheet.getDataRange().getValues(); if(r.length<2) return B;
       for(var i=r.length-1;i>=1;i--){ var s=num(r[i][2]); if(s!==0){B.saldo=s;break;} }
       B.totalRows=r.length-1;
-      B.movimientos=r.slice(1).slice(-30).reverse().map(function(x){
+      B.movimientos=r.slice(1).reverse().map(function(x,i){
         var m=num(x[1]);
         return{fecha:dt(x[0]),monto:m,saldo:num(x[2]),referencia:String(x[3]||''),
                usd:num(x[4]),tipoCambio:num(x[5]),notas:String(x[6]||''),
-               poliza:String(x[7]||''),mes:String(x[8]||''),tipo:m>=0?'cargo':'pago'};
+               poliza:String(x[7]||''),mes:String(x[8]||''),tipo:m>=0?'cargo':'pago',
+               rowNum:r.length-i};
       });
       return B;
     }
@@ -507,11 +509,12 @@ function readBanksData() {
       var r=sheet.getDataRange().getValues(); if(r.length<2) return B;
       for(var i=r.length-1;i>=1;i--){ var s=num(r[i][6]); if(s!==0){B.saldo=s;break;} }
       B.totalRows=r.length-1;
-      B.movimientos=r.slice(1).slice(-30).reverse().map(function(x){
+      B.movimientos=r.slice(1).reverse().map(function(x,i){
         return{mes:String(x[0]||''),fecha:dt(x[1]),cobro:num(x[2]),comisiones:num(x[3]),
                pctComision:num(x[4]),totalVenta:num(x[5]),saldo:num(x[6]),
                liberado:x[7]===true||String(x[7]).toUpperCase()==='TRUE',
-               observaciones:String(x[8]||''),tipo:String(x[9]||'CARGO').toUpperCase(),monto:num(x[5])};
+               observaciones:String(x[8]||''),tipo:String(x[9]||'CARGO').toUpperCase(),
+               monto:num(x[5]),rowNum:r.length-i};
       });
       return B;
     }
