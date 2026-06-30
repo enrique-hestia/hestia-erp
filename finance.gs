@@ -3673,11 +3673,11 @@ var CFG_DD_TAB = 'Config_Dropdowns';
 
 var CFG_DD_DEFAULTS = [
   // Seccion, Campo, Etiqueta, Valores (pipe-separated)
-  ['Egresos',   'subtipo',   'Subtipo / Categoría',   'Honorarios Médicos|Nómina|Renta|Servicios Generales|Medicamentos e Insumos|Laboratorio Externo|Marketing|Mantenimiento|Seguros|Impuestos y Contribuciones|Equipo Médico|Tecnología|Viáticos|Comisiones|Otros'],
+  ['Egresos',   'subtipo',   'Subtipo / Categoría',   'Honorarios Médicos|Honorarios Cons|Nómina|Renta|Servicios Generales|Medicamentos e Insumos|Insumos Lab|Laboratorio Externo|Marketing|Mantenimiento|Seguros|Impuestos y Contribuciones|Equipo Médico|Tecnología|Viáticos|Comisiones|Otros'],
   ['Egresos',   'contable',  'Tipo contable',          'Gasto|Costo|Crédito|Inversión'],
   ['Egresos',   'tipo',      'Tipo de egreso',         'Fijo|Variable|Extraordinario'],
   ['Egresos',   'formaPago', 'Forma de pago',          'Santander|Mercado Pago|AMEX|Efectivo|TDC|TDD|Transferencia'],
-  ['CxP',       'subtipo',   'Subtipo / Categoría',   'Honorarios Médicos|Nómina|Renta|Servicios Generales|Medicamentos e Insumos|Laboratorio Externo|Marketing|Mantenimiento|Seguros|Impuestos y Contribuciones|Equipo Médico|Tecnología|Viáticos|Comisiones|Otros'],
+  ['CxP',       'subtipo',   'Subtipo / Categoría',   'Honorarios Médicos|Honorarios Cons|Nómina|Renta|Servicios Generales|Medicamentos e Insumos|Insumos Lab|Laboratorio Externo|Marketing|Mantenimiento|Seguros|Impuestos y Contribuciones|Equipo Médico|Tecnología|Viáticos|Comisiones|Otros'],
   ['CxP',       'formaPago', 'Forma de pago',          'Santander|Mercado Pago|AMEX|Efectivo|TDC|TDD|Transferencia'],
   ['Ingresos',  'formaPago', 'Forma de pago',          'Efectivo|Mercado Pago|AMEX|Santander|TDC|TDD|Transferencia|Cortesía'],
   ['Ingresos',  'facturacion','Facturación',            'No Factura|Factura|Factura Global|REPROVIDA|Grupo Médico'],

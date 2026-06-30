@@ -10975,18 +10975,15 @@ function ddRemoveChip(ddId, idx) {
 async function ddSave(sec, campo, etiqueta) {
   var ddId   = 'dd-'+sec+'-'+campo;
   var valores = ddGetValores(ddId).join('|');
-  var btn     = document.querySelector('#'+ddId+' + div button, [onclick*="ddSave(\''+sec+'\',\''+campo+'\'"]');
-  // Find the save button
   var allBtns = document.querySelectorAll('#dd-editor button');
   var saveBtn = null;
   allBtns.forEach(function(b){ if(b.getAttribute('onclick')&&b.getAttribute('onclick').indexOf("ddSave('"+sec+"','"+campo+"'")>=0) saveBtn=b; });
   if (saveBtn) { saveBtn.textContent = 'Guardando…'; saveBtn.disabled = true; }
   try {
     var tok  = encodeURIComponent(getToken());
-    var body = encodeURIComponent(JSON.stringify({seccion:sec, campo:campo, etiqueta:etiqueta, valores:valores}));
-    var r    = await fetch(APPS_SCRIPT_URL+'?action=saveDropdown&token='+tok, {
-      method:'POST', redirect:'follow',
-      body: JSON.stringify({action:'saveDropdown', token:getToken(), data:body})
+    var data = encodeURIComponent(JSON.stringify({seccion:sec, campo:campo, etiqueta:etiqueta, valores:valores}));
+    var r    = await fetch(APPS_SCRIPT_URL+'?action=saveDropdown&token='+tok+'&data='+data+'&_t='+Date.now(), {
+      redirect:'follow'
     });
     var d = await r.json();
     if (!d.ok) throw new Error(d.error||'Error guardando');
