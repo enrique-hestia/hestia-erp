@@ -3369,7 +3369,17 @@ function _amexSuggestProv(desc) {
 function conciliaAMEX(body) {
   try {
     var periodo = body.periodo || ''; // YYYY-MM
-    function num(v){var n=parseFloat(String(v||'').replace(/[$,\s]/g,''));return isNaN(n)?0:n;}
+    function num(v){
+      if(typeof v==='number') return v;
+      var s=String(v||'').trim().replace(/[$\s]/g,'');
+      // Detectar formato europeo: punto como miles, coma como decimal (ej: "5.217,39")
+      if(/\.\d{3},\d{1,2}$/.test(s)||(/,\d{1,2}$/.test(s)&&s.indexOf('.')>-1)){
+        s=s.replace(/\./g,'').replace(',','.');
+      } else {
+        s=s.replace(/,/g,'');
+      }
+      var n=parseFloat(s); return isNaN(n)?0:n;
+    }
     function dt(v){if(!v)return'';if(v instanceof Date)return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0');return String(v).trim().substring(0,10);}
     function parseD(s){if(!s)return null;if(s instanceof Date){var d=new Date(s);d.setHours(0,0,0,0);return d;}var d=new Date(String(s).trim());if(isNaN(d))return null;d.setHours(0,0,0,0);return d;}
 
