@@ -274,6 +274,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 .lr-badge--limit{background:#fff3e0;color:#e65100}
 .lr-kpi--ok .kpi-value{color:#2e7d32}
 .lr-kpi--warn .kpi-value{color:#e65100}
+.btn-delete-row{display:inline-flex;align-items:center;padding:4px 8px;font-size:11px;font-weight:600;color:#b91c1c;background:rgba(185,28,28,.08);border:1.5px solid #b91c1c;border-radius:20px;cursor:pointer;line-height:1;font-family:inherit;transition:background .15s;margin-left:4px}
 .btn-edit-row{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;font-size:11px;font-weight:600;color:var(--color-primary);background:rgba(196,106,122,.1);border:1.5px solid var(--color-primary);border-radius:20px;cursor:pointer;line-height:1;font-family:inherit;transition:background .15s,color .15s}
 .btn-edit-row:hover{background:var(--color-primary);color:#fff}
 .lr-ins-critico td{color:#c62828}
@@ -2448,7 +2449,7 @@ function _renderIngresosERP() {
     +'<div style="overflow-x:auto;max-height:65vh;overflow-y:auto">'
     +'<table class="ing-tbl"><thead><tr>'
     +'<th style="width:30px"></th><th>Fecha</th><th>OP</th><th>Paciente</th><th>Categoría</th><th>Items</th><th>Total</th><th>Pagado</th><th>F. Pago</th><th style="min-width:120px">Estado fiscal</th>'
-    +(hasPermission('editar_ingresos')?'<th style="width:50px"></th>':'')
+    +((hasPermission('editar_ingresos')||hasPermission('borrar_ingresos'))?'<th style="width:80px">Acciones</th>':'')
     +'</tr></thead><tbody>');
 
   if(pageOps.length){
@@ -2493,9 +2494,9 @@ function _renderIngresosERP() {
         +'<td style="font-weight:600;color:'+(isPaid?'#166534':'#b45309')+'">'+fC(op.pagado)+'</td>'
         +'<td style="font-size:10.5px;color:var(--text-secondary,#6b7280)">'+(op.formaPago||'—')+'</td>'
         +'<td id="ing-badges-'+safeId+'" style="white-space:nowrap">'+_badges+'</td>'
-        +(hasPermission('editar_ingresos')?'<td style="text-align:center" onclick="event.stopPropagation()"><button class="btn-edit-row" onclick="ingEditOp(\''+opId.replace(/'/g,"\\'")+'\')">✎</button></td>':'')
+        +((hasPermission('editar_ingresos')||hasPermission('borrar_ingresos'))?'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'+(hasPermission('editar_ingresos')?'<button class="btn-edit-row" onclick="ingEditOp(\''+opId.replace(/'/g,"\\'")+'\')">✎ Editar</button>':'')+(hasPermission('borrar_ingresos')?'<button class="btn-delete-row" onclick="ingDeleteOp(\''+opId.replace(/'/g,"\\'")+'\')">🗑</button>':'')+'</td>':'')
         +'</tr>');
-      var colSpan = hasPermission('editar_ingresos') ? 11 : 10;
+      var colSpan = (hasPermission('editar_ingresos')||hasPermission('borrar_ingresos')) ? 11 : 10;
       // Fila expandible con detalle de líneas
       var _fiscalInputStyle='width:80px;padding:3px 7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11.5px;font-weight:700;background:var(--card-bg,#fff);color:var(--text-primary,#111)';
       var _fiscalBar = '<div style="display:flex;align-items:center;gap:12px;padding:7px 14px;background:var(--color-surface,#f3f4f6);border-bottom:1px solid var(--color-divider,#e5e7eb);flex-wrap:wrap">'
@@ -3545,6 +3546,48 @@ function ingEditOp(opId) {
   });
 }
 
+
+async function ingDeleteOp(opId) {
+  if (!hasPermission('borrar_ingresos')) { alert('No tienes permisos para borrar operaciones.'); return; }
+  var modal = document.getElementById('modal-ing-delete');
+  if (modal) {
+    document.getElementById('ing-del-op-label').textContent = opId;
+    modal.dataset.opId = opId;
+    modal.style.display = 'flex';
+  }
+}
+
+function ingDeleteConfirm() {
+  var modal = document.getElementById('modal-ing-delete');
+  if (!modal) return;
+  var opId = modal.dataset.opId;
+  if (!opId) return;
+  var btn = document.getElementById('ing-del-confirm-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Borrando…'; }
+  var s = getSession() || {};
+  fetch(APPS_SCRIPT_URL, {
+    method: 'POST',
+    body: JSON.stringify({action:'deleteIngreso', token:getToken(), opId:opId, usuario:s.email||s.nombre||''})
+  }).then(function(r){ return r.json(); }).then(function(res) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Sí, borrar'; }
+    modal.style.display = 'none';
+    if (res.ok) {
+      loadIngresosERP();
+    } else {
+      alert('Error al borrar: ' + (res.error || 'No se pudo borrar'));
+    }
+  }).catch(function(err) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Sí, borrar'; }
+    modal.style.display = 'none';
+    alert('Error de conexión: ' + err.message);
+  });
+}
+
+function ingDeleteCancel() {
+  var modal = document.getElementById('modal-ing-delete');
+  if (modal) modal.style.display = 'none';
+}
+
 async function ingOpenDrawer() {
   if (!_ingEditMode) _ingEditMode = null; // reset cuando se abre como nuevo
   _ingLineCount = 0;
@@ -4019,7 +4062,7 @@ function _ingCollectPayload() {
 
   var s = getSession() || {};
   return {
-    action: _ingEditMode ? 'updateIngreso' : 'saveIngreso',
+    action: _ingEditMode ? 'updateIngresoConBancos' : 'saveIngreso',
     token:  getToken(),
     opId:   _ingEditMode || undefined,
     usuario: s.email || s.nombre || '',
@@ -4120,14 +4163,14 @@ async function _ingSaveAndBank(payload, comisionMP) {
 
     // 2. Auto-registrar movimiento bancario (solo operaciones nuevas, no ediciones)
     _swrDel('ingresos'); // invalidar caché para que recargue datos frescos
-    if (payload.action === 'updateIngreso') {
+    if (payload.action === 'updateIngreso' || payload.action === 'updateIngresoConBancos') {
       ingCloseDrawer();
       loadIngresosERP();
       return;
     }
     var fecha  = payload.fecha;
     var pac    = payload.paciente;
-    var obs    = (payload.observaciones ? payload.observaciones + ' · ' : '') + 'Px. ' + pac;
+    var obs    = (payload.observaciones ? payload.observaciones + ' · ' : '') + 'Px. ' + pac + (res.op ? ' [' + res.op + ']' : '');
     var mesStr = fecha.substring(0, 7);
 
     for (var pi = 0; pi < payload._payments.length; pi++) {
@@ -15567,5 +15610,22 @@ function ecImprimir() {
 }
 
 </script>
+
+<!-- Modal: confirmar borrar ingreso -->
+<div id="modal-ing-delete" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:3000;align-items:center;justify-content:center">
+  <div style="background:var(--color-surface-2);border-radius:14px;padding:32px 28px;max-width:380px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.2);text-align:center">
+    <div style="font-size:36px;margin-bottom:12px">🗑️</div>
+    <h3 style="margin:0 0 8px;font-size:17px;color:var(--color-text)">Borrar operación</h3>
+    <p style="margin:0 0 20px;font-size:13.5px;color:var(--color-text-muted)">
+      ¿Confirmas borrar <strong id="ing-del-op-label"></strong>?<br>
+      <span style="font-size:12px">Se revertirá el movimiento bancario correspondiente.</span>
+    </p>
+    <div style="display:flex;gap:10px;justify-content:center">
+      <button onclick="ingDeleteCancel()" style="padding:9px 22px;border:1.5px solid var(--color-border);border-radius:8px;background:var(--color-surface);color:var(--color-text);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Cancelar</button>
+      <button id="ing-del-confirm-btn" onclick="ingDeleteConfirm()" style="padding:9px 22px;border:none;border-radius:8px;background:#b91c1c;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Sí, borrar</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

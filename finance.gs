@@ -593,6 +593,12 @@ function doPost(e) {
     if (body.action === 'updateIngreso') {
       return jsonResponse(updateIngreso(body));
     }
+    if (body.action === 'updateIngresoConBancos') {
+      return jsonResponse(updateIngresoConBancos(body));
+    }
+    if (body.action === 'deleteIngreso') {
+      return jsonResponse(deleteIngreso(body));
+    }
     if (body.action === 'renamePacienteIngresos') {
       return jsonResponse(renamePacienteIngresos(body.oldNombre, body.newNombre));
     }
@@ -3485,3 +3491,162 @@ function conciliaAMEX(body) {
    ────────────────────────────────────────────────────────────────── */
 
 /* ── Autenticación: helpers ──────────────────────────────────── */
+
+/* ══════════════════════════════════════════════════════════════
+   EDITAR / BORRAR INGRESOS CON SINCRONÍA BANCARIA
+   ══════════════════════════════════════════════════════════════ */
+
+function _reverseIngresoBank(opId, formaPago, fecha, monto, obs) {
+  try {
+    var fp  = String(formaPago || '').trim();
+    var tz  = 'America/Mexico_City';
+    var hoy = new Date();
+    var todayStr = Utilities.formatDate(hoy, tz, 'yyyy-MM-dd');
+    var mesHoy   = todayStr.substring(0, 7);
+    var label    = 'REVERSO [' + opId + '] ' + String(obs || '').substring(0, 80);
+
+    if (fp === 'Santander') {
+      saveBankRow('santander', [todayStr, 0, monto, 0, label, 0, 0, '', '']);
+    } else if (fp === 'TDC' || fp === 'TDD' || fp === 'AMEX' || fp === 'Transferencia') {
+      saveBankRow('mercadopago', [mesHoy, todayStr, 0, 0, 0, -Math.abs(monto), 0, false, label, 'REVERSO']);
+    } else if (fp === 'Efectivo') {
+      var sh = getCajaChicaSheet();
+      var data = sh.getDataRange().getValues();
+      var headers = data[0].map(function(h) { return String(h).trim().toUpperCase(); });
+      var iFecha  = headers.indexOf('FECHA');
+      var iConc   = headers.indexOf('CONCEPTO');
+      var iSalida = headers.indexOf('SALIDA');
+      var targetRow = -1;
+      for (var r = 1; r < data.length; r++) {
+        if (!String(data[r][iFecha] || '').trim() && !String(data[r][iConc] || '').trim()) {
+          targetRow = r + 1; break;
+        }
+      }
+      if (targetRow === -1) targetRow = sh.getLastRow() + 1;
+      sh.getRange(targetRow, iFecha  + 1).setValue(todayStr);
+      sh.getRange(targetRow, iConc   + 1).setValue(label);
+      sh.getRange(targetRow, iSalida + 1).setValue(monto);
+      SpreadsheetApp.flush();
+    }
+    return {ok: true};
+  } catch(ex) {
+    Logger.log('_reverseIngresoBank error: ' + ex.message);
+    return {ok: false, error: ex.message};
+  }
+}
+
+function updateIngresoConBancos(payload) {
+  try {
+    if (!_tokenHasPermission(payload.token || '', 'editar_ingresos')) {
+      return {ok:false, error:'Sin autorización para editar ingresos.'};
+    }
+    var opId = String(payload.opId || '').trim();
+    if (!opId) return {ok:false, error:'opId requerido'};
+
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sheets = ss.getSheets();
+    var sheet = null;
+    for (var i = 0; i < sheets.length; i++) {
+      if (sheets[i].getName() === BD_INGRESOS_TAB) { sheet = sheets[i]; break; }
+    }
+    if (!sheet) return {ok:false, error:'BD_Ingresos no encontrada'};
+
+    var data = sheet.getDataRange().getValues();
+    var origRows = [];
+    for (var r = 1; r < data.length; r++) {
+      if (String(data[r][0]).trim() === opId) origRows.push(data[r]);
+    }
+    if (!origRows.length) return {ok:false, error:'OP ' + opId + ' no encontrada'};
+
+    var origFP      = String(origRows[0][12] || '');
+    var origFecha   = String(origRows[0][2]  || '');
+    var origPac     = String(origRows[0][3]  || '');
+    var origObs     = String(origRows[0][16] || '');
+    var origPagado  = origRows.reduce(function(s, r) { return s + (parseFloat(r[10]) || 0); }, 0);
+    var origObsBank = (origObs ? origObs + ' · ' : '') + 'Px. ' + origPac;
+
+    _reverseIngresoBank(opId, origFP, origFecha, origPagado, origObsBank);
+
+    var updateResult = updateIngreso(payload);
+    if (!updateResult.ok) return updateResult;
+
+    var payments = payload._payments || [{formaPago: payload.formaPago, monto: parseFloat(payload.pagado) || 0}];
+    var newPac   = payload.paciente || '';
+    var newObs   = payload.observaciones || '';
+    var newFecha = payload.fecha || '';
+    var mesStr   = newFecha.substring(0, 7);
+    var bankObs  = (newObs ? newObs + ' · ' : '') + 'Px. ' + newPac + ' [' + opId + ']';
+
+    for (var pi = 0; pi < payments.length; pi++) {
+      var pay = payments[pi];
+      var fp  = pay.formaPago;
+      var amt = parseFloat(pay.monto) || 0;
+      if (!amt) continue;
+
+      if (fp === 'Efectivo') {
+        saveCajaChicaIngreso({fecha: newFecha, concepto: bankObs, entrada: amt});
+      } else if (fp === 'Santander') {
+        saveBankRow('santander', [newFecha, amt, 0, 0, bankObs, 0, 0, '', '']);
+      } else if (fp === 'TDC' || fp === 'TDD' || fp === 'AMEX' || fp === 'Transferencia') {
+        saveBankRow('mercadopago', [mesStr, newFecha, amt, 0, 0, amt, 0, false, bankObs, 'CARGO']);
+      }
+    }
+
+    return {ok:true, op:opId, edited:true, bankSynced:true};
+  } catch(ex) {
+    return {ok:false, error:ex.message};
+  }
+}
+
+function deleteIngreso(payload) {
+  try {
+    if (!_tokenHasPermission(payload.token || '', 'borrar_ingresos')) {
+      return {ok:false, error:'Sin autorizacion para borrar ingresos. Solicita el permiso borrar_ingresos al administrador.'};
+    }
+    var opId = String(payload.opId || '').trim();
+    if (!opId) return {ok:false, error:'opId requerido'};
+
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sheets = ss.getSheets();
+    var sheet = null;
+    for (var i = 0; i < sheets.length; i++) {
+      if (sheets[i].getName() === BD_INGRESOS_TAB) { sheet = sheets[i]; break; }
+    }
+    if (!sheet) return {ok:false, error:'BD_Ingresos no encontrada'};
+
+    var data = sheet.getDataRange().getValues();
+    var origRows = [];
+    var rowNums  = [];
+    for (var r = data.length - 1; r >= 1; r--) {
+      if (String(data[r][0]).trim() === opId) {
+        origRows.push(data[r]);
+        rowNums.push(r + 1);
+      }
+    }
+    if (!origRows.length) return {ok:false, error:'OP ' + opId + ' no encontrada'};
+
+    var first      = origRows[origRows.length - 1];
+    var origFP     = String(first[12] || '');
+    var origFecha  = String(first[2]  || '');
+    var origPac    = String(first[3]  || '');
+    var origObs    = String(first[16] || '');
+    var origPagado = origRows.reduce(function(s, r) { return s + (parseFloat(r[10]) || 0); }, 0);
+    var origObsBank = (origObs ? origObs + ' · ' : '') + 'Px. ' + origPac;
+
+    _reverseIngresoBank(opId, origFP, origFecha, origPagado, origObsBank);
+
+    for (var d = 0; d < rowNums.length; d++) {
+      sheet.deleteRow(rowNums[d]);
+    }
+
+    try {
+      logAudit(payload.usuario || 'sistema', 'Ingresos', 'Borrar', opId, 'Eliminado',
+        rowNums.length + ' lineas · $' + origPagado.toFixed(2), 'FP: ' + origFP);
+    } catch(ae) {}
+
+    try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch(e) {}
+    return {ok:true, op:opId, deleted:true, lineas:rowNums.length};
+  } catch(ex) {
+    return {ok:false, error:ex.message};
+  }
+}
