@@ -12484,8 +12484,18 @@ function _amexProvExists(name){
   return false;
 }
 
+function _renderAmexSubtipoDatalist(){
+  var dl=document.getElementById('amex-subtipo-dl');
+  if(!dl){ dl=document.createElement('datalist'); dl.id='amex-subtipo-dl'; document.body.appendChild(dl); }
+  var base=['Software','Servicio','Suscripción','Marketing','Honorarios','Insumos','Renta',
+            'Utilidades','Seguros','Impuestos','Nómina','Viáticos','Laboratorio','Farmacia','Otro'];
+  var extra=(window._egData&&_egData.subtipos)||[];
+  extra.forEach(function(s){ if(s&&base.indexOf(s)===-1) base.push(s); });
+  dl.innerHTML=base.sort().map(function(s){ return '<option value="'+s.replace(/"/g,'&quot;')+'">'; }).join('');
+}
+
 async function amexConciliaLoad(force){
-  try{ _renderProvDatalist(); }catch(e){}
+  try{ _renderProvDatalist(); _renderAmexSubtipoDatalist(); }catch(e){}
   var body = document.getElementById('amex-concilia-body'); if(!body) return;
   body.innerHTML='<div style="padding:12px 0;font-size:12px;color:var(--text-secondary,#9ca3af)">Analizando movimientos AMEX…</div>';
   try {
@@ -12605,13 +12615,26 @@ function _amexGapCard(g, status){
   if(isConciliado){
     // Mostrar proveedor/concepto guardados en el estado
     var st={}; try{ st=JSON.parse(localStorage.getItem(_amexGapKey(g))||'{}'); }catch(e){}
-    if(st.proveedor) html+='<div style="font-size:12px;color:#166534;font-weight:600">'+_amexEsc(st.proveedor)+(st.concepto&&st.concepto!==st.proveedor?' · <span style="font-weight:400;color:var(--text-secondary,#6b7280)">'+_amexEsc(st.concepto)+'</span>':'')+'</div>';
+    if(st.proveedor) html+='<div style="font-size:12px;color:#166534;font-weight:600">'+_amexEsc(st.proveedor)
+      +(st.concepto&&st.concepto!==st.proveedor?' · <span style="font-weight:400;color:var(--text-secondary,#6b7280)">'+_amexEsc(st.concepto)+'</span>':'')
+      +(st.tipo||st.subtipo?'<span style="margin-left:8px;font-size:10px;font-weight:500;color:var(--text-secondary,#6b7280)">'+(st.tipo||'')+(st.tipo&&st.subtipo?' · ':'')+_amexEsc(st.subtipo||'')+'</span>':'')
+      +'</div>';
   } else if(!isDiscarded){
     html+='<div style="display:flex;gap:8px;flex-wrap:wrap">';
     html+='<div style="flex:1;min-width:140px"><label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af);display:block;margin-bottom:3px">Proveedor <span style="color:#dc2626">*</span></label>'
       +'<input id="'+key+'-prov" type="text" value="'+_amexEsc(g.proveedorSugerido||'')+'" list="prov-datalist" placeholder="Selecciona o escribe un proveedor dado de alta…" style="width:100%;box-sizing:border-box;padding:5px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"></div>';
     html+='<div style="flex:1;min-width:160px"><label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af);display:block;margin-bottom:3px">Concepto</label>'
       +'<input id="'+key+'-conc" type="text" value="'+_amexEsc(g.referencia||'')+'" style="width:100%;box-sizing:border-box;padding:5px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"></div>';
+    html+='</div>';
+    // Segunda fila: Tipo + Subtipo
+    html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">';
+    html+='<div style="min-width:110px"><label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af);display:block;margin-bottom:3px">Tipo <span style="color:#dc2626">*</span></label>'
+      +'<select id="'+key+'-tipo" style="width:100%;box-sizing:border-box;padding:5px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
+      +'<option value="Variable">Variable</option>'
+      +'<option value="Fijo">Fijo</option>'
+      +'</select></div>';
+    html+='<div style="flex:1;min-width:140px"><label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af);display:block;margin-bottom:3px">Subtipo</label>'
+      +'<input id="'+key+'-subtipo" type="text" list="amex-subtipo-dl" placeholder="Software, Servicio, Marketing…" style="width:100%;box-sizing:border-box;padding:5px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"></div>';
     html+='</div>';
   }
   html+='</div>';
@@ -12661,10 +12684,14 @@ function _amexGetGapFromBtn(cardId){
 
 async function amexGapAdd(cardId){
   var g=_amexGetGapFromBtn(cardId); if(!g) return;
-  var provEl=document.getElementById(cardId+'-prov');
-  var concEl=document.getElementById(cardId+'-conc');
-  var prov=((provEl?provEl.value:'')||g.proveedorSugerido||'').trim();
-  var conc=((concEl?concEl.value:'')||g.referencia||'').trim();
+  var provEl   = document.getElementById(cardId+'-prov');
+  var concEl   = document.getElementById(cardId+'-conc');
+  var tipoEl   = document.getElementById(cardId+'-tipo');
+  var subtipoEl= document.getElementById(cardId+'-subtipo');
+  var prov    = ((provEl?provEl.value:'')||g.proveedorSugerido||'').trim();
+  var conc    = ((concEl?concEl.value:'')||g.referencia||'').trim();
+  var tipo    = (tipoEl?tipoEl.value:'Variable')||'Variable';
+  var subtipo = (subtipoEl?subtipoEl.value:'').trim();
   if(!prov){ alert('Selecciona un proveedor'); if(provEl) provEl.focus(); return; }
   if(!_amexProvExists(prov)){
     alert('El proveedor "'+prov+'" no está dado de alta en el catálogo.\n\nDa de alta el proveedor primero en el módulo de Proveedores y luego regresa a conciliar.');
@@ -12672,7 +12699,6 @@ async function amexGapAdd(cardId){
     return;
   }
   if(provEl) provEl.style.borderColor='';
-  var now=new Date();
   var mes=g.fecha.substring(0,7);
   var año=parseInt(g.fecha.substring(0,4));
   var s=getSession()||{};
@@ -12680,6 +12706,7 @@ async function amexGapAdd(cardId){
     action:'saveEgreso', usuario:s.email||'sistema',
     fecha:g.fecha, mes:mes, año:año,
     proveedor:prov, concepto:conc, contable:'Gasto',
+    tipo:tipo, subtipo:subtipo,
     monto:g.monto, divisa:'MXN',
     formaPago:'AMEX', pagado:true, conciliacion:true,
     notas:'Agregado desde conciliación AMEX · '+g.referencia,
@@ -12694,7 +12721,8 @@ async function amexGapAdd(cardId){
       try{
         localStorage.setItem(_amexGapKey(g), JSON.stringify({
           status:'conciliado', fecha:g.fecha, monto:g.monto, referencia:g.referencia,
-          proveedor:prov, concepto:conc, egresoId:res.id||res.rowNum||'', ts:Date.now()
+          proveedor:prov, concepto:conc, tipo:tipo, subtipo:subtipo,
+          egresoId:res.id||res.rowNum||'', ts:Date.now()
         }));
       }catch(e){}
       _amexShowToast('✓ Egreso registrado — '+prov+' '+_amexFM(g.monto));
