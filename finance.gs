@@ -1248,33 +1248,43 @@ function pagarCxP(body) {
     }
 
     // Rutear a banco según forma de pago
+    var mesStr = fechaPago.substring(0, 7);
+    var usdAmt = esUSD ? montoUSD : '';
+    var tc     = esUSD ? tipoCambio : '';
+    var ref    = concepto + ' · ' + proveedor + ' [Egreso #' + egId + ']';
     if (formaPago === 'Efectivo' && monto > 0) {
-      // Efectivo → Caja Chica
+      // Efectivo → Caja Chica (usa getCajaChicaSheet para apuntar al SS correcto)
       try {
-        var ccSh = ss.getSheetByName('CajaChica') || ss.getSheetByName('Caja Chica');
-        if (!ccSh) {
-          // Buscar en otro spreadsheet si es necesario
-          var ssPrincipal = SpreadsheetApp.openById(SHEET_ID);
-          ccSh = ssPrincipal.getSheetByName('CajaChica') || ssPrincipal.getSheetByName('Caja Chica');
+        var ccSh = getCajaChicaSheet();
+        var ccData = ccSh.getDataRange().getValues();
+        var ccHdr  = ccData[0].map(function(h){ return String(h).trim().toUpperCase(); });
+        var ciF = ccHdr.indexOf('FECHA'), ciC = ccHdr.indexOf('CONCEPTO'), ciS = ccHdr.indexOf('SALIDA');
+        // Buscar primera fila vacía o append
+        var ccRow = -1;
+        for (var ci = 1; ci < ccData.length; ci++) {
+          if (!String(ccData[ci][ciF]||'').trim() && !String(ccData[ci][ciC]||'').trim()) { ccRow = ci + 1; break; }
         }
-        if (ccSh) {
-          ccSh.appendRow([new Date(fechaPago), proveedor + ' - ' + concepto, -monto, '', 'Egreso #' + egId]);
-        }
-      } catch(ccErr) { /* silencioso */ }
+        if (ccRow === -1) ccRow = ccSh.getLastRow() + 1;
+        ccSh.getRange(ccRow, ciF+1).setValue(fechaPago);
+        ccSh.getRange(ccRow, ciC+1).setValue(ref);
+        ccSh.getRange(ccRow, ciS+1).setValue(monto);
+        SpreadsheetApp.flush();
+      } catch(ccErr) { Logger.log('pagarCxP Efectivo→CajaChica error: ' + ccErr.message); }
     } else if (formaPago && monto > 0) {
-      // Otros → banco correspondiente.
-      // Columnas reales: Santander → F(idx5)=Depósito USD, G(idx6)=T.Cambio.
-      //                  AMEX      → E(idx4)=USD,          F(idx5)=Tipo de cambio.
       var banco = '', bankRow = null;
-      var mesStr = fechaPago.substring(0, 7);
-      var usdAmt = esUSD ? montoUSD : '';   // monto en dólares
-      var tc     = esUSD ? tipoCambio : '';  // tipo de cambio
-      var ref = concepto + ' · ' + proveedor;
-      if (formaPago === 'Santander') { banco = 'santander'; bankRow = [fechaPago, 0, monto, 0, ref, usdAmt, tc, '', '']; }
-      else if (formaPago === 'AMEX') { banco = 'amex'; bankRow = [fechaPago, monto, 0, ref, usdAmt, tc, '', '', mesStr]; }
-      else if (formaPago === 'Mercado Pago') { banco = 'mercadopago'; bankRow = [mesStr, fechaPago, 0, 0, 0, 0, 0, false, ref, 'pago']; }
+      if (formaPago === 'Santander' || formaPago === 'Transferencia') {
+        banco = 'santander';
+        bankRow = [fechaPago, 0, monto, 0, ref, usdAmt, tc, '', ''];
+      } else if (formaPago === 'AMEX') {
+        banco = 'amex';
+        bankRow = [fechaPago, monto, 0, ref, usdAmt, tc, '', '', mesStr];
+      } else if (formaPago === 'Mercado Pago' || formaPago === 'TDC' || formaPago === 'TDD') {
+        banco = 'mercadopago';
+        // neto negativo = salida de fondos de Mercado Pago
+        bankRow = [mesStr, fechaPago, 0, 0, 0, -monto, 0, false, ref, 'PAGO'];
+      }
       if (banco && bankRow) {
-        try { saveBankRow(banco, bankRow); } catch(bErr) { /* silencioso */ }
+        try { saveBankRow(banco, bankRow); } catch(bErr) { Logger.log('pagarCxP banco error: ' + bErr.message); }
       }
     }
 
