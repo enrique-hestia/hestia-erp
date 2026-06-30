@@ -3399,11 +3399,22 @@ async function ingOnPacienteChange() {
       _ingPacienteLista = d.lista;
       if (listaLabel) listaLabel.textContent = 'Lista: '+d.lista;
       // Refrescar datalists de productos con precios de la nueva lista
+      // Sin llamar ingOnCatChange (limpia los valores) — solo actualizar datalist
       for (var i=1;i<=_ingLineCount;i++) {
         var dlEl = document.getElementById('ing-prodlist-'+i);
-        if (dlEl) dlEl.innerHTML = _ingBuildProdDatalist(i);
-        var catEl = document.getElementById('ing-cat-'+i);
-        if (catEl && catEl.value) ingOnCatChange(i);
+        var catEl2 = document.getElementById('ing-cat-'+i);
+        var cat2 = catEl2 ? catEl2.value : '';
+        if (dlEl) {
+          var prods2 = cat2 ? ingGetProductosByCat(cat2) : _ingProductos.filter(function(p){return p.activo!==false;});
+          var dh = '';
+          prods2.forEach(function(p) {
+            var precio2 = (p.precios && p.precios[_ingPacienteLista]) ? p.precios[_ingPacienteLista]
+                       : (p.precios && p.precios['General']) ? p.precios['General']
+                       : p.precio || 0;
+            dh += '<option value="'+p.descripcion.replace(/"/g,'&quot;')+'" data-precio="'+precio2+'">';
+          });
+          dlEl.innerHTML = dh;
+        }
       }
     }
   } catch(e) { _ingPacienteLista = 'General'; }
