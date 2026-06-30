@@ -1412,6 +1412,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
       <button class="pc-tab" onclick="pcTab('general',this)">General</button>
       <button class="pc-tab" onclick="pcTab('programacion',this)">Programación</button>
       <button class="pc-tab" onclick="pcTab('formato',this)">Formato impresión</button>
+      <button class="pc-tab" onclick="pcTab('formularios',this)">Formularios</button>
     </div>
 
     <!-- ── Apariencia ─────────────────────────────────────── -->
@@ -1673,6 +1674,19 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
       </div>
     </div>
 
+    <!-- ── Formularios ───────────────────────────────────────── -->
+    <div id="pc-formularios" class="pc-section" style="display:none">
+      <div class="pc-card">
+        <div class="pc-card-title">Opciones de formularios</div>
+        <div style="font-size:12px;color:var(--color-text-muted);margin-bottom:16px">
+          Edita los valores que aparecen en los dropdowns de toda la aplicación. Los cambios se guardan directamente en Google Sheets y entran en efecto de inmediato.
+        </div>
+        <div id="dd-loading" style="text-align:center;padding:32px;color:var(--color-text-muted);font-size:13px">
+          Cargando opciones...
+        </div>
+        <div id="dd-editor" style="display:none"></div>
+      </div>
+    </div>
 
   </div>
 </div>
@@ -4709,8 +4723,15 @@ function egOpenForm() {
   var today = new Date().toISOString().substring(0, 10);
   // Proveedores: usa el datalist GLOBAL (catálogo central + nombres ya usados).
   try { _renderProvDatalist(); } catch(e){}
-  var subOpts = ((_egData && _egData.subtipos) || []).map(function(s){ return '<option value="'+s.replace(/"/g,'&quot;')+'">'+s+'</option>'; }).join('');
-  var fpOpts = ['Santander','Mercado Pago','AMEX','Efectivo','TDC','TDD','Transferencia'].map(function(f){ return '<option value="'+f+'">'+f+'</option>'; }).join('');
+  // Opciones desde Config_Dropdowns (Panel de Control > Formularios), con fallback a datos existentes
+  function _ddOpts(sec, campo, fallback) {
+    var vals = (_ddData && _ddData[sec] && _ddData[sec][campo] && _ddData[sec][campo].valores) || fallback || [];
+    return vals.map(function(v){ return '<option value="'+v.replace(/"/g,'&quot;')+'">'+v+'</option>'; }).join('');
+  }
+  var subOpts   = _ddOpts('Egresos','subtipo',   (_egData&&_egData.subtipos)||[]);
+  var contOpts  = _ddOpts('Egresos','contable',  ['Gasto','Costo','Crédito']);
+  var tipoOpts  = _ddOpts('Egresos','tipo',      ['Fijo','Variable']);
+  var fpOpts    = _ddOpts('Egresos','formaPago', ['Santander','Mercado Pago','AMEX','Efectivo','TDC','TDD','Transferencia']);
 
   var S = 'style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"';
   var LBL = 'style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px"';
@@ -4730,10 +4751,10 @@ function egOpenForm() {
     +'<div><label '+LBL+'>Monto *</label><input type="number" id="eg-monto" '+S+' placeholder="0.00" step="0.01"></div>'
     +'</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
-    +'<div><label '+LBL+'>Contable</label><select id="eg-contable" '+S+'><option value="Gasto">Gasto</option><option value="Costo">Costo</option><option value="Crédito">Crédito</option></select></div>'
-    +'<div><label '+LBL+'>Tipo</label><select id="eg-tipo" '+S+'><option value="Fijo">Fijo</option><option value="Variable">Variable</option></select></div>'
+    +'<div><label '+LBL+'>Contable</label><select id="eg-contable" '+S+'><option value="">— Seleccionar —</option>'+contOpts+'</select></div>'
+    +'<div><label '+LBL+'>Tipo</label><select id="eg-tipo" '+S+'><option value="">— Seleccionar —</option>'+tipoOpts+'</select></div>'
     +'<div><label '+LBL+'>Subtipo</label><select id="eg-subtipo" '+S+'><option value="">— Seleccionar —</option>'+subOpts+'</select></div>'
-    +'<div><label '+LBL+'>Forma de pago</label><select id="eg-fpago" '+S+'>'+fpOpts+'</select></div>'
+    +'<div><label '+LBL+'>Forma de pago</label><select id="eg-fpago" '+S+'><option value="">— Seleccionar —</option>'+fpOpts+'</select></div>'
     +'</div>'
     +'<div style="margin-bottom:14px"><label '+LBL+'>Concepto *</label><input id="eg-concepto" '+S+' placeholder="Descripción del egreso"></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
@@ -10828,7 +10849,7 @@ function fmtSyncColor(type) {
 
 function pcTab(tab, btn, silent) {
   _pcActiveTab = tab;
-  ['apariencia','menu','conexiones','general','programacion','formato'].forEach(function(t) {
+  ['apariencia','menu','conexiones','general','programacion','formato','formularios'].forEach(function(t) {
     var el = document.getElementById('pc-' + t);
     if (el) el.style.display = (t === tab) ? '' : 'none';
   });
@@ -10837,6 +10858,181 @@ function pcTab(tab, btn, silent) {
   });
   if (tab === 'formato') { fmtLoad(); fmtSyncColor('primary'); fmtSyncColor('text'); fmtSyncColor('accent'); }
   if (tab === 'programacion') { pcLoadScheduled(); }
+  if (tab === 'formularios') { ddLoad(); }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   DROPDOWN CONFIG — editor en Panel de Control
+   ══════════════════════════════════════════════════════════════ */
+var _ddData = null; // cache de dropdowns cargados
+
+async function ddLoad(force) {
+  var loading = document.getElementById('dd-loading');
+  var editor  = document.getElementById('dd-editor');
+  if (!loading || !editor) return;
+  if (_ddData && !force) { ddRender(_ddData); return; }
+  loading.style.display = '';
+  editor.style.display  = 'none';
+  try {
+    var tok = encodeURIComponent(getToken());
+    var r   = await fetch(APPS_SCRIPT_URL+'?action=getDropdowns&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+    var d   = await r.json();
+    if (!d.ok) throw new Error(d.error||'Error cargando dropdowns');
+    _ddData = d.dropdowns;
+    ddRender(_ddData);
+  } catch(ex) {
+    loading.innerHTML = '<div style="color:#dc2626;padding:20px;text-align:center">Error: '+ex.message+'<br><button onclick="ddLoad(true)" style="margin-top:10px;padding:6px 16px;border-radius:6px;border:1px solid #dc2626;background:#fff;color:#dc2626;cursor:pointer">Reintentar</button></div>';
+  }
+}
+
+function ddRender(data) {
+  var loading = document.getElementById('dd-loading');
+  var editor  = document.getElementById('dd-editor');
+  if (!loading || !editor) return;
+  loading.style.display = 'none';
+  editor.style.display  = '';
+
+  var secciones = Object.keys(data).sort();
+  var COLORS = {Egresos:'#ef4444',CxP:'#f97316',Ingresos:'#22c55e',General:'#6366f1'};
+
+  var h = '';
+  secciones.forEach(function(sec) {
+    var campos = data[sec];
+    var col = COLORS[sec] || '#c46a7a';
+    h += '<div style="margin-bottom:24px">';
+    h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">'
+       + '<span style="width:10px;height:10px;border-radius:50%;background:'+col+';display:inline-block"></span>'
+       + '<span style="font-size:13px;font-weight:700;color:var(--color-text)">'+sec+'</span>'
+       + '</div>';
+
+    Object.keys(campos).sort().forEach(function(campo) {
+      var cfg  = campos[campo];
+      var ddId = 'dd-'+sec+'-'+campo;
+      h += '<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:10px;padding:14px 16px;margin-bottom:10px">';
+      h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">';
+      h += '<span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted)">'+cfg.etiqueta+'</span>';
+      h += '<button onclick="ddSave(\''+sec+'\',\''+campo+'\',\''+cfg.etiqueta+'\')" '
+         + 'style="padding:4px 14px;font-size:11px;font-weight:600;border-radius:6px;border:1px solid '+col+';background:'+col+';color:#fff;cursor:pointer">Guardar</button>';
+      h += '</div>';
+      // Chips container
+      h += '<div id="'+ddId+'-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">';
+      cfg.valores.forEach(function(v, vi) {
+        h += '<span style="display:inline-flex;align-items:center;gap:4px;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:20px;padding:4px 10px;font-size:12px">'
+           + '<span>'+v+'</span>'
+           + '<button onclick="ddRemoveChip(\''+ddId+'\','+vi+')" title="Eliminar" '
+           + 'style="width:14px;height:14px;border-radius:50%;border:none;background:#e5e7eb;color:#6b7280;cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center;padding:0;line-height:1">✕</button>'
+           + '</span>';
+      });
+      h += '</div>';
+      // Input para agregar
+      h += '<div style="display:flex;gap:6px">'
+         + '<input id="'+ddId+'-input" type="text" placeholder="Nuevo valor..." onkeydown="if(event.key===\'Enter\'){event.preventDefault();ddAddChip(\''+ddId+'\')}" '
+         + 'style="flex:1;padding:6px 10px;border:1.5px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--card-bg,#fff);color:var(--color-text)">'
+         + '<button onclick="ddAddChip(\''+ddId+'\')" '
+         + 'style="padding:6px 14px;border-radius:7px;border:1px solid var(--color-divider);background:var(--color-surface);font-size:12px;cursor:pointer;font-weight:600">+ Agregar</button>'
+         + '</div>';
+      h += '</div>'; // end card
+    });
+    h += '</div>'; // end section
+  });
+
+  // Botón para crear nueva sección/campo
+  h += '<div style="border-top:1px solid var(--color-divider);padding-top:16px;margin-top:4px">'
+     + '<button onclick="ddNuevoCampo()" style="padding:8px 18px;border-radius:8px;border:1.5px dashed var(--color-divider);background:transparent;font-size:12px;font-weight:600;color:var(--color-text-muted);cursor:pointer;width:100%">+ Agregar nueva sección / campo</button>'
+     + '</div>';
+
+  editor.innerHTML = h;
+}
+
+function ddGetValores(ddId) {
+  var chips = document.querySelectorAll('#'+ddId+'-chips span > span');
+  return Array.from(chips).map(function(s){ return s.textContent.trim(); }).filter(Boolean);
+}
+
+function ddAddChip(ddId) {
+  var input = document.getElementById(ddId+'-input');
+  if (!input || !input.value.trim()) return;
+  var val = input.value.trim();
+  var chips = document.getElementById(ddId+'-chips');
+  var idx   = chips.querySelectorAll('span[style]').length;
+  var span  = document.createElement('span');
+  span.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:20px;padding:4px 10px;font-size:12px';
+  span.innerHTML = '<span>'+val+'</span>'
+    + '<button onclick="this.parentElement.remove()" title="Eliminar" '
+    + 'style="width:14px;height:14px;border-radius:50%;border:none;background:#e5e7eb;color:#6b7280;cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center;padding:0;line-height:1">✕</button>';
+  chips.appendChild(span);
+  input.value = '';
+  input.focus();
+}
+
+function ddRemoveChip(ddId, idx) {
+  var chips = document.getElementById(ddId+'-chips');
+  if (!chips) return;
+  var items = chips.querySelectorAll('span[style]');
+  if (items[idx]) items[idx].remove();
+}
+
+async function ddSave(sec, campo, etiqueta) {
+  var ddId   = 'dd-'+sec+'-'+campo;
+  var valores = ddGetValores(ddId).join('|');
+  var btn     = document.querySelector('#'+ddId+' + div button, [onclick*="ddSave(\''+sec+'\',\''+campo+'\'"]');
+  // Find the save button
+  var allBtns = document.querySelectorAll('#dd-editor button');
+  var saveBtn = null;
+  allBtns.forEach(function(b){ if(b.getAttribute('onclick')&&b.getAttribute('onclick').indexOf("ddSave('"+sec+"','"+campo+"'")>=0) saveBtn=b; });
+  if (saveBtn) { saveBtn.textContent = 'Guardando…'; saveBtn.disabled = true; }
+  try {
+    var tok  = encodeURIComponent(getToken());
+    var body = encodeURIComponent(JSON.stringify({seccion:sec, campo:campo, etiqueta:etiqueta, valores:valores}));
+    var r    = await fetch(APPS_SCRIPT_URL+'?action=saveDropdown&token='+tok, {
+      method:'POST', redirect:'follow',
+      body: JSON.stringify({action:'saveDropdown', token:getToken(), data:body})
+    });
+    var d = await r.json();
+    if (!d.ok) throw new Error(d.error||'Error guardando');
+    // Actualizar cache local
+    if (_ddData && _ddData[sec] && _ddData[sec][campo]) {
+      _ddData[sec][campo].valores = ddGetValores(ddId);
+    }
+    if (saveBtn) { saveBtn.textContent = '✓ Guardado'; saveBtn.style.background='#22c55e'; saveBtn.style.borderColor='#22c55e'; }
+    setTimeout(function(){ if(saveBtn){ saveBtn.textContent='Guardar'; saveBtn.disabled=false; saveBtn.style.background=''; saveBtn.style.borderColor=''; } }, 2500);
+    // Aplicar inmediatamente en los formularios
+    _ddApply(sec, campo, ddGetValores(ddId));
+  } catch(ex) {
+    if (saveBtn) { saveBtn.textContent = '✕ Error'; saveBtn.style.background='#dc2626'; saveBtn.style.borderColor='#dc2626'; }
+    setTimeout(function(){ if(saveBtn){ saveBtn.textContent='Guardar'; saveBtn.disabled=false; saveBtn.style.background=''; saveBtn.style.borderColor=''; } }, 3000);
+    showToast('Error al guardar: '+ex.message, 'error');
+  }
+}
+
+function ddNuevoCampo() {
+  var sec   = prompt('Sección (ej: Egresos, Ingresos, CxP, General):');
+  if (!sec) return;
+  var campo = prompt('Nombre del campo (clave, sin espacios, ej: subtipo):');
+  if (!campo) return;
+  var etiq  = prompt('Etiqueta que verá el usuario (ej: Subtipo / Categoría):');
+  if (!etiq) return;
+  if (!_ddData) _ddData = {};
+  if (!_ddData[sec]) _ddData[sec] = {};
+  _ddData[sec][campo] = { etiqueta: etiq, valores: [] };
+  ddRender(_ddData);
+}
+
+function _ddApply(sec, campo, valores) {
+  // Actualiza en tiempo real los selects del formulario que usen ese dropdown
+  var selId = null;
+  if (sec==='Egresos'  && campo==='subtipo')   selId = 'eg-subtipo';
+  if (sec==='Egresos'  && campo==='contable')  selId = 'eg-contable';
+  if (sec==='Egresos'  && campo==='tipo')      selId = 'eg-tipo';
+  if (sec==='Egresos'  && campo==='formaPago') selId = 'eg-fpago';
+  if (selId) {
+    var sel = document.getElementById(selId);
+    if (sel) {
+      var cur = sel.value;
+      sel.innerHTML = '<option value="">— Seleccionar —</option>'
+        + valores.map(function(v){ return '<option value="'+v+'"'+(v===cur?' selected':'')+'>'+v+'</option>'; }).join('');
+    }
+  }
 }
 
 /* ── Tareas programadas (scheduler) ─────────────────────────── */

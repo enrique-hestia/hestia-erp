@@ -354,6 +354,15 @@ function doGet(e) {
       return jsonResponse(readFormatos());
     }
 
+    if (action === 'getDropdowns') {
+      return jsonResponse(readDropdowns());
+    }
+
+    if (action === 'saveDropdown') {
+      var ddData = e.parameter.data || '{}';
+      return jsonResponse(saveDropdownValues(JSON.parse(decodeURIComponent(ddData))));
+    }
+
     if (action === 'saveFormatos') {
       var fmtData = e.parameter.data || '{}';
       return jsonResponse(saveFormatos(JSON.parse(decodeURIComponent(fmtData))));
