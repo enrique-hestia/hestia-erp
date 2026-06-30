@@ -655,12 +655,16 @@ function readBanksData() {
       var r=sheet.getDataRange().getValues(); if(r.length<2) return B;
       for(var i=r.length-1;i>=1;i--){ var s=num(r[i][2]); if(s!==0){B.saldo=s;break;} }
       B.totalRows=r.length-1;
-      B.movimientos=r.slice(1).map(function(x,idx){
-        var m=num(x[1]);
-        return{rowNum:idx+2,fecha:dt(x[0]),monto:m,saldo:num(x[2]),referencia:String(x[3]||''),
-               usd:num(x[4]),tipoCambio:num(x[5]),notas:String(x[6]||''),
-               poliza:String(x[7]||''),mes:String(x[8]||''),tipo:m>=0?'cargo':'pago'};
-      }).slice(-30).reverse();
+      var amexRows=[];
+      for(var i=1;i<r.length;i++){
+        var m=num(r[i][1]);
+        var f=dt(r[i][0]);
+        if(!f&&m===0) continue; // saltar filas vacías
+        amexRows.push({rowNum:i+1,fecha:f,monto:m,saldo:num(r[i][2]),referencia:String(r[i][3]||''),
+                       usd:num(r[i][4]),tipoCambio:num(r[i][5]),notas:String(r[i][6]||''),
+                       poliza:String(r[i][7]||''),mes:String(r[i][8]||''),tipo:m>=0?'cargo':'pago'});
+      }
+      B.movimientos=amexRows.reverse(); // más recientes primero, sin límite de filas
       return B;
     }
     function rMP(sheet) {
