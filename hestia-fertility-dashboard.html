@@ -12482,9 +12482,13 @@ function _amexRenderGaps(){
   var snoozeBtn = document.getElementById('amex-snooze-btn');
   var snoozeCnt = document.getElementById('amex-snooze-cnt');
 
-  var pending   = _amexGaps.filter(function(g){ return _amexGapState(g)==='pending'; });
-  var snoozed   = _amexGaps.filter(function(g){ return _amexGapState(g)==='snoozed'; });
-  var discarded = _amexGaps.filter(function(g){ return _amexGapState(g)==='discarded'; });
+  var pending    = _amexGaps.filter(function(g){ return _amexGapState(g)==='pending'; });
+  var snoozed    = _amexGaps.filter(function(g){ return _amexGapState(g)==='snoozed'; });
+  var discarded  = _amexGaps.filter(function(g){ return _amexGapState(g)==='discarded'; });
+  // Conciliados locales = gaps validados esta sesión (localStorage 'conciliado')
+  var concLocals = _amexGaps.filter(function(g){ return _amexGapState(g)==='conciliado'; });
+  // Conciliados totales = locales + los que el backend ya encontró cruzados
+  var totalConc  = concLocals.length + (_amexConciliados||[]).length;
 
   if(badge){ if(pending.length){ badge.textContent=pending.length; badge.style.display='inline'; }else{ badge.style.display='none'; } }
   if(snoozeBtn){ snoozeBtn.style.display=(snoozed.length>0)?'inline-block':'none'; }
@@ -12496,9 +12500,7 @@ function _amexRenderGaps(){
   if(pending.length){
     html+='<div style="margin-bottom:16px">';
     html+='<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#dc2626;margin-bottom:8px">⚠ Sin egreso registrado ('+pending.length+')</div>';
-    pending.forEach(function(g){
-      html+=_amexGapCard(g,'pending');
-    });
+    pending.forEach(function(g){ html+=_amexGapCard(g,'pending'); });
     html+='</div>';
   }
 
@@ -12510,6 +12512,19 @@ function _amexRenderGaps(){
     html+='</div>';
   }
 
+  // ── Conciliados ────────────────────────────────────────
+  if(totalConc > 0){
+    html+='<details'+(pending.length?' ':'  open ')+'style="margin-bottom:12px">';
+    html+='<summary style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#166534;cursor:pointer;user-select:none;list-style:none;display:flex;align-items:center;gap:6px">'
+      +'<span style="font-size:15px">✓</span> Conciliados ('+totalConc+')</summary>';
+    html+='<div style="margin-top:8px">';
+    // Primero los validados esta sesión
+    concLocals.forEach(function(g){ html+=_amexGapCard(g,'conciliado'); });
+    // Luego los que el backend ya cruzó (venían con egreso previo)
+    (_amexConciliados||[]).forEach(function(c){ html+=_amexConciliadoCard(c); });
+    html+='</div></details>';
+  }
+
   // ── Descartados (restaurables) ─────────────────────────
   if(discarded.length){
     html+='<details style="margin-bottom:8px"><summary style="font-size:11px;color:var(--text-secondary,#9ca3af);cursor:pointer;user-select:none">Descartados ('+discarded.length+') — clic para ver / restaurar</summary><div style="margin-top:8px">';
@@ -12517,16 +12532,9 @@ function _amexRenderGaps(){
     html+='</div></details>';
   }
 
-  // ── Sin gaps pendientes ────────────────────────────────
-  if(!pending.length && !snoozed.length){
-    if(_amexGaps.length===0){
-      html+='<div style="font-size:12px;color:var(--text-secondary,#9ca3af)">No se encontraron cargos AMEX para el período.</div>';
-    } else {
-      html+='<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(22,101,52,.07);border-radius:10px;font-size:12px;color:#166534">'
-        +'<span style="font-size:18px">✓</span>'
-        +'<span><b>Todo conciliado</b> — '+_amexConciliados.length+' cargo(s) AMEX tienen egreso registrado.</span>'
-        +'</div>';
-    }
+  // ── Mensaje si no hay nada pendiente ──────────────────
+  if(!pending.length && !snoozed.length && totalConc===0 && !discarded.length){
+    html+='<div style="font-size:12px;color:var(--text-secondary,#9ca3af)">No se encontraron cargos AMEX para el período.</div>';
   }
 
   body.innerHTML=html;
@@ -12534,16 +12542,28 @@ function _amexRenderGaps(){
 
 function _amexGapCard(g, status){
   var key='amex-g-'+g.fecha.replace(/-/g,'')+'-'+(g.monto+'').replace('.','');
-  var isDiscarded = status==='discarded';
-  var isSnoozed   = status==='snoozed';
-  var cardBg = isDiscarded?'rgba(0,0,0,.03)':isSnoozed?'rgba(245,158,11,.04)':'rgba(220,38,38,.04)';
-  var borderC = isDiscarded?'var(--color-divider,#e5e7eb)':isSnoozed?'rgba(245,158,11,.3)':'rgba(220,38,38,.2)';
+  var isDiscarded   = status==='discarded';
+  var isSnoozed     = status==='snoozed';
+  var isConciliado  = status==='conciliado';
+  var cardBg  = isConciliado?'rgba(22,101,52,.05)':isDiscarded?'rgba(0,0,0,.03)':isSnoozed?'rgba(245,158,11,.04)':'rgba(220,38,38,.04)';
+  var borderC = isConciliado?'rgba(22,101,52,.25)':isDiscarded?'var(--color-divider,#e5e7eb)':isSnoozed?'rgba(245,158,11,.3)':'rgba(220,38,38,.2)';
   var html='<div id="'+key+'" style="background:'+cardBg+';border:1.5px solid '+borderC+';border-radius:12px;padding:14px 16px;margin-bottom:10px'+(isDiscarded?';opacity:.65':'')+'">';
   html+='<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap">';
   html+='<div style="flex:1;min-width:200px">';
-  html+='<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-bottom:3px">'+g.fecha+' · <b style="color:'+(isDiscarded?'var(--text-secondary,#9ca3af)':'#dc2626')+'">'+_amexFM(g.monto)+'</b>'+(g.usd>0?' <span style="font-size:10px;color:#0369a1;font-weight:700">USD '+g.usd.toFixed(2)+'</span>':'')+'</div>';
-  html+='<div style="font-size:12px;color:var(--text-secondary,#374151);margin-bottom:8px;font-family:monospace">'+_amexEsc(g.referencia||'—')+'</div>';
-  if(!isDiscarded){
+  // Encabezado: fecha · monto
+  var montoColor = isConciliado?'#166534':isDiscarded?'var(--text-secondary,#9ca3af)':'#dc2626';
+  html+='<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-bottom:3px">'
+    +(isConciliado?'<span style="color:#166534;font-weight:700;margin-right:5px">✓</span>':'')
+    +g.fecha+' · <b style="color:'+montoColor+'">'+_amexFM(g.monto)+'</b>'
+    +(g.usd>0?' <span style="font-size:10px;color:#0369a1;font-weight:700">USD '+g.usd.toFixed(2)+'</span>':'')
+    +'</div>';
+  html+='<div style="font-size:12px;color:var(--text-secondary,#374151);margin-bottom:'+(isConciliado?'4':'8')+'px;font-family:monospace">'+_amexEsc(g.referencia||'—')+'</div>';
+
+  if(isConciliado){
+    // Mostrar proveedor/concepto guardados en el estado
+    var st={}; try{ st=JSON.parse(localStorage.getItem(_amexGapKey(g))||'{}'); }catch(e){}
+    if(st.proveedor) html+='<div style="font-size:12px;color:#166534;font-weight:600">'+_amexEsc(st.proveedor)+(st.concepto&&st.concepto!==st.proveedor?' · <span style="font-weight:400;color:var(--text-secondary,#6b7280)">'+_amexEsc(st.concepto)+'</span>':'')+'</div>';
+  } else if(!isDiscarded){
     html+='<div style="display:flex;gap:8px;flex-wrap:wrap">';
     html+='<div style="flex:1;min-width:140px"><label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af);display:block;margin-bottom:3px">Proveedor <span style="color:#dc2626">*</span></label>'
       +'<input id="'+key+'-prov" type="text" value="'+_amexEsc(g.proveedorSugerido||'')+'" list="prov-datalist" placeholder="Selecciona o escribe un proveedor dado de alta…" style="width:100%;box-sizing:border-box;padding:5px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"></div>';
@@ -12552,9 +12572,12 @@ function _amexGapCard(g, status){
     html+='</div>';
   }
   html+='</div>';
+
   // Botones
   html+='<div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">';
-  if(isDiscarded){
+  if(isConciliado){
+    html+='<div style="font-size:11px;color:#166534;font-weight:700;text-align:center;padding:4px 8px">✓ En Egresos</div>';
+  } else if(isDiscarded){
     html+='<button onclick="amexGapRestore(\''+key+'\')" data-gap="'+encodeURIComponent(JSON.stringify(g))+'" style="padding:5px 12px;background:rgba(59,130,246,.1);color:#2563eb;border:1px solid rgba(59,130,246,.25);border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">↩ Restaurar</button>';
     html+='<button onclick="amexGapDiscardFinal(\''+key+'\')" data-gap="'+encodeURIComponent(JSON.stringify(g))+'" style="padding:5px 12px;background:rgba(220,38,38,.08);color:#dc2626;border:none;border-radius:7px;font-size:10px;cursor:pointer">🗑 Definitivo</button>';
   } else if(isSnoozed){
@@ -12569,6 +12592,22 @@ function _amexGapCard(g, status){
   html+='</div>';
   html+='</div></div>';
   return html;
+}
+
+// Tarjeta para movimientos ya conciliados por el backend (cruzan con egreso existente)
+function _amexConciliadoCard(c){
+  return '<div style="background:rgba(22,101,52,.05);border:1.5px solid rgba(22,101,52,.2);border-radius:12px;padding:12px 16px;margin-bottom:8px">'
+    +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+    +'<span style="color:#166534;font-size:15px;flex-shrink:0">✓</span>'
+    +'<div style="flex:1;min-width:180px">'
+    +'<div style="font-size:11px;color:var(--text-secondary,#6b7280)">'+(c.fecha||'')
+      +' · <b style="color:#166534">'+_amexFM(c.monto)+'</b>'
+      +(c.usd>0?' <span style="font-size:10px;color:#0369a1;font-weight:700">USD '+c.usd.toFixed(2)+'</span>':'')
+      +'</div>'
+    +'<div style="font-size:12px;font-family:monospace;color:var(--text-secondary,#374151);margin-top:2px">'+_amexEsc(c.referencia||'—')+'</div>'
+    +(c.egProveedor?'<div style="font-size:12px;color:#166534;font-weight:600;margin-top:2px">'+_amexEsc(c.egProveedor)+'</div>':'')
+    +'</div>'
+    +'</div></div>';
 }
 
 function _amexGetGapFromBtn(cardId){
@@ -12609,9 +12648,13 @@ async function amexGapAdd(cardId){
     var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(payload)});
     var res=await r.json();
     if(res.ok||res.id){
-      _amexGapSetState(g,'processed');
-      _amexShowToast('✓ Egreso agregado — '+prov+' '+_amexFM(g.monto));
-      // Quitar la tarjeta del DOM con animación
+      try{
+        localStorage.setItem(_amexGapKey(g), JSON.stringify({
+          status:'conciliado', fecha:g.fecha, monto:g.monto, referencia:g.referencia,
+          proveedor:prov, concepto:conc, egresoId:res.id||res.rowNum||'', ts:Date.now()
+        }));
+      }catch(e){}
+      _amexShowToast('✓ Egreso registrado — '+prov+' '+_amexFM(g.monto));
       if(card){ card.style.transition='opacity .3s'; card.style.opacity='0'; setTimeout(function(){_amexRenderGaps();},320); }
     } else { alert('Error al guardar: '+(res.error||'sin detalle')); if(card){var btn=card.querySelector('button');if(btn){btn.disabled=false;btn.textContent='✓ Agregar a Egresos';}} }
   }catch(e){ alert('Error: '+e.message); }
