@@ -12437,7 +12437,7 @@ function _amexFM(v){
 }
 function _amexEsc(s){ var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
-// Escanea localStorage para todos los gaps con status='conciliado'.
+// Escanea localStorage para todos los gaps conciliados (status 'conciliado' o el viejo 'processed').
 // No depende de _amexGaps (en memoria), así persiste aunque el usuario navegue.
 function _amexGetLocalConciliados(){
   var result=[]; var seen={};
@@ -12446,10 +12446,20 @@ function _amexGetLocalConciliados(){
       var k=localStorage.key(i);
       if(!k||!k.startsWith('amex_gap_')) continue;
       var v={}; try{v=JSON.parse(localStorage.getItem(k)||'{}');}catch(e){continue;}
-      if(v.status!=='conciliado'||!v.fecha||!v.monto) continue;
-      var dedup=v.fecha+'_'+v.monto;
+      if(v.status!=='conciliado'&&v.status!=='processed') continue;
+      // Extraer fecha y monto: pueden venir en el objeto o del propio key (amex_gap_FECHA_MONTO)
+      var fecha=v.fecha||''; var montoRaw=v.monto;
+      if(!fecha||montoRaw===undefined||montoRaw===null||montoRaw===''){
+        // Intentar recuperar del key: amex_gap_2026-06-01_5217.39
+        var parts=k.replace('amex_gap_','').split('_');
+        if(parts.length>=2){ fecha=parts[0]; montoRaw=parts[parts.length-1]; }
+      }
+      var monto=parseFloat(String(montoRaw||'').replace(/[$,]/g,''))||0;
+      if(!fecha||!monto) continue;
+      var dedup=fecha+'_'+monto;
       if(seen[dedup]) continue; seen[dedup]=1;
-      result.push({fecha:v.fecha, monto:parseFloat(v.monto)||0, referencia:v.referencia||v.ref||'', usd:0, proveedorSugerido:v.proveedor||''});
+      result.push({fecha:fecha, monto:monto, referencia:v.referencia||v.ref||'', usd:0,
+                   proveedorSugerido:v.proveedor||'', _localStatus:v.status});
     }
   }catch(e){}
   result.sort(function(a,b){ return a.fecha<b.fecha?1:-1; });

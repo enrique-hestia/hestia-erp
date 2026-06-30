@@ -3445,7 +3445,11 @@ function conciliaAMEX(body) {
         if (daysDiff <= 2) { matched = egr; break; }
       }
       if (matched) {
-        conciliados.push({amex:amov, egreso:{proveedor:matched.proveedor, concepto:matched.concepto, fecha:matched.fecha}});
+        conciliados.push({
+          fecha: amov.fecha, monto: amov.monto, referencia: amov.referencia,
+          usd: amov.usd||0, tipoCambio: amov.tipoCambio||0,
+          egProveedor: matched.proveedor, egConcepto: matched.concepto, egFecha: matched.fecha
+        });
       } else {
         gaps.push({
           rowNum: amov.rowNum, fecha: amov.fecha, monto: amov.monto,
