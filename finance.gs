@@ -542,6 +542,7 @@ function doPost(e) {
     if (body.action === 'programarGastoFijo')      return jsonResponse(programarGastoFijo(body));
     if (body.action === 'programarGastosFijosBatch') return jsonResponse(programarGastosFijosBatch(body));
     if (body.action === 'bulkUpdateCxPMonto')         return jsonResponse(bulkUpdateCxPMonto(body));
+    if (body.action === 'conciliaAMEX')              return jsonResponse(conciliaAMEX(body));
     // Tareas programadas (scheduler)
     if (body.action === 'updateScheduledTask')     return jsonResponse(updateScheduledTask(body));
     if (body.action === 'setupScheduledTriggers')  return jsonResponse(setupScheduledTriggers());
@@ -3346,6 +3347,108 @@ function fixOPGrouping() {
     operacionesUnicas: Object.keys(uniqueOps).length,
     ultimoOP: lastOP
   };
+}
+
+/* ══════════════════════════════════════════════════════════════
+   CONCILIACIÓN AMEX — detecta cargos AMEX sin egreso registrado
+   ══════════════════════════════════════════════════════════════ */
+function _amexSuggestProv(desc) {
+  if (!desc) return '';
+  var s = desc.trim()
+    .replace(/\*.*$/, '')
+    .replace(/\.COM.*$/i, '')
+    .replace(/\.MX.*$/i, '')
+    .replace(/\s+(MX|SA|SAS|SAPI|CV|DE CV)\s*.*$/i, '')
+    .replace(/[0-9]{5,}/g, '')
+    .replace(/[_\-]+$/, '')
+    .trim();
+  if (!s || s.length < 2) s = desc.trim().split(/[\s*]/)[0];
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
+function conciliaAMEX(body) {
+  try {
+    var periodo = body.periodo || ''; // YYYY-MM
+    function num(v){var n=parseFloat(String(v||'').replace(/[$,\s]/g,''));return isNaN(n)?0:n;}
+    function dt(v){if(!v)return'';if(v instanceof Date)return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0');return String(v).trim().substring(0,10);}
+    function parseD(s){if(!s)return null;if(s instanceof Date){var d=new Date(s);d.setHours(0,0,0,0);return d;}var d=new Date(String(s).trim());if(isNaN(d))return null;d.setHours(0,0,0,0);return d;}
+
+    // ── 1. Leer TODOS los cargos AMEX ──────────────────────────
+    var bankSS = SpreadsheetApp.openById(BANKS_SS_ID);
+    var allSheets = bankSS.getSheets();
+    var amexSheet = null;
+    for (var si = 0; si < allSheets.length; si++) {
+      if (allSheets[si].getSheetId() === BANKS_GID.amex) { amexSheet = allSheets[si]; break; }
+    }
+    if (!amexSheet) return {ok:false, error:'No se encontró la pestaña AMEX en el spreadsheet de bancos'};
+
+    var amexRaw = amexSheet.getDataRange().getValues();
+    var amexMovs = [];
+    for (var i = 1; i < amexRaw.length; i++) {
+      var r = amexRaw[i];
+      var monto = num(r[1]); // col B = monto; positivo = cargo
+      if (monto <= 0) continue;
+      var fecha = dt(r[0]);
+      if (!fecha) continue;
+      if (periodo && fecha.substring(0,7) !== periodo) continue;
+      amexMovs.push({
+        rowNum: i+1, fecha: fecha, monto: monto,
+        saldo: num(r[2]), referencia: String(r[3]||'').trim(),
+        usd: num(r[4]), tipoCambio: num(r[5]),
+        notas: String(r[6]||''), poliza: String(r[7]||'')
+      });
+    }
+
+    // ── 2. Leer Egresos con FormaPago=AMEX ─────────────────────
+    var year = periodo ? parseInt(periodo.substring(0,4)) : new Date().getFullYear();
+    var egSSId = EGRESOS_IDS[year] || EGRESOS_SS_2026;
+    var egTab  = EGRESOS_TABS[year] || 'Egresos2026';
+    var egSh   = SpreadsheetApp.openById(egSSId).getSheetByName(egTab);
+    var egresosAMEX = [];
+    if (egSh) {
+      var egRaw = egSh.getDataRange().getValues();
+      for (var i = 1; i < egRaw.length; i++) {
+        var r = egRaw[i];
+        if (String(r[16]||'').trim().toUpperCase() !== 'AMEX') continue; // col Q = FormaPago
+        var fecha = dt(r[1]); // col B = Fecha
+        if (!fecha) continue;
+        if (periodo && fecha.substring(0,7) !== periodo) continue;
+        egresosAMEX.push({
+          rowNum: i+1, fecha: fecha,
+          monto: Math.abs(num(r[9])), // col J = Egresos (puede ser negativo en el sheet)
+          proveedor: String(r[4]||'').trim(),
+          concepto:  String(r[8]||'').trim()
+        });
+      }
+    }
+
+    // ── 3. Cruzar: detectar gaps ────────────────────────────────
+    var gaps = [], conciliados = [];
+    for (var ai = 0; ai < amexMovs.length; ai++) {
+      var amov = amexMovs[ai];
+      var amovDate = parseD(amov.fecha);
+      var matched = null;
+      for (var ei = 0; ei < egresosAMEX.length; ei++) {
+        var egr = egresosAMEX[ei];
+        if (Math.abs(amov.monto - egr.monto) > 0.01) continue;
+        var daysDiff = Math.abs((amovDate - parseD(egr.fecha)) / 86400000);
+        if (daysDiff <= 2) { matched = egr; break; }
+      }
+      if (matched) {
+        conciliados.push({amex:amov, egreso:{proveedor:matched.proveedor, concepto:matched.concepto, fecha:matched.fecha}});
+      } else {
+        gaps.push({
+          rowNum: amov.rowNum, fecha: amov.fecha, monto: amov.monto,
+          referencia: amov.referencia, usd: amov.usd, tipoCambio: amov.tipoCambio,
+          proveedorSugerido: _amexSuggestProv(amov.referencia)
+        });
+      }
+    }
+
+    return {ok:true, gaps:gaps, conciliados:conciliados, totalAMEX:amexMovs.length, totalEgresos:egresosAMEX.length};
+  } catch(ex) {
+    return {ok:false, error:ex.message};
+  }
 }
 
 /* ── Constantes definidas en api_config.gs (mismo proyecto GAS) ──

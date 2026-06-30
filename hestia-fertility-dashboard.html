@@ -6369,6 +6369,20 @@ function renderConciliacion(data) {
   } else {
     hh.push('<div class="cb-empty">Sin movimientos registrados para '+aB.nombre+'.<br>Usa el botón <strong>+ Agregar movimiento</strong> para capturar.</div>');
   }
+  // ── Conciliación AMEX ─────────────────────────────────────
+  if (aB.id === 'amex') {
+    hh.push('<div id="amex-concilia-wrap" style="margin-top:18px;border-top:1px solid var(--color-divider,#f0f0f0);padding-top:16px">');
+    hh.push('<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">'
+      +'<div style="font-size:13px;font-weight:800;color:var(--text-primary,#111)">Conciliación AMEX <span id="amex-gap-badge" style="display:none;font-size:11px;background:#dc2626;color:#fff;border-radius:10px;padding:1px 8px;margin-left:6px;font-weight:700"></span></div>'
+      +'<div style="display:flex;gap:7px">'
+      +'<button onclick="amexConciliaLoad(true)" style="padding:6px 14px;background:rgba(196,106,122,.1);color:var(--color-primary,#c46a7a);border:1.5px solid rgba(196,106,122,.25);border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer">🔍 Revisar gaps</button>'
+      +'<button onclick="amexConciliaToggleSnoozed()" id="amex-snooze-btn" style="display:none;padding:6px 14px;background:rgba(245,158,11,.1);color:#b45309;border:1.5px solid rgba(245,158,11,.25);border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer">⏸ Para revisar después (<span id="amex-snooze-cnt">0</span>)</button>'
+      +'</div></div>');
+    hh.push('<div id="amex-concilia-body">');
+    hh.push('<div style="font-size:12px;color:var(--text-secondary,#9ca3af)">Haz clic en <b>Revisar gaps</b> para detectar cargos AMEX sin egreso registrado.</div>');
+    hh.push('</div>');
+    hh.push('</div>');
+  }
   hh.push('</div></div></div>'); // cb-mc, cb-body, cb-main
 
   // ── Sidebar ──────────────────────────────────────────
@@ -12397,6 +12411,227 @@ window.cxpBulkDelete = async function(){
     if(errors.length) alert('Algunas filas no se pudieron eliminar:\n'+errors.join('\n'));
   }catch(e){alert('Error: '+e.message);}
 };
+
+/* ══════════════ CONCILIACIÓN AMEX ══════════════ */
+var _amexGaps = [];
+var _amexConciliados = [];
+var _amexSnoozedVisible = false;
+
+function _amexGapKey(g){ return 'amex_gap_'+g.fecha+'_'+g.monto; }
+
+function _amexGapState(g){
+  try{ var v=localStorage.getItem(_amexGapKey(g)); if(!v) return 'pending'; var o=JSON.parse(v); return o.status||'pending'; }catch(e){ return 'pending'; }
+}
+function _amexGapSetState(g, status){
+  try{ localStorage.setItem(_amexGapKey(g), JSON.stringify({status:status, fecha:g.fecha, monto:g.monto, ref:g.referencia, ts:Date.now()})); }catch(e){}
+}
+function _amexGapClear(g){
+  try{ localStorage.removeItem(_amexGapKey(g)); }catch(e){}
+}
+
+function _amexFM(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function _amexEsc(s){ var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+async function amexConciliaLoad(force){
+  var body = document.getElementById('amex-concilia-body'); if(!body) return;
+  body.innerHTML='<div style="padding:12px 0;font-size:12px;color:var(--text-secondary,#9ca3af)">Analizando movimientos AMEX…</div>';
+  try {
+    var s=getSession()||{};
+    var per = (currentPeriodo||'').replace('Q1','').replace('Q2','').replace('Q3','').replace('Q4','');
+    // Derive YYYY-MM from current month
+    var now = new Date();
+    var periodoMes = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+    var r = await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',
+      body:JSON.stringify({action:'conciliaAMEX', periodo:periodoMes, usuario:s.email||''})});
+    var res = await r.json();
+    if(!res.ok) throw new Error(res.error||'Error al consultar');
+    _amexGaps = res.gaps||[];
+    _amexConciliados = res.conciliados||[];
+
+    // Detectar nuevos gaps vs los que ya vimos antes
+    var prevCount = parseInt(localStorage.getItem('amex_last_gap_total')||'0');
+    var pendingNow = _amexGaps.filter(function(g){ return _amexGapState(g)==='pending'; }).length;
+    if(pendingNow > prevCount && prevCount > 0) {
+      _amexShowToast('⚠ '+pendingNow+' cargo(s) AMEX sin egreso detectados');
+    }
+    localStorage.setItem('amex_last_gap_total', pendingNow);
+
+    _amexRenderGaps();
+  } catch(e) {
+    body.innerHTML='<div style="color:#dc2626;font-size:12px;padding:8px 0">Error: '+_amexEsc(e.message)+'</div>';
+  }
+}
+
+function _amexRenderGaps(){
+  var body = document.getElementById('amex-concilia-body'); if(!body) return;
+  var badge = document.getElementById('amex-gap-badge');
+  var snoozeBtn = document.getElementById('amex-snooze-btn');
+  var snoozeCnt = document.getElementById('amex-snooze-cnt');
+
+  var pending   = _amexGaps.filter(function(g){ return _amexGapState(g)==='pending'; });
+  var snoozed   = _amexGaps.filter(function(g){ return _amexGapState(g)==='snoozed'; });
+  var discarded = _amexGaps.filter(function(g){ return _amexGapState(g)==='discarded'; });
+
+  if(badge){ if(pending.length){ badge.textContent=pending.length; badge.style.display='inline'; }else{ badge.style.display='none'; } }
+  if(snoozeBtn){ snoozeBtn.style.display=(snoozed.length>0)?'inline-block':'none'; }
+  if(snoozeCnt){ snoozeCnt.textContent=snoozed.length; }
+
+  var html='';
+
+  // ── Pendientes ─────────────────────────────────────────
+  if(pending.length){
+    html+='<div style="margin-bottom:16px">';
+    html+='<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#dc2626;margin-bottom:8px">⚠ Sin egreso registrado ('+pending.length+')</div>';
+    pending.forEach(function(g){
+      html+=_amexGapCard(g,'pending');
+    });
+    html+='</div>';
+  }
+
+  // ── Para revisar después (snoozed) ─────────────────────
+  if(_amexSnoozedVisible && snoozed.length){
+    html+='<div style="margin-bottom:16px">';
+    html+='<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#b45309;margin-bottom:8px">⏸ Para revisar después ('+snoozed.length+')</div>';
+    snoozed.forEach(function(g){ html+=_amexGapCard(g,'snoozed'); });
+    html+='</div>';
+  }
+
+  // ── Descartados (restaurables) ─────────────────────────
+  if(discarded.length){
+    html+='<details style="margin-bottom:8px"><summary style="font-size:11px;color:var(--text-secondary,#9ca3af);cursor:pointer;user-select:none">Descartados ('+discarded.length+') — clic para ver / restaurar</summary><div style="margin-top:8px">';
+    discarded.forEach(function(g){ html+=_amexGapCard(g,'discarded'); });
+    html+='</div></details>';
+  }
+
+  // ── Sin gaps pendientes ────────────────────────────────
+  if(!pending.length && !snoozed.length){
+    if(_amexGaps.length===0){
+      html+='<div style="font-size:12px;color:var(--text-secondary,#9ca3af)">No se encontraron cargos AMEX para el período.</div>';
+    } else {
+      html+='<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(22,101,52,.07);border-radius:10px;font-size:12px;color:#166534">'
+        +'<span style="font-size:18px">✓</span>'
+        +'<span><b>Todo conciliado</b> — '+_amexConciliados.length+' cargo(s) AMEX tienen egreso registrado.</span>'
+        +'</div>';
+    }
+  }
+
+  body.innerHTML=html;
+}
+
+function _amexGapCard(g, status){
+  var key='amex-g-'+g.fecha.replace(/-/g,'')+'-'+(g.monto+'').replace('.','');
+  var isDiscarded = status==='discarded';
+  var isSnoozed   = status==='snoozed';
+  var cardBg = isDiscarded?'rgba(0,0,0,.03)':isSnoozed?'rgba(245,158,11,.04)':'rgba(220,38,38,.04)';
+  var borderC = isDiscarded?'var(--color-divider,#e5e7eb)':isSnoozed?'rgba(245,158,11,.3)':'rgba(220,38,38,.2)';
+  var html='<div id="'+key+'" style="background:'+cardBg+';border:1.5px solid '+borderC+';border-radius:12px;padding:14px 16px;margin-bottom:10px'+(isDiscarded?';opacity:.65':'')+'">';
+  html+='<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap">';
+  html+='<div style="flex:1;min-width:200px">';
+  html+='<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-bottom:3px">'+g.fecha+' · <b style="color:'+(isDiscarded?'var(--text-secondary,#9ca3af)':'#dc2626')+'">'+_amexFM(g.monto)+'</b>'+(g.usd>0?' <span style="font-size:10px;color:#0369a1;font-weight:700">USD '+g.usd.toFixed(2)+'</span>':'')+'</div>';
+  html+='<div style="font-size:12px;color:var(--text-secondary,#374151);margin-bottom:8px;font-family:monospace">'+_amexEsc(g.referencia||'—')+'</div>';
+  if(!isDiscarded){
+    html+='<div style="display:flex;gap:8px;flex-wrap:wrap">';
+    html+='<div style="flex:1;min-width:140px"><label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af);display:block;margin-bottom:3px">Proveedor</label>'
+      +'<input id="'+key+'-prov" type="text" value="'+_amexEsc(g.proveedorSugerido||'')+'" style="width:100%;box-sizing:border-box;padding:5px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"></div>';
+    html+='<div style="flex:1;min-width:160px"><label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af);display:block;margin-bottom:3px">Concepto</label>'
+      +'<input id="'+key+'-conc" type="text" value="'+_amexEsc(g.referencia||'')+'" style="width:100%;box-sizing:border-box;padding:5px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"></div>';
+    html+='</div>';
+  }
+  html+='</div>';
+  // Botones
+  html+='<div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0">';
+  if(isDiscarded){
+    html+='<button onclick="amexGapRestore(\''+key+'\')" data-gap="'+encodeURIComponent(JSON.stringify(g))+'" style="padding:5px 12px;background:rgba(59,130,246,.1);color:#2563eb;border:1px solid rgba(59,130,246,.25);border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">↩ Restaurar</button>';
+    html+='<button onclick="amexGapDiscardFinal(\''+key+'\')" data-gap="'+encodeURIComponent(JSON.stringify(g))+'" style="padding:5px 12px;background:rgba(220,38,38,.08);color:#dc2626;border:none;border-radius:7px;font-size:10px;cursor:pointer">🗑 Definitivo</button>';
+  } else if(isSnoozed){
+    html+='<button onclick="amexGapAdd(\''+key+'\')" data-gap="'+encodeURIComponent(JSON.stringify(g))+'" style="padding:6px 12px;background:#166534;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">✓ Agregar</button>';
+    html+='<button onclick="amexGapRestore(\''+key+'\')" data-gap="'+encodeURIComponent(JSON.stringify(g))+'" style="padding:5px 12px;background:rgba(59,130,246,.1);color:#2563eb;border:1px solid rgba(59,130,246,.25);border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">↩ Pendiente</button>';
+    html+='<button onclick="amexGapDiscard(\''+key+'\')" data-gap="'+encodeURIComponent(JSON.stringify(g))+'" style="padding:5px 10px;background:rgba(220,38,38,.07);color:#dc2626;border:none;border-radius:7px;font-size:10px;cursor:pointer">✕ Descartar</button>';
+  } else {
+    html+='<button onclick="amexGapAdd(\''+key+'\')" data-gap="'+encodeURIComponent(JSON.stringify(g))+'" style="padding:6px 12px;background:#166534;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">✓ Agregar a Egresos</button>';
+    html+='<button onclick="amexGapSnooze(\''+key+'\')" data-gap="'+encodeURIComponent(JSON.stringify(g))+'" style="padding:5px 10px;background:rgba(245,158,11,.1);color:#b45309;border:1px solid rgba(245,158,11,.25);border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">⏸ Después</button>';
+    html+='<button onclick="amexGapDiscard(\''+key+'\')" data-gap="'+encodeURIComponent(JSON.stringify(g))+'" style="padding:5px 10px;background:rgba(220,38,38,.07);color:#dc2626;border:none;border-radius:7px;font-size:10px;cursor:pointer">✕ Descartar</button>';
+  }
+  html+='</div>';
+  html+='</div></div>';
+  return html;
+}
+
+function _amexGetGapFromBtn(cardId){
+  var card=document.getElementById(cardId); if(!card) return null;
+  var btn=card.querySelector('[data-gap]'); if(!btn) return null;
+  try{ return JSON.parse(decodeURIComponent(btn.dataset.gap)); }catch(e){ return null; }
+}
+
+async function amexGapAdd(cardId){
+  var g=_amexGetGapFromBtn(cardId); if(!g) return;
+  var provEl=document.getElementById(cardId+'-prov');
+  var concEl=document.getElementById(cardId+'-conc');
+  var prov=(provEl?provEl.value:g.proveedorSugerido)||g.proveedorSugerido||g.referencia;
+  var conc=(concEl?concEl.value:g.referencia)||g.referencia;
+  if(!prov){ alert('Ingresa el nombre del proveedor'); if(provEl) provEl.focus(); return; }
+  var now=new Date();
+  var mes=g.fecha.substring(0,7);
+  var año=parseInt(g.fecha.substring(0,4));
+  var s=getSession()||{};
+  var payload={
+    action:'saveEgreso', usuario:s.email||'sistema',
+    fecha:g.fecha, mes:mes, año:año,
+    proveedor:prov, concepto:conc, contable:'Gasto',
+    monto:g.monto, divisa:'MXN',
+    formaPago:'AMEX', pagado:true, conciliacion:true,
+    notas:'Agregado desde conciliación AMEX · '+g.referencia,
+    periodo:currentPeriodo||''
+  };
+  var card=document.getElementById(cardId);
+  if(card){ var btn=card.querySelector('button'); if(btn){btn.disabled=true;btn.textContent='Guardando…';} }
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(payload)});
+    var res=await r.json();
+    if(res.ok||res.id){
+      _amexGapSetState(g,'processed');
+      _amexShowToast('✓ Egreso agregado — '+prov+' '+_amexFM(g.monto));
+      // Quitar la tarjeta del DOM con animación
+      if(card){ card.style.transition='opacity .3s'; card.style.opacity='0'; setTimeout(function(){_amexRenderGaps();},320); }
+    } else { alert('Error al guardar: '+(res.error||'sin detalle')); if(card){var btn=card.querySelector('button');if(btn){btn.disabled=false;btn.textContent='✓ Agregar a Egresos';}} }
+  }catch(e){ alert('Error: '+e.message); }
+}
+
+function amexGapSnooze(cardId){
+  var g=_amexGetGapFromBtn(cardId); if(!g) return;
+  _amexGapSetState(g,'snoozed');
+  _amexRenderGaps();
+}
+function amexGapDiscard(cardId){
+  var g=_amexGetGapFromBtn(cardId); if(!g) return;
+  if(!confirm('¿Descartar este cargo?\n\nPodrás restaurarlo después desde la sección "Descartados".')) return;
+  _amexGapSetState(g,'discarded');
+  _amexRenderGaps();
+}
+function amexGapDiscardFinal(cardId){
+  var g=_amexGetGapFromBtn(cardId); if(!g) return;
+  if(!confirm('¿Eliminar definitivamente este descarte?\n\nYa no aparecerá en ninguna lista (a menos que el sistema lo detecte como movimiento nuevo).')) return;
+  _amexGapClear(g);
+  _amexRenderGaps();
+}
+function amexGapRestore(cardId){
+  var g=_amexGetGapFromBtn(cardId); if(!g) return;
+  _amexGapClear(g); // quita de localStorage = vuelve a "pending"
+  _amexRenderGaps();
+}
+function amexConciliaToggleSnoozed(){
+  _amexSnoozedVisible=!_amexSnoozedVisible;
+  var btn=document.getElementById('amex-snooze-btn');
+  if(btn) btn.style.fontWeight=_amexSnoozedVisible?'900':'700';
+  _amexRenderGaps();
+}
+function _amexShowToast(msg){
+  var t=document.createElement('div');
+  t.textContent=msg;
+  t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e3a8a;color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.22);pointer-events:none;transition:opacity .4s';
+  document.body.appendChild(t);
+  setTimeout(function(){t.style.opacity='0';setTimeout(function(){t.remove();},400);},3000);
+}
 
 /* ══════════════ GASTOS FIJOS (recurrentes) ══════════════ */
 var _gfData = {propuestas:[], generadas:[], periodo:''};
