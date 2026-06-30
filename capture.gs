@@ -456,3 +456,42 @@ function readMensual(ss, sheetName, fechaInicio, fechaFin, sucursal) {
    readPaisesOrigen, readCostos, readEstadoResultados, readOperatingPL,
    _buildPLReport, readBanksData, saveBankRow, doPost
    ────────────────────────────────────────────────────────────────────────── */
+function saveCajaChicaIngreso(body) {
+  try {
+    var sh = getCajaChicaSheet();
+    var data = sh.getDataRange().getValues();
+    var headers = data[0].map(function(h) { return String(h).trim().toUpperCase(); });
+    var iFecha    = headers.indexOf('FECHA');
+    var iConcepto = headers.indexOf('CONCEPTO');
+    var iEntrada  = headers.indexOf('ENTRADA');
+    var iTotal    = headers.indexOf('TOTAL');
+
+    var fecha    = String(body.fecha    || '').trim();
+    var concepto = String(body.concepto || '').trim();
+    var entrada  = parseFloat(body.entrada) || 0;
+
+    if (!fecha || !concepto || !entrada) {
+      return { ok: false, error: 'fecha, concepto y entrada son requeridos' };
+    }
+
+    // Buscar primera fila vacía (placeholder) o agregar al final
+    var targetRow = -1;
+    for (var r = 1; r < data.length; r++) {
+      if (!String(data[r][iFecha] || '').trim() && !String(data[r][iConcepto] || '').trim()) {
+        targetRow = r + 1;
+        break;
+      }
+    }
+    if (targetRow === -1) targetRow = sh.getLastRow() + 1;
+
+    sh.getRange(targetRow, iFecha + 1).setValue(fecha);
+    sh.getRange(targetRow, iConcepto + 1).setValue(concepto);
+    sh.getRange(targetRow, iEntrada + 1).setValue(entrada);
+    SpreadsheetApp.flush();
+
+    var nuevoTotal = iTotal >= 0 ? (sh.getRange(targetRow, iTotal + 1).getValue() || 0) : 0;
+    return { ok: true, rowNum: targetRow, saldoFinal: Number(nuevoTotal) };
+  } catch(ex) {
+    return { ok: false, error: ex.message };
+  }
+}

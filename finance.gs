@@ -599,6 +599,9 @@ function doPost(e) {
     if (body.action === 'updateCajaChica') {
       return jsonResponse(updateCajaChicaRow(body));
     }
+    if (body.action === 'saveCajaChicaIngreso') {
+      return jsonResponse(saveCajaChicaIngreso(body));
+    }
     if (body.action === 'saveuser') {
       var ss      = SpreadsheetApp.openById(SHEET_ID);
       var tkEmail = verifyToken(body.token || '');
