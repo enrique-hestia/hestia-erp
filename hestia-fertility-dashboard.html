@@ -6314,7 +6314,10 @@ function renderConciliacion(data) {
     +'<div class="cb-ms">'+(aB.movimientos||[]).length+' de '+(aB.totalRows||0)+' registros</div></div>'
     +(hasPermission('bank_capture')?'<button class="cf-btn cf-btp" style="font-size:11px;padding:6px 14px" onclick="cbSB(\''+aB.id+'\');cbOpenDrawer()">+ Nuevo</button>':'')
     +'</div>');
-  var movs = (aB.movimientos||[]);
+  var movs = (aB.movimientos||[]).filter(function(m){
+    var f=m.fecha||'';
+    return (!currentFechaInicio||f>=currentFechaInicio)&&(!currentFechaFin||f<=currentFechaFin);
+  });
   if (movs.length) {
     hh.push('<div style="overflow-x:auto"><table class="cb-tbl"><thead><tr>');
     hh.push('<th>Fecha</th>');
@@ -6856,7 +6859,10 @@ function renderCashFlow(data) {
   hh.push('<div class="cf-mh"><div><div class="cf-mt"><div style="width:9px;height:9px;border-radius:50%;background:'+aB.color+'"></div>'+aB.nombre+' \u2014 \u00faltimos movimientos</div><div class="cf-ms">'+(aB.movimientos||[]).length+' de '+(aB.totalRows||0)+' registros</div></div>'
     +'<button class="cf-btn cf-btg" onclick="cfOpenDrawer(\''+aB.id+'\')" style="font-size:11px;padding:5px 10px">+ Agregar</button></div>');
   hh.push('<div style="overflow-x:auto"><table class="cf-tbl">');
-  var movs=aB.movimientos||[];
+  var movs=(aB.movimientos||[]).filter(function(m){
+    var f=m.fecha||'';
+    return (!currentFechaInicio||f>=currentFechaInicio)&&(!currentFechaFin||f<=currentFechaFin);
+  });
   if(aB.id==='santander'){
     hh.push('<thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Dep\u00f3sito</th><th>Retiro</th><th>Saldo</th><th>P\u00f3liza</th></tr></thead><tbody>');
     movs.forEach(function(m){
