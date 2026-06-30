@@ -221,13 +221,14 @@ function doGet(e) {
     }
 
     if (action === 'banks') {
+      var banksPeriodo  = (e && e.parameter.periodo) || '';
       var banksCache    = CacheService.getScriptCache();
-      var banksCacheKey = 'erp_banks_v1';
+      var banksCacheKey = 'erp_banks_v2_' + banksPeriodo;
       var banksCached   = banksCache.get(banksCacheKey);
       if (banksCached) {
         return ContentService.createTextOutput(banksCached).setMimeType(ContentService.MimeType.JSON);
       }
-      var banksResult = readBanksData();
+      var banksResult = readBanksData(banksPeriodo);
       var banksJson   = JSON.stringify(banksResult);
       try { banksCache.put(banksCacheKey, banksJson, 30); } catch(e) {}
       return ContentService.createTextOutput(banksJson).setMimeType(ContentService.MimeType.JSON);
