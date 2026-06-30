@@ -3728,6 +3728,12 @@ function readDropdowns() {
         valores:  valores ? valores.split('|').map(function(v){return v.trim();}).filter(Boolean) : []
       };
     }
+    // CxP subtipo siempre hereda de Egresos subtipo (fuente única de verdad)
+    if (result['Egresos'] && result['Egresos']['subtipo']) {
+      if (!result['CxP']) result['CxP'] = {};
+      if (!result['CxP']['subtipo']) result['CxP']['subtipo'] = { etiqueta: 'Subtipo / Categoría', valores: [] };
+      result['CxP']['subtipo'].valores = result['Egresos']['subtipo'].valores.slice();
+    }
     return {ok:true, dropdowns:result};
   } catch(ex) {
     return {ok:false, error:ex.message, dropdowns:{}};
@@ -3755,9 +3761,23 @@ function saveDropdownValues(body) {
     if (found > 0) {
       sh.getRange(found, 4).setValue(valores); // columna D = Valores
     } else {
-      // Crear nueva fila
       var etiqueta = body.etiqueta || (campo.charAt(0).toUpperCase()+campo.slice(1));
       sh.appendRow([seccion, campo, etiqueta, valores, true]);
+    }
+    // Si se actualiza Egresos subtipo, sincronizar automáticamente CxP subtipo
+    if (seccion === 'Egresos' && campo === 'subtipo') {
+      var dataSync = sh.getDataRange().getValues();
+      var cxpRow = -1;
+      for (var j = 1; j < dataSync.length; j++) {
+        if (String(dataSync[j][0]).trim()==='CxP' && String(dataSync[j][1]).trim()==='subtipo') {
+          cxpRow = j + 1; break;
+        }
+      }
+      if (cxpRow > 0) {
+        sh.getRange(cxpRow, 4).setValue(valores);
+      } else {
+        sh.appendRow(['CxP', 'subtipo', 'Subtipo / Categoría', valores, true]);
+      }
     }
     SpreadsheetApp.flush();
     return {ok:true, seccion:seccion, campo:campo};
