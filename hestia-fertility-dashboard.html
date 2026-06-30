@@ -3316,17 +3316,22 @@ function ingOnCatChange(lineNum) {
   var pvpEl = document.getElementById('ing-pvp-'+lineNum);
   if (!catEl || !prodEl) return;
   var cat = catEl.value;
-  var prods = cat ? ingGetProductosByCat(cat) : _ingProductos.filter(function(p){ return p.activo !== false; });
+  var allSrc = _ingTodosProductos || _ingProductos;
+  var allProds = cat ? allSrc.filter(function(p){ return p.categoria === cat; }) : allSrc;
+  var activos2   = allProds.filter(function(p){ return p.activo !== false; });
+  var inactivos2 = allProds.filter(function(p){ return p.activo === false; });
   var dlEl = document.getElementById('ing-prodlist-'+lineNum);
   if (dlEl) {
     var h = '';
-    prods.forEach(function(p){
+    function _catOpt(p, inactive) {
       var precio = (p.precios && p.precios[_ingPacienteLista]) ? p.precios[_ingPacienteLista]
                  : (p.precios && p.precios['General']) ? p.precios['General']
                  : p.precio || 0;
-      var label = (p.sku?'['+p.sku+'] ':'')+p.descripcion+' — '+p.categoria+(precio?' — $'+precio.toLocaleString('en-US'):'');
-      h += '<option value="'+p.descripcion.replace(/"/g,'&quot;')+'" data-precio="'+precio+'">';
-    });
+      var label = (inactive?'[INACTIVO] ':'')+(p.sku?'['+p.sku+'] ':'')+p.descripcion+' — '+p.categoria+(precio?' — $'+precio.toLocaleString('en-US'):'');
+      return '<option value="'+p.descripcion.replace(/"/g,'&quot;')+'" label="'+label.replace(/"/g,'&quot;')+'" data-precio="'+precio+'">';
+    }
+    activos2.forEach(function(p){ h += _catOpt(p, false); });
+    inactivos2.forEach(function(p){ h += _catOpt(p, true); });
     dlEl.innerHTML = h;
   }
   prodEl.value = '';
@@ -3405,13 +3410,15 @@ async function ingOnPacienteChange() {
         var catEl2 = document.getElementById('ing-cat-'+i);
         var cat2 = catEl2 ? catEl2.value : '';
         if (dlEl) {
-          var prods2 = cat2 ? ingGetProductosByCat(cat2) : _ingProductos.filter(function(p){return p.activo!==false;});
+          var src2 = _ingTodosProductos || _ingProductos;
+          var prods2 = cat2 ? src2.filter(function(p){return p.categoria===cat2;}) : src2;
           var dh = '';
           prods2.forEach(function(p) {
             var precio2 = (p.precios && p.precios[_ingPacienteLista]) ? p.precios[_ingPacienteLista]
                        : (p.precios && p.precios['General']) ? p.precios['General']
                        : p.precio || 0;
-            dh += '<option value="'+p.descripcion.replace(/"/g,'&quot;')+'" data-precio="'+precio2+'">';
+            var lbl2 = (p.activo===false?'[INACTIVO] ':'')+p.descripcion;
+            dh += '<option value="'+p.descripcion.replace(/"/g,'&quot;')+'" label="'+lbl2.replace(/"/g,'&quot;')+'" data-precio="'+precio2+'">';
           });
           dlEl.innerHTML = dh;
         }
@@ -3759,18 +3766,19 @@ function ingCloseDrawer() {
 }
 
 function _ingBuildProdDatalist(lineNum) {
-  var prods = _ingProductos.filter(function(p){ return p.activo !== false; });
+  var activos   = _ingProductos.filter(function(p){ return p.activo !== false; });
+  var inactivos = (_ingTodosProductos||[]).filter(function(p){ return p.activo === false; });
   var h = '';
-  prods.forEach(function(p){
+  function _dlOpt(p, inactive) {
     var precio = (p.precios && p.precios[_ingPacienteLista]) ? p.precios[_ingPacienteLista]
                : (p.precios && p.precios['General']) ? p.precios['General']
                : p.precio || 0;
     var precioFmt = '$' + precio.toLocaleString('en-US', {minimumFractionDigits:0});
-    h += '<option value="'+p.descripcion.replace(/"/g,'&quot;')+'">'
-       + p.categoria + ' — ' + precioFmt
-       + (p.sku ? ' — ' + p.sku : '')
-       + '</option>';
-  });
+    var label = (inactive?'[INACTIVO] ':'')+p.categoria + ' — ' + precioFmt + (p.sku ? ' — ' + p.sku : '');
+    return '<option value="'+p.descripcion.replace(/"/g,'&quot;')+'" label="'+label.replace(/"/g,'&quot;')+'">';
+  }
+  activos.forEach(function(p){ h += _dlOpt(p, false); });
+  inactivos.forEach(function(p){ h += _dlOpt(p, true); });
   return h;
 }
 
@@ -3786,6 +3794,7 @@ function ingOnProdSearch(lineNum) {
     ? _ingProductos.find(function(p){ return p.descripcion === val && p.categoria === selCat; })
     : null;
   if (!found) found = _ingProductos.find(function(p){ return p.descripcion === val; });
+  if (!found) found = (_ingTodosProductos||[]).find(function(p){ return p.descripcion === val; });
   if (!found) return;
   var precio = (found.precios && found.precios[_ingPacienteLista]) ? found.precios[_ingPacienteLista]
              : (found.precios && found.precios['General']) ? found.precios['General']
