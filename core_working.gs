@@ -156,6 +156,21 @@ function doGet(e) {
       ));
     }
 
+    // ── BYPASS: lectura de egresos con API key dedicada (integraciones externas, p.ej. Claude) ──
+    if (action === 'egresos_raw') {
+      var ECRAW_KEY = 'hestia-ecraw-9f2a71';
+      var apiKey = (e && e.parameter.key) || '';
+      if (!apiKey || apiKey !== ECRAW_KEY) {
+        return jsonResponse({ error: 'API key inválida.', code: 401 });
+      }
+      var anioRaw = parseInt((e && e.parameter.anio) || new Date().getFullYear());
+      var fpRaw   = (e && e.parameter.fp) || '';
+      var egData  = readEgresosData(anioRaw);
+      var rows    = egData.rows || [];
+      if (fpRaw) rows = rows.filter(function(r){ return r.formaPago === fpRaw; });
+      return jsonResponse({ ok: true, egresos: rows, anio: anioRaw, fp: fpRaw, total: rows.length });
+    }
+
     // ── VALIDAR TOKEN en todas las acciones (si la hoja Usuarios existe) ──
     var currentUser = null;
     var shUsuariosExiste = !!ss.getSheetByName('Usuarios');

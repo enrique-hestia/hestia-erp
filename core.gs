@@ -146,10 +146,13 @@ function doGet(e) {
       ));
     }
 
-    // ── BYPASS: lectura de egresos con API key (para integraciones externas como Claude) ──
+    // ── BYPASS: lectura de egresos con API key dedicada (integraciones externas, p.ej. Claude) ──
+    // Clave propia e independiente de AUTH_SECRET para evitar depender de cuál definición
+    // de AUTH_SECRET esté activa en el proyecto (hardcoded vs. Script Properties).
     if (action === 'egresos_raw') {
+      var ECRAW_KEY = 'hestia-ecraw-9f2a71';
       var apiKey = (e && e.parameter.key) || '';
-      if (!apiKey || apiKey !== AUTH_SECRET) {
+      if (!apiKey || apiKey !== ECRAW_KEY) {
         return jsonResponse({ error: 'API key inválida.', code: 401 });
       }
       var anioRaw = parseInt((e && e.parameter.anio) || new Date().getFullYear());
