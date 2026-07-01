@@ -638,6 +638,8 @@ function doPost(e) {
       }
       return jsonResponse({ success: true });
     }
+    if (body.action === 'reporteProveedor')    return jsonResponse(readReporteProveedor(body));
+    if (body.action === 'setupEgresosAnio')    return jsonResponse(setupEgresosAnio(body.anio));
     return jsonResponse({error:'Accion desconocida: ' + body.action});
   } catch(ex) { return jsonResponse({error: ex.message}); }
 }
@@ -1639,6 +1641,82 @@ function readEgresosData(anio) {
   } catch(ex) {
     return {ok:false, error:ex.message, rows:[], totalRows:0};
   }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   EGRESOS — Setup de hoja por año y reporte multi-año
+   ══════════════════════════════════════════════════════════════ */
+function setupEgresosAnio(anio) {
+  anio = parseInt(anio) || new Date().getFullYear();
+  var ssId = EGRESOS_IDS[anio];
+  if (!ssId) return {ok:false, error:'Año no configurado: '+anio};
+  var tabName = EGRESOS_TABS[anio] || 'Egresos'+anio;
+  try {
+    var ss = SpreadsheetApp.openById(ssId);
+    var sh = ss.getSheetByName(tabName);
+    var created = false;
+    if (!sh) {
+      sh = ss.insertSheet(tabName);
+      created = true;
+    }
+    var raw = sh.getDataRange().getValues();
+    var rows = Math.max(0, raw.length - 1);
+    var hasHeaders = raw.length > 0 && raw[0].filter(function(h){ return String(h).trim(); }).length > 3;
+    if (!hasHeaders) {
+      var hdrs = ['ID','Fecha','Mes','Proveedor','Contable','Tipo','Subtipo','Concepto',
+        'Egresos','Notas','Vencimiento','Facturación','Pagado','Contabilidad','Póliza',
+        'Forma de Pago','Observaciones','Link Factura','Link Pago','Cotización'];
+      sh.getRange(1,1,1,hdrs.length).setValues([hdrs]);
+      sh.getRange(1,1,1,hdrs.length).setFontWeight('bold').setBackground('#fce7f3');
+      sh.setFrozenRows(1);
+      created = true; rows = 0;
+    }
+    return {ok:true, anio:anio, tabName:tabName, ssId:ssId, created:created, rows:rows};
+  } catch(ex) {
+    return {ok:false, error:ex.message};
+  }
+}
+
+function readReporteProveedor(body) {
+  var prov = String(body.proveedor||'').trim();
+  var ini  = String(body.ini||'');
+  var fin  = String(body.fin||'');
+  if (!prov) return {ok:false, error:'Proveedor requerido'};
+  var provLow = prov.toLowerCase();
+  var allRows = [];
+  var years = Object.keys(EGRESOS_IDS).map(Number).sort();
+  years.forEach(function(anio) {
+    try {
+      var eg = readEgresosData(anio);
+      if (!eg.ok || !eg.rows) return;
+      eg.rows.forEach(function(r) {
+        if (!r.pagado) return;
+        if ((r.proveedor||'').trim().toLowerCase() !== provLow) return;
+        var fd = (r.fecha||'').substring(0,10);
+        if (ini && fd && fd < ini) return;
+        if (fin && fd && fd > fin) return;
+        allRows.push(r);
+      });
+    } catch(e) { /* año no disponible */ }
+  });
+  if (!allRows.length) return {ok:true, proveedor:prov, rows:[],
+    totales:{total:0,count:0,avg:0,ultimoPago:'',ultimaFormaPago:''},tendencia:[]};
+  allRows.sort(function(a,b){ return (a.fecha||'').localeCompare(b.fecha||''); });
+  var total = allRows.reduce(function(s,r){ return s+(r.monto||0); }, 0);
+  var count = allRows.length;
+  var last = allRows[allRows.length-1];
+  var byMes = {};
+  allRows.forEach(function(r){
+    var k=(r.fecha||'').substring(0,7); if(k) byMes[k]=(byMes[k]||0)+(r.monto||0);
+  });
+  var MN=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  var tendencia = Object.keys(byMes).sort().map(function(k){
+    var p=k.split('-'); return {mes:k, label:(MN[parseInt(p[1],10)-1]||p[1])+' '+(p[0]||'').substring(2), monto:byMes[k]};
+  });
+  return {ok:true, proveedor:prov, ini:ini, fin:fin, rows:allRows,
+    totales:{total:total, count:count, avg:count?total/count:0,
+      ultimoPago:last.fecha||'', ultimaFormaPago:last.formaPago||''},
+    tendencia:tendencia};
 }
 
 function saveEgreso(payload) {

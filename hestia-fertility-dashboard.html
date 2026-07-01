@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.06.30.9 -->
+﻿<!-- app-build:2026.06.30.10 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -251,6 +251,8 @@
 .pc-tab:hover{color:var(--color-text);background:var(--color-surface-offset)}
 .pc-tab.active{color:var(--color-primary);border-bottom-color:var(--color-primary);background:transparent}
 .pc-section{display:flex;flex-direction:column;gap:20px}
+#eg-year-bar button.active{background:var(--color-primary,#c46a7a);color:#fff;border-color:var(--color-primary,#c46a7a)}
+#eg-year-bar button:hover:not(.active){background:var(--color-surface);color:var(--color-text)}
 .pc-card{background:var(--color-surface);border:1px solid var(--color-divider);border-radius:var(--radius-lg);padding:22px 24px}
 .pc-card-title{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:16px}
 /* Themes */
@@ -901,6 +903,13 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 
 <!-- ══ VISTA: GASTOS OPERATIVOS ══ -->
 <div id="view-gastos" class="view" style="display:none">
+  <div id="eg-year-bar" style="display:flex;gap:6px;padding:10px 16px 0;align-items:center">
+    <span style="font-size:11px;font-weight:600;color:var(--color-text-muted);margin-right:4px">Año:</span>
+    <button id="eg-yr-2024" onclick="loadEgresosERP(2024)" style="padding:5px 14px;border-radius:20px;border:1px solid var(--color-divider);background:var(--color-surface-offset);color:var(--color-text-muted);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">2024</button>
+    <button id="eg-yr-2025" onclick="loadEgresosERP(2025)" style="padding:5px 14px;border-radius:20px;border:1px solid var(--color-divider);background:var(--color-surface-offset);color:var(--color-text-muted);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">2025</button>
+    <button id="eg-yr-2026" onclick="loadEgresosERP(2026)" style="padding:5px 14px;border-radius:20px;border:1px solid var(--color-divider);background:var(--color-surface-offset);color:var(--color-text-muted);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">2026</button>
+    <span id="eg-year-setup-hint" style="font-size:10.5px;color:var(--color-text-muted);margin-left:8px"></span>
+  </div>
   <div id="eg-root"></div>
   <div id="eg-form-view" style="display:none;position:fixed;inset:0;z-index:200;background:var(--color-bg,#f5f5f5);overflow-y:auto;padding:24px 32px">
     <div id="eg-form-content" style="max-width:800px;margin:0 auto"></div>
@@ -4408,32 +4417,35 @@ async function _ingSaveAndBank(payload, comisionMP) {
    EGRESOS ERP — Módulo completo de gastos y costos
    ══════════════════════════════════════════════════════════════ */
 var _egData = null;
+var _egAnio = new Date().getFullYear();
 var _egFilters = {mes:'',contable:'',subtipo:'',proveedor:'',formaPago:'',buscar:'',pagado:''};
 var _egPage = 1, _egPerPage = 30;
 
-async function loadEgresosERP() {
+async function loadEgresosERP(anio) {
+  if (anio) { _egAnio = parseInt(anio); _egPage = 1; _egFilters = {mes:'',contable:'',subtipo:'',proveedor:'',formaPago:'',buscar:'',pagado:''}; }
   var root = document.getElementById('eg-root');
   if (!root) return;
-  var swrHit = _swrGet('egresos', '', '');
+  var swrKey = 'egresos_'+_egAnio;
+  var swrHit = _swrGet(swrKey, '', '');
   if (swrHit) {
     _egData = swrHit.data; _egPage = 1;
     await hfFinish(); _renderEgresosERP();
     if (Date.now() - swrHit.ts > SWR_STALE_MS) {
       var tok = encodeURIComponent(getToken());
-      fetch(APPS_SCRIPT_URL+'?action=egresos&token='+tok, {redirect:'follow'})
+      fetch(APPS_SCRIPT_URL+'?action=egresos&anio='+_egAnio+'&token='+tok, {redirect:'follow'})
         .then(function(r){ return r.json(); })
-        .then(function(d){ if (!d.error) { _swrSet('egresos',d,'',''); _egData=d; _renderEgresosERP(); } })
+        .then(function(d){ if (!d.error) { _swrSet(swrKey,d,'',''); _egData=d; _renderEgresosERP(); } })
         .catch(function(){});
     }
     return;
   }
-  root.innerHTML = hestiaLoader('Cargando egresos…');
+  root.innerHTML = hestiaLoader('Cargando egresos '+_egAnio+'…');
   try {
     var tok = encodeURIComponent(getToken());
-    var resp = await fetch(APPS_SCRIPT_URL+'?action=egresos&token='+tok, {redirect:'follow'});
+    var resp = await fetch(APPS_SCRIPT_URL+'?action=egresos&anio='+_egAnio+'&token='+tok, {redirect:'follow'});
     _egData = await resp.json();
     if (_egData.error) throw new Error(_egData.error);
-    _swrSet('egresos', _egData, '', '');
+    _swrSet(swrKey, _egData, '', '');
     _egPage = 1;
     await hfFinish();
     _renderEgresosERP();
@@ -4471,6 +4483,16 @@ function _egSearchDebounce(v) { clearTimeout(_egSearchTimer); _egSearchTimer=set
 function _renderEgresosERP() {
   var root = document.getElementById('eg-root');
   if (!root || !_egData) return;
+
+  // ── Selector de año ────────────────────────────────────────
+  var yearBar = document.getElementById('eg-year-bar');
+  if (yearBar) {
+    [2024,2025,2026].forEach(function(y){
+      var btn = document.getElementById('eg-yr-'+y);
+      if (btn) btn.classList.toggle('active', y === _egAnio);
+    });
+  }
+
   var data = _egData;
   var filtered = _egFilterRows();
   var totalFiltered = filtered.reduce(function(s,r){return s+r.monto;},0);
@@ -4769,59 +4791,41 @@ function _provRepToggle(){
   body.style.display=open?'':'none';
   if(chev) chev.style.transform=open?'rotate(180deg)':'';
 }
-function proveedorReporte(){
+async function proveedorReporte(){
   var prov=(document.getElementById('prov-rep-prov')||{}).value||'';
   var ini=(document.getElementById('prov-rep-ini')||{}).value||'';
   var fin=(document.getElementById('prov-rep-fin')||{}).value||'';
   var res=document.getElementById('prov-rep-result'); if(!res) return;
+  if(!prov.trim()){ res.innerHTML='<div style="padding:10px;color:#e53e3e;font-size:12.5px">Selecciona un proveedor.</div>'; return; }
+  res.innerHTML='<div style="padding:16px;text-align:center;color:var(--color-text-muted);font-size:12.5px">Consultando 2024 · 2025 · 2026…</div>';
   try {
-    if(!prov.trim()){ res.innerHTML='<div style="padding:10px;color:#e53e3e;font-size:12.5px">Selecciona un proveedor.</div>'; return; }
-    if(!_egData||!_egData.rows||!_egData.rows.length){ res.innerHTML='<div style="padding:10px;color:#999;font-size:12.5px">No hay datos cargados. Abre Egresos y espera que carguen los datos.</div>'; return; }
-    var provLow=prov.trim().toLowerCase();
-    var rows=_egData.rows.filter(function(r){
-      if(!r.pagado) return false;
-      if((r.proveedor||'').trim().toLowerCase()!==provLow) return false;
-      var fd=(r.fecha||'').substring(0,10);
-      if(ini&&fd&&fd<ini) return false;
-      if(fin&&fd&&fd>fin) return false;
-      return true;
-    });
-    if(!rows.length){
-      var pagados=_egData.rows.filter(function(r){return r.pagado;});
-      var hint=pagados.length?' ('+pagados.length+' pagados disponibles en el período cargado)':'';
-      res.innerHTML='<div style="padding:14px 0;font-size:12.5px;color:var(--color-text-muted)">Sin registros para <b>'+_escH(prov)+'</b> en el rango indicado'+hint+'. Verifica el nombre exacto usando el datalist.</div>';
+    var tok=getToken();
+    var resp=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',
+      body:JSON.stringify({action:'reporteProveedor',token:tok,proveedor:prov,ini:ini,fin:fin})});
+    var d=await resp.json();
+    if(!d.ok) throw new Error(d.error||'Sin respuesta del servidor');
+    if(!d.rows||!d.rows.length){
+      res.innerHTML='<div style="padding:14px 0;font-size:12.5px;color:var(--color-text-muted)">Sin registros para <b>'+_escH(prov)+'</b> en el rango indicado (2024–2026).</div>';
       return;
     }
-    rows.sort(function(a,b){return(a.fecha||'').localeCompare(b.fecha||'');});
-    var total=rows.reduce(function(s,r){return s+(r.monto||0);},0);
-    var count=rows.length;
-    var avg=total/count;
-    var last=rows[rows.length-1];
-    var byMes={};
-    rows.forEach(function(r){var k=(r.fecha||'').substring(0,7);byMes[k]=(byMes[k]||0)+(r.monto||0);});
-    var meses=Object.keys(byMes).sort();
-    var tendencia=meses.map(function(k){
-      var p=k.split('-');
-      var mn=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][parseInt(p[1],10)-1]||k;
-      return {label:mn+' '+(p[0]||'').substring(2),monto:byMes[k]};
-    });
+    var t=d.totales;
     var pd={type:'proveedor',title:'Reporte de proveedor',subject:prov,
       period:(ini||'—')+' → '+(fin||'—'),
       generado:new Date().toLocaleString('es-MX',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}),
       kpis:[
-        {label:'Total gastado',value:_tplFmt(total)},
-        {label:'Pagos',value:String(count)},
-        {label:'Promedio',value:_tplFmt(avg)},
-        {label:'Último pago',value:(last.fecha||'—').substring(0,10),sub:last.formaPago||'—'}
+        {label:'Total gastado',value:_tplFmt(t.total)},
+        {label:'Pagos',value:String(t.count)},
+        {label:'Promedio',value:_tplFmt(t.avg)},
+        {label:'Último pago',value:(t.ultimoPago||'—').substring(0,10),sub:t.ultimaFormaPago||'—'}
       ],
-      tendencia:tendencia,
+      tendencia:d.tendencia||[],
       cols:['Fecha','Concepto','Tipo','Subtipo','Monto','Forma pago'],
-      rows:rows.map(function(r){return[(r.fecha||'—').substring(0,10),_escH(r.concepto||'—'),r.tipo||'—',r.subtipo||'—',_tplFmt(r.monto),r.formaPago||'—'];}),
-      totalLabel:'Total general',totalValue:_tplFmt(total)};
+      rows:d.rows.map(function(r){return[(r.fecha||'—').substring(0,10),_escH(r.concepto||'—'),r.tipo||'—',r.subtipo||'—',_tplFmt(r.monto),r.formaPago||'—'];}),
+      totalLabel:'Total general',totalValue:_tplFmt(t.total)};
     window._provRepData=pd;
-    _renderProvReporte(rows,pd);
+    _renderProvReporte(d.rows,pd);
   } catch(err){
-    res.innerHTML='<div style="padding:10px;color:#b91c1c;font-size:12px">⚠ Error: '+_escH(err.message)+'</div>';
+    res.innerHTML='<div style="padding:10px;color:#b91c1c;font-size:12px">⚠ Error: '+_escH(err.message)+'<br><span style="color:var(--color-text-muted)">Asegúrate de haber desplegado el backend actualizado.</span></div>';
   }
 }
 function _escH(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}

@@ -343,6 +343,10 @@ function doGet(e) {
       var anioEg = (e && e.parameter.anio) || '';
       return jsonResponse(readEgresosData(anioEg ? parseInt(anioEg) : undefined));
     }
+    if (action === 'egresosSetup') {
+      var anioS = parseInt((e && e.parameter.anio) || new Date().getFullYear());
+      return jsonResponse(setupEgresosAnio(anioS));
+    }
 
     if (action === 'listaPacientes') {
       return jsonResponse(listaPacientesAll());
