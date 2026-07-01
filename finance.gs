@@ -599,6 +599,9 @@ function doPost(e) {
     if (body.action === 'deleteEgreso') {
       return jsonResponse(deleteEgreso(body));
     }
+    if (body.action === 'saveDropdown') {
+      return jsonResponse(saveDropdownValues(body));
+    }
     if (body.action === 'updateIngreso') {
       return jsonResponse(updateIngreso(body));
     }

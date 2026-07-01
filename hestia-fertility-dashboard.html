@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.01.09 -->
+﻿<!-- app-build:2026.07.01.10 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12271,10 +12271,9 @@ async function ddSave(sec, campo, etiqueta) {
   allBtns.forEach(function(b){ if(b.getAttribute('onclick')&&b.getAttribute('onclick').indexOf("ddSave('"+sec+"','"+campo+"'")>=0) saveBtn=b; });
   if (saveBtn) { saveBtn.textContent = 'Guardando…'; saveBtn.disabled = true; }
   try {
-    var tok  = encodeURIComponent(getToken());
-    var data = encodeURIComponent(JSON.stringify({seccion:sec, campo:campo, etiqueta:etiqueta, valores:valores}));
-    var r    = await fetch(APPS_SCRIPT_URL+'?action=saveDropdown&token='+tok+'&data='+data+'&_t='+Date.now(), {
-      redirect:'follow'
+    var r = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      body: JSON.stringify({action:'saveDropdown', token:getToken(), seccion:sec, campo:campo, etiqueta:etiqueta, valores:valores})
     });
     var d = await r.json();
     if (!d.ok) throw new Error(d.error||'Error guardando');
