@@ -14084,12 +14084,18 @@ async function amexConciliaLoad(force){
   body.innerHTML='<div style="padding:12px 0;font-size:12px;color:var(--text-secondary,#9ca3af)">Analizando movimientos AMEX…</div>';
   try {
     var s=getSession()||{};
-    var per = (currentPeriodo||'').replace('Q1','').replace('Q2','').replace('Q3','').replace('Q4','');
-    // Derive YYYY-MM from current month
+    // Ciclo AMEX: 26 del mes anterior → 25 del mes actual.
+    // Si hoy < 26, la mayoría de los cargos del ciclo están en el mes anterior.
     var now = new Date();
-    var periodoMes = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+    var cicloMes;
+    if (now.getDate() < 26) {
+      var prev = new Date(now.getFullYear(), now.getMonth()-1, 1);
+      cicloMes = prev.getFullYear()+'-'+String(prev.getMonth()+1).padStart(2,'0');
+    } else {
+      cicloMes = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+    }
     var r = await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',
-      body:JSON.stringify({action:'conciliaAMEX', periodo:periodoMes, usuario:s.email||''})});
+      body:JSON.stringify({action:'conciliaAMEX', periodo:cicloMes, usuario:s.email||''})});
     var res = await r.json();
     if(!res.ok) throw new Error(res.error||'Error al consultar');
     _amexGaps = res.gaps||[];
