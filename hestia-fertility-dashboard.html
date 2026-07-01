@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.06.30.7 -->
+﻿<!-- app-build:2026.06.30.8 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1500,6 +1500,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
       <button class="pc-tab" onclick="pcTab('formato',this)">Formato impresión</button>
       <button class="pc-tab" onclick="pcTab('formularios',this)">Formularios</button>
       <button class="pc-tab" onclick="pcTab('animaciones',this)">Animaciones</button>
+      <button class="pc-tab" onclick="pcTab('reportes',this)">Reportes</button>
     </div>
 
     <!-- ── Apariencia ─────────────────────────────────────── -->
@@ -1794,6 +1795,29 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
           <div id="anim-prev-name" style="font-size:13px;font-weight:700;margin-bottom:16px;color:var(--color-text)"></div>
           <div id="anim-prev-content"></div>
           <button onclick="document.getElementById('anim-prev-modal').style.display='none'" style="margin-top:16px;padding:7px 20px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">Cerrar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Reportes ──────────────────────────────────────────── -->
+    <div id="pc-reportes" class="pc-section" style="display:none">
+      <div class="pc-card">
+        <div class="pc-card-title">Plantilla de impresión por tipo de reporte</div>
+        <p style="font-size:12px;color:var(--color-text-muted);margin:0 0 18px">
+          Elige la plantilla que se usará al imprimir o exportar cada tipo de reporte. Puedes cambiarla en cualquier momento.
+        </p>
+        <div id="rep-cfg-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;margin-bottom:14px"></div>
+        <div style="background:var(--color-surface-offset);border-radius:8px;padding:12px 14px;margin-top:4px">
+          <div style="font-size:11.5px;font-weight:700;color:var(--color-text);margin-bottom:8px">Plantillas disponibles</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            <span style="padding:4px 10px;background:var(--color-primary);color:#fff;border-radius:20px;font-size:11px;font-weight:600">Ejecutivo</span>
+            <span style="padding:4px 10px;background:#1a365d;color:#fff;border-radius:20px;font-size:11px;font-weight:600">Contable</span>
+            <span style="padding:4px 10px;background:#555;color:#fff;border-radius:20px;font-size:11px;font-weight:600">Minimalista</span>
+            <span style="padding:4px 10px;background:#c46a7a;color:#fff;border-radius:20px;font-size:11px;font-weight:600">Clínica Rosa</span>
+            <span style="padding:4px 10px;background:#2c3e50;color:#fff;border-radius:20px;font-size:11px;font-weight:600">Bicolor</span>
+            <span style="padding:4px 10px;background:#7a5c00;color:#fff;border-radius:20px;font-size:11px;font-weight:600">Certificado</span>
+            <span style="padding:4px 10px;background:linear-gradient(90deg,#c46a7a,#1D9E75);color:#fff;border-radius:20px;font-size:11px;font-weight:600">Moderno líneas</span>
+          </div>
         </div>
       </div>
     </div>
@@ -4716,7 +4740,132 @@ function _renderEgresosERP() {
   h.push('</div>'); // grid
   h.push('</div>'); // wrap
 
+  // ── Reporte por proveedor (collapsible) ─────────────────────
+  h.push('<div id="prov-rep-wrap" style="margin-top:20px">');
+  h.push('<button onclick="_provRepToggle()" id="prov-rep-toggle" style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:13px 16px;background:var(--color-surface-offset);border:1px solid var(--color-divider);border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;color:var(--color-text);text-align:left;gap:8px">');
+  h.push('<span style="display:flex;align-items:center;gap:9px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary,#c46a7a)" stroke-width="2.2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>Reporte por proveedor</span>');
+  h.push('<span id="prov-rep-chev" style="font-size:10px;color:var(--color-text-muted);transition:transform .2s">▼</span>');
+  h.push('</button>');
+  h.push('<div id="prov-rep-body" style="display:none;padding:18px 16px;border:1px solid var(--color-divider);border-top:none;border-radius:0 0 10px 10px;background:var(--color-surface)">');
+  h.push('<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:18px">');
+  h.push('<div style="flex:2;min-width:170px"><label style="font-size:11px;font-weight:600;color:var(--color-text-muted);display:block;margin-bottom:5px">Proveedor</label><input id="prov-rep-prov" list="prov-datalist" placeholder="Escribe o selecciona..." autocomplete="off" style="width:100%;padding:8px 11px;border:1px solid var(--color-divider);border-radius:8px;font-size:13px;background:var(--color-surface-offset);color:var(--color-text);font-family:inherit"></div>');
+  h.push('<div><label style="font-size:11px;font-weight:600;color:var(--color-text-muted);display:block;margin-bottom:5px">Del</label><input type="date" id="prov-rep-ini" style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:8px;font-size:13px;background:var(--color-surface-offset);color:var(--color-text);font-family:inherit"></div>');
+  h.push('<div><label style="font-size:11px;font-weight:600;color:var(--color-text-muted);display:block;margin-bottom:5px">Al</label><input type="date" id="prov-rep-fin" style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:8px;font-size:13px;background:var(--color-surface-offset);color:var(--color-text);font-family:inherit"></div>');
+  h.push('<button onclick="proveedorReporte()" style="padding:9px 22px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">Generar reporte</button>');
+  h.push('</div>');
+  h.push('<div id="prov-rep-result"></div>');
+  h.push('</div>');
+  h.push('</div>');
+
   root.innerHTML = h.join('');
+}
+
+/* ── Reporte por proveedor ──────────────────────────────────── */
+function _provRepToggle(){
+  var body=document.getElementById('prov-rep-body');
+  var chev=document.getElementById('prov-rep-chev');
+  if(!body) return;
+  var open=body.style.display==='none';
+  body.style.display=open?'':'none';
+  if(chev) chev.style.transform=open?'rotate(180deg)':'';
+}
+function proveedorReporte(){
+  var prov=(document.getElementById('prov-rep-prov')||{}).value||'';
+  var ini=(document.getElementById('prov-rep-ini')||{}).value||'';
+  var fin=(document.getElementById('prov-rep-fin')||{}).value||'';
+  var res=document.getElementById('prov-rep-result'); if(!res) return;
+  if(!prov.trim()){ res.innerHTML='<div style="padding:10px;color:#e53e3e;font-size:12.5px">Selecciona un proveedor.</div>'; return; }
+  if(!_egData||!_egData.rows||!_egData.rows.length){ res.innerHTML='<div style="padding:10px;color:#999;font-size:12.5px">No hay datos cargados.</div>'; return; }
+  var rows=_egData.rows.filter(function(r){
+    if(!r.pagado) return false;
+    if((r.proveedor||'').trim().toLowerCase()!==prov.trim().toLowerCase()) return false;
+    if(ini&&(r.fecha||'').substring(0,10)<ini) return false;
+    if(fin&&(r.fecha||'').substring(0,10)>fin) return false;
+    return true;
+  });
+  if(!rows.length){ res.innerHTML='<div style="padding:14px 0;font-size:12.5px;color:var(--color-text-muted)">Sin registros para <b>'+_escH(prov)+'</b> en el rango indicado.</div>'; return; }
+  rows.sort(function(a,b){return(a.fecha||'').localeCompare(b.fecha||'');});
+  var total=rows.reduce(function(s,r){return s+(r.monto||0);},0);
+  var count=rows.length;
+  var avg=total/count;
+  var last=rows[rows.length-1];
+  var byMes={};
+  rows.forEach(function(r){var k=(r.fecha||'').substring(0,7);byMes[k]=(byMes[k]||0)+(r.monto||0);});
+  var meses=Object.keys(byMes).sort();
+  var tendencia=meses.map(function(k){
+    var p=k.split('-');
+    var mn=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'][parseInt(p[1],10)-1]||p[1];
+    return {label:mn+' '+(p[0]||'').substring(2),monto:byMes[k]};
+  });
+  var pd={type:'proveedor',title:'Reporte de proveedor',subject:prov,
+    period:(ini||'—')+' → '+(fin||'—'),
+    generado:new Date().toLocaleString('es-MX',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}),
+    kpis:[
+      {label:'Total gastado',value:fE(total)},
+      {label:'Pagos',value:String(count)},
+      {label:'Promedio',value:fE(avg)},
+      {label:'Último pago',value:(last.fecha||'—').substring(0,10),sub:last.formaPago||'—'}
+    ],
+    tendencia:tendencia,
+    cols:['Fecha','Concepto','Tipo','Subtipo','Monto','Forma pago'],
+    rows:rows.map(function(r){return[(r.fecha||'—').substring(0,10),_escH(r.concepto||'—'),r.tipo||'—',r.subtipo||'—',fE(r.monto),r.formaPago||'—'];}),
+    totalLabel:'Total general',totalValue:fE(total)};
+  window._provRepData=pd;
+  _renderProvReporte(rows,pd);
+}
+function _escH(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function _renderProvReporte(rows,pd){
+  var res=document.getElementById('prov-rep-result'); if(!res) return;
+  var h='';
+  h+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">';
+  pd.kpis.forEach(function(k){
+    h+='<div style="background:var(--color-surface-offset);border-radius:9px;padding:12px 14px;border-left:3px solid var(--color-primary,#c46a7a)">'
+      +'<div style="font-size:19px;font-weight:800;color:var(--color-primary,#c46a7a)">'+k.value+'</div>'
+      +'<div style="font-size:9.5px;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.05em;margin-top:3px">'+k.label+'</div>'
+      +(k.sub?'<div style="font-size:10.5px;color:var(--color-text-muted);margin-top:1px">'+k.sub+'</div>':'')+'</div>';
+  });
+  h+='</div>';
+  if(pd.tendencia.length>1){
+    var mx=Math.max.apply(null,pd.tendencia.map(function(t){return t.monto;}));
+    h+='<div style="background:var(--color-surface-offset);border-radius:9px;padding:12px 16px;margin-bottom:16px">'
+      +'<div style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">Gasto mensual</div>';
+    pd.tendencia.forEach(function(t){
+      var pct=mx?Math.round(t.monto/mx*100):0;
+      h+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:5px">'
+        +'<span style="width:44px;font-size:10px;color:var(--color-text-muted);text-align:right;flex-shrink:0">'+t.label+'</span>'
+        +'<div style="flex:1;height:10px;background:var(--color-divider);border-radius:2px"><div style="width:'+pct+'%;height:100%;background:var(--color-primary,#c46a7a);border-radius:2px"></div></div>'
+        +'<span style="width:72px;font-size:10px;font-weight:600;color:var(--color-text);text-align:right;flex-shrink:0">'+fE(t.monto)+'</span></div>';
+    });
+    h+='</div>';
+  }
+  h+='<div style="overflow-x:auto;margin-bottom:16px"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+    +'<thead><tr style="background:var(--color-surface-offset)">';
+  ['Fecha','Concepto','Tipo','Subtipo','Monto','Forma pago'].forEach(function(c,i){
+    h+='<th style="padding:7px 9px;text-align:'+(i>=4?'right':'left')+';font-size:10.5px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1.5px solid var(--color-divider)">'+c+'</th>';
+  });
+  h+='</tr></thead><tbody>';
+  rows.forEach(function(r,ri){
+    h+='<tr style="background:'+(ri%2?'var(--color-surface-offset)':'transparent')+'">'
+      +'<td style="padding:6px 9px;border-bottom:0.5px solid var(--color-divider)">'+(r.fecha||'—').substring(0,10)+'</td>'
+      +'<td style="padding:6px 9px;border-bottom:0.5px solid var(--color-divider)">'+_escH(r.concepto||'—')+'</td>'
+      +'<td style="padding:6px 9px;border-bottom:0.5px solid var(--color-divider)">'+_escH(r.tipo||'—')+'</td>'
+      +'<td style="padding:6px 9px;border-bottom:0.5px solid var(--color-divider)">'+_escH(r.subtipo||'—')+'</td>'
+      +'<td style="padding:6px 9px;border-bottom:0.5px solid var(--color-divider);text-align:right;font-weight:600">'+fE(r.monto)+'</td>'
+      +'<td style="padding:6px 9px;border-bottom:0.5px solid var(--color-divider);text-align:right">'+_escH(r.formaPago||'—')+'</td>'
+    +'</tr>';
+  });
+  h+='<tr style="background:var(--color-surface-offset)">'
+    +'<td colspan="4" style="padding:7px 9px;font-weight:700;font-size:12.5px;border-top:1.5px solid var(--color-divider)">Total general</td>'
+    +'<td style="padding:7px 9px;font-weight:800;font-size:13px;text-align:right;border-top:1.5px solid var(--color-divider);color:var(--color-primary,#c46a7a)">'+pd.totalValue+'</td>'
+    +'<td style="border-top:1.5px solid var(--color-divider)"></td></tr>';
+  h+='</tbody></table></div>';
+  h+='<div style="display:flex;gap:10px;flex-wrap:wrap">'
+    +'<button onclick="hfReportPrint(\'proveedor\',window._provRepData)" style="padding:9px 20px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px">'
+    +'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Imprimir / PDF</button>'
+    +'<button onclick="hfReportExcel(window._provRepData,\'proveedor_\'+(document.getElementById(\'prov-rep-prov\')||{value:\'rep\'}).value.replace(/\\s+/g,\'_\'))" style="padding:9px 20px;background:#1a7a3c;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px">'
+    +'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Exportar Excel</button>'
+    +'</div>';
+  res.innerHTML=h;
 }
 
 /* ── Upload PDF y Visor ─────────────────────────────────────── */
@@ -11476,7 +11625,7 @@ function fmtSyncColor(type) {
 
 function pcTab(tab, btn, silent) {
   _pcActiveTab = tab;
-  ['apariencia','menu','conexiones','general','programacion','formato','formularios','animaciones'].forEach(function(t) {
+  ['apariencia','menu','conexiones','general','programacion','formato','formularios','animaciones','reportes'].forEach(function(t) {
     var el = document.getElementById('pc-' + t);
     if (el) el.style.display = (t === tab) ? '' : 'none';
   });
@@ -11487,6 +11636,7 @@ function pcTab(tab, btn, silent) {
   if (tab === 'programacion') { pcLoadScheduled(); }
   if (tab === 'formularios') { ddLoad(); }
   if (tab === 'animaciones') { _renderAnimPanel(); }
+  if (tab === 'reportes') { _renderReportesPanel(); }
 }
 function _renderAnimPanel(){
   var grid=document.getElementById('anim-cfg-grid'); if(!grid) return;
@@ -11520,6 +11670,303 @@ function hfAnimPreview(viewId){
 function hfAnimResetAll(){
   _HF_ANIM_VIEWS.forEach(function(v){ localStorage.removeItem('hf_anim_view_'+v.id); });
   _renderAnimPanel();
+}
+
+/* ══════════════════════════════════════════════════════════════
+   REPORT TEMPLATE SYSTEM — impresión en nueva pestaña + Excel
+   ══════════════════════════════════════════════════════════════ */
+var _REPORT_TPL_LIST=[
+  {id:'ejecutivo',   label:'Ejecutivo',       desc:'Logo · KPIs · gráfica · tabla'},
+  {id:'contable',    label:'Contable',         desc:'Header azul · tabla densa · totales'},
+  {id:'minimalista', label:'Minimalista',      desc:'Sin adornos · una columna · compacto'},
+  {id:'clinica',     label:'Cl\xednica Rosa',  desc:'Header marca #c46a7a · KPIs con borde'},
+  {id:'bicolor',     label:'Bicolor',          desc:'Sidebar oscuro con KPIs · tabla derecha'},
+  {id:'certificado', label:'Certificado',      desc:'Marco dorado · pie de emisión · formal'},
+  {id:'moderno',     label:'Moderno l\xedneas',desc:'Degradado accent · montos en rosa'}
+];
+var _REPORT_TYPES=[
+  {id:'proveedor',     label:'Reporte de proveedor',       defaultTpl:'ejecutivo'},
+  {id:'estado-cuenta', label:'Estado de cuenta',           defaultTpl:'clinica'},
+  {id:'ingresos-res',  label:'Resumen de ingresos',        defaultTpl:'ejecutivo'},
+  {id:'presupuesto',   label:'Presupuesto vs. real',       defaultTpl:'contable'},
+  {id:'conciliacion',  label:'Conciliaci\xf3n bancaria',   defaultTpl:'contable'},
+  {id:'pnl',           label:'Estado de resultados (P&L)', defaultTpl:'ejecutivo'},
+  {id:'cxp',           label:'Cuentas por pagar',          defaultTpl:'minimalista'}
+];
+/* ── Shared helpers ────────────────────────────────────────── */
+function _tplFmt(v){var n=Number(v)||0;return '$'+Math.round(n).toLocaleString('en-US');}
+function _tplFmtDate(s){if(!s||s==='—')return '—';try{var d=new Date(String(s).substring(0,10)+'T12:00:00');return d.toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'});}catch(e){return s;}}
+function _tplBarChart(tendencia,color){
+  if(!tendencia||!tendencia.length)return '';
+  var max=Math.max.apply(null,tendencia.map(function(t){return t.monto||0;}))||1;
+  var h='<div style="margin:10px 0">';
+  tendencia.forEach(function(t){
+    var pct=Math.round((t.monto||0)/max*92);
+    h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">'
+      +'<span style="width:46px;font-size:8.5px;color:#888;text-align:right;flex-shrink:0">'+t.label+'</span>'
+      +'<div style="flex:1;height:11px;background:#f0f0f0;border-radius:2px">'
+        +'<div style="width:'+pct+'%;height:100%;background:'+color+';border-radius:2px"></div>'
+      +'</div>'
+      +'<span style="width:56px;font-size:8.5px;color:#555;text-align:right;flex-shrink:0">'+_tplFmt(t.monto)+'</span>'
+    +'</div>';
+  });
+  return h+'</div>';
+}
+function _tplTableHTML(data,headerBg,headerColor){
+  headerBg=headerBg||'#f0f0f0'; headerColor=headerColor||'#333';
+  var h='<table style="width:100%;border-collapse:collapse;font-size:9.5px">'
+    +'<thead><tr style="background:'+headerBg+'">';
+  (data.cols||[]).forEach(function(c,i){
+    var right=i>0&&i>=(data.cols.length-2);
+    h+='<th style="padding:5px 6px;text-align:'+(right?'right':'left')+';font-weight:700;font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;color:'+headerColor+';border-bottom:1px solid rgba(0,0,0,.15)">'+c+'</th>';
+  });
+  h+='</tr></thead><tbody>';
+  (data.rows||[]).forEach(function(r,ri){
+    h+='<tr style="background:'+(ri%2?'rgba(0,0,0,.025)':'transparent')+'">';
+    r.forEach(function(cell,ci){
+      var right=ci>0&&ci>=(r.length-2);
+      h+='<td style="padding:3.5px 6px;border-bottom:0.5px solid rgba(0,0,0,.07);text-align:'+(right?'right':'left')+'">'+cell+'</td>';
+    });
+    h+='</tr>';
+  });
+  if(data.totalValue){
+    h+='<tr style="background:rgba(0,0,0,.04)">';
+    (data.cols||[]).forEach(function(c,i){
+      var right=i>0&&i>=(data.cols.length-2);
+      if(i===0) h+='<td style="padding:5px 6px;font-weight:700;border-top:1.5px solid #333;font-size:10px">'+data.totalLabel+'</td>';
+      else if(i===(data.cols.length-2)) h+='<td style="padding:5px 6px;font-weight:700;text-align:right;border-top:1.5px solid #333;font-size:10px">'+data.totalValue+'</td>';
+      else h+='<td style="border-top:1.5px solid #333"></td>';
+    });
+    h+='</tr>';
+  }
+  return h+'</tbody></table>';
+}
+function _tplPage(bodyHTML,extraCSS){
+  return '<!DOCTYPE html><html><head><meta charset="utf-8">'
+    +'<meta name="viewport" content="width=device-width,initial-scale=1">'
+    +'<title>Reporte · Hestia Fertility</title>'
+    +'<style>*{box-sizing:border-box;margin:0;padding:0}'
+    +'body{font-family:\'Helvetica Neue\',Arial,sans-serif;font-size:11px;color:#111;background:#fff}'
+    +'@media print{.no-print{display:none!important}@page{margin:15mm}}'
+    +(extraCSS||'')+'</style></head><body>'
+    +'<div class="no-print" style="position:fixed;top:0;left:0;right:0;background:#1a1a1a;padding:8px 20px;display:flex;align-items:center;gap:8px;z-index:9999">'
+    +'<span style="color:#fff;font-size:13px;font-weight:600;flex:1">Vista previa · Hestia Fertility</span>'
+    +'<button onclick="window.print()" style="padding:7px 18px;background:#c46a7a;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer">Imprimir / PDF</button>'
+    +'<button onclick="window.close()" style="padding:7px 14px;background:#444;color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer">Cerrar</button>'
+    +'</div>'
+    +'<div style="padding:52px 0 32px">'+bodyHTML+'</div>'
+    +'</body></html>';
+}
+/* ── 7 Plantillas ──────────────────────────────────────────── */
+var _REPORT_TEMPLATES={
+  ejecutivo:function(d){
+    var c='#c46a7a';
+    var b='<div style="max-width:780px;margin:0 auto;padding:24px 32px">'
+      +'<div style="display:flex;align-items:flex-start;justify-content:space-between;padding-bottom:14px;border-bottom:2.5px solid '+c+';margin-bottom:20px">'
+      +'<div style="display:flex;align-items:center;gap:10px">'
+      +'<div style="width:36px;height:36px;background:'+c+';border-radius:7px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;font-weight:800">H</div>'
+      +'<div><div style="font-size:16px;font-weight:700;letter-spacing:-.01em">Hestia Fertility Clinic</div>'
+      +'<div style="font-size:10px;color:#888;margin-top:1px">'+d.title+'</div></div>'
+      +'</div>'
+      +'<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:'+c+'">'+d.subject+'</div>'
+      +'<div style="font-size:10px;color:#999;margin-top:2px">'+d.period+'</div>'
+      +'<div style="font-size:9px;color:#bbb;margin-top:1px">'+d.generado+'</div></div>'
+      +'</div>'
+      +'<div style="display:grid;grid-template-columns:repeat('+d.kpis.length+',1fr);gap:10px;margin-bottom:20px">'
+      +d.kpis.map(function(k){return'<div style="background:#fdf5f7;border-radius:7px;padding:12px 14px;border-left:3px solid '+c+'">'
+        +'<div style="font-size:20px;font-weight:800;color:'+c+'">'+k.value+'</div>'
+        +'<div style="font-size:8.5px;color:#aaa;text-transform:uppercase;letter-spacing:.06em;margin-top:3px">'+k.label+'</div>'
+        +(k.sub?'<div style="font-size:9.5px;color:#666;margin-top:2px">'+k.sub+'</div>':'')+'</div>';}).join('')
+      +'</div>'
+      +(d.tendencia&&d.tendencia.length?'<div style="background:#fafafa;border-radius:7px;padding:13px 16px;margin-bottom:20px"><div style="font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#bbb;margin-bottom:6px">Gasto mensual</div>'+_tplBarChart(d.tendencia,c)+'</div>':'')
+      +'<div style="font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#bbb;margin-bottom:8px">Detalle de movimientos</div>'
+      +_tplTableHTML(d,'#fdf5f7','#c46a7a')
+      +'<div style="margin-top:20px;padding-top:10px;border-top:0.5px solid #eee;display:flex;justify-content:space-between">'
+      +'<span style="font-size:8.5px;color:#ccc">Sistema ERP · Hestia Fertility Clinic</span>'
+      +'<span style="font-size:8.5px;color:#ccc">'+d.generado+'</span></div></div>';
+    return _tplPage(b);
+  },
+  contable:function(d){
+    var b='<div style="max-width:900px;margin:0 auto;padding:20px 28px">'
+      +'<div style="background:#1a365d;padding:12px 16px;border-radius:5px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:flex-end">'
+      +'<div><div style="font-size:13px;font-weight:800;color:#fff;letter-spacing:.04em;text-transform:uppercase">HESTIA FERTILITY CLINIC</div>'
+      +'<div style="font-size:10px;color:#90caf9;margin-top:2px">'+d.title+' · '+d.subject+'</div></div>'
+      +'<div style="text-align:right"><div style="font-size:10px;color:#cfe2ff">Período: '+d.period+'</div>'
+      +'<div style="font-size:9px;color:#90caf9;margin-top:1px">Emitido: '+d.generado+'</div></div></div>'
+      +'<div style="display:flex;border:1px solid #ddd;border-radius:4px;overflow:hidden;margin-bottom:14px">'
+      +d.kpis.map(function(k,i){return'<div style="flex:1;padding:9px 12px;text-align:center;border-right:'+(i<d.kpis.length-1?'1px solid #ddd':'none')+'">'
+        +'<div style="font-size:16px;font-weight:800;color:#1a365d">'+k.value+'</div>'
+        +'<div style="font-size:8.5px;color:#999;text-transform:uppercase;letter-spacing:.04em;margin-top:2px">'+k.label+'</div>'
+        +(k.sub?'<div style="font-size:9px;color:#666;margin-top:1px">'+k.sub+'</div>':'')+'</div>';}).join('')
+      +'</div>'
+      +_tplTableHTML(d,'#e8eef7','#1a365d')
+      +'<div style="margin-top:18px;font-size:8.5px;color:#aaa;text-align:right">Reporte contable · Sistema ERP Hestia Fertility · '+d.generado+'</div></div>';
+    return _tplPage(b);
+  },
+  minimalista:function(d){
+    var b='<div style="max-width:620px;margin:0 auto;padding:28px 36px">'
+      +'<div style="margin-bottom:22px"><div style="font-size:22px;font-weight:700;color:#111">'+d.subject+'</div>'
+      +'<div style="font-size:11px;color:#aaa;margin-top:3px">'+d.title+' · '+d.period+'</div></div>'
+      +'<div style="display:flex;border:0.5px solid #ddd;border-radius:4px;overflow:hidden;margin-bottom:22px">'
+      +d.kpis.map(function(k,i){return'<div style="flex:1;padding:10px;text-align:center;border-right:'+(i<d.kpis.length-1?'0.5px solid #ddd':'none')+'">'
+        +'<div style="font-size:17px;font-weight:700;color:#111">'+k.value+'</div>'
+        +'<div style="font-size:8.5px;color:#aaa;margin-top:2px">'+k.label+'</div>'
+        +(k.sub?'<div style="font-size:9px;color:#888;margin-top:1px">'+k.sub+'</div>':'')+'</div>';}).join('')+'</div>'
+      +(d.rows||[]).map(function(r){return'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:0.5px solid #f0f0f0">'
+        +'<span style="font-size:10px;color:#666">'+r[0]+' &nbsp;·&nbsp; '+r[1]+'</span>'
+        +'<span style="font-size:11px;font-weight:600;color:#111">'+r[r.length-2]+'</span></div>';}).join('')
+      +'<div style="display:flex;justify-content:space-between;padding:9px 0;border-top:1.5px solid #111;margin-top:3px">'
+      +'<span style="font-size:12px;font-weight:700">'+d.totalLabel+'</span>'
+      +'<span style="font-size:13px;font-weight:700;color:#c46a7a">'+d.totalValue+'</span></div>'
+      +'<div style="margin-top:28px;font-size:8.5px;color:#ccc">Hestia Fertility · '+d.generado+'</div></div>';
+    return _tplPage(b);
+  },
+  clinica:function(d){
+    var c='#c46a7a';
+    var b='<div style="max-width:780px;margin:0 auto;padding:24px 32px">'
+      +'<div style="background:'+c+';padding:14px 18px;border-radius:8px;margin-bottom:18px">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between">'
+      +'<div style="display:flex;align-items:center;gap:10px">'
+      +'<div style="width:32px;height:32px;background:rgba(255,255,255,.25);border-radius:5px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:800">H</div>'
+      +'<div><div style="font-size:14px;font-weight:800;color:#fff;letter-spacing:.03em">HESTIA FERTILITY CLINIC</div>'
+      +'<div style="font-size:9px;color:rgba(255,255,255,.75);letter-spacing:.06em;text-transform:uppercase;margin-top:1px">'+d.title+'</div></div>'
+      +'</div>'
+      +'<div style="text-align:right"><div style="font-size:12px;font-weight:700;color:#fff">'+d.subject+'</div>'
+      +'<div style="font-size:9px;color:rgba(255,255,255,.75);margin-top:2px">'+d.period+'</div>'
+      +'<div style="font-size:8.5px;color:rgba(255,255,255,.55);margin-top:1px">'+d.generado+'</div></div>'
+      +'</div></div>'
+      +'<div style="display:grid;grid-template-columns:repeat('+d.kpis.length+',1fr);gap:10px;margin-bottom:18px">'
+      +d.kpis.map(function(k){return'<div style="background:#fdf5f7;border-radius:7px;padding:10px 12px;border-left:3px solid '+c+'">'
+        +'<div style="font-size:18px;font-weight:800;color:'+c+'">'+k.value+'</div>'
+        +'<div style="font-size:8.5px;color:#aaa;text-transform:uppercase;letter-spacing:.05em;margin-top:2px">'+k.label+'</div>'
+        +(k.sub?'<div style="font-size:9px;color:#888;margin-top:1px">'+k.sub+'</div>':'')+'</div>';}).join('')
+      +'</div>'
+      +(d.tendencia&&d.tendencia.length?'<div style="background:#fdf5f7;border-radius:7px;padding:12px 16px;margin-bottom:18px"><div style="font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+c+';margin-bottom:6px">Evolución mensual</div>'+_tplBarChart(d.tendencia,c)+'</div>':'')
+      +_tplTableHTML(d,'#fdf5f7',c)
+      +'<div style="margin-top:18px;padding-top:10px;border-top:1px solid #fde0e7;text-align:right"><span style="font-size:8.5px;color:#dbb0bc">Hestia Fertility Clinic · '+d.generado+'</span></div></div>';
+    return _tplPage(b);
+  },
+  bicolor:function(d){
+    var c='#2c3e50';
+    var b='<div style="max-width:820px;margin:0 auto;padding:24px 32px">'
+      +'<table style="width:100%;border-collapse:collapse"><tr>'
+      +'<td style="width:90px;background:'+c+';vertical-align:top;padding:16px 8px;border-radius:6px 0 0 6px">'
+      +'<div style="color:rgba(255,255,255,.5);font-size:8px;letter-spacing:.1em;text-transform:uppercase;text-align:center;margin-bottom:16px">Hestia</div>'
+      +d.kpis.map(function(k){return'<div style="text-align:center;margin-bottom:14px;padding-bottom:14px;border-bottom:0.5px solid rgba(255,255,255,.15)">'
+        +'<div style="font-size:14px;font-weight:800;color:#fff">'+k.value+'</div>'
+        +'<div style="font-size:7.5px;color:rgba(255,255,255,.55);margin-top:2px;text-transform:uppercase;letter-spacing:.05em">'+k.label+'</div>'
+        +(k.sub?'<div style="font-size:8px;color:rgba(255,255,255,.45);margin-top:1px">'+k.sub+'</div>':'')+'</div>';}).join('')
+      +'<div style="color:rgba(255,255,255,.25);font-size:7px;text-align:center;margin-top:16px;writing-mode:vertical-rl;transform:rotate(180deg);margin:auto">Sistema ERP</div>'
+      +'</td>'
+      +'<td style="vertical-align:top;padding:16px 20px">'
+      +'<div style="border-bottom:2px solid '+c+';padding-bottom:10px;margin-bottom:14px">'
+      +'<div style="font-size:16px;font-weight:700;color:'+c+'">'+d.subject+'</div>'
+      +'<div style="font-size:10px;color:#999;margin-top:2px">'+d.title+' · '+d.period+'</div>'
+      +'<div style="font-size:8.5px;color:#bbb;margin-top:1px">'+d.generado+'</div>'
+      +'</div>'
+      +(d.tendencia&&d.tendencia.length?'<div style="margin-bottom:14px"><div style="font-size:8.5px;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Gasto mensual</div>'+_tplBarChart(d.tendencia,c)+'</div>':'')
+      +_tplTableHTML(d,'#ecf0f1',c)
+      +'</td></tr></table></div>';
+    return _tplPage(b);
+  },
+  certificado:function(d){
+    var g='#b08030';
+    var b='<div style="max-width:720px;margin:0 auto;padding:28px 36px">'
+      +'<div style="border:2px solid '+g+';border-radius:5px;padding:24px 28px">'
+      +'<div style="text-align:center;border-bottom:1px solid #d4a843;padding-bottom:16px;margin-bottom:16px">'
+      +'<div style="font-size:10px;font-weight:700;color:'+g+';letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px">HESTIA FERTILITY CLINIC</div>'
+      +'<div style="font-size:9px;color:#999;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px">'+d.title+'</div>'
+      +'<div style="font-size:18px;font-weight:700;color:#111;margin-bottom:4px">'+d.subject+'</div>'
+      +'<div style="font-size:10px;color:#999">Período: '+d.period+'</div>'
+      +'</div>'
+      +'<div style="display:grid;grid-template-columns:repeat('+d.kpis.length+',1fr);gap:10px;margin-bottom:18px">'
+      +d.kpis.map(function(k){return'<div style="text-align:center;padding:10px;border:1px solid #d4a843;border-radius:4px">'
+        +'<div style="font-size:17px;font-weight:700;color:#7a5c00">'+k.value+'</div>'
+        +'<div style="font-size:8.5px;color:'+g+';text-transform:uppercase;letter-spacing:.05em;margin-top:3px">'+k.label+'</div>'
+        +(k.sub?'<div style="font-size:9px;color:#888;margin-top:1px">'+k.sub+'</div>':'')+'</div>';}).join('')
+      +'</div>'
+      +(d.tendencia&&d.tendencia.length?'<div style="margin-bottom:16px"><div style="font-size:8.5px;font-weight:700;color:'+g+';text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px">Evolución mensual</div>'+_tplBarChart(d.tendencia,'#d4a843')+'</div>':'')
+      +_tplTableHTML(d,'#faf6e8','#7a5c00')
+      +'<div style="text-align:center;margin-top:20px;padding-top:12px;border-top:1px solid #d4a843">'
+      +'<div style="font-size:8.5px;color:'+g+';font-style:italic">Documento generado por el Sistema ERP de Hestia Fertility Clinic</div>'
+      +'<div style="font-size:8.5px;color:#aaa;margin-top:2px">'+d.generado+'</div>'
+      +'</div></div></div>';
+    return _tplPage(b);
+  },
+  moderno:function(d){
+    var b='<div style="max-width:780px;margin:0 auto;padding:24px 32px">'
+      +'<div style="height:4px;background:linear-gradient(90deg,#c46a7a,#1D9E75);border-radius:2px;margin-bottom:18px"></div>'
+      +'<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px">'
+      +'<div><div style="font-size:10px;color:#aaa;font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px">'+d.title+'</div>'
+      +'<div style="font-size:20px;font-weight:700;color:#111">'+d.subject+'</div></div>'
+      +'<div style="text-align:right"><div style="font-size:11px;color:#888">'+d.period+'</div>'
+      +'<div style="font-size:9.5px;color:#bbb;margin-top:2px">Hestia Fertility · '+d.generado+'</div></div>'
+      +'</div>'
+      +'<div style="display:flex;border:0.5px solid #e0e0e0;border-radius:6px;overflow:hidden;margin-bottom:18px">'
+      +d.kpis.map(function(k,i){return'<div style="flex:1;padding:10px 12px;border-right:'+(i<d.kpis.length-1?'0.5px solid #e0e0e0':'none')+'">'
+        +'<div style="font-size:17px;font-weight:700;color:#111">'+k.value+'</div>'
+        +'<div style="font-size:8.5px;color:#aaa;margin-top:2px">'+k.label+'</div>'
+        +(k.sub?'<div style="font-size:9px;color:#888;margin-top:1px">'+k.sub+'</div>':'')+'</div>';}).join('')+'</div>'
+      +(d.tendencia&&d.tendencia.length?'<div style="margin-bottom:18px">'+_tplBarChart(d.tendencia,'#c46a7a')+'</div>':'')
+      +_tplTableHTML(d,'#f8f8f8','#555')
+      +'<div style="margin-top:7px;display:flex;justify-content:space-between;align-items:center">'
+      +'<div style="height:2px;flex:1;background:linear-gradient(90deg,#c46a7a,#1D9E75);border-radius:1px;margin-right:14px"></div>'
+      +'<span style="font-size:8.5px;color:#ccc">Hestia Fertility · Sistema ERP</span></div></div>';
+    return _tplPage(b);
+  }
+};
+/* ── Config helpers ────────────────────────────────────────── */
+function hfTplGet(reportId){
+  var def=(_REPORT_TYPES.find(function(t){return t.id===reportId;})||{defaultTpl:'ejecutivo'}).defaultTpl;
+  return localStorage.getItem('hf_tpl_'+reportId)||def;
+}
+function hfTplSet(reportId,tplId){ localStorage.setItem('hf_tpl_'+reportId,tplId); }
+function hfReportPrint(reportId,data){
+  var tplId=hfTplGet(reportId);
+  var fn=_REPORT_TEMPLATES[tplId]||_REPORT_TEMPLATES['ejecutivo'];
+  var html=fn(data);
+  var w=window.open('','_blank');
+  if(!w){ alert('Habilita las ventanas emergentes para este sitio e intenta de nuevo.'); return; }
+  w.document.write(html);
+  w.document.close();
+}
+function hfReportExcel(data,filename){
+  var ths=(data.cols||[]).map(function(c){return'<th style="background:#c46a7a;color:#fff;padding:4px 8px;font-size:10px">'+c+'</th>';}).join('');
+  var trs=(data.rows||[]).map(function(r,ri){
+    return '<tr style="background:'+(ri%2?'#fdf5f7':'#fff')+'">'
+      +r.map(function(c){return'<td style="padding:3px 7px;border:0.5px solid #eee;font-size:10px">'+c+'</td>';}).join('')+'</tr>';
+  }).join('');
+  var totalRow='';
+  if(data.totalValue){
+    totalRow='<tr style="background:#fdf5f7"><td style="padding:5px 7px;font-weight:bold;border:0.5px solid #ddd;font-size:10px">'+data.totalLabel+'</td>'
+      +(data.cols||[]).slice(1,-2).map(function(){return'<td style="border:0.5px solid #ddd"></td>';}).join('')
+      +'<td style="padding:5px 7px;font-weight:bold;border:0.5px solid #ddd;font-size:10px;text-align:right">'+data.totalValue+'</td>'
+      +'<td style="border:0.5px solid #ddd"></td></tr>';
+  }
+  var html='<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">'
+    +'<head><meta charset="utf-8"></head>'
+    +'<body><table border="0"><thead><tr>'+ths+'</tr></thead><tbody>'+trs+totalRow+'</tbody></table></body></html>';
+  var b=new Blob(['﻿'+html],{type:'application/vnd.ms-excel;charset=utf-8'});
+  var u=URL.createObjectURL(b);
+  var a=document.createElement('a');
+  a.href=u; a.download=(filename||'reporte_hestia')+'.xls';
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(u);},200);
+}
+/* ── Panel de Control — sección Reportes ──────────────────── */
+function _renderReportesPanel(){
+  var g=document.getElementById('rep-cfg-grid'); if(!g) return;
+  var h='';
+  _REPORT_TYPES.forEach(function(rt){
+    var cur=hfTplGet(rt.id);
+    h+='<div style="background:var(--color-surface-offset);border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:10px">'
+      +'<div style="flex:1"><div style="font-size:12.5px;font-weight:700;color:var(--color-text)">'+rt.label+'</div>'
+      +'<div style="font-size:10.5px;color:var(--color-text-muted);margin-top:2px">'+(_REPORT_TPL_LIST.find(function(t){return t.id===cur;})||{desc:cur}).desc+'</div></div>'
+      +'<select onchange="hfTplSet(\''+rt.id+'\',this.value);_renderReportesPanel()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--color-divider);background:var(--color-surface);color:var(--color-text);font-size:12px;font-family:inherit">'
+      +_REPORT_TPL_LIST.map(function(t){return'<option value="'+t.id+'"'+(t.id===cur?' selected':'')+'>'+t.label+'</option>';}).join('')
+      +'</select></div>';
+  });
+  g.innerHTML=h;
 }
 
 /* ══════════════════════════════════════════════════════════════
