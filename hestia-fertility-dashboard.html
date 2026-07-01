@@ -15830,7 +15830,13 @@ function ecBuscar() {
     .then(function(r){ return r.json(); })
     .then(function(d){
       document.getElementById("ec-loading").style.display = "none";
-      if (!d.ok) { document.getElementById("ec-error").textContent = d.error || "Error al consultar"; document.getElementById("ec-error").style.display = ""; return; }
+      if (!d || (!d.ok && !d.paciente)) {
+        var msg = (d && d.error) || '';
+        if (!msg && d && !d.ok && !d.paciente) msg = 'El backend no reconoció esta acción. Redespliega analisis.gs y core.gs en Apps Script.';
+        document.getElementById("ec-error").textContent = msg || "Error al consultar";
+        document.getElementById("ec-error").style.display = "";
+        return;
+      }
       _ecData = d;
       _ecMovAll = d.movimientos || [];
       ecRenderResult(d);
