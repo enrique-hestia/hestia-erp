@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.01.05 -->
+﻿<!-- app-build:2026.07.01.06 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4762,6 +4762,19 @@ function _renderEgresosERP() {
   h.push('<div id="prov-rep-body" style="display:none;padding:18px 16px;border:1px solid var(--color-divider);border-top:none;border-radius:0 0 10px 10px;background:var(--color-surface)">');
   h.push('<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:18px">');
   h.push('<div style="flex:2;min-width:170px"><label style="font-size:11px;font-weight:600;color:var(--color-text-muted);display:block;margin-bottom:5px">Proveedor</label><input id="prov-rep-prov" list="prov-datalist" placeholder="Escribe o selecciona..." autocomplete="off" style="width:100%;padding:8px 11px;border:1px solid var(--color-divider);border-radius:8px;font-size:13px;background:var(--color-surface-offset);color:var(--color-text);font-family:inherit"></div>');
+  (function(){
+    var SEL='style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:8px;font-size:13px;background:var(--color-surface-offset);color:var(--color-text);font-family:inherit;min-width:130px"';
+    function ddOpts(campo, fallback){
+      var vals=(_ddData&&_ddData['Egresos']&&_ddData['Egresos'][campo]&&_ddData['Egresos'][campo].valores)||fallback||[];
+      return vals.map(function(v){return '<option value="'+String(v).replace(/"/g,'&quot;')+'">'+v+'</option>';}).join('');
+    }
+    var fpOpts=ddOpts('formaPago',['Santander','Mercado Pago','AMEX','Efectivo','TDC','TDD','Transferencia']);
+    var contOpts=ddOpts('contable',['Gasto','Costo','Crédito']);
+    var subOpts=ddOpts('subtipo',(_egData&&_egData.subtipos)||[]);
+    h.push('<div><label style="font-size:11px;font-weight:600;color:var(--color-text-muted);display:block;margin-bottom:5px">Forma de pago</label><select id="prov-rep-fp" '+SEL+'><option value="">Todas</option>'+fpOpts+'</select></div>');
+    h.push('<div><label style="font-size:11px;font-weight:600;color:var(--color-text-muted);display:block;margin-bottom:5px">Contable</label><select id="prov-rep-cont" '+SEL+'><option value="">Todos</option>'+contOpts+'</select></div>');
+    h.push('<div><label style="font-size:11px;font-weight:600;color:var(--color-text-muted);display:block;margin-bottom:5px">Subtipo</label><select id="prov-rep-sub" '+SEL+'><option value="">Todos</option>'+subOpts+'</select></div>');
+  })();
   h.push('<div><label style="font-size:11px;font-weight:600;color:var(--color-text-muted);display:block;margin-bottom:5px">Del</label><input type="date" id="prov-rep-ini" style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:8px;font-size:13px;background:var(--color-surface-offset);color:var(--color-text);font-family:inherit"></div>');
   h.push('<div><label style="font-size:11px;font-weight:600;color:var(--color-text-muted);display:block;margin-bottom:5px">Al</label><input type="date" id="prov-rep-fin" style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:8px;font-size:13px;background:var(--color-surface-offset);color:var(--color-text);font-family:inherit"></div>');
   h.push('<button onclick="proveedorReporte()" style="padding:9px 22px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">Generar reporte</button>');
@@ -4784,23 +4797,28 @@ function _provRepToggle(){
 }
 async function proveedorReporte(){
   var prov=(document.getElementById('prov-rep-prov')||{}).value||'';
+  var fp=(document.getElementById('prov-rep-fp')||{}).value||'';
+  var cont=(document.getElementById('prov-rep-cont')||{}).value||'';
+  var sub=(document.getElementById('prov-rep-sub')||{}).value||'';
   var ini=(document.getElementById('prov-rep-ini')||{}).value||'';
   var fin=(document.getElementById('prov-rep-fin')||{}).value||'';
   var res=document.getElementById('prov-rep-result'); if(!res) return;
-  if(!prov.trim()){ res.innerHTML='<div style="padding:10px;color:#e53e3e;font-size:12.5px">Selecciona un proveedor.</div>'; return; }
+  if(!prov.trim()&&!fp&&!cont&&!sub){ res.innerHTML='<div style="padding:10px;color:#e53e3e;font-size:12.5px">Selecciona al menos un filtro (proveedor, forma de pago, contable o subtipo).</div>'; return; }
+  var subjectParts=[prov.trim(),fp,cont,sub].filter(Boolean);
+  var subject=subjectParts.length?subjectParts.join(' · '):'Todos los proveedores';
   res.innerHTML='<div style="padding:16px;text-align:center;color:var(--color-text-muted);font-size:12.5px">Consultando 2024 · 2025 · 2026…</div>';
   try {
     var tok=getToken();
     var resp=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',
-      body:JSON.stringify({action:'reporteProveedor',token:tok,proveedor:prov,ini:ini,fin:fin})});
+      body:JSON.stringify({action:'reporteProveedor',token:tok,proveedor:prov,formaPago:fp,contable:cont,subtipo:sub,ini:ini,fin:fin})});
     var d=await resp.json();
     if(!d.ok) throw new Error(d.error||'Sin respuesta del servidor');
     if(!d.rows||!d.rows.length){
-      res.innerHTML='<div style="padding:14px 0;font-size:12.5px;color:var(--color-text-muted)">Sin registros para <b>'+_escH(prov)+'</b> en el rango indicado (2024–2026).</div>';
+      res.innerHTML='<div style="padding:14px 0;font-size:12.5px;color:var(--color-text-muted)">Sin registros para <b>'+_escH(subject)+'</b> en el rango indicado (2024–2026).</div>';
       return;
     }
     var t=d.totales;
-    var pd={type:'proveedor',title:'Reporte de proveedor',subject:prov,
+    var pd={type:'proveedor',title:'Reporte de proveedor',subject:subject,
       period:(ini||'—')+' → '+(fin||'—'),
       generado:new Date().toLocaleString('es-MX',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}),
       kpis:[
@@ -4868,7 +4886,7 @@ function _renderProvReporte(rows,pd){
   h+='<div style="display:flex;gap:10px;flex-wrap:wrap">'
     +'<button onclick="hfReportPrint(\'proveedor\',window._provRepData)" style="padding:9px 20px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px">'
     +'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Imprimir / PDF</button>'
-    +'<button onclick="hfReportExcel(window._provRepData,\'proveedor_\'+(document.getElementById(\'prov-rep-prov\')||{value:\'rep\'}).value.replace(/\\s+/g,\'_\'))" style="padding:9px 20px;background:#1a7a3c;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px">'
+    +'<button onclick="hfReportExcel(window._provRepData,\''+('reporte_'+(pd.subject||'egresos')).replace(/[^a-zA-Z0-9]+/g,'_')+'\')" style="padding:9px 20px;background:#1a7a3c;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px">'
     +'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Exportar Excel</button>'
     +'</div>';
   res.innerHTML=h;

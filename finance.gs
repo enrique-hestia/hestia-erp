@@ -1682,9 +1682,12 @@ function setupEgresosAnio(anio) {
 
 function readReporteProveedor(body) {
   var prov = String(body.proveedor||'').trim();
+  var fp   = String(body.formaPago||'').trim();
+  var cont = String(body.contable||'').trim();
+  var sub  = String(body.subtipo||'').trim();
   var ini  = String(body.ini||'');
   var fin  = String(body.fin||'');
-  if (!prov) return {ok:false, error:'Proveedor requerido'};
+  if (!prov && !fp && !cont && !sub) return {ok:false, error:'Selecciona al menos un filtro (proveedor, forma de pago, contable o subtipo).'};
   var provLow = prov.toLowerCase();
   var allRows = [];
   var years = Object.keys(EGRESOS_IDS).map(Number).sort();
@@ -1694,7 +1697,10 @@ function readReporteProveedor(body) {
       if (!eg.ok || !eg.rows) return;
       eg.rows.forEach(function(r) {
         if (!r.pagado) return;
-        if ((r.proveedor||'').trim().toLowerCase() !== provLow) return;
+        if (prov && (r.proveedor||'').trim().toLowerCase() !== provLow) return;
+        if (fp && (r.formaPago||'').trim() !== fp) return;
+        if (cont && (r.contable||'').trim() !== cont) return;
+        if (sub && (r.subtipo||'').trim() !== sub) return;
         var fd = (r.fecha||'').substring(0,10);
         if (ini && fd && fd < ini) return;
         if (fin && fd && fd > fin) return;
