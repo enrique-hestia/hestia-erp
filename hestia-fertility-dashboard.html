@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.01.11 -->
+﻿<!-- app-build:2026.07.01.12 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4460,6 +4460,10 @@ function _egFilterRows() {
     // El menú de Egresos solo muestra lo PAGADO (validado en checkbox PAG).
     // Lo pendiente de pago vive en Cuentas por Pagar.
     if (!r.pagado) return false;
+    // Respeta el rango Del/Al seleccionado en la parte superior
+    var fd = (r.fecha||'').substring(0,10);
+    if (currentFechaInicio && fd && fd < currentFechaInicio) return false;
+    if (currentFechaFin && fd && fd > currentFechaFin) return false;
     if (f.mes && r.mes !== f.mes) return false;
     if (f.contable && r.contable !== f.contable) return false;
     if (f.subtipo && r.subtipo !== f.subtipo) return false;
