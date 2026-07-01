@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.06.30.5 -->
+﻿<!-- app-build:2026.06.30.6 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -9522,7 +9522,11 @@ function _renderPresupuesto(){
     +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Presupuesto y meta</h1>'
     +'<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">Trimestre en curso '+a.periodo+' · proyección '+sg.periodo+' · modelo estacional con piso creciente</div>'
     +'</div>'
+    +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
     +(canEdit?'<button class="pr-btn" onclick="presOpenMeta()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Fijar / editar meta</button>':'')
+    +'<button onclick="presShowManual()" title="Manual completo de Presupuesto" style="display:inline-flex;align-items:center;gap:5px;padding:8px 12px;background:var(--color-surface,#f1f1f1);color:var(--text-secondary,#374151);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:9px;font-size:11px;font-weight:600;cursor:pointer">📖 Manual</button>'
+    +'<button onclick="_tourStart(_PRES_TOUR)" title="Tutorial interactivo" style="width:34px;height:34px;border-radius:50%;background:transparent;color:var(--color-primary,#c46a7a);border:2px solid var(--color-primary,#c46a7a);font-size:17px;font-weight:900;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1">?</button>'
+    +'</div>'
     +'</div>');
 
   // Hero semáforo + simulador interactivo (trimestre en curso)
@@ -9618,6 +9622,7 @@ function _renderPresupuesto(){
   h.push('</div>');
   root.innerHTML = h.join('');
   try { presSimUpdate(); } catch(e){}
+  setTimeout(function(){ if(typeof _tourStart==='function') _tourStart(_PRES_TOUR,'hestia_tour_pres_v1'); },700);
 
   // Gráfica
   try {
@@ -9921,6 +9926,237 @@ async function presApplyAllProj(){
   _presTotalsUI(tipo); _presGroupsUI(tipo);
   var s=getSession()||{};
   try { await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMetasBatch',periodo:_presData.siguiente.periodo,metas:metas,usuario:s.email||''})}); } catch(e){}
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MOTOR DE TOUR / ONBOARDING — reutilizable en cualquier vista
+   Uso: _tourStart(arrayDePasos)
+   Paso: { el: 'css-selector'|null, title: '...', body: '...' }
+   ══════════════════════════════════════════════════════════════ */
+(function(){
+  var _tSteps=[], _tIdx=0, _tInited=false;
+
+  function _tq(id){ return document.getElementById(id); }
+
+  function _tCreateUI(){
+    if (_tInited) return; _tInited=true;
+    var css=document.createElement('style'); css.id='_tour-css';
+    css.textContent=
+      '#_tov{position:fixed;inset:0;z-index:9988;pointer-events:all}'
+      +'#_tsp{position:fixed;border-radius:10px;box-shadow:0 0 0 9999px rgba(0,0,0,.55),inset 0 0 0 2px #c46a7a;z-index:9989;pointer-events:none;transition:left .22s ease,top .22s ease,width .22s ease,height .22s ease}'
+      +'#_tcard{position:fixed;z-index:9990;background:var(--card-bg,#fff);border-radius:14px;box-shadow:0 12px 48px rgba(0,0,0,.3);padding:20px 22px;width:310px;max-width:92vw;transition:left .18s ease,top .18s ease}'
+      +'#_tcard h3{font-size:15px;font-weight:800;color:var(--text-primary,#111);margin:0 0 8px}'
+      +'#_tcard p{font-size:12.5px;line-height:1.58;color:var(--text-secondary,#374151);margin:0 0 14px}'
+      +'._tbtn{display:inline-flex;align-items:center;gap:5px;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:none}'
+      +'._tbtn-p{background:var(--color-primary,#c46a7a);color:#fff}'
+      +'._tbtn-s{background:var(--color-surface,#f1f1f1);color:var(--text-secondary,#374151);border:1.5px solid var(--color-divider,#e5e7eb)!important}';
+    document.head.appendChild(css);
+    var ov=document.createElement('div'); ov.id='_tov'; document.body.appendChild(ov);
+    var sp=document.createElement('div'); sp.id='_tsp'; sp.style.cssText='left:50%;top:50%;width:0;height:0'; document.body.appendChild(sp);
+    var card=document.createElement('div'); card.id='_tcard'; card.style.cssText='left:-9999px;top:-9999px;visibility:hidden'; document.body.appendChild(card);
+  }
+
+  function _tDestroy(){
+    ['_tov','_tsp','_tcard','_tour-css'].forEach(function(id){ var e=document.getElementById(id); if(e) e.remove(); });
+    _tInited=false;
+  }
+
+  window._tourStart=function(steps, storageKey){
+    if (!steps||!steps.length) return;
+    if (storageKey && localStorage.getItem(storageKey)) return;
+    _tSteps=steps; _tIdx=0;
+    _tCreateUI();
+    _tShow();
+    if (storageKey) localStorage.setItem(storageKey,'1');
+  };
+  window._tourNext=function(){ _tIdx++; if(_tIdx>=_tSteps.length) _tDestroy(); else _tShow(); };
+  window._tourPrev=function(){ if(_tIdx>0){ _tIdx--; _tShow(); } };
+  window._tourEnd =function(){ _tDestroy(); };
+
+  function _tShow(){
+    var step=_tSteps[_tIdx]; if(!step) return;
+    var sp=_tq('_tsp'), card=_tq('_tcard'); if(!sp||!card) return;
+    var n=_tSteps.length, i=_tIdx, isLast=i===n-1;
+
+    // Dots
+    var dots='<div style="display:flex;gap:5px;justify-content:center;margin-top:13px">';
+    for(var d=0;d<n;d++) dots+='<div style="width:'+(d===i?'20':'7')+'px;height:7px;border-radius:4px;background:'+(d===i?'var(--color-primary,#c46a7a)':'var(--color-divider,#d1d5db)')+';transition:width .15s"></div>';
+    dots+='</div>';
+
+    card.style.visibility='hidden';
+    card.innerHTML=
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+        +'<span style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Paso '+(i+1)+' / '+n+'</span>'
+        +'<button onclick="_tourEnd()" style="border:none;background:none;cursor:pointer;font-size:20px;color:var(--text-secondary,#9ca3af);line-height:1;padding:0 2px">×</button>'
+      +'</div>'
+      +'<h3>'+step.title+'</h3>'
+      +'<p>'+step.body+'</p>'
+      +'<div style="display:flex;gap:8px;align-items:center;justify-content:space-between">'
+        +(i>0?'<button class="_tbtn _tbtn-s" onclick="_tourPrev()">← Atrás</button>':'<span></span>')
+        +'<button class="_tbtn _tbtn-p" onclick="'+(isLast?'_tourEnd()':'_tourNext()')+'">'+( isLast?'¡Listo! ✓':'Siguiente →')+'</button>'
+      +'</div>'
+      +dots;
+
+    var target=step.el ? document.querySelector(step.el) : null;
+    if(target){
+      target.scrollIntoView({behavior:'smooth',block:'center'});
+      setTimeout(function(){
+        var r=target.getBoundingClientRect();
+        var pad=10;
+        sp.style.left=(r.left-pad)+'px'; sp.style.top=(r.top-pad)+'px';
+        sp.style.width=(r.width+pad*2)+'px'; sp.style.height=(r.height+pad*2)+'px';
+        _tPosCard(card,r);
+        card.style.visibility='';
+      },290);
+    } else {
+      sp.style.left='50%'; sp.style.top='50%'; sp.style.width='0'; sp.style.height='0';
+      card.style.cssText='position:fixed;z-index:9990;background:var(--card-bg,#fff);border-radius:14px;box-shadow:0 12px 48px rgba(0,0,0,.3);padding:20px 22px;width:310px;max-width:92vw;top:50%;left:50%;transform:translate(-50%,-50%);visibility:visible';
+    }
+  }
+
+  function _tPosCard(card,r){
+    var vw=window.innerWidth, vh=window.innerHeight;
+    var cw=Math.min(310,vw*0.92), ch=card.offsetHeight||230, pad=14;
+    var cl=r.left; if(cl+cw>vw-8) cl=vw-cw-8; if(cl<8) cl=8;
+    var ct;
+    if(r.bottom+ch+pad<vh) ct=r.bottom+pad;
+    else if(r.top-ch-pad>0) ct=r.top-ch-pad;
+    else ct=Math.max(8,(vh-ch)/2);
+    card.style.cssText='position:fixed;z-index:9990;background:var(--card-bg,#fff);border-radius:14px;box-shadow:0 12px 48px rgba(0,0,0,.3);padding:20px 22px;width:'+cw+'px;max-width:92vw;transition:left .18s ease,top .18s ease;left:'+cl+'px;top:'+ct+'px;visibility:visible';
+  }
+})();
+
+/* ── Pasos del tour de Presupuesto ───────────────────────────────── */
+var _PRES_TOUR = [
+  {el:null,
+   title:'Módulo de Presupuesto',
+   body:'Proyecta automáticamente <b>ingresos y egresos del próximo trimestre</b> con tu historial real, y hace seguimiento del trimestre actual. Este tutorial te muestra cada sección. Puedes reabrirlo con el botón <b>?</b> en cualquier momento.'},
+  {el:'.pr-hero',
+   title:'Semáforo de avance',
+   body:'Indica si vas a llegar a tu meta al ritmo actual. <span style="color:#166534;font-weight:700">Verde</span> = vas a llegar · <span style="color:#b45309;font-weight:700">Amarillo</span> = riesgo · <span style="color:#991b1b;font-weight:700">Rojo</span> = no vas al ritmo actual. El % es tu proyección de cierre ÷ meta.'},
+  {el:'#pr-sim',
+   title:'Simulador de meta (el slider)',
+   body:'Arrastra para explorar qué pasaría con distintas metas <b>sin guardarlas</b>. Muestra la brecha pendiente, el ingreso diario necesario en los días restantes y el cierre proyectado. "Guardar como meta" la fija oficialmente.'},
+  {el:'.pr-kstrip',
+   title:'Métricas clave del trimestre',
+   body:'<b>Meta</b>: lo que dijiste que facturarías. <b>Real acumulado</b>: lo que llevas registrado. <b>Proyección de cierre</b>: si sigues a este ritmo, ¿cuánto cerrarás? <b>Brecha</b>: lo que te falta.'},
+  {el:'#presChart',
+   title:'Gráfica de tendencia mensual',
+   body:'<b>Líneas sólidas</b> = datos reales históricos. <b>Líneas punteadas</b> = proyección del modelo para el siguiente trimestre. Los checkboxes encima permiten mostrar u ocultar Income o Expenses independientemente.'},
+  {el:'.pr-scen',
+   title:'Escenarios del siguiente trimestre',
+   body:'<b>Conservador</b>: estimado bajo. <b>Base</b>: lo más probable según el modelo — el más recomendado. <b>Optimista</b>: Base +12%. <b>Meta capturada</b>: la cifra que tú definiste con "Fijar meta".'},
+  {el:'#pr-tab-ing',
+   title:'Reporte por línea (Income / Expenses)',
+   body:'<b>Income</b> = ingresos por tipo de servicio (Tratamientos, Consultas, PGT…). Cambia a <b>Expenses</b> para ver los egresos por categoría. Cada fila muestra: año anterior, trimestre reciente y proyección del modelo.'},
+  {el:'.pr-tbl',
+   title:'Tabla: columna Budget (editable)',
+   body:'Escribe la meta de cada línea en la columna <b>Budget</b> — se guarda automáticamente. El badge <b>Estado</b> compara tu budget vs la proyección: <i>Sin budget / En línea / Bajo / Ambicioso</i>. La columna <b>Δ</b> muestra la diferencia.'},
+  {el:'button[onclick="presApplyAllProj()"]',
+   title:'"Usar proyección como budget"',
+   body:'Copia la proyección del modelo a <b>todas las líneas de una sola vez</b>. Útil para empezar rápido con el estimado automático y ajustar solo los servicios donde tengas información propia.'},
+  {el:'button[onclick="presOpenMeta()"]',
+   title:'"Fijar / editar meta" — el más importante',
+   body:'Define la <b>meta total del trimestre</b> (actual o siguiente). Puedes aceptar el estimado del modelo con un clic o escribir tu propia cifra. Esta meta activa el semáforo de avance. ¡Ya conoces todo el módulo!'}
+];
+
+/* ── Manual completo de Presupuesto ─────────────────────────────── */
+function presShowManual(){
+  if (document.getElementById('pres-manual-ovl')) return;
+  var ovl=document.createElement('div');
+  ovl.id='pres-manual-ovl';
+  ovl.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
+  ovl.onclick=function(e){ if(e.target===ovl) ovl.remove(); };
+
+  var S='var(--color-surface,#fafafa)',DV='var(--color-divider,#e5e7eb)',TP='var(--text-primary,#111)',TS='var(--text-secondary,#374151)',CB='var(--card-bg,#fff)';
+  function th(t){ return '<th style="padding:7px 10px;text-align:left;border-bottom:2px solid '+DV+';font-size:11px;font-weight:700;letter-spacing:.3px;color:'+TS+'">'+t+'</th>'; }
+  function tr(cells,last){
+    return '<tr>'+(cells.map(function(c,i){ return '<td style="padding:7px 10px;'+(last?'':'border-bottom:1px solid '+DV+';')+'font-size:12px;'+(i===0?'font-weight:700;':'color:'+TS+';')+'">'+(c||'')+'</td>'; }).join(''))+'</tr>';
+  }
+  function h2(t){ return '<h2 style="font-size:13px;font-weight:800;margin:20px 0 6px;color:'+TP+'">'+t+'</h2>'; }
+  function p(t){  return '<p style="margin:0 0 10px;font-size:12.5px;line-height:1.62;color:'+TS+'">'+t+'</p>'; }
+  function code(t){ return '<code style="background:'+S+';padding:2px 7px;border-radius:5px;font-size:11px;font-family:monospace">'+t+'</code>'; }
+
+  ovl.innerHTML='<div style="background:'+CB+';border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.3);width:700px;max-width:96vw;max-height:88vh;overflow:hidden;display:flex;flex-direction:column">'
+    // Header
+    +'<div style="padding:18px 24px;border-bottom:1px solid '+DV+';display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
+      +'<div>'
+        +'<div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Hestia ERP · Finanzas</div>'
+        +'<div style="font-size:18px;font-weight:800;color:'+TP+';margin-top:2px">Manual de Presupuesto</div>'
+      +'</div>'
+      +'<div style="display:flex;gap:8px">'
+        +'<button onclick="_tourStart(_PRES_TOUR);document.getElementById(\'pres-manual-ovl\').remove()" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:'+S+';color:'+TP+';border:1.5px solid '+DV+';border-radius:9px;font-size:11px;font-weight:600;cursor:pointer">▶ Tutorial interactivo</button>'
+        +'<button onclick="document.getElementById(\'pres-manual-ovl\').remove()" style="border:1.5px solid '+DV+';background:'+CB+';border-radius:9px;padding:6px 14px;cursor:pointer;font-size:13px;font-weight:600">✕</button>'
+      +'</div>'
+    +'</div>'
+    // Body
+    +'<div style="overflow-y:auto;padding:20px 26px;color:'+TP+'">'
+
+    +h2('¿Qué hace este módulo?')
+    +p('Calcula automáticamente una <b>proyección de ingresos y egresos para el próximo trimestre</b> usando tus datos históricos reales de BD_Ingresos y Egresos. También hace seguimiento del trimestre en curso: indica si vas a llegar a la meta y cuánto te falta.')
+
+    +h2('El modelo: "estacional con piso creciente" (ratchet)')
+    +p('Garantiza que la proyección <b>nunca quede por debajo del año anterior ni del nivel reciente ya alcanzado</b>. El crecimiento tiene un techo del 30% para evitar que el arranque bajo de 2024 infle las proyecciones artificialmente.')
+    +'<div style="background:'+S+';border-radius:10px;padding:14px 16px;font-size:12px;line-height:2;margin-bottom:12px;border:1px solid '+DV+';font-family:monospace">'
+      +'<b>Piso</b> = MAX(mismo trimestre año anterior, último trimestre completo)<br>'
+      +'<b>Crecimiento</b> = MAX(crec. real interanual, % objetivo propio) — tope: 30%<br>'
+      +'<b>Base estacional</b> = año anterior si existe, si no: reciente<br>'
+      +'<b>Proyección</b> = MAX(base × (1 + crecimiento), piso)'
+    +'</div>'
+
+    +h2('Semáforo del trimestre en curso')
+    +p('La <b>proyección de cierre</b> = real acumulado ÷ fracción del trimestre transcurrida. Si hoy es el día 30 de 91 (33%) y llevas $300K, la proyección es ~$909K.')
+    +'<table style="width:100%;border-collapse:collapse;margin-bottom:14px"><thead><tr style="background:'+S+'">'+th('Semáforo')+th('Condición')+'</tr></thead><tbody>'
+    +tr(['<span style="color:#166534">🟢 Verde</span>','Proyección de cierre ≥ 100% de la meta'])
+    +tr(['<span style="color:#b45309">🟡 Amarillo</span>','Proyección entre 90% y 100% de la meta'])
+    +tr(['<span style="color:#991b1b">🔴 Rojo</span>','Proyección por debajo del 90% de la meta'])
+    +tr(['<span style="color:#6b7280">⚪ Gris</span>','No hay meta capturada para este trimestre'],true)
+    +'</tbody></table>'
+
+    +h2('Simulador de meta')
+    +p('El slider te permite explorar qué pasaría con distintas metas <b>sin guardarlas</b>. Calcula en tiempo real: brecha pendiente, ingreso diario necesario en los días restantes, y el semáforo actualizado. "Guardar como meta" lo fija oficialmente y recarga los datos.')
+
+    +h2('Escenarios del siguiente trimestre')
+    +'<table style="width:100%;border-collapse:collapse;margin-bottom:14px"><thead><tr style="background:'+S+'">'+th('Escenario')+th('Cómo se calcula')+'</tr></thead><tbody>'
+    +tr(['Conservador','MAX(piso, base × (1 + MAX(crec×0.5, 2%)))'])
+    +tr(['<span style="color:var(--color-primary,#c46a7a)"><b>Base (esperado)</b></span>','MAX(base × (1 + crecimiento), piso) — <b>el recomendado</b>'])
+    +tr(['Optimista','Base × 1.12 (doce puntos porcentuales adicionales)'])
+    +tr(['Meta capturada','La cifra que definiste con "Fijar / editar meta"'],true)
+    +'</tbody></table>'
+
+    +h2('Tabla por línea — columnas')
+    +'<table style="width:100%;border-collapse:collapse;margin-bottom:14px"><thead><tr style="background:'+S+'">'+th('Columna')+th('Significado')+'</tr></thead><tbody>'
+    +tr(['Año ant.','Total real del mismo trimestre del año pasado'])
+    +tr(['Reciente','Total real del último trimestre completo (inmediato anterior)'])
+    +tr(['Proyección','Estimación del modelo para el siguiente trimestre'])
+    +tr(['Crec. a/a','Crecimiento proyección vs año anterior (verde = sube, rojo = baja)'])
+    +tr(['Budget','Tu meta por línea — <b>editable</b>, se guarda automáticamente en la nube'])
+    +tr(['Estado','<span style="color:#6b7280">Sin budget</span> · <span style="color:#166534">En línea</span> (±10%) · <span style="color:#b45309">Bajo</span> (&lt;90%) · <span style="color:#2563eb">Ambicioso</span> (&gt;110%)'])
+    +tr(['Δ vs proy.','Budget menos proyección: verde = tienes colchón, rojo = ajustado'],true)
+    +'</tbody></table>'
+
+    +h2('Gráfica de tendencia')
+    +p('Muestra los <b>últimos 9 meses de datos reales</b> (línea sólida) + los <b>3 meses del siguiente trimestre proyectados</b> (línea punteada). Los colores: rosa = Income, naranja-café = Expenses. Usa los checkboxes para mostrar u ocultar cada serie.')
+
+    +h2('Flujo de trabajo recomendado')
+    +'<ol style="margin:0 0 14px;padding-left:18px;font-size:12.5px;line-height:2;color:'+TS+'">'
+      +'<li>Al inicio del trimestre: revisa el semáforo y ajusta la meta con <b>Fijar / editar meta</b></li>'
+      +'<li>A mitad del trimestre: si está en rojo, usa el simulador para calcular cuánto necesitas por día</li>'
+      +'<li>Antes de que termine el trimestre: llena el budget del siguiente periodo por línea</li>'
+      +'<li>Usa <b>"Usar proyección como budget"</b> para empezar con el estimado automático y ajusta solo las líneas clave</li>'
+    +'</ol>'
+
+    +h2('Permisos')
+    +p('Para editar budgets, fijar metas y guardar simulaciones se requiere el permiso '+code('bank_capture')+'. Sin ese permiso la página es de solo lectura — puedes ver proyecciones y gráficas.')
+
+    +'</div>'
+    // Footer
+    +'<div style="padding:12px 24px;border-top:1px solid '+DV+';display:flex;justify-content:flex-end;flex-shrink:0">'
+      +'<button onclick="document.getElementById(\'pres-manual-ovl\').remove()" style="padding:9px 24px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">Cerrar manual</button>'
+    +'</div>'
+  +'</div>';
+
+  document.body.appendChild(ovl);
 }
 
 /* ══════════════════════════════════════════════════════════════
