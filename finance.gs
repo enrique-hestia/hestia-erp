@@ -1514,7 +1514,8 @@ function readEgresosData(anio) {
         iNotas=col('notas'), iVenc=col('vencimiento'), iFact=col('facturación'), iPagado=col('pagado'),
         iCont=col('contabilidad'), iPoliza=col('póliza')===-1?col('poliza'):col('póliza'),
         iFPago=col('forma de pago'), iObs=col('observaciones'), iLinkFact=col('link factura'),
-        iLinkPago=col('link pago'), iLinkCotiz=col('cotiz');
+        iLinkPago=col('link pago'), iLinkCotiz=col('cotiz'),
+        iUSD=col('usd'), iTC=col('tipo de cambio');
 
     function num(v) { if (typeof v==='number') return v; var n=parseFloat(String(v||'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
     function dt(v) { if(!v)return''; if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0'); return String(v); }
@@ -1564,7 +1565,9 @@ function readEgresosData(anio) {
         linkPago: iLinkPago>-1 ? String(row[iLinkPago]||'').trim() : '',
         linkPagoUrl: '',
         linkCotizacion: iLinkCotiz>-1 ? String(row[iLinkCotiz]||'').trim() : '',
-        linkCotizacionUrl: ''
+        linkCotizacionUrl: '',
+        montoUSD: iUSD>-1 ? num(row[iUSD]) : 0,
+        tipoCambio: iTC>-1 ? num(row[iTC]) : 0
       });
     }
 
@@ -1668,11 +1671,23 @@ function setupEgresosAnio(anio) {
     if (!hasHeaders) {
       var hdrs = ['ID','Fecha','Mes','Proveedor','Contable','Tipo','Subtipo','Concepto',
         'Egresos','Notas','Vencimiento','Facturación','Pagado','Contabilidad','Póliza',
-        'Forma de Pago','Observaciones','Link Factura','Link Pago','Cotización'];
+        'Forma de Pago','Observaciones','Link Factura','Link Pago','Cotización',
+        'Monto USD','Tipo de Cambio'];
       sh.getRange(1,1,1,hdrs.length).setValues([hdrs]);
       sh.getRange(1,1,1,hdrs.length).setFontWeight('bold').setBackground('#fce7f3');
       sh.setFrozenRows(1);
       created = true; rows = 0;
+    } else {
+      // Migración segura: agrega columnas faltantes AL FINAL, sin mover nada existente
+      var existing = raw[0].map(function(h){ return String(h).trim().toLowerCase(); });
+      var toAdd = [];
+      if (existing.indexOf('monto usd') === -1) toAdd.push('Monto USD');
+      if (existing.indexOf('tipo de cambio') === -1) toAdd.push('Tipo de Cambio');
+      if (toAdd.length) {
+        var lastCol = sh.getLastColumn();
+        sh.getRange(1, lastCol+1, 1, toAdd.length).setValues([toAdd]);
+        sh.getRange(1, lastCol+1, 1, toAdd.length).setFontWeight('bold').setBackground('#fce7f3');
+      }
     }
     return {ok:true, anio:anio, tabName:tabName, ssId:ssId, created:created, rows:rows};
   } catch(ex) {
@@ -1762,7 +1777,8 @@ function saveEgreso(payload) {
         iPagado=col('pagado'), iCont=col('contabilidad'),
         iPoliza=col('póliza')===-1?col('poliza'):col('póliza'),
         iFPago=col('forma de pago'), iObs=col('observaciones'),
-        iLinkFact=col('link factura'), iLinkPago=col('link pago');
+        iLinkFact=col('link factura'), iLinkPago=col('link pago'),
+        iUSD=col('usd'), iTC=col('tipo de cambio');
 
     // Número de fila (#) en columna 0
     var iNum = -1;
@@ -1791,6 +1807,8 @@ function saveEgreso(payload) {
     if (iObs>-1) newRow[iObs] = payload.observaciones || '';
     if (iLinkFact>-1) newRow[iLinkFact] = payload.linkFactura || '';
     if (iLinkPago>-1) newRow[iLinkPago] = payload.linkPago || '';
+    if (iUSD>-1) newRow[iUSD] = parseFloat(String(payload.montoUSD||'').replace(/[$,]/g,'')) || 0;
+    if (iTC>-1) newRow[iTC] = parseFloat(String(payload.tipoCambio||'').replace(/[$,]/g,'')) || 0;
 
     // Column 1 (status) = 2 (capturado)
     if (headers.length > 3) {
@@ -1848,7 +1866,9 @@ function updateEgresoField(payload) {
         'pagado':payload.pagado===true||payload.pagado==='true',
         'contabilidad':payload.contabilidad===true||payload.contabilidad==='true',
         'poliza':payload.poliza||'', 'forma de pago':payload.formaPago||'',
-        'observaciones':payload.observaciones||''
+        'observaciones':payload.observaciones||'',
+        'usd':parseFloat(String(payload.montoUSD||'').replace(/[$,]/g,''))||0,
+        'tipo de cambio':parseFloat(String(payload.tipoCambio||'').replace(/[$,]/g,''))||0
       };
       // Actualizar mes automáticamente
       var fd = new Date(payload.fecha);

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.01.06 -->
+﻿<!-- app-build:2026.07.01.07 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4561,6 +4561,9 @@ function _renderEgresosERP() {
       +'.eg-badge-g{background:rgba(59,130,246,.1);color:#2563eb}'
       +'.eg-badge-c{background:rgba(16,185,129,.1);color:#059669}'
       +'.eg-badge-cr{background:rgba(245,158,11,.1);color:#d97706}'
+      +'.eg-row:hover td{background:var(--color-primary-hl,rgba(196,106,122,.06))!important}'
+      +'.eg-row-toggle{display:inline-flex;width:18px;height:18px;align-items:center;justify-content:center;border-radius:5px;background:var(--color-surface-offset,#f3f4f6);font-size:9px;color:var(--text-secondary,#9ca3af);transition:transform .15s}'
+      +'.eg-row-toggle.open{transform:rotate(90deg);color:var(--color-primary,#c46a7a);background:var(--color-primary-hl,rgba(196,106,122,.1))}'
       // ── Hero del periodo (protagonista) ──
       +'.eg-hero{display:flex;flex-wrap:wrap;align-items:stretch;gap:20px;margin-bottom:14px;padding:20px 24px;border-radius:16px;background:linear-gradient(135deg,var(--card-bg,#fff),var(--color-primary-hl,rgba(196,106,122,.06)));border:1px solid var(--color-divider,#e5e7eb);box-shadow:0 1px 3px rgba(0,0,0,.04)}'
       +'.eg-hero-l{display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:180px}'
@@ -4653,7 +4656,7 @@ function _renderEgresosERP() {
     +'<div class="eg-ph"><div class="eg-pt">Detalle de egresos</div><div style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Pág. '+_egPage+' de '+totalPages+'</div></div>'
     +'<div style="overflow-x:auto;max-height:65vh;overflow-y:auto">'
     +'<table class="eg-tbl"><thead><tr>'
-    +'<th>Fecha</th><th>Proveedor</th><th>Concepto</th><th>Subtipo</th><th style="text-align:right">Monto</th><th>F. Pago</th><th style="text-align:center">Fact</th><th style="text-align:center">Pag</th><th style="text-align:center">Cont</th><th style="text-align:center">Docs</th>'
+    +'<th style="width:26px"></th><th>Fecha</th><th>Proveedor</th><th>Concepto</th><th>Subtipo</th><th style="text-align:right">Monto</th><th>F. Pago</th><th style="text-align:center">Fact</th><th style="text-align:center">Pag</th><th style="text-align:center">Cont</th><th style="text-align:center">Docs</th>'
     +((hasPermission('editar_egresos')||hasPermission('borrar_egresos'))?'<th style="width:90px"></th>':'')
     +'</tr></thead><tbody>');
 
@@ -4670,22 +4673,39 @@ function _renderEgresosERP() {
       var cotizIcon = r.linkCotizacionUrl
         ? '<span onclick="egViewPDF(\''+r.linkCotizacionUrl.replace(/'/g,"\\'")+'\',\'Cotización · '+provSafe+'\')" style="cursor:pointer;font-size:13px" title="Ver cotización">📋</span>'
         : '<span onclick="egOpenUpload('+r._rowNum+',\'cotizacion\',\''+provSafe+'\')" style="cursor:pointer;font-size:11px;color:var(--color-primary,#c46a7a)" title="Adjuntar cotización">＋</span>';
-      h.push('<tr>'
+      h.push('<tr class="eg-row" onclick="egToggleRow('+r._rowNum+')" style="cursor:pointer">'
+        +'<td style="text-align:center"><span class="eg-row-toggle" id="eg-tog-'+r._rowNum+'">▶</span></td>'
         +'<td style="color:var(--text-secondary,#6b7280)">'+((r.fecha||'').substring(0,10)||'—')+'</td>'
         +'<td style="font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis" title="'+r.proveedor+'">'+(r.proveedor||'—')+'</td>'
         +'<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;color:var(--text-secondary,#374151)" title="'+r.concepto+'">'+(r.concepto||'—')+'</td>'
         +'<td><span class="eg-badge '+contBadge+'">'+(r.subtipo||'—')+'</span></td>'
         +'<td style="text-align:right;font-weight:700;color:#991b1b">'+fE(r.monto)+'</td>'
         +'<td style="font-size:10.5px;color:var(--text-secondary,#6b7280)">'+(r.formaPago||'—')+'</td>'
-        +'<td style="text-align:center"><input type="checkbox" class="eg-chk"'+(r.facturacion?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'facturación\',this.checked)"'+(r.linkFacturaUrl?' title="Factura adjunta"':'')+'></td>'
-        +'<td style="text-align:center"><input type="checkbox" class="eg-chk"'+(r.pagado?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'pagado\',this.checked)"'+(r.linkPagoUrl?' title="Pago adjunto"':'')+'></td>'
-        +'<td style="text-align:center"><input type="checkbox" class="eg-chk"'+(r.contabilidad?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'contabilidad\',this.checked)"></td>'
-        +'<td style="text-align:center;white-space:nowrap">'+cotizIcon+' '+factIcon+' '+pagoIcon+'</td>'
-        +((hasPermission('editar_egresos')||hasPermission('borrar_egresos'))?'<td style="text-align:center;white-space:nowrap">'+(hasPermission('editar_egresos')?'<button class="btn-edit-row" onclick="egEditRow('+r._rowNum+')">✎</button>':'')+(hasPermission('borrar_egresos')?'<button class="btn-delete-row" onclick="egDeleteRow('+r._rowNum+')">🗑</button>':'')+'</td>':'')
+        +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.facturacion?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'facturación\',this.checked)"'+(r.linkFacturaUrl?' title="Factura adjunta"':'')+'></td>'
+        +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.pagado?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'pagado\',this.checked)"'+(r.linkPagoUrl?' title="Pago adjunto"':'')+'></td>'
+        +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.contabilidad?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'contabilidad\',this.checked)"></td>'
+        +'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'+cotizIcon+' '+factIcon+' '+pagoIcon+'</td>'
+        +((hasPermission('editar_egresos')||hasPermission('borrar_egresos'))?'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'+(hasPermission('editar_egresos')?'<button class="btn-edit-row" onclick="egEditRow('+r._rowNum+')">✎</button>':'')+(hasPermission('borrar_egresos')?'<button class="btn-delete-row" onclick="egDeleteRow('+r._rowNum+')">🗑</button>':'')+'</td>':'')
         +'</tr>');
+      var egColSpanDet = (hasPermission('editar_egresos')||hasPermission('borrar_egresos')) ? 12 : 11;
+      var hasUSD = (r.montoUSD||0) > 0;
+      h.push('<tr id="eg-det-'+r._rowNum+'" style="display:none"><td colspan="'+egColSpanDet+'" style="padding:0;background:var(--color-surface,#fafafa)">'
+        +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px 18px;padding:14px 18px;font-size:12px">'
+        +'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Concepto completo</div><div style="font-weight:600;color:var(--text-primary,#111)">'+(r.concepto||'—')+'</div></div>'
+        +'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Contable</div><div style="font-weight:600">'+(r.contable||'—')+'</div></div>'
+        +'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Tipo</div><div style="font-weight:600">'+(r.tipo||'—')+'</div></div>'
+        +'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Vencimiento</div><div style="font-weight:600">'+((r.vencimiento||'').substring(0,10)||'—')+'</div></div>'
+        +'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Póliza</div><div style="font-weight:600">'+(r.poliza||'—')+'</div></div>'
+        +(hasUSD
+          ?'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#0369a1">Monto USD</div><div style="font-weight:700;color:#0369a1">$'+Number(r.montoUSD).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' USD</div></div>'
+           +'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Tipo de cambio</div><div style="font-weight:600">'+((r.tipoCambio||0)>0?Number(r.tipoCambio).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:4}):'—')+'</div></div>'
+          :'')
+        +'<div style="grid-column:1/-1"><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Notas</div><div style="color:var(--text-secondary,#374151)">'+(r.notas||'—')+'</div></div>'
+        +'<div style="grid-column:1/-1"><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Observaciones</div><div style="color:var(--text-secondary,#374151)">'+(r.observaciones||'—')+'</div></div>'
+        +'</div></td></tr>');
     });
   } else {
-    var egColSpan = (hasPermission('editar_egresos')||hasPermission('borrar_egresos')) ? 11 : 10;
+    var egColSpan = (hasPermission('editar_egresos')||hasPermission('borrar_egresos')) ? 12 : 11;
     h.push('<tr><td colspan="'+egColSpan+'" style="text-align:center;padding:2rem;color:var(--text-secondary,#9ca3af)">Sin registros con los filtros seleccionados</td></tr>');
   }
   h.push('</tbody></table></div>');
@@ -4945,6 +4965,15 @@ function egViewPDF(url, title) {
   document.getElementById('modal-eg-viewer').style.display = 'flex';
 }
 
+function egToggleRow(rowNum) {
+  var det = document.getElementById('eg-det-'+rowNum);
+  var tog = document.getElementById('eg-tog-'+rowNum);
+  if (!det) return;
+  var open = det.style.display !== 'none';
+  det.style.display = open ? 'none' : '';
+  if (tog) tog.classList.toggle('open', !open);
+}
+
 async function egToggleField(rowNum, field, value) {
   // Reflejar el cambio en el estado local. Al desmarcar PAG, la partida
   // queda pendiente y debe salir de la vista de Egresos (pasa a Cuentas por Pagar).
@@ -4980,7 +5009,8 @@ function egEditRow(rowNum) {
       'eg-monto': row.monto, 'eg-concepto': row.concepto,
       'eg-contable': row.contable, 'eg-tipo': row.tipo, 'eg-subtipo': row.subtipo,
       'eg-fpago': row.formaPago, 'eg-venc': (row.vencimiento||'').substring(0,10),
-      'eg-poliza': row.poliza, 'eg-notas': row.notas, 'eg-obs': row.observaciones
+      'eg-poliza': row.poliza, 'eg-notas': row.notas, 'eg-obs': row.observaciones,
+      'eg-usd': row.montoUSD||'', 'eg-tc': row.tipoCambio||''
     };
     for (var id in fields) {
       var el = document.getElementById(id);
@@ -5092,6 +5122,10 @@ function egOpenForm() {
     +'<div><label '+LBL+'>Póliza</label><input id="eg-poliza" '+S+' placeholder="Número de póliza"></div>'
     +'<div><label '+LBL+'>Notas</label><input id="eg-notas" '+S+' placeholder="Notas adicionales"></div>'
     +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'
+    +'<div><label '+LBL+'>Monto USD <span style="font-weight:400;color:var(--text-secondary,#9ca3af)">(si se pagó en dólares)</span></label><input type="number" id="eg-usd" '+S+' placeholder="0.00" step="0.01"></div>'
+    +'<div><label '+LBL+'>Tipo de cambio</label><input type="number" id="eg-tc" '+S+' placeholder="18.50" step="0.0001"></div>'
+    +'</div>'
     +'<div style="display:flex;gap:18px;margin-bottom:14px">'
     +'<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary,#9ca3af)" title="Se activa al subir factura"><input type="checkbox" id="eg-chk-fact" class="eg-chk" disabled> Facturación <span style="font-size:9px">(auto: link factura)</span></label>'
     +'<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary,#9ca3af)" title="Se activa al subir comprobante de pago"><input type="checkbox" id="eg-chk-pag" class="eg-chk" disabled> Pagado <span style="font-size:9px">(auto: link pago)</span></label>'
@@ -5174,7 +5208,9 @@ async function egSubmit() {
       facturacion: autoFact,
       pagado: autoPagado,
       contabilidad: autoCont,
-      observaciones: (document.getElementById('eg-obs')||{}).value||''
+      observaciones: (document.getElementById('eg-obs')||{}).value||'',
+      montoUSD: (document.getElementById('eg-usd')||{}).value||'',
+      tipoCambio: (document.getElementById('eg-tc')||{}).value||''
     };
   }
 
