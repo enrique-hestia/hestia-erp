@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.01.07 -->
+﻿<!-- app-build:2026.07.01.08 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4842,15 +4842,15 @@ async function proveedorReporte(){
       period:(ini||'—')+' → '+(fin||'—'),
       generado:new Date().toLocaleString('es-MX',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}),
       kpis:[
-        {label:'Total gastado',value:_tplFmt(t.total)},
+        {label:'Total gastado',value:_tplFmt(t.total,2)},
         {label:'Pagos',value:String(t.count)},
-        {label:'Promedio',value:_tplFmt(t.avg)},
+        {label:'Promedio',value:_tplFmt(t.avg,2)},
         {label:'Último pago',value:(t.ultimoPago||'—').substring(0,10),sub:t.ultimaFormaPago||'—'}
       ],
       tendencia:d.tendencia||[],
       cols:['Fecha','Concepto','Tipo','Subtipo','Monto','Forma pago'],
-      rows:d.rows.map(function(r){return[(r.fecha||'—').substring(0,10),_escH(r.concepto||'—'),r.tipo||'—',r.subtipo||'—',_tplFmt(r.monto),r.formaPago||'—'];}),
-      totalLabel:'Total general',totalValue:_tplFmt(t.total)};
+      rows:d.rows.map(function(r){return[(r.fecha||'—').substring(0,10),_escH(r.concepto||'—'),r.tipo||'—',r.subtipo||'—',_tplFmt(r.monto,2),r.formaPago||'—'];}),
+      totalLabel:'Total general',totalValue:_tplFmt(t.total,2)};
     window._provRepData=pd;
     _renderProvReporte(d.rows,pd);
   } catch(err){
@@ -4878,7 +4878,7 @@ function _renderProvReporte(rows,pd){
       h+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:5px">'
         +'<span style="width:44px;font-size:10px;color:var(--color-text-muted);text-align:right;flex-shrink:0">'+t.label+'</span>'
         +'<div style="flex:1;height:10px;background:var(--color-divider);border-radius:2px"><div style="width:'+pct+'%;height:100%;background:var(--color-primary,#c46a7a);border-radius:2px"></div></div>'
-        +'<span style="width:72px;font-size:10px;font-weight:600;color:var(--color-text);text-align:right;flex-shrink:0">'+_tplFmt(t.monto)+'</span></div>';
+        +'<span style="width:72px;font-size:10px;font-weight:600;color:var(--color-text);text-align:right;flex-shrink:0">'+_tplFmt(t.monto,2)+'</span></div>';
     });
     h+='</div>';
   }
@@ -4894,7 +4894,7 @@ function _renderProvReporte(rows,pd){
       +'<td style="padding:6px 9px;border-bottom:0.5px solid var(--color-divider)">'+_escH(r.concepto||'—')+'</td>'
       +'<td style="padding:6px 9px;border-bottom:0.5px solid var(--color-divider)">'+_escH(r.tipo||'—')+'</td>'
       +'<td style="padding:6px 9px;border-bottom:0.5px solid var(--color-divider)">'+_escH(r.subtipo||'—')+'</td>'
-      +'<td style="padding:6px 9px;border-bottom:0.5px solid var(--color-divider);text-align:right;font-weight:600">'+_tplFmt(r.monto)+'</td>'
+      +'<td style="padding:6px 9px;border-bottom:0.5px solid var(--color-divider);text-align:right;font-weight:600">'+_tplFmt(r.monto,2)+'</td>'
       +'<td style="padding:6px 9px;border-bottom:0.5px solid var(--color-divider);text-align:right">'+_escH(r.formaPago||'—')+'</td>'
     +'</tr>';
   });
@@ -11871,7 +11871,7 @@ var _REPORT_TYPES=[
   {id:'cxp',           label:'Cuentas por pagar',          defaultTpl:'minimalista'}
 ];
 /* ── Shared helpers ────────────────────────────────────────── */
-function _tplFmt(v){var n=Number(v)||0;return '$'+Math.round(n).toLocaleString('en-US');}
+function _tplFmt(v,decimals){var n=Number(v)||0;var d=decimals||0;return '$'+n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});}
 function _tplFmtDate(s){if(!s||s==='—')return '—';try{var d=new Date(String(s).substring(0,10)+'T12:00:00');return d.toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'});}catch(e){return s;}}
 function _tplBarChart(tendencia,color){
   if(!tendencia||!tendencia.length)return '';
