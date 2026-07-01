@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.01.10 -->
+﻿<!-- app-build:2026.07.01.11 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -14597,7 +14597,89 @@ async function _ecParsePDF(file){
   }
   var banco = (typeof _cbActiveBanco!=='undefined') ? _cbActiveBanco : '';
   if(banco==='amex' || /american\s*express/i.test(fullText)) return _ecParseAmexPdfText(fullText);
-  throw new Error('El formato de este PDF aún no está soportado. Por ahora solo se reconoce el formato de estado de cuenta AMEX. Para este banco, usa CSV/TXT o pide que se agregue soporte para este formato.');
+  if(banco==='santander' || /banco santander/i.test(fullText)) return _ecParseSantanderPdfText(fullText);
+  throw new Error('El formato de este PDF aún no está soportado. Por ahora solo se reconocen los formatos de estado de cuenta AMEX y Santander. Para este banco, usa CSV/TXT o pide que se agregue soporte para este formato.');
+}
+
+// Parser específico del formato de estado de cuenta Santander (cuenta de cheques MXN)
+// Los retiros/depósitos no vienen etiquetados en el texto lineal del PDF (se pierde la
+// columna visual); se distinguen matemáticamente comparando el saldo corrido:
+// saldoAnterior - monto = saldoActual → retiro (egreso); saldoAnterior + monto = saldoActual → depósito.
+function _ecParseSantanderPdfText(text){
+  var MESES = {ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sep:9,oct:10,nov:11,dic:12};
+  var MESES_LIST = Object.keys(MESES).join('|');
+
+  var saldoIniRe = /SALDO FINAL DEL PERIODO ANTERIOR:?\s*\$?\s*([\d,]+\.\d{2})/i;
+  var mSaldoIni = text.match(saldoIniRe);
+  if(!mSaldoIni) throw new Error('No se encontró "Saldo final del periodo anterior" — verifica que sea un estado de cuenta Santander (cuenta de cheques) con el formato estándar.');
+  var saldoAnterior = parseFloat(mSaldoIni[1].replace(/,/g,''));
+
+  // Acotar al bloque de "cuenta de cheques" (excluir Dinero Creciente / información fiscal)
+  var cutIdx = text.search(/Detalles de movimientos Dinero Creciente|Informaci[oó]n fiscal/i);
+  if(cutIdx>-1) text = text.substring(0, cutIdx);
+
+  // "PERIODO DEL D-MES-YYYY AL D-MES-YYYY" y "CORTE AL D-MES-YYYY" se repiten en cada
+  // página como encabezado y contienen fechas que no son transacciones — se eliminan
+  // todas las ocurrencias antes de escanear, igual que con el estado de cuenta AMEX.
+  var perRe = new RegExp('PERIODO\\s+DEL\\s+\\d{1,2}-(?:'+MESES_LIST+')-\\d{4}\\s+AL\\s+\\d{1,2}-(?:'+MESES_LIST+')-\\d{4}','gi');
+  text = text.replace(perRe, ' ');
+  var corteRe = new RegExp('CORTE\\s+AL\\s+\\d{1,2}-(?:'+MESES_LIST+')-\\d{4}','gi');
+  text = text.replace(corteRe, ' ');
+
+  var dateRe = new RegExp('(\\d{1,2})-('+MESES_LIST+')-(\\d{4})','gi');
+  var stopRe = /\bTOTAL\b|SALDO FINAL DEL PERIODO\s*:|P[aá]gina\s+\d+\s+de|FECHA\s+FOLIO\s+DESCRIPCION/gi;
+
+  var marks=[], m;
+  dateRe.lastIndex=0;
+  while((m=dateRe.exec(text))){ marks.push({idx:m.index, isDate:true, dia:parseInt(m[1],10), mes:MESES[m[2].toLowerCase()], anio:parseInt(m[3],10), len:m[0].length}); }
+  stopRe.lastIndex=0;
+  while((m=stopRe.exec(text))){ marks.push({idx:m.index, isDate:false}); }
+  marks.sort(function(a,b){ return a.idx-b.idx; });
+
+  var amtRe=/(\d{1,3}(?:,\d{3})*\.\d{2})/g;
+  var rows=[];
+
+  for(var k=0;k<marks.length;k++){
+    if(!marks[k].isDate) continue;
+    var startIdx=marks[k].idx;
+    var endIdx=text.length;
+    for(var j=k+1;j<marks.length;j++){ endIdx=marks[j].idx; break; }
+    var chunk=text.substring(startIdx, endIdx);
+
+    var amtMatches=chunk.match(amtRe);
+    if(!amtMatches||amtMatches.length<2) continue;
+    var montoStr=amtMatches[amtMatches.length-2];
+    var saldoStr=amtMatches[amtMatches.length-1];
+    var monto=parseFloat(montoStr.replace(/,/g,''));
+    var saldoActual=parseFloat(saldoStr.replace(/,/g,''));
+    if(isNaN(monto)||isNaN(saldoActual)||monto<=0){ continue; }
+
+    var esRetiro = Math.abs((saldoAnterior - monto) - saldoActual) < 0.02;
+    var esDeposito = !esRetiro && Math.abs((saldoAnterior + monto) - saldoActual) < 0.02;
+    saldoAnterior = saldoActual; // el saldo corrido avanza sin importar el tipo
+
+    if(!esRetiro){
+      continue; // depósitos (ingresos) no aplican a este análisis de egresos; si tampoco es depósito consistente, se omite por seguridad
+    }
+
+    var afterDate=chunk.substring(marks[k].len);
+    var folioMatch=afterDate.match(/^\s*(\d{5,10})\s+/);
+    var afterFolio = folioMatch ? afterDate.substring(folioMatch[0].length) : afterDate;
+    var conceptoRaw = afterFolio.substring(0, afterFolio.lastIndexOf(saldoStr));
+    var concepto = conceptoRaw
+      .replace(/CLAVE DE RASTREO\s*\S*/gi,'')
+      .replace(/\bREF\s+\S+/gi,'')
+      .replace(/\bRFC\s+\S+/gi,'')
+      .replace(/DE LA CUENTA\s+\S+/gi,'')
+      .replace(/A LA CUENTA\s+\S+/gi,'')
+      .replace(/\(\s*1\s*\)\s*DATO NO VERIFICADO[^\n]*/gi,'')
+      .replace(/\s+/g,' ')
+      .trim();
+
+    var fecha = marks[k].anio+'-'+String(marks[k].mes).padStart(2,'0')+'-'+String(marks[k].dia).padStart(2,'0');
+    rows.push({fecha:fecha, monto:monto, concepto:concepto||'(sin descripción)'});
+  }
+  return rows;
 }
 
 // Parser específico del formato de estado de cuenta AMEX (Business Gold Card / formato estándar MX)
