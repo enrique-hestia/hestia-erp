@@ -14504,8 +14504,7 @@ async function _gfLoadProy(per){
   try {
     var tok=encodeURIComponent(getToken());
     var d=await fetch(APPS_SCRIPT_URL+'?action=gfProyeccion&periodo='+per+'&meses=3&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();});
-    console.log('[GF Proy] respuesta backend:', JSON.stringify(d));
-    if(!d.ok) throw new Error(d.error||'Error: '+JSON.stringify(d));
+    if(!d.ok) throw new Error(d.error||'Error');
     var h='<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-bottom:12px">Estimado de gastos fijos del trimestre (solo lectura, para budget — no crea CxP).</div>';
     h+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">';
     (d.periodos||[]).forEach(function(pm){
@@ -14518,7 +14517,7 @@ async function _gfLoadProy(per){
     });
     h+='</div>';
     c.innerHTML=h;
-  } catch(e){ console.error('[GF Proy] catch error:', e.message, e); c.innerHTML='<div style="padding:20px;color:#991b1b">⚠ Error en proyección: '+e.message+'<br><small style="color:#6b7280">Revisa la consola (F12) para el detalle completo.</small></div>'; }
+  } catch(e){ c.innerHTML='<div style="padding:20px;color:#991b1b">⚠ Error en proyección: '+e.message+'</div>'; }
 }
 
 async function gfProgramarUno(id){
