@@ -284,10 +284,29 @@ function _gfEgContext() {
   return {egSh:egSh, iRec:iRec, genSet:genSet, lastByGF:lastByGF};
 }
 
+// Convierte cualquier valor de fecha a string "YYYY-MM" para comparación.
+// Handles: Date objects de Sheets, strings "YYYY-MM", strings "YYYY-MM-DD",
+// strings como "Wed Jul 01 2026 00:00:00 GMT+0000", y celdas vacías.
+function _gfToYM(v) {
+  if (!v) return '';
+  if (v instanceof Date) {
+    return v.getFullYear() + '-' + String(v.getMonth()+1).padStart(2,'0');
+  }
+  var s = String(v).trim();
+  if (!s) return '';
+  // Ya está en YYYY-MM o YYYY-MM-DD
+  if (/^\d{4}-\d{2}/.test(s)) return s.substring(0,7);
+  // Cualquier otro formato de fecha → parsear
+  var d = new Date(s);
+  if (!isNaN(d.getTime())) return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+  return s;
+}
+
 function _gfAplica(t, periodo, mesNum) {
   var activo = t[1]===true||String(t[1]).toUpperCase()==='TRUE';
   if(!activo) return false;
-  var desde=String(t[10]||'').trim(), hasta=String(t[11]||'').trim();
+  var desde = _gfToYM(t[10]);
+  var hasta  = _gfToYM(t[11]);
   if(desde && periodo<desde) return false;
   if(hasta && periodo>hasta) return false;
   var meses=String(t[9]||'Todos').trim();
