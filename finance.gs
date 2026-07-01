@@ -596,6 +596,9 @@ function doPost(e) {
     if (body.action === 'updateEgresoField') {
       return jsonResponse(updateEgresoField(body));
     }
+    if (body.action === 'deleteEgreso') {
+      return jsonResponse(deleteEgreso(body));
+    }
     if (body.action === 'updateIngreso') {
       return jsonResponse(updateIngreso(body));
     }
@@ -1867,6 +1870,43 @@ function updateEgresoField(payload) {
       if (ci2 > -1) sheet.getRange(rowNum, ci2+1).setValue(fields[key]);
     }
 
+    return {ok:true, rowNum:rowNum};
+  } catch(ex) {
+    return {ok:false, error:ex.message};
+  }
+}
+
+function deleteEgreso(payload) {
+  try {
+    var anio = payload.anio || new Date().getFullYear();
+    var ssId = EGRESOS_IDS[anio] || EGRESOS_SS_2026;
+    var tabName = EGRESOS_TABS[anio] || 'Egresos' + anio;
+    var ss = SpreadsheetApp.openById(ssId);
+    var sheet = null;
+    var sheets = ss.getSheets();
+    for (var i = 0; i < sheets.length; i++) {
+      if (sheets[i].getName() === tabName) { sheet = sheets[i]; break; }
+    }
+    if (!sheet) return {ok:false, error:'Pestaña ' + tabName + ' no encontrada'};
+
+    var rowNum = parseInt(payload.rowNum);
+    if (!rowNum || rowNum < 2 || rowNum > sheet.getLastRow()) return {ok:false, error:'Fila inválida'};
+
+    var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(function(h){return String(h).trim();});
+    function col(name) {
+      var lc = name.toLowerCase();
+      for (var c=0;c<headers.length;c++) { if(headers[c].toLowerCase().indexOf(lc)>-1) return c; }
+      return -1;
+    }
+    var rowVals = sheet.getRange(rowNum, 1, 1, headers.length).getValues()[0];
+    var iProveedor=col('proveedor'), iEgresos=col('egresos');
+    var proveedor = iProveedor>-1 ? String(rowVals[iProveedor]||'') : '';
+    var monto = iEgresos>-1 ? rowVals[iEgresos] : '';
+
+    sheet.deleteRow(rowNum);
+
+    try { logAudit(payload.usuario||'sistema', 'Egresos', 'Borrar', 'Fila '+rowNum, proveedor, '$'+monto, '—'); } catch(ae){}
+    try { CacheService.getScriptCache().remove('gas_egresos_v1_' + anio); } catch(e) {}
     return {ok:true, rowNum:rowNum};
   } catch(ex) {
     return {ok:false, error:ex.message};

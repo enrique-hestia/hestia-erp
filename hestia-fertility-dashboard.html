@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.01.04 -->
+﻿<!-- app-build:2026.07.01.05 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4654,7 +4654,7 @@ function _renderEgresosERP() {
     +'<div style="overflow-x:auto;max-height:65vh;overflow-y:auto">'
     +'<table class="eg-tbl"><thead><tr>'
     +'<th>Fecha</th><th>Proveedor</th><th>Concepto</th><th>Subtipo</th><th style="text-align:right">Monto</th><th>F. Pago</th><th style="text-align:center">Fact</th><th style="text-align:center">Pag</th><th style="text-align:center">Cont</th><th style="text-align:center">Docs</th>'
-    +(hasPermission('editar_egresos')?'<th style="width:50px"></th>':'')
+    +((hasPermission('editar_egresos')||hasPermission('borrar_egresos'))?'<th style="width:90px"></th>':'')
     +'</tr></thead><tbody>');
 
   if (pageRows.length) {
@@ -4681,11 +4681,11 @@ function _renderEgresosERP() {
         +'<td style="text-align:center"><input type="checkbox" class="eg-chk"'+(r.pagado?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'pagado\',this.checked)"'+(r.linkPagoUrl?' title="Pago adjunto"':'')+'></td>'
         +'<td style="text-align:center"><input type="checkbox" class="eg-chk"'+(r.contabilidad?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'contabilidad\',this.checked)"></td>'
         +'<td style="text-align:center;white-space:nowrap">'+cotizIcon+' '+factIcon+' '+pagoIcon+'</td>'
-        +(hasPermission('editar_egresos')?'<td style="text-align:center"><button class="btn-edit-row" onclick="egEditRow('+r._rowNum+')">✎</button></td>':'')
+        +((hasPermission('editar_egresos')||hasPermission('borrar_egresos'))?'<td style="text-align:center;white-space:nowrap">'+(hasPermission('editar_egresos')?'<button class="btn-edit-row" onclick="egEditRow('+r._rowNum+')">✎</button>':'')+(hasPermission('borrar_egresos')?'<button class="btn-delete-row" onclick="egDeleteRow('+r._rowNum+')">🗑</button>':'')+'</td>':'')
         +'</tr>');
     });
   } else {
-    var egColSpan = hasPermission('editar_egresos') ? 11 : 10;
+    var egColSpan = (hasPermission('editar_egresos')||hasPermission('borrar_egresos')) ? 11 : 10;
     h.push('<tr><td colspan="'+egColSpan+'" style="text-align:center;padding:2rem;color:var(--text-secondary,#9ca3af)">Sin registros con los filtros seleccionados</td></tr>');
   }
   h.push('</tbody></table></div>');
@@ -4976,6 +4976,53 @@ function egEditRow(rowNum) {
     var saveBtn = document.getElementById('eg-save-btn');
     if (saveBtn) saveBtn.textContent = 'Actualizar egreso';
   }, 50);
+}
+
+function egDeleteRow(rowNum) {
+  if (!hasPermission('borrar_egresos')) { alert('No tienes permisos para eliminar egresos.'); return; }
+  if (!_egData || !_egData.rows) return;
+  var row = _egData.rows.find(function(r){ return r._rowNum === rowNum; });
+  if (!row) { alert('Registro no encontrado'); return; }
+  var modal = document.getElementById('modal-eg-delete');
+  if (modal) {
+    var montoFmt = '$'+Math.abs(Number(row.monto)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+    var label = (row.proveedor||'—')+' · '+montoFmt+' · '+((row.fecha||'').substring(0,10)||'—');
+    document.getElementById('eg-del-row-label').textContent = label;
+    modal.dataset.rowNum = rowNum;
+    modal.style.display = 'flex';
+  }
+}
+
+function egDeleteCancel() {
+  var modal = document.getElementById('modal-eg-delete');
+  if (modal) modal.style.display = 'none';
+}
+
+function egDeleteConfirm() {
+  var modal = document.getElementById('modal-eg-delete');
+  if (!modal) return;
+  var rowNum = parseInt(modal.dataset.rowNum);
+  if (!rowNum) return;
+  var btn = document.getElementById('eg-del-confirm-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Borrando…'; }
+  var s = getSession() || {};
+  fetch(APPS_SCRIPT_URL, {
+    method: 'POST',
+    body: JSON.stringify({action:'deleteEgreso', token:getToken(), anio:_egAnio, rowNum:rowNum, usuario:s.email||s.nombre||''})
+  }).then(function(r){ return r.json(); }).then(function(res) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Sí, borrar'; }
+    modal.style.display = 'none';
+    if (res.ok) {
+      if (_egData && _egData.rows) _egData.rows = _egData.rows.filter(function(r){ return r._rowNum !== rowNum; });
+      _renderEgresosERP();
+    } else {
+      alert('Error al borrar: ' + (res.error || 'No se pudo borrar'));
+    }
+  }).catch(function(err) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Sí, borrar'; }
+    modal.style.display = 'none';
+    alert('Error de conexión: ' + err.message);
+  });
 }
 
 function egOpenForm() {
@@ -12538,6 +12585,7 @@ var OP_PERMS_CATALOG = [
   {key:'bank_liberado',    label:'Marcar liberado (MP)',             cat:'Conciliación Bancaria'},
   {key:'editar_ingresos',  label:'Editar operaciones de ingreso',    cat:'Ingresos'},
   {key:'editar_egresos',   label:'Editar partidas de egreso',        cat:'Egresos'},
+  {key:'borrar_egresos',   label:'Eliminar partidas de egreso',      cat:'Egresos'},
   {key:'sheets_access',    label:'Acceso directo a Google Sheets',   cat:'General'},
   {key:'cf_capture',       label:'Capturar en Flujo de Efectivo',    cat:'Flujo de Efectivo'},
   {key:'export_data',      label:'Exportar datos',                   cat:'General'}
@@ -17640,6 +17688,22 @@ function ecImprimir() {
     <div style="display:flex;gap:10px;justify-content:center">
       <button onclick="ingDeleteCancel()" style="padding:9px 22px;border:1.5px solid var(--color-border);border-radius:8px;background:var(--color-surface);color:var(--color-text);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Cancelar</button>
       <button id="ing-del-confirm-btn" onclick="ingDeleteConfirm()" style="padding:9px 22px;border:none;border-radius:8px;background:#b91c1c;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Sí, borrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: confirmar borrar egreso -->
+<div id="modal-eg-delete" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:3000;align-items:center;justify-content:center">
+  <div style="background:var(--color-surface-2);border-radius:14px;padding:32px 28px;max-width:380px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.2);text-align:center">
+    <div style="font-size:36px;margin-bottom:12px">🗑️</div>
+    <h3 style="margin:0 0 8px;font-size:17px;color:var(--color-text)">Borrar egreso</h3>
+    <p style="margin:0 0 20px;font-size:13.5px;color:var(--color-text-muted)">
+      ¿Confirmas borrar <strong id="eg-del-row-label"></strong>?<br>
+      <span style="font-size:12px">Esta acción no se puede deshacer.</span>
+    </p>
+    <div style="display:flex;gap:10px;justify-content:center">
+      <button onclick="egDeleteCancel()" style="padding:9px 22px;border:1.5px solid var(--color-border);border-radius:8px;background:var(--color-surface);color:var(--color-text);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Cancelar</button>
+      <button id="eg-del-confirm-btn" onclick="egDeleteConfirm()" style="padding:9px 22px;border:none;border-radius:8px;background:#b91c1c;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Sí, borrar</button>
     </div>
   </div>
 </div>
