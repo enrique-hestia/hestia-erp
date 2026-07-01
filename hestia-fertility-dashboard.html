@@ -1,4 +1,5 @@
-﻿<!DOCTYPE html>
+﻿<!-- app-build:2026.06.30.4 -->
+<!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
 <meta charset="UTF-8">
@@ -15809,19 +15810,33 @@ function submitEntmed() {
 (function(){
   if (location.protocol === 'file:') return;
   var CHECK_INTERVAL = 60000;
-  var _lastModified = null;
+  var _knownBuild = null;
   var _pageUrl = location.href.split('?')[0].split('#')[0];
 
+  function parseBuild(text) {
+    var m = text.match(/<!--\s*app-build:([^\s>]+)/);
+    return m ? m[1] : null;
+  }
+
+  // Captura el build actual de la página ya cargada
+  _knownBuild = parseBuild(document.documentElement.outerHTML.substring(0, 200));
+
   function checkForUpdate() {
-    fetch(_pageUrl, {method:'HEAD', cache:'no-store'}).then(function(r){
-      var lm = r.headers.get('last-modified') || r.headers.get('etag') || '';
-      if (!lm) return;
-      if (_lastModified === null) {
-        _lastModified = lm;
-      } else if (lm !== _lastModified) {
-        document.getElementById('upd-toast').classList.add('show');
-      }
-    }).catch(function(){});
+    // Range request: solo los primeros 200 bytes (donde está el comentario app-build)
+    fetch(_pageUrl + '?_v=' + Date.now(), {
+      method: 'GET',
+      cache: 'no-store',
+      headers: { 'Range': 'bytes=0-200' }
+    }).then(function(r){ return r.text(); })
+      .then(function(text){
+        var remoteBuild = parseBuild(text);
+        if (!remoteBuild) return;
+        if (_knownBuild === null) {
+          _knownBuild = remoteBuild;
+        } else if (remoteBuild !== _knownBuild) {
+          document.getElementById('upd-toast').classList.add('show');
+        }
+      }).catch(function(){});
   }
 
   setTimeout(checkForUpdate, 15000);
