@@ -543,6 +543,7 @@ function doPost(e) {
     if (body.action === 'programarGastosFijosBatch') return jsonResponse(programarGastosFijosBatch(body));
     if (body.action === 'bulkUpdateCxPMonto')         return jsonResponse(bulkUpdateCxPMonto(body));
     if (body.action === 'conciliaAMEX')              return jsonResponse(conciliaAMEX(body));
+    if (body.action === 'amexCorte')                 return jsonResponse(readAmexCorte(body));
     // Tareas programadas (scheduler)
     if (body.action === 'updateScheduledTask')     return jsonResponse(updateScheduledTask(body));
     if (body.action === 'setupScheduledTriggers')  return jsonResponse(setupScheduledTriggers());
@@ -3491,6 +3492,98 @@ function conciliaAMEX(body) {
     }
 
     return {ok:true, gaps:gaps, conciliados:conciliados, totalAMEX:amexMovs.length, totalEgresos:egresosAMEX.length};
+  } catch(ex) {
+    return {ok:false, error:ex.message};
+  }
+}
+
+function readAmexCorte(body) {
+  try {
+    function num(v){ if(typeof v==='number') return v; var s=String(v||'').trim().replace(/[$\s,]/g,''); var n=parseFloat(s); return isNaN(n)?0:n; }
+    function dt(v){ if(!v)return''; if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0'); return String(v).trim().substring(0,10); }
+    function fmtD(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+
+    var hoy = new Date(); hoy.setHours(0,0,0,0);
+    var yr = hoy.getFullYear(), mo = hoy.getMonth(), dd = hoy.getDate();
+
+    // Ciclo: 26 del mes anterior → 25 del mes actual
+    // Si día >= 26: el ciclo que acaba de cerrarse fue 26/(mo-1) → 25/mo; el abierto es 26/mo → 25/(mo+1)
+    // Si día <= 25: el cerrado fue 26/(mo-2) → 25/(mo-1);            el abierto es 26/(mo-1) → 25/mo
+    var ultimoInicio, ultimoCorte, actualInicio, actualCorte;
+    if (dd >= 26) {
+      ultimoInicio = new Date(yr, mo-1, 26);
+      ultimoCorte  = new Date(yr, mo,   25);
+      actualInicio = new Date(yr, mo,   26);
+      actualCorte  = new Date(yr, mo+1, 25);
+    } else {
+      ultimoInicio = new Date(yr, mo-2, 26);
+      ultimoCorte  = new Date(yr, mo-1, 25);
+      actualInicio = new Date(yr, mo-1, 26);
+      actualCorte  = new Date(yr, mo,   25);
+    }
+
+    var ultimoInicioStr = fmtD(ultimoInicio), ultimoCorteStr = fmtD(ultimoCorte);
+    var actualInicioStr = fmtD(actualInicio), actualCorteStr = fmtD(actualCorte);
+
+    var bankSS = SpreadsheetApp.openById(BANKS_SS_ID);
+    var amexSheet = null;
+    var sheets = bankSS.getSheets();
+    for (var si = 0; si < sheets.length; si++) {
+      if (sheets[si].getSheetId() === BANKS_GID.amex) { amexSheet = sheets[si]; break; }
+    }
+    if (!amexSheet) return {ok:false, error:'No se encontró la pestaña AMEX'};
+
+    var raw = amexSheet.getDataRange().getValues();
+    var movsUltimo = [], movsActual = [];
+    for (var i = 1; i < raw.length; i++) {
+      var r = raw[i];
+      var f = dt(r[0]);
+      if (!f) continue;
+      var m = num(r[1]);
+      var mov = {fecha:f, monto:m, saldo:num(r[2]), referencia:String(r[3]||'').trim(), usd:num(r[4])};
+      if (f >= ultimoInicioStr && f <= ultimoCorteStr) movsUltimo.push(mov);
+      if (f >= actualInicioStr && f <= actualCorteStr) movsActual.push(mov);
+    }
+
+    function calcCiclo(movs) {
+      var cargos = 0, pagos = 0, listaCargos = [], listaPagos = [];
+      for (var j = 0; j < movs.length; j++) {
+        var mv = movs[j];
+        if (mv.monto > 0) { cargos += mv.monto; listaCargos.push(mv); }
+        else if (mv.monto < 0) { pagos += Math.abs(mv.monto); listaPagos.push(mv); }
+      }
+      var saldo = Math.round((cargos - pagos) * 100) / 100;
+      if (saldo < 0) saldo = 0;
+      return {
+        totalCargos: Math.round(cargos*100)/100,
+        totalPagos:  Math.round(pagos*100)/100,
+        saldoPendiente: saldo,
+        cargos: listaCargos,
+        pagos:  listaPagos
+      };
+    }
+
+    var ultimo = calcCiclo(movsUltimo);
+    var actual = calcCiclo(movsActual);
+
+    return {
+      ok: true,
+      hoy: fmtD(hoy),
+      ultimoCiclo: {
+        inicio: ultimoInicioStr, corte: ultimoCorteStr,
+        estado: ultimo.saldoPendiente < 1 ? 'pagado' : 'pendiente',
+        totalCargos: ultimo.totalCargos, totalPagos: ultimo.totalPagos,
+        saldoPendiente: ultimo.saldoPendiente,
+        cargos: ultimo.cargos, pagos: ultimo.pagos
+      },
+      cicloActual: {
+        inicio: actualInicioStr, corte: actualCorteStr,
+        estadoCiclo: dd === 25 ? 'corte-hoy' : 'abierto',
+        totalCargos: actual.totalCargos, totalPagos: actual.totalPagos,
+        saldoPendiente: actual.saldoPendiente,
+        cargos: actual.cargos, pagos: actual.pagos
+      }
+    };
   } catch(ex) {
     return {ok:false, error:ex.message};
   }
