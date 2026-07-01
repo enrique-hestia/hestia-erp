@@ -12820,6 +12820,28 @@ function _renderAmexSubtipoDatalist(){
 /* ══════════════ CORTE AMEX ══════════════ */
 var _amexCorteData = null;
 
+function _amexCorteOmitir() {
+  var v = localStorage.getItem('amex_corte_omitir');
+  return (v !== null ? v : 'GRACIAS POR SU PAGO EN LINEA').trim();
+}
+
+function amexCorteSaveOmitir() {
+  var inp = document.getElementById('amex-corte-omitir-inp');
+  if (!inp) return;
+  localStorage.setItem('amex_corte_omitir', inp.value.trim());
+  if (_amexCorteData) { _renderAmexCorte(_amexCorteData); _updateCfAmexCorte(_amexCorteData); }
+}
+
+function _amexCorteFilterPagos(pagos, omitirTexto) {
+  var included = [], excluded = [];
+  var lo = (omitirTexto||'').trim().toLowerCase();
+  (pagos||[]).forEach(function(p) {
+    if (lo && (p.referencia||'').toLowerCase().indexOf(lo) >= 0) excluded.push(p);
+    else included.push(p);
+  });
+  return {included: included, excluded: excluded};
+}
+
 async function amexCorteLoad() {
   var wrap = document.getElementById('amex-corte-wrap');
   if (!wrap) return;
@@ -12842,6 +12864,8 @@ function _renderAmexCorte(data) {
   var wrap = document.getElementById('amex-corte-wrap');
   if (!wrap) return;
   var uc = data.ultimoCiclo, ac = data.cicloActual;
+  var omitirTexto = _amexCorteOmitir();
+
   function fS(v){ return fmtMoney(Number(v)||0,'Finanzas'); }
   function fD(s){
     if(!s) return '—';
@@ -12849,7 +12873,17 @@ function _renderAmexCorte(data) {
     return isNaN(d)?s:d.toLocaleDateString('es-MX',{day:'2-digit',month:'short'});
   }
 
-  var ucPendiente = uc.estado !== 'pagado';
+  // Aplicar filtro de exclusión a los pagos de cada ciclo
+  var ucFilt = _amexCorteFilterPagos(uc.pagos, omitirTexto);
+  var acFilt = _amexCorteFilterPagos(ac.pagos, omitirTexto);
+
+  // Recalcular saldo sin los pagos excluidos (son pagos de ciclo anterior)
+  var ucPagosInc = ucFilt.included.reduce(function(s,p){return s+Math.abs(p.monto);},0);
+  var acPagosInc = acFilt.included.reduce(function(s,p){return s+Math.abs(p.monto);},0);
+  var ucSaldo = Math.max(0, Math.round((uc.totalCargos - ucPagosInc)*100)/100);
+  var acSaldo = Math.max(0, Math.round((ac.totalCargos - acPagosInc)*100)/100);
+
+  var ucPendiente = ucSaldo > 0;
   var ucColor  = ucPendiente ? '#dc2626' : '#16a34a';
   var ucBg     = ucPendiente ? 'rgba(220,38,38,.05)' : 'rgba(22,163,74,.05)';
   var ucBorder = ucPendiente ? 'rgba(220,38,38,.18)' : 'rgba(22,163,74,.18)';
@@ -12864,29 +12898,42 @@ function _renderAmexCorte(data) {
 
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">';
 
+  // Tarjeta: último corte cerrado
   html += '<div style="background:'+ucBg+';border:1.5px solid '+ucBorder+';border-radius:10px;padding:11px 13px">'
     +'<div style="font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:'+ucColor+';margin-bottom:5px">Último corte</div>'
     +'<div style="font-size:9px;color:var(--text-secondary,#9ca3af);margin-bottom:4px">'+fD(uc.inicio)+' → '+fD(uc.corte)+'</div>'
-    +'<div style="font-size:18px;font-weight:800;color:'+ucColor+';line-height:1.1;margin-bottom:5px">'+fS(uc.saldoPendiente)+'</div>'
+    +'<div style="font-size:18px;font-weight:800;color:'+ucColor+';line-height:1.1;margin-bottom:5px">'+fS(ucSaldo)+'</div>'
     +'<div style="font-size:9.5px;color:var(--text-secondary,#6b7280)">Cargos: '+fS(uc.totalCargos)+'</div>'
-    +(uc.totalPagos>0?'<div style="font-size:9.5px;color:var(--text-secondary,#6b7280)">Pagos: '+fS(uc.totalPagos)+'</div>':'')
+    +(ucPagosInc>0?'<div style="font-size:9.5px;color:var(--text-secondary,#6b7280)">Pagos aplicados: '+fS(ucPagosInc)+'</div>':'')
     +'<div style="margin-top:6px;font-size:9.5px;font-weight:700;color:'+ucColor+'">'+ucLbl+'</div>'
     +'</div>';
 
+  // Tarjeta: ciclo actual abierto
   html += '<div style="background:'+acBg+';border:1.5px solid '+acBorder+';border-radius:10px;padding:11px 13px">'
     +'<div style="font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:'+acColor+';margin-bottom:5px">Ciclo actual</div>'
     +'<div style="font-size:9px;color:var(--text-secondary,#9ca3af);margin-bottom:4px">vence '+fD(ac.corte)+'</div>'
     +'<div style="font-size:18px;font-weight:800;color:'+acColor+';line-height:1.1;margin-bottom:5px">'+fS(ac.totalCargos)+'</div>'
     +'<div style="font-size:9.5px;color:var(--text-secondary,#6b7280)">'+ac.cargos.length+' cargo'+(ac.cargos.length!==1?'s':'')+'</div>'
-    +(ac.totalPagos>0?'<div style="font-size:9.5px;color:var(--text-secondary,#6b7280)">Pagos: '+fS(ac.totalPagos)+'</div>':'')
+    +(acPagosInc>0?'<div style="font-size:9.5px;color:var(--text-secondary,#6b7280)">Pagos aplicados: '+fS(acPagosInc)+'</div>':'')
     +'<div style="margin-top:6px;font-size:9.5px;font-weight:700;color:'+acColor+'">'+acLbl+'</div>'
     +'</div>';
 
-  html += '</div>';
+  html += '</div>'; // end grid
 
+  // Pagos excluidos (ciclo anterior) — mostrar en aviso amarillo
+  var totalExcluidos = ucFilt.excluded.concat(acFilt.excluded);
+  if (totalExcluidos.length > 0) {
+    var totalExcAmt = totalExcluidos.reduce(function(s,p){return s+Math.abs(p.monto);},0);
+    html += '<div style="margin-top:8px;background:#fffbeb;border:1px solid #fde68a;border-radius:7px;padding:7px 10px;font-size:10px;color:#92400e">'
+      +'<span style="font-weight:700">⬥ Pago'+(totalExcluidos.length!==1?'s':'')+' de ciclo anterior excluido'+(totalExcluidos.length!==1?'s':'')+' del cálculo:</span> '
+      +totalExcluidos.map(function(p){return fS(Math.abs(p.monto))+' ('+fD(p.fecha)+')';}).join(' · ')
+      +'</div>';
+  }
+
+  // Desglose de cargos del último corte
   if (ucPendiente && uc.cargos && uc.cargos.length > 0) {
-    html += '<details style="margin-top:10px"><summary style="cursor:pointer;font-size:10.5px;font-weight:600;color:var(--text-secondary,#6b7280);list-style:none;display:flex;align-items:center;gap:5px">▸ '+uc.cargos.length+' cargo'+(uc.cargos.length!==1?'s':'')+ ' pendientes de pago</summary>'
-      +'<div style="margin-top:7px;font-size:11px;max-height:180px;overflow-y:auto">';
+    html += '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:10.5px;font-weight:600;color:var(--text-secondary,#6b7280);list-style:none;display:flex;align-items:center;gap:5px">▸ '+uc.cargos.length+' cargo'+(uc.cargos.length!==1?'s':'')+' pendientes de pago</summary>'
+      +'<div style="margin-top:6px;font-size:11px;max-height:180px;overflow-y:auto">';
     (uc.cargos||[]).forEach(function(c){
       html += '<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--color-divider,#f0f0f0)">'
         +'<span style="color:var(--text-secondary,#6b7280)">'+fD(c.fecha)+' · '+_amexEsc((c.referencia||'').substring(0,28))+'</span>'
@@ -12896,6 +12943,15 @@ function _renderAmexCorte(data) {
     html += '</div></details>';
   }
 
+  // Config: texto a excluir
+  html += '<div style="margin-top:11px;padding-top:9px;border-top:1px solid var(--color-divider,#f0f0f0);display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
+    +'<span style="font-size:9.5px;font-weight:700;color:var(--text-secondary,#6b7280);white-space:nowrap">Excluir referencia:</span>'
+    +'<input id="amex-corte-omitir-inp" value="'+_amexEsc(omitirTexto)+'" placeholder="Ej: GRACIAS POR SU PAGO" '
+      +'style="flex:1;min-width:140px;font-size:10.5px;padding:4px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-family:inherit;color:var(--text-primary,#111);background:var(--card-bg,#fff)" '
+      +'onkeydown="if(event.key===\'Enter\') amexCorteSaveOmitir()">'
+    +'<button onclick="amexCorteSaveOmitir()" style="padding:4px 10px;background:rgba(37,99,235,.1);color:#2563eb;border:1.5px solid rgba(37,99,235,.2);border-radius:6px;font-size:10.5px;font-weight:700;cursor:pointer;white-space:nowrap">Aplicar</button>'
+    +'</div>';
+
   wrap.innerHTML = html;
 }
 
@@ -12903,17 +12959,23 @@ function _updateCfAmexCorte(data) {
   var chip = document.getElementById('cf-amex-corte-chip');
   if (!chip || !data) return;
   var uc = data.ultimoCiclo, ac = data.cicloActual;
+  var omitirTexto = _amexCorteOmitir();
   function fS(v){ return fmtMoney(Number(v)||0,'Finanzas'); }
   function fD(s){
     if(!s) return '—';
     var d = new Date(s+'T12:00:00');
     return isNaN(d)?s:d.toLocaleDateString('es-MX',{month:'short',day:'2-digit'});
   }
+  var ucFilt = _amexCorteFilterPagos(uc.pagos, omitirTexto);
+  var ucPagosInc = ucFilt.included.reduce(function(s,p){return s+Math.abs(p.monto);},0);
+  var ucSaldo = Math.max(0, Math.round((uc.totalCargos - ucPagosInc)*100)/100);
+  var acFilt = _amexCorteFilterPagos(ac.pagos, omitirTexto);
+  var acPagosInc = acFilt.included.reduce(function(s,p){return s+Math.abs(p.monto);},0);
   var html = '';
-  if (uc.saldoPendiente > 0) {
+  if (ucSaldo > 0) {
     html += '<div style="background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.2);border-radius:6px;padding:5px 8px;margin-top:5px">'
       +'<div style="font-size:9px;font-weight:700;color:#dc2626;text-transform:uppercase;letter-spacing:.4px">Corte '+fD(uc.corte)+' — pendiente</div>'
-      +'<div style="font-size:14px;font-weight:800;color:#dc2626">'+fS(uc.saldoPendiente)+'</div>'
+      +'<div style="font-size:14px;font-weight:800;color:#dc2626">'+fS(ucSaldo)+'</div>'
       +'</div>';
   }
   if (ac.totalCargos > 0) {
