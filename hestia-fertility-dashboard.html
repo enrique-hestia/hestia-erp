@@ -13904,11 +13904,14 @@ function _amexProvExists(name){
 function _renderAmexSubtipoDatalist(){
   var dl=document.getElementById('amex-subtipo-dl');
   if(!dl){ dl=document.createElement('datalist'); dl.id='amex-subtipo-dl'; document.body.appendChild(dl); }
-  var base=['Software','Servicio','Suscripción','Marketing','Honorarios','Insumos','Renta',
-            'Utilidades','Seguros','Impuestos','Nómina','Viáticos','Laboratorio','Farmacia','Otro'];
-  var extra=(window._egData&&_egData.subtipos)||[];
-  extra.forEach(function(s){ if(s&&base.indexOf(s)===-1) base.push(s); });
-  dl.innerHTML=base.sort().map(function(s){ return '<option value="'+s.replace(/"/g,'&quot;')+'">'; }).join('');
+  var base=(_ddData&&_ddData['Egresos']&&_ddData['Egresos']['subtipo']&&_ddData['Egresos']['subtipo'].valores)||[];
+  if(!base.length){
+    base=['Software','Servicio','Suscripción','Marketing','Honorarios','Insumos','Renta',
+          'Utilidades','Seguros','Impuestos','Nómina','Viáticos','Laboratorio','Farmacia','Otro'];
+    var extra=(window._egData&&_egData.subtipos)||[];
+    extra.forEach(function(s){ if(s&&base.indexOf(s)===-1) base.push(s); });
+  }
+  dl.innerHTML=base.map(function(s){ return '<option value="'+s.replace(/"/g,'&quot;')+'">'; }).join('');
 }
 
 /* ══════════════ CORTE AMEX ══════════════ */
@@ -14210,8 +14213,7 @@ function _amexGapCard(g, status){
     html+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">';
     html+='<div style="min-width:110px"><label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af);display:block;margin-bottom:3px">Tipo <span style="color:#dc2626">*</span></label>'
       +'<select id="'+key+'-tipo" style="width:100%;box-sizing:border-box;padding:5px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
-      +'<option value="Variable">Variable</option>'
-      +'<option value="Fijo">Fijo</option>'
+      +(function(){ var t=(_ddData&&_ddData['Egresos']&&_ddData['Egresos']['tipo']&&_ddData['Egresos']['tipo'].valores)||['Variable','Fijo']; return t.map(function(v){return '<option value="'+v+'">'+v+'</option>';}).join(''); })()
       +'</select></div>';
     html+='<div style="flex:1;min-width:140px"><label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af);display:block;margin-bottom:3px">Subtipo</label>'
       +'<input id="'+key+'-subtipo" type="text" list="amex-subtipo-dl" placeholder="Software, Servicio, Marketing…" style="width:100%;box-sizing:border-box;padding:5px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"></div>';
