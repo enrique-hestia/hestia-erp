@@ -3433,7 +3433,8 @@ var _ingLineCount = 0;
 var ING_CATEGORIAS = ['Almacenamiento','Consulta','Estudios - Andrologia','Estudios - Ciclo','Estudios - Consulta','Extras Externos','Medicamento','PGT-A','Tratamientos','VIOLET'];
 var ING_FORMAS_PAGO = ['TDC','TDD','AMEX','Santander','Transferencia','Efectivo','Otro'];
 var ING_CICLOS = ['ALTA','BAJA','CONSULTA','Almacenamiento','Estudios - Andrologia','Estudios - Ciclo','EXTERNOS'];
-var _ingProductos = []; // catálogo completo cargado desde BD_Productos
+var _ingProductos = [];
+var _ingTodosProductos = [];
 var _ingProductosLoaded = false;
 
 async function ingLoadProductos() {
@@ -3444,10 +3445,10 @@ async function ingLoadProductos() {
     var d = await r.json();
     if (d.ok && d.productos) {
       _ingProductos = d.productos;
+      _ingTodosProductos = d.todosProductos || d.productos;
       _ingProductosLoaded = true;
-      // Actualizar categorías desde el catálogo real
       var cats = {};
-      d.productos.forEach(function(p){ if(p.categoria) cats[p.categoria]=1; });
+      _ingTodosProductos.forEach(function(p){ if(p.categoria) cats[p.categoria]=1; });
       ING_CATEGORIAS = Object.keys(cats).sort();
     }
   } catch(e) { console.warn('Error cargando productos:', e); }
