@@ -679,77 +679,70 @@ function readEstadoCuentaPaciente(pacienteNombre) {
     if (!pacienteNombre) return { ok: false, error: 'Nombre de paciente requerido' };
     var nombreBuscar = String(pacienteNombre).trim().toLowerCase();
 
-    var anios = [
-      { id: INGRESOS_SS_2024, label: '2024' },
-      { id: INGRESOS_SS_2025, label: '2025' },
-      { id: INGRESOS_SS_ID,   label: '2026' }
-    ];
+    // BD_Ingresos es la hoja CONSOLIDADA de todos los años; vive solo en
+    // INGRESOS_SS_ID. No leer de los spreadsheets por año (2024/2025)
+    // porque causaría duplicados si esas hojas también tienen BD_Ingresos.
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sh = null;
+    var sheets = ss.getSheets();
+    for (var i = 0; i < sheets.length; i++) {
+      if (sheets[i].getName() === BD_INGRESOS_TAB) { sh = sheets[i]; break; }
+    }
+    if (!sh) return { ok: false, error: 'No se encontró la hoja ' + BD_INGRESOS_TAB + ' en el spreadsheet principal.' };
+
+    var data = sh.getDataRange().getValues();
+    var H = data[0].map(function(x){ return String(x||'').trim().toLowerCase(); });
+    function hc(){ for (var a=0;a<arguments.length;a++){ var k=H.indexOf(arguments[a]); if(k>-1) return k; } return -1; }
+    var iOp    = hc('op');
+    var iFecha = hc('fecha');
+    var iPac   = hc('paciente');
+    var iCat   = hc('categoria','categoría');
+    var iProd  = hc('producto');
+    var iDesc  = hc('descripcion','descripción');
+    var iCant  = hc('cantidad');
+    var iTotal = hc('totalpagar','total a pagar','total');
+    var iEst   = hc('estatus','estado');
+    var iPago  = hc('formapago','forma de pago','forma pago');
+    if (iPac < 0 || iTotal < 0)
+      return { ok: false, error: 'Columnas Paciente o Total no encontradas en ' + BD_INGRESOS_TAB };
 
     var movimientos = [];
     var totalGeneral = 0;
 
-    anios.forEach(function(anio) {
-      try {
-        var ss = SpreadsheetApp.openById(anio.id);
-        var sh = null;
-        var sheets = ss.getSheets();
-        for (var i = 0; i < sheets.length; i++) {
-          if (sheets[i].getName() === BD_INGRESOS_TAB) { sh = sheets[i]; break; }
-        }
-        if (!sh) return;
-        var data = sh.getDataRange().getValues();
-        var H = data[0].map(function(x){ return String(x||'').trim().toLowerCase(); });
-        function hc(){ for (var a=0;a<arguments.length;a++){ var k=H.indexOf(arguments[a]); if(k>-1) return k; } return -1; }
-        var iOp    = hc('op');
-        var iFecha = hc('fecha');
-        var iPac   = hc('paciente');
-        var iCat   = hc('categoria','categoría');
-        var iProd  = hc('producto');
-        var iDesc  = hc('descripcion','descripción');
-        var iCant  = hc('cantidad');
-        var iTotal = hc('totalpagar','total a pagar','total');
-        var iEst   = hc('estatus','estado');
-        var iPago  = hc('formapago','forma de pago','forma pago');
-        if (iPac < 0 || iTotal < 0) return;
-        for (var r = 1; r < data.length; r++) {
-          var row = data[r];
-          var pac = String(row[iPac] || '').trim().toLowerCase();
-          if (pac !== nombreBuscar) continue;
-          var rawFecha = row[iFecha];
-          var fechaStr = '';
-          if (rawFecha instanceof Date) {
-            fechaStr = Utilities.formatDate(rawFecha, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-          } else {
-            fechaStr = String(rawFecha || '').substring(0, 10);
-          }
-          var total = parseFloat(String(row[iTotal] || '0').replace(/[$,]/g, '')) || 0;
-          totalGeneral += total;
-          movimientos.push({
-            op:       String(row[iOp]   || '').trim(),
-            fecha:    fechaStr,
-            anio:     anio.label,
-            cat:      String(row[iCat]  || '').trim(),
-            producto: String(row[iProd] || '').trim(),
-            desc:     iDesc >= 0 ? String(row[iDesc] || '').trim() : '',
-            cant:     iCant >= 0 ? (parseFloat(String(row[iCant]||'1'))||1) : 1,
-            total:    total,
-            estatus:  iEst  >= 0 ? String(row[iEst]  || '').trim() : '',
-            pago:     iPago >= 0 ? String(row[iPago]  || '').trim() : ''
-          });
-        }
-      } catch(ex) { /* skip year if fails */ }
-    });
+    for (var r = 1; r < data.length; r++) {
+      var row = data[r];
+      var pac = String(row[iPac] || '').trim().toLowerCase();
+      if (pac !== nombreBuscar) continue;
+      var rawFecha = row[iFecha];
+      var fechaStr = '';
+      if (rawFecha instanceof Date) {
+        fechaStr = Utilities.formatDate(rawFecha, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      } else {
+        fechaStr = String(rawFecha || '').substring(0, 10);
+      }
+      var total = parseFloat(String(row[iTotal] || '0').replace(/[$,]/g, '')) || 0;
+      totalGeneral += total;
+      movimientos.push({
+        op:       String(row[iOp]   || '').trim(),
+        fecha:    fechaStr,
+        anio:     fechaStr ? fechaStr.substring(0, 4) : 'Sin año',
+        cat:      String(row[iCat]  || '').trim(),
+        producto: String(row[iProd] || '').trim(),
+        desc:     iDesc >= 0 ? String(row[iDesc] || '').trim() : '',
+        cant:     iCant >= 0 ? (parseFloat(String(row[iCant]||'1'))||1) : 1,
+        total:    total,
+        estatus:  iEst  >= 0 ? String(row[iEst]  || '').trim() : '',
+        pago:     iPago >= 0 ? String(row[iPago]  || '').trim() : ''
+      });
+    }
 
     movimientos.sort(function(a, b) { return a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0; });
 
-    // Agrupar por categoría
     var porCategoria = {};
     movimientos.forEach(function(m) {
-      var k = m.cat || 'Sin categoría';
-      porCategoria[k] = (porCategoria[k] || 0) + m.total;
+      porCategoria[m.cat || 'Sin categoría'] = (porCategoria[m.cat || 'Sin categoría'] || 0) + m.total;
     });
 
-    // Totales por año
     var porAnio = {};
     movimientos.forEach(function(m) {
       porAnio[m.anio] = (porAnio[m.anio] || 0) + m.total;
