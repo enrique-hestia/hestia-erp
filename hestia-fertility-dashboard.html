@@ -14499,25 +14499,49 @@ function _gfCatHTML(){
   return h;
 }
 
-async function _gfLoadProy(per){
+function _gfLoadProy(per){
   var c=document.getElementById('gf-proy-c'); if(!c) return;
-  try {
-    var tok=encodeURIComponent(getToken());
-    var d=await fetch(APPS_SCRIPT_URL+'?action=gfProyeccion&periodo='+per+'&meses=3&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();});
-    if(!d.ok) throw new Error(d.error||'Error');
-    var h='<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-bottom:12px">Estimado de gastos fijos del trimestre (solo lectura, para budget — no crea CxP).</div>';
-    h+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">';
-    (d.periodos||[]).forEach(function(pm){
-      var cats=Object.keys(pm.porCategoria||{}).map(function(k){return {n:k,v:pm.porCategoria[k]};}).sort(function(a,b){return b.v-a.v;});
-      h+='<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:14px">'
-        +'<div style="font-size:13px;font-weight:800;color:var(--text-primary,#111)">'+_gfMesNombre(pm.periodo)+'</div>'
-        +'<div style="font-size:20px;font-weight:800;color:#dc2626;margin:4px 0 10px">'+_cxpFM(pm.total)+'</div>';
-      cats.forEach(function(c2){ h+='<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--text-secondary,#6b7280)">'+_cxpEsc(c2.n)+'</span><span style="font-weight:600">'+_cxpFM(c2.v)+'</span></div>'; });
-      h+='</div>';
+  var cat=_gfCatalogo||[];
+  if(!cat.length){ c.innerHTML='<div style="padding:20px;color:var(--text-secondary,#6b7280)">Carga el catálogo primero (ve al tab Catálogo).</div>'; return; }
+  function _aplica(t,periodo,mesNum){
+    if(!t.activo) return false;
+    var desde=String(t.desde||'').substring(0,7);
+    var hasta=String(t.hasta||'').substring(0,7);
+    if(desde&&periodo<desde) return false;
+    if(hasta&&periodo>hasta) return false;
+    var meses=String(t.meses||'Todos').trim();
+    if(meses&&meses.toLowerCase()!=='todos'){
+      var list=meses.split(/[,\s]+/).map(function(x){return parseInt(x,10);}).filter(function(x){return x>=1&&x<=12;});
+      if(list.indexOf(mesNum)===-1) return false;
+    }
+    return true;
+  }
+  var y=parseInt(per.substring(0,4),10), mo=parseInt(per.substring(5,7),10)-1;
+  var periodos=[];
+  for(var k=0;k<3;k++){
+    var dd=new Date(y,mo+k,1);
+    var pMes=dd.getFullYear()+'-'+String(dd.getMonth()+1).padStart(2,'0');
+    var mesNum=dd.getMonth()+1;
+    var total=0, porCat={};
+    cat.forEach(function(t){
+      if(!_aplica(t,pMes,mesNum)) return;
+      var v=t.montoEstimado||0; total+=v;
+      var cat2=t.subtipo||'—'; porCat[cat2]=(porCat[cat2]||0)+v;
     });
+    periodos.push({periodo:pMes, total:total, porCategoria:porCat});
+  }
+  var h='<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-bottom:12px">Estimado de gastos fijos del trimestre (solo lectura, para budget — no crea CxP).</div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">';
+  periodos.forEach(function(pm){
+    var cats=Object.keys(pm.porCategoria).map(function(k){return {n:k,v:pm.porCategoria[k]};}).sort(function(a,b){return b.v-a.v;});
+    h+='<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:14px">'
+      +'<div style="font-size:13px;font-weight:800;color:var(--text-primary,#111)">'+_gfMesNombre(pm.periodo)+'</div>'
+      +'<div style="font-size:20px;font-weight:800;color:#dc2626;margin:4px 0 10px">'+_cxpFM(pm.total)+'</div>';
+    cats.forEach(function(c2){ h+='<div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0"><span style="color:var(--text-secondary,#6b7280)">'+_cxpEsc(c2.n)+'</span><span style="font-weight:600">'+_cxpFM(c2.v)+'</span></div>'; });
     h+='</div>';
-    c.innerHTML=h;
-  } catch(e){ c.innerHTML='<div style="padding:20px;color:#991b1b">⚠ Error en proyección: '+e.message+'</div>'; }
+  });
+  h+='</div>';
+  c.innerHTML=h;
 }
 
 async function gfProgramarUno(id){
