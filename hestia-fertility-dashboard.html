@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.06.30.4 -->
+﻿<!-- app-build:2026.06.30.5 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -15902,15 +15902,16 @@ function ecBuscar() {
   document.getElementById("ec-result").style.display = "none";
   document.getElementById("ec-error").style.display = "none";
   document.getElementById("ec-btn-print").style.display = "none";
-  var tok = getToken();
-  fetch(APPS_SCRIPT_URL + "?action=estadoCuenta&paciente=" + encodeURIComponent(nombre) + "&token=" + encodeURIComponent(tok) + "&_t=" + Date.now(), {redirect:"follow"})
+  var s = getSession() || {};
+  fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow',
+    body: JSON.stringify({action:'estadoCuenta', paciente: nombre, token: s.token||getToken(), usuario: s.email||''})})
     .then(function(r){ return r.json(); })
     .then(function(d){
       document.getElementById("ec-loading").style.display = "none";
       if (!d || (!d.ok && !d.paciente)) {
         var msg = (d && d.error) || '';
-        if (!msg && d && !d.ok && !d.paciente) msg = 'El backend no reconoció esta acción. Redespliega analisis.gs y core.gs en Apps Script.';
-        document.getElementById("ec-error").textContent = msg || "Error al consultar";
+        if (!msg) msg = 'El backend no reconoció esta acción. Copia finance.gs y analisis.gs al proyecto Apps Script y redespliega.';
+        document.getElementById("ec-error").textContent = msg;
         document.getElementById("ec-error").style.display = "";
         return;
       }

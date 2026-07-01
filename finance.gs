@@ -544,6 +544,11 @@ function doPost(e) {
     if (body.action === 'bulkUpdateCxPMonto')         return jsonResponse(bulkUpdateCxPMonto(body));
     if (body.action === 'conciliaAMEX')              return jsonResponse(conciliaAMEX(body));
     if (body.action === 'amexCorte')                 return jsonResponse(readAmexCorte(body));
+    if (body.action === 'estadoCuenta') {
+      if (typeof readEstadoCuentaPaciente !== 'function')
+        return jsonResponse({ok:false, error:'Agrega analisis.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readEstadoCuentaPaciente(body.paciente||''));
+    }
     // Tareas programadas (scheduler)
     if (body.action === 'updateScheduledTask')     return jsonResponse(updateScheduledTask(body));
     if (body.action === 'setupScheduledTriggers')  return jsonResponse(setupScheduledTriggers());
