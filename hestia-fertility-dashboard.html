@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.01.02 -->
+﻿<!-- app-build:2026.07.01.03 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -14566,8 +14566,8 @@ async function ecAnalyze(){
     if(years.indexOf(curY)===-1) years.push(curY);
     for(var yi=0;yi<years.length;yi++){
       try{
-        var rd=await fetch(APPS_SCRIPT_URL+'?action=egresos&anio='+years[yi]).then(function(x){ return x.json(); });
-        (rd.egresos||[]).filter(function(e){ return e.formaPago===fp; }).forEach(function(e){ allEgresos.push(e); });
+        var rd=await fetch(APPS_SCRIPT_URL+'?action=egresos&anio='+years[yi]+'&token='+(getSession()&&getSession().token||'')).then(function(x){ return x.json(); });
+        (rd.rows||rd.egresos||[]).filter(function(e){ return e.formaPago===fp; }).forEach(function(e){ allEgresos.push(e); });
       }catch(e2){ /* ignorar año con error */ }
     }
     var usedEg=new Set(), conciliados=[], gaps=[], extras=[];
