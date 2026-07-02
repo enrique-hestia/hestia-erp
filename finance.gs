@@ -2715,6 +2715,8 @@ function leerXmlFactura(fileId) {
     try { file = DriveApp.getFileById(fileId); }
     catch(fe) { return {ok:false, error:'Archivo no encontrado: '+fe.message}; }
     var content = file.getBlob().getDataAsString('UTF-8');
+    if (content.charCodeAt(0) === 0xFEFF) content = content.substring(1);
+    content = content.replace(/^\s+/, '');
     var doc = XmlService.parse(content);
     var root = doc.getRootElement();
     var cfdiNs = root.getNamespace();
