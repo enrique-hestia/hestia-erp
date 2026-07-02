@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.04 -->
+﻿<!-- app-build:2026.07.02.05 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2541,6 +2541,9 @@ function _renderIngresosERP() {
     +'.ing-fac-tbl{width:100%;border-collapse:collapse;font-size:11.5px}'
     +'.ing-fac-tbl th{padding:6px 10px;font-size:8.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);background:var(--color-surface,#fafafa);border-bottom:2px solid var(--color-divider,#d1d5db);text-align:left;white-space:nowrap}'
     +'.ing-fac-tbl td{padding:6px 10px;border-bottom:1px solid var(--color-divider,#f0f0f0);white-space:nowrap}'
+    +'@keyframes ing-spin{to{transform:rotate(360deg)}}'
+    +'.ing-spinner{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:ing-spin .7s linear infinite;vertical-align:-2px;margin-right:7px}'
+    +'.ing-spinner-dark{border:2px solid var(--color-divider,#e5e7eb);border-top-color:var(--color-primary,#c46a7a)}'
     +'</style>');
 
   h.push('<div class="ing-w">');
@@ -4354,8 +4357,8 @@ async function ingFacAnalizar() {
   var out = document.getElementById('ing-fac-resultado');
   var btn = document.getElementById('ing-fac-analizar-btn');
   if (!currentFechaInicio || !currentFechaFin) { if(out) out.innerHTML = '<div style="color:#dc2626;font-size:12px">Selecciona un rango de fechas en el filtro principal primero.</div>'; return; }
-  if (btn) { btn.disabled = true; btn.textContent = 'Analizando…'; }
-  if (out) out.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:12px">Leyendo XMLs en Drive y comparando contra Ingresos…</div>';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ing-spinner"></span>Analizando…'; }
+  if (out) out.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:12px"><span class="ing-spinner ing-spinner-dark"></span>Leyendo XMLs en Drive y comparando contra Ingresos…</div>';
   try {
     var tok = encodeURIComponent(getToken());
     var r = await fetch(APPS_SCRIPT_URL+'?action=reconciliarFacturas&fechaInicio='+currentFechaInicio+'&fechaFin='+currentFechaFin+'&token='+tok);
@@ -4389,7 +4392,7 @@ async function ingFacAnalizar() {
 }
 
 async function ingFacVincular(opId, fileId, btn) {
-  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ing-spinner"></span>Vinculando…'; }
   try {
     var s = getSession()||{};
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'vincularXmlFactura', opId:opId, fileId:fileId, usuario:s.email||''})});
@@ -4425,7 +4428,7 @@ async function ingFacUploadXml(opId, input) {
   var stEl = document.getElementById('ing-fac-upload-st-'+safe);
   var folio = folioInput ? folioInput.value.trim() : '';
   if (!folio) { if(stEl) stEl.textContent = 'Captura el folio primero'; return; }
-  if (stEl) stEl.textContent = 'Subiendo…';
+  if (stEl) stEl.innerHTML = '<span class="ing-spinner ing-spinner-dark"></span>Subiendo…';
   try {
     var base64 = await _fileToBase64(file);
     var s = getSession()||{};
@@ -4462,8 +4465,8 @@ function _ingFacRenderSeccion3(d) {
 async function ingFacGenerarReporte() {
   var btn = document.getElementById('ing-fac-reporte-btn');
   var out = document.getElementById('ing-fac-reporte-resultado');
-  if (btn) { btn.disabled = true; btn.textContent = 'Generando…'; }
-  if (out) out.innerHTML = 'Generando reporte, esto puede tardar unos segundos…';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ing-spinner"></span>Generando…'; }
+  if (out) out.innerHTML = '<span class="ing-spinner ing-spinner-dark"></span>Generando reporte, esto puede tardar unos segundos…';
   try {
     var s = getSession()||{};
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'generarReporteContaDigital', fechaInicio:currentFechaInicio, fechaFin:currentFechaFin, usuario:s.email||''})});
