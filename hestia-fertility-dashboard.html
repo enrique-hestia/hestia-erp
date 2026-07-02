@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.01 -->
+﻿<!-- app-build:2026.07.02.02 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2674,8 +2674,8 @@ function _renderIngresosERP() {
         // ── PDF link ──
         +(op.archivoURL
           ?('<div style="width:1px;height:14px;background:var(--color-divider,#e5e7eb)"></div>'
-            +'<a href="'+op.archivoURL+'" target="_blank" style="display:flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;color:var(--color-primary,#c46a7a);text-decoration:none">'
-              +'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Ver PDF ↗</a>')
+            +'<button type="button" onclick="ingViewFactura(\''+op.archivoURL.replace(/'/g,"\\'")+'\',\''+(op.factura||'').replace(/'/g,"\\'")+'\' )" style="display:flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;color:var(--color-primary,#c46a7a);background:none;border:none;cursor:pointer;padding:0">'
+              +'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Ver factura</button>')
           :'')
         // ── Upload button ──
         +'<div style="margin-left:auto;display:flex;align-items:center;gap:8px">'
@@ -4213,6 +4213,84 @@ async function ingUploadFacturaOp(opId, input) {
     }
   } catch(e) {
     if (stEl) stEl.textContent = 'Error de conexión';
+  }
+}
+
+async function ingViewFactura(url, folio) {
+  var modal = document.getElementById('modal-ing-fac-viewer');
+  if (!modal) return;
+  var body = document.getElementById('ing-fac-viewer-body');
+  var link = document.getElementById('ing-fac-viewer-link');
+  var titleEl = document.getElementById('ing-fac-viewer-title');
+  var esc = function(v){ return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+  titleEl.textContent = folio ? 'Factura ' + folio : 'Factura';
+  link.href = url || '#';
+  body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-secondary)">Cargando CFDI…</div>';
+  modal.style.display = 'flex';
+  if (!url) { body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-secondary)">Sin archivo adjunto.</div>'; return; }
+  var m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (!m) { body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-secondary)">URL no válida.</div>'; return; }
+  try {
+    var s = getSession() || {};
+    var resp = await fetch(APPS_SCRIPT_URL + '?action=leerXmlFactura&fileId=' + encodeURIComponent(m[1]) + '&token=' + encodeURIComponent(s.token || ''));
+    var d = await resp.json();
+    if (!d.ok) throw new Error(d.error || 'Error al leer XML');
+    var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+    var fmtD = function(v){ return v?String(v).substring(0,10):''; };
+    var tipoLabel = d.tipoComprobante==='E'?'NOTA DE CRÉDITO':d.tipoComprobante==='N'?'NÓMINA':'FACTURA';
+    var h = '<div style="font-family:Arial,sans-serif;font-size:12px;color:var(--text-primary,#222)">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px;gap:12px">';
+    h += '<div><div style="font-size:18px;font-weight:800;color:var(--color-primary,#c46a7a)">'+esc(d.emisor.nombre||'HESTIA CLINIC')+'</div>';
+    h += '<div style="font-size:10.5px;color:var(--text-secondary,#6b7280);margin-top:2px">RFC: '+esc(d.emisor.rfc)+'</div>';
+    if (d.emisor.regimen) h += '<div style="font-size:10px;color:var(--text-secondary,#9ca3af)">Régimen: '+esc(d.emisor.regimen)+'</div>';
+    h += '</div><div style="text-align:right">';
+    h += '<div style="font-size:13px;font-weight:700;color:var(--color-primary,#c46a7a)">'+tipoLabel+'</div>';
+    h += '<div style="font-size:16px;font-weight:800;color:var(--text-primary,#111)">'+(d.serie||'')+(d.folio?'-'+d.folio:'')+'</div>';
+    h += '<div style="font-size:10.5px;color:var(--text-secondary,#6b7280)">Fecha: '+fmtD(d.fecha)+'</div>';
+    h += '</div></div>';
+    h += '<hr style="border:none;border-top:2px solid var(--color-primary,#c46a7a);margin:0 0 16px">';
+    h += '<div style="background:var(--color-surface,#f3f4f6);border-radius:8px;padding:11px 14px;margin-bottom:16px">';
+    h += '<div style="font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af);margin-bottom:5px">Receptor</div>';
+    h += '<div style="font-weight:700;font-size:12.5px">'+esc(d.receptor.nombre)+'</div>';
+    h += '<div style="color:var(--text-secondary,#555);margin-top:2px">RFC: '+esc(d.receptor.rfc)+'</div>';
+    if (d.receptor.domFiscal) h += '<div style="color:var(--text-secondary,#555)">C.P.: '+esc(d.receptor.domFiscal)+'</div>';
+    if (d.receptor.usoCfdi) h += '<div style="color:var(--text-secondary,#555)">Uso CFDI: '+esc(d.receptor.usoCfdi)+'</div>';
+    h += '</div>';
+    h += '<table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:11px">';
+    h += '<thead><tr style="background:var(--color-primary,#c46a7a);color:#fff">';
+    h += '<th style="padding:6px 10px;text-align:left;font-weight:600">Descripción</th>';
+    h += '<th style="padding:6px 8px;text-align:center;font-weight:600;width:50px">Cant.</th>';
+    h += '<th style="padding:6px 10px;text-align:right;font-weight:600;width:90px">Precio unit.</th>';
+    h += '<th style="padding:6px 10px;text-align:right;font-weight:600;width:90px">Importe</th>';
+    h += '</tr></thead><tbody>';
+    for (var ci=0;ci<d.conceptos.length;ci++) {
+      var c=d.conceptos[ci];
+      h += '<tr style="background:'+(ci%2===0?'var(--card-bg,#fff)':'var(--color-surface,#f8f8f8)')+'">';
+      h += '<td style="padding:7px 10px;border-bottom:1px solid var(--color-divider,#f0e0e4)">'+esc(c.descripcion)+'</td>';
+      h += '<td style="padding:7px 8px;border-bottom:1px solid var(--color-divider,#f0e0e4);text-align:center">'+esc(c.cantidad)+'</td>';
+      h += '<td style="padding:7px 10px;border-bottom:1px solid var(--color-divider,#f0e0e4);text-align:right">'+fmtM(c.valorUnitario)+'</td>';
+      h += '<td style="padding:7px 10px;border-bottom:1px solid var(--color-divider,#f0e0e4);text-align:right;font-weight:600">'+fmtM(c.importe)+'</td>';
+      h += '</tr>';
+    }
+    h += '</tbody></table>';
+    var iva = d.totalImpuestosTrasladados || Math.max(0, d.total - d.subTotal);
+    h += '<div style="display:flex;justify-content:flex-end;margin-bottom:14px">';
+    h += '<div style="min-width:240px;border:1px solid var(--color-divider,#f0e0e4);border-radius:8px;overflow:hidden">';
+    h += '<div style="display:flex;justify-content:space-between;padding:6px 14px;border-bottom:1px solid var(--color-divider,#f0e0e4)"><span style="color:var(--text-secondary,#666)">Subtotal</span><span>'+fmtM(d.subTotal)+'</span></div>';
+    if (iva>0) h += '<div style="display:flex;justify-content:space-between;padding:6px 14px;border-bottom:1px solid var(--color-divider,#f0e0e4)"><span style="color:var(--text-secondary,#666)">IVA</span><span>'+fmtM(iva)+'</span></div>';
+    h += '<div style="display:flex;justify-content:space-between;padding:8px 14px;background:var(--color-primary,#c46a7a);color:#fff"><span style="font-weight:700">Total '+esc(d.moneda)+'</span><span style="font-weight:700;font-size:14px">'+fmtM(d.total)+'</span></div>';
+    h += '</div></div>';
+    h += '<div style="background:var(--color-surface,#f3f4f6);border-radius:8px;padding:9px 14px;font-size:10.5px;color:var(--text-secondary,#666);display:flex;gap:20px;flex-wrap:wrap;margin-bottom:10px">';
+    if (d.formaPago) h += '<div><b style="color:var(--text-primary,#444)">Forma pago:</b> '+esc(d.formaPago)+'</div>';
+    if (d.metodoPago) h += '<div><b style="color:var(--text-primary,#444)">Método:</b> '+esc(d.metodoPago)+'</div>';
+    if (d.moneda!=='MXN'&&d.tipoCambio&&d.tipoCambio!==1) h += '<div><b style="color:var(--text-primary,#444)">T.C.:</b> '+d.tipoCambio+'</div>';
+    if (d.fechaTimbrado) h += '<div><b style="color:var(--text-primary,#444)">Timbrado:</b> '+fmtD(d.fechaTimbrado)+'</div>';
+    h += '</div>';
+    if (d.uuid) h += '<div style="padding:7px 10px;background:var(--card-bg,#fff);border:1px dashed var(--color-divider,#e5e7eb);border-radius:6px;font-size:9px;color:var(--text-secondary,#9ca3af);word-break:break-all;text-align:center">UUID: '+esc(d.uuid)+'</div>';
+    h += '</div>';
+    body.innerHTML = h;
+  } catch(ex) {
+    body.innerHTML = '<div style="text-align:center;padding:40px;color:#dc2626">Error: '+String(ex.message).replace(/</g,'&lt;')+'</div>';
   }
 }
 
@@ -13288,6 +13366,20 @@ function initTheme() {
       </div>
     </div>
     <iframe id="eg-viewer-iframe" style="flex:1;border:none;border-radius:0 0 12px 12px" src="about:blank"></iframe>
+  </div>
+</div>
+
+<!-- Modal: Visor Factura XML -->
+<div id="modal-ing-fac-viewer" class="modal-overlay" style="display:none" onclick="if(event.target===this)document.getElementById('modal-ing-fac-viewer').style.display='none'">
+  <div class="modal" style="max-width:820px;max-height:88vh;display:flex;flex-direction:column">
+    <div class="modal-header">
+      <span class="modal-title" id="ing-fac-viewer-title">Factura</span>
+      <div style="display:flex;gap:8px">
+        <a id="ing-fac-viewer-link" href="#" target="_blank" style="font-size:11px;font-weight:600;color:var(--color-primary);text-decoration:none;padding:4px 10px;border:1px solid var(--color-primary);border-radius:6px">Abrir XML</a>
+        <button class="modal-close" onclick="document.getElementById('modal-ing-fac-viewer').style.display='none'"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      </div>
+    </div>
+    <div id="ing-fac-viewer-body" style="flex:1;overflow-y:auto;padding:24px"></div>
   </div>
 </div>
 

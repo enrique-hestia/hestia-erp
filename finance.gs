@@ -2702,6 +2702,55 @@ function createProducto(body) {
   } catch(ex) { return {ok:false, error:ex.message}; }
 }
 
+function leerXmlFactura(fileId) {
+  try {
+    if (!fileId) return {ok:false, error:'fileId requerido'};
+    var file;
+    try { file = DriveApp.getFileById(fileId); }
+    catch(fe) { return {ok:false, error:'Archivo no encontrado: '+fe.message}; }
+    var content = file.getBlob().getDataAsString('UTF-8');
+    var doc = XmlService.parse(content);
+    var root = doc.getRootElement();
+    var cfdiNs = root.getNamespace();
+    var attr = function(el, name) { var a = el.getAttribute(name); return a ? a.getValue() : ''; };
+    var child = function(el, name) { return el.getChild(name, cfdiNs); };
+    var serie = attr(root,'Serie'), folio = attr(root,'Folio'), fecha = attr(root,'Fecha');
+    var subTotal = parseFloat(attr(root,'SubTotal'))||0;
+    var total = parseFloat(attr(root,'Total'))||0;
+    var moneda = attr(root,'Moneda')||'MXN';
+    var formaPago = attr(root,'FormaPago'), metodoPago = attr(root,'MetodoPago');
+    var tipoCambio = parseFloat(attr(root,'TipoCambio'))||1;
+    var tipoComprobante = attr(root,'TipoDeComprobante')||'I';
+    var emisorEl = child(root,'Emisor');
+    var emisor = {rfc:'', nombre:'', regimen:''};
+    if (emisorEl) { emisor.rfc=attr(emisorEl,'Rfc'); emisor.nombre=attr(emisorEl,'Nombre'); emisor.regimen=attr(emisorEl,'RegimenFiscal'); }
+    var receptorEl = child(root,'Receptor');
+    var receptor = {rfc:'', nombre:'', usoCfdi:'', domFiscal:''};
+    if (receptorEl) { receptor.rfc=attr(receptorEl,'Rfc'); receptor.nombre=attr(receptorEl,'Nombre'); receptor.usoCfdi=attr(receptorEl,'UsoCFDI'); receptor.domFiscal=attr(receptorEl,'DomicilioFiscalReceptor'); }
+    var conceptos = [];
+    var conceptosEl = child(root,'Conceptos');
+    if (conceptosEl) {
+      var cEls = conceptosEl.getChildren('Concepto', cfdiNs);
+      for (var i=0;i<cEls.length;i++) {
+        var c=cEls[i];
+        conceptos.push({claveProdServ:attr(c,'ClaveProdServ'), cantidad:attr(c,'Cantidad'), claveUnidad:attr(c,'ClaveUnidad'), descripcion:attr(c,'Descripcion'), valorUnitario:parseFloat(attr(c,'ValorUnitario'))||0, importe:parseFloat(attr(c,'Importe'))||0});
+      }
+    }
+    var totalImpuestosTrasladados = 0;
+    var impEl = child(root,'Impuestos');
+    if (impEl) totalImpuestosTrasladados = parseFloat(attr(impEl,'TotalImpuestosTrasladados'))||0;
+    var uuid='', fechaTimbrado='', noCertificadoSat='';
+    var compEl = child(root,'Complemento');
+    if (compEl) {
+      var chs = compEl.getChildren();
+      for (var ci=0;ci<chs.length;ci++) {
+        if (chs[ci].getName()==='TimbreFiscalDigital') { uuid=attr(chs[ci],'UUID'); fechaTimbrado=attr(chs[ci],'FechaTimbrado'); noCertificadoSat=attr(chs[ci],'NoCertificadoSAT'); break; }
+      }
+    }
+    return {ok:true, serie:serie, folio:folio, fecha:fecha, subTotal:subTotal, total:total, moneda:moneda, formaPago:formaPago, metodoPago:metodoPago, tipoCambio:tipoCambio, tipoComprobante:tipoComprobante, emisor:emisor, receptor:receptor, conceptos:conceptos, totalImpuestosTrasladados:totalImpuestosTrasladados, uuid:uuid, fechaTimbrado:fechaTimbrado, noCertificadoSat:noCertificadoSat, fileName:file.getName()};
+  } catch(ex) { return {ok:false, error:ex.message}; }
+}
+
 function updateProducto(body) {
   try {
     var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);

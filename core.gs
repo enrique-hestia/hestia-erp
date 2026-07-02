@@ -348,6 +348,11 @@ function doGet(e) {
       return jsonResponse(readIngresosData());
     }
 
+    if (action === 'leerXmlFactura') {
+      var fid = (e && e.parameter.fileId) || '';
+      return jsonResponse(leerXmlFactura(fid));
+    }
+
     if (action === 'productos') {
       return jsonResponse(readProductos());
     }
