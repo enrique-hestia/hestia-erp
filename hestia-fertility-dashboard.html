@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.05 -->
+﻿<!-- app-build:2026.07.02.06 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2558,6 +2558,8 @@ function _renderIngresosERP() {
     +'<div style="font-size:12px;font-weight:700;color:var(--text-primary,#111)">'+(data.anio||new Date().getFullYear())+'</div>'
     +'<div style="font-size:10px;color:var(--text-secondary,#6b7280);text-transform:uppercase;letter-spacing:.5px">'+filtered.length+' de '+(data.totalRows||0)+' registros</div>'
     +'</div>'
+    +'<button onclick="ingShowManual()" title="Manual completo de Ingresos" style="display:inline-flex;align-items:center;gap:5px;padding:8px 12px;background:var(--color-surface,#f1f1f1);color:var(--text-secondary,#374151);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:9px;font-size:11px;font-weight:600;cursor:pointer">📖 Manual</button>'
+    +'<button onclick="_tourStart(_ING_TOUR)" title="Tutorial interactivo" style="width:34px;height:34px;border-radius:50%;background:transparent;color:var(--color-primary,#c46a7a);border:2px solid var(--color-primary,#c46a7a);font-size:17px;font-weight:900;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1">?</button>'
     +(hasPermission('bank_capture')?'<button onclick="ingOpenDrawer()" style="display:inline-flex;align-items:center;gap:6px;padding:10px 18px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(196,106,122,.25)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Registrar operación</button>':'')
     +'</div></div>');
 
@@ -2909,6 +2911,8 @@ function _renderIngresosERP() {
 
   // Reabrir el dropdown de filtro que estaba abierto (multi-select sin cerrarse)
   if (_ingOpenFilter) { var _op = document.getElementById('ing-msel-'+_ingOpenFilter); if (_op) _op.classList.add('open'); }
+
+  setTimeout(function(){ if(typeof _tourStart==='function') _tourStart(_ING_TOUR,'hestia_tour_ing_v1'); },700);
 
   // Render chart
   setTimeout(function(){
@@ -4479,6 +4483,144 @@ async function ingFacGenerarReporte() {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Generar reporte del periodo'; }
   }
+}
+
+/* ── Tour interactivo de Ingresos (Lista + Facturación) ──────────── */
+var _ING_TOUR = [
+  {el:null,
+   title:'Módulo de Ingresos',
+   body:'Aquí capturas y controlas todos los cobros de la clínica. Tiene dos pestañas: <b>Lista</b> (el detalle de operaciones) y <b>Facturación</b> (conciliar XML contra tus ventas). Este tutorial recorre ambas. Reábrelo cuando quieras con el botón <b>?</b>, o abre el <b>📖 Manual</b> para la referencia completa.'},
+  {el:'.ing-kstrip',
+   title:'Métricas del año',
+   body:'<b>Ingresos totales</b>: todo lo facturado en el año. <b>Total cobrado</b>: lo que ya se cobró (puede ser menor si hay pagos pendientes). <b>Operaciones</b>: número de ventas registradas. <b>Ticket promedio</b>: ingreso total ÷ operaciones.'},
+  {el:'.ing-filters',
+   title:'Filtros de la lista',
+   body:'Mes, Categoría, Forma de pago y Sucursal son selectores múltiples — puedes marcar varios a la vez. <b>Buscar</b> encuentra por paciente, producto o ID de operación (OP-#####). Estos filtros son solo de la vista Lista.'},
+  {el:'.ing-subtabs',
+   title:'Lista / Facturación',
+   body:'<b>Lista</b> es el detalle operación por operación que ya conoces. <b>Facturación</b> es el módulo nuevo para conciliar tus XML timbrados contra estas ventas — a diferencia de Lista, usa el rango de fechas <b>Del/Al del filtro principal</b> arriba de toda la pantalla, no los filtros de esta tabla.'},
+  {el:'button[onclick="ingOpenDrawer()"]',
+   title:'Registrar operación',
+   body:'Abre el formulario de captura: buscas o das de alta al paciente, agregas productos/servicios (con botón ✏ para editar el producto seleccionado o "Nuevo producto" para darlo de alta sin salir de la venta), formas de pago (incluye cálculo automático de comisión si pagan con Mercado Pago) y datos de facturación.'},
+  {el:null, before:function(){ ingSwitchTab('facturacion'); },
+   title:'Pestaña Facturación',
+   body:'Aquí resuelves la pregunta "¿qué ventas ya tienen su factura en regla?". Tiene 3 secciones que se usan en orden: <b>1) Conciliación</b>, <b>2) Documentos faltantes</b> y <b>3) Reporte ContaDigital</b>. Solo analiza el periodo que tengas activo en el filtro Del/Al principal.'},
+  {el:'#ing-fac-analizar-btn',
+   title:'1. Analizar periodo actual',
+   body:'Al hacer clic, el sistema lee todos los XML timbrados en Drive del rango de fechas activo y los compara contra tus operaciones de Ingresos por <b>número de folio</b>. Excluye automáticamente recibos de nómina y notas de crédito.'},
+  {el:null,
+   title:'Los 4 resultados posibles',
+   body:'<b style="color:#166534">Con documento</b>: ya está todo en orden. <b style="color:#c46a7a">Falta vincular</b>: capturaste el folio y el XML ya existe en Drive, solo falta un clic. <b style="color:#b45309">Sin número de factura</b>: aún no capturaste el folio en esa operación. <b style="color:#6b7280">XML sin operación asociada</b>: hay una factura timbrada que no corresponde a ninguna venta registrada — revisar con cuidado.'},
+  {el:null,
+   title:'Botón "Vincular"',
+   body:'No sube ni copia ningún archivo: solo guarda el enlace del XML que ya existe en Drive en el registro de esa operación. Después de vincular, aparece el botón "Ver factura" en la Lista para esa venta. <b>Antes de dar clic, compara "Total op." vs "Total XML"</b> — si no coinciden, probablemente el folio capturado no es el correcto.'},
+  {el:null,
+   title:'2. Documentos faltantes',
+   body:'Para operaciones sin folio capturado: escribe el número de factura y sube el archivo XML descargado. El sistema lo guarda en la carpeta de facturas y vincula la operación automáticamente, en un solo paso.'},
+  {el:null,
+   title:'3. Reporte para ContaDigital',
+   body:'Cuando ya no queden pendientes (o quieras generar con lo que hay), este botón arma un archivo <b>.xlsx</b> con el mismo formato que usas para la carga masiva en ContaDigital: una fila por factura, con sus conceptos, impuestos y forma de pago ya traducidos del XML. Te da un link de descarga directo desde Drive.'},
+  {el:null, before:function(){ ingSwitchTab('lista'); },
+   title:'¡Listo!',
+   body:'Ya conoces las dos pestañas de Ingresos. Para el detalle completo de cada campo, columna y regla de negocio, abre el <b>📖 Manual</b> en cualquier momento — no hace falta repetir este tutorial.'}
+];
+
+/* ── Manual completo de Ingresos ─────────────────────────────────── */
+function ingShowManual(){
+  if (document.getElementById('ing-manual-ovl')) return;
+  var ovl=document.createElement('div');
+  ovl.id='ing-manual-ovl';
+  ovl.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
+  ovl.onclick=function(e){ if(e.target===ovl) ovl.remove(); };
+
+  var S='var(--color-surface,#fafafa)',DV='var(--color-divider,#e5e7eb)',TP='var(--text-primary,#111)',TS='var(--text-secondary,#374151)',CB='var(--card-bg,#fff)';
+  function th(t){ return '<th style="padding:7px 10px;text-align:left;border-bottom:2px solid '+DV+';font-size:11px;font-weight:700;letter-spacing:.3px;color:'+TS+'">'+t+'</th>'; }
+  function tr(cells,last){
+    return '<tr>'+(cells.map(function(c,i){ return '<td style="padding:7px 10px;'+(last?'':'border-bottom:1px solid '+DV+';')+'font-size:12px;'+(i===0?'font-weight:700;':'color:'+TS+';')+'">'+(c||'')+'</td>'; }).join(''))+'</tr>';
+  }
+  function h2(t){ return '<h2 style="font-size:13px;font-weight:800;margin:20px 0 6px;color:'+TP+'">'+t+'</h2>'; }
+  function h3(t){ return '<h3 style="font-size:12px;font-weight:800;margin:14px 0 5px;color:'+TP+'">'+t+'</h3>'; }
+  function p(t){  return '<p style="margin:0 0 10px;font-size:12.5px;line-height:1.62;color:'+TS+'">'+t+'</p>'; }
+  function code(t){ return '<code style="background:'+S+';padding:2px 7px;border-radius:5px;font-size:11px;font-family:monospace">'+t+'</code>'; }
+
+  ovl.innerHTML='<div style="background:'+CB+';border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.3);width:740px;max-width:96vw;max-height:88vh;overflow:hidden;display:flex;flex-direction:column">'
+    +'<div style="padding:18px 24px;border-bottom:1px solid '+DV+';display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
+      +'<div>'
+        +'<div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Hestia ERP · Finanzas</div>'
+        +'<div style="font-size:18px;font-weight:800;color:'+TP+';margin-top:2px">Manual de Ingresos</div>'
+      +'</div>'
+      +'<div style="display:flex;gap:8px">'
+        +'<button onclick="_tourStart(_ING_TOUR);document.getElementById(\'ing-manual-ovl\').remove()" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:'+S+';color:'+TP+';border:1.5px solid '+DV+';border-radius:9px;font-size:11px;font-weight:600;cursor:pointer">▶ Tutorial interactivo</button>'
+        +'<button onclick="document.getElementById(\'ing-manual-ovl\').remove()" style="border:1.5px solid '+DV+';background:'+CB+';border-radius:9px;padding:6px 14px;cursor:pointer;font-size:13px;font-weight:600">✕</button>'
+      +'</div>'
+    +'</div>'
+    +'<div style="overflow-y:auto;padding:20px 26px;color:'+TP+'">'
+
+    +h2('¿Qué hace este módulo?')
+    +p('Registra y controla todos los cobros de la clínica: consultas, tratamientos, laboratorios, PGT, etc. Tiene dos pestañas — <b>Lista</b> (captura y detalle de cada operación) y <b>Facturación</b> (conciliar los XML timbrados en Drive contra esas operaciones y generar el reporte de carga masiva para ContaDigital).')
+
+    +h2('Pestaña Lista')
+    +h3('Métricas del año (KPIs)')
+    +'<table style="width:100%;border-collapse:collapse;margin-bottom:14px"><thead><tr style="background:'+S+'">'+th('Métrica')+th('Qué significa')+'</tr></thead><tbody>'
+    +tr(['Ingresos totales','Suma de todo lo facturado en el año, sin importar si ya se cobró'])
+    +tr(['Total cobrado','Suma de lo efectivamente pagado — puede ser menor si hay operaciones con saldo pendiente'])
+    +tr(['Operaciones','Número de ventas (OP-#####) registradas'])
+    +tr(['Ticket promedio','Ingresos totales ÷ número de operaciones'],true)
+    +'</tbody></table>'
+
+    +h3('Filtros')
+    +p('<b>Mes, Categoría, Forma de pago y Sucursal</b> son selectores múltiples (puedes marcar varias opciones a la vez). <b>Buscar</b> encuentra por nombre de paciente, producto o ID de operación. Estos filtros son independientes del rango <b>Del/Al</b> del filtro principal de la pantalla — ese rango es el que usa la pestaña Facturación.')
+
+    +h3('Tabla de operaciones')
+    +p('Las líneas se agrupan por operación (OP). Haz clic en una fila para expandirla y ver la <b>barra fiscal</b>: número de <b>Factura</b>, número de <b>Póliza</b>, botón <b>Ver factura</b> (si ya hay documento vinculado, abre un visor emergente con la factura CFDI ya formateada) y el botón para subir manualmente un PDF/XML.')
+
+    +h3('Registrar operación')
+    +'<table style="width:100%;border-collapse:collapse;margin-bottom:14px"><thead><tr style="background:'+S+'">'+th('Sección del formulario')+th('Qué hace')+'</tr></thead><tbody>'
+    +tr(['Datos del paciente','Busca por nombre o correo; si no existe, se da de alta con el botón +. La lista de precios (General u otra) se detecta automáticamente según el paciente'])
+    +tr(['Productos / servicios','Buscador con categoría, precio y SKU visibles en el desplegable. El botón ✏ edita el producto ya seleccionado y "Nuevo producto" da de alta uno sin salir de la venta — los cambios quedan disponibles de inmediato'])
+    +tr(['Formas de pago','Puedes dividir el cobro en varias formas de pago. Si seleccionas Mercado Pago, calcula automáticamente la comisión de la plataforma antes de guardar'])
+    +tr(['Facturación y datos / CFDI','Monto a facturar, moneda, folio, y el panel de ISR declarado (para el cálculo del cierre mensual)'],true)
+    +'</tbody></table>'
+
+    +h2('Pestaña Facturación')
+    +p('Reconcilia los XML de facturas emitidas (guardados en Drive) contra tus operaciones de Ingresos. <b>Solo trabaja sobre el rango de fechas Del/Al</b> que tengas activo en el filtro principal de la pantalla — cambia el periodo ahí antes de analizar.')
+
+    +h3('1. Conciliación')
+    +p('El botón <b>"Analizar periodo actual"</b> lee todos los archivos XML de la carpeta de facturas del periodo, se queda solo con los <b>comprobantes de tipo Ingreso</b> (descarta nómina, notas de crédito y pagos), y compara el folio de cada uno contra el campo <b>Factura#</b> de tus operaciones.')
+    +'<table style="width:100%;border-collapse:collapse;margin-bottom:14px"><thead><tr style="background:'+S+'">'+th('Resultado')+th('Qué significa')+th('Qué hacer')+'</tr></thead><tbody>'
+    +tr(['<span style="color:#166534">Con documento ✓</span>','La operación ya tiene un XML vinculado','Nada, ya está completa'])
+    +tr(['<span style="color:#c46a7a">Falta vincular</span>','Tiene folio capturado y el XML existe en Drive, pero no está vinculado','Revisar que el total coincida y dar clic en <b>Vincular</b>'])
+    +tr(['<span style="color:#b45309">Sin número de factura</span>','La operación no tiene folio capturado todavía','Ir a la sección 2 y subir su XML'])
+    +tr(['<span style="color:#6b7280">XML sin operación asociada</span>','Hay una factura timbrada cuyo folio no aparece en ninguna operación del periodo','Investigar — puede faltar registrar la venta, o el folio se capturó distinto en Ingresos'],true)
+    +p('El botón <b>Vincular</b> no sube ni copia archivos: toma la URL del XML que ya existe en Drive y la guarda en el registro de la operación. Antes de usarlo, compara la columna <b>Total op.</b> contra <b>Total XML</b> — si no coinciden, es señal de que el folio capturado no corresponde a esa venta.')
+
+    +h3('2. Documentos faltantes')
+    +p('Lista las operaciones sin factura vinculada. Para cada una: escribe el <b>número de folio</b> en el campo y sube el <b>archivo XML</b> descargado con el botón "↑ XML". El sistema guarda el archivo en la carpeta de facturas del Ingreso y vincula la operación en un solo paso — no hace falta volver a la sección 1.')
+
+    +h3('3. Reporte para ContaDigital')
+    +p('Genera un archivo <b>.xlsx</b> con el mismo formato de tu plantilla de carga masiva: una fila por factura, con sus conceptos (clave de producto, cantidad, precio, IVA), forma de pago traducida al catálogo de ContaDigital y totales — leídos directamente del contenido del XML, no capturados a mano. Solo incluye operaciones que ya tienen XML vinculado (secciones 1 y 2 completas). El botón entrega un link de descarga directo desde Drive.')
+
+    +h2('Flujo de trabajo recomendado')
+    +'<ol style="margin:0 0 14px;padding-left:18px;font-size:12.5px;line-height:2;color:'+TS+'">'
+      +'<li>Ajusta el rango <b>Del/Al</b> del filtro principal al periodo que vas a facturar</li>'
+      +'<li>En Facturación, da clic en <b>Analizar periodo actual</b></li>'
+      +'<li>Vincula una por una las operaciones de "Falta vincular", verificando que el monto coincida</li>'
+      +'<li>Sube el XML y captura el folio de las operaciones "Sin número de factura"</li>'
+      +'<li>Revisa los XML huérfanos — puede que falte registrar esa venta en Ingresos</li>'
+      +'<li>Genera el <b>reporte para ContaDigital</b> y súbelo a la plataforma</li>'
+    +'</ol>'
+
+    +h2('Notas técnicas')
+    +p('La conciliación identifica las facturas por <b>número de folio</b>, dentro de la carpeta de Drive organizada por año y mes. Si un mismo folio se usó accidentalmente en dos operaciones, el sistema solo podrá vincular una — corrige el número de factura en la que esté mal antes de continuar.')
+    +p('Para editar operaciones, capturar folio/póliza, vincular XML y generar el reporte se requiere el permiso '+code('bank_capture')+'. Para eliminar operaciones se requiere '+code('borrar_ingresos')+'.')
+
+    +'</div>'
+    +'<div style="padding:12px 24px;border-top:1px solid '+DV+';display:flex;justify-content:flex-end;flex-shrink:0">'
+      +'<button onclick="document.getElementById(\'ing-manual-ovl\').remove()" style="padding:9px 24px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">Cerrar manual</button>'
+    +'</div>'
+  +'</div>';
+
+  document.body.appendChild(ovl);
 }
 
 // Guarda solo factura# o póliza# directo desde la barra fiscal (sin tocar items ni pagos)
@@ -11048,6 +11190,7 @@ async function presApplyAllProj(){
 
   function _tShow(){
     var step=_tSteps[_tIdx]; if(!step) return;
+    if (typeof step.before==='function') { try{ step.before(); }catch(e){} }
     var sp=_tq('_tsp'), card=_tq('_tcard'); if(!sp||!card) return;
     var n=_tSteps.length, i=_tIdx, isLast=i===n-1;
 
