@@ -560,6 +560,9 @@ function doPost(e) {
     if (body.action === 'updateProducto') {
       return jsonResponse(updateProducto(body));
     }
+    if (body.action === 'createProducto') {
+      return jsonResponse(createProducto(body));
+    }
     if (body.action === 'saveLista') {
       return jsonResponse(saveLista(body));
     }
@@ -2668,6 +2671,35 @@ function setupBDListas() {
   }
   _syncListasDropdown();
   return {ok:true, msg:'BD_Listas configurada, dropdown sincronizado'};
+}
+
+function createProducto(body) {
+  try {
+    var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+    var prodSheet = ss.getSheetByName('BD_Productos');
+    if (!prodSheet) return {ok:false, error:'BD_Productos no encontrada'};
+    var prodId = String(body.productoId||'').trim();
+    var desc   = String(body.descripcion||'').trim();
+    if (!prodId) return {ok:false, error:'ID requerido'};
+    if (!desc)   return {ok:false, error:'Descripción requerida'};
+    var data = prodSheet.getDataRange().getValues();
+    for (var i=1;i<data.length;i++) {
+      if (String(data[i][0]).trim() === prodId)
+        return {ok:false, error:'Ya existe un producto con ID: '+prodId};
+    }
+    var activo = body.activo !== false && body.activo !== 'false';
+    prodSheet.appendRow([prodId, body.sku||'', desc, body.categoria||'', body.tipo||'', body.notas||'', activo]);
+    var precio = parseFloat(String(body.precio||'').replace(/[$,]/g,''))||0;
+    if (precio > 0) {
+      var precSheet = ss.getSheetByName('BD_Precios');
+      if (precSheet) {
+        var vigencia = body.vigencia || new Date().toISOString().substring(0,10);
+        precSheet.appendRow([prodId, vigencia, precio, body.moneda||'MXN', body.usuario||'sistema', new Date(), body.lista||'General']);
+      }
+    }
+    logAudit(body.usuario||'sistema','Productos','Crear',prodId,'','-',desc);
+    return {ok:true, productoId:prodId};
+  } catch(ex) { return {ok:false, error:ex.message}; }
 }
 
 function updateProducto(body) {

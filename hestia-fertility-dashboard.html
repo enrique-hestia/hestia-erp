@@ -3442,9 +3442,10 @@ var ING_CICLOS = ['ALTA','BAJA','CONSULTA','Almacenamiento','Estudios - Androlog
 var _ingProductos = [];
 var _ingTodosProductos = [];
 var _ingProductosLoaded = false;
+var _ingProdModal = null;
 
 async function ingLoadProductos() {
-  if (_ingProductosLoaded && _ingProductos.length) return;
+  if (_ingProductosLoaded && _ingProductos.length && !arguments[0]) return;
   try {
     var tok = encodeURIComponent(getToken());
     var r = await fetch(APPS_SCRIPT_URL+'?action=productos&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
@@ -3816,9 +3817,12 @@ async function ingOpenDrawer() {
   h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'
     +'<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);display:flex;align-items:center;gap:8px">'
       +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>Productos / Servicios</div>'
-    +'<button onclick="ingAddLine()" style="display:flex;align-items:center;gap:5px;font-size:11px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-weight:700">'
-      +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Agregar línea</button>'
-    +'</div>';
+    +'<div style="display:flex;gap:8px">'
+      +'<button onclick="ingOpenProdModal(0,true)" style="display:flex;align-items:center;gap:5px;font-size:11px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:8px;padding:6px 14px;cursor:pointer;font-weight:700">'
+        +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Nuevo producto</button>'
+      +'<button onclick="ingAddLine()" style="display:flex;align-items:center;gap:5px;font-size:11px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-weight:700">'
+        +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Agregar línea</button>'
+    +'</div></div>';
   // Encabezado de tabla
   h += '<div style="display:grid;grid-template-columns:170px 1fr 100px 80px 60px 110px 30px;gap:8px;padding:0 4px 6px;border-bottom:2px solid var(--color-divider,#d1d5db)">'
     +'<div style="font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Categoría</div>'
@@ -3989,8 +3993,10 @@ function ingAddLine() {
   div.id = 'ing-line-'+n;
   div.style.cssText = 'display:grid;grid-template-columns:170px 1fr 100px 80px 60px 110px 30px;gap:8px;padding:8px 4px;align-items:center;border-bottom:1px solid var(--color-divider,#f0f0f0)';
   div.innerHTML = '<select id="ing-cat-'+n+'" style="'+IS+'" onchange="ingOnCatChange('+n+')"><option value="">— Categoría —</option>'+catOpts+'</select>'
-    +'<div style="position:relative"><input id="ing-prod-'+n+'" list="'+dlId+'" style="'+IS+'" placeholder="Buscar producto…" onchange="ingOnProdSearch('+n+')" oninput="ingOnProdSearch('+n+')">'
-    +'<datalist id="'+dlId+'">'+_ingBuildProdDatalist(n)+'</datalist></div>'
+    +'<div style="position:relative"><input id="ing-prod-'+n+'" list="'+dlId+'" style="'+IS+';padding-right:26px" placeholder="Buscar producto…" onchange="ingOnProdSearch('+n+')" oninput="ingOnProdSearch('+n+')">'
+    +'<datalist id="'+dlId+'">'+_ingBuildProdDatalist(n)+'</datalist>'
+    +'<button type="button" onclick="ingOpenProdModal('+n+',false)" tabindex="-1" title="Editar producto seleccionado" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:2px 3px;font-size:12px;color:#9ca3af;line-height:1">✏</button>'
+    +'</div>'
     +'<input type="number" id="ing-pvp-'+n+'" style="text-align:right;'+IS+'" placeholder="0.00" step="0.01" oninput="ingCalcTotal()">'
     +'<input type="number" id="ing-desc-'+n+'" style="text-align:right;'+IS+'" placeholder="0" step="1" min="0" max="100" oninput="ingCalcTotal()">'
     +'<input type="number" id="ing-cant-'+n+'" style="text-align:center;'+IS+'" value="1" min="1" oninput="ingCalcTotal()">'
@@ -4004,6 +4010,102 @@ function ingRemoveLine(n) {
   var el = document.getElementById('ing-line-'+n);
   if (el) el.remove();
   ingCalcTotal();
+}
+
+function ingOpenProdModal(n, isNew) {
+  var prod = null;
+  if (!isNew) {
+    var prodVal = (document.getElementById('ing-prod-'+n)||{}).value || '';
+    prod = (_ingTodosProductos||[]).find(function(p){ return p.descripcion === prodVal; });
+    if (!prodVal) { alert('Primero selecciona un producto en la línea.'); return; }
+  }
+  _ingProdModal = { lineNum: n, isNew: !!isNew, prodId: prod ? prod.id : '' };
+
+  var cats = (ING_CATEGORIAS||[]);
+  var catOpts = cats.map(function(c){
+    return '<option value="'+c+'"'+(prod&&prod.categoria===c?' selected':'')+'>'+c+'</option>';
+  }).join('');
+
+  var S = 'width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;background:#fff;color:#111;font-family:inherit';
+  var LBL = 'display:block;font-size:10px;font-weight:600;color:#6b7280;margin-bottom:5px;letter-spacing:.3px;text-transform:uppercase';
+  var FG = 'margin-bottom:15px';
+
+  var modal = document.getElementById('ing-prod-modal');
+  if (!modal) { modal = document.createElement('div'); modal.id = 'ing-prod-modal'; document.body.appendChild(modal); }
+  modal.style.cssText = 'position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)';
+  modal.innerHTML =
+    '<div style="background:#fff;border-radius:16px;padding:28px;width:min(460px,92vw);box-shadow:0 20px 60px rgba(0,0,0,.25);max-height:90vh;overflow-y:auto">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:22px">'
+      +'<div style="font-size:16px;font-weight:800;color:#111">'+(isNew?'Nuevo producto':'Editar producto')+'</div>'
+      +'<button onclick="ingCloseProdModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#9ca3af;line-height:1;padding:2px">×</button>'
+    +'</div>'
+    +(isNew?'<div style="'+FG+'"><label style="'+LBL+'">ID del producto *</label><input id="ipm-id" style="'+S+'" placeholder="ej. CON-006" autocomplete="off"></div>':'')
+    +'<div style="'+FG+'"><label style="'+LBL+'">Descripción *</label><input id="ipm-desc" style="'+S+'" placeholder="Nombre del servicio o producto" value="'+(prod?_escH(prod.descripcion):'')+'"></div>'
+    +'<div style="'+FG+'"><label style="'+LBL+'">Categoría</label><select id="ipm-cat" style="'+S+'"><option value="">Sin categoría</option>'+catOpts+'</select></div>'
+    +'<div style="'+FG+'"><label style="'+LBL+'">Precio (MXN)</label><input id="ipm-precio" type="number" step="0.01" min="0" style="'+S+'" placeholder="0.00" value="'+(prod&&prod.precio>0?prod.precio:'')+'"></div>'
+    +'<div style="'+FG+';display:flex;align-items:center;gap:9px">'
+      +'<input type="checkbox" id="ipm-activo"'+(isNew||!prod||prod.activo!==false?' checked':'')+' style="width:16px;height:16px;accent-color:#c46a7a;cursor:pointer">'
+      +'<label for="ipm-activo" style="font-size:13px;font-weight:600;color:#374151;cursor:pointer">Producto activo</label>'
+    +'</div>'
+    +'<div id="ipm-status" style="min-height:16px;font-size:12px;margin-bottom:14px"></div>'
+    +'<div style="display:flex;gap:10px;justify-content:flex-end">'
+      +'<button onclick="ingCloseProdModal()" style="padding:9px 18px;border:1.5px solid #e5e7eb;border-radius:8px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">Cancelar</button>'
+      +'<button onclick="ingSaveProdModal()" id="ipm-save" style="padding:9px 22px;background:#c46a7a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">Guardar</button>'
+    +'</div>'
+    +'</div>';
+}
+
+function ingCloseProdModal() {
+  var m = document.getElementById('ing-prod-modal');
+  if (m) m.style.display = 'none';
+}
+
+async function ingSaveProdModal() {
+  var st = document.getElementById('ipm-status');
+  var btn = document.getElementById('ipm-save');
+  if (!st || !btn) return;
+  var desc = ((document.getElementById('ipm-desc')||{}).value||'').trim();
+  if (!desc) { st.style.color='#dc2626'; st.textContent='La descripción es requerida.'; return; }
+  var m = _ingProdModal || {};
+  btn.disabled = true; btn.textContent = 'Guardando…'; st.textContent = '';
+  try {
+    var payload = {
+      token: getToken(),
+      descripcion: desc,
+      categoria: (document.getElementById('ipm-cat')||{}).value || '',
+      precio: parseFloat((document.getElementById('ipm-precio')||{}).value) || 0,
+      activo: !!(document.getElementById('ipm-activo')||{}).checked,
+      lista: 'General',
+      usuario: (getSession()||{}).email || 'sistema'
+    };
+    if (m.isNew) {
+      var newId = ((document.getElementById('ipm-id')||{}).value||'').trim();
+      if (!newId) { st.style.color='#dc2626'; st.textContent='El ID es requerido.'; btn.disabled=false; btn.textContent='Guardar'; return; }
+      payload.action = 'createProducto';
+      payload.productoId = newId;
+    } else {
+      payload.action = 'updateProducto';
+      payload.productoId = m.prodId;
+    }
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify(payload)});
+    var d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Error al guardar');
+    st.style.color = '#16a34a'; st.textContent = '✓ Guardado';
+    _ingProductosLoaded = false;
+    await ingLoadProductos(true);
+    if (m.lineNum) {
+      var dl = document.getElementById('ing-prodlist-'+m.lineNum);
+      if (dl) dl.innerHTML = _ingBuildProdDatalist(m.lineNum);
+      if (m.isNew) {
+        var inp = document.getElementById('ing-prod-'+m.lineNum);
+        if (inp) { inp.value = desc; ingOnProdSearch(m.lineNum); }
+      }
+    }
+    setTimeout(ingCloseProdModal, 700);
+  } catch(e) {
+    st.style.color = '#dc2626'; st.textContent = 'Error: '+e.message;
+    btn.disabled = false; btn.textContent = 'Guardar';
+  }
 }
 
 function ingCalcTotal() {
