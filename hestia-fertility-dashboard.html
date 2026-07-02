@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.02 -->
+﻿<!-- app-build:2026.07.02.03 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2250,6 +2250,8 @@ var ingChart=null, ingDonutChart=null;
 var _ingChart=null, _ingDonutChart=null, _ingPage=1, _ingPerPage=50;
 var _ingFilters={mes:[],categoria:[],formaPago:[],sucursal:[],buscar:''};
 var _ingData=null;
+var _ingActiveTab='lista';
+var _ingFacResult=null;
 
 function renderIngresos(data) {
   // Compatibilidad: si data viene del API viejo (con .todos), ignorar y cargar desde nuevo endpoint
@@ -2526,6 +2528,19 @@ function _renderIngresosERP() {
     // Sidebar cards
     +'.ing-sc{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:14px 16px;margin-bottom:14px}'
     +'.ing-sh{font-size:9.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:10px}'
+    +'.ing-subtabs{display:flex;gap:4px;margin-bottom:18px;border-bottom:1px solid var(--color-divider,#e5e7eb)}'
+    +'.ing-subtab{background:none;border:none;cursor:pointer;padding:9px 4px;margin-right:20px;font-size:12.5px;font-weight:700;color:var(--text-secondary,#9ca3af);border-bottom:2px solid transparent;position:relative;top:1px}'
+    +'.ing-subtab.active{color:var(--color-primary,#c46a7a);border-bottom-color:var(--color-primary,#c46a7a)}'
+    +'.ing-fac-sc{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:18px 20px;margin-bottom:16px}'
+    +'.ing-fac-sh{font-size:13.5px;font-weight:800;color:var(--text-primary,#111);margin-bottom:4px;display:flex;align-items:center;gap:8px}'
+    +'.ing-fac-sub{font-size:11px;color:var(--text-secondary,#6b7280);margin-bottom:14px}'
+    +'.ing-fac-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}'
+    +'.ing-fac-k{border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:12px 14px}'
+    +'.ing-fac-k-val{font-size:20px;font-weight:800}'
+    +'.ing-fac-k-lbl{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af);margin-top:3px}'
+    +'.ing-fac-tbl{width:100%;border-collapse:collapse;font-size:11.5px}'
+    +'.ing-fac-tbl th{padding:6px 10px;font-size:8.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);background:var(--color-surface,#fafafa);border-bottom:2px solid var(--color-divider,#d1d5db);text-align:left;white-space:nowrap}'
+    +'.ing-fac-tbl td{padding:6px 10px;border-bottom:1px solid var(--color-divider,#f0f0f0);white-space:nowrap}'
     +'</style>');
 
   h.push('<div class="ing-w">');
@@ -2542,6 +2557,14 @@ function _renderIngresosERP() {
     +'</div>'
     +(hasPermission('bank_capture')?'<button onclick="ingOpenDrawer()" style="display:inline-flex;align-items:center;gap:6px;padding:10px 18px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(196,106,122,.25)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Registrar operación</button>':'')
     +'</div></div>');
+
+  // ── Submenú Lista / Facturación ──
+  h.push('<div class="ing-subtabs">'
+    +'<button class="ing-subtab'+(_ingActiveTab==='lista'?' active':'')+'" onclick="ingSwitchTab(\'lista\')">Lista</button>'
+    +'<button class="ing-subtab'+(_ingActiveTab==='facturacion'?' active':'')+'" onclick="ingSwitchTab(\'facturacion\')">Facturación</button>'
+    +'</div>');
+
+  h.push('<div id="ing-tab-lista" style="display:'+(_ingActiveTab==='facturacion'?'none':'block')+'">');
 
   // ── KPI strip ──
   var tAnual=data.totalAnual||0, tPagado=data.totalPagado||0, nOps=data.numOperaciones||0, tktProm=data.ticketPromedio||0;
@@ -2868,6 +2891,9 @@ function _renderIngresosERP() {
 
   h.push('</div>'); // /sidebar
   h.push('</div>'); // /ing-grid
+  h.push('</div>'); // /ing-tab-lista
+
+  h.push('<div id="ing-tab-facturacion" style="display:'+(_ingActiveTab==='facturacion'?'block':'none')+'"><div id="ing-fac-body"></div></div>');
 
   // ── Vista de captura (página completa estilo Odoo, oculta por default) ──
   h.push('<div id="ing-form-view" style="display:none;position:fixed;inset:0;z-index:900;background:var(--color-bg,#f5f5f5);overflow-y:auto">'
@@ -3993,7 +4019,7 @@ function ingAddLine() {
   div.id = 'ing-line-'+n;
   div.style.cssText = 'display:grid;grid-template-columns:170px 1fr 100px 80px 60px 110px 30px;gap:8px;padding:8px 4px;align-items:center;border-bottom:1px solid var(--color-divider,#f0f0f0)';
   div.innerHTML = '<select id="ing-cat-'+n+'" style="'+IS+'" onchange="ingOnCatChange('+n+')"><option value="">— Categoría —</option>'+catOpts+'</select>'
-    +'<div style="position:relative"><input id="ing-prod-'+n+'" list="'+dlId+'" style="'+IS+';padding-right:26px" placeholder="Buscar producto…" onchange="ingOnProdSearch('+n+')" oninput="ingOnProdSearch('+n+')">'
+    +'<div style="position:relative"><input id="ing-prod-'+n+'" list="'+dlId+'" autocomplete="off" style="'+IS+';padding-right:26px" placeholder="Buscar producto…" onchange="ingOnProdSearch('+n+')" oninput="ingOnProdSearch('+n+')">'
     +'<datalist id="'+dlId+'">'+_ingBuildProdDatalist(n)+'</datalist>'
     +'<button type="button" onclick="ingOpenProdModal('+n+',false)" tabindex="-1" title="Editar producto seleccionado" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;padding:2px 3px;font-size:12px;color:#9ca3af;line-height:1">✏</button>'
     +'</div>'
@@ -4291,6 +4317,164 @@ async function ingViewFactura(url, folio) {
     body.innerHTML = h;
   } catch(ex) {
     body.innerHTML = '<div style="text-align:center;padding:40px;color:#dc2626">Error: '+String(ex.message).replace(/</g,'&lt;')+'</div>';
+  }
+}
+
+function ingSwitchTab(tab) {
+  _ingActiveTab = tab;
+  var elLista = document.getElementById('ing-tab-lista');
+  var elFac = document.getElementById('ing-tab-facturacion');
+  if (elLista) elLista.style.display = (tab==='lista') ? 'block' : 'none';
+  if (elFac) elFac.style.display = (tab==='facturacion') ? 'block' : 'none';
+  document.querySelectorAll('.ing-subtab').forEach(function(b,i){ b.classList.toggle('active', (i===0&&tab==='lista')||(i===1&&tab==='facturacion')); });
+  if (tab === 'facturacion') ingFacRender();
+}
+
+function _ingFacPeriodoLabel() {
+  if (!currentFechaInicio || !currentFechaFin) return '';
+  return currentFechaInicio + ' a ' + currentFechaFin;
+}
+
+function ingFacRender() {
+  var body = document.getElementById('ing-fac-body');
+  if (!body) return;
+  var periodo = _ingFacPeriodoLabel();
+  var h = '<div class="ing-fac-sc">'
+    +'<div class="ing-fac-sh">📋 Conciliación de facturas XML</div>'
+    +'<div class="ing-fac-sub">Compara los XML timbrados en Drive contra las operaciones de Ingresos del periodo filtrado ('+(periodo||'sin periodo seleccionado')+'). Solo aplica al rango Del/Al activo en el filtro principal.</div>'
+    +'<button onclick="ingFacAnalizar()" id="ing-fac-analizar-btn" style="padding:9px 18px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer" '+(periodo?'':'disabled')+'>Analizar periodo actual</button>'
+    +'<div id="ing-fac-resultado" style="margin-top:16px"></div>'
+    +'</div>'
+    +'<div id="ing-fac-seccion2"></div>'
+    +'<div id="ing-fac-seccion3"></div>';
+  body.innerHTML = h;
+}
+
+async function ingFacAnalizar() {
+  var out = document.getElementById('ing-fac-resultado');
+  var btn = document.getElementById('ing-fac-analizar-btn');
+  if (!currentFechaInicio || !currentFechaFin) { if(out) out.innerHTML = '<div style="color:#dc2626;font-size:12px">Selecciona un rango de fechas en el filtro principal primero.</div>'; return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Analizando…'; }
+  if (out) out.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:12px">Leyendo XMLs en Drive y comparando contra Ingresos…</div>';
+  try {
+    var tok = encodeURIComponent(getToken());
+    var r = await fetch(APPS_SCRIPT_URL+'?action=reconciliarFacturas&fechaInicio='+currentFechaInicio+'&fechaFin='+currentFechaFin+'&token='+tok);
+    var d = await r.json();
+    if (!d.ok) { if(out) out.innerHTML = '<div style="color:#dc2626;font-size:12px">Error: '+(d.error||'No se pudo analizar')+'</div>'; return; }
+    _ingFacResult = d;
+    var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+    var h = '<div class="ing-fac-kpis">'
+      +'<div class="ing-fac-k"><div class="ing-fac-k-val" style="color:#166534">'+d.conDocumento.length+'</div><div class="ing-fac-k-lbl">Con documento ✓</div></div>'
+      +'<div class="ing-fac-k"><div class="ing-fac-k-val" style="color:#c46a7a">'+d.faltaDocumento.length+'</div><div class="ing-fac-k-lbl">Falta vincular (XML ya existe)</div></div>'
+      +'<div class="ing-fac-k"><div class="ing-fac-k-val" style="color:#b45309">'+d.sinFactura.length+'</div><div class="ing-fac-k-lbl">Sin número de factura</div></div>'
+      +'<div class="ing-fac-k"><div class="ing-fac-k-val" style="color:#6b7280">'+d.xmlHuerfanos.length+'</div><div class="ing-fac-k-lbl">XML sin operación asociada</div></div>'
+      +'</div>';
+    if (d.faltaDocumento.length) {
+      h += '<div style="font-size:12px;font-weight:700;margin-bottom:6px">Se encontró el XML en Drive — vincular con un clic:</div>';
+      h += '<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Fecha</th><th>Paciente</th><th>Factura</th><th>Total op.</th><th>Total XML</th><th></th></tr></thead><tbody>';
+      d.faltaDocumento.forEach(function(o){
+        h += '<tr><td>'+o.id+'</td><td>'+o.fecha+'</td><td>'+_cxpEsc(o.paciente)+'</td><td>'+_cxpEsc(o.factura)+'</td><td>'+fmtM(o.total)+'</td><td>'+fmtM(o.xmlTotal)+'</td>'
+           +'<td><button onclick="ingFacVincular(\''+o.id+'\',\''+o.xmlFileId+'\',this)" style="padding:4px 10px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10.5px;font-weight:700;cursor:pointer">Vincular</button></td></tr>';
+      });
+      h += '</tbody></table>';
+    }
+    document.getElementById('ing-fac-resultado').innerHTML = h;
+    _ingFacRenderSeccion2(d);
+    _ingFacRenderSeccion3(d);
+  } catch(ex) {
+    if (out) out.innerHTML = '<div style="color:#dc2626;font-size:12px">Error de conexión: '+ex.message+'</div>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Analizar periodo actual'; }
+  }
+}
+
+async function ingFacVincular(opId, fileId, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'vincularXmlFactura', opId:opId, fileId:fileId, usuario:s.email||''})});
+    var res = await r.json();
+    if (res.ok) { if(btn){ var row=btn.closest('tr'); if(row) row.style.opacity='.4'; btn.textContent='✓ Vinculado'; } }
+    else { if(btn){ btn.disabled=false; btn.textContent='Error'; } alert(res.error||'No se pudo vincular'); }
+  } catch(ex) { if(btn){ btn.disabled=false; btn.textContent='Error'; } }
+}
+
+function _ingFacRenderSeccion2(d) {
+  var el = document.getElementById('ing-fac-seccion2');
+  if (!el) return;
+  if (!d.sinFactura.length) { el.innerHTML = ''; return; }
+  var h = '<div class="ing-fac-sc">'
+    +'<div class="ing-fac-sh">📎 Documentos faltantes</div>'
+    +'<div class="ing-fac-sub">Operaciones sin número de factura capturado o sin XML localizado en Drive. Sube el XML descargado y se vinculará automáticamente a la operación.</div>'
+    +'<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Fecha</th><th>Paciente</th><th>Total</th><th>Factura#</th><th>Subir XML</th></tr></thead><tbody>';
+  d.sinFactura.forEach(function(o){
+    var safe = o.id.replace(/[^a-zA-Z0-9_-]/g,'_');
+    h += '<tr id="ing-fac-row-'+safe+'"><td>'+o.id+'</td><td>'+o.fecha+'</td><td>'+_cxpEsc(o.paciente)+'</td><td>$'+(o.total||0).toLocaleString('en-US',{minimumFractionDigits:2})+'</td>'
+       +'<td><input id="ing-fac-folio-'+safe+'" type="text" placeholder="Núm." style="width:60px;padding:3px 6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11px"></td>'
+       +'<td><label style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--text-secondary,#6b7280);cursor:pointer;padding:4px 9px;border:1.5px dashed var(--color-divider,#d1d5db);border-radius:6px">↑ XML<input type="file" accept=".xml" style="display:none" onchange="ingFacUploadXml(\''+o.id+'\',this)"></label> <span id="ing-fac-upload-st-'+safe+'" style="font-size:9.5px;color:var(--text-secondary,#9ca3af)"></span></td></tr>';
+  });
+  h += '</tbody></table></div>';
+  el.innerHTML = h;
+}
+
+async function ingFacUploadXml(opId, input) {
+  if (!input.files.length) return;
+  var file = input.files[0];
+  var safe = opId.replace(/[^a-zA-Z0-9_-]/g,'_');
+  var folioInput = document.getElementById('ing-fac-folio-'+safe);
+  var stEl = document.getElementById('ing-fac-upload-st-'+safe);
+  var folio = folioInput ? folioInput.value.trim() : '';
+  if (!folio) { if(stEl) stEl.textContent = 'Captura el folio primero'; return; }
+  if (stEl) stEl.textContent = 'Subiendo…';
+  try {
+    var base64 = await _fileToBase64(file);
+    var s = getSession()||{};
+    var r1 = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'uploadIngresoPDF', opId:opId, tipo:'factura', fileName:file.name, base64:base64, mimeType:file.type||'text/xml', usuario:s.email||'sistema'
+    })});
+    var res1 = await r1.json();
+    if (!res1.ok) { if(stEl) stEl.textContent = 'Error: '+(res1.error||''); return; }
+    var r2 = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'updateIngresoFiscal', opId:opId, factura:folio, usuario:s.email||'sistema'})});
+    var res2 = await r2.json();
+    if (res2.ok) {
+      if (stEl) stEl.innerHTML = '<span style="color:#166534">✓ Vinculado</span>';
+      var row = document.getElementById('ing-fac-row-'+safe);
+      if (row) row.style.opacity = '.4';
+    } else if (stEl) stEl.textContent = 'Error al guardar folio';
+  } catch(ex) {
+    if (stEl) stEl.textContent = 'Error de conexión';
+  }
+}
+
+function _ingFacRenderSeccion3(d) {
+  var el = document.getElementById('ing-fac-seccion3');
+  if (!el) return;
+  var listos = d.conDocumento.length + d.faltaDocumento.length;
+  var h = '<div class="ing-fac-sc">'
+    +'<div class="ing-fac-sh">📊 Reporte para ContaDigital</div>'
+    +'<div class="ing-fac-sub">Genera el archivo de carga masiva (formato Plantilla_Masiva) con las facturas del periodo que ya tienen XML vinculado ('+listos+' operaciones listas).</div>'
+    +'<button onclick="ingFacGenerarReporte()" id="ing-fac-reporte-btn" style="padding:9px 18px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer" '+(listos?'':'disabled')+'>Generar reporte del periodo</button>'
+    +'<div id="ing-fac-reporte-resultado" style="margin-top:14px;font-size:12px"></div>'
+    +'</div>';
+  el.innerHTML = h;
+}
+
+async function ingFacGenerarReporte() {
+  var btn = document.getElementById('ing-fac-reporte-btn');
+  var out = document.getElementById('ing-fac-reporte-resultado');
+  if (btn) { btn.disabled = true; btn.textContent = 'Generando…'; }
+  if (out) out.innerHTML = 'Generando reporte, esto puede tardar unos segundos…';
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'generarReporteContaDigital', fechaInicio:currentFechaInicio, fechaFin:currentFechaFin, usuario:s.email||''})});
+    var res = await r.json();
+    if (res.ok) {
+      if (out) out.innerHTML = '<span style="color:#166534;font-weight:700">✓ Reporte generado ('+res.numFacturas+' facturas)</span> — <a href="'+res.url+'" target="_blank" style="color:var(--color-primary,#c46a7a);font-weight:700">Descargar xlsx ↗</a>';
+    } else if (out) out.innerHTML = '<span style="color:#dc2626">Error: '+(res.error||'No se pudo generar')+'</span>';
+  } catch(ex) {
+    if (out) out.innerHTML = '<span style="color:#dc2626">Error de conexión</span>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Generar reporte del periodo'; }
   }
 }
 

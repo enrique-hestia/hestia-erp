@@ -563,6 +563,12 @@ function doPost(e) {
     if (body.action === 'createProducto') {
       return jsonResponse(createProducto(body));
     }
+    if (body.action === 'vincularXmlFactura') {
+      return jsonResponse(vincularXmlFactura(body));
+    }
+    if (body.action === 'generarReporteContaDigital') {
+      return jsonResponse(generarReporteContaDigital(body.fechaInicio, body.fechaFin, body.usuario));
+    }
     if (body.action === 'saveLista') {
       return jsonResponse(saveLista(body));
     }

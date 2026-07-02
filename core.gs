@@ -353,6 +353,12 @@ function doGet(e) {
       return jsonResponse(leerXmlFactura(fid));
     }
 
+    if (action === 'reconciliarFacturas') {
+      var fIni = (e && e.parameter.fechaInicio) || '';
+      var fFin = (e && e.parameter.fechaFin) || '';
+      return jsonResponse(reconciliarFacturasXml(fIni, fFin));
+    }
+
     if (action === 'productos') {
       return jsonResponse(readProductos());
     }
