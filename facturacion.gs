@@ -272,8 +272,11 @@ function generarReporteContaDigital(fechaInicio, fechaFin, usuario) {
     sh.getRange(1, 1, rows.length, headers.length).setValues(rows);
     sh.getRange(1, 1, 1, headers.length).setFontWeight('bold');
 
-    var xlsxBlob = DriveApp.getFileById(ssOut.getId()).getAs(MimeType.MICROSOFT_EXCEL);
-    xlsxBlob.setName('ContaDigital_Masiva_' + fechaInicio + '_a_' + fechaFin + '.xlsx');
+    // DriveApp.getAs(MICROSOFT_EXCEL) falla intermitentemente para Sheets nativos;
+    // se usa la URL de exportación de Sheets (más confiable) con el token OAuth del script.
+    var exportUrl = 'https://docs.google.com/spreadsheets/d/' + ssOut.getId() + '/export?format=xlsx';
+    var exportResp = UrlFetchApp.fetch(exportUrl, { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() } });
+    var xlsxBlob = exportResp.getBlob().setName('ContaDigital_Masiva_' + fechaInicio + '_a_' + fechaFin + '.xlsx');
     var folder = DriveApp.getFolderById(INGRESOS_FOLDER_FACTURAS);
     var xlsxFile = folder.createFile(xlsxBlob);
     DriveApp.getFileById(ssOut.getId()).setTrashed(true);
