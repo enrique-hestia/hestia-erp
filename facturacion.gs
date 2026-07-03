@@ -16,6 +16,88 @@ var FAC_METODO_PAGO_MAP = {
   '31':'Tarjeta de crédito','99':'Tarjeta de crédito'
 };
 
+// Construye un .xlsx válido (OOXML) directamente con Utilities.zip(), sin pasar
+// por SpreadsheetApp/DriveApp.getAs()/UrlFetchApp — evita las conversiones de
+// Drive que fallan de forma intermitente y no requiere ningún permiso adicional.
+function _buildXlsxBlob(rows, sheetName, fileName) {
+  function colLetter(n) {
+    var s = ''; n++;
+    while (n > 0) { var rem = (n - 1) % 26; s = String.fromCharCode(65 + rem) + s; n = Math.floor((n - 1) / 26); }
+    return s;
+  }
+  function esc(v) {
+    return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+  }
+
+  var sheetRowsXml = [];
+  for (var r = 0; r < rows.length; r++) {
+    var row = rows[r] || [];
+    var cellsXml = [];
+    for (var c = 0; c < row.length; c++) {
+      var v = row[c];
+      if (v === '' || v === null || v === undefined) continue;
+      var ref = colLetter(c) + (r + 1);
+      if (typeof v === 'number' && isFinite(v)) {
+        cellsXml.push('<c r="' + ref + '"><v>' + v + '</v></c>');
+      } else {
+        cellsXml.push('<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' + esc(v) + '</t></is></c>');
+      }
+    }
+    sheetRowsXml.push('<row r="' + (r + 1) + '">' + cellsXml.join('') + '</row>');
+  }
+
+  var contentTypes = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+    + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    + '<Default Extension="xml" ContentType="application/xml"/>'
+    + '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+    + '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+    + '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+    + '</Types>';
+
+  var rootRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+    + '</Relationships>';
+
+  var workbookXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+    + '<sheets><sheet name="' + esc(sheetName) + '" sheetId="1" r:id="rId1"/></sheets>'
+    + '</workbook>';
+
+  var workbookRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+    + '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+    + '</Relationships>';
+
+  var stylesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    + '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
+    + '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>'
+    + '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+    + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+    + '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>'
+    + '</styleSheet>';
+
+  var sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    + '<sheetData>' + sheetRowsXml.join('') + '</sheetData>'
+    + '</worksheet>';
+
+  var parts = [
+    Utilities.newBlob(contentTypes, 'application/xml', '[Content_Types].xml'),
+    Utilities.newBlob(rootRels, 'application/xml', '_rels/.rels'),
+    Utilities.newBlob(workbookXml, 'application/xml', 'xl/workbook.xml'),
+    Utilities.newBlob(workbookRels, 'application/xml', 'xl/_rels/workbook.xml.rels'),
+    Utilities.newBlob(stylesXml, 'application/xml', 'xl/styles.xml'),
+    Utilities.newBlob(sheetXml, 'application/xml', 'xl/worksheets/sheet1.xml')
+  ];
+
+  var zipBlob = Utilities.zip(parts, fileName);
+  return Utilities.newBlob(zipBlob.getBytes(), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', fileName);
+}
+
 function _facMonthFolder(anio, mes) {
   var mesTag = (mes < 10 ? '0' : '') + mes + ' ' + FAC_MESES_ABR[mes - 1];
   var top = DriveApp.getFoldersByName('onefactureXMLs');
@@ -229,6 +311,25 @@ function _facParseCfdiFull(fileId) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
+// Índice paciente (nombre normalizado) -> {razonSocial, rfc} desde Registro de Pacientes
+function _pacFiscalIndex() {
+  var ss = SpreadsheetApp.openById(PACIENTES_SS_ID);
+  var sh = ss.getSheets()[0];
+  var data = sh.getDataRange().getValues();
+  var hdrs = (data[0] || []).map(function (h) { return String(h).trim(); });
+  var idxRS = _pacColIdx(hdrs, 'Razon Social'), idxRFC = _pacColIdx(hdrs, 'RFC');
+  var byNorm = {};
+  for (var i = 1; i < data.length; i++) {
+    var nombre = String(data[i][1] || '').trim();
+    if (!nombre) continue;
+    var rfc = idxRFC > -1 ? String(data[i][idxRFC] || '').trim() : '';
+    var rs = idxRS > -1 ? String(data[i][idxRS] || '').trim() : '';
+    if (!rfc && !rs) continue;
+    byNorm[_pacNormNombre(nombre)] = { razonSocial: rs, rfc: rfc };
+  }
+  return byNorm;
+}
+
 function generarReporteContaDigital(fechaInicio, fechaFin, usuario) {
   try {
     if (!fechaInicio || !fechaFin) return { ok: false, error: 'Rango de fechas requerido' };
@@ -237,6 +338,8 @@ function generarReporteContaDigital(fechaInicio, fechaFin, usuario) {
     var facturables = ops.filter(function (o) { return o.factura && idx.byFolio[o.factura]; });
     if (!facturables.length) return { ok: false, error: 'No hay operaciones con factura y XML vinculado en el periodo seleccionado' };
 
+    var pacFiscal = _pacFiscalIndex();
+
     var maxConceptos = 1;
     var invoices = [];
     facturables.forEach(function (op) {
@@ -244,8 +347,13 @@ function generarReporteContaDigital(fechaInicio, fechaFin, usuario) {
       var full = _facParseCfdiFull(x.fileId);
       if (!full || !full.ok || !full.conceptos.length) return;
       if (full.conceptos.length > maxConceptos) maxConceptos = full.conceptos.length;
+      var pf = pacFiscal[_pacNormNombre(op.paciente)];
       full._paciente = op.paciente;
       full._opId = op.id;
+      // Regla: datos fiscales del Registro de Pacientes tienen prioridad; si el
+      // paciente no tiene RFC/Razón Social capturados, se usa público en general.
+      full._rfcFinal = (pf && pf.rfc) ? pf.rfc : 'XAXX010101000';
+      full._razonSocialFinal = (pf && pf.razonSocial) ? pf.razonSocial : 'PUBLICO EN GENERAL';
       invoices.push(full);
     });
     if (!invoices.length) return { ok: false, error: 'No se pudo leer ningún XML vinculado en el periodo' };
@@ -257,7 +365,7 @@ function generarReporteContaDigital(fechaInicio, fechaFin, usuario) {
     invoices.forEach(function (f) {
       var metodoLabel = FAC_METODO_PAGO_MAP[f.formaPago] || f.formaPago || '';
       var row = [
-        f.serie || '', f.fecha ? f.fecha.substring(0, 10) : '', '', f.receptor.rfc || 'XAXX010101000',
+        f.serie || '', f.fecha ? f.fecha.substring(0, 10) : '', '', f._rfcFinal,
         f.moneda || 'MXN', f.tipoCambio || 1, metodoLabel, '', '',
         f.total, 0, f.subTotal, f.totalImpuestosTrasladados || 0, 0, 0, 0, f.total
       ];
@@ -272,33 +380,17 @@ function generarReporteContaDigital(fechaInicio, fechaFin, usuario) {
       rows.push(row);
     });
 
-    var ssOut = SpreadsheetApp.create('ContaDigital_Masiva_' + fechaInicio + '_a_' + fechaFin);
-    var sh = ssOut.getSheets()[0];
-    sh.setName('Hoja1');
-    sh.getRange(1, 1, rows.length, headers.length).setValues(rows);
-    sh.getRange(1, 1, 1, headers.length).setFontWeight('bold');
-
-    // Primero se intenta la conversión nativa (no requiere permiso extra, ya que
-    // DriveApp ya está autorizado). Si falla (ocurre a veces con Sheets recién creados),
-    // se recurre a la URL de exportación vía UrlFetchApp — esa sí requiere el permiso
-    // "Realizar solicitudes externas" autorizado una vez en el editor de Apps Script.
-    var xlsxBlob;
-    try {
-      xlsxBlob = DriveApp.getFileById(ssOut.getId()).getAs(MimeType.MICROSOFT_EXCEL);
-    } catch (convEx) {
-      var exportUrl = 'https://docs.google.com/spreadsheets/d/' + ssOut.getId() + '/export?format=xlsx';
-      var exportResp = UrlFetchApp.fetch(exportUrl, { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() } });
-      xlsxBlob = exportResp.getBlob();
-    }
-    xlsxBlob.setName('ContaDigital_Masiva_' + fechaInicio + '_a_' + fechaFin + '.xlsx');
+    // Se escribe el .xlsx directamente en formato OOXML (sin pasar por Sheets ni
+    // por conversiones de Drive) para no depender de getAs()/UrlFetchApp, que han
+    // fallado en este proyecto. Solo usa Utilities, que ya está autorizado.
+    var xlsxBlob = _buildXlsxBlob(rows, 'Hoja1', 'ContaDigital_Masiva_' + fechaInicio + '_a_' + fechaFin + '.xlsx');
     var folder = DriveApp.getFolderById(INGRESOS_FOLDER_FACTURAS);
     var xlsxFile = folder.createFile(xlsxBlob);
-    DriveApp.getFileById(ssOut.getId()).setTrashed(true);
 
     var detalle = invoices.map(function (f) {
       return {
-        opId: f._opId, paciente: f._paciente, razonSocial: f.receptor.nombre || '',
-        rfc: f.receptor.rfc || 'XAXX010101000', folio: f.folio, serie: f.serie,
+        opId: f._opId, paciente: f._paciente, razonSocial: f._razonSocialFinal,
+        rfc: f._rfcFinal, folio: f.folio, serie: f.serie,
         fecha: f.fecha ? f.fecha.substring(0, 10) : '', total: f.total
       };
     });
