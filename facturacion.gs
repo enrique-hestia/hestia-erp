@@ -397,10 +397,31 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
     });
 
     var xmlHuerfanos = idx.all.filter(function (x) { return x.folio && !usedFolios[x.folio]; });
+
+    // Para cada XML huérfano: ¿su monto coincide con una operación que YA tiene
+    // su propia factura? Si sí, es señal fuerte de que este XML es un duplicado
+    // (se facturó dos veces la misma venta) — candidato a cancelar en el SAT en
+    // vez de dejarlo suelto. Se compara contra operaciones con documento
+    // confirmado (conDocumento) o con folio+XML ya encontrado (faltaDocumento),
+    // no contra sugerencias todavía sin confirmar.
+    var opsFacturadas = conDocumento.concat(faltaDocumento);
+    xmlHuerfanos.forEach(function (x) {
+      var match = opsFacturadas.find(function (op) { return Math.abs((op.total || 0) - (x.total || 0)) < 0.01; });
+      if (match) { x.posibleDuplicadoDeOp = match.id; x.posibleDuplicadoDePaciente = match.paciente; }
+    });
+
+    var totalFacturadoXml = idx.all.reduce(function (s, x) { return s + (x.total || 0); }, 0);
+    var totalIngresos = ops.reduce(function (s, op) { return s + (op.total || 0); }, 0);
+    var totalHuerfanos = xmlHuerfanos.reduce(function (s, x) { return s + (x.total || 0); }, 0);
+
     return {
       ok: true, conDocumento: conDocumento, faltaDocumento: faltaDocumento,
       sinFactura: sinFactura, xmlHuerfanos: xmlHuerfanos, totalOps: ops.length,
-      carpetasAnalizadas: idx.carpetas
+      carpetasAnalizadas: idx.carpetas,
+      resumenFacturacion: {
+        totalFacturadoXml: totalFacturadoXml, totalIngresos: totalIngresos,
+        totalHuerfanos: totalHuerfanos, diferencia: totalFacturadoXml - totalIngresos
+      }
     };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }

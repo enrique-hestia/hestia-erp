@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.03.03 -->
+﻿<!-- app-build:2026.07.03.04 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4487,6 +4487,7 @@ function ingFacRender() {
     +'<button onclick="ingFacBackfillRazonSocial()" id="ing-fac-backfill-btn" title="Completa razón social/RFC de operaciones que ya tienen factura vinculada pero les falta este dato (ej. facturas a nombre de un familiar)" style="margin-left:8px;padding:9px 18px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer" '+(periodo?'':'disabled')+'>🔄 Completar razón social histórica</button>'
     +'<div id="ing-fac-resultado" style="margin-top:16px"></div>'
     +'</div>'
+    +'<div id="ing-fac-huerfanos"></div>'
     +'<div id="ing-fac-seccion2"></div>'
     +'<div id="ing-fac-seccion3"></div>'
     +'<div id="ing-fac-seccion4"></div>';
@@ -4507,6 +4508,17 @@ function _ingFacRenderResultado(d) {
     +'<div class="ing-fac-k"><div class="ing-fac-k-val" style="color:#b45309">'+d.sinFactura.length+'</div><div class="ing-fac-k-lbl">Sin número de factura</div></div>'
     +'<div class="ing-fac-k"><div class="ing-fac-k-val" style="color:#6b7280">'+d.xmlHuerfanos.length+'</div><div class="ing-fac-k-lbl">XML sin operación asociada</div></div>'
     +'</div>';
+  if (d.resumenFacturacion) {
+    var rf = d.resumenFacturacion;
+    var diffAbs = Math.abs(rf.diferencia||0);
+    var diffColor = diffAbs < 1 ? '#166534' : '#dc2626';
+    h += '<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:baseline;background:var(--color-surface,#fafafa);border-radius:10px;padding:12px 16px;margin-bottom:14px">'
+      +'<div><span style="font-size:10.5px;color:var(--text-secondary,#9ca3af);display:block">FACTURADO (TODOS LOS XML)</span><span style="font-size:15px;font-weight:800">'+fmtM(rf.totalFacturadoXml)+'</span></div>'
+      +'<div><span style="font-size:10.5px;color:var(--text-secondary,#9ca3af);display:block">INGRESOS DEL PERIODO</span><span style="font-size:15px;font-weight:800">'+fmtM(rf.totalIngresos)+'</span></div>'
+      +'<div><span style="font-size:10.5px;color:var(--text-secondary,#9ca3af);display:block">DIFERENCIA</span><span style="font-size:15px;font-weight:800;color:'+diffColor+'">'+(rf.diferencia>=0?'+':'')+fmtM(rf.diferencia)+'</span></div>'
+      +(diffAbs>=1 ? '<div style="font-size:11px;color:'+diffColor+';max-width:260px">'+(rf.diferencia>0?'Se timbró más de lo registrado en Ingresos — revisa "Facturas sin operación" abajo.':'Hay ingresos sin su factura correspondiente todavía.')+'</div>' : '<div style="font-size:11px;color:#166534">Cuadra ✓</div>')
+      +'</div>';
+  }
   if (d.faltaDocumento.length) {
     h += '<div style="font-size:12px;font-weight:700;margin-bottom:6px">Se encontró el XML en Drive — vincular con un clic:</div>';
     h += '<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Fecha</th><th>Paciente</th><th>Factura</th><th>Total op.</th><th>Total XML</th><th></th></tr></thead><tbody>';
@@ -4529,6 +4541,7 @@ function _ingFacRenderResultado(d) {
       +'</tbody></table></div></div>';
   }
   out.innerHTML = h;
+  _ingFacRenderHuerfanos(d);
   _ingFacRenderSeccion2(d);
   _ingFacRenderSeccion3(d);
   _ingFacRenderSeccion4(d);
@@ -4723,6 +4736,37 @@ async function ingFacUsarSugerencia(opId, folio, fileId, porMonto, btn) {
     if (res2.ok) { if(btn){ var row=btn.closest('tr'); if(row) row.style.opacity='.4'; btn.textContent='✓ Vinculado'; } }
     else { if(btn){ btn.disabled=false; btn.textContent='Error'; } alert(res2.error||'No se pudo vincular'); }
   } catch(ex) { if(btn){ btn.disabled=false; btn.textContent='Error'; } }
+}
+
+// XML timbrados que no corresponden a ninguna operación de Ingresos del
+// periodo — la otra mitad del cuadre: no solo falta ver qué no se ha
+// facturado, sino qué se facturó de más (o duplicado) sin que haya un
+// ingreso real detrás. Si el monto coincide con una operación que YA tiene
+// su propia factura, se marca como posible duplicado (candidato a cancelar
+// en el SAT en vez de dejarlo suelto).
+function _ingFacRenderHuerfanos(d) {
+  var el = document.getElementById('ing-fac-huerfanos');
+  if (!el) return;
+  if (!d.xmlHuerfanos || !d.xmlHuerfanos.length) { el.innerHTML = ''; return; }
+  var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var totalHuerfanos = d.xmlHuerfanos.reduce(function(s,x){ return s+(x.total||0); },0);
+  var duplicados = d.xmlHuerfanos.filter(function(x){ return x.posibleDuplicadoDeOp; }).length;
+  var h = '<div class="ing-fac-sc">'
+    +'<div class="ing-fac-sh">🧾 Facturas sin operación (posible exceso)</div>'
+    +'<div class="ing-fac-sub">XML timbrados en el periodo que no corresponden a ninguna venta registrada en Ingresos. Si de verdad no hay una venta detrás, es una factura de más — revisa si hay que <b>cancelarla</b> en el SAT/ContaDigital. Si el monto coincide con una operación que ya tiene su propia factura, se marca como posible duplicado.</div>'
+    +'<div style="display:inline-flex;align-items:baseline;gap:8px;background:rgba(220,38,38,.08);border-radius:10px;padding:10px 16px;margin-bottom:14px">'
+      +'<span style="font-size:20px;font-weight:800;color:#dc2626">'+fmtM(totalHuerfanos)+'</span>'
+      +'<span style="font-size:11px;font-weight:600;color:#dc2626">facturado sin operación — '+d.xmlHuerfanos.length+' XML'+(duplicados?(' · '+duplicados+' posible(s) duplicado(s)'):'')+'</span>'
+    +'</div>'
+    +'<table class="ing-fac-tbl"><thead><tr><th>Folio</th><th>Fecha</th><th>Receptor</th><th>RFC</th><th>Total</th><th>UUID</th><th></th></tr></thead><tbody>';
+  d.xmlHuerfanos.forEach(function(x){
+    h += '<tr><td>'+_cxpEsc(x.serie||'')+' '+_cxpEsc(x.folio)+'</td><td>'+(x.fecha||'')+'</td><td>'+_cxpEsc(x.receptorNombre||'—')
+      +(x.posibleDuplicadoDeOp?('<div style="font-size:9.5px;color:#dc2626;font-weight:700">⚠ posible duplicado de '+x.posibleDuplicadoDeOp+' ('+_cxpEsc(x.posibleDuplicadoDePaciente||'')+')</div>'):'')
+      +'</td><td>'+_cxpEsc(x.receptorRfc||'')+'</td><td>'+fmtM(x.total)+'</td><td style="font-family:monospace;font-size:9.5px">'+_cxpEsc(x.uuid||'')+'</td>'
+      +'<td><button onclick="ingViewFactura(\''+x.fileUrl+'\',\''+x.folio+'\')" style="padding:3px 8px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1px solid var(--color-primary,#c46a7a);border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">Ver</button></td></tr>';
+  });
+  h += '</tbody></table></div>';
+  el.innerHTML = h;
 }
 
 function _ingFacRenderSeccion2(d) {
@@ -5006,8 +5050,12 @@ function ingShowManual(){
     +tr(['<span style="color:#166534">Con documento ✓</span>','La operación ya tiene un XML vinculado','Nada, ya está completa'])
     +tr(['<span style="color:#c46a7a">Falta vincular</span>','Tiene folio capturado y el XML existe en Drive, pero no está vinculado','Revisar que el total coincida y dar clic en <b>Vincular</b>'])
     +tr(['<span style="color:#b45309">Sin número de factura</span>','La operación no tiene folio capturado todavía','Ir a la sección 2 y subir su XML, o usar la sugerencia si aparece una'])
-    +tr(['<span style="color:#6b7280">XML sin operación asociada</span>','Hay una factura timbrada cuyo folio no aparece en ninguna operación del periodo','Investigar — puede faltar registrar la venta, o el folio se capturó distinto en Ingresos'],true)
+    +tr(['<span style="color:#6b7280">XML sin operación asociada</span>','Hay una factura timbrada cuyo folio no aparece en ninguna operación del periodo','Ver la lista completa en "Facturas sin operación" (debajo de estos KPIs) y decidir si hay que registrar la venta o cancelar la factura'],true)
     +p('El botón <b>Vincular</b> no sube ni copia archivos: toma la URL del XML que ya existe en Drive y la guarda en el registro de la operación. Antes de usarlo, compara la columna <b>Total op.</b> contra <b>Total XML</b> — si no coinciden, es señal de que el folio capturado no corresponde a esa venta.')
+
+    +h3('Facturado vs. Ingresos — ¿cuadra?')
+    +p('Debajo de los 4 KPIs aparece un resumen con el <b>total facturado</b> (todos los XML del periodo, tengan o no operación asociada), el <b>total de Ingresos</b> capturado y la <b>diferencia</b> entre ambos. Si la diferencia es distinta de cero, hay algo que revisar: o falta registrar una venta, o se facturó de más.')
+    +p('La sección <b>"🧾 Facturas sin operación (posible exceso)"</b> lista uno por uno los XML que no corresponden a ninguna venta — con Folio, Receptor, RFC, Total y UUID, y un botón para ver el documento completo. Si el monto de alguno coincide con una operación que <b>ya tiene su propia factura</b>, se marca en rojo como <b>posible duplicado</b> — normalmente significa que esa venta se facturó dos veces y hay que cancelar la de más en el SAT/ContaDigital. Si no hay ninguna operación con ese monto, probablemente sea una venta que nunca se registró en Ingresos.')
 
     +h3('2. Documentos faltantes')
     +p('Lista las operaciones sin factura vinculada. Muchas facturas se timbran a <b>"PÚBLICO EN GENERAL"</b> (sin el nombre del paciente en el XML), así que el sistema ofrece dos formas de resolverlas:')
