@@ -244,6 +244,8 @@ function generarReporteContaDigital(fechaInicio, fechaFin, usuario) {
       var full = _facParseCfdiFull(x.fileId);
       if (!full || !full.ok || !full.conceptos.length) return;
       if (full.conceptos.length > maxConceptos) maxConceptos = full.conceptos.length;
+      full._paciente = op.paciente;
+      full._opId = op.id;
       invoices.push(full);
     });
     if (!invoices.length) return { ok: false, error: 'No se pudo leer ningún XML vinculado en el periodo' };
@@ -285,10 +287,20 @@ function generarReporteContaDigital(fechaInicio, fechaFin, usuario) {
     var xlsxFile = folder.createFile(xlsxBlob);
     DriveApp.getFileById(ssOut.getId()).setTrashed(true);
 
+    var detalle = invoices.map(function (f) {
+      return {
+        opId: f._opId, paciente: f._paciente, razonSocial: f.receptor.nombre || '',
+        rfc: f.receptor.rfc || 'XAXX010101000', folio: f.folio, serie: f.serie,
+        fecha: f.fecha ? f.fecha.substring(0, 10) : '', total: f.total
+      };
+    });
+    var totalGeneral = detalle.reduce(function (s, d) { return s + (d.total || 0); }, 0);
+
     logAudit(usuario || 'sistema', 'Facturacion', 'ReporteContaDigital', '', fechaInicio + ' a ' + fechaFin, '', invoices.length + ' facturas');
     return {
       ok: true, url: xlsxFile.getUrl(), numFacturas: invoices.length,
-      numOperacionesTotal: ops.length, numSinXml: ops.length - facturables.length
+      numOperacionesTotal: ops.length, numSinXml: ops.length - facturables.length,
+      detalle: detalle, totalGeneral: totalGeneral
     };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }

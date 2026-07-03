@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.07 -->
+﻿<!-- app-build:2026.07.02.08 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4511,7 +4511,17 @@ async function ingFacGenerarReporte() {
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'generarReporteContaDigital', fechaInicio:currentFechaInicio, fechaFin:currentFechaFin, usuario:s.email||''})});
     var res = await r.json();
     if (res.ok) {
-      if (out) out.innerHTML = '<span style="color:#166534;font-weight:700">✓ Reporte generado ('+res.numFacturas+' facturas)</span> — <a href="'+res.url+'" target="_blank" style="color:var(--color-primary,#c46a7a);font-weight:700">Descargar xlsx ↗</a>';
+      var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+      var h = '<div style="margin-bottom:10px"><span style="color:#166534;font-weight:700">✓ Reporte generado ('+res.numFacturas+' facturas · '+fmtM(res.totalGeneral)+')</span> — <a href="'+res.url+'" target="_blank" style="color:var(--color-primary,#c46a7a);font-weight:700">Descargar xlsx ↗</a></div>';
+      if (res.detalle && res.detalle.length) {
+        h += '<div style="font-size:11px;font-weight:700;color:var(--text-secondary,#6b7280);margin-bottom:4px">Desglose por razón social — corrobora antes de subir a ContaDigital:</div>';
+        h += '<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Paciente</th><th>Razón social (facturada)</th><th>RFC</th><th>Folio</th><th>Fecha</th><th>Total</th></tr></thead><tbody>';
+        res.detalle.forEach(function(d){
+          h += '<tr><td>'+d.opId+'</td><td>'+_cxpEsc(d.paciente)+'</td><td>'+_cxpEsc(d.razonSocial||'—')+'</td><td>'+_cxpEsc(d.rfc)+'</td><td>'+(d.serie||'')+'-'+d.folio+'</td><td>'+d.fecha+'</td><td>'+fmtM(d.total)+'</td></tr>';
+        });
+        h += '</tbody></table>';
+      }
+      if (out) out.innerHTML = h;
     } else if (out) out.innerHTML = '<span style="color:#dc2626">Error: '+(res.error||'No se pudo generar')+'</span>';
   } catch(ex) {
     if (out) out.innerHTML = '<span style="color:#dc2626">Error de conexión</span>';
