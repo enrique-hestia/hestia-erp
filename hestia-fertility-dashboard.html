@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.22 -->
+﻿<!-- app-build:2026.07.03.01 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2992,6 +2992,12 @@ function _renderIngresosERP() {
 
   el.innerHTML = h.join('');
 
+  // _renderIngresosERP() puede ser invocado en medio de un refresh silencioso
+  // (ej. backfill de razón social dentro de Facturación) que reconstruye TODO
+  // el DOM de Ingresos, incluido #ing-fac-body vacío — si la pestaña activa
+  // era Facturación, hay que repoblarla o queda en blanco.
+  if (_ingActiveTab === 'facturacion' && typeof ingFacRender === 'function') ingFacRender();
+
   // Reabrir el dropdown de filtro que estaba abierto (multi-select sin cerrarse)
   if (_ingOpenFilter) { var _op = document.getElementById('ing-msel-'+_ingOpenFilter); if (_op) _op.classList.add('open'); }
 
@@ -4486,6 +4492,46 @@ function ingFacRender() {
   body.innerHTML = h;
 }
 
+// Pinta el resultado de reconciliarFacturas (KPIs + tabla + carpetas) en
+// #ing-fac-resultado y dispara seccion2/seccion3. Separado de ingFacAnalizar()
+// para poder repintar desde datos ya en memoria (_ingFacResult) sin pedirlos
+// de nuevo al backend — se usa tras un refresh silencioso que reconstruyó el DOM.
+function _ingFacRenderResultado(d) {
+  var out = document.getElementById('ing-fac-resultado');
+  if (!out) return;
+  var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var h = '<div class="ing-fac-kpis">'
+    +'<div class="ing-fac-k"><div class="ing-fac-k-val" style="color:#166534">'+d.conDocumento.length+'</div><div class="ing-fac-k-lbl">Con documento ✓</div></div>'
+    +'<div class="ing-fac-k"><div class="ing-fac-k-val" style="color:#c46a7a">'+d.faltaDocumento.length+'</div><div class="ing-fac-k-lbl">Falta vincular (XML ya existe)</div></div>'
+    +'<div class="ing-fac-k"><div class="ing-fac-k-val" style="color:#b45309">'+d.sinFactura.length+'</div><div class="ing-fac-k-lbl">Sin número de factura</div></div>'
+    +'<div class="ing-fac-k"><div class="ing-fac-k-val" style="color:#6b7280">'+d.xmlHuerfanos.length+'</div><div class="ing-fac-k-lbl">XML sin operación asociada</div></div>'
+    +'</div>';
+  if (d.faltaDocumento.length) {
+    h += '<div style="font-size:12px;font-weight:700;margin-bottom:6px">Se encontró el XML en Drive — vincular con un clic:</div>';
+    h += '<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Fecha</th><th>Paciente</th><th>Factura</th><th>Total op.</th><th>Total XML</th><th></th></tr></thead><tbody>';
+    d.faltaDocumento.forEach(function(o){
+      h += '<tr><td>'+o.id+'</td><td>'+o.fecha+'</td><td>'+_cxpEsc(o.paciente)+'</td><td>'+_cxpEsc(o.factura)+'</td><td>'+fmtM(o.total)+'</td><td>'+fmtM(o.xmlTotal)+'</td>'
+         +'<td><button onclick="ingFacVincular(\''+o.id+'\',\''+o.xmlFileId+'\',this)" style="padding:4px 10px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10.5px;font-weight:700;cursor:pointer">Vincular</button></td></tr>';
+    });
+    h += '</tbody></table>';
+  }
+  if (d.carpetasAnalizadas && d.carpetasAnalizadas.length) {
+    h += '<div style="margin-top:14px">'
+      +'<button onclick="var e=document.getElementById(\'ing-fac-carpetas\');e.style.display=e.style.display===\'none\'?\'block\':\'none\'" style="background:none;border:none;cursor:pointer;font-size:10.5px;font-weight:700;color:var(--text-secondary,#9ca3af);padding:0">📁 Ver carpetas analizadas ('+d.carpetasAnalizadas.length+' meses) ▾</button>'
+      +'<div id="ing-fac-carpetas" style="display:none;margin-top:8px">'
+      +'<table class="ing-fac-tbl"><thead><tr><th>Carpeta</th><th>Encontrada</th><th>XML totales</th><th>Tipo Ingreso en rango</th></tr></thead><tbody>'
+      +d.carpetasAnalizadas.map(function(c){
+        return '<tr><td style="font-family:monospace;font-size:10px">'+_cxpEsc(c.path)+'</td>'
+          +'<td>'+(c.encontrada?'<span style="color:#166534">✓ sí</span>':'<span style="color:#dc2626">✕ no existe</span>')+'</td>'
+          +'<td>'+c.totalArchivosXml+'</td><td>'+c.totalTipoIngreso+'</td></tr>';
+      }).join('')
+      +'</tbody></table></div></div>';
+  }
+  out.innerHTML = h;
+  _ingFacRenderSeccion2(d);
+  _ingFacRenderSeccion3(d);
+}
+
 async function ingFacAnalizar() {
   var out = document.getElementById('ing-fac-resultado');
   var btn = document.getElementById('ing-fac-analizar-btn');
@@ -4498,37 +4544,7 @@ async function ingFacAnalizar() {
     var d = await r.json();
     if (!d.ok) { if(out) out.innerHTML = '<div style="color:#dc2626;font-size:12px">Error: '+(d.error||'No se pudo analizar')+'</div>'; return; }
     _ingFacResult = d;
-    var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
-    var h = '<div class="ing-fac-kpis">'
-      +'<div class="ing-fac-k"><div class="ing-fac-k-val" style="color:#166534">'+d.conDocumento.length+'</div><div class="ing-fac-k-lbl">Con documento ✓</div></div>'
-      +'<div class="ing-fac-k"><div class="ing-fac-k-val" style="color:#c46a7a">'+d.faltaDocumento.length+'</div><div class="ing-fac-k-lbl">Falta vincular (XML ya existe)</div></div>'
-      +'<div class="ing-fac-k"><div class="ing-fac-k-val" style="color:#b45309">'+d.sinFactura.length+'</div><div class="ing-fac-k-lbl">Sin número de factura</div></div>'
-      +'<div class="ing-fac-k"><div class="ing-fac-k-val" style="color:#6b7280">'+d.xmlHuerfanos.length+'</div><div class="ing-fac-k-lbl">XML sin operación asociada</div></div>'
-      +'</div>';
-    if (d.faltaDocumento.length) {
-      h += '<div style="font-size:12px;font-weight:700;margin-bottom:6px">Se encontró el XML en Drive — vincular con un clic:</div>';
-      h += '<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Fecha</th><th>Paciente</th><th>Factura</th><th>Total op.</th><th>Total XML</th><th></th></tr></thead><tbody>';
-      d.faltaDocumento.forEach(function(o){
-        h += '<tr><td>'+o.id+'</td><td>'+o.fecha+'</td><td>'+_cxpEsc(o.paciente)+'</td><td>'+_cxpEsc(o.factura)+'</td><td>'+fmtM(o.total)+'</td><td>'+fmtM(o.xmlTotal)+'</td>'
-           +'<td><button onclick="ingFacVincular(\''+o.id+'\',\''+o.xmlFileId+'\',this)" style="padding:4px 10px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10.5px;font-weight:700;cursor:pointer">Vincular</button></td></tr>';
-      });
-      h += '</tbody></table>';
-    }
-    if (d.carpetasAnalizadas && d.carpetasAnalizadas.length) {
-      h += '<div style="margin-top:14px">'
-        +'<button onclick="var e=document.getElementById(\'ing-fac-carpetas\');e.style.display=e.style.display===\'none\'?\'block\':\'none\'" style="background:none;border:none;cursor:pointer;font-size:10.5px;font-weight:700;color:var(--text-secondary,#9ca3af);padding:0">📁 Ver carpetas analizadas ('+d.carpetasAnalizadas.length+' meses) ▾</button>'
-        +'<div id="ing-fac-carpetas" style="display:none;margin-top:8px">'
-        +'<table class="ing-fac-tbl"><thead><tr><th>Carpeta</th><th>Encontrada</th><th>XML totales</th><th>Tipo Ingreso en rango</th></tr></thead><tbody>'
-        +d.carpetasAnalizadas.map(function(c){
-          return '<tr><td style="font-family:monospace;font-size:10px">'+_cxpEsc(c.path)+'</td>'
-            +'<td>'+(c.encontrada?'<span style="color:#166534">✓ sí</span>':'<span style="color:#dc2626">✕ no existe</span>')+'</td>'
-            +'<td>'+c.totalArchivosXml+'</td><td>'+c.totalTipoIngreso+'</td></tr>';
-        }).join('')
-        +'</tbody></table></div></div>';
-    }
-    document.getElementById('ing-fac-resultado').innerHTML = h;
-    _ingFacRenderSeccion2(d);
-    _ingFacRenderSeccion3(d);
+    _ingFacRenderResultado(d);
   } catch(ex) {
     if (out) out.innerHTML = '<div style="color:#dc2626;font-size:12px">Error de conexión: '+ex.message+'</div>';
   } finally {
@@ -4562,7 +4578,13 @@ async function ingFacBackfillRazonSocial(silent) {
           var dIng = _ingApplyDateFilter(rawIng);
           _swrSet('ingresos', dIng, currentFechaInicio||'', currentFechaFin||'');
           _ingData = dIng;
-          if (document.getElementById('view-ingresos') && document.getElementById('view-ingresos').style.display !== 'none') _renderIngresosERP();
+          if (document.getElementById('view-ingresos') && document.getElementById('view-ingresos').style.display !== 'none') {
+            _renderIngresosERP();
+            // _renderIngresosERP() ya repobló #ing-fac-body (ver ingFacRender() ahí
+            // dentro), pero eso solo deja la tarjeta inicial — si ya había un
+            // análisis en pantalla, se repinta desde memoria sin volver a pedirlo.
+            if (_ingActiveTab === 'facturacion' && _ingFacResult) _ingFacRenderResultado(_ingFacResult);
+          }
         } catch(_ref) {}
       }
     } else if (!silent) {

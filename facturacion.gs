@@ -6,8 +6,19 @@
 
 var FAC_MESES_ABR = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
 
-var FAC_MASIVA_HEADERS_INV = ['SERIE','FECHA','SUCURSAL','RFC RECEPTOR','MONEDA','T.C.','METODO DE PAGO','CUENTA BANCARIA','REFERENCIA','IMPORTE','DESCUENTO','SUBTOTAL','IVA TOTAL','IEPS TOTAL','RETENCION IVA','RETENCION ISR','TOTAL FACTURA'];
-var FAC_MASIVA_HEADERS_CONCEPTO = ['CLAVE PRODUCTO','DESCRIPCION ADICIONAL','CANTIDAD','PRECIO','DESCUENTO $','IVA %','IVA $','IEPS %','IEPS $','RET IVA%','RET IVA $','RET ISR %','RET ISR $','PREDIAL'];
+// Encabezados EXACTOS (texto, acentos y espacios) copiados de la plantilla real
+// ContaDigital "Plantilla_Masiva.xlsx" que usa el usuario — no cambiar sin volver
+// a comparar contra esa plantilla, porque el importador de ContaDigital hace
+// match por nombre de columna literal.
+var FAC_MASIVA_HEADERS_INV = ['SERIE','FECHA','SUCURSAL','RFC RECEPTOR','MONEDA','T.C.','MÉTODO DE PAGO','CUENTA BANCARIA','REFERENCIA','IMPORTE','DESCUENTO','SUBTOTAL','IVA TOTAL','IEPS TOTAL','RETENCIÓN IVA','RETENCIÓN ISR','TOTAL FACTURA '];
+var FAC_MASIVA_HEADERS_CONCEPTO = ['CLAVE PRODUCTO','DESCRIPCION ADICIONAL ','CANTIDAD ','PRECIO ','DESCUENTO $','IVA % ',' IVA $ ','IEPS %','IEPS $ ','RET IVA% ','RET IVA $','RET ISR % ','RET ISR $','PREDIAL'];
+var FAC_MASIVA_HEADERS_TRAIL = ['USO CFDI','CONDICIONES DE PAGO','FORMA DE PAGO','TIPO','ALUMNO','CURP','NIVEL','RVOE','TIPO RELACION','UUID RELACIONADOS','FECHA VENCIMIENTO'];
+var FAC_MASIVA_CONCEPTO_BLOQUES = 10; // la plantilla real siempre trae 10 bloques de concepto, aunque la factura tenga menos líneas
+var FAC_MASIVA_SERIE = 'Hestia Pacientes'; // constante fija de la plantilla, no viene del CFDI
+
+// Carpeta de Drive donde el usuario pidió que se guarde siempre el reporte masivo
+// (no la carpeta genérica de facturas de Ingresos).
+var FAC_MASIVA_FOLDER_ID = '1yf0a6NTIMJdDpTdqO6SRgTPKVcuIoONJ';
 
 var FAC_METODO_PAGO_MAP = {
   '01':'Efectivo','02':'Cheque nominativo','03':'Transferencia electrónica de fondos',
@@ -15,6 +26,8 @@ var FAC_METODO_PAGO_MAP = {
   '08':'Vales de despensa','28':'Tarjeta de débito','29':'Tarjeta de servicios',
   '31':'Tarjeta de crédito','99':'Tarjeta de crédito'
 };
+
+var FAC_MONEDA_MAP = { 'MXN':'PESOS', 'USD':'USD', 'EUR':'EUR', 'CAD':'CAD' };
 
 // Construye un .xlsx válido (OOXML) directamente con Utilities.zip(), sin pasar
 // por SpreadsheetApp/DriveApp.getAs()/UrlFetchApp — evita las conversiones de
@@ -482,7 +495,7 @@ function _facParseCfdiFull(fileId) {
       formaPago: attr(root, 'FormaPago'), metodoPago: attr(root, 'MetodoPago'),
       totalImpuestosTrasladados: (function () { var im = child(root, 'Impuestos'); return im ? (parseFloat(attr(im, 'TotalImpuestosTrasladados')) || 0) : 0; })(),
       emisor: { rfc: emisorEl ? attr(emisorEl, 'Rfc') : '', nombre: emisorEl ? attr(emisorEl, 'Nombre') : '' },
-      receptor: { rfc: receptorEl ? attr(receptorEl, 'Rfc') : '', nombre: receptorEl ? attr(receptorEl, 'Nombre') : '' },
+      receptor: { rfc: receptorEl ? attr(receptorEl, 'Rfc') : '', nombre: receptorEl ? attr(receptorEl, 'Nombre') : '', usoCfdi: receptorEl ? attr(receptorEl, 'UsoCFDI') : '' },
       conceptos: conceptos
     };
   } catch (ex) { return { ok: false, error: ex.message }; }
@@ -512,21 +525,33 @@ function generarReporteContaDigital(fechaInicio, fechaFin, usuario) {
     if (!fechaInicio || !fechaFin) return { ok: false, error: 'Rango de fechas requerido' };
     var ops = _facReadOpsInRange(fechaInicio, fechaFin);
     var idx = _facBuildXmlIndex(fechaInicio, fechaFin);
-    var facturables = ops.filter(function (o) { return o.factura && idx.byFolio[o.factura]; });
-    if (!facturables.length) return { ok: false, error: 'No hay operaciones con factura y XML vinculado en el periodo seleccionado' };
+    var byFileId = {};
+    idx.all.forEach(function (x) { byFileId[x.fileId] = x; });
+
+    // El dato con el que SIEMPRE se puede llegar al XML real es ArchivoURL (lo
+    // que llena "Vincular"/"Analizar periodo" en Facturación) — no el campo
+    // Factura# capturado a mano, que muchas veces no coincide con el folio del
+    // XML (ej. facturas vinculadas por sugerencia de nombre, no por folio).
+    var facturables = [];
+    ops.forEach(function (op) {
+      if (!op.archivoURL) return;
+      var m = op.archivoURL.match(/[-\w]{25,}/);
+      if (!m) return;
+      var x = byFileId[m[0]];
+      if (!x) return;
+      facturables.push({ op: op, fileId: m[0] });
+    });
+    if (!facturables.length) return { ok: false, error: 'No hay operaciones con XML vinculado en el periodo seleccionado. Usa "Analizar periodo actual" en Facturación para vincular primero.' };
 
     var pacFiscal = _pacFiscalIndex();
 
-    var maxConceptos = 1;
     var invoices = [];
-    facturables.forEach(function (op) {
-      var x = idx.byFolio[op.factura];
-      var full = _facParseCfdiFull(x.fileId);
+    facturables.forEach(function (item) {
+      var full = _facParseCfdiFull(item.fileId);
       if (!full || !full.ok || !full.conceptos.length) return;
-      if (full.conceptos.length > maxConceptos) maxConceptos = full.conceptos.length;
-      var pf = pacFiscal[_pacNormNombre(op.paciente)];
-      full._paciente = op.paciente;
-      full._opId = op.id;
+      var pf = pacFiscal[_pacNormNombre(item.op.paciente)];
+      full._paciente = item.op.paciente;
+      full._opId = item.op.id;
       // Regla: datos fiscales del Registro de Pacientes tienen prioridad; si el
       // paciente no tiene RFC/Razón Social capturados, se usa público en general.
       full._rfcFinal = (pf && pf.rfc) ? pf.rfc : 'XAXX010101000';
@@ -535,37 +560,47 @@ function generarReporteContaDigital(fechaInicio, fechaFin, usuario) {
     });
     if (!invoices.length) return { ok: false, error: 'No se pudo leer ningún XML vinculado en el periodo' };
 
+    // La plantilla real de ContaDigital siempre trae el mismo número de
+    // columnas (17 + 10 bloques de concepto de 14 + 11 finales = 168) — se
+    // respeta ese ancho fijo aunque una factura tenga menos o (recortando) más
+    // líneas, para que el archivo sea consistente factura a factura.
     var headers = FAC_MASIVA_HEADERS_INV.slice();
-    for (var c = 0; c < maxConceptos; c++) headers = headers.concat(FAC_MASIVA_HEADERS_CONCEPTO);
+    for (var c = 0; c < FAC_MASIVA_CONCEPTO_BLOQUES; c++) headers = headers.concat(FAC_MASIVA_HEADERS_CONCEPTO);
+    headers = headers.concat(FAC_MASIVA_HEADERS_TRAIL);
 
     var rows = [headers];
     invoices.forEach(function (f) {
       var metodoLabel = FAC_METODO_PAGO_MAP[f.formaPago] || f.formaPago || '';
       var descuentoFactura = f.descuento || 0;
+      var monedaLabel = FAC_MONEDA_MAP[f.moneda] || f.moneda || 'PESOS';
       // IMPORTE = bruto antes de descuento (= SubTotal del CFDI, que ya de por sí es
       // la suma de Importe por concepto sin descontar) · SUBTOTAL (columna propia de
       // ContaDigital) = neto antes de impuestos · TOTAL FACTURA = el Total real del CFDI.
       var row = [
-        f.serie || '', f.fecha ? f.fecha.substring(0, 10) : '', '', f._rfcFinal,
-        f.moneda || 'MXN', f.tipoCambio || 1, metodoLabel, '', '',
+        FAC_MASIVA_SERIE, f.fecha ? f.fecha.substring(0, 10) : '', '', f._rfcFinal,
+        monedaLabel, (f.moneda && f.moneda !== 'MXN') ? (f.tipoCambio || 1) : '', metodoLabel, '', f._opId,
         f.subTotal, descuentoFactura, f.subTotal - descuentoFactura, f.totalImpuestosTrasladados || 0, 0, 0, 0, f.total
       ];
-      f.conceptos.forEach(function (con) {
+      var nConceptos = Math.min(f.conceptos.length, FAC_MASIVA_CONCEPTO_BLOQUES);
+      for (var ci = 0; ci < nConceptos; ci++) {
+        var con = f.conceptos[ci];
+        var ivaPctVal = (con.ivaPct === 'EXENTO') ? 0 : con.ivaPct;
         row.push(
-          con.noIdentificacion || con.claveProdServ || '', '', con.cantidad, con.valorUnitario, con.descuento || 0,
-          con.ivaPct, con.ivaMonto, 0, 0, 0, 0, 0, 0, 0
+          con.noIdentificacion || con.claveProdServ || '', con.descripcion || '', con.cantidad, con.valorUnitario, con.descuento || 0,
+          ivaPctVal, con.ivaMonto, '', 0, 'No aplica', 0, '', 0, ''
         );
-      });
-      var missing = maxConceptos - f.conceptos.length;
-      for (var mi = 0; mi < missing; mi++) row = row.concat(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+      }
+      for (var mi = nConceptos; mi < FAC_MASIVA_CONCEPTO_BLOQUES; mi++) row = row.concat(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+      row.push(f.receptor.usoCfdi || '', '', f.metodoPago || '', 'Factura', '', '', '', '', '', '', '');
       rows.push(row);
     });
 
     // Se escribe el .xlsx directamente en formato OOXML (sin pasar por Sheets ni
     // por conversiones de Drive) para no depender de getAs()/UrlFetchApp, que han
-    // fallado en este proyecto. Solo usa Utilities, que ya está autorizado.
+    // fallado en este proyecto, ni de ningún permiso adicional. Solo usa
+    // Utilities/DriveApp, que ya están autorizados en este proyecto.
     var xlsxBlob = _buildXlsxBlob(rows, 'Hoja1', 'ContaDigital_Masiva_' + fechaInicio + '_a_' + fechaFin + '.xlsx');
-    var folder = DriveApp.getFolderById(INGRESOS_FOLDER_FACTURAS);
+    var folder = DriveApp.getFolderById(FAC_MASIVA_FOLDER_ID);
     var xlsxFile = folder.createFile(xlsxBlob);
 
     var detalle = invoices.map(function (f) {
