@@ -136,7 +136,9 @@ function _facQuickParse(xml) {
   var uuidM = xml.match(/UUID="([^"]*)"/);
   return {
     folio: a('Folio'), serie: a('Serie'), tipo: a('TipoDeComprobante'),
-    total: parseFloat(a('Total')) || 0, fecha: a('Fecha'), formaPago: a('FormaPago'),
+    total: parseFloat(a('Total')) || 0, subTotal: parseFloat(a('SubTotal')) || 0,
+    descuento: parseFloat(a('Descuento')) || 0,
+    fecha: a('Fecha'), formaPago: a('FormaPago'),
     receptorNombre: a('Nombre', rec), receptorRfc: a('Rfc', rec),
     receptorCP: a('DomicilioFiscalReceptor', rec), receptorUsoCfdi: a('UsoCFDI', rec),
     receptorRegimen: a('RegimenFiscalReceptor', rec),
@@ -167,7 +169,8 @@ function _facBuildXmlIndex(fechaInicio, fechaFin) {
         if (fechaISO < fechaInicio || fechaISO > fechaFin) continue;
         totalIngreso++;
         var rec = {
-          folio: p.folio, serie: p.serie, uuid: p.uuid, total: p.total, fecha: fechaISO,
+          folio: p.folio, serie: p.serie, uuid: p.uuid, total: p.total,
+          subTotal: p.subTotal, descuento: p.descuento, fecha: fechaISO,
           receptorNombre: p.receptorNombre, receptorRfc: p.receptorRfc,
           receptorCP: p.receptorCP, receptorUsoCfdi: p.receptorUsoCfdi, receptorRegimen: p.receptorRegimen,
           formaPago: p.formaPago,
@@ -208,6 +211,46 @@ function _facReadOpsInRange(fechaInicio, fechaFin) {
       order.push(op);
     }
     opsMap[op].total += num(r[9]);
+  }
+  return order.map(function (k) { return opsMap[k]; });
+}
+
+// Igual que _facReadOpsInRange pero además suma el precio de lista (PVP × Cantidad,
+// SIN descuento) y detecta si alguna línea de la venta llevó % de descuento —
+// necesario para el análisis de descuento fiscal vs. descuento en la venta.
+function _facReadOpsConDetalleVenta(fechaInicio, fechaFin) {
+  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+  var sheet = ss.getSheetByName(BD_INGRESOS_TAB);
+  if (!sheet) return [];
+  var raw = sheet.getDataRange().getValues();
+  var opsMap = {}, order = [];
+  function dt(v) {
+    if (!v) return '';
+    if (v instanceof Date) return v.getFullYear() + '-' + String(v.getMonth() + 1).padStart(2, '0') + '-' + String(v.getDate()).padStart(2, '0');
+    return String(v).substring(0, 10);
+  }
+  function num(v) { var n = parseFloat(String(v || '').replace(/[$,\s]/g, '')); return isNaN(n) ? 0 : n; }
+  for (var i = 1; i < raw.length; i++) {
+    var r = raw[i];
+    var op = String(r[0] || '').trim();
+    if (!op) continue;
+    var fecha = dt(r[2]);
+    if (fecha < fechaInicio || fecha > fechaFin) continue;
+    if (!opsMap[op]) {
+      opsMap[op] = {
+        id: op, fecha: fecha, paciente: String(r[3] || ''), total: 0, montoLista: 0,
+        tieneDescuentoVenta: false, descuentoVentaPct: 0,
+        factura: String(r[17] || '').trim(), archivoURL: String(r[22] || '')
+      };
+      order.push(op);
+    }
+    var pvp = num(r[6]), descPct = num(r[7]), cant = num(r[8]) || 1;
+    opsMap[op].total += num(r[9]);
+    opsMap[op].montoLista += pvp * cant;
+    if (descPct > 0) {
+      opsMap[op].tieneDescuentoVenta = true;
+      if (descPct > opsMap[op].descuentoVentaPct) opsMap[op].descuentoVentaPct = descPct;
+    }
   }
   return order.map(function (k) { return opsMap[k]; });
 }
@@ -426,13 +469,15 @@ function _facParseCfdiFull(fileId) {
           claveProdServ: attr(c, 'ClaveProdServ'), noIdentificacion: attr(c, 'NoIdentificacion'),
           cantidad: parseFloat(attr(c, 'Cantidad')) || 1, descripcion: attr(c, 'Descripcion'),
           valorUnitario: parseFloat(attr(c, 'ValorUnitario')) || 0, importe: parseFloat(attr(c, 'Importe')) || 0,
+          descuento: parseFloat(attr(c, 'Descuento')) || 0,
           ivaPct: ivaPct, ivaMonto: ivaMonto
         });
       }
     }
     return {
       ok: true, serie: attr(root, 'Serie'), folio: attr(root, 'Folio'), fecha: attr(root, 'Fecha'),
-      subTotal: parseFloat(attr(root, 'SubTotal')) || 0, total: parseFloat(attr(root, 'Total')) || 0,
+      subTotal: parseFloat(attr(root, 'SubTotal')) || 0, descuento: parseFloat(attr(root, 'Descuento')) || 0,
+      total: parseFloat(attr(root, 'Total')) || 0,
       moneda: attr(root, 'Moneda') || 'MXN', tipoCambio: parseFloat(attr(root, 'TipoCambio')) || 1,
       formaPago: attr(root, 'FormaPago'), metodoPago: attr(root, 'MetodoPago'),
       totalImpuestosTrasladados: (function () { var im = child(root, 'Impuestos'); return im ? (parseFloat(attr(im, 'TotalImpuestosTrasladados')) || 0) : 0; })(),
@@ -496,14 +541,18 @@ function generarReporteContaDigital(fechaInicio, fechaFin, usuario) {
     var rows = [headers];
     invoices.forEach(function (f) {
       var metodoLabel = FAC_METODO_PAGO_MAP[f.formaPago] || f.formaPago || '';
+      var descuentoFactura = f.descuento || 0;
+      // IMPORTE = bruto antes de descuento (= SubTotal del CFDI, que ya de por sí es
+      // la suma de Importe por concepto sin descontar) · SUBTOTAL (columna propia de
+      // ContaDigital) = neto antes de impuestos · TOTAL FACTURA = el Total real del CFDI.
       var row = [
         f.serie || '', f.fecha ? f.fecha.substring(0, 10) : '', '', f._rfcFinal,
         f.moneda || 'MXN', f.tipoCambio || 1, metodoLabel, '', '',
-        f.total, 0, f.subTotal, f.totalImpuestosTrasladados || 0, 0, 0, 0, f.total
+        f.subTotal, descuentoFactura, f.subTotal - descuentoFactura, f.totalImpuestosTrasladados || 0, 0, 0, 0, f.total
       ];
       f.conceptos.forEach(function (con) {
         row.push(
-          con.noIdentificacion || con.claveProdServ || '', '', con.cantidad, con.valorUnitario, 0,
+          con.noIdentificacion || con.claveProdServ || '', '', con.cantidad, con.valorUnitario, con.descuento || 0,
           con.ivaPct, con.ivaMonto, 0, 0, 0, 0, 0, 0, 0
         );
       });
@@ -523,7 +572,8 @@ function generarReporteContaDigital(fechaInicio, fechaFin, usuario) {
       return {
         opId: f._opId, paciente: f._paciente, razonSocial: f._razonSocialFinal,
         rfc: f._rfcFinal, folio: f.folio, serie: f.serie,
-        fecha: f.fecha ? f.fecha.substring(0, 10) : '', total: f.total
+        fecha: f.fecha ? f.fecha.substring(0, 10) : '', total: f.total,
+        subTotal: f.subTotal, descuento: f.descuento || 0
       };
     });
     var totalGeneral = detalle.reduce(function (s, d) { return s + (d.total || 0); }, 0);
@@ -731,5 +781,70 @@ function aplicarDatosFiscalesPacientes(body) {
     });
     logAudit(body.usuario || 'sistema', 'Pacientes', 'SyncFiscal', '', '', '', actualizados + ' pacientes actualizados');
     return { ok: true, actualizados: actualizados };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// ============================================================
+// ANÁLISIS FISCAL DE DESCUENTOS
+// ============================================================
+// El CFDI 4.0 separa Importe (precio de lista, sin descuento) de Descuento
+// (el descuento que el propio comprobante declara). El SAT prellena la
+// declaración con el Importe/SubTotal bruto — el descuento hay que
+// capturarlo aparte, a mano, en "Descuentos y devoluciones" para bajar la
+// base gravable. El problema: algunas ventas se facturaron con el precio
+// YA rebajado (sin usar el campo Descuento del CFDI), así que ese
+// descuento nunca aparece declarable por separado — ya está absorbido en
+// un Importe más bajo. Esta función distingue ambos casos comparando el
+// % de descuento capturado en la venta (Ingresos) contra lo que el XML
+// realmente declara.
+function analizarDescuentosFiscales(fechaInicio, fechaFin) {
+  try {
+    if (!fechaInicio || !fechaFin) return { ok: false, error: 'Rango de fechas requerido' };
+    var ops = _facReadOpsConDetalleVenta(fechaInicio, fechaFin);
+    var idx = _facBuildXmlIndex(fechaInicio, fechaFin);
+    var byFileId = {};
+    idx.all.forEach(function (x) { byFileId[x.fileId] = x; });
+
+    var detalle = [];
+    var totales = {
+      montoFiscal: 0, descuentoCFDI: 0, montoHorneado: 0, totalFacturado: 0,
+      sinDescuento: 0, reflejadoCfdi: 0, horneadoEnPrecio: 0, revisar: 0
+    };
+
+    ops.forEach(function (op) {
+      if (!op.archivoURL) return;
+      var m = op.archivoURL.match(/[-\w]{25,}/);
+      if (!m) return;
+      var x = byFileId[m[0]];
+      if (!x) return; // factura vinculada pero el XML cayó fuera del rango escaneado
+
+      var clasificacion;
+      if (op.tieneDescuentoVenta && x.descuento > 0) clasificacion = 'reflejado_cfdi';
+      else if (op.tieneDescuentoVenta && x.descuento === 0) clasificacion = 'horneado_en_precio';
+      else if (!op.tieneDescuentoVenta && x.descuento > 0) clasificacion = 'revisar';
+      else clasificacion = 'sin_descuento';
+
+      var montoHorneado = clasificacion === 'horneado_en_precio' ? Math.max(0, op.montoLista - op.total) : 0;
+
+      detalle.push({
+        opId: op.id, fecha: op.fecha, paciente: op.paciente, factura: op.factura,
+        opTotal: op.total, montoLista: op.montoLista, descuentoVentaPct: op.descuentoVentaPct,
+        xmlSubTotal: x.subTotal, xmlDescuento: x.descuento, xmlTotal: x.total,
+        clasificacion: clasificacion, montoHorneado: montoHorneado
+      });
+
+      totales.montoFiscal += x.subTotal;
+      totales.descuentoCFDI += x.descuento;
+      totales.montoHorneado += montoHorneado;
+      totales.totalFacturado += x.total;
+      if (clasificacion === 'sin_descuento') totales.sinDescuento++;
+      else if (clasificacion === 'reflejado_cfdi') totales.reflejadoCfdi++;
+      else if (clasificacion === 'horneado_en_precio') totales.horneadoEnPrecio++;
+      else totales.revisar++;
+    });
+
+    detalle.sort(function (a, b) { return a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0; });
+
+    return { ok: true, detalle: detalle, totales: totales };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }

@@ -369,6 +369,12 @@ function doGet(e) {
       return jsonResponse(migratePacientesFiscales());
     }
 
+    if (action === 'analizarDescuentosFiscales') {
+      var dfIni2 = (e && e.parameter.fechaInicio) || '';
+      var dfFin2 = (e && e.parameter.fechaFin) || '';
+      return jsonResponse(analizarDescuentosFiscales(dfIni2, dfFin2));
+    }
+
     if (action === 'productos') {
       return jsonResponse(readProductos());
     }

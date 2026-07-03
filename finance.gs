@@ -2760,6 +2760,7 @@ function leerXmlFactura(fileId) {
     var serie = attr(root,'Serie'), folio = attr(root,'Folio'), fecha = attr(root,'Fecha');
     var subTotal = parseFloat(attr(root,'SubTotal'))||0;
     var total = parseFloat(attr(root,'Total'))||0;
+    var descuento = parseFloat(attr(root,'Descuento'))||0;
     var moneda = attr(root,'Moneda')||'MXN';
     var formaPago = attr(root,'FormaPago'), metodoPago = attr(root,'MetodoPago');
     var tipoCambio = parseFloat(attr(root,'TipoCambio'))||1;
@@ -2776,7 +2777,7 @@ function leerXmlFactura(fileId) {
       var cEls = conceptosEl.getChildren('Concepto', cfdiNs);
       for (var i=0;i<cEls.length;i++) {
         var c=cEls[i];
-        conceptos.push({claveProdServ:attr(c,'ClaveProdServ'), cantidad:attr(c,'Cantidad'), claveUnidad:attr(c,'ClaveUnidad'), descripcion:attr(c,'Descripcion'), valorUnitario:parseFloat(attr(c,'ValorUnitario'))||0, importe:parseFloat(attr(c,'Importe'))||0});
+        conceptos.push({claveProdServ:attr(c,'ClaveProdServ'), cantidad:attr(c,'Cantidad'), claveUnidad:attr(c,'ClaveUnidad'), descripcion:attr(c,'Descripcion'), valorUnitario:parseFloat(attr(c,'ValorUnitario'))||0, importe:parseFloat(attr(c,'Importe'))||0, descuento:parseFloat(attr(c,'Descuento'))||0});
       }
     }
     var totalImpuestosTrasladados = 0;
@@ -2790,7 +2791,7 @@ function leerXmlFactura(fileId) {
         if (chs[ci].getName()==='TimbreFiscalDigital') { uuid=attr(chs[ci],'UUID'); fechaTimbrado=attr(chs[ci],'FechaTimbrado'); noCertificadoSat=attr(chs[ci],'NoCertificadoSAT'); break; }
       }
     }
-    return {ok:true, serie:serie, folio:folio, fecha:fecha, subTotal:subTotal, total:total, moneda:moneda, formaPago:formaPago, metodoPago:metodoPago, tipoCambio:tipoCambio, tipoComprobante:tipoComprobante, emisor:emisor, receptor:receptor, conceptos:conceptos, totalImpuestosTrasladados:totalImpuestosTrasladados, uuid:uuid, fechaTimbrado:fechaTimbrado, noCertificadoSat:noCertificadoSat, fileName:file.getName()};
+    return {ok:true, serie:serie, folio:folio, fecha:fecha, subTotal:subTotal, descuento:descuento, total:total, moneda:moneda, formaPago:formaPago, metodoPago:metodoPago, tipoCambio:tipoCambio, tipoComprobante:tipoComprobante, emisor:emisor, receptor:receptor, conceptos:conceptos, totalImpuestosTrasladados:totalImpuestosTrasladados, uuid:uuid, fechaTimbrado:fechaTimbrado, noCertificadoSat:noCertificadoSat, fileName:file.getName()};
   } catch(ex) { return {ok:false, error:ex.message}; }
 }
 
