@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.12 -->
+﻿<!-- app-build:2026.07.02.13 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2251,7 +2251,7 @@ function renderView(view, data) {
 /* ── INGRESOS ─── */
 var ingChart=null, ingDonutChart=null;
 var _ingChart=null, _ingDonutChart=null, _ingPage=1, _ingPerPage=50;
-var _ingFilters={mes:[],categoria:[],formaPago:[],sucursal:[],buscar:''};
+var _ingFilters={mes:[],categoria:[],formaPago:[],sucursal:[],buscar:'',factura:''};
 var _ingData=null;
 var _ingActiveTab='lista';
 var _ingFacResult=null;
@@ -2345,14 +2345,31 @@ async function loadIngresosERP() {
 }
 
 function _ingInSel(sel, v) { return !sel || !sel.length || sel.indexOf(v) > -1; }
+function _ingSetFacturaFilter(v) {
+  _ingFilters.factura = v;
+  _ingPage = 1;
+  _renderIngresosERP();
+}
+
 function _ingFilterRows() {
   if (!_ingData || !_ingData.rows) return [];
   var f = _ingFilters;
+  // El campo Factura# solo se guarda en la primera línea de cada OP — el estatus
+  // "con/sin factura" se determina a nivel operación (viendo todas sus líneas),
+  // no por línea individual, para no excluir por error las demás líneas de una
+  // operación que ya está facturada.
+  var opFacturaMap = null;
+  if (f.factura) {
+    opFacturaMap = {};
+    _ingData.rows.forEach(function(r){ if (r.factura) opFacturaMap[r.id] = true; });
+  }
   return _ingData.rows.filter(function(r) {
     if (!_ingInSel(f.mes, r.mes)) return false;
     if (!_ingInSel(f.categoria, r.categoria)) return false;
     if (!_ingInSel(f.formaPago, r.formaPago)) return false;
     if (!_ingInSel(f.sucursal, r.sucursal)) return false;
+    if (f.factura === 'con' && !opFacturaMap[r.id]) return false;
+    if (f.factura === 'sin' && opFacturaMap[r.id]) return false;
     if (f.buscar) {
       var q = f.buscar.toLowerCase();
       if ((r.paciente||'').toLowerCase().indexOf(q)===-1
@@ -2594,6 +2611,11 @@ function _renderIngresosERP() {
     +_ingMSelHTML('categoria','Categoría',cats)
     +_ingMSelHTML('formaPago','Forma de pago',fps)
     +(sucs.length?_ingMSelHTML('sucursal','Sucursal',sucs):'')
+    +'<div class="ing-fg"><div class="ing-fl">Factura</div><select class="ing-sel" id="ing-fac-filter" onchange="_ingSetFacturaFilter(this.value)">'
+      +'<option value=""'+(!_ingFilters.factura?' selected':'')+'>Todas</option>'
+      +'<option value="con"'+(_ingFilters.factura==='con'?' selected':'')+'>Con factura</option>'
+      +'<option value="sin"'+(_ingFilters.factura==='sin'?' selected':'')+'>Sin factura</option>'
+    +'</select></div>'
     +'<div class="ing-fg"><div class="ing-fl">Buscar</div><input id="ing-buscar" class="ing-search" placeholder="Paciente, producto o ID…" value="'+(_ingFilters.buscar||'')+'" oninput="_ingBuscarDebounce(this.value)"></div>'
     +'<div style="margin-left:auto;font-size:11px;font-weight:700;color:var(--text-primary,#111)">Filtrado: '+fC(totalFiltered)+'</div>'
     +'</div>');
