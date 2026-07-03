@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.03.01 -->
+﻿<!-- app-build:2026.07.03.02 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4488,7 +4488,8 @@ function ingFacRender() {
     +'<div id="ing-fac-resultado" style="margin-top:16px"></div>'
     +'</div>'
     +'<div id="ing-fac-seccion2"></div>'
-    +'<div id="ing-fac-seccion3"></div>';
+    +'<div id="ing-fac-seccion3"></div>'
+    +'<div id="ing-fac-seccion4"></div>';
   body.innerHTML = h;
 }
 
@@ -4530,6 +4531,7 @@ function _ingFacRenderResultado(d) {
   out.innerHTML = h;
   _ingFacRenderSeccion2(d);
   _ingFacRenderSeccion3(d);
+  _ingFacRenderSeccion4(d);
 }
 
 async function ingFacAnalizar() {
@@ -4789,12 +4791,61 @@ function _ingFacRenderSeccion3(d) {
   if (!el) return;
   var listos = d.conDocumento.length + d.faltaDocumento.length;
   var h = '<div class="ing-fac-sc">'
-    +'<div class="ing-fac-sh">📊 Reporte para ContaDigital</div>'
-    +'<div class="ing-fac-sub">Genera el archivo de carga masiva (formato Plantilla_Masiva) con las facturas del periodo que ya tienen XML vinculado ('+listos+' operaciones listas).</div>'
+    +'<div class="ing-fac-sh">✅ Ya facturado (ContaDigital)</div>'
+    +'<div class="ing-fac-sub">Corrobora contra ContaDigital: arma el archivo (formato Plantilla_Masiva) con las facturas del periodo que ya tienen XML vinculado — esto ya existe allá, es solo para verificar ('+listos+' operaciones listas).</div>'
     +'<button onclick="ingFacGenerarReporte()" id="ing-fac-reporte-btn" style="padding:9px 18px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer" '+(listos?'':'disabled')+'>Generar reporte del periodo</button>'
     +'<div id="ing-fac-reporte-resultado" style="margin-top:14px;font-size:12px"></div>'
     +'</div>';
   el.innerHTML = h;
+}
+
+// Cuántas operaciones están genuinamente pendientes por facturar: sin XML
+// vinculado, sin folio que haga match y SIN sugerencia por nombre (si hay
+// sugerencia, probablemente ya existe la factura y solo falta confirmarla arriba).
+function _ingFacPendientesReales(d) {
+  return (d.sinFactura || []).filter(function (o) { return !o.sugerenciaFolio; });
+}
+
+function _ingFacRenderSeccion4(d) {
+  var el = document.getElementById('ing-fac-seccion4');
+  if (!el) return;
+  var pendientes = _ingFacPendientesReales(d);
+  var h = '<div class="ing-fac-sc">'
+    +'<div class="ing-fac-sh">🕓 Pendiente por facturar (ContaDigital)</div>'
+    +'<div class="ing-fac-sub">Arma el archivo de carga masiva (mismo formato Plantilla_Masiva) con lo que <b>todavía no existe</b> en ContaDigital: operaciones del periodo sin factura ni sugerencia de XML ('+pendientes.length+' operación(es)). Súbelo a ContaDigital para generar ahí esas facturas. Como no hay CFDI del que leer impuestos, se asume Exento (servicios médicos) y Clave de producto en blanco — revísalos antes de subir.</div>'
+    +'<button onclick="ingFacGenerarReportePendientes()" id="ing-fac-reporte-pend-btn" style="padding:9px 18px;background:#b45309;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer" '+(pendientes.length?'':'disabled')+'>Generar reporte de pendientes</button>'
+    +'<div id="ing-fac-reporte-pend-resultado" style="margin-top:14px;font-size:12px"></div>'
+    +'</div>';
+  el.innerHTML = h;
+}
+
+async function ingFacGenerarReportePendientes() {
+  var btn = document.getElementById('ing-fac-reporte-pend-btn');
+  var out = document.getElementById('ing-fac-reporte-pend-resultado');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ing-spinner"></span>Generando…'; }
+  if (out) out.innerHTML = '<span class="ing-spinner ing-spinner-dark"></span>Generando reporte, esto puede tardar unos segundos…';
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'generarReporteContaDigitalPendientes', fechaInicio:currentFechaInicio, fechaFin:currentFechaFin, usuario:s.email||''})});
+    var res = await r.json();
+    if (res.ok) {
+      var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+      var h = '<div style="margin-bottom:10px"><span style="color:#166534;font-weight:700">✓ Reporte generado ('+res.numOperaciones+' operaciones · '+fmtM(res.totalGeneral)+')</span> — <a href="'+res.url+'" target="_blank" style="color:var(--color-primary,#c46a7a);font-weight:700">Descargar xlsx ↗</a></div>';
+      if (res.detalle && res.detalle.length) {
+        h += '<div style="font-size:11px;font-weight:700;color:var(--text-secondary,#6b7280);margin-bottom:4px">Operaciones incluidas — corrobora antes de subir a ContaDigital:</div>';
+        h += '<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Paciente</th><th>Razón social</th><th>RFC</th><th>Fecha</th><th>Total</th></tr></thead><tbody>';
+        res.detalle.forEach(function(d){
+          h += '<tr><td>'+d.opId+'</td><td>'+_cxpEsc(d.paciente)+'</td><td>'+_cxpEsc(d.razonSocial||'—')+'</td><td>'+_cxpEsc(d.rfc)+'</td><td>'+d.fecha+'</td><td>'+fmtM(d.total)+'</td></tr>';
+        });
+        h += '</tbody></table>';
+      }
+      if (out) out.innerHTML = h;
+    } else if (out) out.innerHTML = '<span style="color:#dc2626">Error: '+(res.error||'No se pudo generar')+'</span>';
+  } catch(ex) {
+    if (out) out.innerHTML = '<span style="color:#dc2626">Error de conexión</span>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Generar reporte de pendientes'; }
+  }
 }
 
 async function ingFacGenerarReporte() {

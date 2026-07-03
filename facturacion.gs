@@ -268,6 +268,44 @@ function _facReadOpsConDetalleVenta(fechaInicio, fechaFin) {
   return order.map(function (k) { return opsMap[k]; });
 }
 
+// Lee BD_Ingresos con detalle por línea (Producto/PVP/Descuento%/Cantidad) SOLO
+// para los OP indicados — usado por el reporte de "Pendiente por facturar", que
+// arma los bloques de concepto de ContaDigital a partir de la venta real (no hay
+// XML del que leer porque, por definición, todavía no se ha facturado).
+function _facReadOpsPendientesDetalle(fechaInicio, fechaFin, opIds) {
+  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+  var sheet = ss.getSheetByName(BD_INGRESOS_TAB);
+  if (!sheet) return {};
+  var raw = sheet.getDataRange().getValues();
+  var wanted = {};
+  opIds.forEach(function (id) { wanted[id] = true; });
+  function dt(v) {
+    if (!v) return '';
+    if (v instanceof Date) return v.getFullYear() + '-' + String(v.getMonth() + 1).padStart(2, '0') + '-' + String(v.getDate()).padStart(2, '0');
+    return String(v).substring(0, 10);
+  }
+  function num(v) { var n = parseFloat(String(v || '').replace(/[$,\s]/g, '')); return isNaN(n) ? 0 : n; }
+  var opsMap = {};
+  for (var i = 1; i < raw.length; i++) {
+    var r = raw[i];
+    var op = String(r[0] || '').trim();
+    if (!op || !wanted[op]) continue;
+    var fecha = dt(r[2]);
+    if (fecha < fechaInicio || fecha > fechaFin) continue;
+    if (!opsMap[op]) {
+      opsMap[op] = {
+        id: op, fecha: fecha, paciente: String(r[3] || ''), sucursal: String(r[21] || ''),
+        formaPago: String(r[12] || ''), montoLista: 0, total: 0, lineas: []
+      };
+    }
+    var pvp = num(r[6]), descPct = num(r[7]), cant = num(r[8]) || 1, totalLinea = num(r[9]);
+    opsMap[op].lineas.push({ producto: String(r[5] || ''), cantidad: cant, pvp: pvp, descPct: descPct });
+    opsMap[op].montoLista += pvp * cant;
+    opsMap[op].total += totalLinea;
+  }
+  return opsMap;
+}
+
 function reconciliarFacturasXml(fechaInicio, fechaFin) {
   try {
     if (!fechaInicio || !fechaFin) return { ok: false, error: 'Rango de fechas requerido' };
@@ -617,6 +655,71 @@ function generarReporteContaDigital(fechaInicio, fechaFin, usuario) {
     return {
       ok: true, url: xlsxFile.getUrl(), numFacturas: invoices.length,
       numOperacionesTotal: ops.length, numSinXml: ops.length - facturables.length,
+      detalle: detalle, totalGeneral: totalGeneral
+    };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// Reporte ContaDigital de lo que TODAVÍA NO se ha facturado — no lee XML (no
+// existe) sino la venta real capturada en BD_Ingresos, para poder subir el
+// archivo a ContaDigital y generar ahí las facturas faltantes.
+// Regla de seguridad: solo entran operaciones sin ArchivoURL, sin folio que
+// haga match con un XML del periodo, Y SIN sugerencia de nombre encontrada por
+// reconciliarFacturasXml — si hay una sugerencia, lo más probable es que la
+// factura YA exista y solo falte vincularla, así que se excluye para no
+// arriesgar una factura duplicada.
+function generarReporteContaDigitalPendientes(fechaInicio, fechaFin, usuario) {
+  try {
+    if (!fechaInicio || !fechaFin) return { ok: false, error: 'Rango de fechas requerido' };
+    var rec = reconciliarFacturasXml(fechaInicio, fechaFin);
+    if (!rec.ok) return rec;
+    var pendientesIds = rec.sinFactura.filter(function (o) { return !o.sugerenciaFolio; }).map(function (o) { return o.id; });
+    if (!pendientesIds.length) return { ok: false, error: 'No hay operaciones pendientes por facturar en el periodo seleccionado (todas ya tienen factura o una sugerencia de XML por confirmar en la sección de arriba).' };
+
+    var opsMap = _facReadOpsPendientesDetalle(fechaInicio, fechaFin, pendientesIds);
+    var pacFiscal = _pacFiscalIndex();
+
+    var headers = FAC_MASIVA_HEADERS_INV.slice();
+    for (var c = 0; c < FAC_MASIVA_CONCEPTO_BLOQUES; c++) headers = headers.concat(FAC_MASIVA_HEADERS_CONCEPTO);
+    headers = headers.concat(FAC_MASIVA_HEADERS_TRAIL);
+
+    var rows = [headers];
+    var detalle = [];
+    pendientesIds.forEach(function (id) {
+      var op = opsMap[id];
+      if (!op || !op.lineas.length) return;
+      var pf = pacFiscal[_pacNormNombre(op.paciente)];
+      var rfcFinal = (pf && pf.rfc) ? pf.rfc : 'XAXX010101000';
+      var razonFinal = (pf && pf.razonSocial) ? pf.razonSocial : 'PUBLICO EN GENERAL';
+      var descuentoOp = Math.max(0, op.montoLista - op.total);
+      // Sin CFDI del que leer impuestos: se asume Exento (servicios médicos, el
+      // caso normal en Hestia) — revisar antes de subir si alguna línea no lo es.
+      var row = [
+        FAC_MASIVA_SERIE, op.fecha, op.sucursal || '', rfcFinal,
+        'PESOS', '', op.formaPago || '', '', op.id,
+        op.montoLista, descuentoOp, op.total, 0, 0, 0, 0, op.total
+      ];
+      var nLineas = Math.min(op.lineas.length, FAC_MASIVA_CONCEPTO_BLOQUES);
+      for (var li = 0; li < nLineas; li++) {
+        var ln = op.lineas[li];
+        var descPesos = ln.pvp * ln.cantidad * (ln.descPct / 100);
+        row.push('', ln.producto || '', ln.cantidad, ln.pvp, descPesos, 0, 0, '', 0, 'No aplica', 0, '', 0, '');
+      }
+      for (var mi = nLineas; mi < FAC_MASIVA_CONCEPTO_BLOQUES; mi++) row = row.concat(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+      row.push('', '', '', 'Factura', '', '', '', '', '', '', '');
+      rows.push(row);
+      detalle.push({ opId: op.id, paciente: op.paciente, razonSocial: razonFinal, rfc: rfcFinal, fecha: op.fecha, total: op.total });
+    });
+    if (rows.length < 2) return { ok: false, error: 'No se pudo armar el detalle de las operaciones pendientes (sin líneas de venta en el rango).' };
+
+    var xlsxBlob = _buildXlsxBlob(rows, 'Hoja1', 'ContaDigital_PorFacturar_' + fechaInicio + '_a_' + fechaFin + '.xlsx');
+    var folder = DriveApp.getFolderById(FAC_MASIVA_FOLDER_ID);
+    var xlsxFile = folder.createFile(xlsxBlob);
+
+    var totalGeneral = detalle.reduce(function (s, d) { return s + (d.total || 0); }, 0);
+    logAudit(usuario || 'sistema', 'Facturacion', 'ReporteContaDigitalPendientes', '', fechaInicio + ' a ' + fechaFin, '', detalle.length + ' operaciones pendientes');
+    return {
+      ok: true, url: xlsxFile.getUrl(), numOperaciones: detalle.length,
       detalle: detalle, totalGeneral: totalGeneral
     };
   } catch (ex) { return { ok: false, error: ex.message }; }

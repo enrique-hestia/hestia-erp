@@ -569,6 +569,9 @@ function doPost(e) {
     if (body.action === 'generarReporteContaDigital') {
       return jsonResponse(generarReporteContaDigital(body.fechaInicio, body.fechaFin, body.usuario));
     }
+    if (body.action === 'generarReporteContaDigitalPendientes') {
+      return jsonResponse(generarReporteContaDigitalPendientes(body.fechaInicio, body.fechaFin, body.usuario));
+    }
     if (body.action === 'aplicarDatosFiscalesPacientes') {
       return jsonResponse(aplicarDatosFiscalesPacientes(body));
     }
