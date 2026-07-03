@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.18 -->
+﻿<!-- app-build:2026.07.02.19 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4499,6 +4499,9 @@ async function ingFacAnalizar() {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Analizar periodo actual'; }
   }
+  // Completa razón social/RFC/UUID en automático cada vez que se analiza el
+  // periodo — ya no depende de que alguien recuerde dar clic al botón aparte.
+  try { await ingFacBackfillRazonSocial(true); } catch(_bf) {}
 }
 
 // Completa razón social/RFC/UUID de operaciones que YA tienen factura vinculada
@@ -4506,24 +4509,34 @@ async function ingFacAnalizar() {
 // antes de que existiera este detalle, o facturas a nombre de otra persona que
 // el paciente (ej. el esposo). Cruza contra el mismo XML ya vinculado, no cambia
 // ni el archivo ni el folio.
-async function ingFacBackfillRazonSocial() {
+async function ingFacBackfillRazonSocial(silent) {
   var btn = document.getElementById('ing-fac-backfill-btn');
-  if (!currentFechaInicio || !currentFechaFin) { alert('Selecciona un rango de fechas en el filtro principal primero.'); return; }
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ing-spinner ing-spinner-dark"></span>Completando…'; }
+  if (!currentFechaInicio || !currentFechaFin) { if(!silent) alert('Selecciona un rango de fechas en el filtro principal primero.'); return; }
+  if (btn && !silent) { btn.disabled = true; btn.innerHTML = '<span class="ing-spinner ing-spinner-dark"></span>Completando…'; }
   try {
     var s = getSession()||{};
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'backfillRazonSocialDesdeXml', fechaInicio:currentFechaInicio, fechaFin:currentFechaFin, usuario:s.email||''})});
     var res = await r.json();
     if (res.ok) {
-      alert('Listo — se completó razón social/RFC en '+res.actualizadas+' operación(es).'+(res.sinCoincidencia?' ('+res.sinCoincidencia+' con factura vinculada pero sin XML en este rango, sin cambios.)':''));
-      if (typeof loadIngresosERP === 'function') loadIngresosERP();
-    } else {
+      if (!silent) alert('Listo — se completó razón social/RFC en '+res.actualizadas+' operación(es).'+(res.sinCoincidencia?' ('+res.sinCoincidencia+' con factura vinculada pero sin XML en este rango, sin cambios.)':''));
+      if (res.actualizadas > 0 && typeof _fetchIngresosRaw === 'function') {
+        // Se acaba de escribir en la hoja — forzar refetch real en vez de confiar
+        // en la caché SWR (que podría seguir sirviendo datos viejos un rato más).
+        try {
+          var rawIng = await _fetchIngresosRaw();
+          var dIng = _ingApplyDateFilter(rawIng);
+          _swrSet('ingresos', dIng, currentFechaInicio||'', currentFechaFin||'');
+          _ingData = dIng;
+          if (document.getElementById('view-ingresos') && document.getElementById('view-ingresos').style.display !== 'none') _renderIngresosERP();
+        } catch(_ref) {}
+      }
+    } else if (!silent) {
       alert('Error: '+(res.error||'No se pudo completar'));
     }
   } catch(ex) {
-    alert('Error de conexión: '+ex.message);
+    if (!silent) alert('Error de conexión: '+ex.message);
   } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = '🔄 Completar razón social histórica'; }
+    if (btn && !silent) { btn.disabled = false; btn.innerHTML = '🔄 Completar razón social histórica'; }
   }
 }
 
