@@ -271,7 +271,11 @@ function _gfEgContext() {
     var d=egSh.getDataRange().getValues();
     for(var i=1;i<d.length;i++){
       var rec=String(d[i][iRec]||'').trim(); if(!rec) continue;
-      var mes=String(d[i][2]||'').trim();
+      // OJO: la columna Mes a veces la guarda Sheets como objeto Date en vez de
+      // texto "YYYY-MM" (según cómo se haya capturado la fila) — sin normalizar,
+      // la comparación de "ya generado" fallaba en silencio y el gasto fijo
+      // volvía a aparecer disponible para programar, aunque ya tuviera CxP.
+      var mes=_gfToYM(d[i][2]);
       genSet[rec+'|'+mes]=true;
       var monto=parseFloat(d[i][9])||0;
       if(!lastByGF[rec] || mes>lastByGF[rec].mes) lastByGF[rec]={mes:mes, monto:monto};
@@ -389,30 +393,40 @@ function readProyeccionGastosFijos(b) {
 }
 
 // Crea UNA fila CxP en Egresos2026 a partir de un item validado.
+// Usa LockService para que la revisión de duplicados + el appendRow sean atómicos:
+// sin esto, dos clics casi simultáneos (doble clic, doble pestaña) podían pasar
+// ambos la revisión de duplicado antes de que cualquiera terminara de escribir,
+// generando dos cuentas por pagar del mismo gasto fijo y riesgo de pago doble.
 function _gfAppendCxP(egSh, iRec1, item, usuario) {
-  var periodo=item.periodo;
-  var monto=parseFloat(String(item.monto||'').replace(/[$,]/g,''))||0;
-  var data=egSh.getDataRange().getValues();
-  for(var i=1;i<data.length;i++){
-    if(String(data[i][iRec1-1]||'').trim()===item.id && String(data[i][2]||'').trim()===periodo)
-      return {ok:false, dup:true, id:item.id};
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) return {ok:false, error:'No se pudo obtener el bloqueo, intenta de nuevo'};
+  try {
+    var periodo=item.periodo;
+    var monto=parseFloat(String(item.monto||'').replace(/[$,]/g,''))||0;
+    var data=egSh.getDataRange().getValues();
+    for(var i=1;i<data.length;i++){
+      if(String(data[i][iRec1-1]||'').trim()===item.id && _gfToYM(data[i][2])===periodo)
+        return {ok:false, dup:true, id:item.id};
+    }
+    var lr=egSh.getLastRow(), lastId=0;
+    if(lr>1){ var ids=egSh.getRange(2,1,lr-1,1).getValues(); for(var k=0;k<ids.length;k++){var n=parseInt(ids[k][0]); if(n>lastId)lastId=n;} }
+    var newId=lastId+1;
+    // A ID, B Fecha(''), C Mes, D prioridad, E Proveedor, F Contable, G Tipo, H Subtipo,
+    // I Concepto, J Monto, K Notas, L Vencimiento, M..O false, P Poliza, Q FormaPago, R Obs, S/T links
+    var row=[ newId,'',periodo,1, item.proveedor||'', item.contable||'Gasto','Fijo', item.subtipo||'',
+              item.concepto||'', monto, item.notas||'', item.vencimiento||'', false,false,false,'',
+              item.formaPago||'', '', '', '' ];
+    egSh.appendRow(row);
+    var newRow = egSh.getLastRow();
+    egSh.getRange(newRow, iRec1).setValue(item.id); // RecurrenteID
+    // Divisa de la partida (columna detectada/creada por header — no colisiona con otras)
+    var div = String(item.divisa||'MXN').toUpperCase()==='USD' ? 'USD' : 'MXN';
+    var iDiv = _egColEnsure(egSh, 'divisa', 'Divisa');
+    egSh.getRange(newRow, iDiv).setValue(div);
+    logAudit(usuario||'sistema','GastoFijo','Programar',item.id,'Mes',periodo,(item.proveedor||'')+' '+div+' '+monto);
+  } finally {
+    lock.releaseLock();
   }
-  var lr=egSh.getLastRow(), lastId=0;
-  if(lr>1){ var ids=egSh.getRange(2,1,lr-1,1).getValues(); for(var k=0;k<ids.length;k++){var n=parseInt(ids[k][0]); if(n>lastId)lastId=n;} }
-  var newId=lastId+1;
-  // A ID, B Fecha(''), C Mes, D prioridad, E Proveedor, F Contable, G Tipo, H Subtipo,
-  // I Concepto, J Monto, K Notas, L Vencimiento, M..O false, P Poliza, Q FormaPago, R Obs, S/T links
-  var row=[ newId,'',periodo,1, item.proveedor||'', item.contable||'Gasto','Fijo', item.subtipo||'',
-            item.concepto||'', monto, item.notas||'', item.vencimiento||'', false,false,false,'',
-            item.formaPago||'', '', '', '' ];
-  egSh.appendRow(row);
-  var newRow = egSh.getLastRow();
-  egSh.getRange(newRow, iRec1).setValue(item.id); // RecurrenteID
-  // Divisa de la partida (columna detectada/creada por header — no colisiona con otras)
-  var div = String(item.divisa||'MXN').toUpperCase()==='USD' ? 'USD' : 'MXN';
-  var iDiv = _egColEnsure(egSh, 'divisa', 'Divisa');
-  egSh.getRange(newRow, iDiv).setValue(div);
-  logAudit(usuario||'sistema','GastoFijo','Programar',item.id,'Mes',periodo,(item.proveedor||'')+' '+div+' '+monto);
   return {ok:true, id:newId};
 }
 
@@ -458,6 +472,39 @@ function programarGastosFijosBatch(b) {
     }
     return {ok:true, creadas:creadas, duplicadas:dups, errores:errores};
   } catch(ex){ return {ok:false, error:ex.message}; }
+}
+
+// Diagnóstico manual (correr una vez desde el editor de Apps Script después del
+// fix): busca en Egresos2026 combinaciones RecurrenteID+Mes repetidas — es decir,
+// el mismo gasto fijo programado más de una vez para el mismo periodo, señal de
+// pago duplicado. No borra nada, solo reporta para revisión manual.
+function detectarDuplicadosGastosFijos() {
+  var ss=SpreadsheetApp.openById(EGRESOS_SS_2026);
+  var egSh=ss.getSheetByName(EGRESOS_TABS[2026]||'Egresos2026');
+  var hdr=egSh.getRange(1,1,1,egSh.getLastColumn()).getValues()[0].map(function(h){return String(h).trim().toLowerCase();});
+  var iRec=-1; for(var c=0;c<hdr.length;c++){ if(hdr[c].indexOf('recurrente')>-1){iRec=c;break;} }
+  if(iRec<0) { Logger.log('No existe columna RecurrenteID todavía — no hay nada que revisar.'); return {ok:true, duplicados:[]}; }
+  var data=egSh.getDataRange().getValues();
+  var vistos={}, duplicados=[];
+  for(var i=1;i<data.length;i++){
+    var rec=String(data[i][iRec]||'').trim(); if(!rec) continue;
+    var mes=_gfToYM(data[i][2]);
+    var key=rec+'|'+mes;
+    if(!vistos[key]) vistos[key]=[];
+    vistos[key].push({fila:i+1, id:data[i][0], proveedor:data[i][4], concepto:data[i][8], monto:data[i][9], pagado:data[i][13]});
+  }
+  for(var k in vistos){
+    if(vistos[k].length>1) duplicados.push({recurrenteYMes:k, filas:vistos[k]});
+  }
+  if(duplicados.length){
+    Logger.log('⚠ Se encontraron '+duplicados.length+' gastos fijos duplicados en Egresos2026:');
+    duplicados.forEach(function(d){
+      Logger.log(d.recurrenteYMes+' → filas: '+d.filas.map(function(f){return 'fila '+f.fila+' (ID '+f.id+', '+f.proveedor+', $'+f.monto+', pagado='+f.pagado+')';}).join(' | '));
+    });
+  } else {
+    Logger.log('✓ No se encontraron duplicados de RecurrenteID+Mes en Egresos2026.');
+  }
+  return {ok:true, duplicados:duplicados};
 }
 
 function bulkUpdateCxPMonto(body) {

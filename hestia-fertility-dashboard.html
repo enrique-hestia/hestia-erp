@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.14 -->
+﻿<!-- app-build:2026.07.02.15 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -15923,7 +15923,7 @@ function _gfProgHTML(per){
         +'<td style="font-size:11px">'+(p.vencimiento||'—')+'</td>'
         +'<td style="text-align:right"><input id="gf-monto-'+p.id+'" type="number" step="0.01" value="'+(p.montoSugerido||0)+'" style="width:120px;text-align:right;border:1.5px solid '+(amber?'#fcd34d':'var(--color-divider,#e5e7eb)')+';border-radius:8px;padding:5px 8px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"></td>'
         +'<td style="text-align:center;white-space:nowrap;display:flex;gap:4px;justify-content:center;align-items:center;padding:6px 4px">'
-        +'<button onclick="gfProgramarUno(\''+p.id+'\')" style="padding:5px 10px;background:#166534;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Programar</button>'
+        +'<button onclick="gfProgramarUno(\''+p.id+'\',this)" style="padding:5px 10px;background:#166534;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Programar</button>'
         +'<button onclick="gfOpenForm(decodeURIComponent(\''+encodeURIComponent(JSON.stringify(p))+'\'))" style="padding:5px 8px;background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:7px;font-size:12px;cursor:pointer" title="Editar plantilla">✎</button>'
         +'<button onclick="gfDeleteById(\''+p.id+'\',decodeURIComponent(\''+encodeURIComponent(p.proveedor||'')+'\'))" style="padding:5px 8px;background:rgba(220,38,38,.08);color:#dc2626;border:none;border-radius:7px;font-size:12px;cursor:pointer" title="Eliminar plantilla">✕</button>'
         +'</td></tr>';
@@ -16037,27 +16037,33 @@ function _gfLoadProy(per){
   c.innerHTML=h;
 }
 
-async function gfProgramarUno(id){
-  var p=(_gfData.propuestas||[]).filter(function(x){return x.id===id;})[0]; if(!p) return;
+async function gfProgramarUno(id, btn){
+  if (btn) { if (btn.disabled) return; btn.disabled = true; btn.innerHTML = '<span class="ing-spinner"></span>'; }
+  var p=(_gfData.propuestas||[]).filter(function(x){return x.id===id;})[0];
+  if(!p) { if(btn){ btn.disabled=false; btn.textContent='Programar'; } return; }
   var monto=(document.getElementById('gf-monto-'+id)||{}).value; if(monto==='') monto=p.montoSugerido;
   var s=getSession()||{};
   try {
     var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'programarGastoFijo', id:id, periodo:_gfData.periodo, proveedor:p.proveedor, contable:p.contable, subtipo:p.subtipo, concepto:p.concepto, monto:monto, vencimiento:p.vencimiento, formaPago:p.formaPago, divisa:p.divisa, frecuencia:p.frecuencia||'mensual', notas:p.notas||'', usuario:s.email||'sistema'})});
     var res=await r.json();
-    if(res.ok||res.dup){ loadGastosFijos(); } else alert('Error: '+(res.error||''));
-  } catch(e){ alert('Error: '+e.message); }
+    if(res.ok||res.dup){ loadGastosFijos(); } else { alert('Error: '+(res.error||'')); if(btn){ btn.disabled=false; btn.textContent='Programar'; } }
+  } catch(e){ alert('Error: '+e.message); if(btn){ btn.disabled=false; btn.textContent='Programar'; } }
 }
+var _gfProgramarTodosBusy = false;
 async function gfProgramarTodos(){
+  if (_gfProgramarTodosBusy) return;
   var props=_gfData.propuestas||[];
   var items=props.map(function(p){ var m=(document.getElementById('gf-monto-'+p.id)||{}).value; if(m==='')m=p.montoSugerido; return {id:p.id, periodo:_gfData.periodo, proveedor:p.proveedor, contable:p.contable, subtipo:p.subtipo, concepto:p.concepto, monto:m, vencimiento:p.vencimiento, formaPago:p.formaPago, divisa:p.divisa, frecuencia:p.frecuencia||'mensual', notas:p.notas||''}; });
   if(!items.length){ alert('No hay propuestas por programar'); return; }
   if(!confirm('¿Programar '+items.length+' gastos fijos a Cuentas por Pagar?')) return;
+  _gfProgramarTodosBusy = true;
   var s=getSession()||{};
   try {
     var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'programarGastosFijosBatch', items:items, usuario:s.email||'sistema'})});
     var res=await r.json();
     if(res.ok){ gfMarkDone(_gfData.periodo); loadGastosFijos(); } else alert('Error: '+(res.error||''));
-  } catch(e){ alert('Error: '+e.message); }
+  } catch(e){ alert('Error: '+e.message);
+  } finally { _gfProgramarTodosBusy = false; }
 }
 
 // ── Catálogo: modales CRUD ──
