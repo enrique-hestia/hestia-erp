@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.15 -->
+﻿<!-- app-build:2026.07.02.16 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -14803,7 +14803,9 @@ function _cxpBuildNewRows(rows) {
     else if(urg==='mes') badge='<span class="cxp-badge cxp-d30">'+d+' días</span>';
     else if(urg==='ok') badge='<span class="cxp-badge cxp-ok">'+d+' días</span>';
     else badge='<span class="cxp-badge cxp-na">Sin fecha</span>';
-    var factIcon = row.facturacion ? '✓' : '—';
+    var factIcon = row.linkFacturaUrl
+      ? '<span onclick="egViewPDF(decodeURIComponent(\''+encodeURIComponent(row.linkFacturaUrl)+'\'),\'Factura · '+row.proveedor.replace(/'/g,"\\'")+'\')" style="cursor:pointer;color:#166534;font-weight:800" title="Ver factura">✓</span>'
+      : (row.facturacion ? '✓' : '—');
     return '<tr'+rowCls+'>'
       + '<td style="padding:8px"><input type="checkbox" class="cxp-row-cb" data-rn="'+row.rowNum+'" onchange="_cxpCbChange()"></td>'
       + '<td>'+badge+'</td>'
@@ -14816,6 +14818,7 @@ function _cxpBuildNewRows(rows) {
       + '<td style="text-align:center;white-space:nowrap">'
         + '<button onclick="cxpOpenPay('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),'+row.monto+',\''+(row.divisa||'MXN')+'\')" style="padding:4px 10px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;margin-right:4px">Pagar</button>'
         + '<button onclick="cxpOpenEdit('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(JSON.stringify(row))+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:6px;font-size:12px;cursor:pointer" title="Editar">✎</button>'
+        + '<button onclick="cxpFactura('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),decodeURIComponent(\''+encodeURIComponent(row.linkFacturaUrl||'')+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.08);border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px;opacity:'+(row.linkFacturaUrl?'1':'.45')+'" title="'+(row.linkFacturaUrl?'Ver factura':'Subir factura')+'">📄</button>'
         + '<button onclick="cxpCotiz('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),decodeURIComponent(\''+encodeURIComponent(row.linkCotizacionUrl||'')+'\'))" style="padding:4px 8px;background:rgba(196,106,122,.1);border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px;opacity:'+(row.linkCotizacionUrl?'1':'.45')+'" title="'+(row.linkCotizacionUrl?'Ver cotización':'Adjuntar cotización')+'">📋</button>'
         + '<button onclick="cxpDeleteRow('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor||'')+'\'))" style="padding:4px 8px;background:rgba(220,38,38,.08);color:#dc2626;border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px" title="Eliminar esta CxP">🗑</button>'
       + '</td>'
@@ -14827,6 +14830,14 @@ function _cxpBuildNewRows(rows) {
 window.cxpCotiz = function(rowNum, prov, url) {
   if (url) { egViewPDF(url, 'Cotización · ' + prov); }
   else { egOpenUpload(rowNum, 'cotizacion', prov); }
+};
+
+// Factura desde la tabla de CxP: misma fila que Egresos (esta CxP ES la fila de
+// Egresos2026 antes de pagarse), así que al subirla aquí ya queda vinculada
+// cuando la cuenta se marque como pagada — pagarCxP no toca este link.
+window.cxpFactura = function(rowNum, prov, url) {
+  if (url) { egViewPDF(url, 'Factura · ' + prov); }
+  else { egOpenUpload(rowNum, 'factura', prov); }
 };
 
 // ── CxP: selección y edición masiva de montos ──

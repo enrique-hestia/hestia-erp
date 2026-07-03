@@ -1156,8 +1156,8 @@ function readBDCxP() {
         facturacion:r[12]===true||String(r[12]).toUpperCase()==='TRUE',
         pagado:false, contabilidad:r[14]===true||String(r[14]).toUpperCase()==='TRUE',
         poliza:String(r[15]||''), formaPago:String(r[16]||''),
-        observaciones:String(r[17]||''), linkFactura:String(r[18]||''),
-        linkPago:String(r[19]||''),
+        observaciones:String(r[17]||''), linkFactura:String(r[18]||''), linkFacturaUrl:'',
+        linkPago:String(r[19]||''), linkPagoUrl:'',
         linkCotizacion: iCotiz>-1 ? String(r[iCotiz]||'') : '', linkCotizacionUrl:'',
         divisa: (iDiv>-1 && String(r[iDiv]||'').toUpperCase()==='USD') ? 'USD' : 'MXN',
         dias:dias, urgencia:urgencia
@@ -1174,6 +1174,23 @@ function readBDCxP() {
           if (uC && byRowC[rcc+2]) byRowC[rcc+2].linkCotizacionUrl = uC;
         }
       } catch(_eC){}
+    }
+    // Hipervínculo de factura (col S=19) y comprobante de pago (col T=20) —
+    // uploadFile() los escribe como rich-text hyperlink, igual que cotización;
+    // sin esta extracción el valor plano de la celda no sirve para abrir el visor.
+    if (rows.length) {
+      try {
+        var byRowF = {};
+        for (var bf=0; bf<rows.length; bf++) byRowF[rows[bf].rowNum] = rows[bf];
+        var rtF = sh.getRange(2, 19, raw.length-1, 1).getRichTextValues();
+        var rtP = sh.getRange(2, 20, raw.length-1, 1).getRichTextValues();
+        for (var rcf=0; rcf<rtF.length; rcf++){
+          var uF = rtF[rcf][0] ? rtF[rcf][0].getLinkUrl() : '';
+          if (uF && byRowF[rcf+2]) byRowF[rcf+2].linkFacturaUrl = uF;
+          var uP = rtP[rcf][0] ? rtP[rcf][0].getLinkUrl() : '';
+          if (uP && byRowF[rcf+2]) byRowF[rcf+2].linkPagoUrl = uP;
+        }
+      } catch(_eF){}
     }
     var urgOrder = {vencido:0,hoy:1,semana:2,mes:3,ok:4,'sin-fecha':5};
     rows.sort(function(a,b){
