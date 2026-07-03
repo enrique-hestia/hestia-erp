@@ -3369,7 +3369,9 @@ function uploadFile(body) {
     // 2) Crear el nuevo archivo (ya sin el viejo del mismo nombre → nombre limpio)
     var blob = Utilities.newBlob(Utilities.base64Decode(body.base64), body.mimeType || 'application/pdf', fullName);
     var file = folder.createFile(blob);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); // visible para cualquiera con acceso
+    // setSharing puede ser lento o fallar por política de la organización — no debe
+    // tumbar toda la subida si el archivo ya se creó correctamente.
+    try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(_share) {}
     var url = file.getUrl();
 
     // 3) Escribir el hipervínculo en la fila + (si factura) marcar Facturación

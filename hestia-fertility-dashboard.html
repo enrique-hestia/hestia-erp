@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.17 -->
+﻿<!-- app-build:2026.07.02.18 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -16820,20 +16820,31 @@ async function _erpUploadFile(dz, file) {
   if (file.size > 10*1024*1024) { alert('Archivo demasiado grande (máx 10MB)'); return; }
   var tipo = dz.dataset.tipo || 'factura';
   var prefix = dz.dataset.prefix || '';
+  var pesado = file.size > 2*1024*1024; // >2MB — avisar que puede tardar más
 
   // UI: uploading
   dz.classList.add('uploading');
-  dz.innerHTML = '<div class="erp-dz-icon">⏳</div><div class="erp-dz-text" style="color:#3b82f6">Subiendo '+file.name+'…</div><div class="erp-dz-sub">Espera un momento</div>';
+  dz.innerHTML = '<div class="erp-dz-icon">⏳</div><div class="erp-dz-text" style="color:#3b82f6">Subiendo '+file.name+'…</div>'
+    + '<div class="erp-dz-sub">'+(pesado?'Archivo pesado ('+(file.size/1024/1024).toFixed(1)+'MB) — puede tardar un poco más':'Espera un momento')+'</div>';
+
+  // Si la respuesta tarda demasiado (más de ~35s), Apps Script a veces la reintenta
+  // como GET y se pierde el token de sesión — eso produce un "Sesión inválida" que
+  // en realidad no es un problema de sesión, sino de tiempo. Se corta antes con un
+  // mensaje claro en vez de dejar esa confusión.
+  var controller = new AbortController();
+  var timedOut = false;
+  var timer = setTimeout(function(){ timedOut = true; controller.abort(); }, 35000);
 
   try {
     var base64 = await _fileToBase64(file);
     var s = getSession()||{};
     var rowNum = (String(prefix).match(/(\d+)/) || [])[1] || '';
-    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', signal: controller.signal, body:JSON.stringify({
       action:'uploadFile', tipo:tipo, prefix:prefix, rowNum:rowNum,
       fileName:file.name, base64:base64, mimeType:file.type,
       usuario:s.email||'sistema'
     })});
+    clearTimeout(timer);
     var res = await r.json();
     if (res.ok) {
       dz.classList.remove('uploading');
@@ -16850,12 +16861,22 @@ async function _erpUploadFile(dz, file) {
       if (cb && typeof window[cb] === 'function') { try { window[cb](res); } catch(_e){} }
     } else {
       dz.classList.remove('uploading');
-      dz.innerHTML = '<div class="erp-dz-icon">❌</div><div class="erp-dz-text" style="color:#dc2626">Error: '+(res.error||'No se pudo subir')+'</div>'
+      // "Sesión inválida" en una subida es casi siempre el timeout disfrazado (ver nota arriba), no que se cerró tu sesión.
+      var errMsg = /sesi[oó]n inv[aá]lida/i.test(res.error||'')
+        ? 'La subida tardó demasiado y se perdió la conexión a mitad de camino. Intenta de nuevo — si se repite, prueba con un archivo más ligero.'
+        : (res.error||'No se pudo subir');
+      dz.innerHTML = '<div class="erp-dz-icon">❌</div><div class="erp-dz-text" style="color:#dc2626">Error: '+errMsg+'</div>'
         + '<div class="erp-dz-sub" style="cursor:pointer;color:var(--color-primary)" onclick="this.parentElement.classList.remove(\'done\')">Reintentar</div>';
     }
   } catch(e) {
+    clearTimeout(timer);
     dz.classList.remove('uploading');
-    dz.innerHTML = '<div class="erp-dz-icon">❌</div><div class="erp-dz-text" style="color:#dc2626">Error de conexión</div>';
+    if (timedOut) {
+      dz.innerHTML = '<div class="erp-dz-icon">⏱</div><div class="erp-dz-text" style="color:#dc2626">La subida está tardando más de lo normal</div>'
+        + '<div class="erp-dz-sub">Puede que el archivo sea pesado o la conexión esté lenta. Revisa en unos segundos si de todas formas se subió antes de reintentar, para no duplicarlo.</div>';
+    } else {
+      dz.innerHTML = '<div class="erp-dz-icon">❌</div><div class="erp-dz-text" style="color:#dc2626">Error de conexión</div>';
+    }
   }
 }
 
