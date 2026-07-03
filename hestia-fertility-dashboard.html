@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.21 -->
+﻿<!-- app-build:2026.07.02.22 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2886,6 +2886,9 @@ function _renderIngresosERP() {
   h.push('<div '+HS+'>Resumen contable</div>');
   h.push('<table style="width:100%;border-collapse:collapse">');
   h.push('<tr><td '+LS+' style="font-weight:700;color:#166534">Facturado</td><td '+VS+' style="color:#166534">'+fC(_facturado)+'</td></tr>');
+  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:var(--text-primary,#111);border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ Monto fiscal a declarar (SAT)</td><td id="ing-desc-fiscal-inline" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:var(--text-primary,#111);border-bottom:1px solid var(--color-divider,#f0f0f0)"><span class="ing-spinner ing-spinner-dark"></span></td></tr>');
+  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#b45309;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ Descuento CFDI a capturar aparte</td><td id="ing-desc-cfdi-inline" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#b45309;border-bottom:1px solid var(--color-divider,#f0f0f0)">…</td></tr>');
+  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ Descuento ya horneado en precio</td><td id="ing-desc-horneado-inline" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)">…</td></tr>');
   h.push('<tr><td '+LS+' style="font-weight:700;color:#b45309">Pendiente por facturar</td><td '+VS+' style="color:#b45309">'+fC(_pendienteFacturar)+'</td></tr>');
   h.push('<tr style="background:var(--color-surface,#fafafa)"><td style="padding:6px 16px;font-size:10px;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)">Verificación (Facturado + Pendiente)</td>'
     +'<td style="padding:6px 16px;font-size:10px;text-align:right;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)">'+fC(_facturado+_pendienteFacturar)+'</td></tr>');
@@ -2898,8 +2901,11 @@ function _renderIngresosERP() {
   h.push('</table>');
   h.push('<div style="padding:10px 16px;font-size:10px;color:var(--text-secondary,#9ca3af);line-height:1.5">'
     +'<strong>Facturado</strong> = Σ Pagado de operaciones con Factura# capturado<br>'
+    +'<strong>Monto fiscal a declarar</strong> = Importe bruto del CFDI (antes de descuento) — lo que el SAT prellena, no el neto ya facturado<br>'
+    +'<strong>Descuento CFDI a capturar aparte</strong> = captúralo tú mismo en "Descuentos y devoluciones" del SAT para bajar la base<br>'
+    +'<strong>Descuento horneado en precio</strong> = ya está absorbido en el Importe facturado, no hay nada que capturar aparte (solo informativo)<br>'
     +'<strong>Pendiente por facturar</strong> = Subtotal Pagado − Facturado<br>'
-    +'<strong>ISR Declarado</strong> = Contabilizado + CFDI mes anterior<br>'
+    +'<strong>ISR Declarado</strong> = Contabilizado + CFDI mes anterior (no usa el monto fiscal — sigue siendo manual)<br>'
     +'<strong>Contabilizado</strong> = Σ Monto Fact/Mes donde Contabilidad ✓<br>'
     +'<strong>Total TDC/TDD</strong> = Subtotal − Efectivo − Santander</div>');
   h.push('</div>');
@@ -4575,18 +4581,36 @@ async function ingFacBackfillRazonSocial(silent) {
 // facturas donde el descuento se "horneó" directamente en el precio (el CFDI no
 // trae Descuento) — esas no se pueden declarar aparte en el SAT porque el
 // Importe ya salió rebajado.
+function _ingSetDescInline(fiscal, cfdi, horneado) {
+  var e1 = document.getElementById('ing-desc-fiscal-inline');
+  var e2 = document.getElementById('ing-desc-cfdi-inline');
+  var e3 = document.getElementById('ing-desc-horneado-inline');
+  if (e1) e1.innerHTML = fiscal;
+  if (e2) e2.innerHTML = cfdi;
+  if (e3) e3.innerHTML = horneado;
+}
+
 async function _ingCargarDescuentosFiscales() {
   var body = document.getElementById('ing-desc-fiscal-body');
   if (!body) return;
-  if (!currentFechaInicio || !currentFechaFin) { body.innerHTML = '<div style="font-size:12px;color:var(--text-secondary,#9ca3af)">Selecciona un rango de fechas.</div>'; return; }
+  var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  if (!currentFechaInicio || !currentFechaFin) {
+    body.innerHTML = '<div style="font-size:12px;color:var(--text-secondary,#9ca3af)">Selecciona un rango de fechas.</div>';
+    _ingSetDescInline('—','—','—');
+    return;
+  }
   try {
     var tok = encodeURIComponent(getToken());
     var r = await fetch(APPS_SCRIPT_URL+'?action=analizarDescuentosFiscales&fechaInicio='+currentFechaInicio+'&fechaFin='+currentFechaFin+'&token='+tok);
     var d = await r.json();
-    if (!d.ok) { body.innerHTML = '<div style="font-size:12px;color:#dc2626">Error: '+(d.error||'No se pudo analizar')+'</div>'; return; }
-    var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+    if (!d.ok) { body.innerHTML = '<div style="font-size:12px;color:#dc2626">Error: '+(d.error||'No se pudo analizar')+'</div>'; _ingSetDescInline('—','—','—'); return; }
     var t = d.totales;
-    if (!d.detalle.length) { body.innerHTML = '<div style="font-size:12px;color:var(--text-secondary,#9ca3af)">No hay operaciones facturadas con XML vinculado en este período todavía.</div>'; return; }
+    if (!d.detalle.length) {
+      body.innerHTML = '<div style="font-size:12px;color:var(--text-secondary,#9ca3af)">No hay operaciones facturadas con XML vinculado en este período todavía.</div>';
+      _ingSetDescInline(fmtM(0), fmtM(0), fmtM(0));
+      return;
+    }
+    _ingSetDescInline(fmtM(t.montoFiscal), fmtM(t.descuentoCFDI), fmtM(t.montoHorneado));
 
     var h = '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">'
       +'<div style="background:var(--color-surface,#f3f4f6);border-radius:10px;padding:12px 14px">'
@@ -4634,6 +4658,7 @@ async function _ingCargarDescuentosFiscales() {
     body.innerHTML = h;
   } catch(ex) {
     body.innerHTML = '<div style="font-size:12px;color:#dc2626">Error de conexión: '+ex.message+'</div>';
+    _ingSetDescInline('—','—','—');
   }
 }
 
