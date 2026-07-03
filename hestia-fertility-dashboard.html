@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.13 -->
+﻿<!-- app-build:2026.07.02.14 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4460,6 +4460,18 @@ async function ingFacAnalizar() {
       });
       h += '</tbody></table>';
     }
+    if (d.carpetasAnalizadas && d.carpetasAnalizadas.length) {
+      h += '<div style="margin-top:14px">'
+        +'<button onclick="var e=document.getElementById(\'ing-fac-carpetas\');e.style.display=e.style.display===\'none\'?\'block\':\'none\'" style="background:none;border:none;cursor:pointer;font-size:10.5px;font-weight:700;color:var(--text-secondary,#9ca3af);padding:0">📁 Ver carpetas analizadas ('+d.carpetasAnalizadas.length+' meses) ▾</button>'
+        +'<div id="ing-fac-carpetas" style="display:none;margin-top:8px">'
+        +'<table class="ing-fac-tbl"><thead><tr><th>Carpeta</th><th>Encontrada</th><th>XML totales</th><th>Tipo Ingreso en rango</th></tr></thead><tbody>'
+        +d.carpetasAnalizadas.map(function(c){
+          return '<tr><td style="font-family:monospace;font-size:10px">'+_cxpEsc(c.path)+'</td>'
+            +'<td>'+(c.encontrada?'<span style="color:#166534">✓ sí</span>':'<span style="color:#dc2626">✕ no existe</span>')+'</td>'
+            +'<td>'+c.totalArchivosXml+'</td><td>'+c.totalTipoIngreso+'</td></tr>';
+        }).join('')
+        +'</tbody></table></div></div>';
+    }
     document.getElementById('ing-fac-resultado').innerHTML = h;
     _ingFacRenderSeccion2(d);
     _ingFacRenderSeccion3(d);
@@ -4481,6 +4493,22 @@ async function ingFacVincular(opId, fileId, btn) {
   } catch(ex) { if(btn){ btn.disabled=false; btn.textContent='Error'; } }
 }
 
+// Aplica de un clic la sugerencia por nombre: captura el folio y vincula el XML,
+// sin que el usuario tenga que escribirlo a mano primero.
+async function ingFacUsarSugerencia(opId, folio, fileId, btn) {
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ing-spinner"></span>…'; }
+  try {
+    var s = getSession()||{};
+    var r1 = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'updateIngresoFiscal', opId:opId, factura:folio, usuario:s.email||'sistema'})});
+    var res1 = await r1.json();
+    if (!res1.ok) { if(btn){ btn.disabled=false; btn.textContent='Error'; } alert(res1.error||'No se pudo capturar el folio'); return; }
+    var r2 = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'vincularXmlFactura', opId:opId, fileId:fileId, usuario:s.email||''})});
+    var res2 = await r2.json();
+    if (res2.ok) { if(btn){ var row=btn.closest('tr'); if(row) row.style.opacity='.4'; btn.textContent='✓ Vinculado'; } }
+    else { if(btn){ btn.disabled=false; btn.textContent='Error'; } alert(res2.error||'No se pudo vincular'); }
+  } catch(ex) { if(btn){ btn.disabled=false; btn.textContent='Error'; } }
+}
+
 function _ingFacRenderSeccion2(d) {
   var el = document.getElementById('ing-fac-seccion2');
   if (!el) return;
@@ -4494,14 +4522,23 @@ function _ingFacRenderSeccion2(d) {
       +'<span style="font-size:20px;font-weight:800;color:#b45309">'+fmtM(totalPendiente)+'</span>'
       +'<span style="font-size:11px;font-weight:600;color:#b45309">pendiente por facturar — '+d.sinFactura.length+' operaciones</span>'
     +'</div>'
-    +'<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Fecha</th><th>Paciente</th><th>Total</th><th>Factura#</th><th>Subir XML</th></tr></thead><tbody>';
+    +'<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Fecha</th><th>Paciente</th><th>Total</th><th>Sugerencia (por nombre)</th><th>Factura#</th><th>Subir XML</th></tr></thead><tbody>';
   d.sinFactura.forEach(function(o){
     var safe = o.id.replace(/[^a-zA-Z0-9_-]/g,'_');
+    var sugCell;
+    if (o.sugerenciaFolio) {
+      var matchColor = o.sugerenciaCoincideMonto ? '#166534' : '#b45309';
+      sugCell = '<div style="font-size:10.5px;color:'+matchColor+';font-weight:600;margin-bottom:3px">Folio '+_cxpEsc(o.sugerenciaFolio)+' — '+fmtM(o.sugerenciaTotal)+(o.sugerenciaCoincideMonto?' ✓':' ⚠')+'</div>'
+        +'<button onclick="ingFacUsarSugerencia(\''+o.id+'\',\''+o.sugerenciaFolio+'\',\''+o.sugerenciaFileId+'\',this)" style="padding:3px 8px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">Usar y vincular</button>';
+    } else {
+      sugCell = '<span style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Sin coincidencia por nombre</span>';
+    }
     h += '<tr id="ing-fac-row-'+safe+'"><td>'+o.id+'</td><td>'+o.fecha+'</td><td>'+_cxpEsc(o.paciente)+'</td><td>'+fmtM(o.total)+'</td>'
+       +'<td>'+sugCell+'</td>'
        +'<td><input id="ing-fac-folio-'+safe+'" type="text" placeholder="Núm." style="width:60px;padding:3px 6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11px"></td>'
        +'<td><label style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--text-secondary,#6b7280);cursor:pointer;padding:4px 9px;border:1.5px dashed var(--color-divider,#d1d5db);border-radius:6px">↑ XML<input type="file" accept=".xml" style="display:none" onchange="ingFacUploadXml(\''+o.id+'\',this)"></label> <span id="ing-fac-upload-st-'+safe+'" style="font-size:9.5px;color:var(--text-secondary,#9ca3af)"></span></td></tr>';
   });
-  h += '<tr style="font-weight:800;background:var(--color-surface,#fafafa)"><td colspan="3" style="text-align:right;padding-right:10px">Total pendiente</td><td>'+fmtM(totalPendiente)+'</td><td colspan="2"></td></tr>';
+  h += '<tr style="font-weight:800;background:var(--color-surface,#fafafa)"><td colspan="3" style="text-align:right;padding-right:10px">Total pendiente</td><td>'+fmtM(totalPendiente)+'</td><td colspan="3"></td></tr>';
   h += '</tbody></table></div>';
   el.innerHTML = h;
 }

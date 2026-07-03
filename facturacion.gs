@@ -146,33 +146,40 @@ function _facQuickParse(xml) {
 
 function _facBuildXmlIndex(fechaInicio, fechaFin) {
   var months = _facMonthsInRange(fechaInicio, fechaFin);
-  var byFolio = {}, all = [];
+  var byFolio = {}, all = [], carpetas = [];
   months.forEach(function (ym) {
+    var mesTag = (ym.mes < 10 ? '0' : '') + ym.mes + ' ' + FAC_MESES_ABR[ym.mes - 1];
+    var pathStr = 'onefactureXMLs/HCL2307051Y6/emitidos/' + ym.anio + '/' + mesTag;
     var folder = _facMonthFolder(ym.anio, ym.mes);
-    if (!folder) return;
-    var files = folder.getFiles();
-    while (files.hasNext()) {
-      var file = files.next();
-      var name = file.getName();
-      if (!/\.xml$/i.test(name)) continue;
-      var xml;
-      try { xml = file.getBlob().getDataAsString('UTF-8'); } catch (e) { continue; }
-      var p = _facQuickParse(xml);
-      if (p.tipo !== 'I') continue; // solo facturas de ingreso (excluye nómina, notas de crédito, pago)
-      var fechaISO = p.fecha ? p.fecha.substring(0, 10) : '';
-      if (fechaISO < fechaInicio || fechaISO > fechaFin) continue;
-      var rec = {
-        folio: p.folio, serie: p.serie, uuid: p.uuid, total: p.total, fecha: fechaISO,
-        receptorNombre: p.receptorNombre, receptorRfc: p.receptorRfc,
-        receptorCP: p.receptorCP, receptorUsoCfdi: p.receptorUsoCfdi, receptorRegimen: p.receptorRegimen,
-        formaPago: p.formaPago,
-        fileId: file.getId(), fileUrl: file.getUrl(), fileName: name
-      };
-      all.push(rec);
-      if (p.folio) byFolio[String(p.folio)] = rec;
+    var totalArchivos = 0, totalIngreso = 0;
+    if (folder) {
+      var files = folder.getFiles();
+      while (files.hasNext()) {
+        var file = files.next();
+        var name = file.getName();
+        if (!/\.xml$/i.test(name)) continue;
+        totalArchivos++;
+        var xml;
+        try { xml = file.getBlob().getDataAsString('UTF-8'); } catch (e) { continue; }
+        var p = _facQuickParse(xml);
+        if (p.tipo !== 'I') continue; // solo facturas de ingreso (excluye nómina, notas de crédito, pago)
+        var fechaISO = p.fecha ? p.fecha.substring(0, 10) : '';
+        if (fechaISO < fechaInicio || fechaISO > fechaFin) continue;
+        totalIngreso++;
+        var rec = {
+          folio: p.folio, serie: p.serie, uuid: p.uuid, total: p.total, fecha: fechaISO,
+          receptorNombre: p.receptorNombre, receptorRfc: p.receptorRfc,
+          receptorCP: p.receptorCP, receptorUsoCfdi: p.receptorUsoCfdi, receptorRegimen: p.receptorRegimen,
+          formaPago: p.formaPago,
+          fileId: file.getId(), fileUrl: file.getUrl(), fileName: name
+        };
+        all.push(rec);
+        if (p.folio) byFolio[String(p.folio)] = rec;
+      }
     }
+    carpetas.push({ path: pathStr, encontrada: !!folder, totalArchivosXml: totalArchivos, totalTipoIngreso: totalIngreso });
   });
-  return { byFolio: byFolio, all: all };
+  return { byFolio: byFolio, all: all, carpetas: carpetas };
 }
 
 function _facReadOpsInRange(fechaInicio, fechaFin) {
@@ -225,10 +232,46 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
       }
       sinFactura.push(op);
     });
+
+    // Para las que no tienen folio capturado: sugerir el XML más probable por
+    // nombre de paciente (+ monto como desempate), sin necesidad de que el
+    // usuario ya sepa/escriba el número de factura primero.
+    sinFactura.forEach(function (op) {
+      var norm = _pacNormNombre(op.paciente);
+      if (!norm) return;
+      // Muchos pacientes se capturan como pareja ("Aleksandra y Kevin") pero el
+      // XML solo trae el nombre de uno — se prueba también cada nombre por separado.
+      var candidatos = [norm];
+      norm.split(' y ').forEach(function (part) {
+        part = part.trim();
+        if (part.length >= 3 && candidatos.indexOf(part) === -1) candidatos.push(part);
+      });
+      var mejor = null, mejorDelta = Infinity;
+      for (var i = 0; i < idx.all.length; i++) {
+        var x = idx.all[i];
+        if (usedFolios[x.folio]) continue;
+        var xNorm = _pacNormNombre(x.receptorNombre);
+        if (!xNorm) continue;
+        var matched = candidatos.some(function (c) { return c && (xNorm.indexOf(c) > -1 || c.indexOf(xNorm) > -1); });
+        if (!matched) continue;
+        var delta = Math.abs((x.total || 0) - (op.total || 0));
+        if (delta < mejorDelta) { mejor = x; mejorDelta = delta; }
+      }
+      if (mejor) {
+        op.sugerenciaFolio = mejor.folio;
+        op.sugerenciaFileId = mejor.fileId;
+        op.sugerenciaTotal = mejor.total;
+        op.sugerenciaFecha = mejor.fecha;
+        op.sugerenciaCoincideMonto = mejorDelta < 0.01;
+        usedFolios[mejor.folio] = true; // no ofrecer el mismo XML como sugerencia a dos operaciones
+      }
+    });
+
     var xmlHuerfanos = idx.all.filter(function (x) { return x.folio && !usedFolios[x.folio]; });
     return {
       ok: true, conDocumento: conDocumento, faltaDocumento: faltaDocumento,
-      sinFactura: sinFactura, xmlHuerfanos: xmlHuerfanos, totalOps: ops.length
+      sinFactura: sinFactura, xmlHuerfanos: xmlHuerfanos, totalOps: ops.length,
+      carpetasAnalizadas: idx.carpetas
     };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
