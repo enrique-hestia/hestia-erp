@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.08 -->
+﻿<!-- app-build:2026.07.02.09 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4445,16 +4445,23 @@ function _ingFacRenderSeccion2(d) {
   var el = document.getElementById('ing-fac-seccion2');
   if (!el) return;
   if (!d.sinFactura.length) { el.innerHTML = ''; return; }
+  var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var totalPendiente = d.sinFactura.reduce(function(s,o){ return s+(o.total||0); },0);
   var h = '<div class="ing-fac-sc">'
     +'<div class="ing-fac-sh">📎 Documentos faltantes</div>'
     +'<div class="ing-fac-sub">Operaciones sin número de factura capturado o sin XML localizado en Drive. Sube el XML descargado y se vinculará automáticamente a la operación.</div>'
+    +'<div style="display:inline-flex;align-items:baseline;gap:8px;background:rgba(180,83,9,.08);border-radius:10px;padding:10px 16px;margin-bottom:14px">'
+      +'<span style="font-size:20px;font-weight:800;color:#b45309">'+fmtM(totalPendiente)+'</span>'
+      +'<span style="font-size:11px;font-weight:600;color:#b45309">pendiente por facturar — '+d.sinFactura.length+' operaciones</span>'
+    +'</div>'
     +'<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Fecha</th><th>Paciente</th><th>Total</th><th>Factura#</th><th>Subir XML</th></tr></thead><tbody>';
   d.sinFactura.forEach(function(o){
     var safe = o.id.replace(/[^a-zA-Z0-9_-]/g,'_');
-    h += '<tr id="ing-fac-row-'+safe+'"><td>'+o.id+'</td><td>'+o.fecha+'</td><td>'+_cxpEsc(o.paciente)+'</td><td>$'+(o.total||0).toLocaleString('en-US',{minimumFractionDigits:2})+'</td>'
+    h += '<tr id="ing-fac-row-'+safe+'"><td>'+o.id+'</td><td>'+o.fecha+'</td><td>'+_cxpEsc(o.paciente)+'</td><td>'+fmtM(o.total)+'</td>'
        +'<td><input id="ing-fac-folio-'+safe+'" type="text" placeholder="Núm." style="width:60px;padding:3px 6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11px"></td>'
        +'<td><label style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--text-secondary,#6b7280);cursor:pointer;padding:4px 9px;border:1.5px dashed var(--color-divider,#d1d5db);border-radius:6px">↑ XML<input type="file" accept=".xml" style="display:none" onchange="ingFacUploadXml(\''+o.id+'\',this)"></label> <span id="ing-fac-upload-st-'+safe+'" style="font-size:9.5px;color:var(--text-secondary,#9ca3af)"></span></td></tr>';
   });
+  h += '<tr style="font-weight:800;background:var(--color-surface,#fafafa)"><td colspan="3" style="text-align:right;padding-right:10px">Total pendiente</td><td>'+fmtM(totalPendiente)+'</td><td colspan="2"></td></tr>';
   h += '</tbody></table></div>';
   el.innerHTML = h;
 }

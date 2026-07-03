@@ -278,11 +278,19 @@ function generarReporteContaDigital(fechaInicio, fechaFin, usuario) {
     sh.getRange(1, 1, rows.length, headers.length).setValues(rows);
     sh.getRange(1, 1, 1, headers.length).setFontWeight('bold');
 
-    // DriveApp.getAs(MICROSOFT_EXCEL) falla intermitentemente para Sheets nativos;
-    // se usa la URL de exportación de Sheets (más confiable) con el token OAuth del script.
-    var exportUrl = 'https://docs.google.com/spreadsheets/d/' + ssOut.getId() + '/export?format=xlsx';
-    var exportResp = UrlFetchApp.fetch(exportUrl, { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() } });
-    var xlsxBlob = exportResp.getBlob().setName('ContaDigital_Masiva_' + fechaInicio + '_a_' + fechaFin + '.xlsx');
+    // Primero se intenta la conversión nativa (no requiere permiso extra, ya que
+    // DriveApp ya está autorizado). Si falla (ocurre a veces con Sheets recién creados),
+    // se recurre a la URL de exportación vía UrlFetchApp — esa sí requiere el permiso
+    // "Realizar solicitudes externas" autorizado una vez en el editor de Apps Script.
+    var xlsxBlob;
+    try {
+      xlsxBlob = DriveApp.getFileById(ssOut.getId()).getAs(MimeType.MICROSOFT_EXCEL);
+    } catch (convEx) {
+      var exportUrl = 'https://docs.google.com/spreadsheets/d/' + ssOut.getId() + '/export?format=xlsx';
+      var exportResp = UrlFetchApp.fetch(exportUrl, { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() } });
+      xlsxBlob = exportResp.getBlob();
+    }
+    xlsxBlob.setName('ContaDigital_Masiva_' + fechaInicio + '_a_' + fechaFin + '.xlsx');
     var folder = DriveApp.getFolderById(INGRESOS_FOLDER_FACTURAS);
     var xlsxFile = folder.createFile(xlsxBlob);
     DriveApp.getFileById(ssOut.getId()).setTrashed(true);
