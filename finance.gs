@@ -569,6 +569,9 @@ function doPost(e) {
     if (body.action === 'generarReporteContaDigital') {
       return jsonResponse(generarReporteContaDigital(body.fechaInicio, body.fechaFin, body.usuario));
     }
+    if (body.action === 'aplicarDatosFiscalesPacientes') {
+      return jsonResponse(aplicarDatosFiscalesPacientes(body));
+    }
     if (body.action === 'saveLista') {
       return jsonResponse(saveLista(body));
     }
@@ -2008,6 +2011,7 @@ function _readFromBDIngresos(sheet) {
       ciclo: String(r[20]||''),
       sucursal: String(r[21]||''),
       archivoURL: String(r[22]||''),
+      razonSocial: String(r[23]||''),
       mes: mesName,
       mesIdx: mesIdx
     });
@@ -2933,13 +2937,25 @@ function listaPacientesAll() {
     var ss = SpreadsheetApp.openById(PACIENTES_SS_ID);
     var sh = ss.getSheets()[0];
     var data = sh.getDataRange().getValues();
+    var hdrs = (data[0] || []).map(function(h){ return String(h).trim(); });
+    var idxRS = _pacColIdx(hdrs,'Razon Social'), idxRFC = _pacColIdx(hdrs,'RFC'),
+        idxCP = _pacColIdx(hdrs,'Codigo Postal'), idxUso = _pacColIdx(hdrs,'Uso CFDI'),
+        idxReg = _pacColIdx(hdrs,'Regimen Fiscal'), idxFP = _pacColIdx(hdrs,'Forma de Pago Habitual');
     var result = [];
     for (var i = 1; i < data.length; i++) {
       var nombre = String(data[i][1] || '').trim();
       if (!nombre) continue;
       var lista  = String(data[i][PAC_COL_LISTA - 1] || '').trim() || 'General';
       var email  = String(data[i][3] || '').trim();
-      result.push({ nombre: nombre, lista: lista, email: email });
+      result.push({
+        id: String(data[i][0]||'').trim(), nombre: nombre, lista: lista, email: email,
+        razonSocial: idxRS>-1 ? String(data[i][idxRS]||'') : '',
+        rfc: idxRFC>-1 ? String(data[i][idxRFC]||'') : '',
+        codigoPostal: idxCP>-1 ? String(data[i][idxCP]||'') : '',
+        usoCfdi: idxUso>-1 ? String(data[i][idxUso]||'') : '',
+        regimenFiscal: idxReg>-1 ? String(data[i][idxReg]||'') : '',
+        formaPagoHabitual: idxFP>-1 ? String(data[i][idxFP]||'') : ''
+      });
     }
     return { ok: true, pacientes: result };
   } catch(e) { return { ok: false, error: e.message, pacientes: [] }; }
@@ -3003,7 +3019,7 @@ var BD_INGRESOS_TAB = 'BD_Ingresos';
 var BD_INGRESOS_HEADERS = ['OP','Linea','Fecha','Paciente','Categoria','Producto',
   'PVP','Descuento','Cantidad','TotalPagar','Pagado','MontoFactMes',
   'FormaPago','Facturacion','Conciliacion','Contabilidad',
-  'Observaciones','Factura','Poliza','USMX','CicloAltaBaja','Sucursal','ArchivoURL'];
+  'Observaciones','Factura','Poliza','USMX','CicloAltaBaja','Sucursal','ArchivoURL','RazonSocial'];
 
 function setupBDIngresos() {
   var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
@@ -3062,6 +3078,7 @@ function saveIngreso(payload) {
     var obs       = payload.observaciones || '';
     var factura   = payload.factura || '';
     var poliza    = payload.poliza || '';
+    var razonSocial = payload.razonSocial || '';
     var facturacionChk  = payload.facturacion === true || payload.facturacion === 'true';
     var conciliacionChk = payload.conciliacion === true || payload.conciliacion === 'true';
     var contabilidadChk = payload.contabilidad === true || payload.contabilidad === 'true';
@@ -3081,7 +3098,7 @@ function saveIngreso(payload) {
 
       // OP,Linea,Fecha,Paciente,Categoria,Producto,PVP,Descuento,Cantidad,TotalPagar,
       // Pagado,MontoFactMes,FormaPago,Facturacion,Conciliacion,Contabilidad,
-      // Observaciones,Factura,Poliza,USMX,CicloAltaBaja,Sucursal,ArchivoURL
+      // Observaciones,Factura,Poliza,USMX,CicloAltaBaja,Sucursal,ArchivoURL,RazonSocial
       rows.push([
         opId, li+1, fecha, paciente,
         l.categoria||'', l.producto||'',
@@ -3095,7 +3112,8 @@ function saveIngreso(payload) {
         li===0 ? factura : '',
         li===0 ? poliza : '',
         moneda, l.ciclo || ciclo, sucursal,
-        '' // ArchivoURL — se llena al subir PDF
+        '', // ArchivoURL — se llena al subir PDF
+        li===0 ? razonSocial : ''
       ]);
     }
 
@@ -3172,6 +3190,7 @@ function updateIngreso(payload) {
     var obs       = payload.observaciones || '';
     var factura   = payload.factura || '';
     var poliza    = payload.poliza || '';
+    var razonSocial = payload.razonSocial || '';
     var facturacionChk  = payload.facturacion === true || payload.facturacion === 'true';
     var conciliacionChk = payload.conciliacion === true || payload.conciliacion === 'true';
     var contabilidadChk = payload.contabilidad === true || payload.contabilidad === 'true';
@@ -3219,7 +3238,8 @@ function updateIngreso(payload) {
         li===0 ? factura : '',
         li===0 ? poliza : '',
         moneda, lc.l.ciclo || ciclo, sucursal,
-        ''
+        '',
+        li===0 ? razonSocial : ''
       ]);
     }
 

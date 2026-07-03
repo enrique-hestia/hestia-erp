@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.06 -->
+﻿<!-- app-build:2026.07.02.07 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -320,6 +320,9 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 #sidebar-nav .sidebar-section{padding:var(--space-3) var(--space-3) var(--space-1)}
 .nav-skeleton{height:28px;border-radius:var(--radius-md);background:var(--color-surface-offset);margin-bottom:6px;animation:pulse 1.5s infinite}
 @keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}
+@keyframes ing-spin{to{transform:rotate(360deg)}}
+.ing-spinner{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:ing-spin .7s linear infinite;vertical-align:-2px;margin-right:7px}
+.ing-spinner-dark{border:2px solid var(--color-divider,#e5e7eb);border-top-color:var(--color-primary,#c46a7a)}
 /* Liberado checkbox — compartido entre CF y Conciliación */
 .cf-chk{width:18px;height:18px;border:2px solid var(--color-divider,#d1d5db);border-radius:4px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;flex-shrink:0;font-size:11px;font-weight:700}
 /* ── ERP Dropzone (reutilizable) ── */
@@ -2682,6 +2685,13 @@ function _renderIngresosERP() {
       // Fila expandible con detalle de líneas
       var _fiscalInputStyle='width:80px;padding:3px 7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11.5px;font-weight:700;background:var(--card-bg,#fff);color:var(--text-primary,#111)';
       var _fiscalBar = '<div style="display:flex;align-items:center;gap:12px;padding:7px 14px;background:var(--color-surface,#f3f4f6);border-bottom:1px solid var(--color-divider,#e5e7eb);flex-wrap:wrap">'
+        // ── Razón Social ──
+        +(op.razonSocial
+          ?('<div style="display:flex;align-items:center;gap:5px">'
+            +'<span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Razón social</span>'
+            +'<span style="font-size:11px;font-weight:600;color:var(--text-primary,#111)">'+_cxpEsc(op.razonSocial)+'</span>'
+          +'</div><div style="width:1px;height:14px;background:var(--color-divider,#e5e7eb)"></div>')
+          :'')
         // ── Factura ──
         +'<div style="display:flex;align-items:center;gap:5px">'
           +'<span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Factura</span>'
@@ -3580,9 +3590,26 @@ function ingNuevoPaciente() {
   openModal('cap-pacientes');
 }
 
+function _ingAutofillRazonSocial() {
+  var pacEl = document.getElementById('ing-paciente');
+  var rsEl = document.getElementById('ing-razon-social');
+  var rfcEl = document.getElementById('ing-rfc-info');
+  if (!pacEl || !rsEl) return;
+  var nombre = pacEl.value.trim();
+  var match = _ingPacientesDB.find(function(p){ return p.nombre && p.nombre.toLowerCase() === nombre.toLowerCase(); });
+  if (match && match.razonSocial) {
+    rsEl.value = match.razonSocial;
+    if (rfcEl) rfcEl.value = match.rfc || '—';
+  } else {
+    rsEl.value = nombre; // por defecto, el nombre del paciente
+    if (rfcEl) rfcEl.value = '—';
+  }
+}
+
 async function ingOnPacienteChange() {
   var pacEl = document.getElementById('ing-paciente');
   if (!pacEl || !pacEl.value.trim()) return;
+  _ingAutofillRazonSocial();
   var listaLabel = document.getElementById('ing-lista-label');
   try {
     var tok = encodeURIComponent(getToken());
@@ -3727,10 +3754,12 @@ function ingEditOp(opId) {
     ingCalcPayTotal();
 
     // Pre-llenar facturación
+    _ingAutofillRazonSocial(); // default: RFC + razón social actual del paciente
     var fields = {
       'ing-factura': first.factura, 'ing-poliza': first.poliza,
       'ing-sucursal': first.sucursal, 'ing-moneda': first.moneda,
-      'ing-obs': first.observaciones, 'ing-monto-fact': first.montoFact
+      'ing-obs': first.observaciones, 'ing-monto-fact': first.montoFact,
+      'ing-razon-social': first.razonSocial // sobreescribe con el valor guardado en ESTA operación, si existe
     };
     for (var fid in fields) {
       var fe = document.getElementById(fid);
@@ -3842,6 +3871,12 @@ async function ingOpenDrawer() {
     +'<div id="ing-lista-label" style="font-size:10px;font-weight:600;color:#0369a1;margin-top:3px">Lista: General</div></div>'
     +'<div><label '+LBL+'>Fecha *</label><input type="date" id="ing-fecha" '+S+' value="'+today+'"></div>'
     +'<div><label '+LBL+'>Ciclo Alta/Baja <span style="font-size:9px;font-weight:500;color:var(--color-text-muted,#9ca3af);letter-spacing:.3px">(automático)</span></label><select id="ing-ciclo" '+S+' disabled style="opacity:.7;cursor:default;pointer-events:none"><option value="">— Automático —</option>'+selOpts(ING_CICLOS)+'</select></div>'
+    +'</div>';
+  h += '<div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-top:14px">'
+    +'<div><label '+LBL+'>Razón Social (facturación) <span style="font-size:9px;font-weight:500;color:var(--color-text-muted,#9ca3af);letter-spacing:.3px">— se autocompleta al elegir paciente</span></label>'
+    +'<input id="ing-razon-social" '+S+' placeholder="Se llena al seleccionar el paciente">'
+    +'</div>'
+    +'<div><label '+LBL+'>RFC</label><input id="ing-rfc-info" readonly tabindex="-1" placeholder="—" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--color-surface,#f3f4f6);color:var(--text-secondary,#6b7280)"></div>'
     +'</div>';
   h += '</div>';
 
@@ -4760,6 +4795,7 @@ function _ingCollectPayload() {
     observaciones:  (document.getElementById('ing-obs')||{}).value || '',
     factura:        (document.getElementById('ing-factura')||{}).value || '',
     poliza:         (document.getElementById('ing-poliza')||{}).value || '',
+    razonSocial:    (document.getElementById('ing-razon-social')||{}).value || '',
     montoFactMes:   (document.getElementById('ing-monto-fact')||{}).value || '0',
     facturacion:    !!(document.getElementById('ing-chk-fact')||{}).checked,
     conciliacion:   !!(document.getElementById('ing-chk-conc')||{}).checked,
@@ -11911,6 +11947,7 @@ function renderCaptura(viewId, data) {
   
     return '<tr data-search="' + searchText + '">' + editTd + cells + '</tr>';}).join('');
 
+  if (data.fuente === 'Pacientes') _pacInjectSyncButton(viewId);
 }
 
 function filterCaptura(viewId) {
@@ -11923,6 +11960,187 @@ function filterCaptura(viewId) {
     var text = tr.getAttribute('data-search') || '';
     tr.style.display = text.includes(q) ? '' : 'none';
   });
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SINCRONIZAR DATOS FISCALES DE PACIENTES — cruce histórico
+   XML (Drive) → Ingresos (folio) → Registro de Pacientes (nombre)
+   ══════════════════════════════════════════════════════════════ */
+var _pacSyncResult = null;
+var _pacSyncViewId = null;
+
+function _pacInjectSyncButton(viewId) {
+  _pacSyncViewId = viewId;
+  var newBtn = document.getElementById('cap-new-btn-' + viewId);
+  if (!newBtn || !newBtn.parentElement) return;
+  var actions = newBtn.parentElement;
+  if (document.getElementById('pac-sync-btn')) return;
+  var btn = document.createElement('button');
+  btn.id = 'pac-sync-btn';
+  btn.className = 'btn';
+  btn.style.cssText = 'font-size:var(--text-xs);padding:6px 14px;display:flex;align-items:center;gap:6px;border:1px solid var(--color-primary);color:var(--color-primary);background:transparent;border-radius:var(--radius-full);cursor:pointer';
+  btn.innerHTML = '🔄 Sincronizar datos fiscales';
+  btn.onclick = _pacSyncOpenModal;
+  actions.insertBefore(btn, actions.firstChild);
+}
+
+function _pacSyncOpenModal() {
+  if (document.getElementById('pac-sync-ovl')) return;
+  var ovl = document.createElement('div');
+  ovl.id = 'pac-sync-ovl';
+  ovl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
+  ovl.onclick = function(e){ if (e.target===ovl) ovl.remove(); };
+
+  var hoy = new Date().toISOString().substring(0,10);
+  ovl.innerHTML = '<div style="background:var(--card-bg,#fff);border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.3);width:820px;max-width:96vw;max-height:90vh;overflow:hidden;display:flex;flex-direction:column">'
+    +'<div style="padding:18px 24px;border-bottom:1px solid var(--color-divider,#e5e7eb);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
+      +'<div>'
+        +'<div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Hestia ERP · Pacientes</div>'
+        +'<div style="font-size:18px;font-weight:800;color:var(--text-primary,#111);margin-top:2px">Sincronizar datos fiscales desde facturas</div>'
+      +'</div>'
+      +'<button onclick="document.getElementById(\'pac-sync-ovl\').remove()" style="border:1.5px solid var(--color-divider,#e5e7eb);background:var(--card-bg,#fff);border-radius:9px;padding:6px 14px;cursor:pointer;font-size:13px;font-weight:600">✕</button>'
+    +'</div>'
+    +'<div style="overflow-y:auto;padding:20px 26px">'
+      +'<p style="margin:0 0 14px;font-size:12.5px;line-height:1.6;color:var(--text-secondary,#374151)">Compara los XML de facturas timbradas en Drive contra las operaciones de Ingresos del rango elegido, y las relaciona con el Registro de Pacientes por nombre. <b>No escribe nada todavía</b> — primero revisa los resultados y confirma qué aplicar.</p>'
+      +'<div style="display:flex;gap:12px;align-items:flex-end;margin-bottom:16px;flex-wrap:wrap">'
+        +'<div><label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Del</label><input type="date" id="pac-sync-desde" value="2025-11-01" style="padding:7px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px"></div>'
+        +'<div><label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Al</label><input type="date" id="pac-sync-hasta" value="'+hoy+'" style="padding:7px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px"></div>'
+        +'<button id="pac-sync-analizar-btn" onclick="_pacSyncAnalizar()" style="padding:9px 18px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">Analizar periodo</button>'
+      +'</div>'
+      +'<div id="pac-sync-resultado"></div>'
+    +'</div>'
+    +'<div style="padding:12px 24px;border-top:1px solid var(--color-divider,#e5e7eb);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0">'
+      +'<button id="pac-sync-aplicar-btn" onclick="_pacSyncAplicar()" style="display:none;padding:9px 24px;background:#166534;color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">Aplicar seleccionados</button>'
+      +'<button onclick="document.getElementById(\'pac-sync-ovl\').remove()" style="padding:9px 24px;background:var(--color-surface,#f1f1f1);color:var(--text-secondary,#374151);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">Cerrar</button>'
+    +'</div>'
+  +'</div>';
+  document.body.appendChild(ovl);
+}
+
+async function _pacSyncAnalizar() {
+  var desde = (document.getElementById('pac-sync-desde')||{}).value;
+  var hasta = (document.getElementById('pac-sync-hasta')||{}).value;
+  var out = document.getElementById('pac-sync-resultado');
+  var btn = document.getElementById('pac-sync-analizar-btn');
+  var aplicarBtn = document.getElementById('pac-sync-aplicar-btn');
+  if (!desde || !hasta) { if(out) out.innerHTML = '<div style="color:#dc2626;font-size:12px">Selecciona ambas fechas.</div>'; return; }
+  if (aplicarBtn) aplicarBtn.style.display = 'none';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ing-spinner"></span>Analizando…'; }
+  if (out) out.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:12px"><span class="ing-spinner ing-spinner-dark"></span>Leyendo XML del periodo — puede tardar uno o dos minutos si es un rango amplio…</div>';
+  try {
+    var tok = encodeURIComponent(getToken());
+    var r = await fetch(APPS_SCRIPT_URL+'?action=analizarDatosFiscalesPacientes&fechaInicio='+desde+'&fechaFin='+hasta+'&token='+tok);
+    var d = await r.json();
+    if (!d.ok) { if(out) out.innerHTML = '<div style="color:#dc2626;font-size:12px">Error: '+(d.error||'No se pudo analizar')+'</div>'; return; }
+    _pacSyncResult = d;
+    _pacSyncRenderResultados(d);
+    if (aplicarBtn) aplicarBtn.style.display = (d.resultado&&d.resultado.length) ? 'inline-block' : 'none';
+  } catch(ex) {
+    if (out) out.innerHTML = '<div style="color:#dc2626;font-size:12px">Error de conexión: '+ex.message+'</div>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Analizar periodo'; }
+  }
+}
+
+function _pacSyncRenderResultados(d) {
+  var out = document.getElementById('pac-sync-resultado');
+  if (!out) return;
+  var claras = (d.resultado||[]).filter(function(r){ return !r.conflicto && r.confianza==='exacto'; });
+  var revisar = (d.resultado||[]).filter(function(r){ return r.conflicto || r.confianza==='parcial'; });
+  var sinMatch = d.sinMatch||[];
+
+  var h = '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:18px">'
+    +'<div style="background:var(--color-surface,#f3f4f6);border-radius:10px;padding:10px 12px"><div style="font-size:18px;font-weight:800">'+d.totalXmlEnRango+'</div><div style="font-size:9px;color:var(--text-secondary,#9ca3af);text-transform:uppercase;font-weight:700">XML en rango</div></div>'
+    +'<div style="background:var(--color-surface,#f3f4f6);border-radius:10px;padding:10px 12px"><div style="font-size:18px;font-weight:800">'+d.totalOpsConFactura+'</div><div style="font-size:9px;color:var(--text-secondary,#9ca3af);text-transform:uppercase;font-weight:700">Ops. con factura</div></div>'
+    +'<div style="background:rgba(22,101,52,.08);border-radius:10px;padding:10px 12px"><div style="font-size:18px;font-weight:800;color:#166534">'+claras.length+'</div><div style="font-size:9px;color:#166534;text-transform:uppercase;font-weight:700">Coincidencia clara</div></div>'
+    +'<div style="background:rgba(180,83,9,.08);border-radius:10px;padding:10px 12px"><div style="font-size:18px;font-weight:800;color:#b45309">'+revisar.length+'</div><div style="font-size:9px;color:#b45309;text-transform:uppercase;font-weight:700">A revisar</div></div>'
+    +'<div style="background:rgba(107,114,128,.08);border-radius:10px;padding:10px 12px"><div style="font-size:18px;font-weight:800;color:#6b7280">'+sinMatch.length+'</div><div style="font-size:9px;color:#6b7280;text-transform:uppercase;font-weight:700">Sin paciente</div></div>'
+    +'</div>';
+
+  function tablaGrupo(titulo, sub, items, checked) {
+    if (!items.length) return '';
+    var t = '<div style="margin-bottom:20px">'
+      +'<div style="font-size:12.5px;font-weight:700;margin-bottom:2px">'+titulo+' ('+items.length+')</div>'
+      +'<div style="font-size:11px;color:var(--text-secondary,#9ca3af);margin-bottom:8px">'+sub+'</div>'
+      +'<table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="background:var(--color-surface,#fafafa)">'
+      +'<th style="padding:6px 8px;text-align:left;width:26px"></th>'
+      +'<th style="padding:6px 8px;text-align:left">Paciente</th>'
+      +'<th style="padding:6px 8px;text-align:left">Razón social encontrada</th>'
+      +'<th style="padding:6px 8px;text-align:left">RFC</th>'
+      +'<th style="padding:6px 8px;text-align:left">Última factura</th>'
+      +'</tr></thead><tbody>';
+    items.forEach(function(r){
+      t += '<tr'+(r.conflicto?' style="background:rgba(180,83,9,.05)"':'')+'>'
+        +'<td style="padding:6px 8px"><input type="checkbox" class="pac-sync-chk" data-idx="'+r._idx+'" '+(checked?'checked':'')+'></td>'
+        +'<td style="padding:6px 8px;font-weight:600">'+_cxpEsc(r.pacienteNombre)+'</td>'
+        +'<td style="padding:6px 8px">'+_cxpEsc(r.razonSocial||'—')+(r.conflicto?' <span title="Hay más de una razón social en el historial — se revisa detalle en Observaciones" style="color:#b45309">⚠</span>':'')+'</td>'
+        +'<td style="padding:6px 8px">'+_cxpEsc(r.rfc||'—')+'</td>'
+        +'<td style="padding:6px 8px">'+r.fechaReferencia+' · Folio '+_cxpEsc(r.folioReferencia)+'</td>'
+        +'</tr>';
+    });
+    t += '</tbody></table></div>';
+    return t;
+  }
+
+  // Asignar índice global para poder recuperar el objeto completo al aplicar
+  (d.resultado||[]).forEach(function(r,i){ r._idx = i; });
+
+  h += tablaGrupo('✓ Coincidencias claras', 'Nombre exacto en el Registro de Pacientes, sin razones sociales distintas en el historial. Preseleccionadas.', claras, true);
+  h += tablaGrupo('⚠ Revisar antes de aplicar', 'Coincidencia parcial de nombre, o se detectaron varias razones sociales distintas para el mismo paciente. Revisa antes de marcar.', revisar, false);
+
+  if (sinMatch.length) {
+    h += '<div style="margin-bottom:10px">'
+      +'<div style="font-size:12.5px;font-weight:700;margin-bottom:2px">XML facturados sin paciente encontrado ('+sinMatch.length+')</div>'
+      +'<div style="font-size:11px;color:var(--text-secondary,#9ca3af);margin-bottom:8px">El folio de la operación coincide con un XML, pero el nombre capturado en Ingresos no se encontró en el Registro de Pacientes. Solo informativo — no se puede aplicar automáticamente.</div>'
+      +'<table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="background:var(--color-surface,#fafafa)">'
+      +'<th style="padding:6px 8px;text-align:left">Nombre en Ingresos</th><th style="padding:6px 8px;text-align:left">Razón social en XML</th><th style="padding:6px 8px;text-align:left">Folio / fecha</th>'
+      +'</tr></thead><tbody>';
+    sinMatch.forEach(function(s){
+      h += '<tr><td style="padding:6px 8px">'+_cxpEsc(s.pacienteNombreOp)+'</td><td style="padding:6px 8px">'+_cxpEsc(s.razonSocial||'—')+'</td><td style="padding:6px 8px">'+_cxpEsc(s.folio)+' · '+s.fecha+'</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+
+  if (!claras.length && !revisar.length && !sinMatch.length) {
+    h += '<div style="padding:24px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:12.5px">No se encontraron facturas con folio coincidente en este rango.</div>';
+  }
+
+  out.innerHTML = h;
+}
+
+async function _pacSyncAplicar() {
+  if (!_pacSyncResult) return;
+  var checks = document.querySelectorAll('.pac-sync-chk:checked');
+  if (!checks.length) { alert('No hay ninguna fila seleccionada.'); return; }
+  var confirmaciones = [];
+  checks.forEach(function(c){
+    var r = _pacSyncResult.resultado[parseInt(c.getAttribute('data-idx'))];
+    if (!r) return;
+    confirmaciones.push({
+      pacienteId: r.pacienteId, razonSocial: r.razonSocial, rfc: r.rfc, codigoPostal: r.codigoPostal,
+      usoCfdi: r.usoCfdi, regimenFiscal: r.regimenFiscal, formaPagoHabitual: r.formaPagoHabitual,
+      notaHistorial: r.notaHistorial
+    });
+  });
+  if (!confirm('Vas a actualizar los datos fiscales de '+confirmaciones.length+' paciente(s). ¿Continuar?')) return;
+  var btn = document.getElementById('pac-sync-aplicar-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ing-spinner"></span>Aplicando…'; }
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'aplicarDatosFiscalesPacientes', confirmaciones:confirmaciones, usuario:s.email||''})});
+    var res = await r.json();
+    if (res.ok) {
+      alert('Listo — se actualizaron '+res.actualizados+' paciente(s).');
+      document.getElementById('pac-sync-ovl').remove();
+      if (_pacSyncViewId && typeof loadView === 'function') loadView(_pacSyncViewId, currentFechaInicio, currentFechaFin, true);
+    } else {
+      alert('Error: '+(res.error||'No se pudo aplicar'));
+    }
+  } catch(ex) {
+    alert('Error de conexión: '+ex.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Aplicar seleccionados'; }
+  }
 }
 
 /* ── Render completo del Resumen (primera vista) ─── */
@@ -13599,6 +13817,31 @@ function initTheme() {
         <label class="form-label">Observaciones / Notas</label>
         <input class="form-input" id="pac-f-observaciones" placeholder="Notas adicionales">
       </div>
+      <div class="form-group full" style="margin-top:6px;padding-top:14px;border-top:1px solid var(--color-divider,#e5e7eb);font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a)">Datos de facturación</div>
+      <div class="form-group full">
+        <label class="form-label">Razón Social (nombre con el que se factura)</label>
+        <input class="form-input" id="pac-f-razon_social" placeholder="Puede ser distinto al nombre del paciente">
+      </div>
+      <div class="form-group">
+        <label class="form-label">RFC</label>
+        <input class="form-input" id="pac-f-rfc" placeholder="XAXX010101000">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Código Postal</label>
+        <input class="form-input" id="pac-f-cp" placeholder="11000">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Uso de CFDI</label>
+        <input class="form-input" id="pac-f-uso_cfdi" placeholder="G03, CN01…">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Régimen Fiscal</label>
+        <input class="form-input" id="pac-f-regimen" placeholder="605, 612…">
+      </div>
+      <div class="form-group full">
+        <label class="form-label">Forma de Pago Habitual</label>
+        <input class="form-input" id="pac-f-forma_pago" placeholder="Tarjeta de crédito, Transferencia…">
+      </div>
     </div>
     <div id="pac-modal-msg" class="modal-msg"></div>
     <div class="modal-footer">
@@ -13957,10 +14200,12 @@ var CAPTURA_CONFIG = {
     msgEl:     'pac-modal-msg',
     fields: ['pac-f-id','pac-f-nombre','pac-f-fecha_nac','pac-f-email',
              'pac-f-origen','pac-f-canal','pac-f-medico','pac-f-pais',
-             'pac-f-observaciones'],
+             'pac-f-observaciones',
+             'pac-f-razon_social','pac-f-rfc','pac-f-cp','pac-f-uso_cfdi','pac-f-regimen','pac-f-forma_pago'],
     keys:   ['ID','Nombre Completo del Paciente','Fecha de Nacimiento','E-mail',
              'Origen','Canal','Médico Tratante','País',
-             'Observaciones / Notas'],
+             'Observaciones / Notas',
+             'Razon Social','RFC','Codigo Postal','Uso CFDI','Regimen Fiscal','Forma de Pago Habitual'],
     required: ['pac-f-nombre']
   },
   laboratorio: {
@@ -13978,6 +14223,7 @@ var CAPTURA_CONFIG = {
 
 var _pacEditRowNum = null;
 var _pacOldNombre  = '';
+var _pacFiscalMigrated = false;
 
 function openModal(tipo) {
   // Si la vista tiene fuente especializada, abrir su modal propio
@@ -14026,6 +14272,10 @@ function openModal(tipo) {
       .then(function(d){ if (idEl) idEl.value = d.nextId || 'HEC-001'; })
       .catch(function(){ if (idEl) idEl.value = 'HEC-001'; });
     loadPacientesOptions();
+    if (!_pacFiscalMigrated) {
+      _pacFiscalMigrated = true;
+      fetch(APPS_SCRIPT_URL + '?action=migratePacientesFiscales&token=' + encodeURIComponent(getToken())).catch(function(){});
+    }
   }
   document.getElementById('modal-' + tipo).style.display = 'flex';
   document.getElementById(cfg.msgEl).className = 'modal-msg';

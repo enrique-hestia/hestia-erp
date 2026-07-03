@@ -54,8 +54,10 @@ function _facQuickParse(xml) {
   var uuidM = xml.match(/UUID="([^"]*)"/);
   return {
     folio: a('Folio'), serie: a('Serie'), tipo: a('TipoDeComprobante'),
-    total: parseFloat(a('Total')) || 0, fecha: a('Fecha'),
+    total: parseFloat(a('Total')) || 0, fecha: a('Fecha'), formaPago: a('FormaPago'),
     receptorNombre: a('Nombre', rec), receptorRfc: a('Rfc', rec),
+    receptorCP: a('DomicilioFiscalReceptor', rec), receptorUsoCfdi: a('UsoCFDI', rec),
+    receptorRegimen: a('RegimenFiscalReceptor', rec),
     uuid: uuidM ? uuidM[1] : ''
   };
 }
@@ -80,6 +82,8 @@ function _facBuildXmlIndex(fechaInicio, fechaFin) {
       var rec = {
         folio: p.folio, serie: p.serie, uuid: p.uuid, total: p.total, fecha: fechaISO,
         receptorNombre: p.receptorNombre, receptorRfc: p.receptorRfc,
+        receptorCP: p.receptorCP, receptorUsoCfdi: p.receptorUsoCfdi, receptorRegimen: p.receptorRegimen,
+        formaPago: p.formaPago,
         fileId: file.getId(), fileUrl: file.getUrl(), fileName: name
       };
       all.push(rec);
@@ -286,5 +290,202 @@ function generarReporteContaDigital(fechaInicio, fechaFin, usuario) {
       ok: true, url: xlsxFile.getUrl(), numFacturas: invoices.length,
       numOperacionesTotal: ops.length, numSinXml: ops.length - facturables.length
     };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// ============================================================
+// DATOS FISCALES DE PACIENTES — cruce histórico XML → Ingresos → Pacientes
+// ============================================================
+
+var PAC_FISCAL_HEADERS = ['Razon Social', 'RFC', 'Codigo Postal', 'Uso CFDI', 'Regimen Fiscal', 'Forma de Pago Habitual'];
+
+function _pacColIdx(headers, name) {
+  var nl = String(name).trim().toLowerCase();
+  for (var i = 0; i < headers.length; i++) {
+    if (String(headers[i]).trim().toLowerCase() === nl) return i;
+  }
+  return -1;
+}
+
+function _pacNormNombre(s) {
+  var out = String(s || '').trim().toLowerCase().normalize('NFD');
+  var stripped = '';
+  for (var i = 0; i < out.length; i++) {
+    var code = out.charCodeAt(i);
+    if (code < 0x0300 || code > 0x036f) stripped += out[i];
+  }
+  return stripped.replace(/\s+/g, ' ');
+}
+
+// Agrega las 6 columnas fiscales a Pacientes si no existen (migración segura, al final)
+function migratePacientesFiscales() {
+  try {
+    var ss = SpreadsheetApp.openById(PACIENTES_SS_ID);
+    var sh = ss.getSheets()[0];
+    var raw = sh.getDataRange().getValues();
+    if (!raw.length) return { ok: false, error: 'Hoja Pacientes vacía' };
+    var existing = raw[0].map(function (h) { return String(h).trim().toLowerCase(); });
+    var toAdd = PAC_FISCAL_HEADERS.filter(function (h) { return existing.indexOf(h.toLowerCase()) === -1; });
+    if (toAdd.length) {
+      var lastCol = sh.getLastColumn();
+      sh.getRange(1, lastCol + 1, 1, toAdd.length).setValues([toAdd]);
+      sh.getRange(1, lastCol + 1, 1, toAdd.length).setFontWeight('bold').setBackground('#fce7f3');
+    }
+    return { ok: true, agregadas: toAdd };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// Agrega la columna RazonSocial a BD_Ingresos si no existe (migración segura, al final)
+function migrateBDIngresosRazonSocial() {
+  try {
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sh = ss.getSheetByName(BD_INGRESOS_TAB);
+    if (!sh) return { ok: false, error: 'BD_Ingresos no encontrada' };
+    var raw = sh.getDataRange().getValues();
+    if (!raw.length) return { ok: false, error: 'Hoja vacía' };
+    var existing = raw[0].map(function (h) { return String(h).trim().toLowerCase(); });
+    if (existing.indexOf('razonsocial') === -1 && existing.indexOf('razon social') === -1) {
+      var lastCol = sh.getLastColumn();
+      sh.getRange(1, lastCol + 1).setValue('RazonSocial');
+      sh.getRange(1, lastCol + 1).setFontWeight('bold').setBackground('#fce7f3');
+      return { ok: true, agregada: true };
+    }
+    return { ok: true, agregada: false };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// Analiza (SOLO LECTURA, no escribe nada) el historial de XML del rango contra Ingresos
+// y contra el Registro de Pacientes, para proponer Razón Social/RFC/CP/Uso CFDI/Régimen/
+// Forma de pago por paciente. Regla: la factura más reciente gana; si hay razones sociales
+// distintas en el historial, se marca como conflicto y se arma una nota con el detalle.
+function analizarDatosFiscalesPacientes(fechaInicio, fechaFin) {
+  try {
+    if (!fechaInicio || !fechaFin) return { ok: false, error: 'Rango de fechas requerido' };
+    migratePacientesFiscales();
+    migrateBDIngresosRazonSocial();
+
+    var idx = _facBuildXmlIndex(fechaInicio, fechaFin);
+    var ops = _facReadOpsInRange(fechaInicio, fechaFin);
+
+    var ss = SpreadsheetApp.openById(PACIENTES_SS_ID);
+    var sh = ss.getSheets()[0];
+    var data = sh.getDataRange().getValues();
+    var pacientes = [];
+    for (var i = 1; i < data.length; i++) {
+      var nombre = String(data[i][1] || '').trim();
+      if (!nombre) continue;
+      pacientes.push({ id: String(data[i][0] || '').trim(), nombre: nombre, norm: _pacNormNombre(nombre) });
+    }
+    var pacByNorm = {};
+    pacientes.forEach(function (p) { pacByNorm[p.norm] = p; });
+
+    var hallazgosPorPaciente = {};
+    var sinMatchPaciente = [];
+    var opsConFactura = 0;
+
+    ops.forEach(function (op) {
+      if (!op.factura) return;
+      opsConFactura++;
+      var x = idx.byFolio[op.factura];
+      if (!x) return;
+      var opNorm = _pacNormNombre(op.paciente);
+      var pMatch = pacByNorm[opNorm];
+      var matchType = 'exacto';
+      if (!pMatch && opNorm) {
+        for (var pi = 0; pi < pacientes.length; pi++) {
+          var pn = pacientes[pi].norm;
+          if (!pn) continue;
+          if (pn.indexOf(opNorm) > -1 || opNorm.indexOf(pn) > -1) { pMatch = pacientes[pi]; matchType = 'parcial'; break; }
+        }
+      }
+      var hallazgo = {
+        opId: op.id, folio: op.factura, fecha: x.fecha, opTotal: op.total, xmlTotal: x.total,
+        razonSocial: x.receptorNombre, rfc: x.receptorRfc, codigoPostal: x.receptorCP,
+        usoCfdi: x.receptorUsoCfdi, regimenFiscal: x.receptorRegimen,
+        formaPago: FAC_METODO_PAGO_MAP[x.formaPago] || x.formaPago || '',
+        matchType: matchType, pacienteNombreOp: op.paciente
+      };
+      if (pMatch) {
+        if (!hallazgosPorPaciente[pMatch.id]) hallazgosPorPaciente[pMatch.id] = { pacienteId: pMatch.id, pacienteNombre: pMatch.nombre, hallazgos: [] };
+        hallazgosPorPaciente[pMatch.id].hallazgos.push(hallazgo);
+      } else {
+        sinMatchPaciente.push(hallazgo);
+      }
+    });
+
+    var resultado = [];
+    for (var pid in hallazgosPorPaciente) {
+      var grupo = hallazgosPorPaciente[pid];
+      grupo.hallazgos.sort(function (a, b) { return a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0; });
+      var top = grupo.hallazgos[0];
+      var distintos = {};
+      grupo.hallazgos.forEach(function (h) { distintos[(h.razonSocial || '') + '|' + (h.rfc || '')] = true; });
+      var conflicto = Object.keys(distintos).length > 1;
+      var confianza = grupo.hallazgos.some(function (h) { return h.matchType === 'parcial'; }) ? 'parcial' : 'exacto';
+      var notaHistorial = '';
+      if (conflicto) {
+        notaHistorial = 'Facturación histórica: ' + grupo.hallazgos.map(function (h) {
+          return h.fecha + ' — ' + (h.razonSocial || 's/nombre') + ' (' + (h.rfc || 's/RFC') + ') — Folio ' + h.folio;
+        }).join(' | ');
+      }
+      resultado.push({
+        pacienteId: pid, pacienteNombre: grupo.pacienteNombre,
+        razonSocial: top.razonSocial, rfc: top.rfc, codigoPostal: top.codigoPostal,
+        usoCfdi: top.usoCfdi, regimenFiscal: top.regimenFiscal, formaPagoHabitual: top.formaPago,
+        folioReferencia: top.folio, fechaReferencia: top.fecha,
+        conflicto: conflicto, confianza: confianza, numFacturas: grupo.hallazgos.length,
+        notaHistorial: notaHistorial
+      });
+    }
+    resultado.sort(function (a, b) { return a.pacienteNombre < b.pacienteNombre ? -1 : 1; });
+
+    return {
+      ok: true, resultado: resultado, sinMatch: sinMatchPaciente,
+      totalXmlEnRango: idx.all.length, totalOpsConFactura: opsConFactura,
+      totalConMatch: resultado.length, totalSinMatch: sinMatchPaciente.length,
+      totalConConflicto: resultado.filter(function (r) { return r.conflicto; }).length
+    };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// Escribe en Pacientes los datos fiscales confirmados por el usuario.
+// body.confirmaciones: [{pacienteId, razonSocial, rfc, codigoPostal, usoCfdi, regimenFiscal, formaPagoHabitual, notaHistorial}]
+function aplicarDatosFiscalesPacientes(body) {
+  try {
+    var confirmaciones = body.confirmaciones || [];
+    if (!confirmaciones.length) return { ok: false, error: 'Sin confirmaciones' };
+    migratePacientesFiscales();
+
+    var ss = SpreadsheetApp.openById(PACIENTES_SS_ID);
+    var sh = ss.getSheets()[0];
+    var data = sh.getDataRange().getValues();
+    var hdrs = data[0].map(function (h) { return String(h).trim(); });
+    var idxRS = _pacColIdx(hdrs, 'Razon Social'), idxRFC = _pacColIdx(hdrs, 'RFC'),
+        idxCP = _pacColIdx(hdrs, 'Codigo Postal'), idxUso = _pacColIdx(hdrs, 'Uso CFDI'),
+        idxReg = _pacColIdx(hdrs, 'Regimen Fiscal'), idxFP = _pacColIdx(hdrs, 'Forma de Pago Habitual'),
+        idxObs = _pacColIdx(hdrs, 'Observaciones / Notas');
+
+    var rowByPacienteId = {};
+    for (var i = 1; i < data.length; i++) rowByPacienteId[String(data[i][0] || '').trim()] = i + 1;
+
+    var actualizados = 0;
+    confirmaciones.forEach(function (c) {
+      var rowNum = rowByPacienteId[c.pacienteId];
+      if (!rowNum) return;
+      if (idxRS > -1) sh.getRange(rowNum, idxRS + 1).setValue(c.razonSocial || '');
+      if (idxRFC > -1) sh.getRange(rowNum, idxRFC + 1).setValue(c.rfc || '');
+      if (idxCP > -1) sh.getRange(rowNum, idxCP + 1).setValue(c.codigoPostal || '');
+      if (idxUso > -1) sh.getRange(rowNum, idxUso + 1).setValue(c.usoCfdi || '');
+      if (idxReg > -1) sh.getRange(rowNum, idxReg + 1).setValue(c.regimenFiscal || '');
+      if (idxFP > -1) sh.getRange(rowNum, idxFP + 1).setValue(c.formaPagoHabitual || '');
+      if (idxObs > -1 && c.notaHistorial) {
+        var actual = String(data[rowNum - 1][idxObs] || '');
+        var nueva = actual ? (actual + ' | ' + c.notaHistorial) : c.notaHistorial;
+        sh.getRange(rowNum, idxObs + 1).setValue(nueva);
+      }
+      actualizados++;
+    });
+    logAudit(body.usuario || 'sistema', 'Pacientes', 'SyncFiscal', '', '', '', actualizados + ' pacientes actualizados');
+    return { ok: true, actualizados: actualizados };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }

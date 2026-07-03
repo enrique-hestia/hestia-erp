@@ -359,6 +359,16 @@ function doGet(e) {
       return jsonResponse(reconciliarFacturasXml(fIni, fFin));
     }
 
+    if (action === 'analizarDatosFiscalesPacientes') {
+      var dfIni = (e && e.parameter.fechaInicio) || '';
+      var dfFin = (e && e.parameter.fechaFin) || '';
+      return jsonResponse(analizarDatosFiscalesPacientes(dfIni, dfFin));
+    }
+
+    if (action === 'migratePacientesFiscales') {
+      return jsonResponse(migratePacientesFiscales());
+    }
+
     if (action === 'productos') {
       return jsonResponse(readProductos());
     }
