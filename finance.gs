@@ -572,6 +572,9 @@ function doPost(e) {
     if (body.action === 'aplicarDatosFiscalesPacientes') {
       return jsonResponse(aplicarDatosFiscalesPacientes(body));
     }
+    if (body.action === 'backfillRazonSocialDesdeXml') {
+      return jsonResponse(backfillRazonSocialDesdeXml(body.fechaInicio, body.fechaFin, body.usuario));
+    }
     if (body.action === 'saveLista') {
       return jsonResponse(saveLista(body));
     }
@@ -1979,6 +1982,15 @@ function _readFromBDIngresos(sheet) {
   function num(v){if(typeof v==='number')return v;var n=parseFloat(String(v||'').replace(/[$,\s]/g,''));return isNaN(n)?0:n;}
   function dt(v){if(!v)return'';if(v instanceof Date)return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0');return String(v);}
 
+  // FacturaRFC/FacturaUUID se agregaron después (columnas dinámicas, no posición fija)
+  var hdrs0 = raw[0]||[];
+  var idxFacRFC = -1, idxFacUUID = -1;
+  for (var hci=0; hci<hdrs0.length; hci++) {
+    var h0=String(hdrs0[hci]).trim();
+    if (h0==='FacturaRFC') idxFacRFC=hci;
+    if (h0==='FacturaUUID') idxFacUUID=hci;
+  }
+
   var MESES_MAP = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio',
                    '07':'Julio','08':'Agosto','09':'Septiembre','10':'Octubre','11':'Noviembre','12':'Diciembre'};
   var MESES_IDX = {Enero:0,Febrero:1,Marzo:2,Abril:3,Mayo:4,Junio:5,Julio:6,Agosto:7,Septiembre:8,Octubre:9,Noviembre:10,Diciembre:11};
@@ -2029,6 +2041,8 @@ function _readFromBDIngresos(sheet) {
       sucursal: String(r[21]||''),
       archivoURL: String(r[22]||''),
       razonSocial: String(r[23]||''),
+      facturaRFC: idxFacRFC>-1 ? String(r[idxFacRFC]||'') : '',
+      facturaUUID: idxFacUUID>-1 ? String(r[idxFacUUID]||'') : '',
       mes: mesName,
       mesIdx: mesIdx
     });

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.16 -->
+﻿<!-- app-build:2026.07.02.17 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2363,6 +2363,18 @@ function _ingFilterRows() {
     opFacturaMap = {};
     _ingData.rows.forEach(function(r){ if (r.factura) opFacturaMap[r.id] = true; });
   }
+  // Igual que factura#: razón social/RFC/UUID/folio solo viven en una de las
+  // líneas de la OP — se arma un mapa por operación para que buscar "el esposo
+  // de Gloria" encuentre la operación aunque ese nombre nunca fue el paciente,
+  // solo la razón social de la factura vinculada.
+  var opSearchMap = null;
+  if (f.buscar) {
+    opSearchMap = {};
+    _ingData.rows.forEach(function(r){
+      if (!opSearchMap[r.id]) opSearchMap[r.id] = '';
+      opSearchMap[r.id] += ' '+(r.razonSocial||'')+' '+(r.factura||'')+' '+(r.facturaRFC||'')+' '+(r.facturaUUID||'');
+    });
+  }
   return _ingData.rows.filter(function(r) {
     if (!_ingInSel(f.mes, r.mes)) return false;
     if (!_ingInSel(f.categoria, r.categoria)) return false;
@@ -2372,9 +2384,11 @@ function _ingFilterRows() {
     if (f.factura === 'sin' && opFacturaMap[r.id]) return false;
     if (f.buscar) {
       var q = f.buscar.toLowerCase();
+      var opExtra = (opSearchMap[r.id]||'').toLowerCase();
       if ((r.paciente||'').toLowerCase().indexOf(q)===-1
         && (r.producto||'').toLowerCase().indexOf(q)===-1
-        && (r.id||'').toString().indexOf(q)===-1) return false;
+        && (r.id||'').toString().indexOf(q)===-1
+        && opExtra.indexOf(q)===-1) return false;
     }
     return true;
   });
@@ -2616,7 +2630,7 @@ function _renderIngresosERP() {
       +'<option value="con"'+(_ingFilters.factura==='con'?' selected':'')+'>Con factura</option>'
       +'<option value="sin"'+(_ingFilters.factura==='sin'?' selected':'')+'>Sin factura</option>'
     +'</select></div>'
-    +'<div class="ing-fg"><div class="ing-fl">Buscar</div><input id="ing-buscar" class="ing-search" placeholder="Paciente, producto o ID…" value="'+(_ingFilters.buscar||'')+'" oninput="_ingBuscarDebounce(this.value)"></div>'
+    +'<div class="ing-fg"><div class="ing-fl">Buscar</div><input id="ing-buscar" class="ing-search" placeholder="Paciente, razón social, factura#, RFC, UUID…" value="'+(_ingFilters.buscar||'')+'" oninput="_ingBuscarDebounce(this.value)"></div>'
     +'<div style="margin-left:auto;font-size:11px;font-weight:700;color:var(--text-primary,#111)">Filtrado: '+fC(totalFiltered)+'</div>'
     +'</div>');
 
@@ -2630,7 +2644,8 @@ function _renderIngresosERP() {
     if (!_opsMap[opId]) {
       _opsMap[opId] = { id:opId, fecha:r.fecha, paciente:r.paciente, formaPago:r.formaPago,
         items:[], total:0, pagado:0, cats:[],
-        factura:'', poliza:'', facturacion:false, conciliacion:false, contabilidad:false, archivoURL:'' };
+        factura:'', poliza:'', facturacion:false, conciliacion:false, contabilidad:false, archivoURL:'',
+        razonSocial:'', facturaRFC:'', facturaUUID:'' };
       _opsOrder.push(opId);
     }
     var op = _opsMap[opId];
@@ -2644,6 +2659,9 @@ function _renderIngresosERP() {
     if (r.conciliacion) op.conciliacion = true;
     if (r.contabilidad) op.contabilidad = true;
     if (r.archivoURL)   op.archivoURL   = r.archivoURL;
+    if (r.razonSocial)  op.razonSocial  = r.razonSocial;
+    if (r.facturaRFC)   op.facturaRFC   = r.facturaRFC;
+    if (r.facturaUUID)  op.facturaUUID  = r.facturaUUID;
   });
 
   var totalOps = _opsOrder.length;
@@ -2707,13 +2725,6 @@ function _renderIngresosERP() {
       // Fila expandible con detalle de líneas
       var _fiscalInputStyle='width:80px;padding:3px 7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11.5px;font-weight:700;background:var(--card-bg,#fff);color:var(--text-primary,#111)';
       var _fiscalBar = '<div style="display:flex;align-items:center;gap:12px;padding:7px 14px;background:var(--color-surface,#f3f4f6);border-bottom:1px solid var(--color-divider,#e5e7eb);flex-wrap:wrap">'
-        // ── Razón Social ──
-        +(op.razonSocial
-          ?('<div style="display:flex;align-items:center;gap:5px">'
-            +'<span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Razón social</span>'
-            +'<span style="font-size:11px;font-weight:600;color:var(--text-primary,#111)">'+_cxpEsc(op.razonSocial)+'</span>'
-          +'</div><div style="width:1px;height:14px;background:var(--color-divider,#e5e7eb)"></div>')
-          :'')
         // ── Factura ──
         +'<div style="display:flex;align-items:center;gap:5px">'
           +'<span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Factura</span>'
@@ -2731,9 +2742,16 @@ function _renderIngresosERP() {
             +'onblur="ingFiscalSave(\''+opId.replace(/'/g,"\\'")+'\',\'poliza\',this)">'
           +'<span id="ing-pol-st-'+safeId+'" style="font-size:9px"></span>'
         +'</div>'
-        // ── PDF link ──
+        // ── PDF link (con razón social justo antes, para saber a quién se facturó) ──
         +(op.archivoURL
           ?('<div style="width:1px;height:14px;background:var(--color-divider,#e5e7eb)"></div>'
+            +(op.razonSocial
+              ?('<div style="display:flex;align-items:center;gap:5px" title="'+(op.facturaUUID?'UUID: '+_cxpEsc(op.facturaUUID):'')+'">'
+                +'<span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Facturado a</span>'
+                +'<span style="font-size:11px;font-weight:700;color:var(--text-primary,#111)">'+_cxpEsc(op.razonSocial)+'</span>'
+                +(op.facturaRFC?' <span style="font-size:9.5px;color:var(--text-secondary,#9ca3af)">('+_cxpEsc(op.facturaRFC)+')</span>':'')
+              +'</div>')
+              :'')
             +'<button type="button" onclick="ingViewFactura(\''+op.archivoURL.replace(/'/g,"\\'")+'\',\''+(op.factura||'').replace(/'/g,"\\'")+'\' )" style="display:flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;color:var(--color-primary,#c46a7a);background:none;border:none;cursor:pointer;padding:0">'
               +'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Ver factura</button>')
           :'')
@@ -4425,6 +4443,7 @@ function ingFacRender() {
     +'<div class="ing-fac-sh">📋 Conciliación de facturas XML</div>'
     +'<div class="ing-fac-sub">Compara los XML timbrados en Drive contra las operaciones de Ingresos del periodo filtrado ('+(periodo||'sin periodo seleccionado')+'). Solo aplica al rango Del/Al activo en el filtro principal.</div>'
     +'<button onclick="ingFacAnalizar()" id="ing-fac-analizar-btn" style="padding:9px 18px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer" '+(periodo?'':'disabled')+'>Analizar periodo actual</button>'
+    +'<button onclick="ingFacBackfillRazonSocial()" id="ing-fac-backfill-btn" title="Completa razón social/RFC de operaciones que ya tienen factura vinculada pero les falta este dato (ej. facturas a nombre de un familiar)" style="margin-left:8px;padding:9px 18px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer" '+(periodo?'':'disabled')+'>🔄 Completar razón social histórica</button>'
     +'<div id="ing-fac-resultado" style="margin-top:16px"></div>'
     +'</div>'
     +'<div id="ing-fac-seccion2"></div>'
@@ -4482,11 +4501,43 @@ async function ingFacAnalizar() {
   }
 }
 
-async function ingFacVincular(opId, fileId, btn) {
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ing-spinner"></span>Vinculando…'; }
+// Completa razón social/RFC/UUID de operaciones que YA tienen factura vinculada
+// (ArchivoURL) pero no tienen este dato — por ejemplo operaciones vinculadas
+// antes de que existiera este detalle, o facturas a nombre de otra persona que
+// el paciente (ej. el esposo). Cruza contra el mismo XML ya vinculado, no cambia
+// ni el archivo ni el folio.
+async function ingFacBackfillRazonSocial() {
+  var btn = document.getElementById('ing-fac-backfill-btn');
+  if (!currentFechaInicio || !currentFechaFin) { alert('Selecciona un rango de fechas en el filtro principal primero.'); return; }
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ing-spinner ing-spinner-dark"></span>Completando…'; }
   try {
     var s = getSession()||{};
-    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'vincularXmlFactura', opId:opId, fileId:fileId, usuario:s.email||''})});
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'backfillRazonSocialDesdeXml', fechaInicio:currentFechaInicio, fechaFin:currentFechaFin, usuario:s.email||''})});
+    var res = await r.json();
+    if (res.ok) {
+      alert('Listo — se completó razón social/RFC en '+res.actualizadas+' operación(es).'+(res.sinCoincidencia?' ('+res.sinCoincidencia+' con factura vinculada pero sin XML en este rango, sin cambios.)':''));
+      if (typeof loadIngresosERP === 'function') loadIngresosERP();
+    } else {
+      alert('Error: '+(res.error||'No se pudo completar'));
+    }
+  } catch(ex) {
+    alert('Error de conexión: '+ex.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '🔄 Completar razón social histórica'; }
+  }
+}
+
+async function ingFacVincular(opId, fileId, btn) {
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ing-spinner"></span>Vinculando…'; }
+  // Buscar el registro completo (razón social/RFC/UUID) en el resultado ya cargado,
+  // en vez de pasarlo por el onclick — evita problemas de escape con nombres raros.
+  var match = ((_ingFacResult&&_ingFacResult.faltaDocumento)||[]).find(function(o){ return o.id===opId && o.xmlFileId===fileId; });
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'vincularXmlFactura', opId:opId, fileId:fileId, usuario:s.email||'',
+      razonSocial: match?match.xmlRazonSocial:'', rfc: match?match.xmlRfc:'', uuid: match?match.xmlUuid:''
+    })});
     var res = await r.json();
     if (res.ok) { if(btn){ var row=btn.closest('tr'); if(row) row.style.opacity='.4'; btn.textContent='✓ Vinculado'; } }
     else { if(btn){ btn.disabled=false; btn.textContent='Error'; } alert(res.error||'No se pudo vincular'); }
@@ -4497,12 +4548,16 @@ async function ingFacVincular(opId, fileId, btn) {
 // sin que el usuario tenga que escribirlo a mano primero.
 async function ingFacUsarSugerencia(opId, folio, fileId, btn) {
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ing-spinner"></span>…'; }
+  var match = ((_ingFacResult&&_ingFacResult.sinFactura)||[]).find(function(o){ return o.id===opId && o.sugerenciaFileId===fileId; });
   try {
     var s = getSession()||{};
     var r1 = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'updateIngresoFiscal', opId:opId, factura:folio, usuario:s.email||'sistema'})});
     var res1 = await r1.json();
     if (!res1.ok) { if(btn){ btn.disabled=false; btn.textContent='Error'; } alert(res1.error||'No se pudo capturar el folio'); return; }
-    var r2 = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'vincularXmlFactura', opId:opId, fileId:fileId, usuario:s.email||''})});
+    var r2 = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'vincularXmlFactura', opId:opId, fileId:fileId, usuario:s.email||'',
+      razonSocial: match?match.sugerenciaRazonSocial:'', rfc: match?match.sugerenciaRfc:''
+    })});
     var res2 = await r2.json();
     if (res2.ok) { if(btn){ var row=btn.closest('tr'); if(row) row.style.opacity='.4'; btn.textContent='✓ Vinculado'; } }
     else { if(btn){ btn.disabled=false; btn.textContent='Error'; } alert(res2.error||'No se pudo vincular'); }

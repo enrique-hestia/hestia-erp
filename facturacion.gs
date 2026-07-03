@@ -226,7 +226,8 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
         usedFolios[op.factura] = true;
         faltaDocumento.push({
           id: op.id, fecha: op.fecha, paciente: op.paciente, total: op.total, factura: op.factura,
-          xmlFileId: x.fileId, xmlFileUrl: x.fileUrl, xmlTotal: x.total, xmlUuid: x.uuid
+          xmlFileId: x.fileId, xmlFileUrl: x.fileUrl, xmlTotal: x.total, xmlUuid: x.uuid,
+          xmlRazonSocial: x.receptorNombre, xmlRfc: x.receptorRfc
         });
         return;
       }
@@ -263,6 +264,8 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
         op.sugerenciaTotal = mejor.total;
         op.sugerenciaFecha = mejor.fecha;
         op.sugerenciaCoincideMonto = mejorDelta < 0.01;
+        op.sugerenciaRazonSocial = mejor.receptorNombre;
+        op.sugerenciaRfc = mejor.receptorRfc;
         usedFolios[mejor.folio] = true; // no ofrecer el mismo XML como sugerencia a dos operaciones
       }
     });
@@ -276,6 +279,25 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
+// Agrega FacturaRFC y FacturaUUID a BD_Ingresos si no existen (migración segura, al final)
+function migrateBDIngresosFacturaDetalle() {
+  try {
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sh = ss.getSheetByName(BD_INGRESOS_TAB);
+    if (!sh) return { ok: false, error: 'BD_Ingresos no encontrada' };
+    var raw = sh.getDataRange().getValues();
+    if (!raw.length) return { ok: false, error: 'Hoja vacía' };
+    var existing = raw[0].map(function (h) { return String(h).trim().toLowerCase(); });
+    var toAdd = ['FacturaRFC', 'FacturaUUID'].filter(function (h) { return existing.indexOf(h.toLowerCase()) === -1; });
+    if (toAdd.length) {
+      var lastCol = sh.getLastColumn();
+      sh.getRange(1, lastCol + 1, 1, toAdd.length).setValues([toAdd]);
+      sh.getRange(1, lastCol + 1, 1, toAdd.length).setFontWeight('bold').setBackground('#fce7f3');
+    }
+    return { ok: true, agregadas: toAdd };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 function vincularXmlFactura(body) {
   try {
     var opId = String(body.opId || '').trim();
@@ -286,15 +308,82 @@ function vincularXmlFactura(body) {
     var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
     var sheet = ss.getSheetByName(BD_INGRESOS_TAB);
     if (!sheet) return { ok: false, error: 'BD_Ingresos no encontrada' };
-    var data = sheet.getDataRange().getValues();
+    migrateBDIngresosFacturaDetalle();
+    var hdrs = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     var urlCol = BD_INGRESOS_HEADERS.indexOf('ArchivoURL') + 1;
+    var razonCol = hdrs.indexOf('RazonSocial') + 1;
+    var rfcCol = hdrs.indexOf('FacturaRFC') + 1;
+    var uuidCol = hdrs.indexOf('FacturaUUID') + 1;
+    var data = sheet.getDataRange().getValues();
     var updated = 0;
     for (var ri = 1; ri < data.length; ri++) {
-      if (String(data[ri][0]) === opId) { sheet.getRange(ri + 1, urlCol).setValue(url); updated++; }
+      if (String(data[ri][0]) !== opId) continue;
+      sheet.getRange(ri + 1, urlCol).setValue(url);
+      // Si el frontend ya trae la razón social/RFC/UUID del XML (viene de la
+      // conciliación, que ya lo leyó), se guarda de una vez — evita depender del
+      // backfill para las vinculaciones nuevas.
+      if (razonCol > 0 && body.razonSocial) sheet.getRange(ri + 1, razonCol).setValue(body.razonSocial);
+      if (rfcCol > 0 && body.rfc) sheet.getRange(ri + 1, rfcCol).setValue(body.rfc);
+      if (uuidCol > 0 && body.uuid) sheet.getRange(ri + 1, uuidCol).setValue(body.uuid);
+      updated++;
     }
     try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch (e) {}
     logAudit(body.usuario || 'sistema', 'Ingreso', 'VincularXML', opId, 'ArchivoURL', '', url);
     return { ok: true, url: url, updated: updated };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// Completa Razón Social/RFC/UUID de operaciones YA vinculadas (ArchivoURL) usando
+// el mismo escaneo de XML de la conciliación — cruza por fileId (extraído de la
+// URL de Drive guardada) contra el índice de XML del periodo. Pensado para
+// operaciones vinculadas antes de que existiera este detalle, o vinculadas
+// manualmente sin pasar por vincularXmlFactura. Siempre sincroniza con el XML
+// (fuente de verdad de a quién se facturó realmente), aunque ya hubiera algo
+// capturado a mano.
+function backfillRazonSocialDesdeXml(fechaInicio, fechaFin, usuario) {
+  try {
+    if (!fechaInicio || !fechaFin) return { ok: false, error: 'Rango de fechas requerido' };
+    migrateBDIngresosFacturaDetalle();
+    var idx = _facBuildXmlIndex(fechaInicio, fechaFin);
+    var byFileId = {};
+    idx.all.forEach(function (x) { byFileId[x.fileId] = x; });
+
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sh = ss.getSheetByName(BD_INGRESOS_TAB);
+    if (!sh) return { ok: false, error: 'BD_Ingresos no encontrada' };
+    var data = sh.getDataRange().getValues();
+    var hdrs = data[0].map(function (h) { return String(h).trim(); });
+    var idxArchivo = hdrs.indexOf('ArchivoURL');
+    var idxFecha = hdrs.indexOf('Fecha');
+    var idxRazon = hdrs.indexOf('RazonSocial');
+    var idxRFC = hdrs.indexOf('FacturaRFC');
+    var idxUUID = hdrs.indexOf('FacturaUUID');
+    if (idxArchivo < 0) return { ok: false, error: 'Columna ArchivoURL no encontrada' };
+
+    function dt(v) {
+      if (!v) return '';
+      if (v instanceof Date) return v.getFullYear() + '-' + String(v.getMonth() + 1).padStart(2, '0') + '-' + String(v.getDate()).padStart(2, '0');
+      return String(v).substring(0, 10);
+    }
+
+    var actualizadas = 0, sinCoincidencia = 0;
+    for (var i = 1; i < data.length; i++) {
+      var url = String(data[i][idxArchivo] || '').trim();
+      if (!url) continue;
+      var fechaStr = dt(data[i][idxFecha]);
+      if (fechaStr < fechaInicio || fechaStr > fechaFin) continue;
+      var m = url.match(/[-\w]{25,}/);
+      if (!m) continue;
+      var x = byFileId[m[0]];
+      if (!x) { sinCoincidencia++; continue; }
+      if (idxRazon > -1) sh.getRange(i + 1, idxRazon + 1).setValue(x.receptorNombre || '');
+      if (idxRFC > -1) sh.getRange(i + 1, idxRFC + 1).setValue(x.receptorRfc || '');
+      if (idxUUID > -1) sh.getRange(i + 1, idxUUID + 1).setValue(x.uuid || '');
+      actualizadas++;
+    }
+    try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch (e) {}
+    logAudit(usuario || 'sistema', 'Ingreso', 'BackfillRazonSocial', '', fechaInicio + ' a ' + fechaFin, '', actualizadas + ' filas actualizadas');
+    return { ok: true, actualizadas: actualizadas, sinCoincidencia: sinCoincidencia };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
