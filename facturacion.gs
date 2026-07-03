@@ -360,7 +360,39 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
         op.sugerenciaCoincideMonto = mejorDelta < 0.01;
         op.sugerenciaRazonSocial = mejor.receptorNombre;
         op.sugerenciaRfc = mejor.receptorRfc;
+        op.sugerenciaTipo = 'nombre';
         usedFolios[mejor.folio] = true; // no ofrecer el mismo XML como sugerencia a dos operaciones
+      }
+    });
+
+    // Segunda pasada, solo para lo que sigue sin sugerencia: muchas facturas se
+    // timbran a "PÚBLICO EN GENERAL" (sin nombre del paciente en el XML), así
+    // que no hay con qué comparar por nombre — se ofrece por monto exacto
+    // dentro del mismo periodo analizado. Si hay más de un XML con el mismo
+    // monto no se autoselecciona ninguno (riesgo de vincular el documento
+    // fiscal equivocado) — se listan todos como candidatos para que el
+    // usuario elija a mano.
+    sinFactura.forEach(function (op) {
+      if (op.sugerenciaFolio) return;
+      var candidatos = idx.all.filter(function (x) {
+        return x.folio && !usedFolios[x.folio] && Math.abs((x.total || 0) - (op.total || 0)) < 0.01;
+      });
+      if (!candidatos.length) return;
+      if (candidatos.length === 1) {
+        var u = candidatos[0];
+        op.sugerenciaFolio = u.folio;
+        op.sugerenciaFileId = u.fileId;
+        op.sugerenciaTotal = u.total;
+        op.sugerenciaFecha = u.fecha;
+        op.sugerenciaCoincideMonto = true;
+        op.sugerenciaRazonSocial = u.receptorNombre;
+        op.sugerenciaRfc = u.receptorRfc;
+        op.sugerenciaTipo = 'monto';
+        usedFolios[u.folio] = true;
+      } else {
+        op.candidatosPorMonto = candidatos.slice(0, 8).map(function (x) {
+          return { folio: x.folio, fileId: x.fileId, fecha: x.fecha, total: x.total, razonSocial: x.receptorNombre, rfc: x.receptorRfc };
+        });
       }
     });
 
@@ -424,6 +456,62 @@ function vincularXmlFactura(body) {
     try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch (e) {}
     logAudit(body.usuario || 'sistema', 'Ingreso', 'VincularXML', opId, 'ArchivoURL', '', url);
     return { ok: true, url: url, updated: updated };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// Sube el XML que el usuario tiene a mano y vincula la operación en un solo
+// paso, leyendo el Folio/Serie/UUID/Razón social/RFC directo del propio
+// archivo — el usuario ya NO tiene que escribir el folio a mano (muchas
+// facturas se timbran a "PÚBLICO EN GENERAL", sin nombre que dé pie a una
+// sugerencia automática, así que subir el XML manualmente es la única forma
+// de vincularlas).
+function uploadYVincularXmlFactura(body) {
+  try {
+    var opId = String(body.opId || '').trim();
+    var base64Data = body.base64;
+    if (!opId || !base64Data) return { ok: false, error: 'opId y archivo requeridos' };
+    if (!INGRESOS_FOLDER_FACTURAS) return { ok: false, error: 'Carpeta de Drive no configurada para facturas' };
+
+    var fileName = String(body.fileName || (opId + '.xml'));
+    var folder = DriveApp.getFolderById(INGRESOS_FOLDER_FACTURAS);
+    var blob = Utilities.newBlob(Utilities.base64Decode(base64Data), 'text/xml', fileName);
+    var file = folder.createFile(blob);
+    file.setName(opId + '_' + fileName);
+    var fileId = file.getId();
+    var url = file.getUrl();
+
+    var parsed = _facParseCfdiFull(fileId);
+    if (!parsed || !parsed.ok) return { ok: false, error: 'El archivo se subió pero no se pudo leer como XML de factura: ' + (parsed ? parsed.error : 'desconocido') };
+    if (!parsed.folio) return { ok: false, error: 'El XML no trae número de Folio — verifica que sea el CFDI correcto.' };
+
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sheet = ss.getSheetByName(BD_INGRESOS_TAB);
+    if (!sheet) return { ok: false, error: 'BD_Ingresos no encontrada' };
+    migrateBDIngresosFacturaDetalle();
+    var hdrs = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var urlCol = BD_INGRESOS_HEADERS.indexOf('ArchivoURL') + 1;
+    var facturaCol = BD_INGRESOS_HEADERS.indexOf('Factura') + 1;
+    var razonCol = hdrs.indexOf('RazonSocial') + 1;
+    var rfcCol = hdrs.indexOf('FacturaRFC') + 1;
+    var uuidCol = hdrs.indexOf('FacturaUUID') + 1;
+    var data = sheet.getDataRange().getValues();
+    var updated = 0;
+    for (var ri = 1; ri < data.length; ri++) {
+      if (String(data[ri][0]) !== opId) continue;
+      sheet.getRange(ri + 1, urlCol).setValue(url);
+      sheet.getRange(ri + 1, facturaCol).setValue(parsed.folio);
+      if (razonCol > 0) sheet.getRange(ri + 1, razonCol).setValue(parsed.receptor.nombre || '');
+      if (rfcCol > 0) sheet.getRange(ri + 1, rfcCol).setValue(parsed.receptor.rfc || '');
+      if (uuidCol > 0) sheet.getRange(ri + 1, uuidCol).setValue(parsed.uuid || '');
+      updated++;
+    }
+    if (!updated) return { ok: false, error: 'No se encontró la operación ' + opId + ' en BD_Ingresos' };
+    try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch (e) {}
+    logAudit(body.usuario || 'sistema', 'Ingreso', 'SubirVincularXML', opId, 'ArchivoURL', '', url);
+    return {
+      ok: true, url: url, updated: updated, folio: parsed.folio, serie: parsed.serie,
+      razonSocial: parsed.receptor.nombre || '', rfc: parsed.receptor.rfc || '', uuid: parsed.uuid || '', total: parsed.total
+    };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
@@ -525,8 +613,19 @@ function _facParseCfdiFull(fileId) {
         });
       }
     }
+    // TimbreFiscalDigital vive dentro de Complemento pero en el namespace tfd
+    // (no cfdi), así que no se puede pedir con getChild(nombre, ns) — se busca
+    // por nombre local entre todos los hijos, sin filtrar por namespace.
+    var uuid = '';
+    var complementoEl = child(root, 'Complemento');
+    if (complementoEl) {
+      var compChildren = complementoEl.getChildren();
+      for (var ki = 0; ki < compChildren.length; ki++) {
+        if (compChildren[ki].getName() === 'TimbreFiscalDigital') { uuid = attr(compChildren[ki], 'UUID'); break; }
+      }
+    }
     return {
-      ok: true, serie: attr(root, 'Serie'), folio: attr(root, 'Folio'), fecha: attr(root, 'Fecha'),
+      ok: true, serie: attr(root, 'Serie'), folio: attr(root, 'Folio'), fecha: attr(root, 'Fecha'), uuid: uuid,
       subTotal: parseFloat(attr(root, 'SubTotal')) || 0, descuento: parseFloat(attr(root, 'Descuento')) || 0,
       total: parseFloat(attr(root, 'Total')) || 0,
       moneda: attr(root, 'Moneda') || 'MXN', tipoCambio: parseFloat(attr(root, 'TipoCambio')) || 1,

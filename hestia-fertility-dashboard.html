@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.03.02 -->
+﻿<!-- app-build:2026.07.03.03 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4703,9 +4703,11 @@ async function ingFacVincular(opId, fileId, btn) {
   } catch(ex) { if(btn){ btn.disabled=false; btn.textContent='Error'; } }
 }
 
-// Aplica de un clic la sugerencia por nombre: captura el folio y vincula el XML,
-// sin que el usuario tenga que escribirlo a mano primero.
-async function ingFacUsarSugerencia(opId, folio, fileId, btn) {
+// Aplica de un clic la sugerencia (por nombre, o por monto cuando el XML no
+// trae el nombre del paciente — ej. facturado a "público en general"): captura
+// el folio y vincula el XML, sin que el usuario tenga que escribirlo a mano.
+async function ingFacUsarSugerencia(opId, folio, fileId, porMonto, btn) {
+  if (porMonto && !confirm('Este folio coincide solo por el monto — el XML no trae el nombre del paciente (facturado a "público en general"). ¿Confirmas que corresponde a esta operación?')) return;
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ing-spinner"></span>…'; }
   var match = ((_ingFacResult&&_ingFacResult.sinFactura)||[]).find(function(o){ return o.id===opId && o.sugerenciaFileId===fileId; });
   try {
@@ -4731,59 +4733,80 @@ function _ingFacRenderSeccion2(d) {
   var totalPendiente = d.sinFactura.reduce(function(s,o){ return s+(o.total||0); },0);
   var h = '<div class="ing-fac-sc">'
     +'<div class="ing-fac-sh">📎 Documentos faltantes</div>'
-    +'<div class="ing-fac-sub">Operaciones sin número de factura capturado o sin XML localizado en Drive. Sube el XML descargado y se vinculará automáticamente a la operación.</div>'
+    +'<div class="ing-fac-sub">Operaciones sin número de factura capturado o sin XML localizado en Drive. Muchas facturas se timbran a "PÚBLICO EN GENERAL" (sin el nombre del paciente en el XML) — para esas, sube el XML descargado y el sistema lee el folio/razón social/RFC directo del archivo y vincula todo en un solo paso.</div>'
     +'<div style="display:inline-flex;align-items:baseline;gap:8px;background:rgba(180,83,9,.08);border-radius:10px;padding:10px 16px;margin-bottom:14px">'
       +'<span style="font-size:20px;font-weight:800;color:#b45309">'+fmtM(totalPendiente)+'</span>'
       +'<span style="font-size:11px;font-weight:600;color:#b45309">pendiente por facturar — '+d.sinFactura.length+' operaciones</span>'
     +'</div>'
-    +'<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Fecha</th><th>Paciente</th><th>Total</th><th>Sugerencia (por nombre)</th><th>Factura#</th><th>Subir XML</th></tr></thead><tbody>';
+    +'<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Fecha</th><th>Paciente</th><th>Total</th><th>Sugerencia</th><th>Subir XML</th></tr></thead><tbody>';
   d.sinFactura.forEach(function(o){
     var safe = o.id.replace(/[^a-zA-Z0-9_-]/g,'_');
     var sugCell;
     if (o.sugerenciaFolio) {
-      var matchColor = o.sugerenciaCoincideMonto ? '#166534' : '#b45309';
-      sugCell = '<div style="font-size:10.5px;color:'+matchColor+';font-weight:600;margin-bottom:3px">Folio '+_cxpEsc(o.sugerenciaFolio)+' — '+fmtM(o.sugerenciaTotal)+(o.sugerenciaCoincideMonto?' ✓':' ⚠')+'</div>'
-        +'<button onclick="ingFacUsarSugerencia(\''+o.id+'\',\''+o.sugerenciaFolio+'\',\''+o.sugerenciaFileId+'\',this)" style="padding:3px 8px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">Usar y vincular</button>';
+      var porMonto = o.sugerenciaTipo === 'monto';
+      var matchColor = porMonto ? '#b45309' : (o.sugerenciaCoincideMonto ? '#166534' : '#b45309');
+      var etiqueta = porMonto ? ('Folio '+_cxpEsc(o.sugerenciaFolio)+' — '+fmtM(o.sugerenciaTotal)+' — coincide solo por monto, sin nombre en el XML ⚠') : ('Folio '+_cxpEsc(o.sugerenciaFolio)+' — '+fmtM(o.sugerenciaTotal)+(o.sugerenciaCoincideMonto?' ✓':' ⚠'));
+      sugCell = '<div style="font-size:10.5px;color:'+matchColor+';font-weight:600;margin-bottom:3px">'+etiqueta+'</div>'
+        +'<button onclick="ingFacUsarSugerencia(\''+o.id+'\',\''+o.sugerenciaFolio+'\',\''+o.sugerenciaFileId+'\','+(porMonto?'true':'false')+',this)" style="padding:3px 8px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">Usar y vincular</button>';
+    } else if (o.candidatosPorMonto && o.candidatosPorMonto.length) {
+      sugCell = '<div style="font-size:10.5px;color:#b45309;font-weight:600;margin-bottom:3px">'+o.candidatosPorMonto.length+' XML con el mismo monto ('+fmtM(o.total)+'), sin nombre — elige el correcto:</div>';
+      o.candidatosPorMonto.forEach(function(c){
+        sugCell += '<button onclick="ingFacUsarCandidato(\''+o.id+'\',\''+c.folio+'\',\''+c.fileId+'\',this)" style="display:block;margin:2px 0;padding:2px 7px;background:var(--card-bg,#fff);color:#b45309;border:1px solid #b45309;border-radius:6px;font-size:9.5px;font-weight:700;cursor:pointer">Folio '+_cxpEsc(c.folio)+' — '+c.fecha+'</button>';
+      });
     } else {
-      sugCell = '<span style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Sin coincidencia por nombre</span>';
+      sugCell = '<span style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Sin coincidencia</span>';
     }
     h += '<tr id="ing-fac-row-'+safe+'"><td>'+o.id+'</td><td>'+o.fecha+'</td><td>'+_cxpEsc(o.paciente)+'</td><td>'+fmtM(o.total)+'</td>'
        +'<td>'+sugCell+'</td>'
-       +'<td><input id="ing-fac-folio-'+safe+'" type="text" placeholder="Núm." style="width:60px;padding:3px 6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11px"></td>'
        +'<td><label style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--text-secondary,#6b7280);cursor:pointer;padding:4px 9px;border:1.5px dashed var(--color-divider,#d1d5db);border-radius:6px">↑ XML<input type="file" accept=".xml" style="display:none" onchange="ingFacUploadXml(\''+o.id+'\',this)"></label> <span id="ing-fac-upload-st-'+safe+'" style="font-size:9.5px;color:var(--text-secondary,#9ca3af)"></span></td></tr>';
   });
-  h += '<tr style="font-weight:800;background:var(--color-surface,#fafafa)"><td colspan="3" style="text-align:right;padding-right:10px">Total pendiente</td><td>'+fmtM(totalPendiente)+'</td><td colspan="3"></td></tr>';
+  h += '<tr style="font-weight:800;background:var(--color-surface,#fafafa)"><td colspan="3" style="text-align:right;padding-right:10px">Total pendiente</td><td>'+fmtM(totalPendiente)+'</td><td colspan="2"></td></tr>';
   h += '</tbody></table></div>';
   el.innerHTML = h;
 }
 
+// Vincula un XML elegido a mano entre varios candidatos con el mismo monto
+// (facturas a "público en general", sin nombre que hubiera permitido elegir
+// solo uno en automático) — lee el XML directo para traer razón social/RFC.
+async function ingFacUsarCandidato(opId, folio, fileId, btn) {
+  if (!confirm('¿Confirmas que el Folio '+folio+' corresponde a esta operación? No tiene el nombre del paciente en el XML, verifica el monto y la fecha antes de vincular.')) return;
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    var s = getSession()||{};
+    var r1 = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'updateIngresoFiscal', opId:opId, factura:folio, usuario:s.email||'sistema'})});
+    var res1 = await r1.json();
+    if (!res1.ok) { if(btn){ btn.disabled=false; btn.textContent='Error'; } alert(res1.error||'No se pudo capturar el folio'); return; }
+    var r2 = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'vincularXmlFactura', opId:opId, fileId:fileId, usuario:s.email||''})});
+    var res2 = await r2.json();
+    if (res2.ok) { var row=btn.closest('tr'); if(row) row.style.opacity='.4'; if(btn) btn.textContent='✓ Vinculado'; }
+    else { if(btn){ btn.disabled=false; btn.textContent='Error'; } alert(res2.error||'No se pudo vincular'); }
+  } catch(ex) { if(btn){ btn.disabled=false; btn.textContent='Error'; } }
+}
+
+// Sube el XML directo — el folio, la razón social y el RFC se leen del propio
+// archivo en el backend, no hace falta capturarlos a mano (uploadYVincularXmlFactura).
 async function ingFacUploadXml(opId, input) {
   if (!input.files.length) return;
   var file = input.files[0];
   var safe = opId.replace(/[^a-zA-Z0-9_-]/g,'_');
-  var folioInput = document.getElementById('ing-fac-folio-'+safe);
   var stEl = document.getElementById('ing-fac-upload-st-'+safe);
-  var folio = folioInput ? folioInput.value.trim() : '';
-  if (!folio) { if(stEl) stEl.textContent = 'Captura el folio primero'; return; }
-  if (stEl) stEl.innerHTML = '<span class="ing-spinner ing-spinner-dark"></span>Subiendo…';
+  if (stEl) stEl.innerHTML = '<span class="ing-spinner ing-spinner-dark"></span>Leyendo XML…';
   try {
     var base64 = await _fileToBase64(file);
     var s = getSession()||{};
-    var r1 = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
-      action:'uploadIngresoPDF', opId:opId, tipo:'factura', fileName:file.name, base64:base64, mimeType:file.type||'text/xml', usuario:s.email||'sistema'
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'uploadYVincularXmlFactura', opId:opId, fileName:file.name, base64:base64, usuario:s.email||'sistema'
     })});
-    var res1 = await r1.json();
-    if (!res1.ok) { if(stEl) stEl.textContent = 'Error: '+(res1.error||''); return; }
-    var r2 = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'updateIngresoFiscal', opId:opId, factura:folio, usuario:s.email||'sistema'})});
-    var res2 = await r2.json();
-    if (res2.ok) {
-      if (stEl) stEl.innerHTML = '<span style="color:#166534">✓ Vinculado</span>';
+    var res = await r.json();
+    if (res.ok) {
+      if (stEl) stEl.innerHTML = '<span style="color:#166534">✓ Vinculado — Folio '+_cxpEsc(res.folio)+'</span>';
       var row = document.getElementById('ing-fac-row-'+safe);
       if (row) row.style.opacity = '.4';
-    } else if (stEl) stEl.textContent = 'Error al guardar folio';
+    } else if (stEl) stEl.innerHTML = '<span style="color:#dc2626">Error: '+_cxpEsc(res.error||'No se pudo vincular')+'</span>';
   } catch(ex) {
     if (stEl) stEl.textContent = 'Error de conexión';
   }
+  input.value = '';
 }
 
 function _ingFacRenderSeccion3(d) {
@@ -4982,24 +5005,31 @@ function ingShowManual(){
     +'<table style="width:100%;border-collapse:collapse;margin-bottom:14px"><thead><tr style="background:'+S+'">'+th('Resultado')+th('Qué significa')+th('Qué hacer')+'</tr></thead><tbody>'
     +tr(['<span style="color:#166534">Con documento ✓</span>','La operación ya tiene un XML vinculado','Nada, ya está completa'])
     +tr(['<span style="color:#c46a7a">Falta vincular</span>','Tiene folio capturado y el XML existe en Drive, pero no está vinculado','Revisar que el total coincida y dar clic en <b>Vincular</b>'])
-    +tr(['<span style="color:#b45309">Sin número de factura</span>','La operación no tiene folio capturado todavía','Ir a la sección 2 y subir su XML'])
+    +tr(['<span style="color:#b45309">Sin número de factura</span>','La operación no tiene folio capturado todavía','Ir a la sección 2 y subir su XML, o usar la sugerencia si aparece una'])
     +tr(['<span style="color:#6b7280">XML sin operación asociada</span>','Hay una factura timbrada cuyo folio no aparece en ninguna operación del periodo','Investigar — puede faltar registrar la venta, o el folio se capturó distinto en Ingresos'],true)
     +p('El botón <b>Vincular</b> no sube ni copia archivos: toma la URL del XML que ya existe en Drive y la guarda en el registro de la operación. Antes de usarlo, compara la columna <b>Total op.</b> contra <b>Total XML</b> — si no coinciden, es señal de que el folio capturado no corresponde a esa venta.')
 
     +h3('2. Documentos faltantes')
-    +p('Lista las operaciones sin factura vinculada. Para cada una: escribe el <b>número de folio</b> en el campo y sube el <b>archivo XML</b> descargado con el botón "↑ XML". El sistema guarda el archivo en la carpeta de facturas del Ingreso y vincula la operación en un solo paso — no hace falta volver a la sección 1.')
+    +p('Lista las operaciones sin factura vinculada. Muchas facturas se timbran a <b>"PÚBLICO EN GENERAL"</b> (sin el nombre del paciente en el XML), así que el sistema ofrece dos formas de resolverlas:')
+    +'<ul style="margin:0 0 12px;padding-left:18px;font-size:12.5px;line-height:1.8;color:'+TS+'">'
+      +'<li><b>Sugerencia automática</b> — si hay un XML con el mismo nombre o, cuando no hay nombre, el mismo monto exacto sin usar todavía, aparece un botón "Usar y vincular". Si coincide solo por monto (no por nombre) se marca con ⚠ y pide confirmar antes de vincular.</li>'
+      +'<li><b>Subir el XML</b> — con el botón "↑ XML" ya no hace falta escribir el folio a mano: el sistema lo lee directo del archivo (folio, razón social, RFC) y vincula todo en un solo paso.</li>'
+    +'</ul>'
 
-    +h3('3. Reporte para ContaDigital')
-    +p('Genera un archivo <b>.xlsx</b> con el mismo formato de tu plantilla de carga masiva: una fila por factura, con sus conceptos (clave de producto, cantidad, precio, IVA), forma de pago traducida al catálogo de ContaDigital y totales — leídos directamente del contenido del XML, no capturados a mano. Solo incluye operaciones que ya tienen XML vinculado (secciones 1 y 2 completas). El botón entrega un link de descarga directo desde Drive.')
+    +h3('3. Ya facturado (ContaDigital)')
+    +p('Genera un archivo <b>.xlsx</b> con el mismo formato de la plantilla masiva de ContaDigital: una fila por factura, con sus conceptos (clave de producto, cantidad, precio, IVA), forma de pago traducida al catálogo de ContaDigital y totales — leídos directamente del contenido del XML, no capturados a mano. Solo incluye operaciones que ya tienen XML vinculado. Es para <b>corroborar</b> — esas facturas ya existen en ContaDigital.')
+
+    +h3('4. Pendiente por facturar (ContaDigital)')
+    +p('Genera el mismo formato de plantilla masiva pero con lo que <b>todavía no existe</b> en ContaDigital: operaciones sin factura y sin ninguna sugerencia de XML. Se arma desde la venta real (Producto, cantidad, precio) capturada en Ingresos, no desde un XML — súbelo a ContaDigital para timbrar esas facturas. Como no hay CFDI del que leer impuestos, asume servicios Exentos y deja la Clave de producto SAT en blanco; revisa antes de subir.')
 
     +h2('Flujo de trabajo recomendado')
     +'<ol style="margin:0 0 14px;padding-left:18px;font-size:12.5px;line-height:2;color:'+TS+'">'
       +'<li>Ajusta el rango <b>Del/Al</b> del filtro principal al periodo que vas a facturar</li>'
       +'<li>En Facturación, da clic en <b>Analizar periodo actual</b></li>'
       +'<li>Vincula una por una las operaciones de "Falta vincular", verificando que el monto coincida</li>'
-      +'<li>Sube el XML y captura el folio de las operaciones "Sin número de factura"</li>'
+      +'<li>En "Documentos faltantes", usa las sugerencias con un clic o sube el XML de las que sigan pendientes</li>'
       +'<li>Revisa los XML huérfanos — puede que falte registrar esa venta en Ingresos</li>'
-      +'<li>Genera el <b>reporte para ContaDigital</b> y súbelo a la plataforma</li>'
+      +'<li>Genera <b>Ya facturado</b> para corroborar contra ContaDigital, y <b>Pendiente por facturar</b> para lo que falta timbrar</li>'
     +'</ol>'
 
     +h2('Notas técnicas')

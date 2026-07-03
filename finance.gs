@@ -566,6 +566,9 @@ function doPost(e) {
     if (body.action === 'vincularXmlFactura') {
       return jsonResponse(vincularXmlFactura(body));
     }
+    if (body.action === 'uploadYVincularXmlFactura') {
+      return jsonResponse(uploadYVincularXmlFactura(body));
+    }
     if (body.action === 'generarReporteContaDigital') {
       return jsonResponse(generarReporteContaDigital(body.fechaInicio, body.fechaFin, body.usuario));
     }
