@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.10 -->
+﻿<!-- app-build:2026.07.02.11 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2784,6 +2784,18 @@ function _renderIngresosERP() {
   var _diferencia = _subtPagado - _contabilizado;
   var _isrDeclarado = _contabilizado;
 
+  // Facturado vs. pendiente por facturar — el campo Factura# solo se guarda en la
+  // primera línea de cada OP, así que el estatus se determina a nivel operación
+  // (usando TODO el período, no solo lo filtrado por mes/categoría) y luego se
+  // suma sobre "filtered" para que Facturado + Pendiente = Subtotal Pagado exacto.
+  var _opFacturaMap = {};
+  (data.rows||[]).forEach(function(r){ if (r.factura) _opFacturaMap[r.id] = true; });
+  var _facturado = 0, _pendienteFacturar = 0;
+  filtered.forEach(function(r){
+    var pag = r.pagado||0;
+    if (_opFacturaMap[r.id]) _facturado += pag; else _pendienteFacturar += pag;
+  });
+
   // Ordenar desglose detallado por monto
   var _fpArr = [];
   for (var fpk in _fpDetail) { if (_fpDetail[fpk]>0) _fpArr.push({name:fpk, total:_fpDetail[fpk]}); }
@@ -2833,6 +2845,10 @@ function _renderIngresosERP() {
   h.push('<div>');
   h.push('<div '+HS+'>Resumen contable</div>');
   h.push('<table style="width:100%;border-collapse:collapse">');
+  h.push('<tr><td '+LS+' style="font-weight:700;color:#166534">Facturado</td><td '+VS+' style="color:#166534">'+fC(_facturado)+'</td></tr>');
+  h.push('<tr><td '+LS+' style="font-weight:700;color:#b45309">Pendiente por facturar</td><td '+VS+' style="color:#b45309">'+fC(_pendienteFacturar)+'</td></tr>');
+  h.push('<tr style="background:var(--color-surface,#fafafa)"><td style="padding:6px 16px;font-size:10px;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)">Verificación (Facturado + Pendiente)</td>'
+    +'<td style="padding:6px 16px;font-size:10px;text-align:right;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)">'+fC(_facturado+_pendienteFacturar)+'</td></tr>');
   h.push('<tr><td '+LS+'>Contabilizado en el período</td><td '+VS+'>'+fC(_contabilizado)+'</td></tr>');
   h.push('<tr><td '+LS+'>Diferencia</td><td '+VS+' style="color:'+(_diferencia>0?'#b45309':'#166534')+'">'+fC(_diferencia)+'</td></tr>');
   h.push('<tr><td style="padding:8px 16px;font-size:11px;color:var(--text-secondary,#6b7280);border-bottom:1px solid var(--color-divider,#f0f0f0)">Pagado − Contabilizado</td><td style="padding:8px 16px;font-size:10px;text-align:right;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)">'+fC(_subtPagado)+' − '+fC(_contabilizado)+'</td></tr>');
@@ -2841,6 +2857,8 @@ function _renderIngresosERP() {
     +'<td id="ing-isr-val" style="padding:12px 16px;font-size:18px;font-weight:800;text-align:right;color:var(--color-primary,#c46a7a);border-top:2px solid var(--color-primary,#c46a7a)">'+fC(_isrDeclarado)+'</td></tr>');
   h.push('</table>');
   h.push('<div style="padding:10px 16px;font-size:10px;color:var(--text-secondary,#9ca3af);line-height:1.5">'
+    +'<strong>Facturado</strong> = Σ Pagado de operaciones con Factura# capturado<br>'
+    +'<strong>Pendiente por facturar</strong> = Subtotal Pagado − Facturado<br>'
     +'<strong>ISR Declarado</strong> = Contabilizado + CFDI mes anterior<br>'
     +'<strong>Contabilizado</strong> = Σ Monto Fact/Mes donde Contabilidad ✓<br>'
     +'<strong>Total TDC/TDD</strong> = Subtotal − Efectivo − Santander</div>');
