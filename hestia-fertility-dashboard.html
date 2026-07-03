@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.02.20 -->
+﻿<!-- app-build:2026.07.02.21 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4362,7 +4362,8 @@ async function ingViewFactura(url, folio) {
   var esc = function(v){ return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
   titleEl.textContent = folio ? 'Factura ' + folio : 'Factura';
   link.href = url || '#';
-  body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-secondary)">Cargando CFDI…</div>';
+  link.textContent = 'Abrir XML';
+  body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-secondary)">Cargando…</div>';
   modal.style.display = 'flex';
   if (!url) { body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-secondary)">Sin archivo adjunto.</div>'; return; }
   var m = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
@@ -4372,6 +4373,17 @@ async function ingViewFactura(url, folio) {
     var resp = await fetch(APPS_SCRIPT_URL + '?action=leerXmlFactura&fileId=' + encodeURIComponent(m[1]) + '&token=' + encodeURIComponent(s.token || ''));
     var d = await resp.json();
     if (!d.ok) throw new Error(d.error || 'Error al leer XML');
+    if (d.tipo === 'archivo') {
+      // No es el XML — es un PDF/imagen subido a mano ("Subir factura PDF").
+      // Se muestra directo en un iframe, igual que el visor de Egresos, en vez
+      // de intentar leerlo como CFDI.
+      link.textContent = 'Abrir archivo';
+      var esImagen = /^image\//.test(d.mimeType||'');
+      var previewUrl = 'https://drive.google.com/file/d/'+m[1]+'/preview';
+      body.innerHTML = '<div style="font-size:10.5px;color:var(--text-secondary,#9ca3af);text-align:center;margin-bottom:8px">'+esc(d.fileName||'')+' — subido manualmente, no es el XML del CFDI</div>'
+        + '<iframe src="'+previewUrl+'" style="width:100%;height:65vh;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px" allow="autoplay"></iframe>';
+      return;
+    }
     var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); };
     var fmtD = function(v){ return v?String(v).substring(0,10):''; };
     var tipoLabel = d.tipoComprobante==='E'?'NOTA DE CRÉDITO':d.tipoComprobante==='N'?'NÓMINA':'FACTURA';

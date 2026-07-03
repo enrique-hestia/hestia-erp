@@ -2749,6 +2749,14 @@ function leerXmlFactura(fileId) {
     var file;
     try { file = DriveApp.getFileById(fileId); }
     catch(fe) { return {ok:false, error:'Archivo no encontrado: '+fe.message}; }
+    // El archivo vinculado puede ser el XML (vinculado vía conciliación) o un PDF/imagen
+    // subido a mano ("Subir factura PDF") — solo el XML se puede parsear como CFDI.
+    var mimeType = file.getMimeType();
+    var fileName = file.getName();
+    var esXml = mimeType === 'text/xml' || mimeType === 'application/xml' || /\.xml$/i.test(fileName);
+    if (!esXml) {
+      return {ok:true, tipo:'archivo', mimeType:mimeType, fileName:fileName, fileId:fileId, viewUrl:file.getUrl()};
+    }
     var content = file.getBlob().getDataAsString('UTF-8');
     if (content.charCodeAt(0) === 0xFEFF) content = content.substring(1);
     content = content.replace(/^\s+/, '');
@@ -2791,7 +2799,7 @@ function leerXmlFactura(fileId) {
         if (chs[ci].getName()==='TimbreFiscalDigital') { uuid=attr(chs[ci],'UUID'); fechaTimbrado=attr(chs[ci],'FechaTimbrado'); noCertificadoSat=attr(chs[ci],'NoCertificadoSAT'); break; }
       }
     }
-    return {ok:true, serie:serie, folio:folio, fecha:fecha, subTotal:subTotal, descuento:descuento, total:total, moneda:moneda, formaPago:formaPago, metodoPago:metodoPago, tipoCambio:tipoCambio, tipoComprobante:tipoComprobante, emisor:emisor, receptor:receptor, conceptos:conceptos, totalImpuestosTrasladados:totalImpuestosTrasladados, uuid:uuid, fechaTimbrado:fechaTimbrado, noCertificadoSat:noCertificadoSat, fileName:file.getName()};
+    return {ok:true, tipo:'xml', serie:serie, folio:folio, fecha:fecha, subTotal:subTotal, descuento:descuento, total:total, moneda:moneda, formaPago:formaPago, metodoPago:metodoPago, tipoCambio:tipoCambio, tipoComprobante:tipoComprobante, emisor:emisor, receptor:receptor, conceptos:conceptos, totalImpuestosTrasladados:totalImpuestosTrasladados, uuid:uuid, fechaTimbrado:fechaTimbrado, noCertificadoSat:noCertificadoSat, fileName:file.getName()};
   } catch(ex) { return {ok:false, error:ex.message}; }
 }
 
