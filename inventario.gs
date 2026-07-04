@@ -78,6 +78,38 @@ function _medInvColIdx(headers, name) {
   return i;
 }
 
+/* ── Backfill: activa Inventariable en los productos "Medicamento" que
+   ya existían en BD_Productos antes de este sistema, para que aparezcan
+   de inmediato en Medicamentos > Catálogo sin tener que volver a
+   guardarlos uno por uno. Genera SKU si falta (lo necesitan Combos y
+   Movimientos para identificar el producto) y solo inicializa
+   StockActual en 0 si estaba vacío — nunca pisa un stock ya capturado.
+   Correr UNA VEZ desde el editor de Apps Script. */
+function activarInventarioMedicamentosExistentes() {
+  var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+  var sh = ss.getSheetByName('BD_Productos');
+  if (!sh) return { ok: false, error: 'BD_Productos no encontrada' };
+  var cols = _bdProdEnsureInventarioCols(sh);
+  var data = sh.getDataRange().getValues();
+  var actualizados = 0, skuGenerados = 0;
+  for (var i = 1; i < data.length; i++) {
+    var categoria = String(data[i][3] || '').trim().toLowerCase();
+    if (categoria !== 'medicamento') continue;
+    var rowNum = i + 1;
+    var yaInventariable = data[i][cols.Inventariable - 1] === true || String(data[i][cols.Inventariable - 1]).toUpperCase() === 'TRUE';
+    if (!yaInventariable) { sh.getRange(rowNum, cols.Inventariable).setValue(true); actualizados++; }
+    if (!String(data[i][1] || '').trim()) {
+      sh.getRange(rowNum, 2).setValue(_getNextSkuConPrefijo(sh, 'MED'));
+      skuGenerados++;
+    }
+    var stockActualCell = data[i][cols.StockActual - 1];
+    if (stockActualCell === '' || stockActualCell === null || stockActualCell === undefined) {
+      sh.getRange(rowNum, cols.StockActual).setValue(0);
+    }
+  }
+  return { ok: true, actualizados: actualizados, skuGenerados: skuGenerados };
+}
+
 /* ── Buscar un producto inventariable en BD_Productos por SKU ─────── */
 function _bdProdFindBySku(sku) {
   var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
