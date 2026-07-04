@@ -536,6 +536,108 @@ function uploadYVincularXmlFactura(body) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
+// Versión masiva de uploadYVincularXmlFactura: recibe varios XML de un jalón y
+// los empareja contra las operaciones del periodo que todavía no tienen
+// ArchivoURL — por folio ya capturado primero, luego por nombre del paciente,
+// y por monto exacto solo si es el único candidato con ese monto (si hay más
+// de uno, no se autoselecciona ninguno). Cada operación solo se usa una vez
+// dentro del mismo lote. Los XML que sí encuentran operación se guardan en
+// Drive y vinculan de una vez; los que no, NO se suben (para no dejar copias
+// sueltas fuera del escaneo de Drive) — se regresan en sinMatch para resolver
+// a mano (con "Facturas sin operación" o subiéndolos uno por uno).
+function uploadYVincularXmlLote(body) {
+  try {
+    var fechaInicio = body.fechaInicio, fechaFin = body.fechaFin;
+    var archivos = body.archivos || [];
+    if (!fechaInicio || !fechaFin) return { ok: false, error: 'Rango de fechas requerido' };
+    if (!archivos.length) return { ok: false, error: 'Sin archivos' };
+    if (!INGRESOS_FOLDER_FACTURAS) return { ok: false, error: 'Carpeta de Drive no configurada para facturas' };
+
+    var ops = _facReadOpsInRange(fechaInicio, fechaFin);
+    var pendientes = ops.filter(function (op) { return !op.archivoURL; });
+    var usadas = {};
+
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sheet = ss.getSheetByName(BD_INGRESOS_TAB);
+    if (!sheet) return { ok: false, error: 'BD_Ingresos no encontrada' };
+    migrateBDIngresosFacturaDetalle();
+    var hdrs = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var urlCol = BD_INGRESOS_HEADERS.indexOf('ArchivoURL') + 1;
+    var facturaCol = BD_INGRESOS_HEADERS.indexOf('Factura') + 1;
+    var razonCol = hdrs.indexOf('RazonSocial') + 1;
+    var rfcCol = hdrs.indexOf('FacturaRFC') + 1;
+    var uuidCol = hdrs.indexOf('FacturaUUID') + 1;
+    var data = sheet.getDataRange().getValues();
+    var rowsByOpId = {};
+    for (var ri = 1; ri < data.length; ri++) {
+      var opId0 = String(data[ri][0]);
+      if (!rowsByOpId[opId0]) rowsByOpId[opId0] = [];
+      rowsByOpId[opId0].push(ri + 1);
+    }
+
+    var folder = DriveApp.getFolderById(INGRESOS_FOLDER_FACTURAS);
+    var vinculadas = [], sinMatch = [], errores = [];
+
+    archivos.forEach(function (a) {
+      try {
+        var rawBytes = Utilities.base64Decode(a.base64);
+        var content = Utilities.newBlob(rawBytes, 'text/xml', a.fileName).getDataAsString('UTF-8');
+        var parsed = _facParseCfdiFullFromContent(content);
+        if (!parsed || !parsed.ok) { errores.push({ fileName: a.fileName, error: parsed ? parsed.error : 'No se pudo leer' }); return; }
+        if (!parsed.folio) { errores.push({ fileName: a.fileName, error: 'El XML no trae número de Folio' }); return; }
+
+        var candidato = pendientes.find(function (op) { return !usadas[op.id] && op.factura && op.factura === parsed.folio; });
+        if (!candidato) {
+          var xNorm = _pacNormNombre(parsed.receptor.nombre);
+          if (xNorm) {
+            candidato = pendientes.find(function (op) {
+              if (usadas[op.id]) return false;
+              var opNorm = _pacNormNombre(op.paciente);
+              if (!opNorm) return false;
+              var partes = [opNorm].concat(opNorm.split(' y ').map(function (s) { return s.trim(); }).filter(function (s) { return s.length >= 3; }));
+              return partes.some(function (p) { return p && (xNorm.indexOf(p) > -1 || p.indexOf(xNorm) > -1); });
+            });
+          }
+        }
+        if (!candidato) {
+          var porMonto = pendientes.filter(function (op) { return !usadas[op.id] && Math.abs((op.total || 0) - (parsed.total || 0)) < 0.01; });
+          if (porMonto.length === 1) candidato = porMonto[0];
+          else if (porMonto.length > 1) {
+            sinMatch.push({ fileName: a.fileName, folio: parsed.folio, total: parsed.total, razonSocial: parsed.receptor.nombre || '', motivo: 'ambiguo (' + porMonto.length + ' operaciones con el mismo monto)' });
+            return;
+          }
+        }
+        if (!candidato) {
+          sinMatch.push({ fileName: a.fileName, folio: parsed.folio, total: parsed.total, razonSocial: parsed.receptor.nombre || '', motivo: 'sin operación con ese folio, nombre o monto' });
+          return;
+        }
+
+        usadas[candidato.id] = true;
+        var blob = Utilities.newBlob(rawBytes, 'text/xml', a.fileName);
+        var savedFile = folder.createFile(blob);
+        savedFile.setName(candidato.id + '_' + a.fileName);
+        var url = savedFile.getUrl();
+
+        var filas = rowsByOpId[candidato.id] || [];
+        filas.forEach(function (rowNum) {
+          sheet.getRange(rowNum, urlCol).setValue(url);
+          sheet.getRange(rowNum, facturaCol).setValue(parsed.folio);
+          if (razonCol > 0) sheet.getRange(rowNum, razonCol).setValue(parsed.receptor.nombre || '');
+          if (rfcCol > 0) sheet.getRange(rowNum, rfcCol).setValue(parsed.receptor.rfc || '');
+          if (uuidCol > 0) sheet.getRange(rowNum, uuidCol).setValue(parsed.uuid || '');
+        });
+        vinculadas.push({ opId: candidato.id, paciente: candidato.paciente, folio: parsed.folio, razonSocial: parsed.receptor.nombre || '', rfc: parsed.receptor.rfc || '', total: parsed.total });
+      } catch (exIn) {
+        errores.push({ fileName: a.fileName, error: exIn.message });
+      }
+    });
+
+    try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch (e) {}
+    logAudit(body.usuario || 'sistema', 'Ingreso', 'SubirVincularXMLLote', '', fechaInicio + ' a ' + fechaFin, '', vinculadas.length + ' vinculadas, ' + sinMatch.length + ' sin match, ' + errores.length + ' errores');
+    return { ok: true, vinculadas: vinculadas, sinMatch: sinMatch, errores: errores };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 // Completa Razón Social/RFC/UUID de operaciones YA vinculadas (ArchivoURL) usando
 // el mismo escaneo de XML de la conciliación — cruza por fileId (extraído de la
 // URL de Drive guardada) contra el índice de XML del periodo. Pensado para
@@ -595,6 +697,15 @@ function _facParseCfdiFull(fileId) {
   try {
     var file = DriveApp.getFileById(fileId);
     var content = file.getBlob().getDataAsString('UTF-8');
+    return _facParseCfdiFullFromContent(content);
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// Igual que _facParseCfdiFull pero a partir del texto del XML directamente
+// (sin necesidad de que el archivo ya exista en Drive) — usado por la subida
+// masiva, que valida/empareja el XML antes de decidir si vale la pena guardarlo.
+function _facParseCfdiFullFromContent(content) {
+  try {
     if (content.charCodeAt(0) === 0xFEFF) content = content.substring(1);
     content = content.replace(/^\s+/, '');
     var doc = XmlService.parse(content);

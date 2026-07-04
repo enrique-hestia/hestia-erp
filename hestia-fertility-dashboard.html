@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.03.04 -->
+﻿<!-- app-build:2026.07.03.05 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2255,6 +2255,7 @@ var _ingFilters={mes:[],categoria:[],formaPago:[],sucursal:[],buscar:'',factura:
 var _ingData=null;
 var _ingActiveTab='lista';
 var _ingFacResult=null;
+var _ingFacLoteResult=null;
 
 function renderIngresos(data) {
   // Compatibilidad: si data viene del API viejo (con .todos), ignorar y cargar desde nuevo endpoint
@@ -4485,6 +4486,8 @@ function ingFacRender() {
     +'<div class="ing-fac-sub">Compara los XML timbrados en Drive contra las operaciones de Ingresos del periodo filtrado ('+(periodo||'sin periodo seleccionado')+'). Solo aplica al rango Del/Al activo en el filtro principal.</div>'
     +'<button onclick="ingFacAnalizar()" id="ing-fac-analizar-btn" style="padding:9px 18px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer" '+(periodo?'':'disabled')+'>Analizar periodo actual</button>'
     +'<button onclick="ingFacBackfillRazonSocial()" id="ing-fac-backfill-btn" title="Completa razón social/RFC de operaciones que ya tienen factura vinculada pero les falta este dato (ej. facturas a nombre de un familiar)" style="margin-left:8px;padding:9px 18px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer" '+(periodo?'':'disabled')+'>🔄 Completar razón social histórica</button>'
+    +'<label title="Selecciona de un jalón todos los XML que tengas descargados — el sistema los empareja solo por folio, nombre o monto" style="margin-left:8px;display:inline-flex;align-items:center;gap:6px;padding:9px 18px;background:var(--card-bg,#fff);color:#166534;border:1.5px solid #166534;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">📤 Subir varios XML<input id="ing-fac-lote-input" type="file" accept=".xml" multiple style="display:none" onchange="ingFacUploadXmlLote(this)" '+(periodo?'':'disabled')+'></label>'
+    +'<div id="ing-fac-lote-resultado" style="margin-top:12px"></div>'
     +'<div id="ing-fac-resultado" style="margin-top:16px"></div>'
     +'</div>'
     +'<div id="ing-fac-huerfanos"></div>'
@@ -4597,8 +4600,10 @@ async function ingFacBackfillRazonSocial(silent) {
             _renderIngresosERP();
             // _renderIngresosERP() ya repobló #ing-fac-body (ver ingFacRender() ahí
             // dentro), pero eso solo deja la tarjeta inicial — si ya había un
-            // análisis en pantalla, se repinta desde memoria sin volver a pedirlo.
+            // análisis o un resultado de subida masiva en pantalla, se repintan
+            // desde memoria sin volver a pedirlos.
             if (_ingActiveTab === 'facturacion' && _ingFacResult) _ingFacRenderResultado(_ingFacResult);
+            if (_ingActiveTab === 'facturacion' && _ingFacLoteResult) _ingFacRenderLoteResultado(_ingFacLoteResult);
           }
         } catch(_ref) {}
       }
@@ -4853,6 +4858,76 @@ async function ingFacUploadXml(opId, input) {
   input.value = '';
 }
 
+// Sube varios XML de un jalón y los empareja contra las operaciones del
+// periodo (por folio, nombre o monto exacto) — mismo criterio que las
+// sugerencias de "Documentos faltantes", pero de un solo golpe en vez de
+// archivo por archivo.
+async function ingFacUploadXmlLote(input) {
+  if (!input.files.length) return;
+  var out = document.getElementById('ing-fac-lote-resultado');
+  var n = input.files.length;
+  if (out) out.innerHTML = '<span class="ing-spinner ing-spinner-dark"></span>Leyendo '+n+' archivo(s)…';
+  try {
+    var archivos = [];
+    for (var i = 0; i < input.files.length; i++) {
+      var f = input.files[i];
+      archivos.push({ fileName: f.name, base64: await _fileToBase64(f) });
+    }
+    if (out) out.innerHTML = '<span class="ing-spinner ing-spinner-dark"></span>Comparando contra las operaciones del periodo…';
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'uploadYVincularXmlLote', fechaInicio:currentFechaInicio, fechaFin:currentFechaFin, archivos:archivos, usuario:s.email||'sistema'
+    })});
+    var res = await r.json();
+    if (!res.ok) { if(out) out.innerHTML = '<span style="color:#dc2626">Error: '+_cxpEsc(res.error||'No se pudo procesar el lote')+'</span>'; return; }
+    _ingFacLoteResult = res;
+    _ingFacRenderLoteResultado(res);
+    input.value = '';
+    // Se acaba de escribir en BD_Ingresos — refetch real y re-analiza para que
+    // todo el panel (KPIs, "Documentos faltantes", huérfanos) refleje lo nuevo.
+    // ingFacAnalizar() puede disparar un refresh que reconstruye #ing-fac-body
+    // (ver ingFacBackfillRazonSocial) — ese refresh ya restaura este resultado
+    // desde _ingFacLoteResult, así que no se pierde.
+    if (res.vinculadas.length && typeof _fetchIngresosRaw === 'function') {
+      try {
+        var rawIng = await _fetchIngresosRaw();
+        var dIng = _ingApplyDateFilter(rawIng);
+        _swrSet('ingresos', dIng, currentFechaInicio||'', currentFechaFin||'');
+        _ingData = dIng;
+      } catch(_ref) {}
+    }
+    if (typeof ingFacAnalizar === 'function') await ingFacAnalizar();
+  } catch(ex) {
+    if (out) out.innerHTML = '<span style="color:#dc2626">Error de conexión: '+_cxpEsc(ex.message||'')+'</span>';
+  }
+}
+
+function _ingFacRenderLoteResultado(res) {
+  var out = document.getElementById('ing-fac-lote-resultado');
+  if (!out) return;
+  var h = '<div style="font-size:12px;font-weight:700;margin-bottom:6px">'
+    +'<span style="color:#166534">✓ '+res.vinculadas.length+' vinculada(s)</span>'
+    +(res.sinMatch.length?' · <span style="color:#b45309">'+res.sinMatch.length+' sin coincidencia</span>':'')
+    +(res.errores.length?' · <span style="color:#dc2626">'+res.errores.length+' con error</span>':'')
+    +'</div>';
+  if (res.vinculadas.length) {
+    h += '<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Paciente</th><th>Folio</th><th>Razón social</th></tr></thead><tbody>'
+      + res.vinculadas.map(function(v){ return '<tr><td>'+v.opId+'</td><td>'+_cxpEsc(v.paciente)+'</td><td>'+_cxpEsc(v.folio)+'</td><td>'+_cxpEsc(v.razonSocial||'—')+'</td></tr>'; }).join('')
+      + '</tbody></table>';
+  }
+  if (res.sinMatch.length) {
+    h += '<div style="font-size:11px;font-weight:700;color:#b45309;margin:10px 0 4px">Sin coincidencia — revisa a mano:</div>'
+      + '<table class="ing-fac-tbl"><thead><tr><th>Archivo</th><th>Folio</th><th>Razón social</th><th>Total</th><th>Motivo</th></tr></thead><tbody>'
+      + res.sinMatch.map(function(m){ return '<tr><td>'+_cxpEsc(m.fileName)+'</td><td>'+_cxpEsc(m.folio)+'</td><td>'+_cxpEsc(m.razonSocial||'—')+'</td><td>$'+(parseFloat(m.total)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</td><td>'+_cxpEsc(m.motivo)+'</td></tr>'; }).join('')
+      + '</tbody></table>';
+  }
+  if (res.errores.length) {
+    h += '<div style="font-size:11px;font-weight:700;color:#dc2626;margin:10px 0 4px">Errores de lectura:</div>'
+      + res.errores.map(function(e){ return '<div style="font-size:10.5px;color:#dc2626">'+_cxpEsc(e.fileName)+': '+_cxpEsc(e.error)+'</div>'; }).join('');
+  }
+  out.innerHTML = h;
+}
+
 function _ingFacRenderSeccion3(d) {
   var el = document.getElementById('ing-fac-seccion3');
   if (!el) return;
@@ -5063,6 +5138,7 @@ function ingShowManual(){
       +'<li><b>Sugerencia automática</b> — si hay un XML con el mismo nombre o, cuando no hay nombre, el mismo monto exacto sin usar todavía, aparece un botón "Usar y vincular". Si coincide solo por monto (no por nombre) se marca con ⚠ y pide confirmar antes de vincular.</li>'
       +'<li><b>Subir el XML</b> — con el botón "↑ XML" ya no hace falta escribir el folio a mano: el sistema lo lee directo del archivo (folio, razón social, RFC) y vincula todo en un solo paso.</li>'
     +'</ul>'
+    +p('<b>📤 Subir varios XML</b> (arriba, junto a "Analizar periodo actual") hace lo mismo pero de un jalón: selecciona todos los .xml que tengas descargados del periodo y el sistema los empareja uno por uno (por folio, nombre o monto exacto) contra las operaciones que aún no tienen factura — mucho más rápido que subirlos uno por uno cuando son varias decenas. Los que no encuentran una operación clara (folio/nombre/monto sin match, o ambiguos) se listan aparte para resolverlos a mano.')
 
     +h3('3. Ya facturado (ContaDigital)')
     +p('Genera un archivo <b>.xlsx</b> con el mismo formato de la plantilla masiva de ContaDigital: una fila por factura, con sus conceptos (clave de producto, cantidad, precio, IVA), forma de pago traducida al catálogo de ContaDigital y totales — leídos directamente del contenido del XML, no capturados a mano. Solo incluye operaciones que ya tienen XML vinculado. Es para <b>corroborar</b> — esas facturas ya existen en ContaDigital.')
