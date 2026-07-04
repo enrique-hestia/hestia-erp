@@ -383,6 +383,10 @@ function doGet(e) {
       return jsonResponse(readCatalogoMedicamentos());
     }
 
+    if (action === 'creditosProveedor') {
+      return jsonResponse(readCreditosProveedor((e && e.parameter.proveedor) || ''));
+    }
+
     if (action === 'movimientosInventario') {
       return jsonResponse(readMovimientosInventario({
         sku: (e && e.parameter.sku) || '',

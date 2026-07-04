@@ -1,0 +1,353 @@
+/* ==============================================================
+   cxp_creditos.gs — Créditos de Proveedor + Abonos parciales en CxP
+   --------------------------------------------------------------
+   CxP y Egresos son el mismo renglón de Egresos2026 (ver finance.gs).
+   Este archivo agrega, SIN tocar pagarCxP/deleteCxPRow existentes:
+
+   - Creditos_Proveedor: saldo a favor que queda cuando se cancela una
+     orden que ya se había pagado (dinero real que salió sin que llegara
+     el producto/servicio).
+   - Abonos_CxP: cada aplicación de dinero contra una cuenta por pagar
+     (pago normal o crédito aplicado) — el saldo pendiente de una orden
+     = Monto − suma de sus abonos activos (no reversados).
+
+   Al cancelar una orden pagada, sus abonos se reversan uno por uno:
+   los que vinieron de crédito regresan ese crédito a disponible: los
+   que fueron pago real (efectivo/banco) se convierten en un crédito
+   nuevo. Caso especial: órdenes pagadas ANTES de que existiera este
+   sistema (vía pagarCxP directo, sin abonos) — se detecta por
+   Pagado=true sin abonos y se trata como un pago completo a convertir.
+   ============================================================== */
+
+var CXP_CRED_TAB = 'Creditos_Proveedor';
+var CXP_CRED_HEADERS = ['ID', 'Fecha', 'Proveedor', 'Monto', 'MontoDisponible', 'Origen', 'CxPIdOrigen', 'Usuario', 'Notas'];
+var CXP_ABONO_TAB = 'Abonos_CxP';
+var CXP_ABONO_HEADERS = ['ID', 'Fecha', 'CxPId', 'Proveedor', 'Concepto', 'Monto', 'Origen', 'CreditoId', 'FormaPago', 'Usuario', 'Notas', 'Reversado'];
+
+function _cxpCredSS() { return SpreadsheetApp.openById(EGRESOS_SS_2026); }
+
+function setupCxPCreditosAbonos() {
+  var ss = _cxpCredSS();
+  var credSh = ss.getSheetByName(CXP_CRED_TAB);
+  if (!credSh) {
+    credSh = ss.insertSheet(CXP_CRED_TAB);
+    credSh.getRange(1, 1, 1, CXP_CRED_HEADERS.length).setValues([CXP_CRED_HEADERS]);
+    credSh.getRange(1, 1, 1, CXP_CRED_HEADERS.length).setFontWeight('bold').setBackground('#166534').setFontColor('#ffffff');
+    credSh.setFrozenRows(1);
+    credSh.autoResizeColumns(1, CXP_CRED_HEADERS.length);
+  }
+  var abonoSh = ss.getSheetByName(CXP_ABONO_TAB);
+  if (!abonoSh) {
+    abonoSh = ss.insertSheet(CXP_ABONO_TAB);
+    abonoSh.getRange(1, 1, 1, CXP_ABONO_HEADERS.length).setValues([CXP_ABONO_HEADERS]);
+    abonoSh.getRange(1, 1, 1, CXP_ABONO_HEADERS.length).setFontWeight('bold').setBackground('#1a252f').setFontColor('#ffffff');
+    abonoSh.setFrozenRows(1);
+    abonoSh.autoResizeColumns(1, CXP_ABONO_HEADERS.length);
+  }
+  return { ok: true, creditosCreada: !ss.getSheetByName(CXP_CRED_TAB) ? false : true, abonosCreada: !ss.getSheetByName(CXP_ABONO_TAB) ? false : true };
+}
+
+function _cxpColIdx(headers, name) { var i = headers.indexOf(name); if (i < 0) throw new Error('Columna ' + name + ' no encontrada (¿corriste setupCxPCreditosAbonos()?)'); return i; }
+
+function _cxpNextId(sh, idColName) {
+  var data = sh.getDataRange().getValues();
+  var hdrs = data[0];
+  var idCol = _cxpColIdx(hdrs, idColName);
+  var max = 0;
+  for (var i = 1; i < data.length; i++) { var n = parseInt(data[i][idCol], 10); if (n > max) max = n; }
+  return max + 1;
+}
+
+/* ── Créditos de proveedor ─────────────────────────────────────── */
+function readCreditosProveedor(proveedor) {
+  try {
+    var sh = _cxpCredSS().getSheetByName(CXP_CRED_TAB);
+    if (!sh) return { ok: true, rows: [] };
+    var data = sh.getDataRange().getValues();
+    var hdrs = data[0];
+    var rows = [];
+    for (var i = 1; i < data.length; i++) {
+      var r = data[i];
+      var disp = Number(r[_cxpColIdx(hdrs, 'MontoDisponible')]) || 0;
+      if (disp <= 0.01) continue;
+      var prov = String(r[_cxpColIdx(hdrs, 'Proveedor')] || '');
+      if (proveedor && prov.trim().toLowerCase() !== String(proveedor).trim().toLowerCase()) continue;
+      rows.push({
+        _rowNum: i + 1, id: r[_cxpColIdx(hdrs, 'ID')], fecha: String(r[_cxpColIdx(hdrs, 'Fecha')] || ''),
+        proveedor: prov, monto: Number(r[_cxpColIdx(hdrs, 'Monto')]) || 0, montoDisponible: disp,
+        origen: String(r[_cxpColIdx(hdrs, 'Origen')] || ''), cxpIdOrigen: String(r[_cxpColIdx(hdrs, 'CxPIdOrigen')] || '')
+      });
+    }
+    return { ok: true, rows: rows };
+  } catch (ex) { return { ok: false, error: ex.message, rows: [] }; }
+}
+
+function _crearCreditoProveedor(p) {
+  var sh = _cxpCredSS().getSheetByName(CXP_CRED_TAB);
+  if (!sh) throw new Error('Falta correr setupCxPCreditosAbonos()');
+  var hdrs = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  var id = _cxpNextId(sh, 'ID');
+  var row = new Array(hdrs.length).fill('');
+  row[_cxpColIdx(hdrs, 'ID')] = id;
+  row[_cxpColIdx(hdrs, 'Fecha')] = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  row[_cxpColIdx(hdrs, 'Proveedor')] = p.proveedor || '';
+  row[_cxpColIdx(hdrs, 'Monto')] = p.monto || 0;
+  row[_cxpColIdx(hdrs, 'MontoDisponible')] = p.monto || 0;
+  row[_cxpColIdx(hdrs, 'Origen')] = p.origen || '';
+  row[_cxpColIdx(hdrs, 'CxPIdOrigen')] = p.cxpIdOrigen || '';
+  row[_cxpColIdx(hdrs, 'Usuario')] = p.usuario || '';
+  row[_cxpColIdx(hdrs, 'Notas')] = p.notas || '';
+  sh.appendRow(row);
+  return id;
+}
+
+function _consumirCredito(creditoId, monto) {
+  var sh = _cxpCredSS().getSheetByName(CXP_CRED_TAB);
+  if (!sh) return { ok: false, error: 'Falta correr setupCxPCreditosAbonos()' };
+  var data = sh.getDataRange().getValues();
+  var hdrs = data[0];
+  var idCol = _cxpColIdx(hdrs, 'ID'), dispCol = _cxpColIdx(hdrs, 'MontoDisponible');
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idCol]) !== String(creditoId)) continue;
+    var disp = Number(data[i][dispCol]) || 0;
+    if (monto > disp + 0.01) return { ok: false, error: 'El crédito solo tiene $' + disp.toFixed(2) + ' disponible' };
+    sh.getRange(i + 1, dispCol + 1).setValue(Math.max(0, disp - monto));
+    return { ok: true };
+  }
+  return { ok: false, error: 'Crédito no encontrado' };
+}
+
+function _restaurarCredito(creditoId, monto) {
+  var sh = _cxpCredSS().getSheetByName(CXP_CRED_TAB);
+  if (!sh) return;
+  var data = sh.getDataRange().getValues();
+  var hdrs = data[0];
+  var idCol = _cxpColIdx(hdrs, 'ID'), dispCol = _cxpColIdx(hdrs, 'MontoDisponible'), montoCol = _cxpColIdx(hdrs, 'Monto');
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idCol]) !== String(creditoId)) continue;
+    var disp = Number(data[i][dispCol]) || 0;
+    var tope = Number(data[i][montoCol]) || 0;
+    sh.getRange(i + 1, dispCol + 1).setValue(Math.min(tope, disp + monto));
+    return;
+  }
+}
+
+/* ── Abonos ───────────────────────────────────────────────────────── */
+function _registrarAbono(p) {
+  var sh = _cxpCredSS().getSheetByName(CXP_ABONO_TAB);
+  if (!sh) throw new Error('Falta correr setupCxPCreditosAbonos()');
+  var hdrs = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  var id = _cxpNextId(sh, 'ID');
+  var row = new Array(hdrs.length).fill('');
+  row[_cxpColIdx(hdrs, 'ID')] = id;
+  row[_cxpColIdx(hdrs, 'Fecha')] = p.fecha || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  row[_cxpColIdx(hdrs, 'CxPId')] = p.cxpId;
+  row[_cxpColIdx(hdrs, 'Proveedor')] = p.proveedor || '';
+  row[_cxpColIdx(hdrs, 'Concepto')] = p.concepto || '';
+  row[_cxpColIdx(hdrs, 'Monto')] = p.monto || 0;
+  row[_cxpColIdx(hdrs, 'Origen')] = p.origen || 'pago'; // 'pago' | 'credito'
+  row[_cxpColIdx(hdrs, 'CreditoId')] = p.creditoId || '';
+  row[_cxpColIdx(hdrs, 'FormaPago')] = p.formaPago || '';
+  row[_cxpColIdx(hdrs, 'Usuario')] = p.usuario || '';
+  row[_cxpColIdx(hdrs, 'Notas')] = p.notas || '';
+  row[_cxpColIdx(hdrs, 'Reversado')] = false;
+  sh.appendRow(row);
+  return id;
+}
+
+function _cxpAbonosPorId(cxpId, soloActivos) {
+  var sh = _cxpCredSS().getSheetByName(CXP_ABONO_TAB);
+  if (!sh) return [];
+  var data = sh.getDataRange().getValues();
+  var hdrs = data[0];
+  var out = [];
+  for (var i = 1; i < data.length; i++) {
+    var r = data[i];
+    if (String(r[_cxpColIdx(hdrs, 'CxPId')]) !== String(cxpId)) continue;
+    var reversado = r[_cxpColIdx(hdrs, 'Reversado')] === true || String(r[_cxpColIdx(hdrs, 'Reversado')]).toUpperCase() === 'TRUE';
+    if (soloActivos && reversado) continue;
+    out.push({
+      _rowNum: i + 1, id: r[_cxpColIdx(hdrs, 'ID')], monto: Number(r[_cxpColIdx(hdrs, 'Monto')]) || 0,
+      origen: String(r[_cxpColIdx(hdrs, 'Origen')] || 'pago'), creditoId: String(r[_cxpColIdx(hdrs, 'CreditoId')] || ''),
+      reversado: reversado
+    });
+  }
+  return out;
+}
+
+function _cxpSumAbonosActivos(cxpId) {
+  return _cxpAbonosPorId(cxpId, true).reduce(function (s, a) { return s + a.monto; }, 0);
+}
+
+function _marcarAbonoReversado(abonoRowNum) {
+  var sh = _cxpCredSS().getSheetByName(CXP_ABONO_TAB);
+  if (!sh) return;
+  var hdrs = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  sh.getRange(abonoRowNum, _cxpColIdx(hdrs, 'Reversado') + 1).setValue(true);
+}
+
+/* Saldo pendiente de una o varias órdenes — usado por readBDCxP para
+   mostrar en pantalla solo lo que de verdad se debe. */
+function readSaldosCxP(cxpIds) {
+  try {
+    var sh = _cxpCredSS().getSheetByName(CXP_ABONO_TAB);
+    var mapa = {};
+    (cxpIds || []).forEach(function (id) { mapa[id] = 0; });
+    if (sh) {
+      var data = sh.getDataRange().getValues();
+      var hdrs = data[0];
+      for (var i = 1; i < data.length; i++) {
+        var r = data[i];
+        var id = String(r[_cxpColIdx(hdrs, 'CxPId')]);
+        if (!(id in mapa)) continue;
+        var reversado = r[_cxpColIdx(hdrs, 'Reversado')] === true || String(r[_cxpColIdx(hdrs, 'Reversado')]).toUpperCase() === 'TRUE';
+        if (reversado) continue;
+        mapa[id] += Number(r[_cxpColIdx(hdrs, 'Monto')]) || 0;
+      }
+    }
+    return { ok: true, abonadoPorId: mapa };
+  } catch (ex) { return { ok: false, error: ex.message, abonadoPorId: {} }; }
+}
+
+/* ── Ruteo a banco/caja chica — copia del bloque ya probado en pagarCxP,
+   factorizado para poder reusarlo desde aplicarAbonoCxP sin tocar pagarCxP ── */
+function _cxpRutearABanco(formaPago, monto, fechaPago, ref) {
+  if (!formaPago || monto <= 0) return;
+  var mesStr = fechaPago.substring(0, 7);
+  if (formaPago === 'Efectivo') {
+    try {
+      var ccSh = getCajaChicaSheet();
+      var ccData = ccSh.getDataRange().getValues();
+      var ccHdr = ccData[0].map(function (h) { return String(h).trim().toUpperCase(); });
+      var ciF = ccHdr.indexOf('FECHA'), ciC = ccHdr.indexOf('CONCEPTO'), ciS = ccHdr.indexOf('SALIDA');
+      var ccRow = -1;
+      for (var ci = 1; ci < ccData.length; ci++) {
+        if (!String(ccData[ci][ciF] || '').trim() && !String(ccData[ci][ciC] || '').trim()) { ccRow = ci + 1; break; }
+      }
+      if (ccRow === -1) ccRow = ccSh.getLastRow() + 1;
+      ccSh.getRange(ccRow, ciF + 1).setValue(fechaPago);
+      ccSh.getRange(ccRow, ciC + 1).setValue(ref);
+      ccSh.getRange(ccRow, ciS + 1).setValue(monto);
+      SpreadsheetApp.flush();
+    } catch (ccErr) { Logger.log('_cxpRutearABanco Efectivo→CajaChica error: ' + ccErr.message); }
+    return;
+  }
+  var banco = '', bankRow = null;
+  if (formaPago === 'Santander' || formaPago === 'Transferencia') {
+    banco = 'santander'; bankRow = [fechaPago, 0, monto, 0, ref, '', '', '', ''];
+  } else if (formaPago === 'AMEX') {
+    banco = 'amex'; bankRow = [fechaPago, monto, 0, ref, '', '', '', '', mesStr];
+  } else if (formaPago === 'Mercado Pago' || formaPago === 'TDC' || formaPago === 'TDD') {
+    banco = 'mercadopago'; bankRow = [mesStr, fechaPago, 0, 0, 0, -monto, 0, false, ref, 'PAGO'];
+  }
+  if (banco && bankRow) {
+    try { saveBankRow(banco, bankRow); } catch (bErr) { Logger.log('_cxpRutearABanco banco error: ' + bErr.message); }
+  }
+}
+
+/* ── Abonar (pago parcial y/o crédito) a una cuenta por pagar ────────
+   No reemplaza pagarCxP (que sigue sirviendo para "pagar todo de un
+   jalón" con ruteo a banco) — este es el camino nuevo para pagos
+   parciales y/o aplicar un crédito de proveedor. Si el saldo llega a
+   cero, marca la fila Pagado=TRUE igual que pagarCxP. */
+function aplicarAbonoCxP(body) {
+  try {
+    var ss = _cxpCredSS();
+    var egTab = EGRESOS_TABS[2026] || 'Egresos2026';
+    var sh = ss.getSheetByName(egTab);
+    if (!sh) return { ok: false, error: 'Hoja Egresos no encontrada' };
+    var rowNum = parseInt(body.rowNum);
+    if (!rowNum || rowNum < 2) return { ok: false, error: 'Fila inválida' };
+    var rowData = sh.getRange(rowNum, 1, 1, 20).getValues()[0];
+    var cxpId = String(rowData[0] || '');
+    var proveedor = String(rowData[4] || '');
+    var concepto = String(rowData[8] || '');
+    var monto = parseFloat(rowData[9]) || 0;
+
+    var saldoActual = monto - _cxpSumAbonosActivos(cxpId);
+    var montoCredito = Math.max(0, parseFloat(body.montoCredito) || 0);
+    var creditoId = body.creditoId || '';
+    var montoPagoCash = Math.max(0, parseFloat(body.montoPagoCash) || 0);
+    var formaPago = body.formaPago || '';
+    var fechaPago = body.fechaPago || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+    if (montoCredito <= 0 && montoPagoCash <= 0) return { ok: false, error: 'Indica un monto de crédito y/o de pago' };
+    if (montoCredito + montoPagoCash > saldoActual + 0.01) return { ok: false, error: 'El monto a aplicar ($' + (montoCredito + montoPagoCash).toFixed(2) + ') es mayor al saldo pendiente ($' + saldoActual.toFixed(2) + ')' };
+    if (montoPagoCash > 0 && !formaPago) return { ok: false, error: 'Indica la forma de pago para la parte en efectivo/banco' };
+
+    if (montoCredito > 0) {
+      if (!creditoId) return { ok: false, error: 'Falta indicar qué crédito aplicar' };
+      var okCred = _consumirCredito(creditoId, montoCredito);
+      if (!okCred.ok) return okCred;
+      _registrarAbono({ cxpId: cxpId, proveedor: proveedor, concepto: concepto, monto: montoCredito, origen: 'credito', creditoId: creditoId, usuario: body.usuario || '', fecha: fechaPago });
+    }
+    if (montoPagoCash > 0) {
+      _registrarAbono({ cxpId: cxpId, proveedor: proveedor, concepto: concepto, monto: montoPagoCash, origen: 'pago', formaPago: formaPago, usuario: body.usuario || '', fecha: fechaPago });
+      _cxpRutearABanco(formaPago, montoPagoCash, fechaPago, concepto + ' · ' + proveedor + ' [Egreso #' + cxpId + ']');
+    }
+
+    var nuevoSaldo = saldoActual - montoCredito - montoPagoCash;
+    if (nuevoSaldo <= 0.01) {
+      sh.getRange(rowNum, 2).setValue(new Date(fechaPago));
+      sh.getRange(rowNum, 14).setValue(true);
+      sh.getRange(rowNum, 17).setValue(formaPago || 'Crédito de proveedor');
+    }
+    try { CacheService.getScriptCache().remove('gas_egresos_v1_2026'); } catch (e) {}
+    logAudit(body.usuario || 'sistema', 'CxP', 'Abono', cxpId, 'Saldo', String(saldoActual.toFixed(2)), String(Math.max(0, nuevoSaldo).toFixed(2)));
+    return { ok: true, saldoPendiente: Math.max(0, nuevoSaldo), pagadoCompleto: nuevoSaldo <= 0.01 };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+/* ── Cancelar una orden — reversa sus abonos (o su pago legado) a
+   crédito de proveedor en vez de solo borrar el registro ──────────── */
+function cancelarOrdenCxP(body) {
+  try {
+    var ss = _cxpCredSS();
+    var egTab = EGRESOS_TABS[2026] || 'Egresos2026';
+    var sh = ss.getSheetByName(egTab);
+    if (!sh) return { ok: false, error: 'Hoja Egresos no encontrada' };
+    var rowNum = parseInt(body.rowNum);
+    if (!rowNum || rowNum < 2) return { ok: false, error: 'Fila inválida' };
+
+    var estatusCol = _egColEnsure(sh, 'estatus', 'Estatus');
+    var lastCol = Math.max(20, estatusCol);
+    var rowData = sh.getRange(rowNum, 1, 1, lastCol).getValues()[0];
+    var cxpId = String(rowData[0] || '');
+    var proveedor = String(rowData[4] || '');
+    var concepto = String(rowData[8] || '');
+    var monto = parseFloat(rowData[9]) || 0;
+    var pagado = rowData[13] === true || String(rowData[13]).toUpperCase() === 'TRUE';
+    var estatusActual = String(rowData[estatusCol - 1] || '').trim();
+    if (estatusActual === 'Cancelada') return { ok: false, error: 'Esta orden ya está cancelada' };
+
+    var totalReversado = 0;
+    var abonos = _cxpAbonosPorId(cxpId, true);
+    abonos.forEach(function (ab) {
+      if (ab.origen === 'credito' && ab.creditoId) {
+        _restaurarCredito(ab.creditoId, ab.monto);
+      } else {
+        _crearCreditoProveedor({
+          proveedor: proveedor, monto: ab.monto,
+          origen: 'Orden cancelada #' + cxpId + ' — ' + concepto,
+          cxpIdOrigen: cxpId, usuario: body.usuario || ''
+        });
+      }
+      _marcarAbonoReversado(ab._rowNum);
+      totalReversado += ab.monto;
+    });
+    // Pagada antes de que existiera este sistema: sin abonos registrados pero Pagado=TRUE
+    if (pagado && abonos.length === 0 && monto > 0) {
+      _crearCreditoProveedor({
+        proveedor: proveedor, monto: monto,
+        origen: 'Orden cancelada #' + cxpId + ' — ' + concepto + ' (pago previo sin abono registrado)',
+        cxpIdOrigen: cxpId, usuario: body.usuario || ''
+      });
+      totalReversado = monto;
+    }
+
+    sh.getRange(rowNum, estatusCol).setValue('Cancelada');
+    try { CacheService.getScriptCache().remove('gas_egresos_v1_2026'); } catch (e) {}
+    logAudit(body.usuario || 'sistema', 'CxP', 'Cancelar', cxpId, 'Estatus', 'Activa', 'Cancelada' + (totalReversado ? (' | crédito generado: $' + totalReversado.toFixed(2)) : ''));
+    return { ok: true, creditoGenerado: totalReversado };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}

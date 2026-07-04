@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.04.01 -->
+﻿<!-- app-build:2026.07.04.02 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -15685,14 +15685,17 @@ function _cxpBuildNewRows(rows) {
       + '<td style="font-weight:600;color:var(--text-primary,#111)">'+row.proveedor+'</td>'
       + '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="'+row.concepto+'">'+row.concepto+'</td>'
       + '<td style="font-size:11px;color:var(--text-secondary,#6b7280)">'+row.subtipo+'</td>'
-      + '<td style="text-align:right;font-weight:700;font-size:13px">'+fMXN(row.monto)+(row.divisa==='USD'?' <span style="font-size:9px;color:#0369a1;font-weight:800">USD</span>':'')+'</td>'
+      + '<td style="text-align:right;font-weight:700;font-size:13px">'+fMXN(row.saldoPendiente!=null?row.saldoPendiente:row.monto)+(row.divisa==='USD'?' <span style="font-size:9px;color:#0369a1;font-weight:800">USD</span>':'')
+        + ((row.montoAbonado>0) ? '<div style="font-size:9.5px;font-weight:600;color:#166534">de '+fMXN(row.monto)+' — abonado '+fMXN(row.montoAbonado)+'</div>' : '')
+      + '</td>'
       + '<td style="font-size:11px">'+(row.vencimiento||'—')+'</td>'
       + '<td style="text-align:center;font-size:12px">'+factIcon+'</td>'
       + '<td style="text-align:center;white-space:nowrap">'
-        + '<button onclick="cxpOpenPay('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),'+row.monto+',\''+(row.divisa||'MXN')+'\')" style="padding:4px 10px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;margin-right:4px">Pagar</button>'
+        + '<button onclick="cxpOpenPay('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),'+(row.saldoPendiente!=null?row.saldoPendiente:row.monto)+',\''+(row.divisa||'MXN')+'\')" style="padding:4px 10px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;margin-right:4px">Pagar</button>'
         + '<button onclick="cxpOpenEdit('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(JSON.stringify(row))+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:6px;font-size:12px;cursor:pointer" title="Editar">✎</button>'
         + '<button onclick="cxpFactura('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),decodeURIComponent(\''+encodeURIComponent(row.linkFacturaUrl||'')+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.08);border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px;opacity:'+(row.linkFacturaUrl?'1':'.45')+'" title="'+(row.linkFacturaUrl?'Ver factura':'Subir factura')+'">📄</button>'
         + '<button onclick="cxpCotiz('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),decodeURIComponent(\''+encodeURIComponent(row.linkCotizacionUrl||'')+'\'))" style="padding:4px 8px;background:rgba(196,106,122,.1);border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px;opacity:'+(row.linkCotizacionUrl?'1':'.45')+'" title="'+(row.linkCotizacionUrl?'Ver cotización':'Adjuntar cotización')+'">📋</button>'
+        + '<button onclick="cxpCancelarOrden('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor||'')+'\'))" style="padding:4px 8px;background:rgba(180,83,9,.08);color:#b45309;border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px" title="Cancelar orden (genera crédito a favor si ya se había pagado)">⊘</button>'
         + '<button onclick="cxpDeleteRow('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor||'')+'\'))" style="padding:4px 8px;background:rgba(220,38,38,.08);color:#dc2626;border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px" title="Eliminar esta CxP">🗑</button>'
       + '</td>'
       + '</tr>';
@@ -17489,8 +17492,24 @@ window.cxpDeleteRow = async function(rowNum, proveedor) {
   } catch(e) { alert('Error al eliminar: ' + e.message); }
 };
 
+// Cancelar una orden: si ya se había pagado (total o parcial), ese dinero se
+// convierte en crédito a favor del proveedor en vez de perderse — se puede
+// aplicar después a otra orden desde el modal de Pagar.
+window.cxpCancelarOrden = async function(rowNum, proveedor) {
+  if (!confirm('¿Cancelar la orden de "'+proveedor+'"?\n\nSi ya se había pagado (total o parcial), ese monto queda como crédito a favor de este proveedor para aplicarlo a otra orden — no se pierde.')) return;
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'cancelarOrdenCxP', rowNum:rowNum, usuario:s.email||''})});
+    var res = await r.json();
+    if (res.ok) {
+      if (res.creditoGenerado > 0) alert('Orden cancelada. Se generó un crédito de $'+res.creditoGenerado.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' a favor de '+proveedor+'.');
+      loadCxPData();
+    } else { alert('Error al cancelar: ' + (res.error||'sin detalle')); }
+  } catch(e) { alert('Error al cancelar: ' + e.message); }
+};
+
 // ── CxP Payment modal ──
-window.cxpOpenPay = function(rowNum, proveedor, monto, divisa) {
+window.cxpOpenPay = async function(rowNum, proveedor, monto, divisa) {
   var m=document.getElementById('cxp-pay-modal'),o=document.getElementById('cxp-pay-ovl');
   if(m)m.style.display='block'; if(o)o.style.display='block';
   var title = document.getElementById('cxp-pay-title');
@@ -17498,13 +17517,37 @@ window.cxpOpenPay = function(rowNum, proveedor, monto, divisa) {
   var body = document.getElementById('cxp-pay-body');
   if (!body) return;
   window._cxpPayMonto = monto;
+  window._cxpPayRowNum = rowNum;
+  window._cxpPaySaldoPendiente = monto; // se reduce si se aplica crédito antes de pagar
+  window._cxpPayCreditos = [];
   divisa = (String(divisa).toUpperCase()==='USD') ? 'USD' : 'MXN';
   var today = new Date().toISOString().substring(0,10);
   var S = 'style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"';
+
+  // Crédito disponible de este proveedor (saldo a favor de órdenes canceladas ya pagadas)
+  var creditoHtml = '';
+  try {
+    var tok = encodeURIComponent(getToken());
+    var rc = await fetch(APPS_SCRIPT_URL+'?action=creditosProveedor&proveedor='+encodeURIComponent(proveedor)+'&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+    var dc = await rc.json();
+    if (dc.ok && dc.rows && dc.rows.length) {
+      window._cxpPayCreditos = dc.rows;
+      var totalCredito = dc.rows.reduce(function(s,c){ return s+c.montoDisponible; },0);
+      creditoHtml = '<div id="cxp-pay-credito-box" style="background:#fef9c3;border:1.5px solid #ca8a04;border-radius:10px;padding:12px;margin-bottom:14px">'
+        + '<div style="font-size:12px;font-weight:700;color:#854d0e">💰 '+proveedor+' tiene $'+totalCredito.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' a favor</div>'
+        + '<div style="font-size:10.5px;color:#854d0e;margin:4px 0 8px">De una orden cancelada que ya se había pagado. Aplícalo a esta orden antes de pagar el resto.</div>'
+        + '<div style="display:flex;gap:8px;align-items:center">'
+          + '<input type="number" id="cxp-pay-credito-monto" step="0.01" min="0" max="'+Math.min(totalCredito,monto)+'" value="'+Math.min(totalCredito,monto).toFixed(2)+'" style="flex:1;padding:6px 8px;border:1.5px solid #ca8a04;border-radius:6px;font-size:12px">'
+          + '<button onclick="cxpAplicarCredito()" id="cxp-pay-credito-btn" style="padding:6px 12px;background:#854d0e;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Aplicar</button>'
+        + '</div></div>';
+    }
+  } catch(eCred){}
+
   body.innerHTML = '<div style="padding:4px">'
-    + '<div style="background:linear-gradient(135deg,#166534,#15803d);border-radius:12px;padding:16px;color:#fff;margin-bottom:16px">'
+    + creditoHtml
+    + '<div id="cxp-pay-monto-box" style="background:linear-gradient(135deg,#166534,#15803d);border-radius:12px;padding:16px;color:#fff;margin-bottom:16px">'
       + '<div style="font-size:13px;font-weight:700">'+proveedor+'</div>'
-      + '<div style="font-size:24px;font-weight:800;margin-top:4px">$'+monto.toLocaleString('en-US',{minimumFractionDigits:2})+(divisa==='USD'?' <span style="font-size:13px;font-weight:700;opacity:.9">USD</span>':'')+'</div>'
+      + '<div id="cxp-pay-monto-display" style="font-size:24px;font-weight:800;margin-top:4px">$'+monto.toLocaleString('en-US',{minimumFractionDigits:2})+(divisa==='USD'?' <span style="font-size:13px;font-weight:700;opacity:.9">USD</span>':'')+'</div>'
       + (divisa==='USD'?'<div style="font-size:10.5px;margin-top:5px;opacity:.92;line-height:1.4">Partida en dólares — elige Santander o AMEX y captura el tipo de cambio; el sistema lo manda a su columna correcta.</div>':'')
     + '</div>'
     + '<div style="display:flex;flex-direction:column;gap:12px">'
@@ -17555,6 +17598,40 @@ window.cxpClosePay = function() {
   if(m)m.style.display='none'; if(o)o.style.display='none';
 };
 
+// Aplica crédito de proveedor a la orden abierta en el modal de Pagar — reduce
+// el saldo mostrado y, si con eso queda en cero, cierra el modal solo.
+window.cxpAplicarCredito = async function(){
+  var input = document.getElementById('cxp-pay-credito-monto');
+  var montoTotal = parseFloat(input ? input.value : 0) || 0;
+  if (montoTotal <= 0) { alert('Captura un monto válido'); return; }
+  var btn = document.getElementById('cxp-pay-credito-btn');
+  if (btn){ btn.disabled=true; btn.textContent='Aplicando…'; }
+  var restante = montoTotal;
+  var s = getSession()||{};
+  var creditos = (window._cxpPayCreditos||[]).slice().sort(function(a,b){ return String(a.fecha||'').localeCompare(String(b.fecha||'')); });
+  try {
+    for (var i=0; i<creditos.length && restante > 0.01; i++){
+      var c = creditos[i];
+      var aplicar = Math.min(c.montoDisponible, restante);
+      if (aplicar <= 0) continue;
+      var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+        action:'aplicarAbonoCxP', rowNum:window._cxpPayRowNum, montoCredito:aplicar, creditoId:c.id, usuario:s.email||'sistema'
+      })});
+      var res = await r.json();
+      if (!res.ok) { alert('Error al aplicar crédito: '+(res.error||'')); if(btn){btn.disabled=false;btn.textContent='Aplicar';} return; }
+      restante -= aplicar;
+      window._cxpPaySaldoPendiente = res.saldoPendiente;
+      if (res.pagadoCompleto) { alert('¡Listo! El crédito cubrió toda la orden.'); cxpClosePay(); loadCxPData(); return; }
+    }
+    var disp = document.getElementById('cxp-pay-monto-display');
+    if (disp) disp.textContent = '$'+window._cxpPaySaldoPendiente.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+    var box = document.getElementById('cxp-pay-credito-box');
+    if (box) box.remove();
+    alert('Crédito aplicado. Saldo restante a pagar: $'+window._cxpPaySaldoPendiente.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}));
+  } catch(e) { alert('Error de conexión: '+e.message); }
+  finally { if(btn){ btn.disabled=false; btn.textContent='Aplicar'; } }
+};
+
 // Muestra divisa/tipo de cambio solo para Santander y AMEX
 window.cxpPayDivisaToggle = function() {
   var fp = (document.getElementById('cxp-pay-fp')||{}).value||'';
@@ -17599,10 +17676,16 @@ window.cxpSubmitPay = async function(rowNum) {
   if(btn){btn.disabled=true;btn.textContent='Procesando…';}
   try {
     var s = getSession()||{};
-    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+    var body = {
       action:'pagarCxP', rowNum:rowNum, fechaPago:fecha, formaPago:fp, linkPago:link, linkFactura:factLink,
       divisa:divisa, tipoCambio:tipoCambio, montoUSD:montoUSD, usuario:s.email||'sistema'
-    })});
+    };
+    // Si ya se aplicó un crédito de proveedor en este mismo modal, el pago en
+    // efectivo/banco solo debe cubrir el saldo restante, no el importe original.
+    if (window._cxpPaySaldoPendiente != null && window._cxpPayMonto != null && window._cxpPaySaldoPendiente < window._cxpPayMonto) {
+      body.montoOverride = window._cxpPaySaldoPendiente;
+    }
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(body)});
     var res = await r.json();
     if (res.ok) { cxpClosePay(); loadCxPData(); }
     else { alert('Error: '+(res.error||'No se pudo procesar')); if(btn){btn.disabled=false;btn.textContent='Confirmar pago';} }

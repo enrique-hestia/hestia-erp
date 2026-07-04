@@ -578,6 +578,15 @@ function doPost(e) {
     if (body.action === 'configurarMenuMedicamentos') {
       return jsonResponse(configurarMenuMedicamentos());
     }
+    if (body.action === 'setupCxPCreditosAbonos') {
+      return jsonResponse(setupCxPCreditosAbonos());
+    }
+    if (body.action === 'aplicarAbonoCxP') {
+      return jsonResponse(aplicarAbonoCxP(body));
+    }
+    if (body.action === 'cancelarOrdenCxP') {
+      return jsonResponse(cancelarOrdenCxP(body));
+    }
     if (body.action === 'saveMedicamento') {
       return jsonResponse(saveMedicamento(body));
     }
@@ -1161,11 +1170,12 @@ function readBDCxP() {
 
     var resumen = {vencido:0,hoy:0,semana:0,mes:0,totalVencido:0,totalHoy:0,totalSemana:0,totalMes:0,totalPendiente:0};
     var rows = [];
-    var iCotiz = -1, iDiv = -1, hdr0 = raw[0]||[];
+    var iCotiz = -1, iDiv = -1, iEstatus = -1, hdr0 = raw[0]||[];
     for (var hc=0; hc<hdr0.length; hc++){
       var h0=String(hdr0[hc]).toLowerCase();
       if(iCotiz<0 && h0.indexOf('cotiz')>-1) iCotiz=hc;
       if(iDiv<0 && h0.indexOf('divisa')>-1) iDiv=hc;
+      if(iEstatus<0 && h0.indexOf('estatus')>-1) iEstatus=hc;
     }
 
     for (var i=1;i<raw.length;i++) {
@@ -1174,6 +1184,8 @@ function readBDCxP() {
       if (!egId) continue;
       var fecha = r[1]; // col B = fecha de pago
       var pagado = r[13]===true||String(r[13]).toUpperCase()==='TRUE';
+      var estatusRow = iEstatus>-1 ? String(r[iEstatus]||'').trim() : '';
+      if (estatusRow === 'Cancelada') continue; // cancelada: no es CxP pendiente ni egreso
       // CxP = sin fecha de pago Y no pagado
       if (fecha || pagado) continue;
       var venc = parseD(r[11]); // col L = vencimiento
@@ -1238,7 +1250,24 @@ function readBDCxP() {
       return (a.dias||999)-(b.dias||999);
     });
 
-    return {ok:true, rows:rows, resumen:resumen};
+    // Saldo pendiente real (Monto - abonos activos) y crédito disponible por
+    // proveedor — para poder aplicarlo directo desde la lista sin adivinar.
+    var creditosPorProveedor = {};
+    try {
+      var saldos = readSaldosCxP(rows.map(function(r){ return r.id; }));
+      var abonadoPorId = (saldos && saldos.abonadoPorId) || {};
+      rows.forEach(function(r){
+        var abonado = abonadoPorId[r.id] || 0;
+        r.montoAbonado = abonado;
+        r.saldoPendiente = Math.max(0, r.monto - abonado);
+      });
+      var todosCreditos = readCreditosProveedor(); // sin filtro: un solo read para todos
+      (todosCreditos && todosCreditos.rows || []).forEach(function(cr){
+        creditosPorProveedor[cr.proveedor] = (creditosPorProveedor[cr.proveedor] || 0) + cr.montoDisponible;
+      });
+    } catch(eSaldo) {}
+
+    return {ok:true, rows:rows, resumen:resumen, creditosPorProveedor: creditosPorProveedor};
   } catch(ex) { return {ok:false, error:ex.message, rows:[], resumen:{}}; }
 }
 
@@ -1317,6 +1346,11 @@ function pagarCxP(body) {
     // Leer datos de la fila para banco routing
     var rowData = sh.getRange(rowNum, 1, 1, 20).getValues()[0];
     var monto = parseFloat(rowData[9]) || 0;
+    // Saldo parcial (créditos/abonos ya aplicados) — si viene, ese es el
+    // importe real que se rutea a banco/caja; el Monto (col J) del egreso no se toca.
+    if (body.montoOverride !== undefined && body.montoOverride !== null && parseFloat(body.montoOverride) > 0) {
+      monto = parseFloat(body.montoOverride);
+    }
     var proveedor = String(rowData[4] || '');
     var concepto = String(rowData[8] || '');
     var egId = String(rowData[0] || '');
