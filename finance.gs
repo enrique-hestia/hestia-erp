@@ -569,8 +569,8 @@ function doPost(e) {
     if (body.action === 'uploadYVincularXmlFactura') {
       return jsonResponse(uploadYVincularXmlFactura(body));
     }
-    if (body.action === 'uploadYVincularXmlLote') {
-      return jsonResponse(uploadYVincularXmlLote(body));
+    if (body.action === 'vincularAutomaticoLote') {
+      return jsonResponse(vincularAutomaticoLote(body.fechaInicio, body.fechaFin, body.usuario));
     }
     if (body.action === 'generarReporteContaDigital') {
       return jsonResponse(generarReporteContaDigital(body.fechaInicio, body.fechaFin, body.usuario));

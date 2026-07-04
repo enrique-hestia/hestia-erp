@@ -360,6 +360,7 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
         op.sugerenciaCoincideMonto = mejorDelta < 0.01;
         op.sugerenciaRazonSocial = mejor.receptorNombre;
         op.sugerenciaRfc = mejor.receptorRfc;
+        op.sugerenciaUuid = mejor.uuid;
         op.sugerenciaTipo = 'nombre';
         usedFolios[mejor.folio] = true; // no ofrecer el mismo XML como sugerencia a dos operaciones
       }
@@ -387,6 +388,7 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
         op.sugerenciaCoincideMonto = true;
         op.sugerenciaRazonSocial = u.receptorNombre;
         op.sugerenciaRfc = u.receptorRfc;
+        op.sugerenciaUuid = u.uuid;
         op.sugerenciaTipo = 'monto';
         usedFolios[u.folio] = true;
       } else {
@@ -536,26 +538,24 @@ function uploadYVincularXmlFactura(body) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
-// Versión masiva de uploadYVincularXmlFactura: recibe varios XML de un jalón y
-// los empareja contra las operaciones del periodo que todavía no tienen
-// ArchivoURL — por folio ya capturado primero, luego por nombre del paciente,
-// y por monto exacto solo si es el único candidato con ese monto (si hay más
-// de uno, no se autoselecciona ninguno). Cada operación solo se usa una vez
-// dentro del mismo lote. Los XML que sí encuentran operación se guardan en
-// Drive y vinculan de una vez; los que no, NO se suben (para no dejar copias
-// sueltas fuera del escaneo de Drive) — se regresan en sinMatch para resolver
-// a mano (con "Facturas sin operación" o subiéndolos uno por uno).
-function uploadYVincularXmlLote(body) {
+// Aplica de un jalón TODAS las sugerencias sin ambigüedad que ya encontró
+// reconciliarFacturasXml (un solo candidato, sea por nombre o por monto) —
+// sin pedir ningún archivo: el XML ya está localizado en Drive desde el
+// escaneo de la conciliación, así que solo hace falta guardar la referencia,
+// igual que el botón "Usar y vincular" pero para todas a la vez. Nace de que
+// pedirle al usuario que seleccione manualmente cuáles XML subir no sirve —
+// los archivos se llaman por UUID, no traen folio/nombre/monto visible, así
+// que no hay forma de saber cuáles ya están vinculados sin abrirlos uno por
+// uno. Los casos ambiguos (varias operaciones con el mismo monto) NO se
+// tocan aquí — siguen resolviéndose a mano en "Documentos faltantes".
+function vincularAutomaticoLote(fechaInicio, fechaFin, usuario) {
   try {
-    var fechaInicio = body.fechaInicio, fechaFin = body.fechaFin;
-    var archivos = body.archivos || [];
-    if (!fechaInicio || !fechaFin) return { ok: false, error: 'Rango de fechas requerido' };
-    if (!archivos.length) return { ok: false, error: 'Sin archivos' };
-    if (!INGRESOS_FOLDER_FACTURAS) return { ok: false, error: 'Carpeta de Drive no configurada para facturas' };
-
-    var ops = _facReadOpsInRange(fechaInicio, fechaFin);
-    var pendientes = ops.filter(function (op) { return !op.archivoURL; });
-    var usadas = {};
+    var rec = reconciliarFacturasXml(fechaInicio, fechaFin);
+    if (!rec.ok) return rec;
+    var candidatos = rec.sinFactura.filter(function (o) { return o.sugerenciaFolio; });
+    var ambiguas = rec.sinFactura.filter(function (o) { return o.candidatosPorMonto && o.candidatosPorMonto.length; }).length;
+    var sinNada = rec.sinFactura.length - candidatos.length - ambiguas;
+    if (!candidatos.length) return { ok: true, vinculadas: [], ambiguas: ambiguas, sinNada: sinNada };
 
     var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
     var sheet = ss.getSheetByName(BD_INGRESOS_TAB);
@@ -575,66 +575,29 @@ function uploadYVincularXmlLote(body) {
       rowsByOpId[opId0].push(ri + 1);
     }
 
-    var folder = DriveApp.getFolderById(INGRESOS_FOLDER_FACTURAS);
-    var vinculadas = [], sinMatch = [], errores = [];
-
-    archivos.forEach(function (a) {
-      try {
-        var rawBytes = Utilities.base64Decode(a.base64);
-        var content = Utilities.newBlob(rawBytes, 'text/xml', a.fileName).getDataAsString('UTF-8');
-        var parsed = _facParseCfdiFullFromContent(content);
-        if (!parsed || !parsed.ok) { errores.push({ fileName: a.fileName, error: parsed ? parsed.error : 'No se pudo leer' }); return; }
-        if (!parsed.folio) { errores.push({ fileName: a.fileName, error: 'El XML no trae número de Folio' }); return; }
-
-        var candidato = pendientes.find(function (op) { return !usadas[op.id] && op.factura && op.factura === parsed.folio; });
-        if (!candidato) {
-          var xNorm = _pacNormNombre(parsed.receptor.nombre);
-          if (xNorm) {
-            candidato = pendientes.find(function (op) {
-              if (usadas[op.id]) return false;
-              var opNorm = _pacNormNombre(op.paciente);
-              if (!opNorm) return false;
-              var partes = [opNorm].concat(opNorm.split(' y ').map(function (s) { return s.trim(); }).filter(function (s) { return s.length >= 3; }));
-              return partes.some(function (p) { return p && (xNorm.indexOf(p) > -1 || p.indexOf(xNorm) > -1); });
-            });
-          }
-        }
-        if (!candidato) {
-          var porMonto = pendientes.filter(function (op) { return !usadas[op.id] && Math.abs((op.total || 0) - (parsed.total || 0)) < 0.01; });
-          if (porMonto.length === 1) candidato = porMonto[0];
-          else if (porMonto.length > 1) {
-            sinMatch.push({ fileName: a.fileName, folio: parsed.folio, total: parsed.total, razonSocial: parsed.receptor.nombre || '', motivo: 'ambiguo (' + porMonto.length + ' operaciones con el mismo monto)' });
-            return;
-          }
-        }
-        if (!candidato) {
-          sinMatch.push({ fileName: a.fileName, folio: parsed.folio, total: parsed.total, razonSocial: parsed.receptor.nombre || '', motivo: 'sin operación con ese folio, nombre o monto' });
-          return;
-        }
-
-        usadas[candidato.id] = true;
-        var blob = Utilities.newBlob(rawBytes, 'text/xml', a.fileName);
-        var savedFile = folder.createFile(blob);
-        savedFile.setName(candidato.id + '_' + a.fileName);
-        var url = savedFile.getUrl();
-
-        var filas = rowsByOpId[candidato.id] || [];
-        filas.forEach(function (rowNum) {
-          sheet.getRange(rowNum, urlCol).setValue(url);
-          sheet.getRange(rowNum, facturaCol).setValue(parsed.folio);
-          if (razonCol > 0) sheet.getRange(rowNum, razonCol).setValue(parsed.receptor.nombre || '');
-          if (rfcCol > 0) sheet.getRange(rowNum, rfcCol).setValue(parsed.receptor.rfc || '');
-          if (uuidCol > 0) sheet.getRange(rowNum, uuidCol).setValue(parsed.uuid || '');
-        });
-        vinculadas.push({ opId: candidato.id, paciente: candidato.paciente, folio: parsed.folio, razonSocial: parsed.receptor.nombre || '', rfc: parsed.receptor.rfc || '', total: parsed.total });
-      } catch (exIn) {
-        errores.push({ fileName: a.fileName, error: exIn.message });
-      }
+    var vinculadas = [];
+    candidatos.forEach(function (op) {
+      var file;
+      try { file = DriveApp.getFileById(op.sugerenciaFileId); } catch (e) { return; }
+      var url = file.getUrl();
+      var filas = rowsByOpId[op.id] || [];
+      filas.forEach(function (rowNum) {
+        sheet.getRange(rowNum, urlCol).setValue(url);
+        sheet.getRange(rowNum, facturaCol).setValue(op.sugerenciaFolio);
+        if (razonCol > 0) sheet.getRange(rowNum, razonCol).setValue(op.sugerenciaRazonSocial || '');
+        if (rfcCol > 0) sheet.getRange(rowNum, rfcCol).setValue(op.sugerenciaRfc || '');
+        if (uuidCol > 0) sheet.getRange(rowNum, uuidCol).setValue(op.sugerenciaUuid || '');
+      });
+      vinculadas.push({
+        opId: op.id, paciente: op.paciente, folio: op.sugerenciaFolio,
+        razonSocial: op.sugerenciaRazonSocial || '', rfc: op.sugerenciaRfc || '',
+        total: op.total, tipo: op.sugerenciaTipo
+      });
     });
 
     try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch (e) {}
-    logAudit(body.usuario || 'sistema', 'Ingreso', 'SubirVincularXMLLote', '', fechaInicio + ' a ' + fechaFin, '', vinculadas.length + ' vinculadas, ' + sinMatch.length + ' sin match, ' + errores.length + ' errores');
-    return { ok: true, vinculadas: vinculadas, sinMatch: sinMatch, errores: errores };
+    logAudit(usuario || 'sistema', 'Ingreso', 'VincularAutomaticoLote', '', fechaInicio + ' a ' + fechaFin, '', vinculadas.length + ' vinculadas automáticamente');
+    return { ok: true, vinculadas: vinculadas, ambiguas: ambiguas, sinNada: sinNada };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
