@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.04.02 -->
+﻿<!-- app-build:2026.07.04.03 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2378,8 +2378,12 @@ function _ingFilterRows() {
   if (f.buscar) {
     opSearchMap = {};
     _ingData.rows.forEach(function(r){
-      if (!opSearchMap[r.id]) opSearchMap[r.id] = '';
-      opSearchMap[r.id] += ' '+(r.razonSocial||'')+' '+(r.factura||'')+' '+(r.facturaRFC||'')+' '+(r.facturaUUID||'');
+      if (!opSearchMap[r.id]) opSearchMap[r.id] = {razonSocial:'', factura:'', rfc:'', uuid:''};
+      var m = opSearchMap[r.id];
+      if (r.razonSocial)  m.razonSocial += ' '+r.razonSocial;
+      if (r.factura)      m.factura     += ' '+r.factura;
+      if (r.facturaRFC)   m.rfc         += ' '+r.facturaRFC;
+      if (r.facturaUUID)  m.uuid        += ' '+r.facturaUUID;
     });
   }
   return _ingData.rows.filter(function(r) {
@@ -2390,12 +2394,24 @@ function _ingFilterRows() {
     if (f.factura === 'con' && !opFacturaMap[r.id]) return false;
     if (f.factura === 'sin' && opFacturaMap[r.id]) return false;
     if (f.buscar) {
-      var q = f.buscar.toLowerCase();
-      var opExtra = (opSearchMap[r.id]||'').toLowerCase();
-      if ((r.paciente||'').toLowerCase().indexOf(q)===-1
-        && (r.producto||'').toLowerCase().indexOf(q)===-1
-        && (r.id||'').toString().indexOf(q)===-1
-        && opExtra.indexOf(q)===-1) return false;
+      var q = f.buscar.toLowerCase().trim();
+      var m = opSearchMap[r.id] || {razonSocial:'',factura:'',rfc:'',uuid:''};
+      // Factura# se compara exacto/por prefijo (no substring): un folio corto
+      // como "807" no debe "encontrar" el RFC o UUID de otra factura solo
+      // porque esos dígitos aparecen sueltos ahí (el RFC trae la fecha de
+      // nacimiento, así que casi siempre contiene series de 2-3 dígitos).
+      var matchFactura = m.factura.toLowerCase().split(/\s+/).some(function(tok){
+        return tok && (tok===q || tok.indexOf(q)===0);
+      });
+      // RFC/UUID solo cuentan como match si la búsqueda ya es lo bastante
+      // específica — evita falsos positivos con fragmentos cortos.
+      var matchRFC  = q.length>=6 && m.rfc.toLowerCase().indexOf(q)!==-1;
+      var matchUUID = q.length>=8 && m.uuid.toLowerCase().indexOf(q)!==-1;
+      if (!(matchFactura || matchRFC || matchUUID
+        || m.razonSocial.toLowerCase().indexOf(q)!==-1
+        || (r.paciente||'').toLowerCase().indexOf(q)!==-1
+        || (r.producto||'').toLowerCase().indexOf(q)!==-1
+        || (r.id||'').toString().toLowerCase().indexOf(q)!==-1)) return false;
     }
     return true;
   });
