@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.04.03 -->
+﻿<!-- app-build:2026.07.04.04 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -3236,7 +3236,7 @@ function _renderProductosView() {
     totalPages = Math.ceil(displayRows.length / _prodPerPage) || 1;
 
     pgRows.forEach(function(p) {
-      var pj = encodeURIComponent(JSON.stringify({id:p.id,sku:p.sku,descripcion:p.descripcion,categoria:p.categoria,tipo:p.tipo,notas:p.notas,precio:p.precio,activo:p.activo,precios:p.precios||{}}));
+      var pj = encodeURIComponent(JSON.stringify({id:p.id,sku:p.sku,descripcion:p.descripcion,categoria:p.categoria,tipo:p.tipo,notas:p.notas,precio:p.precio,activo:p.activo,precios:p.precios||{},inventariable:p.inventariable,unidad:p.unidad,stockMinimo:p.stockMinimo,stockMaximo:p.stockMaximo,costoUnitario:p.costoUnitario,proveedorPreferido:p.proveedorPreferido}));
       h.push('<tr>'
         +'<td style="font-family:monospace;font-size:11px;color:'+titleColor+'">'+(p.sku||p.id)+'</td>'
         +'<td style="font-weight:600;color:var(--text-primary,#111)">'+p.descripcion
@@ -3313,7 +3313,7 @@ function _renderProductosView() {
 
     pgRows2.forEach(function(p) {
       var color = catColors[p.categoria] || '#6b7280';
-      var pj2 = encodeURIComponent(JSON.stringify({id:p.id,sku:p.sku,descripcion:p.descripcion,categoria:p.categoria,tipo:p.tipo,notas:p.notas,precio:p.precio,activo:p.activo,precios:p.precios||{}}));
+      var pj2 = encodeURIComponent(JSON.stringify({id:p.id,sku:p.sku,descripcion:p.descripcion,categoria:p.categoria,tipo:p.tipo,notas:p.notas,precio:p.precio,activo:p.activo,precios:p.precios||{},inventariable:p.inventariable,unidad:p.unidad,stockMinimo:p.stockMinimo,stockMaximo:p.stockMaximo,costoUnitario:p.costoUnitario,proveedorPreferido:p.proveedorPreferido}));
       h.push('<tr>'
         +'<td style="font-family:monospace;font-size:11px;color:var(--color-primary,#c46a7a)">'+(p.sku||p.id)+'</td>'
         +'<td style="font-weight:600;color:var(--text-primary,#111);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+p.descripcion+'</td>'
@@ -3381,7 +3381,7 @@ function prodOpenForm(defaultCat) {
   h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
     +'<div><label '+LBL+'>SKU <span style="font-weight:400;color:var(--text-secondary,#9ca3af)">(auto si vacío)</span></label><input id="prod-f-sku" '+S+' placeholder="TRA-0001"></div>'
     +'<div style="grid-column:1/-1"><label '+LBL+'>Descripción *</label><input id="prod-f-desc" '+S+' placeholder="Nombre completo del producto o servicio"></div>'
-    +'<div><label '+LBL+'>Categoría *</label><select id="prod-f-cat" '+S+'><option value="">— Seleccionar —</option>'+opts(cats,defaultCat)+'</select></div>'
+    +'<div><label '+LBL+'>Categoría *</label><select id="prod-f-cat" '+S+' onchange="_prodInvToggle()"><option value="">— Seleccionar —</option>'+opts(cats,defaultCat)+'</select></div>'
     +'<div><label '+LBL+'>Tipo</label><select id="prod-f-tipo" '+S+'><option value="">— Seleccionar —</option>'+opts(tipos)+'</select></div>'
     +'<div style="grid-column:1/-1"><label '+LBL+'>Notas adicionales</label><input id="prod-f-notas" '+S+' placeholder="Descripción detallada, indicaciones, etc."></div>'
     +'</div></div>';
@@ -3408,6 +3408,24 @@ function prodOpenForm(defaultCat) {
     +'<input id="prod-f-imagen" '+S+' placeholder="URL de imagen o dejar vacío para agregar después"></div>'
     +'</div>';
 
+  // Sección: Inventario — automático para "Medicamento", opcional (checkbox)
+  // para cualquier otra categoría (insumos, reactivos, etc.). Al marcarlo,
+  // el producto queda disponible como componente de Combos.
+  h += '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:20px;margin-bottom:16px">';
+  h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">'
+    +'<input type="checkbox" id="prod-f-inventariable" style="width:16px;height:16px" onchange="_prodInvToggle()">'
+    +'<label for="prod-f-inventariable" style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);cursor:pointer">Es inventariable (controla stock en tiempo real)</label>'
+    +'</div>'
+    +'<div id="prod-f-inv-fields" style="display:none">'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
+      +'<div><label '+LBL+'>Unidad</label><input id="prod-f-unidad" '+S+' placeholder="ampolleta, caja, ml…"></div>'
+      +'<div><label '+LBL+'>Proveedor preferido</label><input id="prod-f-proveedor" '+S+'></div>'
+      +'<div><label '+LBL+'>Stock mínimo</label><input type="number" id="prod-f-stockmin" '+S+'></div>'
+      +'<div><label '+LBL+'>Stock máximo</label><input type="number" id="prod-f-stockmax" '+S+'></div>'
+      +'<div><label '+LBL+'>Costo unitario (MXN)</label><input type="number" step="0.01" id="prod-f-costo" '+S+'></div>'
+      +'<div id="prod-f-stockinicial-wrap"><label '+LBL+'>Stock inicial</label><input type="number" id="prod-f-stockinicial" '+S+' value="0"></div>'
+    +'</div></div></div>';
+
   // Footer
   h += '<div style="display:flex;align-items:center;gap:12px;justify-content:flex-end;padding:16px 0">'
     +'<span id="prod-save-status" style="font-size:12px;font-weight:600;flex:1;text-align:right"></span>'
@@ -3418,6 +3436,22 @@ function prodOpenForm(defaultCat) {
   h += '</div>';
   el.innerHTML = h;
   el.scrollTop = 0;
+  _prodInvToggle();
+}
+
+// Muestra/oculta los campos de stock. "Medicamento" siempre es inventariable
+// (el checkbox se fuerza y se bloquea) — cualquier otra categoría lo decide
+// el usuario, para poder marcar insumos/reactivos sin depender del nombre
+// exacto de la categoría.
+function _prodInvToggle() {
+  var cat = (document.getElementById('prod-f-cat')||{}).value || '';
+  var chk = document.getElementById('prod-f-inventariable');
+  if (!chk) return;
+  var esMedicamento = cat.trim().toLowerCase() === 'medicamento';
+  if (esMedicamento) { chk.checked = true; chk.disabled = true; }
+  else { chk.disabled = false; }
+  var fields = document.getElementById('prod-f-inv-fields');
+  if (fields) fields.style.display = chk.checked ? 'block' : 'none';
 }
 
 function prodEditForm(jsonStr) {
@@ -3433,6 +3467,17 @@ function prodEditForm(jsonStr) {
   if(_el('prod-f-precio')) _el('prod-f-precio').value = p.precio||'';
   if(_el('prod-f-activo')) _el('prod-f-activo').value = p.activo?'true':'false';
   if(_el('prod-f-sku')) _el('prod-f-sku').value = p.sku||'';
+  // Inventario — el stock inicial no aplica al editar (los cambios de saldo
+  // solo pasan por Compras/Ajustes/Sobrante, nunca por edición directa).
+  var stockWrap = _el('prod-f-stockinicial-wrap');
+  if (stockWrap) stockWrap.remove();
+  if(_el('prod-f-unidad')) _el('prod-f-unidad').value = p.unidad||'';
+  if(_el('prod-f-proveedor')) _el('prod-f-proveedor').value = p.proveedorPreferido||'';
+  if(_el('prod-f-stockmin')) _el('prod-f-stockmin').value = p.stockMinimo||'';
+  if(_el('prod-f-stockmax')) _el('prod-f-stockmax').value = p.stockMaximo||'';
+  if(_el('prod-f-costo')) _el('prod-f-costo').value = p.costoUnitario||'';
+  if(_el('prod-f-inventariable')) _el('prod-f-inventariable').checked = !!p.inventariable;
+  _prodInvToggle();
   var titleEl = document.querySelector('#view-productos-catalogo h1');
   if(titleEl) titleEl.textContent = 'Editar producto — '+(p.sku||p.id);
   var btn = _el('prod-save-btn');
@@ -3468,6 +3513,17 @@ async function prodSubmitEdit(productoId) {
       lista: (document.getElementById('prod-f-lista')||{}).value||'General',
       usuario: s.email||'sistema'
     };
+    var invChk = document.getElementById('prod-f-inventariable');
+    if (invChk) {
+      payload.inventariable = invChk.checked;
+      if (invChk.checked) {
+        payload.unidad = (document.getElementById('prod-f-unidad')||{}).value||'';
+        payload.stockMinimo = (document.getElementById('prod-f-stockmin')||{}).value||0;
+        payload.stockMaximo = (document.getElementById('prod-f-stockmax')||{}).value||0;
+        payload.costoUnitario = (document.getElementById('prod-f-costo')||{}).value||0;
+        payload.proveedorPreferido = (document.getElementById('prod-f-proveedor')||{}).value||'';
+      }
+    }
     console.log('[prodSubmitEdit] payload=', JSON.stringify(payload));
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify(payload)});
     var text = await r.text();
@@ -3556,6 +3612,18 @@ async function prodSubmitForm() {
       vigencia: vigencia,
       usuario: s.email||'sistema'
     };
+    var invChk2 = document.getElementById('prod-f-inventariable');
+    if (invChk2) {
+      savePayload.inventariable = invChk2.checked;
+      if (invChk2.checked) {
+        savePayload.unidad = (document.getElementById('prod-f-unidad')||{}).value||'';
+        savePayload.stockMinimo = (document.getElementById('prod-f-stockmin')||{}).value||0;
+        savePayload.stockMaximo = (document.getElementById('prod-f-stockmax')||{}).value||0;
+        savePayload.costoUnitario = (document.getElementById('prod-f-costo')||{}).value||0;
+        savePayload.proveedorPreferido = (document.getElementById('prod-f-proveedor')||{}).value||'';
+        savePayload.stockInicial = (document.getElementById('prod-f-stockinicial')||{}).value||0;
+      }
+    }
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(savePayload)});
     var res = await r.json();
     if (res.ok) {
@@ -12368,27 +12436,32 @@ function _renderMedsLista(){
   rows.forEach(function(m){
     var bajo = m.activo && m.stockActual < m.stockMinimo;
     var color = bajo ? '#dc2626' : '#166534';
-    h += '<tr><td><b>'+_medsEsc(m.nombre)+'</b></td><td>'+_medsEsc(m.categoria)+'</td><td>'+_medsEsc(m.unidad)+'</td>'
+    var catLabel = m.categoria === 'Medicamento' ? (m.tipo || '—') : m.categoria;
+    h += '<tr><td><b>'+_medsEsc(m.nombre)+'</b></td><td>'+_medsEsc(catLabel)+'</td><td>'+_medsEsc(m.unidad)+'</td>'
       +'<td style="color:'+color+';font-weight:700">'+m.stockActual+(bajo?' ⚠':'')+'</td>'
       +'<td>'+m.stockMinimo+' / '+m.stockMaximo+'</td><td>'+_medsFmt(m.costoUnitario)+'</td><td>'+_medsEsc(m.proveedorPreferido)+'</td>'
       +'<td>'+(m.activo?'<span style="color:#166534;font-weight:700">Activo</span>':'<span style="color:#9ca3af">Inactivo</span>')+'</td>'
-      +'<td><button class="mv-btn-sec" style="padding:4px 10px;font-size:10.5px" onclick="medsOpenForm('+m._rowNum+')">Editar</button></td></tr>';
+      +'<td><button class="mv-btn-sec" style="padding:4px 10px;font-size:10.5px" onclick="medsOpenForm('+_medsEsc(JSON.stringify(m.productoId))+')">Editar</button></td></tr>';
   });
   h += '</tbody></table></div></div>';
   root.innerHTML = h;
 }
 
-function medsOpenForm(rowNum){
-  var row = rowNum ? (_medsCat.rows||[]).find(function(r){ return r._rowNum === rowNum; }) : null;
+function medsOpenForm(productoId){
+  var row = productoId ? (_medsCat.rows||[]).find(function(r){ return r.productoId === productoId; }) : null;
   var isEdit = !!row;
-  var cats = (_medsCat && _medsCat.categorias) || MEDINV_CATEGORIAS_FALLBACK;
-  var catOpts = cats.map(function(c){ return '<option value="'+_medsEsc(c)+'"'+(row&&row.categoria===c?' selected':'')+'>'+c+'</option>'; }).join('');
+  // "Categoría" aquí es la sub-clasificación del medicamento (Estimulación,
+  // Analgésicos…) — en BD_Productos vive en el campo Tipo; la Categoría real
+  // (columna Categoria) siempre es "Medicamento" para todo lo dado de alta
+  // desde esta pantalla, así aparece automático en el Catálogo General.
+  var cats = (_medsCat && _medsCat.categorias && _medsCat.categorias.length) ? _medsCat.categorias : MEDINV_CATEGORIAS_FALLBACK;
+  var catOpts = '<option value="">— Sin subcategoría —</option>'+cats.map(function(c){ return '<option value="'+_medsEsc(c)+'"'+(row&&row.tipo===c?' selected':'')+'>'+c+'</option>'; }).join('');
   var ovl = document.createElement('div'); ovl.className='mv-moverlay'; ovl.id='meds-modal-ovl';
   ovl.onclick = function(e){ if(e.target===ovl) medsCloseForm(); };
   ovl.innerHTML = '<div class="mv-modal">'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px"><div style="font-size:16px;font-weight:800">'+(isEdit?'Editar medicamento':'Nuevo medicamento')+'</div><button onclick="medsCloseForm()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af">✕</button></div>'
     +'<div class="mv-field"><label class="mv-flbl">Nombre *</label><input class="mv-inp" id="mf-nombre" value="'+(row?_medsEsc(row.nombre):'')+'"></div>'
-    +'<div class="mv-field"><label class="mv-flbl">Categoría</label><select class="mv-inp" id="mf-categoria">'+catOpts+'</select></div>'
+    +'<div class="mv-field"><label class="mv-flbl">Subcategoría</label><select class="mv-inp" id="mf-tipo">'+catOpts+'</select></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
       +'<div class="mv-field"><label class="mv-flbl">Unidad</label><input class="mv-inp" id="mf-unidad" placeholder="ampolleta, caja…" value="'+(row?_medsEsc(row.unidad):'')+'"></div>'
       +'<div class="mv-field"><label class="mv-flbl">Costo unitario (MXN)</label><input class="mv-inp" type="number" step="0.01" id="mf-costo" value="'+(row?row.costoUnitario:'')+'"></div>'
@@ -12397,40 +12470,40 @@ function medsOpenForm(rowNum){
       +'<div class="mv-field" style="padding-right:5px"><label class="mv-flbl">Stock mínimo</label><input class="mv-inp" type="number" id="mf-min" value="'+(row?row.stockMinimo:'')+'"></div>'
       +'<div class="mv-field" style="padding-left:5px"><label class="mv-flbl">Stock máximo</label><input class="mv-inp" type="number" id="mf-max" value="'+(row?row.stockMaximo:'')+'"></div>'
     +'</div>'
-    +(isEdit?'':'<div class="mv-field"><label class="mv-flbl">Stock inicial</label><input class="mv-inp" type="number" id="mf-stockinicial" value="0"></div>')
+    +(isEdit?'<div class="mv-field" style="font-size:11px;color:var(--text-secondary,#9ca3af)">Stock actual: <b>'+row.stockActual+'</b> — para cambiarlo usa Compras, Movimientos o el ajuste manual, no esta edición.</div>':'<div class="mv-field"><label class="mv-flbl">Stock inicial</label><input class="mv-inp" type="number" id="mf-stockinicial" value="0"></div>')
     +'<div class="mv-field"><label class="mv-flbl">Proveedor preferido</label><input class="mv-inp" id="mf-proveedor" value="'+(row?_medsEsc(row.proveedorPreferido):'')+'"></div>'
     +'<div class="mv-field"><label class="mv-flbl">Notas</label><input class="mv-inp" id="mf-notas" value="'+(row?_medsEsc(row.notas):'')+'"></div>'
     +(isEdit?'<div class="mv-field" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="mf-activo" '+(row.activo?'checked':'')+' style="width:15px;height:15px"><label for="mf-activo" style="font-size:12px;font-weight:600">Activo</label></div>':'')
     +'<div id="mf-msg" style="font-size:11.5px;color:#991b1b;margin-bottom:8px"></div>'
-    +'<div style="display:flex;gap:10px"><button class="mv-btn-sec" style="flex:1" onclick="medsCloseForm()">Cancelar</button><button class="mv-btn" style="flex:1" id="mf-save-btn" onclick="medsSaveForm('+(rowNum||'null')+')">'+(isEdit?'Guardar cambios':'Registrar')+'</button></div>'
+    +'<div style="display:flex;gap:10px"><button class="mv-btn-sec" style="flex:1" onclick="medsCloseForm()">Cancelar</button><button class="mv-btn" style="flex:1" id="mf-save-btn" onclick="medsSaveForm('+(productoId?_medsEsc(JSON.stringify(productoId)):'null')+')">'+(isEdit?'Guardar cambios':'Registrar')+'</button></div>'
     +'</div>';
   document.body.appendChild(ovl);
 }
 function medsCloseForm(){ var o=document.getElementById('meds-modal-ovl'); if(o) o.remove(); }
 
-async function medsSaveForm(rowNum){
+async function medsSaveForm(productoId){
   function val(id){ var e=document.getElementById(id); return e?e.value.trim():''; }
   var nombre = val('mf-nombre');
   var msg = document.getElementById('mf-msg'), btn = document.getElementById('mf-save-btn');
   if (!nombre){ if(msg) msg.textContent='El nombre es obligatorio.'; return; }
   var s = getSession()||{};
   var payload = {
-    nombre: nombre, categoria: val('mf-categoria'), unidad: val('mf-unidad'),
+    nombre: nombre, tipo: val('mf-tipo'), unidad: val('mf-unidad'),
     stockMinimo: val('mf-min'), stockMaximo: val('mf-max'), costoUnitario: val('mf-costo'),
     proveedorPreferido: val('mf-proveedor'), notas: val('mf-notas'), usuario: s.email||''
   };
-  if (rowNum) { payload.action='updateMedicamento'; payload.rowNum=rowNum; var ac=document.getElementById('mf-activo'); if(ac) payload.activo=ac.checked; }
+  if (productoId) { payload.action='updateMedicamento'; payload.productoId=productoId; var ac=document.getElementById('mf-activo'); if(ac) payload.activo=ac.checked; }
   else { payload.action='saveMedicamento'; payload.stockInicial = val('mf-stockinicial'); }
   if (btn){ btn.disabled=true; btn.textContent='Guardando…'; }
   try {
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(payload)});
     var d = await r.json();
-    if (!d.ok){ if(msg) msg.textContent = d.error || 'No se pudo guardar.'; if(btn){btn.disabled=false;btn.textContent=rowNum?'Guardar cambios':'Registrar';} return; }
+    if (!d.ok){ if(msg) msg.textContent = d.error || 'No se pudo guardar.'; if(btn){btn.disabled=false;btn.textContent=productoId?'Guardar cambios':'Registrar';} return; }
     medsCloseForm();
     await loadMedsLista();
   } catch(e){
     if(msg) msg.textContent = 'Error de conexión: '+e.message;
-    if(btn){btn.disabled=false;btn.textContent=rowNum?'Guardar cambios':'Registrar';}
+    if(btn){btn.disabled=false;btn.textContent=productoId?'Guardar cambios':'Registrar';}
   }
 }
 
@@ -12532,7 +12605,8 @@ function _renderMedsMovimientos(){
   if (!root) return;
   var rows = window._medsMov || [];
   var h = '<div class="mv-w">'
-    +'<div class="mv-hdr"><div><div class="mv-title">📜 Movimientos de Inventario</div><div class="mv-sub">Historial completo — más reciente primero</div></div></div>'
+    +'<div class="mv-hdr"><div><div class="mv-title">📜 Movimientos de Inventario</div><div class="mv-sub">Historial completo — más reciente primero</div></div>'
+    +'<button class="mv-btn" onclick="medsOpenSobranteForm()">+ Registrar sobrante</button></div>'
     +'<div class="mv-card"><table class="mv-tbl"><thead><tr><th>Fecha</th><th>Medicamento</th><th>Tipo</th><th>Cantidad</th><th>Motivo</th><th>Referencia</th><th>Saldo resultante</th><th>Usuario</th></tr></thead><tbody>';
   if (!rows.length) h += '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-secondary,#9ca3af)">Sin movimientos todavía</td></tr>';
   rows.forEach(function(m){
@@ -12542,6 +12616,50 @@ function _renderMedsMovimientos(){
   });
   h += '</tbody></table></div></div>';
   root.innerHTML = h;
+}
+
+/* ── Sobrante: lo que no se usó de un componente de combo (ej. sobra
+   medio frasco) regresa al stock de inmediato — acción rápida aparte de
+   la venta, para no hacer más lenta la captura de Ingresos. ──────── */
+function medsOpenSobranteForm(){
+  var rows = (_medsCat && _medsCat.rows || []).filter(function(m){ return m.activo; });
+  var opts = rows.map(function(m){ return '<option value="'+_medsEsc(m.sku)+'">'+_medsEsc(m.nombre)+' — stock: '+m.stockActual+'</option>'; }).join('');
+  var ovl = document.createElement('div'); ovl.className='mv-moverlay'; ovl.id='meds-sobrante-modal-ovl';
+  ovl.onclick = function(e){ if(e.target===ovl) medsCloseSobranteForm(); };
+  ovl.innerHTML = '<div class="mv-modal">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px"><div style="font-size:16px;font-weight:800">Registrar sobrante</div><button onclick="medsCloseSobranteForm()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af">✕</button></div>'
+    +'<div class="mv-field"><label class="mv-flbl">Producto *</label><select class="mv-inp" id="ms-sku">'+(opts||'<option value="">Sin productos inventariables activos</option>')+'</select></div>'
+    +'<div class="mv-field"><label class="mv-flbl">Cantidad que sobró *</label><input class="mv-inp" type="number" step="0.01" min="0.01" id="ms-cantidad" placeholder="Ej. 1"></div>'
+    +'<div class="mv-field"><label class="mv-flbl">Referencia (OP, paciente…)</label><input class="mv-inp" id="ms-referencia" placeholder="Opcional"></div>'
+    +'<div class="mv-field"><label class="mv-flbl">Notas</label><input class="mv-inp" id="ms-notas" placeholder="Opcional"></div>'
+    +'<div id="ms-msg" style="font-size:11.5px;color:#991b1b;margin-bottom:8px"></div>'
+    +'<div style="display:flex;gap:10px"><button class="mv-btn-sec" style="flex:1" onclick="medsCloseSobranteForm()">Cancelar</button><button class="mv-btn" style="flex:1" id="ms-save-btn" onclick="medsSaveSobrante()">Registrar</button></div>'
+    +'</div>';
+  document.body.appendChild(ovl);
+}
+function medsCloseSobranteForm(){ var o=document.getElementById('meds-sobrante-modal-ovl'); if(o) o.remove(); }
+
+async function medsSaveSobrante(){
+  function val(id){ var e=document.getElementById(id); return e?e.value.trim():''; }
+  var sku = val('ms-sku'), cantidad = val('ms-cantidad');
+  var msg = document.getElementById('ms-msg'), btn = document.getElementById('ms-save-btn');
+  if (!sku || !cantidad || Number(cantidad) <= 0){ if(msg) msg.textContent='Elige el producto y una cantidad válida.'; return; }
+  var s = getSession()||{};
+  if (btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  try {
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'registrarSobranteInventario', sku:sku, cantidad:cantidad,
+      referencia:val('ms-referencia'), notas:val('ms-notas'), usuario:s.email||''
+    })});
+    var d = await r.json();
+    if (!d.ok){ if(msg) msg.textContent = d.error || 'No se pudo registrar.'; if(btn){btn.disabled=false;btn.textContent='Registrar';} return; }
+    medsCloseSobranteForm();
+    _medsCat = null;
+    await loadMedsMovimientos();
+  } catch(e){
+    if(msg) msg.textContent = 'Error de conexión: '+e.message;
+    if(btn){btn.disabled=false;btn.textContent='Registrar';}
+  }
 }
 
 /* ── Combos (qué medicamentos descuenta cada Producto de Ingresos) ── */
@@ -12576,10 +12694,10 @@ function _renderMedsCombos(){
   var prodNames = {};
   (window._ingTodosProductos||[]).forEach(function(p){ if(p.descripcion) prodNames[p.descripcion]=true; });
   var h = '<div class="mv-w">'
-    +'<div class="mv-hdr"><div><div class="mv-title">🔗 Combos</div><div class="mv-sub">Qué medicamentos (y cuánto de cada uno) descuenta un producto cuando se vende en Ingresos</div></div>'
+    +'<div class="mv-hdr"><div><div class="mv-title">🔗 Combos</div><div class="mv-sub">Qué componentes (medicamentos, insumos, reactivos…) y cuánto de cada uno descuenta un producto cuando se vende en Ingresos</div></div>'
     +'<button class="mv-btn" onclick="medsOpenComboForm()">+ Nuevo combo</button></div>'
-    +'<div class="mv-card"><table class="mv-tbl"><thead><tr><th>Producto (Ingresos)</th><th>Medicamento</th><th>Cantidad por unidad</th><th></th><th></th></tr></thead><tbody>';
-  if (!rows.length) h += '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-secondary,#9ca3af)">Sin combos configurados — los medicamentos que se venden sueltos (Categoría "Medicamento" en Ingresos) no necesitan combo si el nombre coincide exacto con el catálogo</td></tr>';
+    +'<div class="mv-card"><table class="mv-tbl"><thead><tr><th>Producto (Ingresos)</th><th>Componente</th><th>Cantidad por unidad</th><th></th><th></th></tr></thead><tbody>';
+  if (!rows.length) h += '<tr><td colspan="5" style="text-align:center;padding:24px;color:var(--text-secondary,#9ca3af)">Sin combos configurados — un tratamiento puede combinar varios componentes (ej. Estimulación Ovárica = medicamentos + insumos + serologías)</td></tr>';
   rows.forEach(function(c){
     var existe = !!prodNames[c.productoIngresos];
     h += '<tr><td>'+_medsEsc(c.productoIngresos)+(existe?'':' <span style="color:#dc2626;font-weight:700" title="Este producto ya no existe con ese nombre en Ingresos — revísalo">⚠ no encontrado</span>')+'</td>'
@@ -12592,8 +12710,12 @@ function _renderMedsCombos(){
 }
 
 function medsOpenComboForm(){
-  var meds = (_medsCat && _medsCat.rows || []).filter(function(m){ return m.activo; });
-  var medOpts = meds.map(function(m){ return '<option value="'+_medsEsc(m.sku)+'">'+_medsEsc(m.nombre)+'</option>'; }).join('');
+  // El componente puede ser cualquier producto marcado Inventariable — no
+  // solo medicamentos — para poder armar tratamientos compuestos (ej.
+  // Estimulación Ovárica Controlada = medicamentos + insumos + serologías).
+  var todos = (window._ingTodosProductos||[]).filter(function(p){ return p.inventariable && p.activo !== false; });
+  todos.sort(function(a,b){ return (a.categoria||'').localeCompare(b.categoria||'') || a.descripcion.localeCompare(b.descripcion); });
+  var medOpts = todos.map(function(p){ return '<option value="'+_medsEsc(p.sku)+'">'+_medsEsc(p.descripcion)+' ('+_medsEsc(p.categoria)+')</option>'; }).join('');
   var prodOptions = (window._ingTodosProductos||[]).map(function(p){ return '<option value="'+_medsEsc(p.descripcion)+'">'; }).join('');
   if (!document.getElementById('meds-prod-datalist')) {
     var dl = document.createElement('datalist'); dl.id = 'meds-prod-datalist'; document.body.appendChild(dl);
@@ -12605,7 +12727,7 @@ function medsOpenComboForm(){
   ovl.innerHTML = '<div class="mv-modal">'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px"><div style="font-size:16px;font-weight:800">Nuevo combo</div><button onclick="medsCloseComboForm()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af">✕</button></div>'
     +'<div class="mv-field"><label class="mv-flbl">Producto (tal como se vende en Ingresos) *</label><input class="mv-inp" id="mcb-producto" list="meds-prod-datalist" placeholder="Buscar producto…"></div>'
-    +'<div class="mv-field"><label class="mv-flbl">Medicamento *</label><select class="mv-inp" id="mcb-sku">'+(medOpts||'<option value="">Sin medicamentos activos</option>')+'</select></div>'
+    +'<div class="mv-field"><label class="mv-flbl">Componente (medicamento, insumo, reactivo…) *</label><select class="mv-inp" id="mcb-sku">'+(medOpts||'<option value="">Sin productos inventariables activos</option>')+'</select></div>'
     +'<div class="mv-field"><label class="mv-flbl">Cantidad por unidad vendida *</label><input class="mv-inp" type="number" step="0.01" min="0.01" id="mcb-cantidad" placeholder="Ej. 3"></div>'
     +'<div id="mcb-msg" style="font-size:11.5px;color:#991b1b;margin-bottom:8px"></div>'
     +'<div style="display:flex;gap:10px"><button class="mv-btn-sec" style="flex:1" onclick="medsCloseComboForm()">Cancelar</button><button class="mv-btn" style="flex:1" id="mcb-save-btn" onclick="medsSaveCombo()">Guardar</button></div>'

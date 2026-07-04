@@ -605,6 +605,9 @@ function doPost(e) {
     if (body.action === 'eliminarCombo') {
       return jsonResponse(eliminarCombo(body));
     }
+    if (body.action === 'registrarSobranteInventario') {
+      return jsonResponse(registrarSobranteInventario(body));
+    }
     if (body.action === 'migrarHistorialInventario') {
       return jsonResponse(migrarHistorialInventario(body.confirmar === true));
     }
@@ -2487,6 +2490,51 @@ function _getNextProdID(sheet) {
   return 'PROD-' + String((m ? parseInt(m[1],10) : 0) + 1).padStart(5,'0');
 }
 
+function _getNextSkuConPrefijo(sheet, prefix) {
+  var data = sheet.getDataRange().getValues();
+  var re = new RegExp('^' + prefix + '-(\\d+)$');
+  var max = 0;
+  for (var i = 1; i < data.length; i++) {
+    var m = String(data[i][1] || '').match(re);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return prefix + '-' + String(max + 1).padStart(4, '0');
+}
+
+/* ── Inventario dentro de BD_Productos ────────────────────────────
+   Un solo catálogo: en vez de mantener una hoja aparte para el
+   inventario de medicamentos, se agregan columnas de stock directo
+   a BD_Productos. Cualquier producto (Medicamento, o cualquier otra
+   categoría que se marque manualmente) puede ser "Inventariable" y
+   entrar al sistema de movimientos/combos. Usa comparación EXACTA de
+   encabezado (no substring) para no chocar con columnas ya existentes
+   como UNIDAD_MP/UNIDAD_SAT al buscar "Unidad". */
+var BDPROD_INV_HEADERS = ['Inventariable','Unidad','StockMinimo','StockMaximo','CostoUnitario','ProveedorPreferido','StockActual'];
+
+function _bdProdColEnsure(sh, headerText) {
+  var lastCol = sh.getLastColumn();
+  var hdrs = sh.getRange(1,1,1,lastCol).getValues()[0].map(function(h){ return String(h).trim().toLowerCase(); });
+  var want = headerText.trim().toLowerCase();
+  var idx = hdrs.indexOf(want);
+  if (idx > -1) return idx + 1;
+  sh.getRange(1, lastCol+1).setValue(headerText);
+  return lastCol + 1;
+}
+
+function _bdProdEnsureInventarioCols(sh) {
+  var cols = {};
+  BDPROD_INV_HEADERS.forEach(function(h){ cols[h] = _bdProdColEnsure(sh, h); });
+  return cols;
+}
+
+// Categoría "Medicamento" siempre es inventariable de forma automática;
+// otras categorías pueden marcarse manualmente vía el checkbox del formulario.
+function _bdProdEsInventariable(body) {
+  var categoria = String(body.categoria||'').trim().toLowerCase();
+  if (categoria === 'medicamento') return true;
+  return body.inventariable === true || body.inventariable === 'true';
+}
+
 function migrateProductos() {
   var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
   setupBDProductos();
@@ -2606,6 +2654,15 @@ function readProductos() {
       precSheet = ss.getSheetByName('BD_Precios');
     }
 
+    // Columnas de inventario (Inventariable/Unidad/Stock…) — pueden no existir
+    // todavía si ningún producto las ha usado; se leen por nombre exacto de
+    // encabezado, no por posición fija, y toleran ausencia (default 0/false).
+    var prodHdrs = prodSheet.getRange(1,1,1,prodSheet.getLastColumn()).getValues()[0].map(function(h){ return String(h).trim().toLowerCase(); });
+    var iInv = prodHdrs.indexOf('inventariable'), iUnidad = prodHdrs.indexOf('unidad'),
+        iStockMin = prodHdrs.indexOf('stockminimo'), iStockMax = prodHdrs.indexOf('stockmaximo'),
+        iCosto = prodHdrs.indexOf('costounitario'), iProv = prodHdrs.indexOf('proveedorpreferido'),
+        iStockAct = prodHdrs.indexOf('stockactual');
+
     // Leer productos
     var prodRaw = prodSheet.getDataRange().getValues();
     var productos = [];
@@ -2622,7 +2679,14 @@ function readProductos() {
         notas: String(r[5]||''),
         activo: (r[6]===false||String(r[6]).toUpperCase()==='FALSE') ? false : true,
         precio: 0,
-        precioVigencia: ''
+        precioVigencia: '',
+        inventariable: iInv>-1 ? (r[iInv]===true || String(r[iInv]).toUpperCase()==='TRUE') : false,
+        unidad: iUnidad>-1 ? String(r[iUnidad]||'') : '',
+        stockMinimo: iStockMin>-1 ? (Number(r[iStockMin])||0) : 0,
+        stockMaximo: iStockMax>-1 ? (Number(r[iStockMax])||0) : 0,
+        costoUnitario: iCosto>-1 ? (Number(r[iCosto])||0) : 0,
+        proveedorPreferido: iProv>-1 ? String(r[iProv]||'') : '',
+        stockActual: iStockAct>-1 ? (Number(r[iStockAct])||0) : 0
       });
     }
 
@@ -2894,6 +2958,28 @@ function updateProducto(body) {
     if (body.tipo !== undefined) prodSheet.getRange(found, 5).setValue(body.tipo);
     if (body.notas !== undefined) prodSheet.getRange(found, 6).setValue(body.notas);
     if (body.activo !== undefined) prodSheet.getRange(found, 7).setValue(body.activo!==false&&body.activo!=='false');
+
+    // Campos de inventario — se tocan solo si vienen en el body (la primera
+    // vez que cualquier producto los necesita, se crean las columnas). El
+    // StockActual NUNCA se edita aquí directamente: solo cambia vía
+    // Compras/Ajustes/Sobrante, para que el ledger de movimientos sea la
+    // única fuente de verdad del saldo.
+    var invFieldMap = {inventariable:'Inventariable', unidad:'Unidad', stockMinimo:'StockMinimo',
+      stockMaximo:'StockMaximo', costoUnitario:'CostoUnitario', proveedorPreferido:'ProveedorPreferido'};
+    var categoriaFinal = body.categoria !== undefined ? String(body.categoria) : String(data[found-1][3]||'');
+    var tocaInventario = Object.keys(invFieldMap).some(function(f){ return body[f] !== undefined; })
+      || categoriaFinal.trim().toLowerCase() === 'medicamento';
+    if (tocaInventario) {
+      var invCols = _bdProdEnsureInventarioCols(prodSheet);
+      var inventariableFinal = _bdProdEsInventariable({categoria:categoriaFinal, inventariable:body.inventariable});
+      prodSheet.getRange(found, invCols.Inventariable).setValue(inventariableFinal);
+      if (body.unidad !== undefined) prodSheet.getRange(found, invCols.Unidad).setValue(String(body.unidad||''));
+      if (body.stockMinimo !== undefined) prodSheet.getRange(found, invCols.StockMinimo).setValue(Number(body.stockMinimo)||0);
+      if (body.stockMaximo !== undefined) prodSheet.getRange(found, invCols.StockMaximo).setValue(Number(body.stockMaximo)||0);
+      if (body.costoUnitario !== undefined) prodSheet.getRange(found, invCols.CostoUnitario).setValue(Number(body.costoUnitario)||0);
+      if (body.proveedorPreferido !== undefined) prodSheet.getRange(found, invCols.ProveedorPreferido).setValue(String(body.proveedorPreferido||''));
+    }
+
     // Si hay nuevo precio: borrar TODAS las filas existentes del mismo prodId+lista
     // y agregar una sola fila nueva. Esto evita la acumulación de duplicados.
     var precio = parseFloat(String(body.precio||'').replace(/[$,]/g,''))||0;
@@ -3032,13 +3118,43 @@ function saveNewProducto(body) {
     var prodId = body.productoId || _getNextProdID(prodSheet);
     var desc = String(body.descripcion||'').trim();
     if (!desc) return {ok:false, error:'Descripción vacía'};
-    prodSheet.appendRow([prodId, body.sku||'', desc, body.categoria||'', body.tipo||'', body.notas||'', body.activo!==false, new Date()]);
+    var sku = String(body.sku||'').trim();
+    prodSheet.appendRow([prodId, sku, desc, body.categoria||'', body.tipo||'', body.notas||'', body.activo!==false, new Date()]);
+    var newRowNum = prodSheet.getLastRow();
+
+    // Inventario: automático para categoría "Medicamento", opcional (checkbox)
+    // para cualquier otra — así cualquier insumo/reactivo puede sumarse a
+    // Combos sin necesitar un catálogo aparte.
+    var inventariable = _bdProdEsInventariable(body);
+    if (inventariable) {
+      var invCols = _bdProdEnsureInventarioCols(prodSheet);
+      prodSheet.getRange(newRowNum, invCols.Inventariable).setValue(true);
+      prodSheet.getRange(newRowNum, invCols.Unidad).setValue(String(body.unidad||''));
+      prodSheet.getRange(newRowNum, invCols.StockMinimo).setValue(Number(body.stockMinimo)||0);
+      prodSheet.getRange(newRowNum, invCols.StockMaximo).setValue(Number(body.stockMaximo)||0);
+      prodSheet.getRange(newRowNum, invCols.CostoUnitario).setValue(Number(body.costoUnitario)||0);
+      prodSheet.getRange(newRowNum, invCols.ProveedorPreferido).setValue(String(body.proveedorPreferido||''));
+      prodSheet.getRange(newRowNum, invCols.StockActual).setValue(0);
+    }
+
     var precio = parseFloat(String(body.precio||'').replace(/[$,]/g,''))||0;
     if (precio>0) {
       precSheet.appendRow([prodId, body.vigencia||new Date().toISOString().substring(0,10), precio, body.moneda||'MXN', body.usuario||'sistema', new Date(), body.lista||'General']);
     }
+
+    // Stock inicial: pasa por el motor de movimientos (no se escribe directo)
+    // para que quede registrado en el ledger de dónde salió el saldo de arranque.
+    var stockInicial = Number(body.stockInicial) || 0;
+    if (inventariable && stockInicial > 0 && sku) {
+      _registrarMovimientoInventario({
+        sku: sku, nombre: desc, tipo: 'Entrada', cantidad: stockInicial, motivo: 'Alta inicial',
+        referencia: '', costoUnitario: Number(body.costoUnitario)||0, usuario: body.usuario||'',
+        modulo: body.categoria || 'Productos', notas: 'Alta de catálogo'
+      });
+    }
+
     logAudit(body.usuario||'sistema','Productos','Crear',prodId,'','',desc+' | $'+precio);
-    return {ok:true, productoId:prodId, sku:body.sku||''};
+    return {ok:true, productoId:prodId, sku:sku};
   } catch(ex) { return {ok:false, error:ex.message}; }
 }
 

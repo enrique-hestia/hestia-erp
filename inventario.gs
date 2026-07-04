@@ -1,30 +1,25 @@
 /* ==============================================================
-   inventario.gs — Inventario de Medicamentos
+   inventario.gs — Inventario (Medicamentos y cualquier producto
+   marcado "Inventariable")
    --------------------------------------------------------------
-   Reemplaza las hojas-matriz (Procedimientos/Estimulación → columna
-   por producto) por un libro de movimientos: un renglón por entrada
-   o salida, con saldo corrido calculado por el sistema, no por
-   fórmula de Sheets. Diseño generalizable — el campo Modulo permite
-   sumar Insumos Qx/Lab más adelante sin rehacer el esquema.
+   Un solo catálogo: el stock vive directamente en BD_Productos
+   (columnas Inventariable/Unidad/Stock…, ver _bdProdEnsureInventarioCols
+   en finance.gs). Esta hoja ya NO mantiene su propio catálogo — solo
+   el ledger de movimientos (un renglón por entrada/salida/ajuste, con
+   saldo corrido calculado por el sistema, no por fórmula de Sheets) y
+   la tabla de Combos, ambos en MED_INV_SS_ID. El campo Modulo del
+   ledger guarda la Categoría del producto afectado, para poder filtrar
+   por Medicamentos/Insumos/etc. sin necesitar catálogos separados.
 
-   Vive en un spreadsheet dedicado (MED_INV_SS_ID en config.gs),
-   separado del archivo "Inventarios" original (que se conserva
-   intacto como respaldo histórico).
-
-   Corre setupInventarioMedicamentos() UNA VEZ desde el editor de
-   Apps Script para crear el spreadsheet — copia el ID que imprime
-   en el log a MED_INV_SS_ID en config.gs y vuelve a desplegar.
+   Cualquier producto de BD_Productos puede entrar al sistema: se marca
+   "Medicamento" y se activa solo, o se marca "Inventariable" manual
+   desde Catálogo General para insumos/reactivos/lo que sea — y con eso
+   ya se puede usar como componente de un Combo.
    ============================================================== */
 
-var MEDINV_CAT_TAB   = 'Catalogo_Medicamentos';
 var MEDINV_MOV_TAB   = 'Movimientos_Inventario';
 var MEDINV_COMBO_TAB = 'Combos';
 
-var MEDINV_CAT_HEADERS = [
-  'SKU', 'Nombre', 'Categoria', 'Unidad', 'StockMinimo', 'StockMaximo',
-  'CostoUnitario', 'ProveedorPreferido', 'StockActual', 'Activo',
-  'FechaAlta', 'UsuarioAlta', 'Notas'
-];
 var MEDINV_MOV_HEADERS = [
   'ID', 'Fecha', 'Modulo', 'SKU', 'Nombre', 'Tipo', 'Cantidad', 'Motivo',
   'Referencia', 'CostoUnitario', 'SaldoResultante', 'Usuario', 'Notas'
@@ -33,28 +28,16 @@ var MEDINV_COMBO_HEADERS = [
   'ID', 'ProductoIngresos', 'SKU', 'NombreMedicamento', 'CantidadPorUnidad', 'Activo'
 ];
 
-var MEDINV_CATEGORIAS = ['Estimulación', 'Analgésicos', 'Anestesia', 'Antibióticos', 'Emergencia', 'Otros'];
+// Subcategorías sugeridas para medicamentos (campo Tipo de BD_Productos) —
+// no son la Categoria del catálogo general, solo agrupan el tipo de fármaco.
+var MEDINV_SUBCATEGORIAS_SUGERIDAS = ['Estimulación', 'Analgésicos', 'Anestesia', 'Antibióticos', 'Emergencia', 'Otros'];
 
 /* ── Setup (correr UNA VEZ desde el editor de Apps Script) ───────── */
 function setupInventarioMedicamentos() {
   var ss = SpreadsheetApp.create('Hestia ERP - Inventario Medicamentos');
 
-  var catSh = ss.getSheets()[0];
-  catSh.setName(MEDINV_CAT_TAB);
-  catSh.getRange(1, 1, 1, MEDINV_CAT_HEADERS.length).setValues([MEDINV_CAT_HEADERS]);
-  catSh.getRange(1, 1, 1, MEDINV_CAT_HEADERS.length).setFontWeight('bold').setBackground('#c46a7a').setFontColor('#ffffff');
-  catSh.setFrozenRows(1);
-  var catCatCol = MEDINV_CAT_HEADERS.indexOf('Categoria') + 1;
-  catSh.getRange(2, catCatCol, 500, 1).setDataValidation(
-    SpreadsheetApp.newDataValidation().requireValueInList(MEDINV_CATEGORIAS, true).setAllowInvalid(true).build()
-  );
-  var catActivoCol = MEDINV_CAT_HEADERS.indexOf('Activo') + 1;
-  catSh.getRange(2, catActivoCol, 500, 1).setDataValidation(
-    SpreadsheetApp.newDataValidation().requireValueInList(['TRUE', 'FALSE'], true).setAllowInvalid(true).build()
-  );
-  catSh.autoResizeColumns(1, MEDINV_CAT_HEADERS.length);
-
-  var movSh = ss.insertSheet(MEDINV_MOV_TAB);
+  var movSh = ss.getSheets()[0];
+  movSh.setName(MEDINV_MOV_TAB);
   movSh.getRange(1, 1, 1, MEDINV_MOV_HEADERS.length).setValues([MEDINV_MOV_HEADERS]);
   movSh.getRange(1, 1, 1, MEDINV_MOV_HEADERS.length).setFontWeight('bold').setBackground('#1a252f').setFontColor('#ffffff');
   movSh.setFrozenRows(1);
@@ -70,7 +53,7 @@ function setupInventarioMedicamentos() {
   comboSh.setFrozenRows(1);
   comboSh.autoResizeColumns(1, MEDINV_COMBO_HEADERS.length);
 
-  Logger.log('========== INVENTARIO DE MEDICAMENTOS CREADO ==========');
+  Logger.log('========== INVENTARIO CREADO ==========');
   Logger.log('Spreadsheet ID: ' + ss.getId());
   Logger.log('URL: ' + ss.getUrl());
   Logger.log('SIGUIENTE PASO: copia ese ID a MED_INV_SS_ID en config.gs y vuelve a desplegar.');
@@ -95,152 +78,97 @@ function _medInvColIdx(headers, name) {
   return i;
 }
 
-/* ── Catálogo ─────────────────────────────────────────────────────── */
+/* ── Buscar un producto inventariable en BD_Productos por SKU ─────── */
+function _bdProdFindBySku(sku) {
+  var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+  var sh = ss.getSheetByName('BD_Productos');
+  if (!sh) throw new Error('BD_Productos no encontrada');
+  var data = sh.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][1] || '').trim() === String(sku).trim()) {
+      return {
+        sh: sh, rowNum: i + 1,
+        productoId: String(data[i][0] || ''), sku: String(data[i][1] || ''),
+        descripcion: String(data[i][2] || ''), categoria: String(data[i][3] || '')
+      };
+    }
+  }
+  return null;
+}
+
+/* ── Catálogo (filtro de BD_Productos: solo lo Inventariable) ─────── */
 function readCatalogoMedicamentos() {
   try {
-    var sh = _medInvSheet(MEDINV_CAT_TAB);
-    var data = sh.getDataRange().getValues();
-    var hdrs = data[0];
-    var rows = [];
-    for (var i = 1; i < data.length; i++) {
-      var r = data[i];
-      if (!String(r[0] || '').trim()) continue;
-      rows.push({
-        _rowNum: i + 1,
-        sku: String(r[_medInvColIdx(hdrs, 'SKU')] || ''),
-        nombre: String(r[_medInvColIdx(hdrs, 'Nombre')] || ''),
-        categoria: String(r[_medInvColIdx(hdrs, 'Categoria')] || ''),
-        unidad: String(r[_medInvColIdx(hdrs, 'Unidad')] || ''),
-        stockMinimo: Number(r[_medInvColIdx(hdrs, 'StockMinimo')]) || 0,
-        stockMaximo: Number(r[_medInvColIdx(hdrs, 'StockMaximo')]) || 0,
-        costoUnitario: Number(r[_medInvColIdx(hdrs, 'CostoUnitario')]) || 0,
-        proveedorPreferido: String(r[_medInvColIdx(hdrs, 'ProveedorPreferido')] || ''),
-        stockActual: Number(r[_medInvColIdx(hdrs, 'StockActual')]) || 0,
-        activo: String(r[_medInvColIdx(hdrs, 'Activo')] || '').toUpperCase() !== 'FALSE',
-        notas: String(r[_medInvColIdx(hdrs, 'Notas')] || '')
-      });
-    }
+    var data = readProductos();
+    if (!data.ok) return data;
+    var rows = data.todosProductos.filter(function (p) { return p.inventariable; }).map(function (p) {
+      return {
+        productoId: p.id, sku: p.sku, nombre: p.descripcion, categoria: p.categoria,
+        tipo: p.tipo, unidad: p.unidad, stockMinimo: p.stockMinimo, stockMaximo: p.stockMaximo,
+        costoUnitario: p.costoUnitario, proveedorPreferido: p.proveedorPreferido,
+        stockActual: p.stockActual, activo: p.activo, notas: p.notas
+      };
+    });
     rows.sort(function (a, b) { return a.nombre.toLowerCase() < b.nombre.toLowerCase() ? -1 : 1; });
     var kpis = {
       total: rows.length,
       bajoMinimo: rows.filter(function (r) { return r.activo && r.stockActual < r.stockMinimo; }).length,
       valorInventario: rows.reduce(function (s, r) { return s + r.stockActual * r.costoUnitario; }, 0)
     };
-    return { ok: true, rows: rows, kpis: kpis, categorias: MEDINV_CATEGORIAS };
+    // "categorias" aquí son las SUBcategorías de medicamento (Estimulación,
+    // Analgésicos…), que viven en el campo Tipo de BD_Productos — no las
+    // categorías generales del catálogo (Medicamento/Tratamientos/etc). Se
+    // arma con los valores de Tipo ya usados + la lista sugerida de base,
+    // para que el picker no se quede vacío en un catálogo nuevo.
+    var tiposUsados = {};
+    rows.forEach(function (r) { if (r.categoria === 'Medicamento' && r.tipo) tiposUsados[r.tipo] = true; });
+    MEDINV_SUBCATEGORIAS_SUGERIDAS.forEach(function (c) { tiposUsados[c] = true; });
+    var categorias = Object.keys(tiposUsados).sort();
+    return { ok: true, rows: rows, kpis: kpis, categorias: categorias };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
-function _getNextMedSku(sh, hdrs) {
-  var data = sh.getDataRange().getValues();
-  var skuCol = _medInvColIdx(hdrs, 'SKU');
-  var max = 0;
-  for (var i = 1; i < data.length; i++) {
-    var m = String(data[i][skuCol] || '').match(/^MED-(\d+)$/);
-    if (m) max = Math.max(max, parseInt(m[1], 10));
-  }
-  return 'MED-' + String(max + 1).padStart(4, '0');
-}
-
+/* ── Alta / edición: delegan en el catálogo único (BD_Productos) ──── */
 function saveMedicamento(body) {
-  try {
-    var nombre = String(body.nombre || '').trim();
-    if (!nombre) return { ok: false, error: 'El nombre es obligatorio.' };
-    var sh = _medInvSheet(MEDINV_CAT_TAB);
-    var hdrs = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
-
-    var data = sh.getDataRange().getValues();
-    var nombreCol = _medInvColIdx(hdrs, 'Nombre');
-    var nuevoNorm = nombre.toLowerCase();
-    for (var i = 1; i < data.length; i++) {
-      if (String(data[i][nombreCol] || '').trim().toLowerCase() === nuevoNorm) {
-        return { ok: false, error: 'Ya existe un medicamento con ese nombre.' };
-      }
-    }
-
-    var sku = _getNextMedSku(sh, hdrs);
-    var fecha = new Date();
-    var fechaStr = fecha.getFullYear() + '-' + String(fecha.getMonth() + 1).padStart(2, '0') + '-' + String(fecha.getDate()).padStart(2, '0');
-    var row = new Array(hdrs.length).fill('');
-    row[_medInvColIdx(hdrs, 'SKU')] = sku;
-    row[_medInvColIdx(hdrs, 'Nombre')] = nombre;
-    row[_medInvColIdx(hdrs, 'Categoria')] = String(body.categoria || '');
-    row[_medInvColIdx(hdrs, 'Unidad')] = String(body.unidad || '');
-    row[_medInvColIdx(hdrs, 'StockMinimo')] = Number(body.stockMinimo) || 0;
-    row[_medInvColIdx(hdrs, 'StockMaximo')] = Number(body.stockMaximo) || 0;
-    row[_medInvColIdx(hdrs, 'CostoUnitario')] = Number(body.costoUnitario) || 0;
-    row[_medInvColIdx(hdrs, 'ProveedorPreferido')] = String(body.proveedorPreferido || '');
-    row[_medInvColIdx(hdrs, 'StockActual')] = Number(body.stockInicial) || 0;
-    row[_medInvColIdx(hdrs, 'Activo')] = 'TRUE';
-    row[_medInvColIdx(hdrs, 'FechaAlta')] = fechaStr;
-    row[_medInvColIdx(hdrs, 'UsuarioAlta')] = String(body.usuario || '');
-    row[_medInvColIdx(hdrs, 'Notas')] = String(body.notas || '');
-    sh.appendRow(row);
-
-    // Si arranca con stock inicial, registrar el movimiento correspondiente
-    var stockInicial = Number(body.stockInicial) || 0;
-    if (stockInicial > 0) {
-      _registrarMovimientoInventario({
-        sku: sku, nombre: nombre, tipo: 'Entrada', cantidad: stockInicial,
-        motivo: 'Saldo inicial', referencia: '', costoUnitario: Number(body.costoUnitario) || 0,
-        usuario: body.usuario || '', modulo: 'Medicamentos', notas: 'Alta de catálogo'
-      });
-    }
-    try { logAudit(body.usuario || '', 'Medicamentos', 'Alta', sku, 'nombre', '', nombre); } catch (e) {}
-    return { ok: true, sku: sku };
-  } catch (ex) { return { ok: false, error: ex.message }; }
+  body.descripcion = body.descripcion || body.nombre;
+  body.categoria = body.categoria || 'Medicamento';
+  body.inventariable = true;
+  if (!String(body.sku || '').trim()) {
+    var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+    var prodSheet = ss.getSheetByName('BD_Productos');
+    if (!prodSheet) { setupBDProductos(); prodSheet = ss.getSheetByName('BD_Productos'); }
+    body.sku = _getNextSkuConPrefijo(prodSheet, 'MED');
+  }
+  return saveNewProducto(body);
 }
 
 function updateMedicamento(body) {
-  try {
-    var rowNum = Number(body.rowNum);
-    if (!rowNum) return { ok: false, error: 'Falta rowNum' };
-    var sh = _medInvSheet(MEDINV_CAT_TAB);
-    var hdrs = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
-    var campos = ['nombre', 'categoria', 'unidad', 'stockMinimo', 'stockMaximo', 'costoUnitario', 'proveedorPreferido', 'notas'];
-    var colMap = {
-      nombre: 'Nombre', categoria: 'Categoria', unidad: 'Unidad', stockMinimo: 'StockMinimo',
-      stockMaximo: 'StockMaximo', costoUnitario: 'CostoUnitario', proveedorPreferido: 'ProveedorPreferido', notas: 'Notas'
-    };
-    campos.forEach(function (f) {
-      if (body.hasOwnProperty(f)) {
-        sh.getRange(rowNum, _medInvColIdx(hdrs, colMap[f]) + 1).setValue(body[f]);
-      }
-    });
-    if (body.hasOwnProperty('activo')) {
-      sh.getRange(rowNum, _medInvColIdx(hdrs, 'Activo') + 1).setValue(body.activo ? 'TRUE' : 'FALSE');
-    }
-    try { logAudit(body.usuario || '', 'Medicamentos', 'Edicion', body.sku || '', '', '', 'fila ' + rowNum); } catch (e) {}
-    return { ok: true };
-  } catch (ex) { return { ok: false, error: ex.message }; }
+  if (body.nombre !== undefined && body.descripcion === undefined) body.descripcion = body.nombre;
+  body.inventariable = true;
+  return updateProducto(body);
 }
 
 /* ── Motor de movimientos: única puerta de entrada para cambiar stock ──
-   Mantiene el saldo en Catalogo_Medicamentos (columna StockActual) y dice
-   registro en Movimientos_Inventario con el saldo resultante — el saldo
+   El saldo vive en BD_Productos (columna StockActual) y cada cambio se
+   registra en Movimientos_Inventario con el saldo resultante — el saldo
    nunca se recalcula con SUM(), lo escribe el sistema en cada movimiento. */
 function _registrarMovimientoInventario(p) {
   var lock = LockService.getScriptLock();
   lock.waitLock(15000);
   try {
-    var catSh = _medInvSheet(MEDINV_CAT_TAB);
-    var catHdrs = catSh.getRange(1, 1, 1, catSh.getLastColumn()).getValues()[0];
-    var catData = catSh.getDataRange().getValues();
-    var skuCol = _medInvColIdx(catHdrs, 'SKU');
-    var stockCol = _medInvColIdx(catHdrs, 'StockActual');
-    var rowIdx = -1;
-    for (var i = 1; i < catData.length; i++) {
-      if (String(catData[i][skuCol] || '').trim() === String(p.sku).trim()) { rowIdx = i; break; }
-    }
-    if (rowIdx < 0) return { ok: false, error: 'SKU no encontrado en el catálogo: ' + p.sku };
+    var prod = _bdProdFindBySku(p.sku);
+    if (!prod) return { ok: false, error: 'SKU no encontrado en el catálogo: ' + p.sku };
 
-    var saldoActual = Number(catData[rowIdx][stockCol]) || 0;
+    var cols = _bdProdEnsureInventarioCols(prod.sh);
+    var saldoActual = Number(prod.sh.getRange(prod.rowNum, cols.StockActual).getValue()) || 0;
     var cantidad = Math.abs(Number(p.cantidad) || 0);
     var saldoNuevo;
     if (p.tipo === 'Entrada') saldoNuevo = saldoActual + cantidad;
     else if (p.tipo === 'Salida') saldoNuevo = saldoActual - cantidad;
     else saldoNuevo = Number(p.cantidad); // Ajuste: cantidad es el saldo absoluto deseado
 
-    catSh.getRange(rowIdx + 1, stockCol + 1).setValue(saldoNuevo);
+    prod.sh.getRange(prod.rowNum, cols.StockActual).setValue(saldoNuevo);
+    prod.sh.getRange(prod.rowNum, cols.Inventariable).setValue(true);
 
     var movSh = _medInvSheet(MEDINV_MOV_TAB);
     var movHdrs = movSh.getRange(1, 1, 1, movSh.getLastColumn()).getValues()[0];
@@ -249,9 +177,9 @@ function _registrarMovimientoInventario(p) {
     var row = new Array(movHdrs.length).fill('');
     row[_medInvColIdx(movHdrs, 'ID')] = nextId;
     row[_medInvColIdx(movHdrs, 'Fecha')] = fecha;
-    row[_medInvColIdx(movHdrs, 'Modulo')] = p.modulo || 'Medicamentos';
+    row[_medInvColIdx(movHdrs, 'Modulo')] = p.modulo || prod.categoria || 'Productos';
     row[_medInvColIdx(movHdrs, 'SKU')] = p.sku;
-    row[_medInvColIdx(movHdrs, 'Nombre')] = p.nombre || '';
+    row[_medInvColIdx(movHdrs, 'Nombre')] = p.nombre || prod.descripcion || '';
     row[_medInvColIdx(movHdrs, 'Tipo')] = p.tipo;
     row[_medInvColIdx(movHdrs, 'Cantidad')] = p.tipo === 'Ajuste' ? (saldoNuevo - saldoActual) : cantidad;
     row[_medInvColIdx(movHdrs, 'Motivo')] = p.motivo || '';
@@ -277,37 +205,24 @@ function registrarCompraMedicamento(body) {
     var cantidad = Number(body.cantidad) || 0;
     if (!sku || cantidad <= 0) return { ok: false, error: 'SKU y cantidad son obligatorios' };
 
-    var catSh = _medInvSheet(MEDINV_CAT_TAB);
-    var catHdrs = catSh.getRange(1, 1, 1, catSh.getLastColumn()).getValues()[0];
-    var catData = catSh.getDataRange().getValues();
-    var skuCol = _medInvColIdx(catHdrs, 'SKU');
-    var nombreCol = _medInvColIdx(catHdrs, 'Nombre');
-    var costoCol = _medInvColIdx(catHdrs, 'CostoUnitario');
-    var nombre = '';
-    for (var i = 1; i < catData.length; i++) {
-      if (String(catData[i][skuCol] || '').trim() === sku) { nombre = String(catData[i][nombreCol] || ''); break; }
-    }
-    if (!nombre) return { ok: false, error: 'SKU no encontrado en el catálogo' };
+    var prod = _bdProdFindBySku(sku);
+    if (!prod) return { ok: false, error: 'SKU no encontrado en el catálogo' };
 
     var costoUnitario = Number(body.costoUnitario) || 0;
     var referencia = [body.proveedor, body.factura].filter(Boolean).join(' — ');
     var resultado = _registrarMovimientoInventario({
-      sku: sku, nombre: nombre, tipo: 'Entrada', cantidad: cantidad,
+      sku: sku, nombre: prod.descripcion, tipo: 'Entrada', cantidad: cantidad,
       motivo: 'Compra', referencia: referencia, costoUnitario: costoUnitario,
-      usuario: body.usuario || '', modulo: 'Medicamentos', notas: body.notas || ''
+      usuario: body.usuario || '', modulo: prod.categoria, notas: body.notas || ''
     });
     if (!resultado.ok) return resultado;
 
     // Actualiza el costo unitario vigente en el catálogo con el de la compra más reciente
     if (costoUnitario > 0) {
-      for (var j = 1; j < catData.length; j++) {
-        if (String(catData[j][skuCol] || '').trim() === sku) {
-          catSh.getRange(j + 1, costoCol + 1).setValue(costoUnitario);
-          break;
-        }
-      }
+      var cols = _bdProdEnsureInventarioCols(prod.sh);
+      prod.sh.getRange(prod.rowNum, cols.CostoUnitario).setValue(costoUnitario);
     }
-    try { logAudit(body.usuario || '', 'Medicamentos', 'Compra', sku, 'cantidad', '', String(cantidad)); } catch (e) {}
+    try { logAudit(body.usuario || '', 'Inventario', 'Compra', sku, 'cantidad', '', String(cantidad)); } catch (e) {}
     return { ok: true, saldoNuevo: resultado.saldoNuevo, movimientoId: resultado.movimientoId };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
@@ -321,20 +236,32 @@ function ajustarInventarioMedicamento(body) {
     var tipo = (motivo === 'Merma' || motivo === 'Caducado') ? 'Salida' : 'Ajuste';
     var cantidad = Number(body.cantidad) || 0;
 
-    var catSh = _medInvSheet(MEDINV_CAT_TAB);
-    var catHdrs = catSh.getRange(1, 1, 1, catSh.getLastColumn()).getValues()[0];
-    var catData = catSh.getDataRange().getValues();
-    var skuCol = _medInvColIdx(catHdrs, 'SKU');
-    var nombreCol = _medInvColIdx(catHdrs, 'Nombre');
-    var nombre = '';
-    for (var i = 1; i < catData.length; i++) {
-      if (String(catData[i][skuCol] || '').trim() === sku) { nombre = String(catData[i][nombreCol] || ''); break; }
-    }
-    if (!nombre) return { ok: false, error: 'SKU no encontrado en el catálogo' };
+    var prod = _bdProdFindBySku(sku);
+    if (!prod) return { ok: false, error: 'SKU no encontrado en el catálogo' };
 
     return _registrarMovimientoInventario({
-      sku: sku, nombre: nombre, tipo: tipo, cantidad: cantidad, motivo: motivo,
-      referencia: body.referencia || '', usuario: body.usuario || '', modulo: 'Medicamentos', notas: body.notas || ''
+      sku: sku, nombre: prod.descripcion, tipo: tipo, cantidad: cantidad, motivo: motivo,
+      referencia: body.referencia || '', usuario: body.usuario || '', modulo: prod.categoria, notas: body.notas || ''
+    });
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+/* ── Sobrante: lo que no se usó de un componente al aplicar un combo
+   (ej. sobra medio frasco) regresa al stock en tiempo real. Acción
+   rápida desde Movimientos — no se mete en la captura de Ingresos para
+   no hacerla más lenta durante la consulta. ─────────────────────── */
+function registrarSobranteInventario(body) {
+  try {
+    var sku = String(body.sku || '').trim();
+    var cantidad = Number(body.cantidad) || 0;
+    if (!sku || cantidad <= 0) return { ok: false, error: 'SKU y cantidad son obligatorios' };
+    var prod = _bdProdFindBySku(sku);
+    if (!prod) return { ok: false, error: 'SKU no encontrado en el catálogo' };
+
+    return _registrarMovimientoInventario({
+      sku: sku, nombre: prod.descripcion, tipo: 'Entrada', cantidad: cantidad, motivo: 'Sobrante',
+      referencia: String(body.referencia || ''), usuario: body.usuario || '', modulo: prod.categoria,
+      notas: body.notas || ''
     });
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
@@ -373,7 +300,11 @@ function readMovimientosInventario(filtros) {
   } catch (ex) { return { ok: false, error: ex.message, rows: [] }; }
 }
 
-/* ── Combos: qué medicamentos descuenta un Producto de Ingresos ──── */
+/* ── Combos: qué productos inventariables descuenta un Producto de
+   Ingresos — el componente puede ser cualquier producto marcado
+   Inventariable (medicamento, insumo, reactivo…), no solo medicamentos,
+   para poder armar tratamientos compuestos (ej. Estimulación Ovárica
+   Controlada = medicamentos + insumos + serologías). ──────────────── */
 function readCombos() {
   try {
     var sh = _medInvSheet(MEDINV_COMBO_TAB);
@@ -402,18 +333,13 @@ function saveCombo(body) {
     var producto = String(body.productoIngresos || '').trim();
     var sku = String(body.sku || '').trim();
     var cantidad = Number(body.cantidadPorUnidad) || 0;
-    if (!producto || !sku || cantidad <= 0) return { ok: false, error: 'Producto, medicamento y cantidad son obligatorios' };
+    if (!producto || !sku || cantidad <= 0) return { ok: false, error: 'Producto, componente y cantidad son obligatorios' };
 
-    var catSh = _medInvSheet(MEDINV_CAT_TAB);
-    var catData = catSh.getDataRange().getValues();
-    var catHdrs = catData[0];
-    var skuCol = _medInvColIdx(catHdrs, 'SKU');
-    var nombreCol = _medInvColIdx(catHdrs, 'Nombre');
-    var nombreMed = '';
-    for (var i = 1; i < catData.length; i++) {
-      if (String(catData[i][skuCol] || '').trim() === sku) { nombreMed = String(catData[i][nombreCol] || ''); break; }
-    }
-    if (!nombreMed) return { ok: false, error: 'Medicamento no encontrado en el catálogo' };
+    var full = null;
+    var data = readProductos();
+    if (data.ok) full = data.todosProductos.filter(function (p) { return p.sku === sku; })[0];
+    if (!full) return { ok: false, error: 'Componente no encontrado en el catálogo' };
+    if (!full.inventariable) return { ok: false, error: 'Ese producto no está marcado como Inventariable — actívalo en Catálogo General antes de usarlo en un combo.' };
 
     var sh = _medInvSheet(MEDINV_COMBO_TAB);
     var hdrs = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
@@ -422,11 +348,11 @@ function saveCombo(body) {
     row[_medInvColIdx(hdrs, 'ID')] = id;
     row[_medInvColIdx(hdrs, 'ProductoIngresos')] = producto;
     row[_medInvColIdx(hdrs, 'SKU')] = sku;
-    row[_medInvColIdx(hdrs, 'NombreMedicamento')] = nombreMed;
+    row[_medInvColIdx(hdrs, 'NombreMedicamento')] = full.descripcion;
     row[_medInvColIdx(hdrs, 'CantidadPorUnidad')] = cantidad;
     row[_medInvColIdx(hdrs, 'Activo')] = 'TRUE';
     sh.appendRow(row);
-    try { logAudit(body.usuario || '', 'Medicamentos', 'ComboAlta', id, '', '', producto + ' -> ' + nombreMed); } catch (e) {}
+    try { logAudit(body.usuario || '', 'Combos', 'Alta', id, '', '', producto + ' -> ' + full.descripcion); } catch (e) {}
     return { ok: true, id: id };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
@@ -514,7 +440,7 @@ function _descontarInventarioPorVenta(opId, lineas, usuario) {
       var cantidadADescontar = c.cantidadPorUnidad * cantLinea;
       var r = _registrarMovimientoInventario({
         sku: c.sku, nombre: c.nombreMedicamento, tipo: 'Salida', cantidad: cantidadADescontar,
-        motivo: 'Venta', referencia: opId, usuario: usuario || '', modulo: 'Medicamentos',
+        motivo: 'Venta', referencia: opId, usuario: usuario || '',
         notas: 'Producto: ' + l.producto
       });
       resultados.push({ sku: c.sku, cantidad: cantidadADescontar, ok: r.ok, saldoNuevo: r.saldoNuevo, error: r.error });
