@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.03.07 -->
+﻿<!-- app-build:2026.07.03.08 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -11996,6 +11996,7 @@ function presShowManual(){
 var _provData = null;
 var _provFilters = { buscar:'', categoria:'', estatus:'' };
 var _provEditRow = null;
+var _provOnSaved = null;
 window._proveedores = window._proveedores || [];
 var PROV_CATS = ['Medicamentos','Laboratorio','Insumos','Servicios','Renta','Honorarios','Nómina','Otros'];
 
@@ -12176,8 +12177,13 @@ function _renderProveedores(){
 }
 
 /* ── Formulario crear / editar ──────────────────────────────────── */
-function provOpenForm(row){
+// onSaved(opcional): callback(prov) invocado tras guardar con éxito — permite
+// que quien abrió el formulario desde otro lado (ej. el modal de Cuentas por
+// Pagar) reciba el proveedor recién creado sin acoplar este módulo a esos
+// llamadores.
+function provOpenForm(row, onSaved){
   _provEditRow = row || null;
+  _provOnSaved = onSaved || null;
   var isEdit = !!row;
   function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
   function inp(id,lbl,val,full,type){return '<div class="pv-field'+(full?' full':'')+'"><label class="pv-flbl">'+lbl+'</label><input class="pv-inp" id="pf-'+id+'" type="'+(type||'text')+'" value="'+esc(val||'')+'"></div>';}
@@ -12210,7 +12216,7 @@ function provOpenForm(row){
   document.body.appendChild(ovl);
   setTimeout(function(){ var n=document.getElementById('pf-nombre'); if(n) n.focus(); }, 50);
 }
-function provCloseForm(){ var o=document.getElementById('pv-modal-ovl'); if(o) o.remove(); _provEditRow=null; }
+function provCloseForm(){ var o=document.getElementById('pv-modal-ovl'); if(o) o.remove(); _provEditRow=null; _provOnSaved=null; }
 function provEditRow(rowNum){
   if (!_provData || !_provData.rows) return;
   var row=_provData.rows.find(function(r){return r._rowNum===rowNum;});
@@ -12236,8 +12242,16 @@ async function provSave(){
     var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify(payload)});
     var d=await r.json();
     if (!d.ok){ if(msg){msg.style.color='#991b1b';msg.textContent=d.error||'No se pudo guardar.';} if(btn){btn.disabled=false;btn.textContent=_provEditRow?'Guardar cambios':'Registrar';} return; }
+    var onSaved = _provOnSaved;
     provCloseForm();
-    await loadProveedores();
+    // Si el catálogo completo está montado (#prov-root) se recarga la vista
+    // entera; si no (ej. se abrió el formulario desde otro módulo, como
+    // Cuentas por Pagar), basta con refrescar el catálogo en memoria y el
+    // datalist compartido para que el nuevo proveedor ya aparezca donde sea
+    // que se esté usando.
+    if (document.getElementById('prov-root')) { await loadProveedores(); }
+    else if (typeof preloadProveedores === 'function') { await preloadProveedores(); }
+    if (onSaved) onSaved({ id: d.id, nombre: nombre });
   } catch(e){
     if(msg){msg.style.color='#991b1b';msg.textContent='Error de red: '+e.message;}
     if(btn){btn.disabled=false;btn.textContent=_provEditRow?'Guardar cambios':'Registrar';}
@@ -17330,7 +17344,7 @@ function _cxpBuildForm(data) {
   var subOpts = subVals.map(function(s){return '<option value="'+String(s).replace(/"/g,'&quot;')+'"'+(s===(data&&data.subtipo||'')?'selected':'')+'>'+s+'</option>';}).join('');
   var h = '<div style="padding:4px">'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'
-      + '<div><label '+LBL+'>Proveedor *</label><input id="cxp-f-prov" list="prov-datalist" '+S+' placeholder="Nombre del proveedor" value="'+(data&&data.proveedor||'').replace(/"/g,'&quot;')+'"></div>'
+      + '<div><label '+LBL+'>Proveedor * <a href="javascript:void(0)" onclick="cxpNuevoProveedor()" style="font-weight:700;color:var(--color-primary,#c46a7a);text-decoration:none">+ Nuevo</a></label><input id="cxp-f-prov" list="prov-datalist" '+S+' placeholder="Nombre del proveedor" value="'+(data&&data.proveedor||'').replace(/"/g,'&quot;')+'"></div>'
       + '<div><label '+LBL+'>Monto *</label><input type="number" id="cxp-f-monto" '+S+' placeholder="0.00" step="0.01" value="'+(data&&data.monto||'')+'"></div>'
     + '</div>'
     + '<div style="margin-bottom:12px"><label '+LBL+'>Concepto *</label><input id="cxp-f-concepto" '+S+' placeholder="Descripción del gasto" value="'+(data&&data.concepto||'').replace(/"/g,'&quot;')+'"></div>'
@@ -17361,6 +17375,17 @@ function _cxpBuildForm(data) {
     + '<input type="hidden" id="cxp-f-cotiz-link" value="">'
     + '<div id="cxp-f-cotiz-status" style="font-size:10px;margin-top:4px;color:var(--text-secondary,#9ca3af)"></div></div>';
   return h;
+}
+
+// Abre el alta de proveedor (mismo formulario del catálogo central en
+// Proveedores) como ventana emergente encima del modal de CxP, sin salir de
+// la captura — al guardar, el nombre recién creado se escribe directo en el
+// campo Proveedor de este formulario.
+function cxpNuevoProveedor(){
+  provOpenForm(null, function(p){
+    var inp = document.getElementById('cxp-f-prov');
+    if (inp) inp.value = p.nombre;
+  });
 }
 
 window.cxpOpenCapture = function() {
