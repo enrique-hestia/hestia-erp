@@ -572,6 +572,33 @@ function doPost(e) {
     if (body.action === 'vincularAutomaticoLote') {
       return jsonResponse(vincularAutomaticoLote(body.fechaInicio, body.fechaFin, body.usuario));
     }
+    if (body.action === 'setupInventarioMedicamentos') {
+      return jsonResponse(setupInventarioMedicamentos());
+    }
+    if (body.action === 'configurarMenuMedicamentos') {
+      return jsonResponse(configurarMenuMedicamentos());
+    }
+    if (body.action === 'saveMedicamento') {
+      return jsonResponse(saveMedicamento(body));
+    }
+    if (body.action === 'updateMedicamento') {
+      return jsonResponse(updateMedicamento(body));
+    }
+    if (body.action === 'registrarCompraMedicamento') {
+      return jsonResponse(registrarCompraMedicamento(body));
+    }
+    if (body.action === 'ajustarInventarioMedicamento') {
+      return jsonResponse(ajustarInventarioMedicamento(body));
+    }
+    if (body.action === 'saveCombo') {
+      return jsonResponse(saveCombo(body));
+    }
+    if (body.action === 'eliminarCombo') {
+      return jsonResponse(eliminarCombo(body));
+    }
+    if (body.action === 'migrarHistorialInventario') {
+      return jsonResponse(migrarHistorialInventario(body.confirmar === true));
+    }
     if (body.action === 'generarReporteContaDigital') {
       return jsonResponse(generarReporteContaDigital(body.fechaInicio, body.fechaFin, body.usuario));
     }
@@ -3169,6 +3196,11 @@ function saveIngreso(payload) {
     sheet.getRange(sheet.getLastRow()+1, 1, rows.length, rows[0].length).setValues(rows);
 
     try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch(e) {}
+
+    // Descuenta inventario si alguno de los productos vendidos tiene un combo
+    // configurado — nunca debe tumbar la venta si el inventario falla.
+    try { _descontarInventarioPorVenta(opId, lineas, payload.usuario); } catch (eInv) {}
+
     return {ok:true, op:opId, lineas:rows.length, total:totalOP};
   } catch(ex) {
     return {ok:false, error:ex.message};

@@ -36,6 +36,7 @@ var QX_SS_ID    = LAB_SS_ID; // ← Reemplaza cuando exista el sheet de Quirófa
 var CAJA_CHICA_SS_ID = '1uB9HnQLqHbotP0w21z6mVQcc4ABb428iKXEru8hvDQE'; // Caja Chica
 var CXP_SS_ID        = '1iRjpYtkcqx-3NRwlVK-UYx09I0gVyiTDRtIA9X9RAQw'; // Cuentas por Pagar
 var CXP_GID          = 1448371071;
+var MED_INV_SS_ID    = ''; // Inventario de Medicamentos — llenar tras correr setupInventarioMedicamentos()
 
 /* ── GIDs (pestañas individuales por ID numérico) ─────────── */
 var ER_GID     = 1953492149; // Estado de Resultados

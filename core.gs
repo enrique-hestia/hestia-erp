@@ -379,6 +379,22 @@ function doGet(e) {
       return jsonResponse(readProductos());
     }
 
+    if (action === 'catalogoMedicamentos') {
+      return jsonResponse(readCatalogoMedicamentos());
+    }
+
+    if (action === 'movimientosInventario') {
+      return jsonResponse(readMovimientosInventario({
+        sku: (e && e.parameter.sku) || '',
+        fechaInicio: (e && e.parameter.fechaInicio) || '',
+        fechaFin: (e && e.parameter.fechaFin) || ''
+      }));
+    }
+
+    if (action === 'combos') {
+      return jsonResponse(readCombos());
+    }
+
     if (action === 'listas') {
       return jsonResponse(readListas());
     }
