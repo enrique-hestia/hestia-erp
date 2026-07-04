@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.03.06 -->
+﻿<!-- app-build:2026.07.03.07 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4752,24 +4752,91 @@ function _ingFacRenderHuerfanos(d) {
   if (!el) return;
   if (!d.xmlHuerfanos || !d.xmlHuerfanos.length) { el.innerHTML = ''; return; }
   var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var escAttr = function(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
   var totalHuerfanos = d.xmlHuerfanos.reduce(function(s,x){ return s+(x.total||0); },0);
   var duplicados = d.xmlHuerfanos.filter(function(x){ return x.posibleDuplicadoDeOp; }).length;
+  // Lista de operaciones candidatas para "Asignar a operación": las mismas
+  // que ya se muestran en Documentos faltantes (sin ArchivoURL todavía) —
+  // datalist compartido por todas las filas, para buscar por nombre/OP sin
+  // tener que ir a otra hoja a identificar al paciente.
+  var opciones = (d.sinFactura||[]).map(function(op){
+    return '<option value="'+escAttr(op.id+' — '+op.paciente+' — '+fmtM(op.total))+'">';
+  }).join('');
   var h = '<div class="ing-fac-sc">'
     +'<div class="ing-fac-sh">🧾 Facturas sin operación (posible exceso)</div>'
-    +'<div class="ing-fac-sub">XML timbrados en el periodo que no corresponden a ninguna venta registrada en Ingresos. Si de verdad no hay una venta detrás, es una factura de más — revisa si hay que <b>cancelarla</b> en el SAT/ContaDigital. Si el monto coincide con una operación que ya tiene su propia factura, se marca como posible duplicado.</div>'
+    +'<div class="ing-fac-sub">XML timbrados en el periodo que no corresponden a ninguna venta registrada en Ingresos. Si sabes a qué paciente le pertenece, búscalo y <b>asígnalo</b> — no vuelve a aparecer. Si de verdad no hay una venta detrás, es una factura de más — revisa si hay que <b>cancelarla</b> en el SAT/ContaDigital. Si el monto coincide con una operación que ya tiene su propia factura, se marca como posible duplicado.</div>'
     +'<div style="display:inline-flex;align-items:baseline;gap:8px;background:rgba(220,38,38,.08);border-radius:10px;padding:10px 16px;margin-bottom:14px">'
       +'<span style="font-size:20px;font-weight:800;color:#dc2626">'+fmtM(totalHuerfanos)+'</span>'
       +'<span style="font-size:11px;font-weight:600;color:#dc2626">facturado sin operación — '+d.xmlHuerfanos.length+' XML'+(duplicados?(' · '+duplicados+' posible(s) duplicado(s)'):'')+'</span>'
     +'</div>'
-    +'<table class="ing-fac-tbl"><thead><tr><th>Folio</th><th>Fecha</th><th>Receptor</th><th>RFC</th><th>Total</th><th>UUID</th><th></th></tr></thead><tbody>';
+    +'<datalist id="ing-fac-ops-datalist">'+opciones+'</datalist>'
+    +'<table class="ing-fac-tbl"><thead><tr><th>Folio</th><th>Fecha</th><th>Receptor</th><th>RFC</th><th>Total</th><th>UUID</th><th></th><th>Asignar a operación</th></tr></thead><tbody>';
   d.xmlHuerfanos.forEach(function(x){
-    h += '<tr><td>'+_cxpEsc(x.serie||'')+' '+_cxpEsc(x.folio)+'</td><td>'+(x.fecha||'')+'</td><td>'+_cxpEsc(x.receptorNombre||'—')
+    var safe = String(x.folio||x.uuid||'').replace(/[^a-zA-Z0-9_-]/g,'_');
+    h += '<tr id="ing-fac-huerfano-'+safe+'"><td>'+_cxpEsc(x.serie||'')+' '+_cxpEsc(x.folio)+'</td><td>'+(x.fecha||'')+'</td><td>'+_cxpEsc(x.receptorNombre||'—')
       +(x.posibleDuplicadoDeOp?('<div style="font-size:9.5px;color:#dc2626;font-weight:700">⚠ posible duplicado de '+x.posibleDuplicadoDeOp+' ('+_cxpEsc(x.posibleDuplicadoDePaciente||'')+')</div>'):'')
       +'</td><td>'+_cxpEsc(x.receptorRfc||'')+'</td><td>'+fmtM(x.total)+'</td><td style="font-family:monospace;font-size:9.5px">'+_cxpEsc(x.uuid||'')+'</td>'
-      +'<td><button onclick="ingViewFactura(\''+x.fileUrl+'\',\''+x.folio+'\')" style="padding:3px 8px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1px solid var(--color-primary,#c46a7a);border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">Ver</button></td></tr>';
+      +'<td><button onclick="ingViewFactura(\''+x.fileUrl+'\',\''+x.folio+'\')" style="padding:3px 8px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1px solid var(--color-primary,#c46a7a);border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">Ver</button></td>'
+      +'<td><div style="display:flex;gap:4px;align-items:center">'
+        +'<input id="ing-fac-asig-'+safe+'" type="text" list="ing-fac-ops-datalist" placeholder="Buscar paciente u OP…" style="width:170px;padding:3px 6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:10.5px">'
+        +'<button onclick="ingFacAsignarHuerfano(\''+_escJs(x.folio)+'\',\''+_escJs(x.fileId)+'\',\''+_escJs(x.receptorNombre||'')+'\',\''+_escJs(x.receptorRfc||'')+'\',\''+_escJs(x.uuid||'')+'\',\''+safe+'\',this)" style="padding:3px 8px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">Asignar</button>'
+      +'</div><span id="ing-fac-asig-st-'+safe+'" style="font-size:9.5px;color:var(--text-secondary,#9ca3af)"></span></td></tr>';
   });
   h += '</tbody></table></div>';
   el.innerHTML = h;
+}
+
+// Escapa un valor para insertarlo dentro de un onclick="...('valor')" —
+// distinto de _cxpEsc (que solo protege HTML): aquí lo que importa es no
+// romper la comilla simple del atributo inline.
+function _escJs(s){ return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+
+// Asigna un XML "huérfano" (facturado a público en general, sin operación
+// asociada) a una operación real que el usuario identificó por su cuenta
+// (buscando por nombre en el datalist) — reutiliza vincularXmlFactura, así
+// que en el próximo análisis esa operación ya no sale en "sin factura" ni el
+// XML en "sin operación": no hay que volver a buscar el nombre del paciente.
+async function ingFacAsignarHuerfano(folio, fileId, razonSocial, rfc, uuid, safe, btn) {
+  var input = document.getElementById('ing-fac-asig-'+safe);
+  var stEl = document.getElementById('ing-fac-asig-st-'+safe);
+  var val = input ? input.value.trim() : '';
+  var m = val.match(/^(OP-[A-Za-z0-9]+)/);
+  if (!m) { if(stEl) stEl.textContent = 'Elige una operación de la lista'; return; }
+  var opId = m[1];
+  var match = ((_ingFacResult&&_ingFacResult.sinFactura)||[]).find(function(o){ return o.id===opId; });
+  if (!match) { if(stEl) stEl.textContent = 'Esa operación ya no está disponible — vuelve a analizar el periodo'; return; }
+  if (!confirm('¿Asignar el folio '+folio+' ('+(razonSocial||'sin nombre en el XML')+') a la operación '+opId+' — '+match.paciente+' ('+ (match.total||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) +')?')) return;
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  if (stEl) stEl.innerHTML = '<span class="ing-spinner ing-spinner-dark"></span>Asignando…';
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'vincularXmlFactura', opId:opId, fileId:fileId, usuario:s.email||'sistema',
+      razonSocial: razonSocial||'', rfc: rfc||'', uuid: uuid||''
+    })});
+    var r2 = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'updateIngresoFiscal', opId:opId, factura:folio, usuario:s.email||'sistema'})});
+    var res = await r.json(), res2 = await r2.json();
+    if (res.ok && res2.ok) {
+      var row = document.getElementById('ing-fac-huerfano-'+safe);
+      if (row) row.style.opacity = '.4';
+      if (stEl) stEl.innerHTML = '<span style="color:#166534">✓ Asignada a '+opId+'</span>';
+      if (typeof _fetchIngresosRaw === 'function') {
+        try {
+          var rawIng = await _fetchIngresosRaw();
+          var dIng = _ingApplyDateFilter(rawIng);
+          _swrSet('ingresos', dIng, currentFechaInicio||'', currentFechaFin||'');
+          _ingData = dIng;
+        } catch(_ref) {}
+      }
+      if (typeof ingFacAnalizar === 'function') await ingFacAnalizar();
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = 'Asignar'; }
+      if (stEl) stEl.innerHTML = '<span style="color:#dc2626">Error: '+_cxpEsc((res.error||res2.error)||'No se pudo asignar')+'</span>';
+    }
+  } catch(ex) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Asignar'; }
+    if (stEl) stEl.textContent = 'Error de conexión';
+  }
 }
 
 function _ingFacRenderSeccion2(d) {
@@ -5130,6 +5197,7 @@ function ingShowManual(){
     +h3('Facturado vs. Ingresos — ¿cuadra?')
     +p('Debajo de los 4 KPIs aparece un resumen con el <b>total facturado</b> (todos los XML del periodo, tengan o no operación asociada), el <b>total de Ingresos</b> capturado y la <b>diferencia</b> entre ambos. Si la diferencia es distinta de cero, hay algo que revisar: o falta registrar una venta, o se facturó de más.')
     +p('La sección <b>"🧾 Facturas sin operación (posible exceso)"</b> lista uno por uno los XML que no corresponden a ninguna venta — con Folio, Receptor, RFC, Total y UUID, y un botón para ver el documento completo. Si el monto de alguno coincide con una operación que <b>ya tiene su propia factura</b>, se marca en rojo como <b>posible duplicado</b> — normalmente significa que esa venta se facturó dos veces y hay que cancelar la de más en el SAT/ContaDigital. Si no hay ninguna operación con ese monto, probablemente sea una venta que nunca se registró en Ingresos.')
+    +p('Si sabes (por otro medio) a qué paciente le pertenece una de estas facturas — muy común con "PÚBLICO EN GENERAL" — cada fila trae un buscador <b>"Asignar a operación"</b>: escribe el nombre o el número de OP, elige la operación de la lista y da clic en <b>Asignar</b>. Eso vincula la factura a esa operación (igual que "Usar y vincular") y, como la operación deja de estar "sin factura", esa fila <b>ya no vuelve a aparecer</b> en el próximo análisis — no hace falta volver a identificarla.')
 
     +h3('2. Documentos faltantes')
     +p('Lista las operaciones sin factura vinculada. Muchas facturas se timbran a <b>"PÚBLICO EN GENERAL"</b> (sin el nombre del paciente en el XML), así que el sistema ofrece dos formas de resolverlas:')
