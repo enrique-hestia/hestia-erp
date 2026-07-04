@@ -254,7 +254,7 @@ function doGet(e) {
 
     if (action === 'menu') {
       var menuCache    = CacheService.getScriptCache();
-      var menuCacheKey = 'erp_menu_v2_' + fechaInicio + '_' + fechaFin;
+      var menuCacheKey = 'erp_menu_v3_' + fechaInicio + '_' + fechaFin;
       var menuCached   = menuCache.get(menuCacheKey);
       if (menuCached) {
         return ContentService.createTextOutput(menuCached).setMimeType(ContentService.MimeType.JSON);
