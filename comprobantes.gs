@@ -269,3 +269,135 @@ function configurarMenuComprobantes() {
   sh.getRange(sh.getLastRow() + 1, 1, 1, fila.length).setValues([fila]);
   return { ok: true, padre: padre || '(raíz)', orden: ordenMax + 1 };
 }
+
+/* ══════════════════════════════════════════════════════════════
+   ENVÍO DE DOCUMENTOS POR CORREO
+   ------------------------------------------------------------
+   Plantillas por tipo de documento (hoja Plantillas_Correo en el
+   spreadsheet principal, editables también desde el ERP) y envío
+   DIRECTO desde la cuenta Google del deployment vía GmailApp, con
+   los archivos de Drive adjuntos de verdad. Cada envío queda en
+   la bitácora Correos_Enviados y en la carpeta Enviados de Gmail.
+   Variables disponibles en asunto/cuerpo:
+     {{destinatario}} {{folio}} {{monto}} {{fecha}} {{referencia}}
+     {{proveedor}} {{paciente}} {{usuario}}
+   ══════════════════════════════════════════════════════════════ */
+var CORREO_PLANTILLAS_TAB = 'Plantillas_Correo';
+var CORREO_LOG_TAB = 'Correos_Enviados';
+
+var CORREO_PLANTILLAS_DEFAULT = [
+  ['factura-ingreso', 'Factura de ingreso (paciente)',
+   'Factura {{folio}} — Hestia Fertility',
+   'Estimado(a) {{destinatario}}:\n\nLe compartimos su factura {{folio}} por {{monto}}, emitida el {{fecha}}.\n\nQuedamos atentos a cualquier aclaración.\n\nHestia Fertility · Administración'],
+  ['factura-egreso', 'Factura de egreso (proveedor)',
+   'Factura {{folio}} recibida — Hestia Fertility',
+   'Estimado proveedor:\n\nConfirmamos la recepción de la factura {{folio}} por {{monto}} con fecha {{fecha}}.\n\nQuedamos atentos a cualquier aclaración.\n\nHestia Fertility · Administración'],
+  ['comprobante-pago', 'Comprobante de pago',
+   'Comprobante de pago — Hestia Fertility · {{referencia}}',
+   'Estimado proveedor:\n\nPor este medio le compartimos el comprobante de pago correspondiente a {{referencia}} por {{monto}}, liquidado el {{fecha}}.\n\nQuedamos atentos a cualquier aclaración.\n\nHestia Fertility · Administración'],
+  ['cotizacion', 'Cotización',
+   'Cotización — Hestia Fertility · {{referencia}}',
+   'Estimado(a) {{destinatario}}:\n\nAdjuntamos la cotización solicitada ({{referencia}}).\n\nQuedamos a sus órdenes para cualquier duda.\n\nHestia Fertility · Administración'],
+  ['estado-cuenta', 'Estado de cuenta',
+   'Estado de cuenta — Hestia Fertility',
+   'Estimado(a) {{destinatario}}:\n\nLe compartimos su estado de cuenta al {{fecha}}.\n\nQuedamos atentos a cualquier aclaración.\n\nHestia Fertility · Administración']
+];
+
+function setupPlantillasCorreo() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sh = ss.getSheetByName(CORREO_PLANTILLAS_TAB);
+  if (!sh) {
+    sh = ss.insertSheet(CORREO_PLANTILLAS_TAB);
+    sh.getRange(1, 1, 1, 4).setValues([['ID', 'Nombre', 'Asunto', 'Cuerpo']]);
+    sh.getRange(1, 1, 1, 4).setFontWeight('bold').setBackground('#f3f4f6');
+    sh.setFrozenRows(1);
+    sh.getRange(2, 1, CORREO_PLANTILLAS_DEFAULT.length, 4).setValues(CORREO_PLANTILLAS_DEFAULT);
+  }
+  var log = ss.getSheetByName(CORREO_LOG_TAB);
+  if (!log) {
+    log = ss.insertSheet(CORREO_LOG_TAB);
+    log.getRange(1, 1, 1, 8).setValues([['Timestamp', 'Usuario', 'Para', 'CC', 'Asunto', 'TipoDocumento', 'Referencia', 'Adjuntos']]);
+    log.getRange(1, 1, 1, 8).setFontWeight('bold').setBackground('#f3f4f6');
+    log.setFrozenRows(1);
+  }
+  return { ok: true };
+}
+
+function readPlantillasCorreo() {
+  try {
+    setupPlantillasCorreo();
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var sh = ss.getSheetByName(CORREO_PLANTILLAS_TAB);
+    var data = sh.getDataRange().getValues();
+    var plantillas = [];
+    for (var i = 1; i < data.length; i++) {
+      var id = String(data[i][0] || '').trim();
+      if (!id) continue;
+      plantillas.push({ id: id, nombre: String(data[i][1] || id), asunto: String(data[i][2] || ''), cuerpo: String(data[i][3] || '') });
+    }
+    return { ok: true, plantillas: plantillas };
+  } catch (ex) { return { ok: false, error: ex.message, plantillas: [] }; }
+}
+
+function savePlantillaCorreo(body) {
+  try {
+    setupPlantillasCorreo();
+    var id = String(body.id || '').trim();
+    if (!id) return { ok: false, error: 'Falta el ID de la plantilla' };
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var sh = ss.getSheetByName(CORREO_PLANTILLAS_TAB);
+    var data = sh.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0] || '').trim() === id) {
+        if (body.nombre !== undefined) sh.getRange(i + 1, 2).setValue(body.nombre);
+        if (body.asunto !== undefined) sh.getRange(i + 1, 3).setValue(body.asunto);
+        if (body.cuerpo !== undefined) sh.getRange(i + 1, 4).setValue(body.cuerpo);
+        try { logAudit(body.usuario || 'sistema', 'Correo', 'EditarPlantilla', id, '', '', ''); } catch (e) {}
+        return { ok: true, id: id };
+      }
+    }
+    sh.appendRow([id, body.nombre || id, body.asunto || '', body.cuerpo || '']);
+    return { ok: true, id: id, creada: true };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+function enviarDocumentoCorreo(body) {
+  try {
+    var para = String(body.para || '').trim();
+    var asunto = String(body.asunto || '').trim();
+    var cuerpo = String(body.cuerpo || '');
+    if (!para || !/^[^\s@]+@[^\s@]+\.[^\s@]+(\s*[,;]\s*[^\s@]+@[^\s@]+\.[^\s@]+)*$/.test(para))
+      return { ok: false, error: 'Destinatario inválido: "' + para + '"' };
+    if (!asunto) return { ok: false, error: 'El asunto es obligatorio' };
+
+    var adjuntos = body.adjuntos || [];
+    var blobs = [], nombres = [], fallidos = [];
+    for (var i = 0; i < Math.min(adjuntos.length, 8); i++) {
+      var fid = String(adjuntos[i] || '').trim();
+      if (!fid) continue;
+      try {
+        var f = DriveApp.getFileById(fid);
+        blobs.push(f.getBlob());
+        nombres.push(f.getName());
+      } catch (fe) { fallidos.push(fid); }
+    }
+    if (fallidos.length && !blobs.length)
+      return { ok: false, error: 'No se pudo leer ningún adjunto de Drive (' + fallidos.length + ' fallidos)' };
+
+    var opts = { name: 'Hestia Fertility' };
+    if (blobs.length) opts.attachments = blobs;
+    var cc = String(body.cc || '').trim();
+    if (cc) opts.cc = cc;
+    GmailApp.sendEmail(para, asunto, cuerpo, opts);
+
+    // Bitácora
+    try {
+      setupPlantillasCorreo();
+      var log = SpreadsheetApp.openById(SHEET_ID).getSheetByName(CORREO_LOG_TAB);
+      log.appendRow([new Date(), body.usuario || '', para, cc, asunto, body.tipoDoc || '', body.referencia || '', nombres.join(', ')]);
+    } catch (le) {}
+    try { logAudit(body.usuario || 'sistema', 'Correo', 'Enviar', body.referencia || '', '', '', para + ' | ' + asunto); } catch (ae) {}
+
+    return { ok: true, para: para, adjuntos: nombres.length, fallidos: fallidos.length };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}

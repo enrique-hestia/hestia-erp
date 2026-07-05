@@ -422,6 +422,12 @@ function doGet(e) {
       return jsonResponse(readComprobantesMes((e && e.parameter.anio) || '', (e && e.parameter.mes) || ''));
     }
 
+    if (action === 'plantillasCorreo') {
+      if (typeof readPlantillasCorreo !== 'function')
+        return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readPlantillasCorreo());
+    }
+
     if (action === 'listas') {
       return jsonResponse(readListas());
     }

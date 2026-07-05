@@ -576,6 +576,16 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(configurarMenuComprobantes());
     }
+    if (body.action === 'enviarDocumentoCorreo') {
+      if (typeof enviarDocumentoCorreo !== 'function')
+        return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(enviarDocumentoCorreo(body));
+    }
+    if (body.action === 'savePlantillaCorreo') {
+      if (typeof savePlantillaCorreo !== 'function')
+        return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(savePlantillaCorreo(body));
+    }
     if (body.action === 'importarCatalogoProductosBatch') {
       return jsonResponse(importarCatalogoProductosBatch(body));
     }
@@ -2954,15 +2964,18 @@ function leerXmlFactura(fileId) {
     var totalImpuestosTrasladados = 0;
     var impEl = child(root,'Impuestos');
     if (impEl) totalImpuestosTrasladados = parseFloat(attr(impEl,'TotalImpuestosTrasladados'))||0;
-    var uuid='', fechaTimbrado='', noCertificadoSat='';
+    var uuid='', fechaTimbrado='', noCertificadoSat='', selloSat='';
     var compEl = child(root,'Complemento');
     if (compEl) {
       var chs = compEl.getChildren();
       for (var ci=0;ci<chs.length;ci++) {
-        if (chs[ci].getName()==='TimbreFiscalDigital') { uuid=attr(chs[ci],'UUID'); fechaTimbrado=attr(chs[ci],'FechaTimbrado'); noCertificadoSat=attr(chs[ci],'NoCertificadoSAT'); break; }
+        if (chs[ci].getName()==='TimbreFiscalDigital') { uuid=attr(chs[ci],'UUID'); fechaTimbrado=attr(chs[ci],'FechaTimbrado'); noCertificadoSat=attr(chs[ci],'NoCertificadoSAT'); selloSat=attr(chs[ci],'SelloSAT'); break; }
       }
     }
-    return {ok:true, tipo:'xml', serie:serie, folio:folio, fecha:fecha, subTotal:subTotal, descuento:descuento, total:total, moneda:moneda, formaPago:formaPago, metodoPago:metodoPago, tipoCambio:tipoCambio, tipoComprobante:tipoComprobante, emisor:emisor, receptor:receptor, conceptos:conceptos, totalImpuestosTrasladados:totalImpuestosTrasladados, uuid:uuid, fechaTimbrado:fechaTimbrado, noCertificadoSat:noCertificadoSat, fileName:file.getName()};
+    var lugarExpedicion = attr(root,'LugarExpedicion');
+    var noCertificado = attr(root,'NoCertificado');
+    var selloCfd = attr(root,'Sello');
+    return {ok:true, tipo:'xml', serie:serie, folio:folio, fecha:fecha, subTotal:subTotal, descuento:descuento, total:total, moneda:moneda, formaPago:formaPago, metodoPago:metodoPago, tipoCambio:tipoCambio, tipoComprobante:tipoComprobante, emisor:emisor, receptor:receptor, conceptos:conceptos, totalImpuestosTrasladados:totalImpuestosTrasladados, uuid:uuid, fechaTimbrado:fechaTimbrado, noCertificadoSat:noCertificadoSat, selloSat:selloSat, lugarExpedicion:lugarExpedicion, noCertificado:noCertificado, selloCfd:selloCfd, fileName:file.getName(), fileId:fileId};
   } catch(ex) { return {ok:false, error:ex.message}; }
 }
 
