@@ -563,6 +563,12 @@ function doPost(e) {
     if (body.action === 'createProducto') {
       return jsonResponse(createProducto(body));
     }
+    if (body.action === 'exportarCatalogoProductos') {
+      return jsonResponse(exportarCatalogoProductos(body.usuario));
+    }
+    if (body.action === 'importarCatalogoProductosBatch') {
+      return jsonResponse(importarCatalogoProductosBatch(body));
+    }
     if (body.action === 'vincularXmlFactura') {
       return jsonResponse(vincularXmlFactura(body));
     }
@@ -3169,6 +3175,137 @@ function saveNewProducto(body) {
     logAudit(body.usuario||'sistema','Productos','Crear',prodId,'','',desc+' | $'+precio);
     return {ok:true, productoId:prodId, sku:sku};
   } catch(ex) { return {ok:false, error:ex.message}; }
+}
+
+/* ══════════ Exportar/Importar catálogo completo (masivo) ══════════
+   Permite descargar TODO el catálogo en un .xlsx editable fuera del
+   sistema y volver a subirlo para actualizar muchos productos a la vez
+   (precio, categoría, inventario, proveedor…) sin abrir uno por uno.
+   El import empareja por ProductoID contra la hoja completa leída UNA
+   sola vez en memoria y escribe con un solo setValues — así una hoja
+   de ~300 productos no dispara cientos de llamadas individuales a
+   Sheets (lo que arriesgaría el límite de 6 min de Apps Script). Filas
+   sin ProductoID (o con uno que no existe) se dan de alta como nuevas,
+   igual que el alta manual vía saveNewProducto. */
+var CATALOGO_XLSX_HEADERS = ['ProductoID','SKU','Descripcion','Categoria','Tipo','Notas','Activo','Precio','Inventariable','Unidad','StockMinimo','StockMaximo','CostoUnitario','ProveedorPreferido'];
+
+function exportarCatalogoProductos(usuario) {
+  try {
+    var data = readProductos();
+    if (!data.ok) return {ok:false, error:data.error};
+    var rows = [CATALOGO_XLSX_HEADERS];
+    data.todosProductos.forEach(function(p){
+      rows.push([
+        p.id, p.sku, p.descripcion, p.categoria, p.tipo, p.notas,
+        p.activo ? 'TRUE' : 'FALSE', p.precio||0,
+        p.inventariable ? 'TRUE' : 'FALSE', p.unidad||'',
+        p.stockMinimo||0, p.stockMaximo||0, p.costoUnitario||0, p.proveedorPreferido||''
+      ]);
+    });
+    var fileName = 'Catalogo_Productos_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone()||'America/Mexico_City', 'yyyy-MM-dd_HHmm') + '.xlsx';
+    var blob = _buildXlsxBlob(rows, 'Catalogo', fileName);
+    var folder;
+    try { folder = DriveApp.getFileById(PRODUCTOS_SS_ID).getParents().next(); }
+    catch(e) { folder = DriveApp.getRootFolder(); }
+    var file = folder.createFile(blob);
+    logAudit(usuario||'sistema','Productos','ExportarCatalogo','','','',data.todosProductos.length+' productos');
+    return {ok:true, url:file.getUrl(), total:data.todosProductos.length};
+  } catch(ex) { return {ok:false, error:ex.message}; }
+}
+
+function importarCatalogoProductosBatch(body) {
+  try {
+    var productos = body.productos || [];
+    if (!productos.length) return {ok:false, error:'Sin productos para importar'};
+    var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+    var prodSheet = ss.getSheetByName('BD_Productos');
+    var precSheet = ss.getSheetByName('BD_Precios');
+    if (!prodSheet || !precSheet) { setupBDProductos(); prodSheet = ss.getSheetByName('BD_Productos'); precSheet = ss.getSheetByName('BD_Precios'); }
+
+    var invCols = _bdProdEnsureInventarioCols(prodSheet);
+    var lastCol = prodSheet.getLastColumn();
+    var data = prodSheet.getDataRange().getValues();
+
+    var idxById = {};
+    var maxIdNum = 0;
+    for (var i = 1; i < data.length; i++) {
+      var pid0 = String(data[i][0] || '').trim();
+      if (pid0) {
+        idxById[pid0] = i;
+        var m = pid0.match(/PROD-(\d+)/);
+        if (m) maxIdNum = Math.max(maxIdNum, parseInt(m[1], 10));
+      }
+    }
+
+    function boolIn(v) {
+      if (typeof v === 'boolean') return v;
+      var s = String(v == null ? '' : v).trim().toUpperCase();
+      return s === 'TRUE' || s === 'SI' || s === 'SÍ' || s === '1' || s === 'X';
+    }
+
+    var actualizados = 0, creados = 0, omitidos = 0;
+    var preciosNuevos = [];
+    var hoy = new Date().toISOString().substring(0, 10);
+    var filasNuevas = [];
+
+    productos.forEach(function (row) {
+      var desc = String(row.descripcion || '').trim();
+      if (!desc) { omitidos++; return; }
+      var pid = String(row.productoId || '').trim();
+      var precio = parseFloat(String(row.precio == null ? '' : row.precio).replace(/[$,]/g, '')) || 0;
+
+      if (pid && idxById[pid] !== undefined && idxById[pid] !== null) {
+        var rIdx = idxById[pid];
+        if (row.sku !== undefined) data[rIdx][1] = row.sku;
+        data[rIdx][2] = desc;
+        if (row.categoria !== undefined) data[rIdx][3] = row.categoria;
+        if (row.tipo !== undefined) data[rIdx][4] = row.tipo;
+        if (row.notas !== undefined) data[rIdx][5] = row.notas;
+        if (row.activo !== undefined) data[rIdx][6] = boolIn(row.activo);
+        var categoriaFinal = row.categoria !== undefined ? row.categoria : data[rIdx][3];
+        var inventariableFinal = _bdProdEsInventariable({ categoria: categoriaFinal, inventariable: boolIn(row.inventariable) });
+        data[rIdx][invCols.Inventariable - 1] = inventariableFinal;
+        if (row.unidad !== undefined) data[rIdx][invCols.Unidad - 1] = row.unidad;
+        if (row.stockMinimo !== undefined) data[rIdx][invCols.StockMinimo - 1] = Number(row.stockMinimo) || 0;
+        if (row.stockMaximo !== undefined) data[rIdx][invCols.StockMaximo - 1] = Number(row.stockMaximo) || 0;
+        if (row.costoUnitario !== undefined) data[rIdx][invCols.CostoUnitario - 1] = Number(row.costoUnitario) || 0;
+        if (row.proveedorPreferido !== undefined) data[rIdx][invCols.ProveedorPreferido - 1] = row.proveedorPreferido;
+        actualizados++;
+        if (precio > 0) preciosNuevos.push([pid, hoy, precio, 'MXN', body.usuario || 'sistema', new Date(), 'General']);
+      } else {
+        maxIdNum++;
+        var newId = 'PROD-' + String(maxIdNum).padStart(5, '0');
+        var newRow = new Array(lastCol).fill('');
+        newRow[0] = newId;
+        newRow[1] = row.sku || '';
+        newRow[2] = desc;
+        newRow[3] = row.categoria || '';
+        newRow[4] = row.tipo || '';
+        newRow[5] = row.notas || '';
+        newRow[6] = row.activo !== undefined ? boolIn(row.activo) : true;
+        newRow[7] = new Date();
+        var inventariableNew = _bdProdEsInventariable({ categoria: row.categoria, inventariable: boolIn(row.inventariable) });
+        newRow[invCols.Inventariable - 1] = inventariableNew;
+        newRow[invCols.Unidad - 1] = row.unidad || '';
+        newRow[invCols.StockMinimo - 1] = Number(row.stockMinimo) || 0;
+        newRow[invCols.StockMaximo - 1] = Number(row.stockMaximo) || 0;
+        newRow[invCols.CostoUnitario - 1] = Number(row.costoUnitario) || 0;
+        newRow[invCols.ProveedorPreferido - 1] = row.proveedorPreferido || '';
+        newRow[invCols.StockActual - 1] = 0;
+        filasNuevas.push(newRow);
+        idxById[newId] = null;
+        creados++;
+        if (precio > 0) preciosNuevos.push([newId, hoy, precio, 'MXN', body.usuario || 'sistema', new Date(), 'General']);
+      }
+    });
+
+    if (data.length > 1) prodSheet.getRange(1, 1, data.length, lastCol).setValues(data);
+    if (filasNuevas.length) prodSheet.getRange(prodSheet.getLastRow() + 1, 1, filasNuevas.length, lastCol).setValues(filasNuevas);
+    if (preciosNuevos.length) precSheet.getRange(precSheet.getLastRow() + 1, 1, preciosNuevos.length, preciosNuevos[0].length).setValues(preciosNuevos);
+
+    logAudit(body.usuario || 'sistema', 'Productos', 'ImportarCatalogoLote', '', '', '', actualizados + ' actualizados, ' + creados + ' creados, ' + omitidos + ' omitidos');
+    return { ok: true, actualizados: actualizados, creados: creados, omitidos: omitidos };
+  } catch (ex) { return { ok: false, error: ex.message + ' (line:' + ex.lineNumber + ')' }; }
 }
 
 function listaPacientesAll() {

@@ -128,24 +128,30 @@ function _bdProdFindBySku(sku) {
   return null;
 }
 
-/* ── Catálogo (filtro de BD_Productos: solo lo Inventariable) ─────── */
+/* ── Catálogo para los dropdowns de Inventario: TODO el Catálogo
+   General (no solo lo Inventariable) — al usar un producto en una
+   orden de compra, combo o movimiento, el sistema lo marca
+   Inventariable automáticamente, sin bloquear la captura. Los KPIs
+   de stock sí se calculan solo sobre lo ya inventariable. ─────────── */
 function readCatalogoMedicamentos() {
   try {
     var data = readProductos();
     if (!data.ok) return data;
-    var rows = data.todosProductos.filter(function (p) { return p.inventariable; }).map(function (p) {
+    var rows = data.todosProductos.map(function (p) {
       return {
         productoId: p.id, sku: p.sku, nombre: p.descripcion, categoria: p.categoria,
         tipo: p.tipo, unidad: p.unidad, stockMinimo: p.stockMinimo, stockMaximo: p.stockMaximo,
         costoUnitario: p.costoUnitario, proveedorPreferido: p.proveedorPreferido,
-        stockActual: p.stockActual, activo: p.activo, notas: p.notas
+        stockActual: p.stockActual, activo: p.activo, notas: p.notas,
+        inventariable: !!p.inventariable
       };
     });
     rows.sort(function (a, b) { return a.nombre.toLowerCase() < b.nombre.toLowerCase() ? -1 : 1; });
+    var inv = rows.filter(function (r) { return r.inventariable; });
     var kpis = {
-      total: rows.length,
-      bajoMinimo: rows.filter(function (r) { return r.activo && r.stockActual < r.stockMinimo; }).length,
-      valorInventario: rows.reduce(function (s, r) { return s + r.stockActual * r.costoUnitario; }, 0)
+      total: inv.length,
+      bajoMinimo: inv.filter(function (r) { return r.activo && r.stockActual < r.stockMinimo; }).length,
+      valorInventario: inv.reduce(function (s, r) { return s + r.stockActual * r.costoUnitario; }, 0)
     };
     // "categorias" aquí son las SUBcategorías de medicamento (Estimulación,
     // Analgésicos…), que viven en el campo Tipo de BD_Productos — no las
@@ -342,7 +348,15 @@ function saveCombo(body) {
     var data = readProductos();
     if (data.ok) full = data.todosProductos.filter(function (p) { return p.sku === sku; })[0];
     if (!full) return { ok: false, error: 'Componente no encontrado en el catálogo' };
-    if (!full.inventariable) return { ok: false, error: 'Ese producto no está marcado como Inventariable — actívalo en Catálogo General antes de usarlo en un combo.' };
+    // Si el componente aún no está marcado Inventariable, se activa aquí
+    // mismo — usarlo en un combo implica que su stock debe controlarse.
+    if (!full.inventariable) {
+      var prodRef = _bdProdFindBySku(sku);
+      if (prodRef) {
+        var invCols = _bdProdEnsureInventarioCols(prodRef.sh);
+        prodRef.sh.getRange(prodRef.rowNum, invCols.Inventariable).setValue(true);
+      }
+    }
 
     var sh = _medInvSheet(MEDINV_COMBO_TAB);
     var hdrs = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
@@ -445,6 +459,10 @@ function crearOrdenCompra(body) {
       if (!sku || cantidad <= 0) continue;
       var prod = _bdProdFindBySku(sku);
       if (!prod) continue;
+      // Comprar un producto lo vuelve inventariable desde ya (aunque la
+      // mercancía no se haya recibido) — así queda listo para el stock.
+      var invColsOc = _bdProdEnsureInventarioCols(prod.sh);
+      prod.sh.getRange(prod.rowNum, invColsOc.Inventariable).setValue(true);
       var subtotal = cantidad * costo;
       total += subtotal;
       lineasValidas.push({ sku: sku, nombre: prod.descripcion, cantidad: cantidad, costoUnitario: costo, subtotal: subtotal });
