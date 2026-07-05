@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.04.05 -->
+﻿<!-- app-build:2026.07.04.06 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2685,6 +2685,7 @@ function _renderIngresosERP() {
     if (r.razonSocial)  op.razonSocial  = r.razonSocial;
     if (r.facturaRFC)   op.facturaRFC   = r.facturaRFC;
     if (r.facturaUUID)  op.facturaUUID  = r.facturaUUID;
+    if (r.pagosDetalle && r.pagosDetalle.length) op.pagosDetalle = r.pagosDetalle;
   });
 
   var totalOps = _opsOrder.length;
@@ -2740,7 +2741,9 @@ function _renderIngresosERP() {
         +'<td style="text-align:center"><span class="ing-items-badge">'+op.items.length+'</span></td>'
         +'<td style="font-weight:700">'+fC(op.total)+'</td>'
         +'<td style="font-weight:600;color:'+(isPaid?'#166534':'#b45309')+'">'+fC(op.pagado)+'</td>'
-        +'<td style="font-size:10.5px;color:var(--text-secondary,#6b7280)">'+(op.formaPago||'—')+'</td>'
+        +'<td style="font-size:10.5px;color:var(--text-secondary,#6b7280)">'+(op.pagosDetalle&&op.pagosDetalle.length>1
+            ?('<span title="'+op.pagosDetalle.map(function(p){return _cxpEsc(p.fp)+' '+fC(p.monto);}).join(' + ')+'" style="font-weight:700;color:#0c4a6e">'+op.pagosDetalle.map(function(p){return _cxpEsc(p.fp);}).join(' + ')+'</span>')
+            :(op.formaPago||'—'))+'</td>'
         +'<td id="ing-badges-'+safeId+'" style="white-space:nowrap">'+_badges+'</td>'
         +((hasPermission('editar_ingresos')||hasPermission('borrar_ingresos'))?'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'+(hasPermission('editar_ingresos')?'<button class="btn-edit-row" onclick="ingEditOp(\''+opId.replace(/'/g,"\\'")+'\')">✎ Editar</button>':'')+(hasPermission('borrar_ingresos')?'<button class="btn-delete-row" onclick="ingDeleteOp(\''+opId.replace(/'/g,"\\'")+'\')">🗑</button>':'')+'</td>':'')
         +'</tr>');
@@ -2765,6 +2768,14 @@ function _renderIngresosERP() {
             +'onblur="ingFiscalSave(\''+opId.replace(/'/g,"\\'")+'\',\'poliza\',this)">'
           +'<span id="ing-pol-st-'+safeId+'" style="font-size:9px"></span>'
         +'</div>'
+        // ── Pago mixto: desglose de formas de pago de esta operación ──
+        +(op.pagosDetalle&&op.pagosDetalle.length>1
+          ?('<div style="width:1px;height:14px;background:var(--color-divider,#e5e7eb)"></div>'
+            +'<div style="display:flex;align-items:center;gap:5px">'
+              +'<span style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Pagos</span>'
+              +'<span style="font-size:11px;font-weight:700;color:#0c4a6e">'+op.pagosDetalle.map(function(p){return _cxpEsc(p.fp)+' '+fC(p.monto);}).join(' · ')+'</span>'
+            +'</div>')
+          :'')
         // ── PDF link (con razón social justo antes, para saber a quién se facturó) ──
         +(op.archivoURL
           ?('<div style="width:1px;height:14px;background:var(--color-divider,#e5e7eb)"></div>'
@@ -2830,16 +2841,30 @@ function _renderIngresosERP() {
   // ── Resumen fiscal del período filtrado ──
   var _subtPagado=0, _totEfectivo=0, _totSantander=0, _contabilizado=0;
   var _fpDetail = {};
+  // Pagos mixtos: el desglose real vive en pagosDetalle (una vez por OP) — esas
+  // operaciones se atribuyen por su desglose, no por la FormaPago principal,
+  // para que Efectivo/Santander/TDC cuadren contra los bancos.
+  var _opSplit = {}, _opSplitDone = {};
+  filtered.forEach(function(r){ if (r.pagosDetalle && r.pagosDetalle.length > 1) _opSplit[r.id] = r.pagosDetalle; });
+  function _fpAdd(fp, pag) {
+    var fpLow = (fp||'').trim().toLowerCase();
+    if (fpLow==='efectivo') _totEfectivo+=pag;
+    else if (fpLow==='santander') _totSantander+=pag;
+    var fpKey = (fp||'').trim() || 'Sin especificar';
+    if (!_fpDetail[fpKey]) _fpDetail[fpKey] = 0;
+    _fpDetail[fpKey] += pag;
+  }
   filtered.forEach(function(r){
     var pag = r.pagado||0;
     _subtPagado += pag;
-    var fp = (r.formaPago||'').trim();
-    var fpLow = fp.toLowerCase();
-    if (fpLow==='efectivo') _totEfectivo+=pag;
-    else if (fpLow==='santander') _totSantander+=pag;
-    var fpKey = fp || 'Sin especificar';
-    if (!_fpDetail[fpKey]) _fpDetail[fpKey] = 0;
-    _fpDetail[fpKey] += pag;
+    if (_opSplit[r.id]) {
+      if (!_opSplitDone[r.id]) {
+        _opSplitDone[r.id] = true;
+        _opSplit[r.id].forEach(function(p){ _fpAdd(p.fp, parseFloat(p.monto)||0); });
+      }
+    } else {
+      _fpAdd(r.formaPago, pag);
+    }
     if (r.contabilidad) _contabilizado+=(r.montoFact||r.pagado||0);
   });
   var _totTDCTDD = _subtPagado - _totEfectivo - _totSantander;
@@ -3661,7 +3686,9 @@ var _ingLineCount = 0;
 
 // Dropdown options (matching Sheets validation)
 var ING_CATEGORIAS = ['Almacenamiento','Consulta','Estudios - Andrologia','Estudios - Ciclo','Estudios - Consulta','Extras Externos','Medicamento','PGT-A','Tratamientos','VIOLET'];
-var ING_FORMAS_PAGO = ['TDC','TDD','AMEX','Santander','Transferencia','Efectivo','Otro'];
+// 'Nota de Crédito' = saldo a favor del paciente aplicado como pago — no toca
+// ningún banco (no es movimiento de dinero), solo baja lo que queda por cobrar.
+var ING_FORMAS_PAGO = ['TDC','TDD','AMEX','Santander','Transferencia','Efectivo','Nota de Crédito','Otro'];
 var ING_CICLOS = ['ALTA','BAJA','CONSULTA','Almacenamiento','Estudios - Andrologia','Estudios - Ciclo','EXTERNOS'];
 var _ingProductos = [];
 var _ingTodosProductos = [];
@@ -3923,15 +3950,29 @@ function ingEditOp(opId) {
     });
     ingCalcTotal();
 
-    // Pre-llenar pago
+    // Pre-llenar pago — si la operación tiene desglose mixto (pagosDetalle),
+    // recrear una línea de pago por cada forma para no perder el split al editar
     var payLinesEl = document.getElementById('ing-pay-lines');
     if (payLinesEl) payLinesEl.innerHTML = '';
     _ingPayCount = 0;
-    ingAddPay();
-    var fpEl = document.getElementById('ing-fp-1');
-    if (fpEl) fpEl.value = first.formaPago || 'TDC';
-    var fpMontoEl = document.getElementById('ing-fp-monto-1');
-    if (fpMontoEl) fpMontoEl.value = _ingOrigPagado || '';
+    var splitDetalle = null;
+    opRows.forEach(function(r){ if (r.pagosDetalle && r.pagosDetalle.length > 1) splitDetalle = r.pagosDetalle; });
+    if (splitDetalle) {
+      splitDetalle.forEach(function(p){
+        ingAddPay();
+        var n = _ingPayCount;
+        var fpN = document.getElementById('ing-fp-'+n);
+        if (fpN) fpN.value = p.fp || 'TDC';
+        var mN = document.getElementById('ing-fp-monto-'+n);
+        if (mN) mN.value = p.monto || '';
+      });
+    } else {
+      ingAddPay();
+      var fpEl = document.getElementById('ing-fp-1');
+      if (fpEl) fpEl.value = first.formaPago || 'TDC';
+      var fpMontoEl = document.getElementById('ing-fp-monto-1');
+      if (fpMontoEl) fpMontoEl.value = _ingOrigPagado || '';
+    }
     ingCalcPayTotal();
 
     // Pre-llenar facturación
@@ -5565,6 +5606,7 @@ function _ingCollectPayload() {
     conciliacion:   !!(document.getElementById('ing-chk-conc')||{}).checked,
     contabilidad:   !!(document.getElementById('ing-chk-cont')||{}).checked,
     lineas: lineas,
+    pagos: payments, // desglose completo — se persiste en PagosDetalle si hay más de uno
     _totalOp: totalOp,
     _payments: payments
   };

@@ -383,6 +383,18 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
     var idx = _facBuildXmlIndex(fechaInicio, fechaFin);
     var conDocumento = [], faltaDocumento = [], sinFactura = [];
     var usedFolios = {}, usedFileIds = {};
+    // Dueños de facturas en TODO BD_Ingresos (cualquier fecha): un XML que ya
+    // está asignado a alguna operación — del periodo o de otro mes — NUNCA
+    // debe ofrecerse como sugerencia/candidato para otra operación. Que el
+    // folio 1081 (ya asignado a una OP de junio) apareciera como candidato
+    // para las OPs de julio era exactamente el tipo de confusión que causa
+    // dobles vinculaciones.
+    var duenoIdx = _facIndexDuenosBDIngresos();
+    function estaAsignado(x) {
+      return !!(duenoIdx.porFileId[x.fileId]
+        || (x.uuid && duenoIdx.porUuid[x.uuid.toUpperCase()])
+        || (x.folio && duenoIdx.porFolio[_facNormFolio(x.folio)]));
+    }
     function marcarUsado(x) {
       if (!x) return;
       usedFileIds[x.fileId] = true;
@@ -442,7 +454,7 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
       var mejor = null, mejorDelta = Infinity;
       for (var i = 0; i < idx.all.length; i++) {
         var x = idx.all[i];
-        if (usedFileIds[x.fileId]) continue;
+        if (usedFileIds[x.fileId] || estaAsignado(x)) continue;
         var xNorm = _pacNormNombre(x.receptorNombre);
         if (!xNorm) continue;
         var matched = candidatos.some(function (c) { return c && (xNorm.indexOf(c) > -1 || c.indexOf(xNorm) > -1); });
@@ -484,7 +496,7 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
         return rfc === 'XAXX010101000' || nom.indexOf('publico en general') > -1 || !nom;
       }
       var todosMonto = idx.all.filter(function (x) {
-        return x.folio && !usedFileIds[x.fileId] && Math.abs((x.total || 0) - (op.total || 0)) < 0.01;
+        return x.folio && !usedFileIds[x.fileId] && !estaAsignado(x) && Math.abs((x.total || 0) - (op.total || 0)) < 0.01;
       });
       var candidatos = todosMonto.filter(esGenerico);
       if (!candidatos.length) {
@@ -525,7 +537,6 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
     // operación de otro mes, no es exceso — es un CFDI cruzado de periodo.
     var xmlHuerfanos = idx.all.filter(function (x) { return x.enPeriodo && !usedFileIds[x.fileId]; });
 
-    var duenoIdx = _facIndexDuenosBDIngresos();
     xmlHuerfanos.forEach(function (x) {
       var dueno = duenoIdx.porFileId[x.fileId]
         || (x.uuid && duenoIdx.porUuid[x.uuid.toUpperCase()])

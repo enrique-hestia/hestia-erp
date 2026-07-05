@@ -2055,13 +2055,14 @@ function _readFromBDIngresos(sheet) {
   function num(v){if(typeof v==='number')return v;var n=parseFloat(String(v||'').replace(/[$,\s]/g,''));return isNaN(n)?0:n;}
   function dt(v){if(!v)return'';if(v instanceof Date)return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0');return String(v);}
 
-  // FacturaRFC/FacturaUUID se agregaron después (columnas dinámicas, no posición fija)
+  // FacturaRFC/FacturaUUID/PagosDetalle se agregaron después (columnas dinámicas, no posición fija)
   var hdrs0 = raw[0]||[];
-  var idxFacRFC = -1, idxFacUUID = -1;
+  var idxFacRFC = -1, idxFacUUID = -1, idxPagosDet = -1;
   for (var hci=0; hci<hdrs0.length; hci++) {
     var h0=String(hdrs0[hci]).trim();
     if (h0==='FacturaRFC') idxFacRFC=hci;
     if (h0==='FacturaUUID') idxFacUUID=hci;
+    if (h0==='PagosDetalle') idxPagosDet=hci;
   }
 
   var MESES_MAP = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio',
@@ -2116,6 +2117,12 @@ function _readFromBDIngresos(sheet) {
       razonSocial: String(r[23]||''),
       facturaRFC: idxFacRFC>-1 ? String(r[idxFacRFC]||'') : '',
       facturaUUID: idxFacUUID>-1 ? String(r[idxFacUUID]||'') : '',
+      pagosDetalle: (function(){
+        if (idxPagosDet < 0) return null;
+        var s = String(r[idxPagosDet]||'').trim();
+        if (!s) return null;
+        try { var arr = JSON.parse(s); return (arr && arr.length) ? arr : null; } catch(e){ return null; }
+      })(),
       mes: mesName,
       mesIdx: mesIdx
     });
@@ -3274,6 +3281,30 @@ function _getNextOP(sheet) {
 var INGRESOS_FOLDER_FACTURAS = '1veQEpzQPS_5FfulHP848aTVWO8CC9X-Q'; // Hestia Fertility\01 Administración y Finanzas\01 Contabilidad\Facturación
 var INGRESOS_FOLDER_PAGOS    = '1D9H3nNIrkgg2wqJtKXzhuSLDH6hIUoPk';
 
+// Columna dinámica PagosDetalle: guarda el desglose cuando una operación se
+// paga con VARIAS formas (ej. tarjeta + nota de crédito). JSON compacto
+// [{"fp":"Santander","monto":9220},...] en la primera línea de la OP. La
+// columna FormaPago (12) conserva la forma principal (la de mayor monto)
+// para no romper filtros/reportes existentes.
+function _bdIngresosEnsurePagosDetalleCol(sheet) {
+  var lastCol = sheet.getLastColumn();
+  var hdrs = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h){ return String(h).trim().toLowerCase(); });
+  var idx = hdrs.indexOf('pagosdetalle');
+  if (idx > -1) return idx + 1;
+  sheet.getRange(1, lastCol + 1).setValue('PagosDetalle');
+  sheet.getRange(1, lastCol + 1).setFontWeight('bold').setBackground('#fce7f3');
+  return lastCol + 1;
+}
+
+function _bdIngresosWritePagosDetalle(sheet, rowNum, pagos) {
+  if (!pagos || !pagos.length) return;
+  var compact = pagos.map(function(p){ return { fp: String(p.formaPago||''), monto: Math.round((parseFloat(p.monto)||0)*100)/100 }; })
+    .filter(function(p){ return p.fp && p.monto > 0; });
+  if (compact.length < 2) return; // un solo pago ya queda completo en FormaPago
+  var col = _bdIngresosEnsurePagosDetalleCol(sheet);
+  sheet.getRange(rowNum, col).setValue(JSON.stringify(compact));
+}
+
 function saveIngreso(payload) {
   try {
     var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
@@ -3343,7 +3374,11 @@ function saveIngreso(payload) {
       ]);
     }
 
-    sheet.getRange(sheet.getLastRow()+1, 1, rows.length, rows[0].length).setValues(rows);
+    var startRow = sheet.getLastRow()+1;
+    sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
+
+    // Pago mixto: guardar el desglose de formas de pago en la primera línea
+    try { _bdIngresosWritePagosDetalle(sheet, startRow, payload.pagos); } catch (ePag) {}
 
     try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch(e) {}
 
@@ -3474,7 +3509,11 @@ function updateIngreso(payload) {
       ]);
     }
 
-    sheet.getRange(sheet.getLastRow()+1, 1, rows.length, rows[0].length).setValues(rows);
+    var startRowUpd = sheet.getLastRow()+1;
+    sheet.getRange(startRowUpd, 1, rows.length, rows[0].length).setValues(rows);
+
+    // Pago mixto: re-guardar el desglose (la edición borra y re-inserta filas)
+    try { _bdIngresosWritePagosDetalle(sheet, startRowUpd, payload.pagos); } catch (ePag) {}
 
     // Auditoría
     try {
