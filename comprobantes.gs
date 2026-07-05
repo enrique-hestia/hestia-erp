@@ -18,7 +18,14 @@
    providers.gs (readProveedores) y core.gs/finance.gs para el wiring.
    ══════════════════════════════════════════════════════════════ */
 
-var COMPROBANTES_ROOT_ID = '1rIWggcMKPAtCRvRxBrQgYzSaCK6kp63w';
+/* Dos fuentes — las MISMAS carpetas donde ya suben archivos los flujos de
+   Egresos/CxP (EGRESOS_DRIVE_FACTURAS / EGRESOS_DRIVE_PAGOS en finance.gs);
+   ambas se organizan Año → Mes ("2026/Junio") vía _getOrCreateMonthFolder:
+     facturas → Contabilidad\Facturas Recibidas (XML CFDI + su PDF)
+     pagos    → Contabilidad\Pagos (comprobantes de transferencia/pago) */
+var COMP_FACTURAS_ROOT_ID = '1t8--HM1xymgqGyBbIsI2jhMVCgQUBm9n';
+var COMP_PAGOS_ROOT_ID    = '1D9H3nNIrkgg2wqJtKXzhuSLDH6hIUoPk';
+function _compRootId(fuente) { return fuente === 'pagos' ? COMP_PAGOS_ROOT_ID : COMP_FACTURAS_ROOT_ID; }
 var COMP_MESES_NOMBRES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 var COMP_MESES_ABR = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 
@@ -36,9 +43,9 @@ function _compMesDesdeNombre(nombre) {
 }
 
 /* ── Estructura: qué años y meses existen en la carpeta ─────────── */
-function listComprobantesEstructura() {
+function listComprobantesEstructura(fuente) {
   try {
-    var root = DriveApp.getFolderById(COMPROBANTES_ROOT_ID);
+    var root = DriveApp.getFolderById(_compRootId(fuente));
     var anios = [];
     var it = root.getFolders();
     while (it.hasNext()) {
@@ -85,20 +92,25 @@ function _compParseXmlLight(content) {
   };
 }
 
-/* ── Leer un mes: XMLs parseados + PDFs emparejados + cruce Egresos ── */
-function readComprobantesMes(anio, mes) {
+/* ── Leer un mes de una fuente:
+   'facturas' → XMLs CFDI parseados + PDF hermano + cruce Link Factura
+   'pagos'    → cualquier archivo (PDF/imagen) + cruce Link Pago ─────── */
+function readComprobantesMes(anio, mes, fuente) {
   try {
+    fuente = fuente === 'pagos' ? 'pagos' : 'facturas';
     anio = parseInt(anio, 10) || new Date().getFullYear();
     mes = parseInt(mes, 10) || (new Date().getMonth() + 1);
 
-    var est = listComprobantesEstructura();
+    var est = listComprobantesEstructura(fuente);
     if (!est.ok) return est;
     var anioObj = null;
     for (var a = 0; a < est.anios.length; a++) if (est.anios[a].anio === anio) { anioObj = est.anios[a]; break; }
-    if (!anioObj) return { ok: true, comprobantes: [], estructura: est.anios, aviso: 'No existe carpeta para el año ' + anio };
+    if (!anioObj) return { ok: true, fuente: fuente, anio: anio, mes: mes, comprobantes: [], estructura: est.anios, aviso: 'No existe carpeta para el año ' + anio };
     var mesObj = null;
     for (var m = 0; m < anioObj.meses.length; m++) if (anioObj.meses[m].mes === mes) { mesObj = anioObj.meses[m]; break; }
-    if (!mesObj) return { ok: true, comprobantes: [], estructura: est.anios, aviso: 'No existe carpeta del mes ' + mes + ' en ' + anio };
+    if (!mesObj) return { ok: true, fuente: fuente, anio: anio, mes: mes, comprobantes: [], estructura: est.anios, aviso: 'No existe carpeta del mes ' + mes + ' en ' + anio };
+
+    if (fuente === 'pagos') return _compLeerMesPagos(anio, mes, mesObj, est);
 
     // 1. Archivos del mes: XMLs parseados; PDFs guardados por nombre base
     var folder = DriveApp.getFolderById(mesObj.folderId);
@@ -201,7 +213,7 @@ function readComprobantesMes(anio, mes) {
     }).length;
 
     return {
-      ok: true, anio: anio, mes: mes, carpeta: mesObj.carpeta,
+      ok: true, fuente: 'facturas', anio: anio, mes: mes, carpeta: mesObj.carpeta,
       comprobantes: xmls, estructura: est.anios,
       resumen: {
         total: xmls.length,
@@ -214,13 +226,65 @@ function readComprobantesMes(anio, mes) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
-/* ── Vincular: escribe el hipervínculo del XML (y PDF si existe) en la
-   columna Link Factura del egreso elegido — igual que el flujo manual ── */
+/* ── Fuente "pagos": comprobantes de transferencia/pago (PDF, imagen…).
+   No hay XML que parsear, así que el cruce es directo por Link Pago y
+   el vinculado manual ofrece los egresos PAGADOS que aún no tienen
+   comprobante (cualquier mes — un pago puede cubrir meses previos). ── */
+function _compLeerMesPagos(anio, mes, mesObj, est) {
+  var folder = DriveApp.getFolderById(mesObj.folderId);
+  var files = folder.getFiles();
+  var archivos = [];
+  while (files.hasNext()) {
+    var f = files.next();
+    archivos.push({
+      fileId: f.getId(), fileName: f.getName(), url: f.getUrl(),
+      fecha: Utilities.formatDate(f.getLastUpdated(), Session.getScriptTimeZone(), 'yyyy-MM-dd')
+    });
+  }
+  var eg = readEgresosData(anio);
+  var egRows = (eg.ok && eg.rows) ? eg.rows : [];
+  archivos.forEach(function (x) {
+    x.estado = 'sinVincular';
+    for (var i = 0; i < egRows.length; i++) {
+      var lk = (egRows[i].linkPagoUrl || '') + ' ' + (egRows[i].linkPago || '');
+      if (lk.indexOf(x.fileId) > -1) {
+        x.estado = 'vinculado';
+        x.egreso = { rowNum: egRows[i]._rowNum, proveedor: egRows[i].proveedor, concepto: egRows[i].concepto, monto: egRows[i].monto, fecha: egRows[i].fecha };
+        break;
+      }
+    }
+  });
+  archivos.sort(function (a, b) { return a.fecha < b.fecha ? 1 : -1; });
+
+  var mesStr = String(anio) + '-' + String(mes).padStart(2, '0');
+  var candidatos = egRows.filter(function (r) {
+    return r.pagado && !r.linkPagoUrl && !r.linkPago && (r.monto || 0) > 0;
+  }).map(function (r) {
+    return { rowNum: r._rowNum, proveedor: r.proveedor, concepto: r.concepto, monto: r.monto, fecha: r.fecha };
+  });
+  candidatos.sort(function (a, b) { return (a.fecha || '') < (b.fecha || '') ? 1 : -1; });
+
+  return {
+    ok: true, fuente: 'pagos', anio: anio, mes: mes, carpeta: mesObj.carpeta,
+    comprobantes: archivos, estructura: est.anios,
+    egresosCandidatos: candidatos.slice(0, 300),
+    resumen: {
+      total: archivos.length,
+      vinculados: archivos.filter(function (x) { return x.estado === 'vinculado'; }).length,
+      sinVincular: archivos.filter(function (x) { return x.estado !== 'vinculado'; }).length,
+      egresosPagadosSinComprobante: candidatos.filter(function (c) { return (c.fecha || '').indexOf(mesStr) === 0; }).length
+    }
+  };
+}
+
+/* ── Vincular: escribe el hipervínculo del archivo en la columna del
+   egreso elegido — campo 'factura' → Link Factura, 'pago' → Link Pago ── */
 function vincularComprobanteEgreso(body) {
   try {
     var anio = parseInt(body.anio, 10) || new Date().getFullYear();
     var rowNum = parseInt(body.rowNum, 10);
     var fileId = String(body.fileId || '').trim();
+    var campo = body.campo === 'pago' ? 'pago' : 'factura';
     if (!rowNum || !fileId) return { ok: false, error: 'Faltan rowNum o fileId' };
 
     var ssId = EGRESOS_IDS[anio] || EGRESOS_SS_2026;
@@ -228,17 +292,19 @@ function vincularComprobanteEgreso(body) {
     var ss = SpreadsheetApp.openById(ssId);
     var sheet = ss.getSheetByName(tabName) || ss.getSheets()[0];
 
+    var buscar = campo === 'pago' ? 'link pago' : 'link factura';
     var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(function (h) { return String(h).trim().toLowerCase(); });
-    var iLinkFact = -1;
-    for (var c = 0; c < headers.length; c++) if (headers[c].indexOf('link factura') > -1) { iLinkFact = c; break; }
-    if (iLinkFact < 0) return { ok: false, error: 'No se encontró la columna Link Factura en ' + tabName };
+    var iCol = -1;
+    for (var c = 0; c < headers.length; c++) if (headers[c].indexOf(buscar) > -1) { iCol = c; break; }
+    if (iCol < 0) return { ok: false, error: 'No se encontró la columna "' + buscar + '" en ' + tabName };
 
     var url = 'https://drive.google.com/file/d/' + fileId + '/view';
-    var rich = SpreadsheetApp.newRichTextValue().setText(body.etiqueta || 'Factura XML').setLinkUrl(url).build();
-    sheet.getRange(rowNum, iLinkFact + 1).setRichTextValue(rich);
+    var etiqueta = body.etiqueta || (campo === 'pago' ? 'Comprobante de pago' : 'Factura XML');
+    var rich = SpreadsheetApp.newRichTextValue().setText(etiqueta).setLinkUrl(url).build();
+    sheet.getRange(rowNum, iCol + 1).setRichTextValue(rich);
 
-    try { logAudit(body.usuario || 'sistema', 'Comprobantes', 'Vincular', 'fila ' + rowNum, '', '', (body.uuid || fileId)); } catch (e) {}
-    return { ok: true, rowNum: rowNum, url: url };
+    try { logAudit(body.usuario || 'sistema', 'Comprobantes', 'Vincular' + (campo === 'pago' ? 'Pago' : 'Factura'), 'fila ' + rowNum, '', '', (body.uuid || fileId)); } catch (e) {}
+    return { ok: true, rowNum: rowNum, url: url, campo: campo };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 

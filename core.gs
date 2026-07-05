@@ -413,13 +413,13 @@ function doGet(e) {
     if (action === 'comprobantesEstructura') {
       if (typeof listComprobantesEstructura !== 'function')
         return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
-      return jsonResponse(listComprobantesEstructura());
+      return jsonResponse(listComprobantesEstructura((e && e.parameter.fuente) || ''));
     }
 
     if (action === 'comprobantesMes') {
       if (typeof readComprobantesMes !== 'function')
         return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
-      return jsonResponse(readComprobantesMes((e && e.parameter.anio) || '', (e && e.parameter.mes) || ''));
+      return jsonResponse(readComprobantesMes((e && e.parameter.anio) || '', (e && e.parameter.mes) || '', (e && e.parameter.fuente) || ''));
     }
 
     if (action === 'plantillasCorreo') {

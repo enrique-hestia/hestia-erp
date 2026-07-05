@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.11 -->
+﻿<!-- app-build:2026.07.05.12 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -13318,13 +13318,16 @@ async function medsEliminarCombo(rowNum){
    ══════════════════════════════════════════════════════════════ */
 var _compData = null;
 var _compAnio = null, _compMes = null;
+var _compFuente = 'facturas'; // 'facturas' (XML CFDI recibidos) | 'pagos' (comprobantes de pago)
 var _compFiltro = '';
 var _COMP_MESES_LBL = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+var _COMP_ROOTS = {facturas:'1t8--HM1xymgqGyBbIsI2jhMVCgQUBm9n', pagos:'1D9H3nNIrkgg2wqJtKXzhuSLDH6hIUoPk'};
 
-async function loadComprobantes(anio, mes){
+async function loadComprobantes(anio, mes, fuente){
   var root = document.getElementById('comprobantes-root');
   if (!root) return;
   _medsStyles();
+  if (fuente) _compFuente = fuente;
   root.innerHTML = hestiaLoader('Leyendo comprobantes de Drive…');
   try {
     if (!anio) {
@@ -13333,7 +13336,7 @@ async function loadComprobantes(anio, mes){
       mes = _compMes || (hoy.getMonth()+1);
     }
     var tok = encodeURIComponent(getToken());
-    var r = await fetch(APPS_SCRIPT_URL+'?action=comprobantesMes&anio='+anio+'&mes='+mes+'&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+    var r = await fetch(APPS_SCRIPT_URL+'?action=comprobantesMes&anio='+anio+'&mes='+mes+'&fuente='+_compFuente+'&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
     var d = await r.json();
     if (!d.ok) throw new Error(d.error||'No se pudo cargar');
     _compData = d; _compAnio = anio; _compMes = mes;
@@ -13351,11 +13354,16 @@ function _renderComprobantes(){
   var root = document.getElementById('comprobantes-root');
   if (!root || !_compData) return;
   var d = _compData;
+  var esPagos = d.fuente === 'pagos';
   var puedeVincular = hasPermission('editar_egresos') || hasPermission('bank_edit');
+  var puedeEnviar = hasPermission('docs_enviar');
   var f = (_compFiltro||'').toLowerCase();
   var rows = (d.comprobantes||[]).filter(function(x){
     if (!f) return true;
-    return (x.emisorNombre+' '+x.emisorRfc+' '+x.folio+' '+x.uuid+' '+x.fileName+' '+String(x.total)).toLowerCase().indexOf(f) > -1;
+    var blob = esPagos
+      ? (x.fileName+' '+(x.egreso?x.egreso.proveedor+' '+x.egreso.concepto:''))
+      : (x.emisorNombre+' '+x.emisorRfc+' '+x.folio+' '+x.uuid+' '+x.fileName+' '+String(x.total));
+    return blob.toLowerCase().indexOf(f) > -1;
   });
 
   // Chips de años/meses disponibles en la carpeta
@@ -13374,28 +13382,75 @@ function _renderComprobantes(){
   });
 
   var res = d.resumen || {};
-  var h = '<div class="mv-w">'
-    +'<div class="mv-hdr"><div><div class="mv-title">📎 Centro de Comprobantes</div>'
-    +'<div class="mv-sub">Facturas XML de proveedores guardadas en Drive por año y mes — se cruzan solas contra Egresos</div></div>'
-    +'<a href="https://drive.google.com/drive/folders/1rIWggcMKPAtCRvRxBrQgYzSaCK6kp63w" target="_blank" class="mv-btn-sec" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px">📁 Abrir carpeta en Drive</a></div>'
-    +'<div class="mv-card" style="padding:12px 16px">'+navHtml+'</div>'
-    +'<div class="mv-kstrip" style="grid-template-columns:repeat(5,1fr)">'
+  function tabBtn(id, lbl){
+    var act = _compFuente === id;
+    return '<button onclick="_compFiltro=\'\';loadComprobantes(_compAnio,_compMes,\''+id+'\')" style="padding:7px 18px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid '
+      +(act?'var(--color-primary,#c46a7a)':'var(--color-divider,#e5e7eb)')+';background:'+(act?'var(--color-primary,#c46a7a)':'var(--card-bg,#fff)')
+      +';color:'+(act?'#fff':'var(--text-secondary,#6b7280)')+'">'+lbl+'</button>';
+  }
+  var kpisHtml = esPagos
+    ? '<div class="mv-kstrip" style="grid-template-columns:repeat(4,1fr)">'
+      +'<div class="mv-ks"><div class="mv-ks-lbl">Archivos en '+_COMP_MESES_LBL[d.mes-1]+' '+d.anio+'</div><div class="mv-ks-val">'+(res.total||0)+'</div></div>'
+      +'<div class="mv-ks"><div class="mv-ks-lbl">Vinculados</div><div class="mv-ks-val" style="color:#166534">'+(res.vinculados||0)+'</div></div>'
+      +'<div class="mv-ks"><div class="mv-ks-lbl">Sin vincular</div><div class="mv-ks-val" style="color:#b45309">'+(res.sinVincular||0)+'</div></div>'
+      +'<div class="mv-ks"><div class="mv-ks-lbl">Egresos pagados del mes sin comprobante</div><div class="mv-ks-val" style="color:#dc2626">'+(res.egresosPagadosSinComprobante||0)+'</div></div>'
+      +'</div>'
+    : '<div class="mv-kstrip" style="grid-template-columns:repeat(5,1fr)">'
       +'<div class="mv-ks"><div class="mv-ks-lbl">XML en '+_COMP_MESES_LBL[d.mes-1]+' '+d.anio+'</div><div class="mv-ks-val">'+(res.total||0)+'</div></div>'
       +'<div class="mv-ks"><div class="mv-ks-lbl">Vinculados</div><div class="mv-ks-val" style="color:#166534">'+(res.vinculados||0)+'</div></div>'
       +'<div class="mv-ks"><div class="mv-ks-lbl">Con sugerencia</div><div class="mv-ks-val" style="color:#b45309">'+(res.sugeridos||0)+'</div></div>'
       +'<div class="mv-ks"><div class="mv-ks-lbl">Sin coincidencia</div><div class="mv-ks-val" style="color:#9ca3af">'+(res.sinCoincidencia||0)+'</div></div>'
       +'<div class="mv-ks"><div class="mv-ks-lbl">Egresos del mes sin factura</div><div class="mv-ks-val" style="color:#dc2626">'+(res.egresosSinFactura||0)+'</div></div>'
-    +'</div>'
+      +'</div>';
+  var h = '<div class="mv-w">'
+    +'<div class="mv-hdr"><div><div class="mv-title">📎 Centro de Comprobantes</div>'
+    +'<div class="mv-sub">'+(esPagos
+      ?'Comprobantes de pago (transferencias) guardados en Drive · Contabilidad\\Pagos — se vinculan al egreso pagado'
+      :'Facturas XML de proveedores en Drive · Contabilidad\\Facturas Recibidas — se cruzan solas contra Egresos')+'</div></div>'
+    +'<a href="https://drive.google.com/drive/folders/'+_COMP_ROOTS[_compFuente]+'" target="_blank" class="mv-btn-sec" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px">📁 Abrir carpeta en Drive</a></div>'
+    +'<div style="display:flex;gap:8px;margin-bottom:14px">'+tabBtn('facturas','📄 Facturas recibidas')+tabBtn('pagos','💸 Comprobantes de pago')+'</div>'
+    +'<div class="mv-card" style="padding:12px 16px">'+navHtml+'</div>'
+    +kpisHtml
     +'<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center">'
-      +'<input class="mv-inp" style="max-width:380px" placeholder="Buscar por proveedor, RFC, folio, UUID o monto…" value="'+_medsEsc(_compFiltro)+'" oninput="_compFiltro=this.value;_renderComprobantes()">'
+      +'<input class="mv-inp" style="max-width:380px" placeholder="'+(esPagos?'Buscar por nombre de archivo o proveedor…':'Buscar por proveedor, RFC, folio, UUID o monto…')+'" value="'+_medsEsc(_compFiltro)+'" oninput="_compFiltro=this.value;_renderComprobantes()">'
       +(f?'<button class="mv-btn-sec" style="padding:6px 12px;font-size:11px" onclick="_compFiltro=\'\';_renderComprobantes()">✕ Limpiar</button>':'')
     +'</div>'
-    +'<div class="mv-card"><table class="mv-tbl"><thead><tr><th>Fecha</th><th>Emisor</th><th>Folio</th><th>UUID</th><th>Total</th><th>Archivos</th><th>Estado</th><th style="min-width:220px">Acción</th></tr></thead><tbody>';
+    +'<div class="mv-card"><table class="mv-tbl"><thead><tr>'
+    +(esPagos
+      ? '<th>Archivo</th><th>Fecha</th><th>Estado</th><th style="min-width:280px">Acción</th>'
+      : '<th>Fecha</th><th>Emisor</th><th>Folio</th><th>UUID</th><th>Total</th><th>Archivos</th><th>Estado</th><th style="min-width:220px">Acción</th>')
+    +'</tr></thead><tbody>';
 
-  if (d.aviso) h += '<tr><td colspan="8" style="text-align:center;padding:24px;color:#b45309">'+_medsEsc(d.aviso)+'</td></tr>';
-  else if (!rows.length) h += '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-secondary,#9ca3af)">'+(f?'Nada coincide con la búsqueda':'Sin archivos XML en esta carpeta')+'</td></tr>';
+  var colSpan = esPagos ? 4 : 8;
+  if (d.aviso) h += '<tr><td colspan="'+colSpan+'" style="text-align:center;padding:24px;color:#b45309">'+_medsEsc(d.aviso)+'</td></tr>';
+  else if (!rows.length) h += '<tr><td colspan="'+colSpan+'" style="text-align:center;padding:24px;color:var(--text-secondary,#9ca3af)">'+(f?'Nada coincide con la búsqueda':'Sin archivos en esta carpeta')+'</td></tr>';
 
-  rows.forEach(function(x){
+  if (esPagos) rows.forEach(function(x){
+    var idx = d.comprobantes.indexOf(x);
+    var estadoHtml, accionHtml;
+    var mailBtn = puedeEnviar ? ' <button class="mv-btn-sec" style="padding:3px 10px;font-size:10.5px" onclick="compEnviarCorreoRow('+idx+')" title="Enviar comprobante por correo">✉ Enviar</button>' : '';
+    if (x.estado === 'vinculado') {
+      estadoHtml = '<span style="color:#166534;font-weight:700">✓ Vinculado</span>';
+      accionHtml = (x.egreso?'<span style="font-size:10.5px;color:var(--text-secondary,#6b7280)">'+_medsEsc(x.egreso.proveedor)+' — '+_medsFmt(x.egreso.monto)+'</span>':'')+mailBtn;
+    } else {
+      estadoHtml = '<span style="color:#b45309;font-weight:700">Sin vincular</span>';
+      var cands = d.egresosCandidatos||[];
+      if (!puedeVincular) accionHtml = '<span style="font-size:10.5px;color:#9ca3af">Sin permiso para vincular</span>'+mailBtn;
+      else if (!cands.length) accionHtml = '<span style="font-size:10.5px;color:#9ca3af">No hay egresos pagados sin comprobante</span>'+mailBtn;
+      else {
+        var opts = cands.map(function(c){ return '<option value="'+c.rowNum+'">'+_medsEsc(c.proveedor)+' — '+_medsEsc((c.concepto||'').substring(0,32))+' — '+_medsFmt(c.monto)+(c.fecha?' — '+c.fecha:'')+'</option>'; }).join('');
+        accionHtml = '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><select class="mv-inp" style="max-width:250px;padding:4px 8px;font-size:10.5px" id="comp-sel-'+idx+'">'+opts+'</select>'
+          +'<button class="mv-btn" style="padding:4px 12px;font-size:10.5px" onclick="compVincular('+idx+',parseInt(document.getElementById(\'comp-sel-'+idx+'\').value),this)">Vincular</button>'+mailBtn+'</div>';
+      }
+    }
+    h += '<tr>'
+      +'<td><a href="'+_medsEsc(x.url)+'" target="_blank" style="color:var(--color-primary,#c46a7a);font-weight:700;text-decoration:none">📄 '+_medsEsc(x.fileName)+'</a></td>'
+      +'<td style="white-space:nowrap">'+_medsEsc(x.fecha||'—')+'</td>'
+      +'<td>'+estadoHtml+'</td>'
+      +'<td>'+accionHtml+'</td>'
+      +'</tr>';
+  });
+  else rows.forEach(function(x){
     var idx = d.comprobantes.indexOf(x);
     var estadoHtml, accionHtml;
     if (x.parseError) {
@@ -13430,7 +13485,8 @@ function _renderComprobantes(){
       +'<td style="white-space:nowrap">'
         +(!x.parseError?'<a href="javascript:void(0)" onclick="compVerCfdi('+idx+')" style="font-size:10.5px;color:var(--color-primary,#c46a7a);font-weight:700;text-decoration:none">👁 Ver</a> · ':'')
         +'<a href="'+_medsEsc(x.url)+'" target="_blank" style="font-size:10.5px;color:var(--color-primary,#c46a7a);font-weight:700;text-decoration:none">XML</a>'
-        +(x.pdfUrl?' · <a href="'+_medsEsc(x.pdfUrl)+'" target="_blank" style="font-size:10.5px;color:var(--color-primary,#c46a7a);font-weight:700;text-decoration:none">PDF</a>':'')+'</td>'
+        +(x.pdfUrl?' · <a href="'+_medsEsc(x.pdfUrl)+'" target="_blank" style="font-size:10.5px;color:var(--color-primary,#c46a7a);font-weight:700;text-decoration:none">PDF</a>':'')
+        +(puedeEnviar?' · <a href="javascript:void(0)" onclick="compEnviarCorreoRow('+idx+')" style="font-size:10.5px;color:var(--color-primary,#c46a7a);font-weight:700;text-decoration:none" title="Enviar por correo">✉ Enviar</a>':'')+'</td>'
       +'<td>'+estadoHtml+'</td>'
       +'<td>'+accionHtml+'</td>'
       +'</tr>';
@@ -13582,9 +13638,12 @@ async function compVincular(idx, rowNum, btn){
   if (btn){ btn.disabled = true; btn.textContent = '…'; }
   try {
     var s = getSession()||{};
+    var esPagos = _compData.fuente === 'pagos';
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
       action:'vincularComprobanteEgreso', anio:_compAnio, rowNum:rowNum, fileId:x.fileId,
-      uuid:x.uuid, etiqueta:(x.serie?x.serie+'-':'')+(x.folio||'Factura XML'), usuario:s.email||''
+      campo: esPagos ? 'pago' : 'factura', uuid:x.uuid||'',
+      etiqueta: esPagos ? 'Comprobante de pago' : ((x.serie?x.serie+'-':'')+(x.folio||'Factura XML')),
+      usuario:s.email||''
     })});
     var d = await r.json();
     if (!d.ok){ alert(d.error||'No se pudo vincular'); if(btn){btn.disabled=false;btn.textContent='Vincular';} return; }
@@ -13592,6 +13651,45 @@ async function compVincular(idx, rowNum, btn){
   } catch(e){
     alert('Error de conexión: '+e.message);
     if(btn){btn.disabled=false;btn.textContent='Vincular';}
+  }
+}
+
+/* ✉ directo desde la fila — facturas: adjunta XML+PDF; pagos: el archivo */
+function compEnviarCorreoRow(idx){
+  var x = _compData && _compData.comprobantes[idx];
+  if (!x) return;
+  var fmtM = function(v){ return '$'+(Number(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  if (_compData.fuente === 'pagos') {
+    hfEnviarCorreo({
+      tipoDoc: 'comprobante-pago',
+      para: '',
+      referencia: (x.egreso ? x.egreso.proveedor+' · ' : '') + x.fileName,
+      variables: {
+        destinatario: x.egreso ? x.egreso.proveedor : '',
+        proveedor: x.egreso ? x.egreso.proveedor : '',
+        monto: x.egreso ? fmtM(x.egreso.monto) : '',
+        fecha: (x.egreso && x.egreso.fecha) || x.fecha || '',
+        referencia: x.egreso ? (x.egreso.concepto||x.egreso.proveedor) : x.fileName
+      },
+      adjuntos: [{fileId:x.fileId, nombre:x.fileName}]
+    });
+  } else {
+    var adjuntos = [{fileId:x.fileId, nombre:x.fileName}];
+    if (x.pdfFileId) adjuntos.push({fileId:x.pdfFileId, nombre:x.fileName.replace(/\.xml$/i,'')+'.pdf'});
+    hfEnviarCorreo({
+      tipoDoc: 'factura-egreso',
+      para: '',
+      referencia: (x.serie?x.serie+'-':'')+(x.folio||x.uuid||x.fileName),
+      variables: {
+        destinatario: x.emisorNombre||'',
+        proveedor: x.emisorNombre||'',
+        folio: (x.serie?x.serie+'-':'')+(x.folio||''),
+        monto: fmtM(x.total)+' '+(x.moneda||'MXN'),
+        fecha: x.fecha||'',
+        referencia: (x.serie?x.serie+'-':'')+(x.folio||'')
+      },
+      adjuntos: adjuntos
+    });
   }
 }
 
