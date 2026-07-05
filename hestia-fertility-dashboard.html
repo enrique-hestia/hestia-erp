@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.03 -->
+﻿<!-- app-build:2026.07.05.04 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -3292,7 +3292,7 @@ function _renderProductosView() {
     // Tabla simple: SKU | Producto | Tipo | Precio | Estado
     h.push('<div class="prod-panel"><div style="overflow-x:auto;max-height:70vh;overflow-y:auto">');
     h.push('<table class="prod-tbl"><thead><tr>'
-      +'<th style="width:100px">SKU</th><th>Producto</th><th style="width:80px">Tipo</th><th style="width:120px;text-align:right">Precio</th><th style="width:80px;text-align:center">Estado</th><th style="width:50px"></th>'
+      +'<th style="width:100px">SKU</th><th>Producto</th><th style="width:80px">Tipo</th><th style="width:120px;text-align:right">Precio</th><th style="width:80px;text-align:center">Estado</th><th style="width:90px;text-align:center" title="Controla si el producto tiene stock y puede usarse como componente de un Combo">Inventariable</th><th style="width:50px"></th>'
       +'</tr></thead><tbody>');
 
     var displayRows = filtered;
@@ -3301,6 +3301,7 @@ function _renderProductosView() {
 
     pgRows.forEach(function(p) {
       var pj = encodeURIComponent(JSON.stringify({id:p.id,sku:p.sku,descripcion:p.descripcion,categoria:p.categoria,tipo:p.tipo,notas:p.notas,precio:p.precio,activo:p.activo,precios:p.precios||{},inventariable:p.inventariable,unidad:p.unidad,stockMinimo:p.stockMinimo,stockMaximo:p.stockMaximo,costoUnitario:p.costoUnitario,proveedorPreferido:p.proveedorPreferido}));
+      var esMed = (p.categoria||'').trim().toLowerCase()==='medicamento';
       h.push('<tr>'
         +'<td style="font-family:monospace;font-size:11px;color:'+titleColor+'">'+(p.sku||p.id)+'</td>'
         +'<td style="font-weight:600;color:var(--text-primary,#111)">'+p.descripcion
@@ -3308,10 +3309,11 @@ function _renderProductosView() {
         +'<td style="font-size:11px;color:var(--text-secondary,#6b7280)">'+(p.tipo||'—')+'</td>'
         +'<td style="text-align:right;font-weight:700;font-size:13px;color:var(--text-primary,#111)">'+(p.precio?fP(p.precio):'—')+'</td>'
         +'<td style="text-align:center">'+(p.activo?'<span class="prod-badge" style="background:#dcfce7;color:#166534">Activo</span>':'<span class="prod-badge" style="background:#fee2e2;color:#991b1b">Inactivo</span>')+'</td>'
+        +'<td style="text-align:center"><input type="checkbox" '+(p.inventariable?'checked':'')+(esMed?' disabled':'')+' onchange="prodToggleInventariable(\''+p.id+'\',this.checked,this)" style="width:15px;height:15px;cursor:pointer" title="'+(esMed?'Medicamento siempre es inventariable':'Márcalo para poder usarlo en Combos')+'"></td>'
         +'<td style="text-align:center"><button onclick="prodEditForm(decodeURIComponent(\''+pj+'\'))" style="background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:13px" title="Editar">✎</button></td>'
         +'</tr>');
     });
-    if (!pgRows.length) h.push('<tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--text-secondary)">Sin productos</td></tr>');
+    if (!pgRows.length) h.push('<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-secondary)">Sin productos</td></tr>');
     h.push('</tbody></table></div>');
 
     h.push('<div class="prod-pag"><span>'+displayRows.length+' productos</span>'
@@ -3368,7 +3370,7 @@ function _renderProductosView() {
     // Full table
     h.push('<div class="prod-panel"><div style="overflow-x:auto;max-height:60vh;overflow-y:auto">');
     h.push('<table class="prod-tbl"><thead><tr>'
-      +'<th>SKU</th><th>Producto</th><th>Categoría</th><th>Tipo</th><th style="text-align:right">Precio</th><th style="text-align:right">Vigencia</th><th style="text-align:center">Estado</th><th style="width:50px"></th>'
+      +'<th>SKU</th><th>Producto</th><th>Categoría</th><th>Tipo</th><th style="text-align:right">Precio</th><th style="text-align:right">Vigencia</th><th style="text-align:center">Estado</th><th style="text-align:center;width:90px" title="Controla si el producto tiene stock y puede usarse como componente de un Combo">Inventariable</th><th style="width:50px"></th>'
       +'</tr></thead><tbody>');
 
     var displayRows2 = filtered;
@@ -3378,6 +3380,7 @@ function _renderProductosView() {
     pgRows2.forEach(function(p) {
       var color = catColors[p.categoria] || '#6b7280';
       var pj2 = encodeURIComponent(JSON.stringify({id:p.id,sku:p.sku,descripcion:p.descripcion,categoria:p.categoria,tipo:p.tipo,notas:p.notas,precio:p.precio,activo:p.activo,precios:p.precios||{},inventariable:p.inventariable,unidad:p.unidad,stockMinimo:p.stockMinimo,stockMaximo:p.stockMaximo,costoUnitario:p.costoUnitario,proveedorPreferido:p.proveedorPreferido}));
+      var esMed2 = (p.categoria||'').trim().toLowerCase()==='medicamento';
       h.push('<tr>'
         +'<td style="font-family:monospace;font-size:11px;color:var(--color-primary,#c46a7a)">'+(p.sku||p.id)+'</td>'
         +'<td style="font-weight:600;color:var(--text-primary,#111);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+p.descripcion+'</td>'
@@ -3386,10 +3389,11 @@ function _renderProductosView() {
         +'<td style="text-align:right;font-weight:700">'+(p.precio?fP(p.precio):'—')+'</td>'
         +'<td style="text-align:right;font-size:10.5px;color:var(--text-secondary,#9ca3af)">'+(p.precioVigencia||'—')+'</td>'
         +'<td style="text-align:center">'+(p.activo?'<span class="prod-badge" style="background:#dcfce7;color:#166534">Activo</span>':'<span class="prod-badge" style="background:#fee2e2;color:#991b1b">Inactivo</span>')+'</td>'
+        +'<td style="text-align:center"><input type="checkbox" '+(p.inventariable?'checked':'')+(esMed2?' disabled':'')+' onchange="prodToggleInventariable(\''+p.id+'\',this.checked,this)" style="width:15px;height:15px;cursor:pointer" title="'+(esMed2?'Medicamento siempre es inventariable':'Márcalo para poder usarlo en Combos')+'"></td>'
         +'<td style="text-align:center"><button onclick="prodEditForm(decodeURIComponent(\''+pj2+'\'))" style="background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:13px" title="Editar">✎</button></td>'
         +'</tr>');
     });
-    if (!pgRows2.length) h.push('<tr><td colspan="8" style="text-align:center;padding:2rem;color:var(--text-secondary)">Sin productos</td></tr>');
+    if (!pgRows2.length) h.push('<tr><td colspan="9" style="text-align:center;padding:2rem;color:var(--text-secondary)">Sin productos</td></tr>');
     h.push('</tbody></table></div>');
     h.push('<div class="prod-pag"><span>'+displayRows2.length+' productos · Pág. '+_prodPage+'/'+totalPages+'</span>'
       +'<div style="display:flex;gap:6px">'
@@ -3516,6 +3520,35 @@ function _prodInvToggle() {
   else { chk.disabled = false; }
   var fields = document.getElementById('prod-f-inv-fields');
   if (fields) fields.style.display = chk.checked ? 'block' : 'none';
+}
+
+// Toggle directo del checkbox "Inventariable" desde la tabla del catálogo —
+// para activar en lote sin tener que abrir el formulario de cada producto.
+// Invalida la caché de productos de Ingresos para que Combos/Movimientos
+// vean el cambio la próxima vez que se abran, sin esperar un refresh completo.
+async function prodToggleInventariable(productoId, checked, cbEl) {
+  if (cbEl) cbEl.disabled = true;
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'updateProducto', productoId: productoId, inventariable: checked, usuario: s.email||'sistema'
+    })});
+    var res = await r.json();
+    if (!res.ok) {
+      alert('Error: '+(res.error||'No se pudo actualizar'));
+      if (cbEl) cbEl.checked = !checked;
+    } else {
+      if (_prodData && _prodData.todosProductos) {
+        _prodData.todosProductos.forEach(function(p){ if (p.id === productoId) p.inventariable = checked; });
+      }
+      if (typeof _ingProductosLoaded !== 'undefined') _ingProductosLoaded = false;
+    }
+  } catch(e) {
+    alert('Error de conexión: '+e.message);
+    if (cbEl) cbEl.checked = !checked;
+  } finally {
+    if (cbEl) cbEl.disabled = false;
+  }
 }
 
 function prodEditForm(jsonStr) {
