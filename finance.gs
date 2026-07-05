@@ -593,9 +593,6 @@ function doPost(e) {
     if (body.action === 'updateMedicamento') {
       return jsonResponse(updateMedicamento(body));
     }
-    if (body.action === 'registrarCompraMedicamento') {
-      return jsonResponse(registrarCompraMedicamento(body));
-    }
     if (body.action === 'ajustarInventarioMedicamento') {
       return jsonResponse(ajustarInventarioMedicamento(body));
     }
@@ -604,6 +601,15 @@ function doPost(e) {
     }
     if (body.action === 'eliminarCombo') {
       return jsonResponse(eliminarCombo(body));
+    }
+    if (body.action === 'setupOrdenesCompra') {
+      return jsonResponse(setupOrdenesCompra());
+    }
+    if (body.action === 'crearOrdenCompra') {
+      return jsonResponse(crearOrdenCompra(body));
+    }
+    if (body.action === 'marcarOrdenRecibida') {
+      return jsonResponse(marcarOrdenRecibida(body));
     }
     if (body.action === 'registrarSobranteInventario') {
       return jsonResponse(registrarSobranteInventario(body));

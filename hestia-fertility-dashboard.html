@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.02 -->
+﻿<!-- app-build:2026.07.05.03 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -998,9 +998,9 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
   </div>
 </div>
 
-<!-- ══ VISTA: MEDICAMENTOS — Catálogo/Inventario, Compras, Movimientos, Combos ══ -->
-<div id="view-meds-lista" class="view" style="display:none"><div id="meds-lista-root"></div></div>
-<div id="view-meds-compras" class="view" style="display:none"><div id="meds-compras-root"></div></div>
+<!-- ══ VISTA: INVENTARIO — Órdenes de Compra, Movimientos, Combos (Medicamentos
+     ahora es una vista de Catálogo General filtrada, ver navigateTo) ══ -->
+<div id="view-oc-lista" class="view" style="display:none"><div id="oc-lista-root"></div></div>
 <div id="view-meds-movimientos" class="view" style="display:none"><div id="meds-movimientos-root"></div></div>
 <div id="view-meds-combos" class="view" style="display:none"><div id="meds-combos-root"></div></div>
 
@@ -10584,13 +10584,15 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     loadProveedores();
     return;
   }
-  // Medicamentos — inventario dedicado (Catálogo/Compras/Movimientos/Combos)
-  if (viewId === 'meds-lista' || viewId === 'meds-compras' || viewId === 'meds-movimientos' || viewId === 'meds-combos') {
+  // Inventario — Órdenes de Compra/Movimientos/Combos (opera sobre cualquier
+  // producto Inventariable, no solo medicamentos — "Medicamentos" en el menú
+  // ahora es solo la vista filtrada de Catálogo General, ver el bloque de
+  // Productos más abajo)
+  if (viewId === 'oc-lista' || viewId === 'meds-movimientos' || viewId === 'meds-combos') {
     document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
     var _medsEl = document.getElementById('view-' + viewId);
     if (_medsEl) _medsEl.style.display = '';
-    if (viewId === 'meds-lista') loadMedsLista();
-    else if (viewId === 'meds-compras') loadMedsCompras();
+    if (viewId === 'oc-lista') loadOrdenesCompra();
     else if (viewId === 'meds-movimientos') loadMedsMovimientos();
     else loadMedsCombos();
     return;
@@ -12743,182 +12745,174 @@ function _medsStyles(){
   document.head.appendChild(s);
 }
 
-/* ── Catálogo (con stock corrido) ─────────────────────────────── */
-async function loadMedsLista(){
-  var root = document.getElementById('meds-lista-root');
+/* ── Órdenes de Compra — liga Inventario ↔ Cuentas por Pagar ──────
+   Toda orden genera su CxP de inmediato (vía saveCxP, sin tocar ese
+   sistema); recepción de mercancía y pago son dos cosas independientes:
+   se puede recibir ahora y pagar después, o pagar antes y recibir
+   cuando llegue físicamente (botón "Marcar recibida" en la lista). ── */
+var _ocData = null;
+var _ocLineCount = 0;
+var OC_SUBTIPOS = ['Medicamentos e Insumos', 'Insumos Lab', 'Equipo Médico', 'Otros'];
+
+async function loadOrdenesCompra(){
+  var root = document.getElementById('oc-lista-root');
   if (!root) return;
   _medsStyles();
-  root.innerHTML = hestiaLoader('Cargando catálogo de medicamentos…');
+  root.innerHTML = hestiaLoader('Cargando órdenes de compra…');
   try {
     var tok = encodeURIComponent(getToken());
-    var r = await fetch(APPS_SCRIPT_URL+'?action=catalogoMedicamentos&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
-    var d = await r.json();
+    var rCat = await fetch(APPS_SCRIPT_URL+'?action=catalogoMedicamentos&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+    _medsCat = await rCat.json();
+    var rOc = await fetch(APPS_SCRIPT_URL+'?action=ordenesCompra&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+    var d = await rOc.json();
     if (!d.ok) throw new Error(d.error || 'No se pudo cargar');
-    _medsCat = d;
+    _ocData = d;
     await hfFinish();
-    _renderMedsLista();
+    _renderOrdenesCompra();
   } catch(e){
-    root.innerHTML = '<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px;line-height:1.6;margin:20px">⚠ '+_medsEsc(e.message)+'<br><span style="color:#6b7280">Si es la primera vez: corre <b>setupInventarioMedicamentos()</b> en Apps Script, copia el ID a MED_INV_SS_ID en config.gs, vuelve a desplegar, y luego corre <b>configurarMenuMedicamentos()</b> una vez.</span></div>';
+    root.innerHTML = '<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px;line-height:1.6;margin:20px">⚠ '+_medsEsc(e.message)+'<br><span style="color:#6b7280">Si es la primera vez, corre <b>setupOrdenesCompra()</b> en Apps Script.</span></div>';
   }
 }
 
-function _renderMedsLista(){
-  var root = document.getElementById('meds-lista-root');
-  if (!root || !_medsCat) return;
-  var rows = _medsCat.rows || [];
-  var k = _medsCat.kpis || {};
+function _renderOrdenesCompra(){
+  var root = document.getElementById('oc-lista-root');
+  if (!root || !_ocData) return;
+  var rows = _ocData.rows || [];
   var h = '<div class="mv-w">'
-    +'<div class="mv-hdr"><div><div class="mv-title">💊 Medicamentos</div><div class="mv-sub">Catálogo e inventario en tiempo real</div></div>'
-    +'<button class="mv-btn" onclick="medsOpenForm()">+ Nuevo medicamento</button></div>'
-    +'<div class="mv-kstrip">'
-      +'<div class="mv-ks"><div class="mv-ks-lbl">Total medicamentos</div><div class="mv-ks-val">'+(k.total||0)+'</div></div>'
-      +'<div class="mv-ks"><div class="mv-ks-lbl">Bajo mínimo</div><div class="mv-ks-val" style="color:'+((k.bajoMinimo||0)>0?'#dc2626':'#166534')+'">'+(k.bajoMinimo||0)+'</div></div>'
-      +'<div class="mv-ks"><div class="mv-ks-lbl">Valor de inventario</div><div class="mv-ks-val">'+_medsFmt(k.valorInventario)+'</div></div>'
-    +'</div>'
-    +'<div class="mv-card"><table class="mv-tbl"><thead><tr><th>Nombre</th><th>Categoría</th><th>Unidad</th><th>Stock</th><th>Mín / Máx</th><th>Costo unitario</th><th>Proveedor</th><th>Estatus</th><th></th></tr></thead><tbody>';
+    +'<div class="mv-hdr"><div><div class="mv-title">🛒 Órdenes de Compra</div><div class="mv-sub">Cada orden genera su cuenta por pagar — recibir mercancía y pagar son pasos independientes</div></div>'
+    +'<button class="mv-btn" onclick="ocOpenForm()">+ Nueva orden</button></div>'
+    +'<div class="mv-card"><table class="mv-tbl"><thead><tr><th>Orden</th><th>Fecha</th><th>Proveedor</th><th>Total</th><th>Recepción</th><th>Pago</th><th></th></tr></thead><tbody>';
   if (!rows.length) {
-    h += '<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-secondary,#9ca3af)">Sin medicamentos todavía — da clic en "+ Nuevo medicamento"</td></tr>';
+    h += '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-secondary,#9ca3af)">Sin órdenes todavía — da clic en "+ Nueva orden"</td></tr>';
   }
-  rows.forEach(function(m){
-    var bajo = m.activo && m.stockActual < m.stockMinimo;
-    var color = bajo ? '#dc2626' : '#166534';
-    var catLabel = m.categoria === 'Medicamento' ? (m.tipo || '—') : m.categoria;
-    h += '<tr><td><b>'+_medsEsc(m.nombre)+'</b></td><td>'+_medsEsc(catLabel)+'</td><td>'+_medsEsc(m.unidad)+'</td>'
-      +'<td style="color:'+color+';font-weight:700">'+m.stockActual+(bajo?' ⚠':'')+'</td>'
-      +'<td>'+m.stockMinimo+' / '+m.stockMaximo+'</td><td>'+_medsFmt(m.costoUnitario)+'</td><td>'+_medsEsc(m.proveedorPreferido)+'</td>'
-      +'<td>'+(m.activo?'<span style="color:#166534;font-weight:700">Activo</span>':'<span style="color:#9ca3af">Inactivo</span>')+'</td>'
-      +'<td><button class="mv-btn-sec" style="padding:4px 10px;font-size:10.5px" onclick="medsOpenForm('+_medsEsc(JSON.stringify(m.productoId))+')">Editar</button></td></tr>';
+  rows.forEach(function(o){
+    var recibida = o.estadoRecepcion === 'Recibida';
+    var safe = o.id.replace(/[^a-zA-Z0-9_-]/g,'_');
+    var lineasHtml = (o.lineas||[]).map(function(l){ return _medsEsc(l.nombre)+' × '+l.cantidad+' ('+_medsFmt(l.costoUnitario)+' c/u)'; }).join('<br>');
+    h += '<tr><td><b>'+_medsEsc(o.id)+'</b><div style="font-size:9.5px;color:var(--text-secondary,#9ca3af);margin-top:2px;max-width:220px">'+lineasHtml+'</div></td>'
+      +'<td>'+_medsEsc(o.fecha)+'</td><td>'+_medsEsc(o.proveedor)+'</td><td>'+_medsFmt(o.total)+'</td>'
+      +'<td>'+(recibida
+          ? '<span style="color:#166534;font-weight:700">✓ Recibida'+(o.fechaRecepcion?(' — '+_medsEsc(o.fechaRecepcion)):'')+'</span>'
+          : '<button class="mv-btn-sec" style="padding:4px 10px;font-size:10.5px;color:#b45309;border-color:#b45309" onclick="ocMarcarRecibida('+o._rowNum+',this)">Marcar recibida</button>')+'</td>'
+      +'<td>'+(o.pagado?'<span style="color:#166534;font-weight:700">✓ Pagada</span>':'<span style="color:#b45309;font-weight:700">Pendiente</span>')+'</td>'
+      +'<td id="oc-cxp-'+safe+'"><a href="javascript:void(0)" onclick="navigateTo(\'fin-cxp\')" style="font-size:10.5px;color:var(--color-primary,#c46a7a);text-decoration:none;font-weight:700">Ver en CxP</a></td></tr>';
   });
   h += '</tbody></table></div></div>';
   root.innerHTML = h;
 }
 
-function medsOpenForm(productoId){
-  var row = productoId ? (_medsCat.rows||[]).find(function(r){ return r.productoId === productoId; }) : null;
-  var isEdit = !!row;
-  // "Categoría" aquí es la sub-clasificación del medicamento (Estimulación,
-  // Analgésicos…) — en BD_Productos vive en el campo Tipo; la Categoría real
-  // (columna Categoria) siempre es "Medicamento" para todo lo dado de alta
-  // desde esta pantalla, así aparece automático en el Catálogo General.
-  var cats = (_medsCat && _medsCat.categorias && _medsCat.categorias.length) ? _medsCat.categorias : MEDINV_CATEGORIAS_FALLBACK;
-  var catOpts = '<option value="">— Sin subcategoría —</option>'+cats.map(function(c){ return '<option value="'+_medsEsc(c)+'"'+(row&&row.tipo===c?' selected':'')+'>'+c+'</option>'; }).join('');
-  var ovl = document.createElement('div'); ovl.className='mv-moverlay'; ovl.id='meds-modal-ovl';
-  ovl.onclick = function(e){ if(e.target===ovl) medsCloseForm(); };
-  ovl.innerHTML = '<div class="mv-modal">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px"><div style="font-size:16px;font-weight:800">'+(isEdit?'Editar medicamento':'Nuevo medicamento')+'</div><button onclick="medsCloseForm()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af">✕</button></div>'
-    +'<div class="mv-field"><label class="mv-flbl">Nombre *</label><input class="mv-inp" id="mf-nombre" value="'+(row?_medsEsc(row.nombre):'')+'"></div>'
-    +'<div class="mv-field"><label class="mv-flbl">Subcategoría</label><select class="mv-inp" id="mf-tipo">'+catOpts+'</select></div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">'
-      +'<div class="mv-field"><label class="mv-flbl">Unidad</label><input class="mv-inp" id="mf-unidad" placeholder="ampolleta, caja…" value="'+(row?_medsEsc(row.unidad):'')+'"></div>'
-      +'<div class="mv-field"><label class="mv-flbl">Costo unitario (MXN)</label><input class="mv-inp" type="number" step="0.01" id="mf-costo" value="'+(row?row.costoUnitario:'')+'"></div>'
+async function ocMarcarRecibida(rowNum, btn){
+  if (!confirm('¿Confirmas que ya recibiste físicamente esta mercancía? Se sumará al inventario de inmediato.')) return;
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'marcarOrdenRecibida', rowNum:rowNum, usuario:s.email||'sistema'})});
+    var d = await r.json();
+    if (!d.ok) { alert(d.error||'No se pudo marcar como recibida'); if(btn){btn.disabled=false;btn.textContent='Marcar recibida';} return; }
+    _ocData = null;
+    await loadOrdenesCompra();
+  } catch(e) { alert('Error de conexión: '+e.message); if(btn){btn.disabled=false;btn.textContent='Marcar recibida';} }
+}
+
+function ocNuevoProveedor(){
+  provOpenForm(null, function(p){
+    var inp = document.getElementById('oc-f-prov');
+    if (inp) inp.value = p.nombre;
+  });
+}
+
+function ocOpenForm(){
+  var ovl = document.createElement('div'); ovl.className='mv-moverlay'; ovl.id='oc-modal-ovl';
+  ovl.onclick = function(e){ if(e.target===ovl) ocCloseForm(); };
+  var subtipoOpts = OC_SUBTIPOS.map(function(s){ return '<option value="'+s+'">'+s+'</option>'; }).join('');
+  var hoy = new Date().toISOString().substring(0,10);
+  ovl.innerHTML = '<div class="mv-modal" style="width:min(620px,94vw)">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px"><div style="font-size:16px;font-weight:800">Nueva orden de compra</div><button onclick="ocCloseForm()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af">✕</button></div>'
+    +'<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px">'
+      +'<div class="mv-field"><label class="mv-flbl">Proveedor * <a href="javascript:void(0)" onclick="ocNuevoProveedor()" style="font-weight:700;color:var(--color-primary,#c46a7a)">+ Nuevo</a></label><input class="mv-inp" id="oc-f-prov" list="prov-datalist" placeholder="Nombre del proveedor"></div>'
+      +'<div class="mv-field"><label class="mv-flbl">Fecha</label><input class="mv-inp" type="date" id="oc-f-fecha" value="'+hoy+'"></div>'
+      +'<div class="mv-field"><label class="mv-flbl">Vencimiento (CxP)</label><input class="mv-inp" type="date" id="oc-f-venc" value="'+hoy+'"></div>'
     +'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr" '+(isEdit?'':'')+'>'
-      +'<div class="mv-field" style="padding-right:5px"><label class="mv-flbl">Stock mínimo</label><input class="mv-inp" type="number" id="mf-min" value="'+(row?row.stockMinimo:'')+'"></div>'
-      +'<div class="mv-field" style="padding-left:5px"><label class="mv-flbl">Stock máximo</label><input class="mv-inp" type="number" id="mf-max" value="'+(row?row.stockMaximo:'')+'"></div>'
+    +'<div class="mv-field"><label class="mv-flbl">Categoría (CxP)</label><select class="mv-inp" id="oc-f-subtipo">'+subtipoOpts+'</select></div>'
+    +'<div class="mv-field"><label class="mv-flbl">Productos *</label><div id="oc-lineas"></div>'
+      +'<button type="button" onclick="ocAddLinea()" style="margin-top:6px;padding:5px 12px;background:var(--color-surface,#f3f4f6);color:var(--text-primary,#111);border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">+ Agregar producto</button></div>'
+    +'<div style="text-align:right;font-size:13px;font-weight:800;margin:8px 0" id="oc-total">Total: $0.00</div>'
+    +'<div class="mv-field" style="display:flex;align-items:center;gap:8px;background:var(--color-surface,#fafafa);padding:10px 12px;border-radius:8px">'
+      +'<input type="checkbox" id="oc-f-recibida" style="width:15px;height:15px" onchange="document.getElementById(\'oc-recibida-nota\').style.display=this.checked?\'block\':\'none\'">'
+      +'<label for="oc-f-recibida" style="font-size:12px;font-weight:600">Ya recibí esta mercancía (sube el inventario de inmediato)</label>'
     +'</div>'
-    +(isEdit?'<div class="mv-field" style="font-size:11px;color:var(--text-secondary,#9ca3af)">Stock actual: <b>'+row.stockActual+'</b> — para cambiarlo usa Compras, Movimientos o el ajuste manual, no esta edición.</div>':'<div class="mv-field"><label class="mv-flbl">Stock inicial</label><input class="mv-inp" type="number" id="mf-stockinicial" value="0"></div>')
-    +'<div class="mv-field"><label class="mv-flbl">Proveedor preferido</label><input class="mv-inp" id="mf-proveedor" value="'+(row?_medsEsc(row.proveedorPreferido):'')+'"></div>'
-    +'<div class="mv-field"><label class="mv-flbl">Notas</label><input class="mv-inp" id="mf-notas" value="'+(row?_medsEsc(row.notas):'')+'"></div>'
-    +(isEdit?'<div class="mv-field" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="mf-activo" '+(row.activo?'checked':'')+' style="width:15px;height:15px"><label for="mf-activo" style="font-size:12px;font-weight:600">Activo</label></div>':'')
-    +'<div id="mf-msg" style="font-size:11.5px;color:#991b1b;margin-bottom:8px"></div>'
-    +'<div style="display:flex;gap:10px"><button class="mv-btn-sec" style="flex:1" onclick="medsCloseForm()">Cancelar</button><button class="mv-btn" style="flex:1" id="mf-save-btn" onclick="medsSaveForm('+(productoId?_medsEsc(JSON.stringify(productoId)):'null')+')">'+(isEdit?'Guardar cambios':'Registrar')+'</button></div>'
+    +'<div id="oc-recibida-nota" style="display:none;font-size:10.5px;color:#166534;margin:-6px 0 8px 4px">✓ El stock se sumará al guardar. Si no la has recibido, deja esto sin marcar — podrás marcarla como recibida después, desde la lista.</div>'
+    +'<div id="oc-msg" style="font-size:11.5px;color:#991b1b;margin-bottom:8px"></div>'
+    +'<div style="display:flex;gap:10px"><button class="mv-btn-sec" style="flex:1" onclick="ocCloseForm()">Cancelar</button><button class="mv-btn" style="flex:1" id="oc-save-btn" onclick="ocSaveForm()">Guardar orden</button></div>'
     +'</div>';
   document.body.appendChild(ovl);
+  _ocLineCount = 0;
+  ocAddLinea();
 }
-function medsCloseForm(){ var o=document.getElementById('meds-modal-ovl'); if(o) o.remove(); }
+function ocCloseForm(){ var o=document.getElementById('oc-modal-ovl'); if(o) o.remove(); }
 
-async function medsSaveForm(productoId){
-  function val(id){ var e=document.getElementById(id); return e?e.value.trim():''; }
-  var nombre = val('mf-nombre');
-  var msg = document.getElementById('mf-msg'), btn = document.getElementById('mf-save-btn');
-  if (!nombre){ if(msg) msg.textContent='El nombre es obligatorio.'; return; }
-  var s = getSession()||{};
-  var payload = {
-    nombre: nombre, tipo: val('mf-tipo'), unidad: val('mf-unidad'),
-    stockMinimo: val('mf-min'), stockMaximo: val('mf-max'), costoUnitario: val('mf-costo'),
-    proveedorPreferido: val('mf-proveedor'), notas: val('mf-notas'), usuario: s.email||''
-  };
-  if (productoId) { payload.action='updateMedicamento'; payload.productoId=productoId; var ac=document.getElementById('mf-activo'); if(ac) payload.activo=ac.checked; }
-  else { payload.action='saveMedicamento'; payload.stockInicial = val('mf-stockinicial'); }
-  if (btn){ btn.disabled=true; btn.textContent='Guardando…'; }
-  try {
-    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(payload)});
-    var d = await r.json();
-    if (!d.ok){ if(msg) msg.textContent = d.error || 'No se pudo guardar.'; if(btn){btn.disabled=false;btn.textContent=productoId?'Guardar cambios':'Registrar';} return; }
-    medsCloseForm();
-    await loadMedsLista();
-  } catch(e){
-    if(msg) msg.textContent = 'Error de conexión: '+e.message;
-    if(btn){btn.disabled=false;btn.textContent=productoId?'Guardar cambios':'Registrar';}
+function ocAddLinea(){
+  _ocLineCount++;
+  var n = _ocLineCount;
+  var el = document.getElementById('oc-lineas');
+  if (!el) return;
+  var prods = ((_medsCat && _medsCat.rows) || []).filter(function(m){ return m.activo; });
+  var opts = '<option value="">— elegir producto —</option>'+prods.map(function(m){ return '<option value="'+_medsEsc(m.sku)+'">'+_medsEsc(m.nombre)+' — stock: '+m.stockActual+'</option>'; }).join('');
+  var div = document.createElement('div');
+  div.id = 'oc-linea-'+n;
+  div.style.cssText = 'display:grid;grid-template-columns:2fr 1fr 1fr 26px;gap:8px;padding:6px 0;align-items:center';
+  div.innerHTML = '<select class="mv-inp" id="oc-l-sku-'+n+'" onchange="ocCalcTotal()">'+opts+'</select>'
+    +'<input class="mv-inp" type="number" min="1" placeholder="Cantidad" id="oc-l-cant-'+n+'" oninput="ocCalcTotal()">'
+    +'<input class="mv-inp" type="number" step="0.01" placeholder="Costo unit." id="oc-l-costo-'+n+'" oninput="ocCalcTotal()">'
+    +(n>1?'<button type="button" onclick="ocRemoveLinea('+n+')" style="background:none;border:none;color:#dc2626;font-size:16px;cursor:pointer">×</button>':'<div></div>');
+  el.appendChild(div);
+}
+function ocRemoveLinea(n){ var el=document.getElementById('oc-linea-'+n); if(el) el.remove(); ocCalcTotal(); }
+
+function ocCalcTotal(){
+  var total = 0;
+  for (var i=1;i<=_ocLineCount;i++){
+    var cEl = document.getElementById('oc-l-cant-'+i), pEl = document.getElementById('oc-l-costo-'+i);
+    if (!cEl || !pEl) continue;
+    total += (parseFloat(cEl.value)||0) * (parseFloat(pEl.value)||0);
   }
+  var t = document.getElementById('oc-total');
+  if (t) t.textContent = 'Total: '+_medsFmt(total);
 }
 
-/* ── Compras (entradas de mercancía) ─────────────────────────────── */
-async function loadMedsCompras(){
-  var root = document.getElementById('meds-compras-root');
-  if (!root) return;
-  _medsStyles();
-  root.innerHTML = hestiaLoader('Cargando…');
-  try {
-    if (!_medsCat) {
-      var tok = encodeURIComponent(getToken());
-      var r = await fetch(APPS_SCRIPT_URL+'?action=catalogoMedicamentos&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
-      _medsCat = await r.json();
-    }
-    await hfFinish();
-    _renderMedsCompras();
-  } catch(e){
-    root.innerHTML = '<div style="padding:24px;color:#991b1b">⚠ '+_medsEsc(e.message)+'</div>';
+async function ocSaveForm(){
+  var proveedor = (document.getElementById('oc-f-prov')||{}).value||'';
+  var msg = document.getElementById('oc-msg'), btn = document.getElementById('oc-save-btn');
+  if (!proveedor.trim()) { if(msg) msg.textContent='El proveedor es obligatorio.'; return; }
+  var lineas = [];
+  for (var i=1;i<=_ocLineCount;i++){
+    var skuEl = document.getElementById('oc-l-sku-'+i);
+    if (!skuEl) continue;
+    var sku = skuEl.value;
+    var cantidad = parseFloat((document.getElementById('oc-l-cant-'+i)||{}).value)||0;
+    var costo = parseFloat((document.getElementById('oc-l-costo-'+i)||{}).value)||0;
+    if (sku && cantidad>0) lineas.push({sku:sku, cantidad:cantidad, costoUnitario:costo});
   }
-}
-
-function _renderMedsCompras(){
-  var root = document.getElementById('meds-compras-root');
-  if (!root) return;
-  var rows = (_medsCat && _medsCat.rows) || [];
-  var opts = rows.filter(function(m){return m.activo;}).map(function(m){ return '<option value="'+_medsEsc(m.sku)+'">'+_medsEsc(m.nombre)+' — stock: '+m.stockActual+'</option>'; }).join('');
-  var h = '<div class="mv-w">'
-    +'<div class="mv-hdr"><div><div class="mv-title">🛒 Compras de Medicamentos</div><div class="mv-sub">Registra la mercancía que entra al inventario</div></div></div>'
-    +'<div class="mv-card">'
-      +'<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px">'
-        +'<div class="mv-field"><label class="mv-flbl">Medicamento *</label><select class="mv-inp" id="mc-sku">'+(opts||'<option value="">Sin medicamentos activos — da de alta uno en Catálogo</option>')+'</select></div>'
-        +'<div class="mv-field"><label class="mv-flbl">Cantidad *</label><input class="mv-inp" type="number" min="1" id="mc-cantidad"></div>'
-        +'<div class="mv-field"><label class="mv-flbl">Costo unitario</label><input class="mv-inp" type="number" step="0.01" id="mc-costo"></div>'
-      +'</div>'
-      +'<div style="display:grid;grid-template-columns:1fr 1fr" style="gap:12px">'
-        +'<div class="mv-field"><label class="mv-flbl">Proveedor</label><input class="mv-inp" id="mc-proveedor"></div>'
-        +'<div class="mv-field"><label class="mv-flbl">Factura</label><input class="mv-inp" id="mc-factura"></div>'
-      +'</div>'
-      +'<div class="mv-field"><label class="mv-flbl">Notas</label><input class="mv-inp" id="mc-notas"></div>'
-      +'<div id="mc-msg" style="font-size:11.5px;margin-bottom:8px"></div>'
-      +'<button class="mv-btn" id="mc-btn" onclick="medsRegistrarCompra()">Registrar entrada</button>'
-    +'</div></div>';
-  root.innerHTML = h;
-}
-
-async function medsRegistrarCompra(){
-  function val(id){ var e=document.getElementById(id); return e?e.value.trim():''; }
-  var sku = val('mc-sku'), cantidad = val('mc-cantidad');
-  var msg = document.getElementById('mc-msg'), btn = document.getElementById('mc-btn');
-  if (!sku || !cantidad || Number(cantidad) <= 0){ if(msg){msg.style.color='#991b1b';msg.textContent='Elige el medicamento y una cantidad válida.';} return; }
+  if (!lineas.length) { if(msg) msg.textContent='Agrega al menos un producto con cantidad válida.'; return; }
   var s = getSession()||{};
   if (btn){ btn.disabled=true; btn.textContent='Guardando…'; }
-  if (msg){ msg.style.color='#6b7280'; msg.textContent='Guardando…'; }
   try {
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
-      action:'registrarCompraMedicamento', sku:sku, cantidad:cantidad, costoUnitario:val('mc-costo'),
-      proveedor:val('mc-proveedor'), factura:val('mc-factura'), notas:val('mc-notas'), usuario:s.email||''
+      action:'crearOrdenCompra', proveedor:proveedor,
+      fecha:(document.getElementById('oc-f-fecha')||{}).value||'',
+      vencimiento:(document.getElementById('oc-f-venc')||{}).value||'',
+      subtipo:(document.getElementById('oc-f-subtipo')||{}).value||'',
+      recibida: !!(document.getElementById('oc-f-recibida')||{}).checked,
+      lineas: lineas, usuario: s.email||'sistema'
     })});
     var d = await r.json();
-    if (!d.ok){ if(msg){msg.style.color='#991b1b';msg.textContent=d.error||'No se pudo registrar.';} if(btn){btn.disabled=false;btn.textContent='Registrar entrada';} return; }
-    _medsCat = null; // fuerza refetch para reflejar el nuevo saldo
-    if(msg){msg.style.color='#166534';msg.textContent='✓ Entrada registrada — nuevo saldo: '+d.saldoNuevo;}
-    ['mc-cantidad','mc-costo','mc-proveedor','mc-factura','mc-notas'].forEach(function(id){ var e=document.getElementById(id); if(e) e.value=''; });
-    if (btn){ btn.disabled=false; btn.textContent='Registrar entrada'; }
-    await loadMedsCompras();
+    if (!d.ok){ if(msg) msg.textContent = d.error || 'No se pudo guardar.'; if(btn){btn.disabled=false;btn.textContent='Guardar orden';} return; }
+    ocCloseForm();
+    _ocData = null; _medsCat = null;
+    await loadOrdenesCompra();
   } catch(e){
-    if(msg){msg.style.color='#991b1b';msg.textContent='Error de conexión: '+e.message;}
-    if(btn){btn.disabled=false;btn.textContent='Registrar entrada';}
+    if(msg) msg.textContent = 'Error de conexión: '+e.message;
+    if(btn){btn.disabled=false;btn.textContent='Guardar orden';}
   }
 }
 
@@ -13114,8 +13108,6 @@ async function medsEliminarCombo(rowNum){
     await loadMedsCombos();
   } catch(e){ alert('Error de conexión'); }
 }
-
-var MEDINV_CATEGORIAS_FALLBACK = ['Estimulación','Analgésicos','Anestesia','Antibióticos','Emergencia','Otros'];
 
 /* ── Dispatcher: vistas conocidas vs. captura genérica ─── */
 function renderViewData(viewId, data) {

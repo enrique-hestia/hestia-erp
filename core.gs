@@ -406,6 +406,10 @@ function doGet(e) {
       return jsonResponse(readCombos());
     }
 
+    if (action === 'ordenesCompra') {
+      return jsonResponse(readOrdenesCompra());
+    }
+
     if (action === 'listas') {
       return jsonResponse(readListas());
     }

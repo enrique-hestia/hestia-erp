@@ -230,35 +230,6 @@ function _registrarMovimientoInventario(p) {
   }
 }
 
-/* ── Compras (entradas de mercancía) ─────────────────────────────── */
-function registrarCompraMedicamento(body) {
-  try {
-    var sku = String(body.sku || '').trim();
-    var cantidad = Number(body.cantidad) || 0;
-    if (!sku || cantidad <= 0) return { ok: false, error: 'SKU y cantidad son obligatorios' };
-
-    var prod = _bdProdFindBySku(sku);
-    if (!prod) return { ok: false, error: 'SKU no encontrado en el catálogo' };
-
-    var costoUnitario = Number(body.costoUnitario) || 0;
-    var referencia = [body.proveedor, body.factura].filter(Boolean).join(' — ');
-    var resultado = _registrarMovimientoInventario({
-      sku: sku, nombre: prod.descripcion, tipo: 'Entrada', cantidad: cantidad,
-      motivo: 'Compra', referencia: referencia, costoUnitario: costoUnitario,
-      usuario: body.usuario || '', modulo: prod.categoria, notas: body.notas || ''
-    });
-    if (!resultado.ok) return resultado;
-
-    // Actualiza el costo unitario vigente en el catálogo con el de la compra más reciente
-    if (costoUnitario > 0) {
-      var cols = _bdProdEnsureInventarioCols(prod.sh);
-      prod.sh.getRange(prod.rowNum, cols.CostoUnitario).setValue(costoUnitario);
-    }
-    try { logAudit(body.usuario || '', 'Inventario', 'Compra', sku, 'cantidad', '', String(cantidad)); } catch (e) {}
-    return { ok: true, saldoNuevo: resultado.saldoNuevo, movimientoId: resultado.movimientoId };
-  } catch (ex) { return { ok: false, error: ex.message }; }
-}
-
 /* ── Ajuste manual (merma, caducidad, conteo físico) ─────────────── */
 function ajustarInventarioMedicamento(body) {
   try {
@@ -400,14 +371,285 @@ function eliminarCombo(body) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
+/* ══════════════════════════════════════════════════════════════
+   ÓRDENES DE COMPRA — liga Inventario ↔ Cuentas por Pagar
+   ------------------------------------------------------------
+   Reemplaza la vieja "Compras" (entrada rápida que solo tocaba
+   inventario, sin generar ninguna cuenta por pagar). Una Orden de
+   Compra SIEMPRE crea su CxP (vía saveCxP, sin modificar ese sistema)
+   y por separado decide si el stock entra YA (recibida al momento)
+   o se queda pendiente hasta que alguien la marque como recibida —
+   recepción y pago son dos interruptores independientes, en
+   cualquier orden, igual que en un ERP real:
+     - Recibida ahora, pagar después: se registra la Entrada de
+       inventario de inmediato y la CxP queda pendiente de pago.
+     - Pagar antes de recibir: la CxP se puede pagar normal (con
+       todo lo que ya existe: bancos, conciliación, créditos de
+       proveedor) y el stock se queda en 0 hasta "Marcar recibida".
+   ══════════════════════════════════════════════════════════════ */
+var MEDINV_OC_TAB = 'Ordenes_Compra';
+var MEDINV_OC_LINEAS_TAB = 'Ordenes_Compra_Lineas';
+var MEDINV_OC_HEADERS = ['ID', 'Fecha', 'Proveedor', 'EstadoRecepcion', 'FechaRecepcion', 'Total', 'CxPId', 'CxPRowNum', 'Usuario', 'Notas'];
+var MEDINV_OC_LINEAS_HEADERS = ['OrdenID', 'SKU', 'Nombre', 'Cantidad', 'CostoUnitario', 'Subtotal'];
+
+/* ── Setup (correr UNA VEZ desde el editor de Apps Script) ───────── */
+function setupOrdenesCompra() {
+  var ss = _medInvSS();
+  var creadas = [];
+  if (!ss.getSheetByName(MEDINV_OC_TAB)) {
+    var sh = ss.insertSheet(MEDINV_OC_TAB);
+    sh.getRange(1, 1, 1, MEDINV_OC_HEADERS.length).setValues([MEDINV_OC_HEADERS]);
+    sh.getRange(1, 1, 1, MEDINV_OC_HEADERS.length).setFontWeight('bold').setBackground('#1a252f').setFontColor('#ffffff');
+    sh.setFrozenRows(1);
+    var estCol = MEDINV_OC_HEADERS.indexOf('EstadoRecepcion') + 1;
+    sh.getRange(2, estCol, 2000, 1).setDataValidation(
+      SpreadsheetApp.newDataValidation().requireValueInList(['Pendiente de recibir', 'Recibida'], true).setAllowInvalid(true).build()
+    );
+    sh.autoResizeColumns(1, MEDINV_OC_HEADERS.length);
+    creadas.push(MEDINV_OC_TAB);
+  }
+  if (!ss.getSheetByName(MEDINV_OC_LINEAS_TAB)) {
+    var sh2 = ss.insertSheet(MEDINV_OC_LINEAS_TAB);
+    sh2.getRange(1, 1, 1, MEDINV_OC_LINEAS_HEADERS.length).setValues([MEDINV_OC_LINEAS_HEADERS]);
+    sh2.getRange(1, 1, 1, MEDINV_OC_LINEAS_HEADERS.length).setFontWeight('bold').setBackground('#1a252f').setFontColor('#ffffff');
+    sh2.setFrozenRows(1);
+    sh2.autoResizeColumns(1, MEDINV_OC_LINEAS_HEADERS.length);
+    creadas.push(MEDINV_OC_LINEAS_TAB);
+  }
+  return { ok: true, creadas: creadas };
+}
+
+function _ocNextId(sh) {
+  var lr = sh.getLastRow();
+  if (lr < 2) return 'OC-00001';
+  var last = String(sh.getRange(lr, 1).getValue() || '');
+  var m = last.match(/OC-(\d+)/);
+  return 'OC-' + String((m ? parseInt(m[1], 10) : 0) + 1).padStart(5, '0');
+}
+
+function crearOrdenCompra(body) {
+  try {
+    setupOrdenesCompra();
+    var proveedor = String(body.proveedor || '').trim();
+    var lineasIn = body.lineas || [];
+    if (!proveedor) return { ok: false, error: 'El proveedor es obligatorio.' };
+    if (!lineasIn.length) return { ok: false, error: 'Agrega al menos un producto.' };
+
+    var lineasValidas = [];
+    var total = 0;
+    for (var i = 0; i < lineasIn.length; i++) {
+      var l = lineasIn[i];
+      var sku = String(l.sku || '').trim();
+      var cantidad = Number(l.cantidad) || 0;
+      var costo = Number(l.costoUnitario) || 0;
+      if (!sku || cantidad <= 0) continue;
+      var prod = _bdProdFindBySku(sku);
+      if (!prod) continue;
+      var subtotal = cantidad * costo;
+      total += subtotal;
+      lineasValidas.push({ sku: sku, nombre: prod.descripcion, cantidad: cantidad, costoUnitario: costo, subtotal: subtotal });
+    }
+    if (!lineasValidas.length) return { ok: false, error: 'Ninguna línea es válida — revisa que el SKU exista y la cantidad sea mayor a 0.' };
+
+    var fecha = body.fecha || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    var recibida = body.recibida === true || body.recibida === 'true';
+    var vencimiento = body.vencimiento || '';
+
+    // 1. La orden SIEMPRE genera su cuenta por pagar — recibir mercancía y
+    // pagarla son cosas independientes, pero toda compra se debe.
+    var conceptoCxP = lineasValidas.map(function (l) { return l.nombre + ' x' + l.cantidad; }).join(', ');
+    var cxpRes = saveCxP({
+      proveedor: proveedor, contable: 'Costo', tipo: 'Variable',
+      subtipo: body.subtipo || 'Medicamentos e Insumos',
+      concepto: 'Orden de compra (pendiente) — ' + conceptoCxP,
+      monto: total, vencimiento: vencimiento,
+      mes: (vencimiento || fecha).substring(0, 7),
+      notas: body.notas || '', usuario: body.usuario || ''
+    });
+    if (!cxpRes.ok) return { ok: false, error: 'No se pudo crear la cuenta por pagar: ' + cxpRes.error };
+
+    // 2. Guardar la orden y sus líneas
+    var sh = _medInvSheet(MEDINV_OC_TAB);
+    var ocId = _ocNextId(sh);
+    var row = new Array(MEDINV_OC_HEADERS.length).fill('');
+    row[_medInvColIdx(MEDINV_OC_HEADERS, 'ID')] = ocId;
+    row[_medInvColIdx(MEDINV_OC_HEADERS, 'Fecha')] = fecha;
+    row[_medInvColIdx(MEDINV_OC_HEADERS, 'Proveedor')] = proveedor;
+    row[_medInvColIdx(MEDINV_OC_HEADERS, 'EstadoRecepcion')] = recibida ? 'Recibida' : 'Pendiente de recibir';
+    row[_medInvColIdx(MEDINV_OC_HEADERS, 'FechaRecepcion')] = recibida ? fecha : '';
+    row[_medInvColIdx(MEDINV_OC_HEADERS, 'Total')] = total;
+    row[_medInvColIdx(MEDINV_OC_HEADERS, 'CxPId')] = cxpRes.id;
+    row[_medInvColIdx(MEDINV_OC_HEADERS, 'CxPRowNum')] = cxpRes.rowNum;
+    row[_medInvColIdx(MEDINV_OC_HEADERS, 'Usuario')] = body.usuario || '';
+    row[_medInvColIdx(MEDINV_OC_HEADERS, 'Notas')] = body.notas || '';
+    sh.appendRow(row);
+
+    var lineasSh = _medInvSheet(MEDINV_OC_LINEAS_TAB);
+    var lineRows = lineasValidas.map(function (l) { return [ocId, l.sku, l.nombre, l.cantidad, l.costoUnitario, l.subtotal]; });
+    lineasSh.getRange(lineasSh.getLastRow() + 1, 1, lineRows.length, lineRows[0].length).setValues(lineRows);
+
+    // 3. Si ya se recibió la mercancía, mover el inventario de una vez
+    var movimientos = [];
+    if (recibida) {
+      lineasValidas.forEach(function (l) {
+        movimientos.push(_registrarMovimientoInventario({
+          sku: l.sku, nombre: l.nombre, tipo: 'Entrada', cantidad: l.cantidad,
+          motivo: 'Compra', referencia: ocId + ' — ' + proveedor, costoUnitario: l.costoUnitario,
+          usuario: body.usuario || '', notas: 'Orden de compra ' + ocId
+        }));
+      });
+    }
+
+    try { logAudit(body.usuario || '', 'Inventario', 'OrdenCompra', ocId, '', '', proveedor + ' | $' + total.toFixed(2)); } catch (e) {}
+    return { ok: true, id: ocId, total: total, cxpId: cxpRes.id, recibida: recibida, movimientos: movimientos };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// Lee el estado Pagado (col N, índice 14 en base 1) directo de Egresos2026
+// para no duplicar ese dato en Ordenes_Compra — una sola fuente de verdad.
+function _ocLeerEstadoPagoCxP(rowNums) {
+  var out = {};
+  if (!rowNums.length) return out;
+  try {
+    var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
+    var sh = ss.getSheetByName(EGRESOS_TABS[2026] || 'Egresos2026');
+    if (!sh) return out;
+    rowNums.forEach(function (rn) {
+      if (!rn) return;
+      try { out[rn] = sh.getRange(rn, 14).getValue() === true; } catch (e) {}
+    });
+  } catch (e) {}
+  return out;
+}
+
+function readOrdenesCompra() {
+  try {
+    setupOrdenesCompra();
+    var sh = _medInvSheet(MEDINV_OC_TAB);
+    var data = sh.getDataRange().getValues();
+    var hdrs = data[0];
+    var rows = [];
+    for (var i = data.length - 1; i >= 1; i--) { // más reciente primero
+      var r = data[i];
+      if (!String(r[0] || '').trim()) continue;
+      rows.push({
+        _rowNum: i + 1,
+        id: String(r[_medInvColIdx(hdrs, 'ID')] || ''),
+        fecha: String(r[_medInvColIdx(hdrs, 'Fecha')] || ''),
+        proveedor: String(r[_medInvColIdx(hdrs, 'Proveedor')] || ''),
+        estadoRecepcion: String(r[_medInvColIdx(hdrs, 'EstadoRecepcion')] || ''),
+        fechaRecepcion: String(r[_medInvColIdx(hdrs, 'FechaRecepcion')] || ''),
+        total: Number(r[_medInvColIdx(hdrs, 'Total')]) || 0,
+        cxpId: String(r[_medInvColIdx(hdrs, 'CxPId')] || ''),
+        cxpRowNum: Number(r[_medInvColIdx(hdrs, 'CxPRowNum')]) || 0,
+        usuario: String(r[_medInvColIdx(hdrs, 'Usuario')] || ''),
+        notas: String(r[_medInvColIdx(hdrs, 'Notas')] || '')
+      });
+      if (rows.length >= 300) break;
+    }
+
+    var pagadoMap = _ocLeerEstadoPagoCxP(rows.map(function (r) { return r.cxpRowNum; }));
+    rows.forEach(function (r) { r.pagado = !!pagadoMap[r.cxpRowNum]; });
+
+    var lineasSh = _medInvSheet(MEDINV_OC_LINEAS_TAB);
+    var lineasData = lineasSh.getDataRange().getValues();
+    var lineasPorOC = {};
+    for (var li = 1; li < lineasData.length; li++) {
+      var lr = lineasData[li];
+      var ocid = String(lr[0] || '').trim();
+      if (!ocid) continue;
+      if (!lineasPorOC[ocid]) lineasPorOC[ocid] = [];
+      lineasPorOC[ocid].push({ sku: String(lr[1] || ''), nombre: String(lr[2] || ''), cantidad: Number(lr[3]) || 0, costoUnitario: Number(lr[4]) || 0, subtotal: Number(lr[5]) || 0 });
+    }
+    rows.forEach(function (r) { r.lineas = lineasPorOC[r.id] || []; });
+
+    return { ok: true, rows: rows };
+  } catch (ex) { return { ok: false, error: ex.message, rows: [] }; }
+}
+
+function marcarOrdenRecibida(body) {
+  try {
+    var rowNum = Number(body.rowNum);
+    if (!rowNum) return { ok: false, error: 'Falta rowNum' };
+    var sh = _medInvSheet(MEDINV_OC_TAB);
+    var hdrs = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+    var data = sh.getRange(rowNum, 1, 1, hdrs.length).getValues()[0];
+    var ocId = String(data[_medInvColIdx(hdrs, 'ID')] || '');
+    var estadoActual = String(data[_medInvColIdx(hdrs, 'EstadoRecepcion')] || '');
+    if (estadoActual === 'Recibida') return { ok: false, error: 'Esta orden ya está marcada como recibida.' };
+    var proveedor = String(data[_medInvColIdx(hdrs, 'Proveedor')] || '');
+
+    var lineasSh = _medInvSheet(MEDINV_OC_LINEAS_TAB);
+    var lineasData = lineasSh.getDataRange().getValues();
+    var movimientos = [];
+    for (var i = 1; i < lineasData.length; i++) {
+      var lr = lineasData[i];
+      if (String(lr[0] || '').trim() !== ocId) continue;
+      movimientos.push(_registrarMovimientoInventario({
+        sku: String(lr[1] || ''), nombre: String(lr[2] || ''), tipo: 'Entrada', cantidad: Number(lr[3]) || 0,
+        motivo: 'Compra', referencia: ocId + ' — ' + proveedor, costoUnitario: Number(lr[4]) || 0,
+        usuario: body.usuario || '', notas: 'Recepción de orden de compra ' + ocId
+      }));
+    }
+    if (!movimientos.length) return { ok: false, error: 'No se encontraron líneas para esta orden.' };
+
+    var fechaHoy = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    sh.getRange(rowNum, _medInvColIdx(hdrs, 'EstadoRecepcion') + 1).setValue('Recibida');
+    sh.getRange(rowNum, _medInvColIdx(hdrs, 'FechaRecepcion') + 1).setValue(fechaHoy);
+    try { logAudit(body.usuario || '', 'Inventario', 'OrdenRecibida', ocId, '', '', ''); } catch (e) {}
+    return { ok: true, movimientos: movimientos };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 /* ── Corrige el menú (hoja "Menu" en SHEET_ID) ────────────────────
-   El nav "Medicamentos" (prod-meds) ya existe como vista suelta, y
-   sus hijos "Orden de Compra"/"Estimulación" quedaron huérfanos
-   (Padre="medicamentos", pero el ID real del grupo es "prod-meds")
-   apuntando al sistema viejo. Se convierte prod-meds en un grupo
-   (igual que Quirofano/Laboratorio) con 4 hijos del sistema nuevo:
-   Catálogo, Compras, Movimientos, Combos. Correr UNA VEZ desde el
-   editor de Apps Script. */
+   Medicamentos deja de ser un grupo con submenú — ahora es una vista
+   directa (igual que Tratamientos/Estudios: filtra Catálogo General
+   por Categoria=Medicamento vía el mismo redirect de navigateTo() que
+   ya existía para 'prod-med...'). Compras/Movimientos/Combos se mudan
+   a un grupo nuevo "Inventario" bajo Captura, porque ya operan sobre
+   cualquier producto Inventariable, no solo medicamentos — vivir bajo
+   "Medicamentos" ya no tenía sentido. La vieja "Compras" (entrada
+   rápida sin CxP) se reemplaza por "Órdenes de Compra". Correr UNA
+   VEZ desde el editor de Apps Script. */
+function configurarMenuInventario() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sh = ss.getSheetByName('Menu');
+  if (!sh) return { ok: false, error: 'No se encontró la hoja Menu' };
+  var data = sh.getDataRange().getValues();
+  var hdrs = data[0];
+  var idxCol = hdrs.indexOf('ID'), padreCol = hdrs.indexOf('Padre'), tipoCol = hdrs.indexOf('Tipo'),
+      fuenteCol = hdrs.indexOf('Fuente'), ordenCol = hdrs.indexOf('Orden');
+
+  var filasABorrar = [];
+  for (var i = 1; i < data.length; i++) {
+    var id = String(data[i][idxCol] || '').trim();
+    if (id === 'meds-lista' || id === 'meds-compras') { filasABorrar.push(i + 1); continue; }
+    if (id === 'prod-meds') {
+      sh.getRange(i + 1, tipoCol + 1).setValue('vista');
+      sh.getRange(i + 1, fuenteCol + 1).setValue('');
+    }
+    if (id === 'meds-movimientos') {
+      sh.getRange(i + 1, padreCol + 1).setValue('inventario');
+      sh.getRange(i + 1, ordenCol + 1).setValue(2);
+    }
+    if (id === 'meds-combos') {
+      sh.getRange(i + 1, padreCol + 1).setValue('inventario');
+      sh.getRange(i + 1, ordenCol + 1).setValue(3);
+    }
+  }
+  filasABorrar.sort(function (a, b) { return b - a; }); // de abajo hacia arriba
+  filasABorrar.forEach(function (rowNum) { sh.deleteRow(rowNum); });
+
+  var nuevasFilas = [
+    ['inventario', 'captura', 'Inventario', '', 'archive', 7, 'grupo', '', 'TRUE'],
+    ['oc-lista', 'inventario', 'Órdenes de Compra', '', 'shopping-cart', 1, 'vista', 'oc-lista', 'TRUE']
+  ];
+  sh.getRange(sh.getLastRow() + 1, 1, nuevasFilas.length, nuevasFilas[0].length).setValues(nuevasFilas);
+
+  return { ok: true, filasBorradas: filasABorrar.length, filasAgregadas: nuevasFilas.length };
+}
+
+/* ── (Histórico) Corrige el menú — versión anterior, ya no se usa ── */
 function configurarMenuMedicamentos() {
   var ss = SpreadsheetApp.openById(SHEET_ID);
   var sh = ss.getSheetByName('Menu');
