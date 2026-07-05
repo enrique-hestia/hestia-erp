@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.12 -->
+﻿<!-- app-build:2026.07.05.13 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6359,6 +6359,9 @@ function _renderEgresosERP() {
       var cotizIcon = r.linkCotizacionUrl
         ? '<span onclick="egViewPDF(\''+r.linkCotizacionUrl.replace(/'/g,"\\'")+'\',\'Cotización · '+provSafe+'\')" style="cursor:pointer;font-size:13px" title="Ver cotización">📋</span>'
         : '<span onclick="egOpenUpload('+r._rowNum+',\'cotizacion\',\''+provSafe+'\')" style="cursor:pointer;font-size:11px;color:var(--color-primary,#c46a7a)" title="Adjuntar cotización">＋</span>';
+      var mailIcon = hasPermission('docs_enviar')
+        ? ' <span onclick="egEnviarCorreoRow(decodeURIComponent(\''+encodeURIComponent(JSON.stringify({proveedor:r.proveedor||'',concepto:r.concepto||'',monto:r.monto||0,fecha:(r.fecha||'').substring(0,10),pagado:!!r.pagado,linkFacturaUrl:r.linkFacturaUrl||'',linkPagoUrl:r.linkPagoUrl||''}))+'\'))" style="cursor:pointer;font-size:13px" title="Enviar documentos por correo (factura/pago adjuntos)">✉</span>'
+        : '';
       h.push('<tr class="eg-row" onclick="egToggleRow('+r._rowNum+')" style="cursor:pointer">'
         +'<td style="text-align:center"><span class="eg-row-toggle" id="eg-tog-'+r._rowNum+'">▶</span></td>'
         +'<td style="color:var(--text-secondary,#6b7280)">'+((r.fecha||'').substring(0,10)||'—')+'</td>'
@@ -6370,7 +6373,7 @@ function _renderEgresosERP() {
         +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.facturacion?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'facturación\',this.checked)"'+(r.linkFacturaUrl?' title="Factura adjunta"':'')+'></td>'
         +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.pagado?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'pagado\',this.checked)"'+(r.linkPagoUrl?' title="Pago adjunto"':'')+'></td>'
         +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.contabilidad?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'contabilidad\',this.checked)"></td>'
-        +'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'+cotizIcon+' '+factIcon+' '+pagoIcon+'</td>'
+        +'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'+cotizIcon+' '+factIcon+' '+pagoIcon+mailIcon+'</td>'
         +((hasPermission('editar_egresos')||hasPermission('borrar_egresos'))?'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'+(hasPermission('editar_egresos')?'<button class="btn-edit-row" onclick="egEditRow('+r._rowNum+')">✎</button>':'')+(hasPermission('borrar_egresos')?'<button class="btn-delete-row" onclick="egDeleteRow('+r._rowNum+')">🗑</button>':'')+'</td>':'')
         +'</tr>');
       var egColSpanDet = (hasPermission('editar_egresos')||hasPermission('borrar_egresos')) ? 12 : 11;
@@ -13709,7 +13712,7 @@ var _correoCfg = null;
 
 function _correoVars(str, vars){
   return String(str||'').replace(/\{\{(\w+)\}\}/g, function(m, k){
-    return (vars && vars[k] !== undefined && vars[k] !== '') ? vars[k] : m;
+    return (vars && vars[k] !== undefined) ? vars[k] : m;
   });
 }
 
@@ -13869,6 +13872,36 @@ function compCfdiCorreo(){
       monto: fmtM(x.total)+' '+(x.moneda||'MXN'),
       fecha: (x.fecha||'').substring(0,10),
       referencia: (x.serie?x.serie+'-':'')+(x.folio||'')
+    },
+    adjuntos: adjuntos
+  });
+}
+
+/* ✉ desde una fila de Egresos — adjunta lo que ya esté vinculado
+   (comprobante de pago y/o factura) sin salir de la vista Egresos */
+function _egDriveFileId(url){
+  var m = String(url||'').match(/\/file\/d\/([A-Za-z0-9_-]{10,})/) || String(url||'').match(/[?&]id=([A-Za-z0-9_-]{10,})/);
+  return m ? m[1] : '';
+}
+function egEnviarCorreoRow(jsonStr){
+  var r; try { r = JSON.parse(jsonStr); } catch(e){ return; }
+  var fmtM = function(v){ return '$'+(Number(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var adjuntos = [];
+  var idPago = _egDriveFileId(r.linkPagoUrl);
+  var idFact = _egDriveFileId(r.linkFacturaUrl);
+  if (idPago) adjuntos.push({fileId:idPago, nombre:'Comprobante de pago — '+(r.proveedor||'')});
+  if (idFact) adjuntos.push({fileId:idFact, nombre:'Factura — '+(r.proveedor||'')});
+  hfEnviarCorreo({
+    tipoDoc: idPago ? 'comprobante-pago' : 'factura-egreso',
+    para: '',
+    referencia: r.concepto || r.proveedor || '',
+    variables: {
+      destinatario: r.proveedor || '',
+      proveedor: r.proveedor || '',
+      monto: fmtM(r.monto),
+      fecha: r.fecha || '',
+      referencia: r.concepto || r.proveedor || '',
+      folio: 'adjunta'
     },
     adjuntos: adjuntos
   });
