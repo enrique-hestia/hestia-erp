@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.07 -->
+﻿<!-- app-build:2026.07.05.08 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1704,7 +1704,8 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
           </div>
           <div>
             <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:5px">URL del logotipo</label>
-            <input id="fmt-logo" type="url" placeholder="https://... (URL de imagen)" style="width:100%">
+            <input id="fmt-logo" type="url" placeholder="https://... (URL de imagen o link de Google Drive)" style="width:100%" oninput="fmtLogoPreview(this.value)">
+            <div id="fmt-logo-prev" style="margin-top:6px;font-size:11px;color:var(--color-text-muted)"></div>
           </div>
           <div>
             <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:5px">Dirección</label>
@@ -1822,18 +1823,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
           Elige la plantilla que se usará al imprimir o exportar cada tipo de reporte. Puedes cambiarla en cualquier momento.
         </p>
         <div id="rep-cfg-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;margin-bottom:14px"></div>
-        <div style="background:var(--color-surface-offset);border-radius:8px;padding:12px 14px;margin-top:4px">
-          <div style="font-size:11.5px;font-weight:700;color:var(--color-text);margin-bottom:8px">Plantillas disponibles</div>
-          <div style="display:flex;flex-wrap:wrap;gap:8px">
-            <span style="padding:4px 10px;background:var(--color-primary);color:#fff;border-radius:20px;font-size:11px;font-weight:600">Ejecutivo</span>
-            <span style="padding:4px 10px;background:#1a365d;color:#fff;border-radius:20px;font-size:11px;font-weight:600">Contable</span>
-            <span style="padding:4px 10px;background:#555;color:#fff;border-radius:20px;font-size:11px;font-weight:600">Minimalista</span>
-            <span style="padding:4px 10px;background:#c46a7a;color:#fff;border-radius:20px;font-size:11px;font-weight:600">Clínica Rosa</span>
-            <span style="padding:4px 10px;background:#2c3e50;color:#fff;border-radius:20px;font-size:11px;font-weight:600">Bicolor</span>
-            <span style="padding:4px 10px;background:#7a5c00;color:#fff;border-radius:20px;font-size:11px;font-weight:600">Certificado</span>
-            <span style="padding:4px 10px;background:linear-gradient(90deg,#c46a7a,#1D9E75);color:#fff;border-radius:20px;font-size:11px;font-weight:600">Moderno líneas</span>
-          </div>
-        </div>
+        <div id="rep-tpl-gallery" style="background:var(--color-surface-offset);border-radius:8px;padding:12px 14px;margin-top:4px"></div>
       </div>
     </div>
 
@@ -14135,6 +14125,32 @@ function fmtLoad() {
     if(picker) picker.value = cfg[key] || FMT_DEFAULTS[key];
     if(hex) hex.value = cfg[key] || FMT_DEFAULTS[key];
   });
+  fmtLogoPreview(cfg.logo || '');
+}
+
+/* Los links "compartir" de Google Drive (file/d/…/view) no sirven como <img>:
+   se convierten aquí a la URL directa de imagen (lh3.googleusercontent.com).
+   Requiere que el archivo esté compartido como "Cualquiera con el enlace". */
+function _tplLogoURL(u) {
+  u = String(u||'').trim();
+  if (!u) return '';
+  var m = u.match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?[^#]*?id=|thumbnail\?[^#]*?id=)([A-Za-z0-9_-]{10,})/);
+  if (m) return 'https://lh3.googleusercontent.com/d/' + m[1];
+  if (/dropbox\.com/.test(u)) return u.replace(/([?&])dl=0/, '$1raw=1');
+  return u;
+}
+
+function fmtLogoPreview(url) {
+  var box = document.getElementById('fmt-logo-prev');
+  if (!box) return;
+  var u = _tplLogoURL(url);
+  if (!u) { box.innerHTML = 'Sin logo — los reportes usarán el emblema Hestia dibujado.'; return; }
+  var esDrive = u !== String(url||'').trim();
+  box.innerHTML = (esDrive ? '<div style="color:#166534;margin-bottom:4px">✓ Link de Google Drive detectado — se usará la versión directa de imagen (el archivo debe estar compartido como "Cualquiera con el enlace").</div>' : '')
+    + '<img src="'+u.replace(/"/g,'&quot;')+'" style="height:44px;object-fit:contain;display:block;background:#fff;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;padding:4px 8px" '
+    + 'onload="this.nextElementSibling.style.display=\'none\'" '
+    + 'onerror="this.style.display=\'none\';this.nextElementSibling.innerHTML=\'✕ No se pudo cargar la imagen desde esa URL — revisa que sea una imagen pública. Mientras tanto, los reportes usarán el emblema Hestia.\';this.nextElementSibling.style.color=\'#dc2626\'">'
+    + '<div style="margin-top:3px">Cargando vista previa…</div>';
 }
 function fmtSave() {
   var cfg = {
@@ -14495,7 +14511,7 @@ var _REPORT_TEMPLATES={
       +_tplWatermarkHTML('editorial',c)
       +'<div style="position:relative">'
       +'<div style="text-align:center">'
-        +(cfg.logo?'<img src="'+cfg.logo+'" style="height:52px;object-fit:contain;display:inline-block" alt="logo">':_tplEmblema(c,52))
+        +_tplLogoIMG(cfg,52,c,'inline-block')
         +'<div style="font-size:12px;letter-spacing:.42em;color:#8e4756;margin-top:9px">'+(cfg.nombre||'HESTIA FERTILITY').toUpperCase()+'</div>'
         +'<div style="margin-top:14px;border-top:1px solid #c9a9b1"></div><div style="margin-top:2.5px;border-top:1px solid #eadade"></div>'
         +'<div style="font-size:22px;font-style:italic;margin-top:16px">'+d.title+'</div>'
@@ -14523,7 +14539,7 @@ var _REPORT_TEMPLATES={
       +'<div style="position:relative">'
       +'<div style="background:'+c+';padding:17px 26px;display:flex;justify-content:space-between;align-items:center;border-radius:8px 8px 0 0">'
         +'<div style="display:flex;align-items:center;gap:11px">'
-          +(cfg.logo?'<img src="'+cfg.logo+'" style="height:42px;object-fit:contain;display:block" alt="logo">':_tplEmblema('#ffffff',42))
+          +_tplLogoIMG(cfg,42,'#ffffff')
           +'<div><div style="font-size:12.5px;font-weight:600;letter-spacing:.2em;color:#fff">'+(cfg.nombre||'Hestia Fertility').toUpperCase()+'</div>'
           +'<div style="font-size:9px;letter-spacing:.08em;color:#f3d9de;margin-top:2px">'+(d.subject||'')+'</div></div>'
         +'</div>'
@@ -14560,9 +14576,16 @@ function _tplWatermarkHTML(tplId,color){
   return '<div style="position:fixed;left:50%;top:52%;transform:translate(-50%,-50%);opacity:.055;pointer-events:none">'
     +'<svg viewBox="0 0 300 300" width="430" height="430">'+_TPL_WATERMARKS[kind](color)+'</svg></div>';
 }
+function _tplLogoIMG(cfg,size,embColor,display){
+  var url=_tplLogoURL(cfg.logo);
+  var emb=_tplEmblema(embColor,size);
+  if(!url) return emb;
+  return '<img src="'+url+'" style="height:'+size+'px;object-fit:contain;display:'+(display||'block')+'" alt="logo" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'inline-block\'">'
+    +'<span style="display:none">'+emb+'</span>';
+}
 function _tplEmblema(color,size){
   var s=size||48;
-  return '<svg viewBox="0 0 64 64" width="'+s+'" height="'+s+'" style="display:block">'
+  return '<svg viewBox="0 0 64 64" width="'+s+'" height="'+s+'" style="display:inline-block;vertical-align:middle">'
     +'<circle cx="32" cy="32" r="26" fill="none" stroke="'+color+'" stroke-width="1.5"/>'
     +'<circle cx="32" cy="32" r="30" fill="none" stroke="'+color+'" stroke-width="1" stroke-dasharray="2 5"/>'
     +'<circle cx="32" cy="26" r="6" fill="none" stroke="'+color+'" stroke-width="1.5"/>'
@@ -14570,7 +14593,7 @@ function _tplEmblema(color,size){
     +'<text x="32" y="45" text-anchor="middle" font-size="8.5" letter-spacing="2" fill="'+color+'" font-family="Helvetica,Arial,sans-serif">HESTIA</text></svg>';
 }
 function _tplLogoBlock(cfg,c){
-  if(cfg.logo) return '<img src="'+cfg.logo+'" style="height:48px;object-fit:contain;display:block" alt="logo">';
+  if(cfg.logo) return '<div style="display:flex;align-items:center">'+_tplLogoIMG(cfg,48,c)+'</div>';
   return '<div style="display:flex;align-items:center;gap:11px">'+_tplEmblema(c,48)
     +'<div><div style="font-size:13.5px;font-weight:600;letter-spacing:.2em;color:'+c+'">HESTIA</div>'
     +'<div style="font-size:9px;letter-spacing:.32em;color:#9a9a94">FERTILITY</div></div></div>';
@@ -14674,6 +14697,60 @@ function _renderReportesPanel(){
       +'</select></div>';
   });
   g.innerHTML=h;
+  var gal=document.getElementById('rep-tpl-gallery');
+  if(gal){
+    gal.innerHTML='<div style="font-size:11.5px;font-weight:700;color:var(--color-text);margin-bottom:3px">Plantillas disponibles</div>'
+      +'<div style="font-size:10.5px;color:var(--color-text-muted);margin-bottom:9px">Da clic en cualquiera para ver la vista previa con datos de ejemplo — sin salir de aquí.</div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:8px">'
+      +_REPORT_TPL_LIST.map(function(t){
+        return '<button onclick="hfTplPreview(\''+t.id+'\')" title="'+t.desc.replace(/"/g,'&quot;')+'" style="padding:5px 13px;background:'+(_TPL_PILL_COLORS[t.id]||'#555')+';color:#fff;border:none;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px">'
+          +'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'+t.label+'</button>';
+      }).join('')+'</div>';
+  }
+}
+var _TPL_PILL_COLORS={ejecutivo:'#c46a7a',contable:'#1a365d',minimalista:'#555555',clinica:'#b3566b',bicolor:'#2c3e50',certificado:'#7a5c00',moderno:'#1D9E75',celula:'#d4879c',editorial:'#8e4756',vida:'#c46a7a'};
+/* ── Vista previa de plantillas con datos de ejemplo (sin ir al reporte) ── */
+function _tplSampleData(){
+  var cfg=getFmtConfig();
+  return {
+    title:'Estado de cuenta', subject:'María Fernanda López García',
+    period:'Emitido el 5 Jul 2026', generado:'Hestia ERP · vista previa con datos de ejemplo',
+    kpis:[{value:'$203,400.00',label:'Total histórico'},{value:'5',label:'Movimientos'},{value:'$187,800.00',label:'2026'}],
+    tendencia:[{label:'Mar',monto:92500},{label:'Abr',monto:45000},{label:'May',monto:65900}],
+    cols:['Fecha','Concepto','Categoría','Forma de pago','Importe'],
+    rows:[
+      ['12 Feb 2026','FIV ciclo completo · OP-01089','Tratamientos','Transferencia','$185,000.00'],
+      ['3 Mar 2026','Medicamentos · Gonal-F 900UI ×3','Medicamento','TDC','$15,600.00'],
+      ['15 Abr 2026','Perfil hormonal','Estudios','Efectivo','$2,800.00'],
+      ['28 Abr 2026','Congelación de óvulos (EF)','Tratamientos','Transferencia','$28,000.00'],
+      ['12 May 2026','Consulta de seguimiento','Consulta','TDC','$1,200.00']
+    ],
+    totalLabel:'Total histórico', totalValue:'$203,400.00',
+    nota:cfg.frase||''
+  };
+}
+function hfTplPreview(tplId){
+  var ovl=document.getElementById('tpl-prev-ovl');
+  if(!ovl){
+    ovl=document.createElement('div'); ovl.id='tpl-prev-ovl';
+    ovl.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
+    ovl.onclick=function(e){ if(e.target===ovl) ovl.remove(); };
+    ovl.innerHTML='<div style="background:var(--color-surface,#fff);border-radius:14px;width:min(900px,95vw);height:min(92vh,920px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.35)">'
+      +'<div id="tpl-prev-head" style="display:flex;align-items:center;gap:6px;padding:11px 16px;border-bottom:1px solid var(--color-divider,#e5e7eb);flex-wrap:wrap"></div>'
+      +'<iframe id="tpl-prev-frame" style="flex:1;border:none;width:100%;background:#fff"></iframe></div>';
+    document.body.appendChild(ovl);
+  }
+  var head=document.getElementById('tpl-prev-head');
+  head.innerHTML='<span style="font-size:12px;font-weight:700;color:var(--color-text,#333);margin-right:2px">Vista previa:</span>'
+    +_REPORT_TPL_LIST.map(function(t){
+      var act=t.id===tplId;
+      return '<button onclick="hfTplPreview(\''+t.id+'\')" style="padding:4px 11px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;border:1.5px solid '+(act?'var(--color-primary,#c46a7a)':'var(--color-divider,#e5e7eb)')+';background:'+(act?'var(--color-primary,#c46a7a)':'transparent')+';color:'+(act?'#fff':'var(--color-text,#333)')+'">'+t.label+'</button>';
+    }).join('')
+    +'<button onclick="document.getElementById(\'tpl-prev-ovl\').remove()" aria-label="Cerrar" style="margin-left:auto;background:none;border:none;font-size:19px;cursor:pointer;color:#9ca3af">✕</button>';
+  var fn=_REPORT_TEMPLATES[tplId]||_REPORT_TEMPLATES.ejecutivo;
+  // Se oculta la barra "Imprimir/Cerrar" del documento (es solo vista previa)
+  var html=fn(_tplSampleData()).replace('</head>','<style>.no-print{display:none!important}body>div{padding-top:14px!important}</style></head>');
+  document.getElementById('tpl-prev-frame').srcdoc=html;
 }
 
 /* ══════════════════════════════════════════════════════════════
