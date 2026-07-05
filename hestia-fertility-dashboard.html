@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.04.07 -->
+﻿<!-- app-build:2026.07.05.01 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -5119,8 +5119,12 @@ function _ingFacRenderSeccion2(d) {
         +'<span style="font-size:11px;font-weight:600;color:#7c3aed">Notas de Crédito — descuento, NO se factura</span>'
       +'</div>'):'')
     +'</div>'
-    +'<button onclick="ingFacVincularAutomatico()" id="ing-fac-autolote-btn" title="Vincula de un jalón: folios ya localizados + sugerencias sin ambigüedad (por nombre o por monto exacto en facturas de público en general) — sin subir ningún archivo" style="margin-bottom:12px;padding:8px 16px;background:#166534;color:#fff;border:none;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer" '+(autoTotal?'':'disabled')+'>🔗 Vincular todo automáticamente ('+autoTotal+')</button>'
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">'
+    +'<button onclick="ingFacVincularAutomatico()" id="ing-fac-autolote-btn" title="Vincula de un jalón: folios ya localizados + sugerencias sin ambigüedad (por nombre o por monto exacto en facturas de público en general) — sin subir ningún archivo" style="padding:8px 16px;background:#166534;color:#fff;border:none;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer" '+(autoTotal?'':'disabled')+'>🔗 Vincular todo automáticamente ('+autoTotal+')</button>'
+    +'<button onclick="ingFacBuscarAmplio()" id="ing-fac-buscar-amplio-btn" title="Busca en un rango de meses más amplio (por defecto ±3 meses) — para cuando el nombre o el monto no coincidieron con lo que ya está en Ingresos" style="padding:8px 16px;background:var(--card-bg,#fff);color:#0c4a6e;border:1.5px solid #0c4a6e;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer">🔍 Buscar XML en meses amplios</button>'
+    +'</div>'
     +'<div id="ing-fac-autolote-resultado" style="margin-bottom:14px"></div>'
+    +'<div id="ing-fac-busqueda-amplia" style="margin-bottom:16px"></div>'
     +'<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Fecha</th><th>Paciente</th><th>Total</th><th>Sugerencia</th><th>Subir XML</th></tr></thead><tbody>';
   d.sinFactura.forEach(function(o){
     var safe = o.id.replace(/[^a-zA-Z0-9_-]/g,'_');
@@ -5144,7 +5148,9 @@ function _ingFacRenderSeccion2(d) {
     if ((o.notaCredito||0) > 0) totCell += '<div style="font-size:9px;color:#7c3aed;font-weight:700">venta '+fmtM(o.total)+' − NC '+fmtM(o.notaCredito)+'</div>';
     h += '<tr id="ing-fac-row-'+safe+'"><td>'+o.id+'</td><td>'+o.fecha+'</td><td>'+_cxpEsc(o.paciente)+'</td><td>'+totCell+'</td>'
        +'<td>'+sugCell+'</td>'
-       +'<td><label style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--text-secondary,#6b7280);cursor:pointer;padding:4px 9px;border:1.5px dashed var(--color-divider,#d1d5db);border-radius:6px">↑ XML<input type="file" accept=".xml" style="display:none" onchange="ingFacUploadXml(\''+o.id+'\',this)"></label> <span id="ing-fac-upload-st-'+safe+'" style="font-size:9.5px;color:var(--text-secondary,#9ca3af)"></span></td></tr>';
+       +'<td style="white-space:nowrap"><label style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--text-secondary,#6b7280);cursor:pointer;padding:4px 9px;border:1.5px dashed var(--color-divider,#d1d5db);border-radius:6px">↑ XML<input type="file" accept=".xml" style="display:none" onchange="ingFacUploadXml(\''+o.id+'\',this)"></label>'
+       +' <button onclick="ingFacBuscarAmplio(\''+o.id+'\')" title="Buscar este XML en un rango de meses más amplio" style="padding:4px 8px;background:var(--card-bg,#fff);color:#0c4a6e;border:1.5px solid #0c4a6e;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">🔍</button>'
+       +' <span id="ing-fac-upload-st-'+safe+'" style="font-size:9.5px;color:var(--text-secondary,#9ca3af)"></span></td></tr>';
   });
   h += '<tr style="font-weight:800;background:var(--color-surface,#fafafa)"><td colspan="3" style="text-align:right;padding-right:10px">Total pendiente por facturar (sin ningún XML)</td><td>'+fmtM(totalPendienteReal)+'</td><td colspan="2"></td></tr>';
   h += '</tbody></table>';
@@ -5162,6 +5168,119 @@ function _ingFacRenderSeccion2(d) {
   }
   h += '</div>';
   el.innerHTML = h;
+}
+
+// ── Búsqueda ampliada de XML (más allá del ±1 mes automático) ──────────
+// Para cuando el nombre/monto no coincidieron con lo ya capturado en
+// Ingresos (ej. la factura se timbró con otra razón social) — el usuario
+// revisa la lista de XML sin asignar en un rango de meses más amplio y
+// elige a mano a qué operación pendiente vincular cada uno.
+var _ingFacBusquedaAmpliaCache = null;
+var _ingFacBusquedaOpPreseleccionada = null;
+var _ingFacBusquedaOpsVinculadas = {};
+
+async function ingFacBuscarAmplio(opIdPreseleccionado) {
+  var panel = document.getElementById('ing-fac-busqueda-amplia');
+  if (!panel) return;
+  if (!currentFechaInicio || !currentFechaFin) { alert('Selecciona un rango de fechas en el filtro principal primero.'); return; }
+  _ingFacBusquedaOpPreseleccionada = opIdPreseleccionado || null;
+  panel.innerHTML = '<div style="padding:14px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:12px"><span class="ing-spinner ing-spinner-dark"></span>Buscando XML en meses amplios (puede tardar unos segundos)…</div>';
+  panel.scrollIntoView({behavior:'smooth', block:'nearest'});
+  try {
+    var tok = encodeURIComponent(getToken());
+    var r = await fetch(APPS_SCRIPT_URL+'?action=buscarXmlAmplio&fechaInicio='+currentFechaInicio+'&fechaFin='+currentFechaFin+'&padMeses=3&token='+tok);
+    var d = await r.json();
+    if (!d.ok) { panel.innerHTML = '<div style="color:#dc2626;font-size:12px">Error: '+_cxpEsc(d.error||'No se pudo buscar')+'</div>'; return; }
+    _ingFacBusquedaAmpliaCache = d;
+    _ingFacBusquedaOpsVinculadas = {};
+    _ingFacRenderBusquedaAmplia('');
+  } catch(ex) {
+    panel.innerHTML = '<div style="color:#dc2626;font-size:12px">Error de conexión: '+_cxpEsc(ex.message)+'</div>';
+  }
+}
+
+function _ingFacRenderBusquedaAmplia(query) {
+  var panel = document.getElementById('ing-fac-busqueda-amplia');
+  if (!panel || !_ingFacBusquedaAmpliaCache) return;
+  var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var rows = _ingFacBusquedaAmpliaCache.rows || [];
+  var q = (query||'').trim().toLowerCase();
+  var filtered = q ? rows.filter(function(x){
+    return (x.folio||'').toLowerCase().indexOf(q)>-1
+      || (x.receptorNombre||'').toLowerCase().indexOf(q)>-1
+      || (x.receptorRfc||'').toLowerCase().indexOf(q)>-1
+      || String(x.total||'').indexOf(q)>-1;
+  }) : rows;
+  var pendientes = ((_ingFacResult && _ingFacResult.sinFactura) || []).filter(function(o){ return !_ingFacBusquedaOpsVinculadas[o.id]; });
+  function facturableOp(o){ return (o.totalFacturable !== undefined) ? o.totalFacturable : (o.total||0); }
+  var opOpts = pendientes.map(function(o){ return '<option value="'+o.id+'"'+(o.id===_ingFacBusquedaOpPreseleccionada?' selected':'')+'>'+o.id+' — '+_cxpEsc(o.paciente)+' — '+fmtM(facturableOp(o))+'</option>'; }).join('');
+
+  var h = '<div style="background:var(--color-surface,#fafafa);border:1.5px solid #0c4a6e;border-radius:10px;padding:14px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+      +'<div style="font-size:12px;font-weight:700;color:#0c4a6e">🔍 XML sin asignar encontrados en '+(_ingFacBusquedaAmpliaCache.mesesEscaneados||0)+' meses</div>'
+      +'<button onclick="document.getElementById(\'ing-fac-busqueda-amplia\').innerHTML=\'\'" style="background:none;border:none;font-size:16px;cursor:pointer;color:#9ca3af">✕</button>'
+    +'</div>'
+    +'<input type="text" id="ing-fac-busqueda-q" placeholder="Buscar por folio, receptor, RFC o monto…" value="'+_cxpEsc(query||'')+'" oninput="_ingFacRenderBusquedaAmplia(this.value)" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;margin-bottom:10px">';
+
+  if (!rows.length) {
+    h += '<div style="font-size:11.5px;color:var(--text-secondary,#9ca3af)">No se encontró ningún XML sin asignar en el rango escaneado.</div>';
+  } else if (!filtered.length) {
+    h += '<div style="font-size:11.5px;color:var(--text-secondary,#9ca3af)">Sin resultados para "'+_cxpEsc(query)+'".</div>';
+  } else {
+    h += '<div style="max-height:320px;overflow-y:auto"><table class="ing-fac-tbl"><thead><tr><th>Folio</th><th>Fecha</th><th>Receptor</th><th>RFC</th><th>Total</th><th>Vincular a</th><th></th></tr></thead><tbody>';
+    filtered.slice(0,100).forEach(function(x, idx){
+      var rid = 'ba-'+idx;
+      h += '<tr id="'+rid+'"><td>'+_cxpEsc((x.serie||'')+' '+(x.folio||''))+'</td><td>'+_cxpEsc(x.fecha||'')+'</td><td>'+_cxpEsc(x.receptorNombre||'—')+'</td><td>'+_cxpEsc(x.receptorRfc||'')+'</td><td>'+fmtM(x.total)+'</td>'
+        +'<td><select id="'+rid+'-op" style="font-size:10.5px;padding:3px 6px;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;max-width:220px"><option value="">— elegir operación —</option>'+opOpts+'</select></td>'
+        +'<td><button onclick="ingFacVincularBusquedaAmplia(\''+rid+'\',\''+_escJs(x.folio)+'\',\''+_escJs(x.fileId)+'\',\''+_escJs(x.receptorNombre||'')+'\',\''+_escJs(x.receptorRfc||'')+'\',\''+_escJs(x.uuid||'')+'\')" style="padding:3px 8px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">Vincular</button></td></tr>';
+    });
+    h += '</tbody></table></div>';
+    if (filtered.length > 100) h += '<div style="font-size:10px;color:var(--text-secondary,#9ca3af);margin-top:6px">Mostrando 100 de '+filtered.length+' — afina la búsqueda.</div>';
+  }
+  h += '</div>';
+  panel.innerHTML = h;
+}
+
+async function ingFacVincularBusquedaAmplia(rid, folio, fileId, razonSocial, rfc, uuid) {
+  var sel = document.getElementById(rid+'-op');
+  var opId = sel ? sel.value : '';
+  if (!opId) { alert('Elige a qué operación vincular este XML.'); return; }
+  var op = ((_ingFacResult&&_ingFacResult.sinFactura)||[]).find(function(o){ return o.id===opId; });
+  if (!confirm('¿Vincular el folio '+folio+' ('+(razonSocial||'sin nombre en el XML')+') a la operación '+opId+' — '+(op?op.paciente:'')+'?')) return;
+  var row = document.getElementById(rid);
+  if (row) row.style.opacity = '.5';
+  try {
+    var s = getSession()||{};
+    var r1 = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'updateIngresoFiscal', opId:opId, factura:folio, usuario:s.email||'sistema'})});
+    var res1 = await r1.json();
+    if (!res1.ok) { alert(res1.error||'No se pudo capturar el folio'); if(row) row.style.opacity='1'; return; }
+    var r2 = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'vincularXmlFactura', opId:opId, fileId:fileId, usuario:s.email||'sistema',
+      razonSocial: razonSocial||'', rfc: rfc||'', uuid: uuid||''
+    })});
+    var res2 = await r2.json();
+    if (!res2.ok) { alert(res2.error||'No se pudo vincular'); if(row) row.style.opacity='1'; return; }
+    // Marcar como resuelto: no volver a ofrecer ni el XML ni la operación
+    _ingFacBusquedaOpsVinculadas[opId] = true;
+    if (_ingFacBusquedaAmpliaCache && _ingFacBusquedaAmpliaCache.rows) {
+      _ingFacBusquedaAmpliaCache.rows = _ingFacBusquedaAmpliaCache.rows.filter(function(x){ return x.fileId !== fileId; });
+    }
+    var qEl = document.getElementById('ing-fac-busqueda-q');
+    _ingFacRenderBusquedaAmplia(qEl ? qEl.value : '');
+    var opRow = document.getElementById('ing-fac-row-'+opId.replace(/[^a-zA-Z0-9_-]/g,'_'));
+    if (opRow) opRow.style.opacity = '.4';
+    if (typeof _fetchIngresosRaw === 'function') {
+      try {
+        var rawIng = await _fetchIngresosRaw();
+        var dIng = _ingApplyDateFilter(rawIng);
+        _swrSet('ingresos', dIng, currentFechaInicio||'', currentFechaFin||'');
+        _ingData = dIng;
+      } catch(_ref) {}
+    }
+  } catch(ex) {
+    alert('Error de conexión: '+ex.message);
+    if (row) row.style.opacity = '1';
+  }
 }
 
 // Vincula un XML elegido a mano entre varios candidatos con el mismo monto

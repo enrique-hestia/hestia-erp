@@ -641,6 +641,58 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
+// Búsqueda manual de XML en un rango de meses AMPLIO (más allá del ±1 mes
+// automático) — para cuando el nombre/monto no coinciden con lo que ya está
+// registrado en Ingresos (ej. la factura la timbraron con una razón social
+// distinta al paciente, o el CFDI cayó fuera del padding por defecto). El
+// usuario revisa la lista y decide a qué operación vincular cada XML — nunca
+// se auto-asigna nada aquí, solo se descartan los que YA están vinculados a
+// alguna operación (para no ofrecer dos veces el mismo CFDI).
+function buscarXmlAmplio(fechaInicio, fechaFin, padMeses) {
+  try {
+    if (!fechaInicio || !fechaFin) return { ok: false, error: 'Rango de fechas requerido' };
+    var pad = parseInt(padMeses, 10);
+    if (!pad || pad < 1) pad = 3;
+    if (pad > 12) pad = 12; // límite razonable — más que esto tarda demasiado en Drive
+
+    var months = _facMonthsInRangePadded(fechaInicio, fechaFin, pad);
+    var duenoIdx = _facIndexDuenosBDIngresos();
+    var results = [];
+    var carpetas = [];
+
+    months.forEach(function (ym) {
+      var mesTag = (ym.mes < 10 ? '0' : '') + ym.mes + ' ' + FAC_MESES_ABR[ym.mes - 1];
+      var folder = _facMonthFolder(ym.anio, ym.mes);
+      carpetas.push({ path: ym.anio + '/' + mesTag, encontrada: !!folder });
+      if (!folder) return;
+      var files = folder.getFiles();
+      while (files.hasNext()) {
+        var file = files.next();
+        var name = file.getName();
+        if (!/\.xml$/i.test(name)) continue;
+        var xml;
+        try { xml = file.getBlob().getDataAsString('UTF-8'); } catch (e) { continue; }
+        var p = _facQuickParse(xml);
+        if (p.tipo !== 'I') continue;
+        var fileId = file.getId();
+        var uuidUp = p.uuid ? p.uuid.toUpperCase() : '';
+        var nf = p.folio ? _facNormFolio(p.folio) : '';
+        var asignado = duenoIdx.porFileId[fileId] || (uuidUp && duenoIdx.porUuid[uuidUp]) || (nf && duenoIdx.porFolio[nf]);
+        if (asignado) continue; // ya vinculado a alguna operación — no ofrecerlo de nuevo
+        var fechaISO = p.fecha ? p.fecha.substring(0, 10) : '';
+        results.push({
+          folio: p.folio, serie: p.serie, fecha: fechaISO, mes: fechaISO.substring(0, 7),
+          total: p.total, receptorNombre: p.receptorNombre, receptorRfc: p.receptorRfc, uuid: p.uuid,
+          fileId: fileId, fileUrl: file.getUrl()
+        });
+      }
+    });
+
+    results.sort(function (a, b) { return a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0; }); // más reciente primero
+    return { ok: true, rows: results, mesesEscaneados: months.length, carpetas: carpetas };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 // Índice de "dueños" de facturas en TODO BD_Ingresos (sin filtro de fecha):
 // fileId del ArchivoURL, UUID y folio normalizado → {opId, fecha, paciente}.
 // Sirve para saber si un XML que parece huérfano en este periodo en realidad

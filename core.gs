@@ -359,6 +359,13 @@ function doGet(e) {
       return jsonResponse(reconciliarFacturasXml(fIni, fFin));
     }
 
+    if (action === 'buscarXmlAmplio') {
+      var baIni = (e && e.parameter.fechaInicio) || '';
+      var baFin = (e && e.parameter.fechaFin) || '';
+      var baPad = (e && e.parameter.padMeses) || '3';
+      return jsonResponse(buscarXmlAmplio(baIni, baFin, parseInt(baPad, 10)));
+    }
+
     if (action === 'analizarDatosFiscalesPacientes') {
       var dfIni = (e && e.parameter.fechaInicio) || '';
       var dfFin = (e && e.parameter.fechaFin) || '';
