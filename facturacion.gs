@@ -160,6 +160,22 @@ function _facMonthsInRangePadded(fechaInicio, fechaFin, pad) {
   return out;
 }
 
+// Rango de fechas de los meses colindantes (antes y después) al periodo
+// analizado — para poder buscar operaciones pendientes (sin folio) de un mes
+// cercano antes de declarar un XML como "sobrante". Devuelve fechas ISO del
+// primer y último día de ese rango ampliado.
+function _facRangoVecino(fechaInicio, fechaFin, pad) {
+  try {
+    pad = pad || 1;
+    var d0 = new Date(fechaInicio + 'T00:00:00');
+    var d1 = new Date(fechaFin + 'T00:00:00');
+    var start = new Date(d0.getFullYear(), d0.getMonth() - pad, 1);
+    var end = new Date(d1.getFullYear(), d1.getMonth() + pad + 1, 0); // día 0 del mes siguiente = último día del mes objetivo
+    function iso(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+    return { inicio: iso(start), fin: iso(end) };
+  } catch (e) { return null; }
+}
+
 // Normaliza un folio para matching: "HF 1164", "hf-1164", " 1164 " y "01164"
 // deben encontrar el mismo XML. Se queda con la serie alfabética (si la hay)
 // + el número sin ceros a la izquierda.
@@ -408,6 +424,21 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
     var idx = _facBuildXmlIndex(fechaInicio, fechaFin);
     var conDocumento = [], faltaDocumento = [], sinFactura = [], notasCredito = [];
     var usedFolios = {}, usedFileIds = {};
+    // Operaciones SIN folio capturado de los meses colindantes (no del periodo
+    // exacto — esas ya están en "ops") — antes de declarar un XML como
+    // "sobrante" (candidato a cancelar en el SAT) hay que descartar que en
+    // realidad sea la factura de una venta de un mes cercano que todavía no
+    // capturó su folio. Sin este cruce, un CFDI que sí tiene venta detrás
+    // podía marcarse como exceso por pura coincidencia de fechas de análisis.
+    var opsVecinasSinFactura = [];
+    var rangoVecino = _facRangoVecino(fechaInicio, fechaFin, 1);
+    if (rangoVecino) {
+      var opsEnPeriodo = {};
+      ops.forEach(function (o) { opsEnPeriodo[o.id] = true; });
+      _facReadOpsInRange(rangoVecino.inicio, rangoVecino.fin).forEach(function (o) {
+        if (!opsEnPeriodo[o.id] && !o.factura) opsVecinasSinFactura.push(o);
+      });
+    }
     // Dueños de facturas en TODO BD_Ingresos (cualquier fecha): un XML que ya
     // está asignado a alguna operación — del periodo o de otro mes — NUNCA
     // debe ofrecerse como sugerencia/candidato para otra operación. Que el
@@ -574,6 +605,12 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
     // operación de otro mes, no es exceso — es un CFDI cruzado de periodo.
     var xmlHuerfanos = idx.all.filter(function (x) { return x.enPeriodo && !usedFileIds[x.fileId]; });
 
+    function esGenericoXml(x) {
+      var rfc = String(x.receptorRfc || '').toUpperCase();
+      var nom = _pacNormNombre(x.receptorNombre);
+      return rfc === 'XAXX010101000' || nom.indexOf('publico en general') > -1 || !nom;
+    }
+    var vecinosUsados = {};
     xmlHuerfanos.forEach(function (x) {
       var dueno = duenoIdx.porFileId[x.fileId]
         || (x.uuid && duenoIdx.porUuid[x.uuid.toUpperCase()])
@@ -583,9 +620,29 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
         x.opDuena = dueno.opId;
         x.opDuenaFecha = dueno.fecha;
         x.opDuenaPaciente = dueno.paciente;
-      } else {
-        x.clasificacion = 'sobrante';
+        return;
       }
+      // Antes de declarar "sobrante" (candidato a cancelar en el SAT): ¿su
+      // monto coincide con una venta pendiente (sin folio) de un mes cercano
+      // que simplemente no ha capturado su factura todavía? Solo se cruza
+      // contra XML genéricos (público en general) — uno con nombre real
+      // pertenece a quien dice esa razón social, no se reasigna por monto.
+      if (esGenericoXml(x)) {
+        var vecino = opsVecinasSinFactura.find(function (o) {
+          if (vecinosUsados[o.id]) return false;
+          var montoOp = (o.totalFacturable !== undefined) ? o.totalFacturable : (o.total || 0);
+          return Math.abs(montoOp - (x.total || 0)) < 0.01;
+        });
+        if (vecino) {
+          x.clasificacion = 'pendienteVecino';
+          x.vecinoOpId = vecino.id;
+          x.vecinoFecha = vecino.fecha;
+          x.vecinoPaciente = vecino.paciente;
+          vecinosUsados[vecino.id] = true;
+          return;
+        }
+      }
+      x.clasificacion = 'sobrante';
     });
 
     // Posible duplicado: el monto coincide con una operación que YA tiene su
@@ -603,16 +660,20 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
     var totalIngresos = ops.reduce(function (s, op) { return s + (op.total || 0); }, 0);
     var sobrantes = xmlHuerfanos.filter(function (x) { return x.clasificacion === 'sobrante'; });
     var huerfanosOtroPeriodo = xmlHuerfanos.filter(function (x) { return x.clasificacion === 'otroPeriodo'; });
+    var pendientesVecinos = xmlHuerfanos.filter(function (x) { return x.clasificacion === 'pendienteVecino'; });
     var totalHuerfanos = xmlHuerfanos.reduce(function (s, x) { return s + (x.total || 0); }, 0);
     var totalSobrantes = sobrantes.reduce(function (s, x) { return s + (x.total || 0); }, 0);
     var totalXmlDeOtroPeriodo = huerfanosOtroPeriodo.reduce(function (s, x) { return s + (x.total || 0); }, 0);
+    var totalPendientesVecinos = pendientesVecinos.reduce(function (s, x) { return s + (x.total || 0); }, 0);
 
     // Ingresos del periodo cuyo CFDI se timbró en otro mes (confirmados o con
     // folio localizado — no sugerencias sin confirmar): van a la declaración
-    // del mes del timbrado, no de este.
+    // del mes del timbrado, no de este. faltaDocumento significa que el folio
+    // ya está capturado pero el ArchivoURL todavía no — se marca para que la
+    // sección de cruzados pueda ofrecer el botón "Vincular" ahí mismo.
     var opsFacturadasOtroMes = [];
-    conDocumento.forEach(function (op) { if (op.xmlOtroMes) opsFacturadasOtroMes.push({ opId: op.id, paciente: op.paciente, fecha: op.fecha, total: op.total, folio: op.xmlFolio || op.factura, xmlFecha: op.xmlFecha, xmlMes: op.xmlMes }); });
-    faltaDocumento.forEach(function (fd) { if (fd.xmlOtroMes) opsFacturadasOtroMes.push({ opId: fd.id, paciente: fd.paciente, fecha: fd.fecha, total: fd.total, folio: fd.factura, xmlFecha: fd.xmlFecha, xmlMes: fd.xmlMes }); });
+    conDocumento.forEach(function (op) { if (op.xmlOtroMes) opsFacturadasOtroMes.push({ opId: op.id, paciente: op.paciente, fecha: op.fecha, total: op.total, folio: op.xmlFolio || op.factura, xmlFecha: op.xmlFecha, xmlMes: op.xmlMes, necesitaVincular: false }); });
+    faltaDocumento.forEach(function (fd) { if (fd.xmlOtroMes) opsFacturadasOtroMes.push({ opId: fd.id, paciente: fd.paciente, fecha: fd.fecha, total: fd.total, folio: fd.factura, xmlFecha: fd.xmlFecha, xmlMes: fd.xmlMes, necesitaVincular: true, xmlFileId: fd.xmlFileId }); });
     var totalOpsFacturadasOtroMes = opsFacturadasOtroMes.reduce(function (s, o) { return s + (o.total || 0); }, 0);
 
     var totalNotasCredito = notasCredito.reduce(function (s, o) { return s + (o.notaCredito || 0); }, 0)
@@ -630,12 +691,17 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
         xmlDeOtroPeriodo: huerfanosOtroPeriodo,             // CFDIs timbrados este mes de ventas de otro mes
         totalXmlDeOtroPeriodo: totalXmlDeOtroPeriodo
       },
+      // XML sin dueño en el periodo pero cuyo monto coincide con una venta
+      // pendiente (sin folio) de un mes colindante — no son sobrante, son
+      // candidatos directos a vincular a esa operación específica.
+      pendientesVecinos: pendientesVecinos,
+      totalPendientesVecinos: totalPendientesVecinos,
       resumenFacturacion: {
         totalFacturadoXml: totalFacturadoXml, totalIngresos: totalIngresos,
         totalHuerfanos: totalHuerfanos, diferencia: totalFacturadoXml - totalIngresos,
         totalSobrantes: totalSobrantes, totalXmlDeOtroPeriodo: totalXmlDeOtroPeriodo,
         totalOpsFacturadasOtroMes: totalOpsFacturadasOtroMes,
-        totalNotasCredito: totalNotasCredito
+        totalNotasCredito: totalNotasCredito, totalPendientesVecinos: totalPendientesVecinos
       }
     };
   } catch (ex) { return { ok: false, error: ex.message }; }
