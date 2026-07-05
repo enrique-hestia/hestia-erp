@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.08 -->
+﻿<!-- app-build:2026.07.05.09 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1703,8 +1703,13 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
             <input id="fmt-nombre" type="text" placeholder="Hestia Fertility" style="width:100%">
           </div>
           <div>
-            <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:5px">URL del logotipo</label>
-            <input id="fmt-logo" type="url" placeholder="https://... (URL de imagen o link de Google Drive)" style="width:100%" oninput="fmtLogoPreview(this.value)">
+            <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:5px">Logotipo</label>
+            <input id="fmt-logo" type="text" placeholder="https://... (URL de imagen) — o usa Subir imagen" style="width:100%" oninput="fmtLogoPreview(this.value)">
+            <div style="display:flex;gap:8px;margin-top:6px">
+              <button type="button" onclick="document.getElementById('fmt-logo-file').click()" style="padding:5px 12px;background:var(--color-primary);color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">⬆ Subir imagen</button>
+              <button type="button" onclick="fmtLogoOficial()" style="padding:5px 12px;background:var(--color-surface);color:var(--color-text);border:1px solid var(--color-divider);border-radius:6px;font-size:11px;font-weight:600;cursor:pointer">Usar logo oficial Hestia</button>
+              <input type="file" id="fmt-logo-file" accept="image/*" style="display:none" onchange="fmtLogoUpload(this)">
+            </div>
             <div id="fmt-logo-prev" style="margin-top:6px;font-size:11px;color:var(--color-text-muted)"></div>
           </div>
           <div>
@@ -14134,23 +14139,82 @@ function fmtLoad() {
 function _tplLogoURL(u) {
   u = String(u||'').trim();
   if (!u) return '';
+  // Un link de CARPETA de Drive no es una imagen — se descarta para que
+  // el sistema caiga al logo oficial en vez de mostrar el ícono roto.
+  if (/drive\.google\.com\/drive\/(?:u\/\d+\/)?folders\//.test(u)) return '';
   var m = u.match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?[^#]*?id=|thumbnail\?[^#]*?id=)([A-Za-z0-9_-]{10,})/);
   if (m) return 'https://lh3.googleusercontent.com/d/' + m[1];
   if (/dropbox\.com/.test(u)) return u.replace(/([?&])dl=0/, '$1raw=1');
   return u;
 }
+/* Logo oficial: HESTIALogoPinkWhite.png vive junto al HTML (GitHub Pages).
+   Se resuelve absoluto porque los reportes se imprimen en ventanas
+   about:blank donde las rutas relativas no funcionan. */
+var _HF_LOGO_DEFAULT = (function(){
+  try { return new URL('HESTIALogoPinkWhite.png', window.location.href).href; }
+  catch(e) { return 'HESTIALogoPinkWhite.png'; }
+})();
 
 function fmtLogoPreview(url) {
   var box = document.getElementById('fmt-logo-prev');
   if (!box) return;
-  var u = _tplLogoURL(url);
-  if (!u) { box.innerHTML = 'Sin logo — los reportes usarán el emblema Hestia dibujado.'; return; }
-  var esDrive = u !== String(url||'').trim();
-  box.innerHTML = (esDrive ? '<div style="color:#166534;margin-bottom:4px">✓ Link de Google Drive detectado — se usará la versión directa de imagen (el archivo debe estar compartido como "Cualquiera con el enlace").</div>' : '')
+  var raw = String(url||'').trim();
+  if (/drive\.google\.com\/drive\/(?:u\/\d+\/)?folders\//.test(raw)) {
+    box.innerHTML = '<div style="color:#dc2626">✕ Ese link es de una <b>carpeta</b> de Drive, no de una imagen. Abre el archivo del logo, usa "Compartir → Copiar enlace", o mejor: da clic en <b>Subir imagen</b> aquí abajo. Mientras tanto, los reportes usan el logo oficial Hestia.</div>';
+    return;
+  }
+  var esDataUrl = raw.indexOf('data:image/') === 0;
+  var u = esDataUrl ? raw : _tplLogoURL(raw);
+  if (!u) {
+    box.innerHTML = '<div style="color:#166534;margin-bottom:4px">✓ Sin URL — los reportes usan el logo oficial Hestia del sistema:</div>'
+      + '<img src="'+_HF_LOGO_DEFAULT.replace(/"/g,'&quot;')+'" style="height:44px;object-fit:contain;display:block;background:#fff;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;padding:4px 8px">';
+    return;
+  }
+  var esDrive = !esDataUrl && u !== raw;
+  box.innerHTML = (esDataUrl ? '<div style="color:#166534;margin-bottom:4px">✓ Imagen cargada — se guarda dentro del sistema, no depende de ninguna URL externa.</div>' : '')
+    + (esDrive ? '<div style="color:#166534;margin-bottom:4px">✓ Link de Google Drive detectado — se usará la versión directa de imagen (el archivo debe estar compartido como "Cualquiera con el enlace").</div>' : '')
     + '<img src="'+u.replace(/"/g,'&quot;')+'" style="height:44px;object-fit:contain;display:block;background:#fff;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;padding:4px 8px" '
     + 'onload="this.nextElementSibling.style.display=\'none\'" '
-    + 'onerror="this.style.display=\'none\';this.nextElementSibling.innerHTML=\'✕ No se pudo cargar la imagen desde esa URL — revisa que sea una imagen pública. Mientras tanto, los reportes usarán el emblema Hestia.\';this.nextElementSibling.style.color=\'#dc2626\'">'
+    + 'onerror="this.style.display=\'none\';this.nextElementSibling.innerHTML=\'✕ No se pudo cargar la imagen desde esa URL — revisa que sea una imagen pública o usa Subir imagen. Mientras tanto, los reportes usan el logo oficial Hestia.\';this.nextElementSibling.style.color=\'#dc2626\'">'
     + '<div style="margin-top:3px">Cargando vista previa…</div>';
+}
+
+/* Subir el logo como archivo: se reduce en un canvas y se guarda como
+   data-URL dentro de la configuración (localStorage) — cero URLs externas,
+   funciona sin permisos de Drive y se imprime aun sin internet. */
+function fmtLogoUpload(inputEl) {
+  var file = inputEl.files && inputEl.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    var img = new Image();
+    img.onload = function() {
+      var maxH = 240, maxW = 900;
+      var scale = Math.min(1, maxH / img.height, maxW / img.width);
+      var cv = document.createElement('canvas');
+      cv.width = Math.round(img.width * scale);
+      cv.height = Math.round(img.height * scale);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      var dataUrl = cv.toDataURL('image/png');
+      var inp = document.getElementById('fmt-logo');
+      if (inp) inp.value = dataUrl;
+      try { fmtSave(); } catch(e) {}
+      fmtLogoPreview(dataUrl);
+    };
+    img.onerror = function() {
+      var box = document.getElementById('fmt-logo-prev');
+      if (box) box.innerHTML = '<div style="color:#dc2626">✕ El archivo no parece ser una imagen válida.</div>';
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+  inputEl.value = '';
+}
+function fmtLogoOficial() {
+  var inp = document.getElementById('fmt-logo');
+  if (inp) inp.value = '';
+  try { fmtSave(); } catch(e) {}
+  fmtLogoPreview('');
 }
 function fmtSave() {
   var cfg = {
@@ -14539,7 +14603,7 @@ var _REPORT_TEMPLATES={
       +'<div style="position:relative">'
       +'<div style="background:'+c+';padding:17px 26px;display:flex;justify-content:space-between;align-items:center;border-radius:8px 8px 0 0">'
         +'<div style="display:flex;align-items:center;gap:11px">'
-          +_tplLogoIMG(cfg,42,'#ffffff')
+          +_tplLogoIMG(cfg,42,'#ffffff','block',true)
           +'<div><div style="font-size:12.5px;font-weight:600;letter-spacing:.2em;color:#fff">'+(cfg.nombre||'Hestia Fertility').toUpperCase()+'</div>'
           +'<div style="font-size:9px;letter-spacing:.08em;color:#f3d9de;margin-top:2px">'+(d.subject||'')+'</div></div>'
         +'</div>'
@@ -14576,8 +14640,11 @@ function _tplWatermarkHTML(tplId,color){
   return '<div style="position:fixed;left:50%;top:52%;transform:translate(-50%,-50%);opacity:.055;pointer-events:none">'
     +'<svg viewBox="0 0 300 300" width="430" height="430">'+_TPL_WATERMARKS[kind](color)+'</svg></div>';
 }
-function _tplLogoIMG(cfg,size,embColor,display){
-  var url=_tplLogoURL(cfg.logo);
+function _tplLogoIMG(cfg,size,embColor,display,sinDefault){
+  // Sin logo configurado (o con URL inválida) se usa el oficial del sistema;
+  // sinDefault=true lo evita (ej. banda rosa de "Vida", donde el PNG con
+  // fondo blanco se vería como un recuadro) y cae al emblema SVG.
+  var url=_tplLogoURL(cfg.logo) || (sinDefault ? '' : _HF_LOGO_DEFAULT);
   var emb=_tplEmblema(embColor,size);
   if(!url) return emb;
   return '<img src="'+url+'" style="height:'+size+'px;object-fit:contain;display:'+(display||'block')+'" alt="logo" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'inline-block\'">'
@@ -14593,10 +14660,7 @@ function _tplEmblema(color,size){
     +'<text x="32" y="45" text-anchor="middle" font-size="8.5" letter-spacing="2" fill="'+color+'" font-family="Helvetica,Arial,sans-serif">HESTIA</text></svg>';
 }
 function _tplLogoBlock(cfg,c){
-  if(cfg.logo) return '<div style="display:flex;align-items:center">'+_tplLogoIMG(cfg,48,c)+'</div>';
-  return '<div style="display:flex;align-items:center;gap:11px">'+_tplEmblema(c,48)
-    +'<div><div style="font-size:13.5px;font-weight:600;letter-spacing:.2em;color:'+c+'">HESTIA</div>'
-    +'<div style="font-size:9px;letter-spacing:.32em;color:#9a9a94">FERTILITY</div></div></div>';
+  return '<div style="display:flex;align-items:center">'+_tplLogoIMG(cfg,48,c)+'</div>';
 }
 function _tplKpiChips(kpis,bg,labelColor,valueColor){
   if(!kpis||!kpis.length) return '';
