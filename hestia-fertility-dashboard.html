@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.09 -->
+﻿<!-- app-build:2026.07.05.10 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1003,6 +1003,9 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 <div id="view-oc-lista" class="view" style="display:none"><div id="oc-lista-root"></div></div>
 <div id="view-meds-movimientos" class="view" style="display:none"><div id="meds-movimientos-root"></div></div>
 <div id="view-meds-combos" class="view" style="display:none"><div id="meds-combos-root"></div></div>
+
+<!-- ══ VISTA: CENTRO DE COMPROBANTES (facturas XML de egresos por año/mes) ══ -->
+<div id="view-comprobantes" class="view" style="display:none"><div id="comprobantes-root"></div></div>
 
 <!-- ══ VISTA: PRESUPUESTO ══ -->
 <div id="view-presupuesto" class="view" style="display:none">
@@ -10717,6 +10720,14 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     else loadMedsCombos();
     return;
   }
+  // Centro de Comprobantes — facturas XML de egresos organizadas año/mes en Drive
+  if (viewId === 'comprobantes') {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _compEl = document.getElementById('view-comprobantes');
+    if (_compEl) _compEl.style.display = '';
+    loadComprobantes();
+    return;
+  }
   // Presupuesto — proyección y meta (página dedicada)
   if (/presupuesto|budget/i.test(viewId)) {
     document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
@@ -13296,6 +13307,153 @@ async function medsEliminarCombo(rowNum){
     if (!d.ok){ alert(d.error||'No se pudo desactivar'); return; }
     await loadMedsCombos();
   } catch(e){ alert('Error de conexión'); }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   CENTRO DE COMPROBANTES — facturas XML de egresos en Drive
+   (carpeta raíz organizada por año → mes). Cada XML se clasifica
+   contra Egresos: vinculado / sugerido / múltiple / sin coincidencia,
+   y se puede vincular con un clic (escribe el hipervínculo en la
+   columna Link Factura del egreso, como el flujo manual actual).
+   ══════════════════════════════════════════════════════════════ */
+var _compData = null;
+var _compAnio = null, _compMes = null;
+var _compFiltro = '';
+var _COMP_MESES_LBL = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+async function loadComprobantes(anio, mes){
+  var root = document.getElementById('comprobantes-root');
+  if (!root) return;
+  _medsStyles();
+  root.innerHTML = hestiaLoader('Leyendo comprobantes de Drive…');
+  try {
+    if (!anio) {
+      var hoy = new Date();
+      anio = _compAnio || hoy.getFullYear();
+      mes = _compMes || (hoy.getMonth()+1);
+    }
+    var tok = encodeURIComponent(getToken());
+    var r = await fetch(APPS_SCRIPT_URL+'?action=comprobantesMes&anio='+anio+'&mes='+mes+'&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+    var d = await r.json();
+    if (!d.ok) throw new Error(d.error||'No se pudo cargar');
+    _compData = d; _compAnio = anio; _compMes = mes;
+    await hfFinish();
+    _renderComprobantes();
+  } catch(e){
+    root.innerHTML = '<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px;line-height:1.6;margin:20px">⚠ '+_medsEsc(e.message)
+      +'<br><span style="color:#6b7280">Si es la primera vez: agrega <b>comprobantes.gs</b> al proyecto de Apps Script, corre <b>configurarMenuComprobantes()</b> una vez desde el editor y redespliega.</span></div>';
+  }
+}
+
+function _compFmtUuid(u){ return u ? u.substring(0,8)+'…'+u.substring(u.length-4) : '—'; }
+
+function _renderComprobantes(){
+  var root = document.getElementById('comprobantes-root');
+  if (!root || !_compData) return;
+  var d = _compData;
+  var puedeVincular = hasPermission('editar_egresos') || hasPermission('bank_edit');
+  var f = (_compFiltro||'').toLowerCase();
+  var rows = (d.comprobantes||[]).filter(function(x){
+    if (!f) return true;
+    return (x.emisorNombre+' '+x.emisorRfc+' '+x.folio+' '+x.uuid+' '+x.fileName+' '+String(x.total)).toLowerCase().indexOf(f) > -1;
+  });
+
+  // Chips de años/meses disponibles en la carpeta
+  var navHtml = '';
+  (d.estructura||[]).forEach(function(a){
+    navHtml += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px">'
+      +'<span style="font-size:11px;font-weight:800;color:var(--text-primary,#111);min-width:38px">'+a.anio+'</span>';
+    a.meses.forEach(function(m){
+      var act = a.anio === d.anio && m.mes === d.mes;
+      navHtml += '<button onclick="loadComprobantes('+a.anio+','+m.mes+')" style="padding:4px 11px;border-radius:20px;font-size:11px;font-weight:600;cursor:pointer;border:1.5px solid '
+        +(act?'var(--color-primary,#c46a7a)':'var(--color-divider,#e5e7eb)')+';background:'+(act?'var(--color-primary,#c46a7a)':'var(--card-bg,#fff)')
+        +';color:'+(act?'#fff':'var(--text-secondary,#6b7280)')+'">'+_COMP_MESES_LBL[m.mes-1]+'</button>';
+    });
+    if (!a.meses.length) navHtml += '<span style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">sin carpetas de mes</span>';
+    navHtml += '</div>';
+  });
+
+  var res = d.resumen || {};
+  var h = '<div class="mv-w">'
+    +'<div class="mv-hdr"><div><div class="mv-title">📎 Centro de Comprobantes</div>'
+    +'<div class="mv-sub">Facturas XML de proveedores guardadas en Drive por año y mes — se cruzan solas contra Egresos</div></div>'
+    +'<a href="https://drive.google.com/drive/folders/1rIWggcMKPAtCRvRxBrQgYzSaCK6kp63w" target="_blank" class="mv-btn-sec" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px">📁 Abrir carpeta en Drive</a></div>'
+    +'<div class="mv-card" style="padding:12px 16px">'+navHtml+'</div>'
+    +'<div class="mv-kstrip" style="grid-template-columns:repeat(5,1fr)">'
+      +'<div class="mv-ks"><div class="mv-ks-lbl">XML en '+_COMP_MESES_LBL[d.mes-1]+' '+d.anio+'</div><div class="mv-ks-val">'+(res.total||0)+'</div></div>'
+      +'<div class="mv-ks"><div class="mv-ks-lbl">Vinculados</div><div class="mv-ks-val" style="color:#166534">'+(res.vinculados||0)+'</div></div>'
+      +'<div class="mv-ks"><div class="mv-ks-lbl">Con sugerencia</div><div class="mv-ks-val" style="color:#b45309">'+(res.sugeridos||0)+'</div></div>'
+      +'<div class="mv-ks"><div class="mv-ks-lbl">Sin coincidencia</div><div class="mv-ks-val" style="color:#9ca3af">'+(res.sinCoincidencia||0)+'</div></div>'
+      +'<div class="mv-ks"><div class="mv-ks-lbl">Egresos del mes sin factura</div><div class="mv-ks-val" style="color:#dc2626">'+(res.egresosSinFactura||0)+'</div></div>'
+    +'</div>'
+    +'<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center">'
+      +'<input class="mv-inp" style="max-width:380px" placeholder="Buscar por proveedor, RFC, folio, UUID o monto…" value="'+_medsEsc(_compFiltro)+'" oninput="_compFiltro=this.value;_renderComprobantes()">'
+      +(f?'<button class="mv-btn-sec" style="padding:6px 12px;font-size:11px" onclick="_compFiltro=\'\';_renderComprobantes()">✕ Limpiar</button>':'')
+    +'</div>'
+    +'<div class="mv-card"><table class="mv-tbl"><thead><tr><th>Fecha</th><th>Emisor</th><th>Folio</th><th>UUID</th><th>Total</th><th>Archivos</th><th>Estado</th><th style="min-width:220px">Acción</th></tr></thead><tbody>';
+
+  if (d.aviso) h += '<tr><td colspan="8" style="text-align:center;padding:24px;color:#b45309">'+_medsEsc(d.aviso)+'</td></tr>';
+  else if (!rows.length) h += '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-secondary,#9ca3af)">'+(f?'Nada coincide con la búsqueda':'Sin archivos XML en esta carpeta')+'</td></tr>';
+
+  rows.forEach(function(x){
+    var idx = d.comprobantes.indexOf(x);
+    var estadoHtml, accionHtml;
+    if (x.parseError) {
+      estadoHtml = '<span style="color:#dc2626;font-weight:700">XML ilegible</span>';
+      accionHtml = '<span style="font-size:10.5px;color:#9ca3af">'+_medsEsc(x.parseError)+'</span>';
+    } else if (x.estado === 'vinculado') {
+      estadoHtml = '<span style="color:#166534;font-weight:700">✓ Vinculado</span>';
+      accionHtml = x.egreso ? '<span style="font-size:10.5px;color:var(--text-secondary,#6b7280)">'+_medsEsc(x.egreso.proveedor)+' — '+_medsFmt(x.egreso.monto)+(x.egreso.pagado?' · pagado':' · por pagar')+'</span>' : '';
+    } else if ((x.estado === 'sugerido' || x.estado === 'multiple') && x.candidatos && x.candidatos.length) {
+      estadoHtml = '<span style="color:#b45309;font-weight:700">'+(x.estado==='sugerido'?'Sugerido':'Elegir egreso')+'</span>';
+      if (!puedeVincular) {
+        accionHtml = '<span style="font-size:10.5px;color:#9ca3af">Sin permiso para vincular</span>';
+      } else if (x.estado === 'sugerido') {
+        var c0 = x.candidatos[0];
+        accionHtml = '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:10.5px;color:var(--text-secondary,#6b7280);max-width:220px">'+_medsEsc(c0.proveedor)+' — '+_medsEsc((c0.concepto||'').substring(0,40))+' — '+_medsFmt(c0.monto)+'</span>'
+          +'<button class="mv-btn" style="padding:4px 12px;font-size:10.5px;background:#166534" onclick="compVincular('+idx+','+c0.rowNum+',this)">Vincular</button></div>';
+      } else {
+        var opts = x.candidatos.map(function(c){ return '<option value="'+c.rowNum+'">'+_medsEsc(c.proveedor)+' — '+_medsEsc((c.concepto||'').substring(0,36))+' — '+_medsFmt(c.monto)+(c.fecha?' — '+c.fecha:'')+'</option>'; }).join('');
+        accionHtml = '<div style="display:flex;gap:6px;align-items:center"><select class="mv-inp" style="max-width:230px;padding:4px 8px;font-size:10.5px" id="comp-sel-'+idx+'">'+opts+'</select>'
+          +'<button class="mv-btn" style="padding:4px 12px;font-size:10.5px" onclick="compVincular('+idx+',parseInt(document.getElementById(\'comp-sel-'+idx+'\').value),this)">Vincular</button></div>';
+      }
+    } else {
+      estadoHtml = '<span style="color:#9ca3af">Sin coincidencia</span>';
+      accionHtml = '<span style="font-size:10.5px;color:#9ca3af">Ningún egreso con este monto/proveedor cerca de la fecha</span>';
+    }
+    h += '<tr>'
+      +'<td style="white-space:nowrap">'+_medsEsc(x.fecha||'—')+'</td>'
+      +'<td><b>'+_medsEsc(x.emisorNombre||'—')+'</b><div style="font-size:9.5px;color:var(--text-secondary,#9ca3af)">'+_medsEsc(x.emisorRfc||'')+'</div></td>'
+      +'<td>'+_medsEsc((x.serie?x.serie+'-':'')+(x.folio||'—'))+'</td>'
+      +'<td style="font-family:monospace;font-size:10px" title="'+_medsEsc(x.uuid)+'">'+_compFmtUuid(x.uuid)+'</td>'
+      +'<td style="font-weight:700">'+_medsFmt(x.total)+(x.moneda&&x.moneda!=='MXN'?' <span style="font-size:9px">'+_medsEsc(x.moneda)+'</span>':'')+'</td>'
+      +'<td style="white-space:nowrap"><a href="'+_medsEsc(x.url)+'" target="_blank" style="font-size:10.5px;color:var(--color-primary,#c46a7a);font-weight:700;text-decoration:none">XML</a>'
+        +(x.pdfUrl?' · <a href="'+_medsEsc(x.pdfUrl)+'" target="_blank" style="font-size:10.5px;color:var(--color-primary,#c46a7a);font-weight:700;text-decoration:none">PDF</a>':'')+'</td>'
+      +'<td>'+estadoHtml+'</td>'
+      +'<td>'+accionHtml+'</td>'
+      +'</tr>';
+  });
+  h += '</tbody></table></div></div>';
+  root.innerHTML = h;
+}
+
+async function compVincular(idx, rowNum, btn){
+  var x = _compData && _compData.comprobantes[idx];
+  if (!x || !rowNum) return;
+  if (btn){ btn.disabled = true; btn.textContent = '…'; }
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'vincularComprobanteEgreso', anio:_compAnio, rowNum:rowNum, fileId:x.fileId,
+      uuid:x.uuid, etiqueta:(x.serie?x.serie+'-':'')+(x.folio||'Factura XML'), usuario:s.email||''
+    })});
+    var d = await r.json();
+    if (!d.ok){ alert(d.error||'No se pudo vincular'); if(btn){btn.disabled=false;btn.textContent='Vincular';} return; }
+    await loadComprobantes(_compAnio, _compMes);
+  } catch(e){
+    alert('Error de conexión: '+e.message);
+    if(btn){btn.disabled=false;btn.textContent='Vincular';}
+  }
 }
 
 /* ── Dispatcher: vistas conocidas vs. captura genérica ─── */

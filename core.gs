@@ -410,6 +410,18 @@ function doGet(e) {
       return jsonResponse(readOrdenesCompra());
     }
 
+    if (action === 'comprobantesEstructura') {
+      if (typeof listComprobantesEstructura !== 'function')
+        return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(listComprobantesEstructura());
+    }
+
+    if (action === 'comprobantesMes') {
+      if (typeof readComprobantesMes !== 'function')
+        return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readComprobantesMes((e && e.parameter.anio) || '', (e && e.parameter.mes) || ''));
+    }
+
     if (action === 'listas') {
       return jsonResponse(readListas());
     }

@@ -566,6 +566,16 @@ function doPost(e) {
     if (body.action === 'exportarCatalogoProductos') {
       return jsonResponse(exportarCatalogoProductos(body.usuario));
     }
+    if (body.action === 'vincularComprobanteEgreso') {
+      if (typeof vincularComprobanteEgreso !== 'function')
+        return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(vincularComprobanteEgreso(body));
+    }
+    if (body.action === 'configurarMenuComprobantes') {
+      if (typeof configurarMenuComprobantes !== 'function')
+        return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(configurarMenuComprobantes());
+    }
     if (body.action === 'importarCatalogoProductosBatch') {
       return jsonResponse(importarCatalogoProductosBatch(body));
     }
