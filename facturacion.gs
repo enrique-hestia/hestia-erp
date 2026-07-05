@@ -251,6 +251,12 @@ function _facXmlPorOp(idx, op) {
   return null;
 }
 
+// Detecta la porción pagada con Nota de Crédito: es un descuento (saldo a
+// favor del paciente), NO un cobro — no se factura ni entra a la declaración.
+function _facEsNotaCredito(fp) {
+  return String(fp || '').trim().toLowerCase().indexOf('nota de cr') === 0;
+}
+
 function _facReadOpsInRange(fechaInicio, fechaFin) {
   var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
   var sheet = ss.getSheetByName(BD_INGRESOS_TAB);
@@ -259,6 +265,7 @@ function _facReadOpsInRange(fechaInicio, fechaFin) {
   // Columnas dinámicas (agregadas por migración, viven al final de la hoja)
   var hdrs = (raw[0] || []).map(function (h) { return String(h).trim().toLowerCase(); });
   var iUuid = hdrs.indexOf('facturauuid'), iRfc = hdrs.indexOf('facturarfc'), iRazon = hdrs.indexOf('razonsocial');
+  var iPagosDet = hdrs.indexOf('pagosdetalle');
   var opsMap = {}, order = [];
   function dt(v) {
     if (!v) return '';
@@ -275,7 +282,8 @@ function _facReadOpsInRange(fechaInicio, fechaFin) {
     if (!opsMap[op]) {
       opsMap[op] = {
         id: op, fecha: fecha, paciente: String(r[3] || ''), total: 0,
-        factura: '', poliza: '', archivoURL: '', facturaUUID: '', facturaRFC: '', razonSocial: ''
+        factura: '', poliza: '', archivoURL: '', facturaUUID: '', facturaRFC: '', razonSocial: '',
+        formaPago: '', notaCredito: 0
       };
       order.push(op);
     }
@@ -288,10 +296,27 @@ function _facReadOpsInRange(fechaInicio, fechaFin) {
     if (!o.factura && String(r[17] || '').trim()) o.factura = String(r[17]).trim();
     if (!o.poliza && String(r[18] || '').trim()) o.poliza = String(r[18]).trim();
     if (!o.archivoURL && String(r[22] || '').trim()) o.archivoURL = String(r[22]).trim();
+    if (!o.formaPago && String(r[12] || '').trim()) o.formaPago = String(r[12]).trim();
     if (iUuid > -1 && !o.facturaUUID && String(r[iUuid] || '').trim()) o.facturaUUID = String(r[iUuid]).trim();
     if (iRfc > -1 && !o.facturaRFC && String(r[iRfc] || '').trim()) o.facturaRFC = String(r[iRfc]).trim();
     if (iRazon > -1 && !o.razonSocial && String(r[iRazon] || '').trim()) o.razonSocial = String(r[iRazon]).trim();
+    // Pago mixto: la porción de Nota de Crédito viene del desglose PagosDetalle
+    if (iPagosDet > -1 && !o._pagosDetLeido && String(r[iPagosDet] || '').trim()) {
+      o._pagosDetLeido = true;
+      try {
+        JSON.parse(String(r[iPagosDet])).forEach(function (p) {
+          if (_facEsNotaCredito(p.fp)) o.notaCredito += parseFloat(p.monto) || 0;
+        });
+      } catch (e) {}
+    }
   }
+  // Op pagada COMPLETA con Nota de Crédito (sin desglose): todo es descuento
+  order.forEach(function (k) {
+    var o = opsMap[k];
+    if (!o.notaCredito && _facEsNotaCredito(o.formaPago)) o.notaCredito = o.total;
+    o.totalFacturable = Math.max(0, o.total - o.notaCredito);
+    delete o._pagosDetLeido;
+  });
   return order.map(function (k) { return opsMap[k]; });
 }
 
@@ -381,7 +406,7 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
     if (!fechaInicio || !fechaFin) return { ok: false, error: 'Rango de fechas requerido' };
     var ops = _facReadOpsInRange(fechaInicio, fechaFin);
     var idx = _facBuildXmlIndex(fechaInicio, fechaFin);
-    var conDocumento = [], faltaDocumento = [], sinFactura = [];
+    var conDocumento = [], faltaDocumento = [], sinFactura = [], notasCredito = [];
     var usedFolios = {}, usedFileIds = {};
     // Dueños de facturas en TODO BD_Ingresos (cualquier fecha): un XML que ya
     // está asignado a alguna operación — del periodo o de otro mes — NUNCA
@@ -428,11 +453,19 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
         marcarUsado(x);
         var fd = {
           id: op.id, fecha: op.fecha, paciente: op.paciente, total: op.total, factura: op.factura,
+          notaCredito: op.notaCredito || 0, totalFacturable: op.totalFacturable,
           xmlFileId: x.fileId, xmlFileUrl: x.fileUrl, xmlTotal: x.total, xmlUuid: x.uuid,
           xmlRazonSocial: x.receptorNombre, xmlRfc: x.receptorRfc
         };
         tagOtroMes(fd, op, x);
         faltaDocumento.push(fd);
+        return;
+      }
+      // Pagada completa con Nota de Crédito y sin CFDI: no es "pendiente por
+      // facturar" — es un descuento (no fiscal). Se lista aparte para que la
+      // conciliación total cuadre sin confundirla con un faltante real.
+      if ((op.totalFacturable || 0) <= 0.01 && (op.notaCredito || 0) > 0) {
+        notasCredito.push(op);
         return;
       }
       sinFactura.push(op);
@@ -459,7 +492,10 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
         if (!xNorm) continue;
         var matched = candidatos.some(function (c) { return c && (xNorm.indexOf(c) > -1 || c.indexOf(xNorm) > -1); });
         if (!matched) continue;
-        var delta = Math.abs((x.total || 0) - (op.total || 0));
+        // El CFDI se timbra por lo realmente cobrado — la porción de Nota de
+        // Crédito es descuento, así que el monto a comparar es el facturable.
+        var montoOp = (op.totalFacturable !== undefined) ? op.totalFacturable : (op.total || 0);
+        var delta = Math.abs((x.total || 0) - montoOp);
         if (delta < mejorDelta) { mejor = x; mejorDelta = delta; }
       }
       if (mejor) {
@@ -495,8 +531,9 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
         var nom = _pacNormNombre(x.receptorNombre);
         return rfc === 'XAXX010101000' || nom.indexOf('publico en general') > -1 || !nom;
       }
+      var montoOpFac = (op.totalFacturable !== undefined) ? op.totalFacturable : (op.total || 0);
       var todosMonto = idx.all.filter(function (x) {
-        return x.folio && !usedFileIds[x.fileId] && !estaAsignado(x) && Math.abs((x.total || 0) - (op.total || 0)) < 0.01;
+        return x.folio && !usedFileIds[x.fileId] && !estaAsignado(x) && Math.abs((x.total || 0) - montoOpFac) < 0.01;
       });
       var candidatos = todosMonto.filter(esGenerico);
       if (!candidatos.length) {
@@ -578,9 +615,14 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
     faltaDocumento.forEach(function (fd) { if (fd.xmlOtroMes) opsFacturadasOtroMes.push({ opId: fd.id, paciente: fd.paciente, fecha: fd.fecha, total: fd.total, folio: fd.factura, xmlFecha: fd.xmlFecha, xmlMes: fd.xmlMes }); });
     var totalOpsFacturadasOtroMes = opsFacturadasOtroMes.reduce(function (s, o) { return s + (o.total || 0); }, 0);
 
+    var totalNotasCredito = notasCredito.reduce(function (s, o) { return s + (o.notaCredito || 0); }, 0)
+      + sinFactura.reduce(function (s, o) { return s + (o.notaCredito || 0); }, 0)
+      + conDocumento.reduce(function (s, o) { return s + (o.notaCredito || 0); }, 0)
+      + faltaDocumento.reduce(function (s, o) { return s + (o.notaCredito || 0); }, 0);
+
     return {
       ok: true, conDocumento: conDocumento, faltaDocumento: faltaDocumento,
-      sinFactura: sinFactura, xmlHuerfanos: xmlHuerfanos, totalOps: ops.length,
+      sinFactura: sinFactura, notasCredito: notasCredito, xmlHuerfanos: xmlHuerfanos, totalOps: ops.length,
       carpetasAnalizadas: idx.carpetas,
       cfdiCruzados: {
         opsFacturadasOtroMes: opsFacturadasOtroMes,        // ingresos de este periodo timbrados en otro mes
@@ -592,7 +634,8 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
         totalFacturadoXml: totalFacturadoXml, totalIngresos: totalIngresos,
         totalHuerfanos: totalHuerfanos, diferencia: totalFacturadoXml - totalIngresos,
         totalSobrantes: totalSobrantes, totalXmlDeOtroPeriodo: totalXmlDeOtroPeriodo,
-        totalOpsFacturadasOtroMes: totalOpsFacturadasOtroMes
+        totalOpsFacturadasOtroMes: totalOpsFacturadasOtroMes,
+        totalNotasCredito: totalNotasCredito
       }
     };
   } catch (ex) { return { ok: false, error: ex.message }; }
@@ -1083,6 +1126,12 @@ function generarReporteContaDigitalPendientes(fechaInicio, fechaFin, usuario) {
     var opsMap = _facReadOpsPendientesDetalle(fechaInicio, fechaFin, pendientesIds);
     var pacFiscal = _pacFiscalIndex();
 
+    // Porción pagada con Nota de Crédito por OP: es descuento — la factura se
+    // timbra por lo realmente cobrado, así que se resta del total y se suma
+    // al campo DESCUENTO de la plantilla.
+    var ncPorOp = {};
+    rec.sinFactura.forEach(function (o) { if (o.notaCredito > 0) ncPorOp[o.id] = o.notaCredito; });
+
     var headers = FAC_MASIVA_HEADERS_INV.slice();
     for (var c = 0; c < FAC_MASIVA_CONCEPTO_BLOQUES; c++) headers = headers.concat(FAC_MASIVA_HEADERS_CONCEPTO);
     headers = headers.concat(FAC_MASIVA_HEADERS_TRAIL);
@@ -1095,13 +1144,15 @@ function generarReporteContaDigitalPendientes(fechaInicio, fechaFin, usuario) {
       var pf = pacFiscal[_pacNormNombre(op.paciente)];
       var rfcFinal = (pf && pf.rfc) ? pf.rfc : 'XAXX010101000';
       var razonFinal = (pf && pf.razonSocial) ? pf.razonSocial : 'PUBLICO EN GENERAL';
-      var descuentoOp = Math.max(0, op.montoLista - op.total);
+      var nc = ncPorOp[op.id] || 0;
+      var totalCobrado = Math.max(0, op.total - nc); // la NC es descuento — se factura lo cobrado
+      var descuentoOp = Math.max(0, op.montoLista - totalCobrado);
       // Sin CFDI del que leer impuestos: se asume Exento (servicios médicos, el
       // caso normal en Hestia) — revisar antes de subir si alguna línea no lo es.
       var row = [
         FAC_MASIVA_SERIE, op.fecha, op.sucursal || '', rfcFinal,
         'PESOS', '', op.formaPago || '', '', op.id,
-        op.montoLista, descuentoOp, op.total, 0, 0, 0, 0, op.total
+        op.montoLista, descuentoOp, totalCobrado, 0, 0, 0, 0, totalCobrado
       ];
       var nLineas = Math.min(op.lineas.length, FAC_MASIVA_CONCEPTO_BLOQUES);
       for (var li = 0; li < nLineas; li++) {
@@ -1112,7 +1163,7 @@ function generarReporteContaDigitalPendientes(fechaInicio, fechaFin, usuario) {
       for (var mi = nLineas; mi < FAC_MASIVA_CONCEPTO_BLOQUES; mi++) row = row.concat(['', '', '', '', '', '', '', '', '', '', '', '', '', '']);
       row.push('', '', '', 'Factura', '', '', '', '', '', '', '');
       rows.push(row);
-      detalle.push({ opId: op.id, paciente: op.paciente, razonSocial: razonFinal, rfc: rfcFinal, fecha: op.fecha, total: op.total });
+      detalle.push({ opId: op.id, paciente: op.paciente, razonSocial: razonFinal, rfc: rfcFinal, fecha: op.fecha, total: totalCobrado, notaCredito: nc });
     });
     if (rows.length < 2) return { ok: false, error: 'No se pudo armar el detalle de las operaciones pendientes (sin líneas de venta en el rango).' };
 

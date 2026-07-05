@@ -4173,6 +4173,32 @@ function _reverseIngresoBank(opId, formaPago, fecha, monto, obs) {
   }
 }
 
+// Reversa los movimientos bancarios de una OP: si tiene desglose mixto
+// (PagosDetalle), reversa CADA forma por su monto — reversar todo con la
+// forma principal descuadraría los bancos (ej. $17,700 de Santander cuando
+// solo $9,220 entraron ahí). Nota de Crédito no toca bancos, se ignora sola.
+function _reverseIngresoBankTodos(opId, hdrRow, origRows, origFP, origFecha, origPagado, obsBank) {
+  var pagosArr = null;
+  try {
+    var hdrs = (hdrRow || []).map(function(h){ return String(h).trim().toLowerCase(); });
+    var iPagosDet = hdrs.indexOf('pagosdetalle');
+    if (iPagosDet > -1) {
+      for (var i = 0; i < origRows.length; i++) {
+        var s = String(origRows[i][iPagosDet] || '').trim();
+        if (s) { pagosArr = JSON.parse(s); break; }
+      }
+    }
+  } catch(e) { pagosArr = null; }
+  if (pagosArr && pagosArr.length > 1) {
+    pagosArr.forEach(function(p){
+      var monto = parseFloat(p.monto) || 0;
+      if (monto > 0) _reverseIngresoBank(opId, p.fp, origFecha, monto, obsBank);
+    });
+  } else {
+    _reverseIngresoBank(opId, origFP, origFecha, origPagado, obsBank);
+  }
+}
+
 function updateIngresoConBancos(payload) {
   try {
     if (!_tokenHasPermission(payload.token || '', 'editar_ingresos')) {
@@ -4203,7 +4229,7 @@ function updateIngresoConBancos(payload) {
     var origPagado  = origRows.reduce(function(s, r) { return s + (parseFloat(r[10]) || 0); }, 0);
     var origObsBank = (origObs ? origObs + ' · ' : '') + 'Px. ' + origPac;
 
-    _reverseIngresoBank(opId, origFP, origFecha, origPagado, origObsBank);
+    _reverseIngresoBankTodos(opId, data[0], origRows, origFP, origFecha, origPagado, origObsBank);
 
     var updateResult = updateIngreso(payload);
     if (!updateResult.ok) return updateResult;
@@ -4271,7 +4297,7 @@ function deleteIngreso(payload) {
     var origPagado = origRows.reduce(function(s, r) { return s + (parseFloat(r[10]) || 0); }, 0);
     var origObsBank = (origObs ? origObs + ' · ' : '') + 'Px. ' + origPac;
 
-    _reverseIngresoBank(opId, origFP, origFecha, origPagado, origObsBank);
+    _reverseIngresoBankTodos(opId, data[0], origRows, origFP, origFecha, origPagado, origObsBank);
 
     for (var d = 0; d < rowNums.length; d++) {
       sheet.deleteRow(rowNums[d]);

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.04.06 -->
+﻿<!-- app-build:2026.07.04.07 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2839,14 +2839,18 @@ function _renderIngresosERP() {
     +'</div></div>');
 
   // ── Resumen fiscal del período filtrado ──
-  var _subtPagado=0, _totEfectivo=0, _totSantander=0, _contabilizado=0;
+  var _subtPagado=0, _totEfectivo=0, _totSantander=0, _contabilizado=0, _totNotaCredito=0;
   var _fpDetail = {};
   // Pagos mixtos: el desglose real vive en pagosDetalle (una vez por OP) — esas
   // operaciones se atribuyen por su desglose, no por la FormaPago principal,
-  // para que Efectivo/Santander/TDC cuadren contra los bancos.
+  // para que Efectivo/Santander/TDC cuadren contra los bancos. La Nota de
+  // Crédito se acumula aparte: es descuento (saldo a favor aplicado), no un
+  // cobro — no entra a ningún banco ni a la parte fiscal.
   var _opSplit = {}, _opSplitDone = {};
   filtered.forEach(function(r){ if (r.pagosDetalle && r.pagosDetalle.length > 1) _opSplit[r.id] = r.pagosDetalle; });
+  function _esNC(fp){ return (fp||'').trim().toLowerCase().indexOf('nota de cr') === 0; }
   function _fpAdd(fp, pag) {
+    if (_esNC(fp)) { _totNotaCredito += pag; return; }
     var fpLow = (fp||'').trim().toLowerCase();
     if (fpLow==='efectivo') _totEfectivo+=pag;
     else if (fpLow==='santander') _totSantander+=pag;
@@ -2867,7 +2871,7 @@ function _renderIngresosERP() {
     }
     if (r.contabilidad) _contabilizado+=(r.montoFact||r.pagado||0);
   });
-  var _totTDCTDD = _subtPagado - _totEfectivo - _totSantander;
+  var _totTDCTDD = _subtPagado - _totEfectivo - _totSantander - _totNotaCredito;
   _ingContabilizado = _contabilizado;
   var _diferencia = _subtPagado - _contabilizado;
   var _isrDeclarado = _contabilizado;
@@ -2878,11 +2882,27 @@ function _renderIngresosERP() {
   // suma sobre "filtered" para que Facturado + Pendiente = Subtotal Pagado exacto.
   var _opFacturaMap = {};
   (data.rows||[]).forEach(function(r){ if (r.factura) _opFacturaMap[r.id] = true; });
-  var _facturado = 0, _pendienteFacturar = 0;
+  // La porción pagada con Nota de Crédito NO forma parte fiscal (es descuento):
+  // se excluye de Facturado y de Pendiente por facturar, y se muestra aparte
+  // para que Facturado + Pendiente + NC = Subtotal Pagado cuadre exacto.
+  var _facturado = 0, _pendienteFacturar = 0, _ncFiscal = 0;
+  var _opNCDone = {};
   filtered.forEach(function(r){
     var pag = r.pagado||0;
+    if (!_opSplit[r.id] && _esNC(r.formaPago)) { _ncFiscal += pag; return; } // op pagada 100% con NC
     if (_opFacturaMap[r.id]) _facturado += pag; else _pendienteFacturar += pag;
+    if (_opSplit[r.id] && !_opNCDone[r.id]) {
+      _opNCDone[r.id] = true;
+      var ncOp = 0;
+      _opSplit[r.id].forEach(function(p){ if (_esNC(p.fp)) ncOp += parseFloat(p.monto)||0; });
+      if (ncOp > 0) {
+        _ncFiscal += ncOp;
+        if (_opFacturaMap[r.id]) _facturado -= ncOp; else _pendienteFacturar -= ncOp;
+      }
+    }
   });
+  _facturado = Math.max(0, _facturado);
+  _pendienteFacturar = Math.max(0, _pendienteFacturar);
 
   // Ordenar desglose detallado por monto
   var _fpArr = [];
@@ -2924,9 +2944,16 @@ function _renderIngresosERP() {
   // Santander
   h.push('<tr><td '+LS+' style="font-weight:700;color:var(--text-primary,#111);padding:10px 16px;font-size:12px;border-bottom:1px solid var(--color-divider,#f0f0f0)">Total Santander</td>'
     +'<td style="padding:10px 16px;font-size:14px;font-weight:800;text-align:right;color:var(--text-primary,#111);border-bottom:1px solid var(--color-divider,#f0f0f0)">'+fC(_totSantander)+'</td></tr>');
+  // Nota de Crédito: saldo a favor aplicado como pago — descuento, no cobro.
+  // No entra a ningún banco ni a la parte fiscal; se muestra para que la
+  // verificación cuadre exacta contra el Subtotal Pagado.
+  if (_totNotaCredito > 0) {
+    h.push('<tr><td '+LS+' style="font-weight:700;color:#7c3aed;padding:10px 16px;font-size:12px;border-bottom:1px solid var(--color-divider,#f0f0f0)">Notas de Crédito (descuento, no fiscal)</td>'
+      +'<td style="padding:10px 16px;font-size:14px;font-weight:800;text-align:right;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)">'+fC(_totNotaCredito)+'</td></tr>');
+  }
   // Verificación
-  h.push('<tr style="background:var(--color-surface,#fafafa)"><td style="padding:6px 16px;font-size:10px;color:var(--text-secondary,#9ca3af)">Verificación (TDC+Efectivo+Santander)</td>'
-    +'<td style="padding:6px 16px;font-size:10px;text-align:right;color:var(--text-secondary,#9ca3af)">'+fC(_totTDCTDD+_totEfectivo+_totSantander)+'</td></tr>');
+  h.push('<tr style="background:var(--color-surface,#fafafa)"><td style="padding:6px 16px;font-size:10px;color:var(--text-secondary,#9ca3af)">Verificación (TDC+Efectivo+Santander'+(_totNotaCredito>0?'+NC':'')+')</td>'
+    +'<td style="padding:6px 16px;font-size:10px;text-align:right;color:var(--text-secondary,#9ca3af)">'+fC(_totTDCTDD+_totEfectivo+_totSantander+_totNotaCredito)+'</td></tr>');
   h.push('</table></div>');
 
   // ── Columna derecha: Contable ──
@@ -2938,8 +2965,11 @@ function _renderIngresosERP() {
   h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#b45309;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ Descuento CFDI a capturar aparte</td><td id="ing-desc-cfdi-inline" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#b45309;border-bottom:1px solid var(--color-divider,#f0f0f0)">…</td></tr>');
   h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ Descuento ya horneado en precio</td><td id="ing-desc-horneado-inline" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)">…</td></tr>');
   h.push('<tr><td '+LS+' style="font-weight:700;color:#b45309">Pendiente por facturar</td><td '+VS+' style="color:#b45309">'+fC(_pendienteFacturar)+'</td></tr>');
-  h.push('<tr style="background:var(--color-surface,#fafafa)"><td style="padding:6px 16px;font-size:10px;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)">Verificación (Facturado + Pendiente)</td>'
-    +'<td style="padding:6px 16px;font-size:10px;text-align:right;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)">'+fC(_facturado+_pendienteFacturar)+'</td></tr>');
+  if (_ncFiscal > 0) {
+    h.push('<tr><td '+LS+' style="font-weight:700;color:#7c3aed">Notas de Crédito (no fiscal — descuento)</td><td '+VS+' style="color:#7c3aed">'+fC(_ncFiscal)+'</td></tr>');
+  }
+  h.push('<tr style="background:var(--color-surface,#fafafa)"><td style="padding:6px 16px;font-size:10px;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)">Verificación (Facturado + Pendiente'+(_ncFiscal>0?' + NC':'')+')</td>'
+    +'<td style="padding:6px 16px;font-size:10px;text-align:right;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)">'+fC(_facturado+_pendienteFacturar+_ncFiscal)+'</td></tr>');
   h.push('<tr><td '+LS+'>Contabilizado en el período</td><td '+VS+'>'+fC(_contabilizado)+'</td></tr>');
   h.push('<tr><td '+LS+'>Diferencia</td><td '+VS+' style="color:'+(_diferencia>0?'#b45309':'#166534')+'">'+fC(_diferencia)+'</td></tr>');
   h.push('<tr><td style="padding:8px 16px;font-size:11px;color:var(--text-secondary,#6b7280);border-bottom:1px solid var(--color-divider,#f0f0f0)">Pagado − Contabilizado</td><td style="padding:8px 16px;font-size:10px;text-align:right;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)">'+fC(_subtPagado)+' − '+fC(_contabilizado)+'</td></tr>');
@@ -5055,16 +5085,22 @@ async function ingFacAsignarHuerfano(folio, fileId, razonSocial, rfc, uuid, safe
 function _ingFacRenderSeccion2(d) {
   var el = document.getElementById('ing-fac-seccion2');
   if (!el) return;
-  if (!d.sinFactura.length && !(d.faltaDocumento||[]).length) { el.innerHTML = ''; return; }
+  var notasCred = d.notasCredito || [];
+  if (!d.sinFactura.length && !(d.faltaDocumento||[]).length && !notasCred.length) { el.innerHTML = ''; return; }
   var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  // Monto que de verdad se factura: la porción pagada con Nota de Crédito es
+  // descuento (no fiscal), así que se resta del pendiente.
+  function facturable(o){ return (o.totalFacturable !== undefined) ? o.totalFacturable : (o.total||0); }
   // Separar lo que de verdad falta por facturar (sin ningún XML localizable)
   // de lo que YA está facturado y solo falta vincular (sugerencia encontrada).
   // Mezclarlos en un solo total fue lo que hizo facturar doble: el total decía
   // "pendiente por facturar" incluyendo ventas cuya factura ya existía.
   var conSug = d.sinFactura.filter(function(o){ return o.sugerenciaFolio; });
   var sinNada = d.sinFactura.filter(function(o){ return !o.sugerenciaFolio; });
-  var totalPendienteReal = sinNada.reduce(function(s,o){ return s+(o.total||0); },0);
-  var totalSoloVincular = conSug.reduce(function(s,o){ return s+(o.total||0); },0);
+  var totalPendienteReal = sinNada.reduce(function(s,o){ return s+facturable(o); },0);
+  var totalSoloVincular = conSug.reduce(function(s,o){ return s+facturable(o); },0);
+  var totalNC = notasCred.reduce(function(s,o){ return s+(o.notaCredito||0); },0)
+    + d.sinFactura.reduce(function(s,o){ return s+(o.notaCredito||0); },0);
   var autoTotal = conSug.length + (d.faltaDocumento||[]).length;
   var h = '<div class="ing-fac-sc">'
     +'<div class="ing-fac-sh">📎 Documentos faltantes</div>'
@@ -5077,6 +5113,10 @@ function _ingFacRenderSeccion2(d) {
       +(conSug.length?('<div style="display:inline-flex;align-items:baseline;gap:8px;background:rgba(22,101,52,.08);border-radius:10px;padding:10px 16px">'
         +'<span style="font-size:20px;font-weight:800;color:#166534">'+fmtM(totalSoloVincular)+'</span>'
         +'<span style="font-size:11px;font-weight:600;color:#166534">ya facturado — solo falta vincular ('+conSug.length+')</span>'
+      +'</div>'):'')
+      +(totalNC>0?('<div style="display:inline-flex;align-items:baseline;gap:8px;background:rgba(124,58,237,.08);border-radius:10px;padding:10px 16px">'
+        +'<span style="font-size:20px;font-weight:800;color:#7c3aed">'+fmtM(totalNC)+'</span>'
+        +'<span style="font-size:11px;font-weight:600;color:#7c3aed">Notas de Crédito — descuento, NO se factura</span>'
       +'</div>'):'')
     +'</div>'
     +'<button onclick="ingFacVincularAutomatico()" id="ing-fac-autolote-btn" title="Vincula de un jalón: folios ya localizados + sugerencias sin ambigüedad (por nombre o por monto exacto en facturas de público en general) — sin subir ningún archivo" style="margin-bottom:12px;padding:8px 16px;background:#166534;color:#fff;border:none;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer" '+(autoTotal?'':'disabled')+'>🔗 Vincular todo automáticamente ('+autoTotal+')</button>'
@@ -5093,19 +5133,34 @@ function _ingFacRenderSeccion2(d) {
       sugCell = '<div style="font-size:10.5px;color:'+matchColor+';font-weight:600;margin-bottom:3px">'+etiqueta+'</div>'
         +'<button onclick="ingFacUsarSugerencia(\''+o.id+'\',\''+o.sugerenciaFolio+'\',\''+o.sugerenciaFileId+'\','+(porMonto?'true':'false')+',this)" style="padding:3px 8px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">Usar y vincular</button>';
     } else if (o.candidatosPorMonto && o.candidatosPorMonto.length) {
-      sugCell = '<div style="font-size:10.5px;color:#b45309;font-weight:600;margin-bottom:3px">'+o.candidatosPorMonto.length+' XML con el mismo monto ('+fmtM(o.total)+') — elige el correcto:</div>';
+      sugCell = '<div style="font-size:10.5px;color:#b45309;font-weight:600;margin-bottom:3px">'+o.candidatosPorMonto.length+' XML con el mismo monto ('+fmtM(facturable(o))+') — elige el correcto:</div>';
       o.candidatosPorMonto.forEach(function(c){
         sugCell += '<button onclick="ingFacUsarCandidato(\''+o.id+'\',\''+c.folio+'\',\''+c.fileId+'\',this)" style="display:block;margin:2px 0;padding:2px 7px;background:var(--card-bg,#fff);color:#b45309;border:1px solid #b45309;border-radius:6px;font-size:9.5px;font-weight:700;cursor:pointer">Folio '+_cxpEsc(c.folio)+' — '+c.fecha+(c.razonSocial?(' — '+_cxpEsc(c.razonSocial)):'')+'</button>';
       });
     } else {
       sugCell = '<span style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Sin coincidencia</span>';
     }
-    h += '<tr id="ing-fac-row-'+safe+'"><td>'+o.id+'</td><td>'+o.fecha+'</td><td>'+_cxpEsc(o.paciente)+'</td><td>'+fmtM(o.total)+'</td>'
+    var totCell = fmtM(facturable(o));
+    if ((o.notaCredito||0) > 0) totCell += '<div style="font-size:9px;color:#7c3aed;font-weight:700">venta '+fmtM(o.total)+' − NC '+fmtM(o.notaCredito)+'</div>';
+    h += '<tr id="ing-fac-row-'+safe+'"><td>'+o.id+'</td><td>'+o.fecha+'</td><td>'+_cxpEsc(o.paciente)+'</td><td>'+totCell+'</td>'
        +'<td>'+sugCell+'</td>'
        +'<td><label style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--text-secondary,#6b7280);cursor:pointer;padding:4px 9px;border:1.5px dashed var(--color-divider,#d1d5db);border-radius:6px">↑ XML<input type="file" accept=".xml" style="display:none" onchange="ingFacUploadXml(\''+o.id+'\',this)"></label> <span id="ing-fac-upload-st-'+safe+'" style="font-size:9.5px;color:var(--text-secondary,#9ca3af)"></span></td></tr>';
   });
   h += '<tr style="font-weight:800;background:var(--color-surface,#fafafa)"><td colspan="3" style="text-align:right;padding-right:10px">Total pendiente por facturar (sin ningún XML)</td><td>'+fmtM(totalPendienteReal)+'</td><td colspan="2"></td></tr>';
-  h += '</tbody></table></div>';
+  h += '</tbody></table>';
+  // Operaciones pagadas COMPLETAS con Nota de Crédito: no se facturan (el
+  // saldo a favor es un descuento) — se listan para que la conciliación
+  // total y la declaración cuadren sin que parezcan faltantes.
+  if (notasCred.length) {
+    h += '<div style="margin-top:16px;font-size:12px;font-weight:700;color:#7c3aed">📝 Pagadas con Nota de Crédito — no se facturan ('+notasCred.length+')</div>'
+      +'<div style="font-size:10.5px;color:var(--text-secondary,#9ca3af);margin:2px 0 8px">El saldo a favor aplicado es un descuento, no un cobro — no forma parte fiscal ni de la declaración.</div>'
+      +'<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Fecha</th><th>Paciente</th><th>Monto NC</th></tr></thead><tbody>';
+    notasCred.forEach(function(o){
+      h += '<tr style="opacity:.75"><td>'+o.id+'</td><td>'+o.fecha+'</td><td>'+_cxpEsc(o.paciente)+'</td><td style="color:#7c3aed;font-weight:700">'+fmtM(o.notaCredito)+'</td></tr>';
+    });
+    h += '</tbody></table>';
+  }
+  h += '</div>';
   el.innerHTML = h;
 }
 
