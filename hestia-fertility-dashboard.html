@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.04.04 -->
+﻿<!-- app-build:2026.07.04.05 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2919,6 +2919,12 @@ function _renderIngresosERP() {
   h.push('<tr><td '+LS+'>Diferencia</td><td '+VS+' style="color:'+(_diferencia>0?'#b45309':'#166534')+'">'+fC(_diferencia)+'</td></tr>');
   h.push('<tr><td style="padding:8px 16px;font-size:11px;color:var(--text-secondary,#6b7280);border-bottom:1px solid var(--color-divider,#f0f0f0)">Pagado − Contabilizado</td><td style="padding:8px 16px;font-size:10px;text-align:right;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)">'+fC(_subtPagado)+' − '+fC(_contabilizado)+'</td></tr>');
   h.push('<tr><td '+LS+'>CFDI Ingreso mes anterior</td><td style="padding:8px 16px;text-align:right;border-bottom:1px solid var(--color-divider,#f0f0f0)"><input id="ing-cfdi-anterior" type="number" value="0" step="0.01" style="width:130px;text-align:right;padding:5px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;font-weight:700;background:var(--card-bg,#fff)" oninput="ingCalcISR()"></td></tr>');
+  // CFDI cruzados de periodo — se llenan al correr "Analizar periodo actual"
+  // en el tab Facturación (necesita el escaneo de XML en Drive). El campo de
+  // arriba se auto-llena con el monto detectado de CFDIs de otro periodo.
+  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#0c4a6e;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ CFDI de otro periodo timbrados este mes (+)</td><td id="ing-cfdi-cruz-in" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#0c4a6e;border-bottom:1px solid var(--color-divider,#f0f0f0)" title="Corre Analizar periodo actual en el tab Facturación para calcularlo">—</td></tr>');
+  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ Ventas del periodo timbradas en otro mes (−)</td><td id="ing-cfdi-cruz-out" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)" title="Corre Analizar periodo actual en el tab Facturación para calcularlo">—</td></tr>');
+  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#dc2626;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ CFDI sobrantes por cancelar</td><td id="ing-cfdi-sobrantes" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#dc2626;border-bottom:1px solid var(--color-divider,#f0f0f0)" title="Corre Analizar periodo actual en el tab Facturación para calcularlo">—</td></tr>');
   h.push('<tr style="background:rgba(196,106,122,.06)"><td style="padding:12px 16px;font-size:14px;font-weight:800;color:var(--color-primary,#c46a7a);border-top:2px solid var(--color-primary,#c46a7a)">ISR Declarado</td>'
     +'<td id="ing-isr-val" style="padding:12px 16px;font-size:18px;font-weight:800;text-align:right;color:var(--color-primary,#c46a7a);border-top:2px solid var(--color-primary,#c46a7a)">'+fC(_isrDeclarado)+'</td></tr>');
   h.push('</table>');
@@ -3027,6 +3033,9 @@ function _renderIngresosERP() {
   setTimeout(function(){ if(typeof _tourStart==='function') _tourStart(_ING_TOUR,'hestia_tour_ing_v1'); },700);
 
   if (document.getElementById('ing-desc-fiscal-body') && _ingActiveTab==='lista') _ingCargarDescuentosFiscales();
+  // Si ya hay un análisis de facturación en memoria, repoblar los renglones
+  // de CFDI cruzados del Resumen Contable (el re-render los deja en "—").
+  if (typeof _ingFacFillResumenContable === 'function') _ingFacFillResumenContable();
 
   // Render chart
   setTimeout(function(){
@@ -4578,6 +4587,7 @@ function ingFacRender() {
     +'<button onclick="ingFacBackfillRazonSocial()" id="ing-fac-backfill-btn" title="Completa razón social/RFC de operaciones que ya tienen factura vinculada pero les falta este dato (ej. facturas a nombre de un familiar)" style="margin-left:8px;padding:9px 18px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer" '+(periodo?'':'disabled')+'>🔄 Completar razón social histórica</button>'
     +'<div id="ing-fac-resultado" style="margin-top:16px"></div>'
     +'</div>'
+    +'<div id="ing-fac-cruzados"></div>'
     +'<div id="ing-fac-huerfanos"></div>'
     +'<div id="ing-fac-seccion2"></div>'
     +'<div id="ing-fac-seccion3"></div>'
@@ -4614,7 +4624,9 @@ function _ingFacRenderResultado(d) {
     h += '<div style="font-size:12px;font-weight:700;margin-bottom:6px">Se encontró el XML en Drive — vincular con un clic:</div>';
     h += '<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Fecha</th><th>Paciente</th><th>Factura</th><th>Total op.</th><th>Total XML</th><th></th></tr></thead><tbody>';
     d.faltaDocumento.forEach(function(o){
-      h += '<tr><td>'+o.id+'</td><td>'+o.fecha+'</td><td>'+_cxpEsc(o.paciente)+'</td><td>'+_cxpEsc(o.factura)+'</td><td>'+fmtM(o.total)+'</td><td>'+fmtM(o.xmlTotal)+'</td>'
+      var facCell = _cxpEsc(o.factura);
+      if (o.xmlOtroMes) facCell += '<div style="font-size:9.5px;color:#7c3aed;font-weight:700">⏭ timbrada en otro mes ('+_cxpEsc(o.xmlFecha||'')+')</div>';
+      h += '<tr><td>'+o.id+'</td><td>'+o.fecha+'</td><td>'+_cxpEsc(o.paciente)+'</td><td>'+facCell+'</td><td>'+fmtM(o.total)+'</td><td>'+fmtM(o.xmlTotal)+'</td>'
          +'<td><button onclick="ingFacVincular(\''+o.id+'\',\''+o.xmlFileId+'\',this)" style="padding:4px 10px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10.5px;font-weight:700;cursor:pointer">Vincular</button></td></tr>';
     });
     h += '</tbody></table>';
@@ -4632,10 +4644,75 @@ function _ingFacRenderResultado(d) {
       +'</tbody></table></div></div>';
   }
   out.innerHTML = h;
+  _ingFacRenderCruzados(d);
   _ingFacRenderHuerfanos(d);
   _ingFacRenderSeccion2(d);
   _ingFacRenderSeccion3(d);
   _ingFacRenderSeccion4(d);
+  _ingFacFillResumenContable();
+}
+
+// ── CFDI cruzados de periodo ─────────────────────────────────────────
+// La declaración mensual del SAT se arma con los CFDI TIMBRADOS en el mes,
+// no con las ventas del mes. Cuando una venta de junio se factura en julio
+// (o viceversa), la diferencia no es un error — es un cruce de periodo que
+// hay que tener identificado con fecha y monto. Esta sección es el historial
+// de esos cruces para el rango analizado.
+function _ingFacRenderCruzados(d) {
+  var el = document.getElementById('ing-fac-cruzados');
+  if (!el) return;
+  var cz = d.cfdiCruzados;
+  if (!cz || (!cz.opsFacturadasOtroMes.length && !cz.xmlDeOtroPeriodo.length)) { el.innerHTML = ''; return; }
+  var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var h = '<div class="ing-fac-sc">'
+    +'<div class="ing-fac-sh">⏭ CFDI cruzados de periodo</div>'
+    +'<div class="ing-fac-sub">La declaración del mes se arma con los CFDI <b>timbrados</b> en el mes. Estos cruces explican la diferencia contra los ingresos del periodo — no son errores, pero hay que declararlos en el mes correcto.</div>';
+  if (cz.opsFacturadasOtroMes.length) {
+    h += '<div style="display:inline-flex;align-items:baseline;gap:8px;background:rgba(124,58,237,.08);border-radius:10px;padding:10px 16px;margin-bottom:10px">'
+      +'<span style="font-size:18px;font-weight:800;color:#7c3aed">−'+fmtM(cz.totalOpsFacturadasOtroMes)+'</span>'
+      +'<span style="font-size:11px;font-weight:600;color:#7c3aed">ventas de este periodo timbradas en OTRO mes — se declaran en el mes del timbrado, no en este</span>'
+    +'</div>'
+    +'<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Fecha venta</th><th>Paciente</th><th>Total</th><th>Folio</th><th>Timbrada el</th><th>Se declara en</th></tr></thead><tbody>';
+    cz.opsFacturadasOtroMes.forEach(function(o){
+      h += '<tr><td>'+_cxpEsc(o.opId)+'</td><td>'+_cxpEsc(o.fecha)+'</td><td>'+_cxpEsc(o.paciente)+'</td><td>'+fmtM(o.total)+'</td><td>'+_cxpEsc(o.folio||'')+'</td><td>'+_cxpEsc(o.xmlFecha||'')+'</td><td style="font-weight:700;color:#7c3aed">'+_cxpEsc(o.xmlMes||'')+'</td></tr>';
+    });
+    h += '</tbody></table>';
+  }
+  if (cz.xmlDeOtroPeriodo.length) {
+    h += '<div style="display:inline-flex;align-items:baseline;gap:8px;background:rgba(12,74,110,.08);border-radius:10px;padding:10px 16px;margin:14px 0 10px">'
+      +'<span style="font-size:18px;font-weight:800;color:#0c4a6e">+'+fmtM(cz.totalXmlDeOtroPeriodo)+'</span>'
+      +'<span style="font-size:11px;font-weight:600;color:#0c4a6e">CFDI timbrados en este periodo de ventas de OTRO mes — suman a la declaración de este mes</span>'
+    +'</div>'
+    +'<table class="ing-fac-tbl"><thead><tr><th>Folio</th><th>Timbrada el</th><th>Receptor</th><th>Total</th><th>Venta original</th><th>Fecha venta</th></tr></thead><tbody>';
+    cz.xmlDeOtroPeriodo.forEach(function(x){
+      h += '<tr><td>'+_cxpEsc((x.serie||'')+' '+(x.folio||''))+'</td><td>'+_cxpEsc(x.fecha||'')+'</td><td>'+_cxpEsc(x.receptorNombre||'—')+'</td><td>'+fmtM(x.total)+'</td><td style="font-weight:700">'+_cxpEsc(x.opDuena||'')+' ('+_cxpEsc(x.opDuenaPaciente||'')+')</td><td>'+_cxpEsc(x.opDuenaFecha||'')+'</td></tr>';
+    });
+    h += '</tbody></table>';
+  }
+  h += '</div>';
+  el.innerHTML = h;
+}
+
+// Rellena en el Resumen Contable (tab Lista) los renglones de CFDI cruzados y
+// auto-llena el campo "CFDI Ingreso mes anterior" con lo detectado — antes
+// había que calcularlo a mano. Solo puede llenarse después de correr
+// "Analizar periodo actual" (necesita el escaneo de XML de Drive).
+function _ingFacFillResumenContable() {
+  var d = _ingFacResult;
+  if (!d || !d.ok) return;
+  var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var cz = d.cfdiCruzados || {};
+  var inEl = document.getElementById('ing-cfdi-cruz-in');
+  var outEl = document.getElementById('ing-cfdi-cruz-out');
+  var sobEl = document.getElementById('ing-cfdi-sobrantes');
+  if (inEl) inEl.textContent = '+'+fmtM(cz.totalXmlDeOtroPeriodo||0);
+  if (outEl) outEl.textContent = '−'+fmtM(cz.totalOpsFacturadasOtroMes||0);
+  if (sobEl) sobEl.textContent = fmtM((d.resumenFacturacion&&d.resumenFacturacion.totalSobrantes)||0);
+  var inp = document.getElementById('ing-cfdi-anterior');
+  if (inp && (!inp.value || parseFloat(inp.value) === 0) && (cz.totalXmlDeOtroPeriodo||0) > 0) {
+    inp.value = (cz.totalXmlDeOtroPeriodo).toFixed(2);
+    if (typeof ingCalcISR === 'function') ingCalcISR();
+  }
 }
 
 async function ingFacAnalizar() {
@@ -4843,8 +4920,13 @@ function _ingFacRenderHuerfanos(d) {
   if (!d.xmlHuerfanos || !d.xmlHuerfanos.length) { el.innerHTML = ''; return; }
   var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
   var escAttr = function(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
-  var totalHuerfanos = d.xmlHuerfanos.reduce(function(s,x){ return s+(x.total||0); },0);
-  var duplicados = d.xmlHuerfanos.filter(function(x){ return x.posibleDuplicadoDeOp; }).length;
+  // Los que pertenecen a una operación de otro mes NO son exceso — ya se
+  // listan en "CFDI cruzados de periodo". Aquí solo cuentan los sobrantes
+  // reales (candidatos a cancelar en el SAT).
+  var sobrantes = d.xmlHuerfanos.filter(function(x){ return x.clasificacion !== 'otroPeriodo'; });
+  if (!sobrantes.length) { el.innerHTML = ''; return; }
+  var totalSobrantes = sobrantes.reduce(function(s,x){ return s+(x.total||0); },0);
+  var duplicados = sobrantes.filter(function(x){ return x.posibleDuplicadoDeOp; }).length;
   // Lista de operaciones candidatas para "Asignar a operación": las mismas
   // que ya se muestran en Documentos faltantes (sin ArchivoURL todavía) —
   // datalist compartido por todas las filas, para buscar por nombre/OP sin
@@ -4853,15 +4935,15 @@ function _ingFacRenderHuerfanos(d) {
     return '<option value="'+escAttr(op.id+' — '+op.paciente+' — '+fmtM(op.total))+'">';
   }).join('');
   var h = '<div class="ing-fac-sc">'
-    +'<div class="ing-fac-sh">🧾 Facturas sin operación (posible exceso)</div>'
-    +'<div class="ing-fac-sub">XML timbrados en el periodo que no corresponden a ninguna venta registrada en Ingresos. Si sabes a qué paciente le pertenece, búscalo y <b>asígnalo</b> — no vuelve a aparecer. Si de verdad no hay una venta detrás, es una factura de más — revisa si hay que <b>cancelarla</b> en el SAT/ContaDigital. Si el monto coincide con una operación que ya tiene su propia factura, se marca como posible duplicado.</div>'
+    +'<div class="ing-fac-sh">🧾 Facturas sobrantes (sin venta detrás)</div>'
+    +'<div class="ing-fac-sub">XML timbrados en el periodo que no corresponden a ninguna venta registrada en Ingresos — <b>ni de este mes ni de ningún otro</b> (ya se buscó en todo el historial). Si sabes a qué paciente le pertenece, búscalo y <b>asígnalo</b>. Si de verdad no hay una venta detrás, es una factura de más — candidata a <b>cancelar</b> en el SAT/ContaDigital. Si el monto coincide con una operación que ya tiene su propia factura, se marca como posible duplicado.</div>'
     +'<div style="display:inline-flex;align-items:baseline;gap:8px;background:rgba(220,38,38,.08);border-radius:10px;padding:10px 16px;margin-bottom:14px">'
-      +'<span style="font-size:20px;font-weight:800;color:#dc2626">'+fmtM(totalHuerfanos)+'</span>'
-      +'<span style="font-size:11px;font-weight:600;color:#dc2626">facturado sin operación — '+d.xmlHuerfanos.length+' XML'+(duplicados?(' · '+duplicados+' posible(s) duplicado(s)'):'')+'</span>'
+      +'<span style="font-size:20px;font-weight:800;color:#dc2626">'+fmtM(totalSobrantes)+'</span>'
+      +'<span style="font-size:11px;font-weight:600;color:#dc2626">sobrante — '+sobrantes.length+' XML'+(duplicados?(' · '+duplicados+' posible(s) duplicado(s)'):'')+'</span>'
     +'</div>'
     +'<datalist id="ing-fac-ops-datalist">'+opciones+'</datalist>'
     +'<table class="ing-fac-tbl"><thead><tr><th>Folio</th><th>Fecha</th><th>Receptor</th><th>RFC</th><th>Total</th><th>UUID</th><th></th><th>Asignar a operación</th></tr></thead><tbody>';
-  d.xmlHuerfanos.forEach(function(x){
+  sobrantes.forEach(function(x){
     var safe = String(x.folio||x.uuid||'').replace(/[^a-zA-Z0-9_-]/g,'_');
     h += '<tr id="ing-fac-huerfano-'+safe+'"><td>'+_cxpEsc(x.serie||'')+' '+_cxpEsc(x.folio)+'</td><td>'+(x.fecha||'')+'</td><td>'+_cxpEsc(x.receptorNombre||'—')
       +(x.posibleDuplicadoDeOp?('<div style="font-size:9.5px;color:#dc2626;font-weight:700">⚠ posible duplicado de '+x.posibleDuplicadoDeOp+' ('+_cxpEsc(x.posibleDuplicadoDePaciente||'')+')</div>'):'')
@@ -4932,18 +5014,31 @@ async function ingFacAsignarHuerfano(folio, fileId, razonSocial, rfc, uuid, safe
 function _ingFacRenderSeccion2(d) {
   var el = document.getElementById('ing-fac-seccion2');
   if (!el) return;
-  if (!d.sinFactura.length) { el.innerHTML = ''; return; }
+  if (!d.sinFactura.length && !(d.faltaDocumento||[]).length) { el.innerHTML = ''; return; }
   var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
-  var totalPendiente = d.sinFactura.reduce(function(s,o){ return s+(o.total||0); },0);
-  var conSugerencia = d.sinFactura.filter(function(o){ return o.sugerenciaFolio; }).length;
+  // Separar lo que de verdad falta por facturar (sin ningún XML localizable)
+  // de lo que YA está facturado y solo falta vincular (sugerencia encontrada).
+  // Mezclarlos en un solo total fue lo que hizo facturar doble: el total decía
+  // "pendiente por facturar" incluyendo ventas cuya factura ya existía.
+  var conSug = d.sinFactura.filter(function(o){ return o.sugerenciaFolio; });
+  var sinNada = d.sinFactura.filter(function(o){ return !o.sugerenciaFolio; });
+  var totalPendienteReal = sinNada.reduce(function(s,o){ return s+(o.total||0); },0);
+  var totalSoloVincular = conSug.reduce(function(s,o){ return s+(o.total||0); },0);
+  var autoTotal = conSug.length + (d.faltaDocumento||[]).length;
   var h = '<div class="ing-fac-sc">'
     +'<div class="ing-fac-sh">📎 Documentos faltantes</div>'
-    +'<div class="ing-fac-sub">Operaciones sin número de factura capturado o sin XML localizado en Drive. Muchas facturas se timbran a "PÚBLICO EN GENERAL" (sin el nombre del paciente en el XML) — para esas, sube el XML descargado y el sistema lee el folio/razón social/RFC directo del archivo y vincula todo en un solo paso.</div>'
-    +'<div style="display:inline-flex;align-items:baseline;gap:8px;background:rgba(180,83,9,.08);border-radius:10px;padding:10px 16px;margin-bottom:14px">'
-      +'<span style="font-size:20px;font-weight:800;color:#b45309">'+fmtM(totalPendiente)+'</span>'
-      +'<span style="font-size:11px;font-weight:600;color:#b45309">pendiente por facturar — '+d.sinFactura.length+' operaciones</span>'
+    +'<div class="ing-fac-sub">Operaciones sin XML vinculado. <b>Ojo:</b> las que ya tienen una sugerencia encontrada en Drive NO están pendientes por facturar — su factura ya existe, solo falta vincularla. El total naranja solo suma las que de verdad no tienen ningún CFDI localizable (ni en este mes ni en los colindantes).</div>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px">'
+      +'<div style="display:inline-flex;align-items:baseline;gap:8px;background:rgba(180,83,9,.08);border-radius:10px;padding:10px 16px">'
+        +'<span style="font-size:20px;font-weight:800;color:#b45309">'+fmtM(totalPendienteReal)+'</span>'
+        +'<span style="font-size:11px;font-weight:600;color:#b45309">pendiente por facturar de verdad — '+sinNada.length+' operacion(es)</span>'
+      +'</div>'
+      +(conSug.length?('<div style="display:inline-flex;align-items:baseline;gap:8px;background:rgba(22,101,52,.08);border-radius:10px;padding:10px 16px">'
+        +'<span style="font-size:20px;font-weight:800;color:#166534">'+fmtM(totalSoloVincular)+'</span>'
+        +'<span style="font-size:11px;font-weight:600;color:#166534">ya facturado — solo falta vincular ('+conSug.length+')</span>'
+      +'</div>'):'')
     +'</div>'
-    +'<button onclick="ingFacVincularAutomatico()" id="ing-fac-autolote-btn" title="Vincula de un jalón todas las que ya tienen una sola coincidencia clara (por nombre o por monto exacto) — sin subir ningún archivo, el XML ya está localizado en Drive" style="margin-bottom:12px;padding:8px 16px;background:#166534;color:#fff;border:none;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer" '+(conSugerencia?'':'disabled')+'>🔗 Vincular '+conSugerencia+' sugerencia(s) automática(s)</button>'
+    +'<button onclick="ingFacVincularAutomatico()" id="ing-fac-autolote-btn" title="Vincula de un jalón: folios ya localizados + sugerencias sin ambigüedad (por nombre o por monto exacto en facturas de público en general) — sin subir ningún archivo" style="margin-bottom:12px;padding:8px 16px;background:#166534;color:#fff;border:none;border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer" '+(autoTotal?'':'disabled')+'>🔗 Vincular todo automáticamente ('+autoTotal+')</button>'
     +'<div id="ing-fac-autolote-resultado" style="margin-bottom:14px"></div>'
     +'<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Fecha</th><th>Paciente</th><th>Total</th><th>Sugerencia</th><th>Subir XML</th></tr></thead><tbody>';
   d.sinFactura.forEach(function(o){
@@ -4953,12 +5048,13 @@ function _ingFacRenderSeccion2(d) {
       var porMonto = o.sugerenciaTipo === 'monto';
       var matchColor = porMonto ? '#b45309' : (o.sugerenciaCoincideMonto ? '#166534' : '#b45309');
       var etiqueta = porMonto ? ('Folio '+_cxpEsc(o.sugerenciaFolio)+' — '+fmtM(o.sugerenciaTotal)+' — coincide solo por monto, sin nombre en el XML ⚠') : ('Folio '+_cxpEsc(o.sugerenciaFolio)+' — '+fmtM(o.sugerenciaTotal)+(o.sugerenciaCoincideMonto?' ✓':' ⚠'));
+      if (o.xmlOtroMes) etiqueta += '<div style="color:#7c3aed">⏭ timbrada en otro mes ('+_cxpEsc(o.xmlFecha||o.sugerenciaFecha||'')+') — se declara en ese mes</div>';
       sugCell = '<div style="font-size:10.5px;color:'+matchColor+';font-weight:600;margin-bottom:3px">'+etiqueta+'</div>'
         +'<button onclick="ingFacUsarSugerencia(\''+o.id+'\',\''+o.sugerenciaFolio+'\',\''+o.sugerenciaFileId+'\','+(porMonto?'true':'false')+',this)" style="padding:3px 8px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer">Usar y vincular</button>';
     } else if (o.candidatosPorMonto && o.candidatosPorMonto.length) {
-      sugCell = '<div style="font-size:10.5px;color:#b45309;font-weight:600;margin-bottom:3px">'+o.candidatosPorMonto.length+' XML con el mismo monto ('+fmtM(o.total)+'), sin nombre — elige el correcto:</div>';
+      sugCell = '<div style="font-size:10.5px;color:#b45309;font-weight:600;margin-bottom:3px">'+o.candidatosPorMonto.length+' XML con el mismo monto ('+fmtM(o.total)+') — elige el correcto:</div>';
       o.candidatosPorMonto.forEach(function(c){
-        sugCell += '<button onclick="ingFacUsarCandidato(\''+o.id+'\',\''+c.folio+'\',\''+c.fileId+'\',this)" style="display:block;margin:2px 0;padding:2px 7px;background:var(--card-bg,#fff);color:#b45309;border:1px solid #b45309;border-radius:6px;font-size:9.5px;font-weight:700;cursor:pointer">Folio '+_cxpEsc(c.folio)+' — '+c.fecha+'</button>';
+        sugCell += '<button onclick="ingFacUsarCandidato(\''+o.id+'\',\''+c.folio+'\',\''+c.fileId+'\',this)" style="display:block;margin:2px 0;padding:2px 7px;background:var(--card-bg,#fff);color:#b45309;border:1px solid #b45309;border-radius:6px;font-size:9.5px;font-weight:700;cursor:pointer">Folio '+_cxpEsc(c.folio)+' — '+c.fecha+(c.razonSocial?(' — '+_cxpEsc(c.razonSocial)):'')+'</button>';
       });
     } else {
       sugCell = '<span style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Sin coincidencia</span>';
@@ -4967,7 +5063,7 @@ function _ingFacRenderSeccion2(d) {
        +'<td>'+sugCell+'</td>'
        +'<td><label style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--text-secondary,#6b7280);cursor:pointer;padding:4px 9px;border:1.5px dashed var(--color-divider,#d1d5db);border-radius:6px">↑ XML<input type="file" accept=".xml" style="display:none" onchange="ingFacUploadXml(\''+o.id+'\',this)"></label> <span id="ing-fac-upload-st-'+safe+'" style="font-size:9.5px;color:var(--text-secondary,#9ca3af)"></span></td></tr>';
   });
-  h += '<tr style="font-weight:800;background:var(--color-surface,#fafafa)"><td colspan="3" style="text-align:right;padding-right:10px">Total pendiente</td><td>'+fmtM(totalPendiente)+'</td><td colspan="2"></td></tr>';
+  h += '<tr style="font-weight:800;background:var(--color-surface,#fafafa)"><td colspan="3" style="text-align:right;padding-right:10px">Total pendiente por facturar (sin ningún XML)</td><td>'+fmtM(totalPendienteReal)+'</td><td colspan="2"></td></tr>';
   h += '</tbody></table></div>';
   el.innerHTML = h;
 }
@@ -5033,7 +5129,7 @@ async function ingFacUploadXml(opId, input) {
 // UUID, sin folio/nombre/monto visible, así que no había forma de saber cuál
 // subir sin abrirlos uno por uno.
 async function ingFacVincularAutomatico() {
-  if (!confirm('Esto vincula de un jalón todas las operaciones con una sola coincidencia clara (por nombre o por monto exacto). Las que sean ambiguas o no tengan ninguna coincidencia no se tocan. ¿Continuar?')) return;
+  if (!confirm('Esto vincula de un jalón: (1) las operaciones cuyo folio capturado ya coincide con un XML localizado, y (2) las que tienen una sola coincidencia clara por nombre o por monto exacto (solo facturas de público en general). Las ambiguas o sin coincidencia no se tocan. ¿Continuar?')) return;
   var btn = document.getElementById('ing-fac-autolote-btn');
   var out = document.getElementById('ing-fac-autolote-resultado');
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="ing-spinner"></span>Vinculando…'; }
@@ -5078,7 +5174,7 @@ function _ingFacRenderAutoLoteResultado(res) {
     +'</div>';
   if (res.vinculadas.length) {
     h += '<table class="ing-fac-tbl"><thead><tr><th>OP</th><th>Paciente</th><th>Folio</th><th>Razón social</th><th>Tipo de match</th></tr></thead><tbody>'
-      + res.vinculadas.map(function(v){ return '<tr><td>'+v.opId+'</td><td>'+_cxpEsc(v.paciente)+'</td><td>'+_cxpEsc(v.folio)+'</td><td>'+_cxpEsc(v.razonSocial||'—')+'</td><td>'+(v.tipo==='monto'?'⚠ por monto':'por nombre')+'</td></tr>'; }).join('')
+      + res.vinculadas.map(function(v){ return '<tr><td>'+v.opId+'</td><td>'+_cxpEsc(v.paciente)+'</td><td>'+_cxpEsc(v.folio)+'</td><td>'+_cxpEsc(v.razonSocial||'—')+'</td><td>'+(v.tipo==='folio'?'✓ por folio capturado':(v.tipo==='monto'?'⚠ por monto':'por nombre'))+'</td></tr>'; }).join('')
       + '</tbody></table>';
   }
   out.innerHTML = h;

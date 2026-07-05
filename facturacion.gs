@@ -140,6 +140,36 @@ function _facMonthsInRange(fechaInicio, fechaFin) {
   return out;
 }
 
+// Igual que _facMonthsInRange pero agrega N meses colindantes por delante y por
+// detrás — para encontrar CFDI de ingresos del periodo que se timbraron en el
+// mes anterior/siguiente (el caso real: venta de junio facturada el 2 de julio).
+function _facMonthsInRangePadded(fechaInicio, fechaFin, pad) {
+  pad = pad || 1;
+  var base = _facMonthsInRange(fechaInicio, fechaFin);
+  if (!base.length) return base;
+  var out = base.slice();
+  var first = base[0], last = base[base.length - 1];
+  for (var i = 1; i <= pad; i++) {
+    var mA = first.mes - i, yA = first.anio;
+    while (mA < 1) { mA += 12; yA--; }
+    out.unshift({ anio: yA, mes: mA, colindante: true });
+    var mB = last.mes + i, yB = last.anio;
+    while (mB > 12) { mB -= 12; yB++; }
+    out.push({ anio: yB, mes: mB, colindante: true });
+  }
+  return out;
+}
+
+// Normaliza un folio para matching: "HF 1164", "hf-1164", " 1164 " y "01164"
+// deben encontrar el mismo XML. Se queda con la serie alfabética (si la hay)
+// + el número sin ceros a la izquierda.
+function _facNormFolio(s) {
+  var t = String(s == null ? '' : s).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  var m = t.match(/^([A-Z]*)0*(\d+)$/);
+  if (m) return m[2]; // solo el número — la serie del emisor es única (HF), no discrimina
+  return t;
+}
+
 function _facQuickParse(xml) {
   var headEnd = xml.indexOf('<cfdi:Emisor');
   var head = headEnd > -1 ? xml.substring(0, headEnd) : xml;
@@ -160,8 +190,13 @@ function _facQuickParse(xml) {
 }
 
 function _facBuildXmlIndex(fechaInicio, fechaFin) {
-  var months = _facMonthsInRange(fechaInicio, fechaFin);
-  var byFolio = {}, all = [], carpetas = [];
+  // Se escanean también los meses colindantes (±1) y NO se descarta ningún
+  // CFDI tipo I por fecha: un ingreso del periodo pudo haberse timbrado en
+  // otro mes, y eso es exactamente lo que hay que detectar (no esconder).
+  // Cada XML lleva enPeriodo (su fecha cae dentro del rango analizado) y
+  // mes (YYYY-MM del timbrado) para poder clasificar cruces de periodo.
+  var months = _facMonthsInRangePadded(fechaInicio, fechaFin, 1);
+  var byFolio = {}, byUuid = {}, byFileId = {}, all = [], carpetas = [];
   months.forEach(function (ym) {
     var mesTag = (ym.mes < 10 ? '0' : '') + ym.mes + ' ' + FAC_MESES_ABR[ym.mes - 1];
     var pathStr = 'onefactureXMLs/HCL2307051Y6/emitidos/' + ym.anio + '/' + mesTag;
@@ -179,23 +214,41 @@ function _facBuildXmlIndex(fechaInicio, fechaFin) {
         var p = _facQuickParse(xml);
         if (p.tipo !== 'I') continue; // solo facturas de ingreso (excluye nómina, notas de crédito, pago)
         var fechaISO = p.fecha ? p.fecha.substring(0, 10) : '';
-        if (fechaISO < fechaInicio || fechaISO > fechaFin) continue;
         totalIngreso++;
         var rec = {
           folio: p.folio, serie: p.serie, uuid: p.uuid, total: p.total,
           subTotal: p.subTotal, descuento: p.descuento, fecha: fechaISO,
+          mes: fechaISO.substring(0, 7),
+          enPeriodo: (fechaISO >= fechaInicio && fechaISO <= fechaFin),
           receptorNombre: p.receptorNombre, receptorRfc: p.receptorRfc,
           receptorCP: p.receptorCP, receptorUsoCfdi: p.receptorUsoCfdi, receptorRegimen: p.receptorRegimen,
           formaPago: p.formaPago,
           fileId: file.getId(), fileUrl: file.getUrl(), fileName: name
         };
         all.push(rec);
-        if (p.folio) byFolio[String(p.folio)] = rec;
+        if (p.folio) {
+          byFolio[String(p.folio)] = rec;
+          var nf = _facNormFolio(p.folio);
+          if (nf && !byFolio[nf]) byFolio[nf] = rec;
+        }
+        if (p.uuid) byUuid[p.uuid.toUpperCase()] = rec;
+        byFileId[rec.fileId] = rec;
       }
     }
-    carpetas.push({ path: pathStr, encontrada: !!folder, totalArchivosXml: totalArchivos, totalTipoIngreso: totalIngreso });
+    carpetas.push({ path: pathStr, encontrada: !!folder, totalArchivosXml: totalArchivos, totalTipoIngreso: totalIngreso, colindante: !!ym.colindante });
   });
-  return { byFolio: byFolio, all: all, carpetas: carpetas };
+  return { byFolio: byFolio, byUuid: byUuid, byFileId: byFileId, all: all, carpetas: carpetas };
+}
+
+// Busca en el índice el XML de una operación por folio normalizado o UUID.
+function _facXmlPorOp(idx, op) {
+  if (op.facturaUUID && idx.byUuid[String(op.facturaUUID).toUpperCase()]) return idx.byUuid[String(op.facturaUUID).toUpperCase()];
+  if (op.factura) {
+    if (idx.byFolio[op.factura]) return idx.byFolio[op.factura];
+    var nf = _facNormFolio(op.factura);
+    if (nf && idx.byFolio[nf]) return idx.byFolio[nf];
+  }
+  return null;
 }
 
 function _facReadOpsInRange(fechaInicio, fechaFin) {
@@ -203,6 +256,9 @@ function _facReadOpsInRange(fechaInicio, fechaFin) {
   var sheet = ss.getSheetByName(BD_INGRESOS_TAB);
   if (!sheet) return [];
   var raw = sheet.getDataRange().getValues();
+  // Columnas dinámicas (agregadas por migración, viven al final de la hoja)
+  var hdrs = (raw[0] || []).map(function (h) { return String(h).trim().toLowerCase(); });
+  var iUuid = hdrs.indexOf('facturauuid'), iRfc = hdrs.indexOf('facturarfc'), iRazon = hdrs.indexOf('razonsocial');
   var opsMap = {}, order = [];
   function dt(v) {
     if (!v) return '';
@@ -219,11 +275,22 @@ function _facReadOpsInRange(fechaInicio, fechaFin) {
     if (!opsMap[op]) {
       opsMap[op] = {
         id: op, fecha: fecha, paciente: String(r[3] || ''), total: 0,
-        factura: String(r[17] || '').trim(), poliza: String(r[18] || ''), archivoURL: String(r[22] || '')
+        factura: '', poliza: '', archivoURL: '', facturaUUID: '', facturaRFC: '', razonSocial: ''
       };
       order.push(op);
     }
-    opsMap[op].total += num(r[9]);
+    var o = opsMap[op];
+    o.total += num(r[9]);
+    // Factura#/Póliza/ArchivoURL/UUID viven en UNA sola línea de la OP (no
+    // necesariamente la primera) — se fusionan de todas las líneas. Leerlos
+    // solo de la primera línea fue el bug que marcaba como "pendiente por
+    // facturar" operaciones ya facturadas (y provocó facturación doble).
+    if (!o.factura && String(r[17] || '').trim()) o.factura = String(r[17]).trim();
+    if (!o.poliza && String(r[18] || '').trim()) o.poliza = String(r[18]).trim();
+    if (!o.archivoURL && String(r[22] || '').trim()) o.archivoURL = String(r[22]).trim();
+    if (iUuid > -1 && !o.facturaUUID && String(r[iUuid] || '').trim()) o.facturaUUID = String(r[iUuid]).trim();
+    if (iRfc > -1 && !o.facturaRFC && String(r[iRfc] || '').trim()) o.facturaRFC = String(r[iRfc]).trim();
+    if (iRazon > -1 && !o.razonSocial && String(r[iRazon] || '').trim()) o.razonSocial = String(r[iRazon]).trim();
   }
   return order.map(function (k) { return opsMap[k]; });
 }
@@ -253,10 +320,13 @@ function _facReadOpsConDetalleVenta(fechaInicio, fechaFin) {
       opsMap[op] = {
         id: op, fecha: fecha, paciente: String(r[3] || ''), total: 0, montoLista: 0,
         tieneDescuentoVenta: false, descuentoVentaPct: 0,
-        factura: String(r[17] || '').trim(), archivoURL: String(r[22] || '')
+        factura: '', archivoURL: ''
       };
       order.push(op);
     }
+    // Igual que _facReadOpsInRange: factura/URL pueden vivir en cualquier línea
+    if (!opsMap[op].factura && String(r[17] || '').trim()) opsMap[op].factura = String(r[17]).trim();
+    if (!opsMap[op].archivoURL && String(r[22] || '').trim()) opsMap[op].archivoURL = String(r[22]).trim();
     var pvp = num(r[6]), descPct = num(r[7]), cant = num(r[8]) || 1;
     opsMap[op].total += num(r[9]);
     opsMap[op].montoLista += pvp * cant;
@@ -312,17 +382,45 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
     var ops = _facReadOpsInRange(fechaInicio, fechaFin);
     var idx = _facBuildXmlIndex(fechaInicio, fechaFin);
     var conDocumento = [], faltaDocumento = [], sinFactura = [];
-    var usedFolios = {};
+    var usedFolios = {}, usedFileIds = {};
+    function marcarUsado(x) {
+      if (!x) return;
+      usedFileIds[x.fileId] = true;
+      if (x.folio) { usedFolios[x.folio] = true; usedFolios[_facNormFolio(x.folio)] = true; }
+    }
+    // Cruce de periodo: el CFDI se declara en el MES en que se timbró — si ese
+    // mes no es el mes de la venta, hay una diferencia fiscal que reportar.
+    function tagOtroMes(target, op, x) {
+      if (!x || !x.fecha) return;
+      var opMes = String(op.fecha || '').substring(0, 7);
+      if (x.mes && opMes && x.mes !== opMes) {
+        target.xmlOtroMes = true;
+        target.xmlFecha = x.fecha;
+        target.xmlMes = x.mes;
+      }
+    }
     ops.forEach(function (op) {
-      if (op.archivoURL) { conDocumento.push(op); if (op.factura) usedFolios[op.factura] = true; return; }
-      if (op.factura && idx.byFolio[op.factura]) {
-        var x = idx.byFolio[op.factura];
-        usedFolios[op.factura] = true;
-        faltaDocumento.push({
+      if (op.archivoURL) {
+        // Localizar el XML real detrás de la URL para: (a) que no aparezca
+        // como huérfano, (b) detectar si se timbró en otro mes.
+        var mUrl = op.archivoURL.match(/[-\w]{25,}/);
+        var xLinked = mUrl ? idx.byFileId[mUrl[0]] : null;
+        if (!xLinked) xLinked = _facXmlPorOp(idx, op);
+        marcarUsado(xLinked);
+        if (xLinked) { tagOtroMes(op, op, xLinked); op.xmlFolio = xLinked.folio; }
+        conDocumento.push(op);
+        return;
+      }
+      var x = _facXmlPorOp(idx, op);
+      if (x) {
+        marcarUsado(x);
+        var fd = {
           id: op.id, fecha: op.fecha, paciente: op.paciente, total: op.total, factura: op.factura,
           xmlFileId: x.fileId, xmlFileUrl: x.fileUrl, xmlTotal: x.total, xmlUuid: x.uuid,
           xmlRazonSocial: x.receptorNombre, xmlRfc: x.receptorRfc
-        });
+        };
+        tagOtroMes(fd, op, x);
+        faltaDocumento.push(fd);
         return;
       }
       sinFactura.push(op);
@@ -344,7 +442,7 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
       var mejor = null, mejorDelta = Infinity;
       for (var i = 0; i < idx.all.length; i++) {
         var x = idx.all[i];
-        if (usedFolios[x.folio]) continue;
+        if (usedFileIds[x.fileId]) continue;
         var xNorm = _pacNormNombre(x.receptorNombre);
         if (!xNorm) continue;
         var matched = candidatos.some(function (c) { return c && (xNorm.indexOf(c) > -1 || c.indexOf(xNorm) > -1); });
@@ -362,7 +460,8 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
         op.sugerenciaRfc = mejor.receptorRfc;
         op.sugerenciaUuid = mejor.uuid;
         op.sugerenciaTipo = 'nombre';
-        usedFolios[mejor.folio] = true; // no ofrecer el mismo XML como sugerencia a dos operaciones
+        tagOtroMes(op, op, mejor);
+        marcarUsado(mejor); // no ofrecer el mismo XML como sugerencia a dos operaciones
       }
     });
 
@@ -375,10 +474,29 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
     // usuario elija a mano.
     sinFactura.forEach(function (op) {
       if (op.sugerenciaFolio) return;
-      var candidatos = idx.all.filter(function (x) {
-        return x.folio && !usedFolios[x.folio] && Math.abs((x.total || 0) - (op.total || 0)) < 0.01;
+      // Un XML timbrado a nombre de OTRA persona no es candidato automático por
+      // monto (pertenece a quien dice su razón social; si de verdad es de esta
+      // operación —ej. pagó el esposo— se vincula a mano). Solo los genéricos
+      // (PÚBLICO EN GENERAL / RFC XAXX010101000) se sugieren por monto.
+      function esGenerico(x) {
+        var rfc = String(x.receptorRfc || '').toUpperCase();
+        var nom = _pacNormNombre(x.receptorNombre);
+        return rfc === 'XAXX010101000' || nom.indexOf('publico en general') > -1 || !nom;
+      }
+      var todosMonto = idx.all.filter(function (x) {
+        return x.folio && !usedFileIds[x.fileId] && Math.abs((x.total || 0) - (op.total || 0)) < 0.01;
       });
-      if (!candidatos.length) return;
+      var candidatos = todosMonto.filter(esGenerico);
+      if (!candidatos.length) {
+        // Sin genérico disponible: los con nombre se listan solo como candidatos
+        // manuales, nunca autoseleccionados.
+        if (todosMonto.length) {
+          op.candidatosPorMonto = todosMonto.slice(0, 8).map(function (x) {
+            return { folio: x.folio, fileId: x.fileId, fecha: x.fecha, total: x.total, razonSocial: x.receptorNombre, rfc: x.receptorRfc };
+          });
+        }
+        return;
+      }
       if (candidatos.length === 1) {
         var u = candidatos[0];
         op.sugerenciaFolio = u.folio;
@@ -390,7 +508,8 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
         op.sugerenciaRfc = u.receptorRfc;
         op.sugerenciaUuid = u.uuid;
         op.sugerenciaTipo = 'monto';
-        usedFolios[u.folio] = true;
+        tagOtroMes(op, op, u);
+        marcarUsado(u);
       } else {
         op.candidatosPorMonto = candidatos.slice(0, 8).map(function (x) {
           return { folio: x.folio, fileId: x.fileId, fecha: x.fecha, total: x.total, razonSocial: x.receptorNombre, rfc: x.receptorRfc };
@@ -398,34 +517,108 @@ function reconciliarFacturasXml(fechaInicio, fechaFin) {
       }
     });
 
-    var xmlHuerfanos = idx.all.filter(function (x) { return x.folio && !usedFolios[x.folio]; });
+    // ── XML sin operación en el periodo ────────────────────────────────
+    // Solo los timbrados DENTRO del rango cuentan aquí (los de meses
+    // colindantes solo sirvieron para encontrar CFDIs de ingresos del
+    // periodo). Antes de declarar un XML "sobrante", se busca su dueño en
+    // TODO BD_Ingresos sin filtro de fecha: si está vinculado a una
+    // operación de otro mes, no es exceso — es un CFDI cruzado de periodo.
+    var xmlHuerfanos = idx.all.filter(function (x) { return x.enPeriodo && !usedFileIds[x.fileId]; });
 
-    // Para cada XML huérfano: ¿su monto coincide con una operación que YA tiene
-    // su propia factura? Si sí, es señal fuerte de que este XML es un duplicado
-    // (se facturó dos veces la misma venta) — candidato a cancelar en el SAT en
-    // vez de dejarlo suelto. Se compara contra operaciones con documento
-    // confirmado (conDocumento) o con folio+XML ya encontrado (faltaDocumento),
-    // no contra sugerencias todavía sin confirmar.
+    var duenoIdx = _facIndexDuenosBDIngresos();
+    xmlHuerfanos.forEach(function (x) {
+      var dueno = duenoIdx.porFileId[x.fileId]
+        || (x.uuid && duenoIdx.porUuid[x.uuid.toUpperCase()])
+        || (x.folio && duenoIdx.porFolio[_facNormFolio(x.folio)]);
+      if (dueno) {
+        x.clasificacion = 'otroPeriodo';
+        x.opDuena = dueno.opId;
+        x.opDuenaFecha = dueno.fecha;
+        x.opDuenaPaciente = dueno.paciente;
+      } else {
+        x.clasificacion = 'sobrante';
+      }
+    });
+
+    // Posible duplicado: el monto coincide con una operación que YA tiene su
+    // propia factura — señal fuerte de que se facturó dos veces la misma venta.
     var opsFacturadas = conDocumento.concat(faltaDocumento);
     xmlHuerfanos.forEach(function (x) {
+      if (x.clasificacion === 'otroPeriodo') return;
       var match = opsFacturadas.find(function (op) { return Math.abs((op.total || 0) - (x.total || 0)) < 0.01; });
       if (match) { x.posibleDuplicadoDeOp = match.id; x.posibleDuplicadoDePaciente = match.paciente; }
     });
 
-    var totalFacturadoXml = idx.all.reduce(function (s, x) { return s + (x.total || 0); }, 0);
+    // ── Totales ─────────────────────────────────────────────────────────
+    var enPeriodo = idx.all.filter(function (x) { return x.enPeriodo; });
+    var totalFacturadoXml = enPeriodo.reduce(function (s, x) { return s + (x.total || 0); }, 0);
     var totalIngresos = ops.reduce(function (s, op) { return s + (op.total || 0); }, 0);
+    var sobrantes = xmlHuerfanos.filter(function (x) { return x.clasificacion === 'sobrante'; });
+    var huerfanosOtroPeriodo = xmlHuerfanos.filter(function (x) { return x.clasificacion === 'otroPeriodo'; });
     var totalHuerfanos = xmlHuerfanos.reduce(function (s, x) { return s + (x.total || 0); }, 0);
+    var totalSobrantes = sobrantes.reduce(function (s, x) { return s + (x.total || 0); }, 0);
+    var totalXmlDeOtroPeriodo = huerfanosOtroPeriodo.reduce(function (s, x) { return s + (x.total || 0); }, 0);
+
+    // Ingresos del periodo cuyo CFDI se timbró en otro mes (confirmados o con
+    // folio localizado — no sugerencias sin confirmar): van a la declaración
+    // del mes del timbrado, no de este.
+    var opsFacturadasOtroMes = [];
+    conDocumento.forEach(function (op) { if (op.xmlOtroMes) opsFacturadasOtroMes.push({ opId: op.id, paciente: op.paciente, fecha: op.fecha, total: op.total, folio: op.xmlFolio || op.factura, xmlFecha: op.xmlFecha, xmlMes: op.xmlMes }); });
+    faltaDocumento.forEach(function (fd) { if (fd.xmlOtroMes) opsFacturadasOtroMes.push({ opId: fd.id, paciente: fd.paciente, fecha: fd.fecha, total: fd.total, folio: fd.factura, xmlFecha: fd.xmlFecha, xmlMes: fd.xmlMes }); });
+    var totalOpsFacturadasOtroMes = opsFacturadasOtroMes.reduce(function (s, o) { return s + (o.total || 0); }, 0);
 
     return {
       ok: true, conDocumento: conDocumento, faltaDocumento: faltaDocumento,
       sinFactura: sinFactura, xmlHuerfanos: xmlHuerfanos, totalOps: ops.length,
       carpetasAnalizadas: idx.carpetas,
+      cfdiCruzados: {
+        opsFacturadasOtroMes: opsFacturadasOtroMes,        // ingresos de este periodo timbrados en otro mes
+        totalOpsFacturadasOtroMes: totalOpsFacturadasOtroMes,
+        xmlDeOtroPeriodo: huerfanosOtroPeriodo,             // CFDIs timbrados este mes de ventas de otro mes
+        totalXmlDeOtroPeriodo: totalXmlDeOtroPeriodo
+      },
       resumenFacturacion: {
         totalFacturadoXml: totalFacturadoXml, totalIngresos: totalIngresos,
-        totalHuerfanos: totalHuerfanos, diferencia: totalFacturadoXml - totalIngresos
+        totalHuerfanos: totalHuerfanos, diferencia: totalFacturadoXml - totalIngresos,
+        totalSobrantes: totalSobrantes, totalXmlDeOtroPeriodo: totalXmlDeOtroPeriodo,
+        totalOpsFacturadasOtroMes: totalOpsFacturadasOtroMes
       }
     };
   } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// Índice de "dueños" de facturas en TODO BD_Ingresos (sin filtro de fecha):
+// fileId del ArchivoURL, UUID y folio normalizado → {opId, fecha, paciente}.
+// Sirve para saber si un XML que parece huérfano en este periodo en realidad
+// pertenece a una operación de otro mes.
+function _facIndexDuenosBDIngresos() {
+  var out = { porFileId: {}, porUuid: {}, porFolio: {} };
+  try {
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sheet = ss.getSheetByName(BD_INGRESOS_TAB);
+    if (!sheet) return out;
+    var raw = sheet.getDataRange().getValues();
+    var hdrs = (raw[0] || []).map(function (h) { return String(h).trim().toLowerCase(); });
+    var iUuid = hdrs.indexOf('facturauuid');
+    function dt(v) {
+      if (!v) return '';
+      if (v instanceof Date) return v.getFullYear() + '-' + String(v.getMonth() + 1).padStart(2, '0') + '-' + String(v.getDate()).padStart(2, '0');
+      return String(v).substring(0, 10);
+    }
+    for (var i = 1; i < raw.length; i++) {
+      var r = raw[i];
+      var op = String(r[0] || '').trim();
+      if (!op) continue;
+      var info = { opId: op, fecha: dt(r[2]), paciente: String(r[3] || '') };
+      var url = String(r[22] || '').trim();
+      if (url) { var m = url.match(/[-\w]{25,}/); if (m && !out.porFileId[m[0]]) out.porFileId[m[0]] = info; }
+      var uuid = iUuid > -1 ? String(r[iUuid] || '').trim().toUpperCase() : '';
+      if (uuid && !out.porUuid[uuid]) out.porUuid[uuid] = info;
+      var folio = String(r[17] || '').trim();
+      if (folio) { var nf = _facNormFolio(folio); if (nf && !out.porFolio[nf]) out.porFolio[nf] = info; }
+    }
+  } catch (e) {}
+  return out;
 }
 
 // Agrega FacturaRFC y FacturaUUID a BD_Ingresos si no existen (migración segura, al final)
@@ -555,7 +748,10 @@ function vincularAutomaticoLote(fechaInicio, fechaFin, usuario) {
     var candidatos = rec.sinFactura.filter(function (o) { return o.sugerenciaFolio; });
     var ambiguas = rec.sinFactura.filter(function (o) { return o.candidatosPorMonto && o.candidatosPorMonto.length; }).length;
     var sinNada = rec.sinFactura.length - candidatos.length - ambiguas;
-    if (!candidatos.length) return { ok: true, vinculadas: [], ambiguas: ambiguas, sinNada: sinNada };
+    // faltaDocumento = el folio capturado YA coincide con un XML localizado —
+    // vínculo sin ambigüedad, solo falta guardar la URL. Entra al lote también.
+    var porFolio = rec.faltaDocumento || [];
+    if (!candidatos.length && !porFolio.length) return { ok: true, vinculadas: [], ambiguas: ambiguas, sinNada: sinNada };
 
     var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
     var sheet = ss.getSheetByName(BD_INGRESOS_TAB);
@@ -576,23 +772,26 @@ function vincularAutomaticoLote(fechaInicio, fechaFin, usuario) {
     }
 
     var vinculadas = [];
-    candidatos.forEach(function (op) {
+    function escribir(opId, fileId, folio, razonSocial, rfc, uuid, total, paciente, tipo) {
       var file;
-      try { file = DriveApp.getFileById(op.sugerenciaFileId); } catch (e) { return; }
+      try { file = DriveApp.getFileById(fileId); } catch (e) { return; }
       var url = file.getUrl();
-      var filas = rowsByOpId[op.id] || [];
+      var filas = rowsByOpId[opId] || [];
       filas.forEach(function (rowNum) {
         sheet.getRange(rowNum, urlCol).setValue(url);
-        sheet.getRange(rowNum, facturaCol).setValue(op.sugerenciaFolio);
-        if (razonCol > 0) sheet.getRange(rowNum, razonCol).setValue(op.sugerenciaRazonSocial || '');
-        if (rfcCol > 0) sheet.getRange(rowNum, rfcCol).setValue(op.sugerenciaRfc || '');
-        if (uuidCol > 0) sheet.getRange(rowNum, uuidCol).setValue(op.sugerenciaUuid || '');
+        if (folio) sheet.getRange(rowNum, facturaCol).setValue(folio);
+        if (razonCol > 0 && razonSocial) sheet.getRange(rowNum, razonCol).setValue(razonSocial);
+        if (rfcCol > 0 && rfc) sheet.getRange(rowNum, rfcCol).setValue(rfc);
+        if (uuidCol > 0 && uuid) sheet.getRange(rowNum, uuidCol).setValue(uuid);
       });
-      vinculadas.push({
-        opId: op.id, paciente: op.paciente, folio: op.sugerenciaFolio,
-        razonSocial: op.sugerenciaRazonSocial || '', rfc: op.sugerenciaRfc || '',
-        total: op.total, tipo: op.sugerenciaTipo
-      });
+      if (filas.length) vinculadas.push({ opId: opId, paciente: paciente, folio: folio, razonSocial: razonSocial || '', rfc: rfc || '', total: total, tipo: tipo });
+    }
+
+    porFolio.forEach(function (fd) {
+      escribir(fd.id, fd.xmlFileId, fd.factura, fd.xmlRazonSocial, fd.xmlRfc, fd.xmlUuid, fd.total, fd.paciente, 'folio');
+    });
+    candidatos.forEach(function (op) {
+      escribir(op.id, op.sugerenciaFileId, op.sugerenciaFolio, op.sugerenciaRazonSocial, op.sugerenciaRfc, op.sugerenciaUuid, op.total, op.paciente, op.sugerenciaTipo);
     });
 
     try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch (e) {}
@@ -1012,7 +1211,7 @@ function analizarDatosFiscalesPacientes(fechaInicio, fechaFin) {
     ops.forEach(function (op) {
       if (!op.factura) return;
       opsConFactura++;
-      var x = idx.byFolio[op.factura];
+      var x = _facXmlPorOp(idx, op);
       if (!x) return;
       var opNorm = _pacNormNombre(op.paciente);
       var pMatch = pacByNorm[opNorm];
@@ -1067,7 +1266,7 @@ function analizarDatosFiscalesPacientes(fechaInicio, fechaFin) {
 
     return {
       ok: true, resultado: resultado, sinMatch: sinMatchPaciente,
-      totalXmlEnRango: idx.all.length, totalOpsConFactura: opsConFactura,
+      totalXmlEnRango: idx.all.filter(function (x) { return x.enPeriodo; }).length, totalOpsConFactura: opsConFactura,
       totalConMatch: resultado.length, totalSinMatch: sinMatchPaciente.length,
       totalConConflicto: resultado.filter(function (r) { return r.conflicto; }).length
     };
