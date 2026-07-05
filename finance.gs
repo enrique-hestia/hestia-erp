@@ -576,6 +576,11 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(configurarMenuComprobantes());
     }
+    if (body.action === 'vincularComprobantesLote') {
+      if (typeof vincularComprobantesLote !== 'function')
+        return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(vincularComprobantesLote(body));
+    }
     if (body.action === 'enviarDocumentoCorreo') {
       if (typeof enviarDocumentoCorreo !== 'function')
         return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});

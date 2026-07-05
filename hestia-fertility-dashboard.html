@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.13 -->
+﻿<!-- app-build:2026.07.05.14 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4690,69 +4690,53 @@ async function ingViewFactura(url, folio) {
         + '<iframe src="'+previewUrl+'" style="width:100%;height:65vh;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px" allow="autoplay"></iframe>';
       return;
     }
+    // Réplica CFDI completa (conceptos con claves SAT, sellos, certificados
+    // y QR de verificación) — el mismo visor que Egresos y Comprobantes.
+    _medsStyles();
+    _cfdiActual = d; _cfdiActual._pdfFileId = '';
     var fmtM = function(v){ return '$'+(parseFloat(v)||0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); };
-    var fmtD = function(v){ return v?String(v).substring(0,10):''; };
-    var tipoLabel = d.tipoComprobante==='E'?'NOTA DE CRÉDITO':d.tipoComprobante==='N'?'NÓMINA':'FACTURA';
-    var h = '<div style="font-family:Arial,sans-serif;font-size:12px;color:var(--text-primary,#222)">';
-    h += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px;gap:12px">';
-    h += '<div><div style="font-size:18px;font-weight:800;color:var(--color-primary,#c46a7a)">'+esc(d.emisor.nombre||'HESTIA CLINIC')+'</div>';
-    h += '<div style="font-size:10.5px;color:var(--text-secondary,#6b7280);margin-top:2px">RFC: '+esc(d.emisor.rfc)+'</div>';
-    if (d.emisor.regimen) h += '<div style="font-size:10px;color:var(--text-secondary,#9ca3af)">Régimen: '+esc(d.emisor.regimen)+'</div>';
-    h += '</div><div style="text-align:right">';
-    h += '<div style="font-size:13px;font-weight:700;color:var(--color-primary,#c46a7a)">'+tipoLabel+'</div>';
-    h += '<div style="font-size:16px;font-weight:800;color:var(--text-primary,#111)">'+(d.serie||'')+(d.folio?'-'+d.folio:'')+'</div>';
-    h += '<div style="font-size:10.5px;color:var(--text-secondary,#6b7280)">Fecha: '+fmtD(d.fecha)+'</div>';
-    h += '</div></div>';
-    h += '<hr style="border:none;border-top:2px solid var(--color-primary,#c46a7a);margin:0 0 16px">';
-    h += '<div style="background:var(--color-surface,#f3f4f6);border-radius:8px;padding:11px 14px;margin-bottom:16px">';
-    h += '<div style="font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af);margin-bottom:5px">Receptor</div>';
-    h += '<div style="font-weight:700;font-size:12.5px">'+esc(d.receptor.nombre)+'</div>';
-    h += '<div style="color:var(--text-secondary,#555);margin-top:2px">RFC: '+esc(d.receptor.rfc)+'</div>';
-    if (d.receptor.domFiscal) h += '<div style="color:var(--text-secondary,#555)">C.P.: '+esc(d.receptor.domFiscal)+'</div>';
-    if (d.receptor.usoCfdi) h += '<div style="color:var(--text-secondary,#555)">Uso CFDI: '+esc(d.receptor.usoCfdi)+'</div>';
-    h += '</div>';
-    var hayDescCol = d.conceptos.some(function(c){ return (c.descuento||0) > 0; });
-    h += '<table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:11px">';
-    h += '<thead><tr style="background:var(--color-primary,#c46a7a);color:#fff">';
-    h += '<th style="padding:6px 10px;text-align:left;font-weight:600">Descripción</th>';
-    h += '<th style="padding:6px 8px;text-align:center;font-weight:600;width:50px">Cant.</th>';
-    h += '<th style="padding:6px 10px;text-align:right;font-weight:600;width:90px">Precio unit.</th>';
-    if (hayDescCol) h += '<th style="padding:6px 10px;text-align:right;font-weight:600;width:80px">Desc.</th>';
-    h += '<th style="padding:6px 10px;text-align:right;font-weight:600;width:90px">Importe neto</th>';
-    h += '</tr></thead><tbody>';
-    for (var ci=0;ci<d.conceptos.length;ci++) {
-      var c=d.conceptos[ci];
-      var netoConcepto = (c.importe||0) - (c.descuento||0);
-      h += '<tr style="background:'+(ci%2===0?'var(--card-bg,#fff)':'var(--color-surface,#f8f8f8)')+'">';
-      h += '<td style="padding:7px 10px;border-bottom:1px solid var(--color-divider,#f0e0e4)">'+esc(c.descripcion)+'</td>';
-      h += '<td style="padding:7px 8px;border-bottom:1px solid var(--color-divider,#f0e0e4);text-align:center">'+esc(c.cantidad)+'</td>';
-      h += '<td style="padding:7px 10px;border-bottom:1px solid var(--color-divider,#f0e0e4);text-align:right">'+fmtM(c.valorUnitario)+'</td>';
-      if (hayDescCol) h += '<td style="padding:7px 10px;border-bottom:1px solid var(--color-divider,#f0e0e4);text-align:right;color:'+(c.descuento>0?'#b45309':'var(--text-secondary,#9ca3af)')+'">'+(c.descuento>0?'−'+fmtM(c.descuento):'—')+'</td>';
-      h += '<td style="padding:7px 10px;border-bottom:1px solid var(--color-divider,#f0e0e4);text-align:right;font-weight:600">'+fmtM(netoConcepto)+'</td>';
-      h += '</tr>';
+    var warn = (d.descuento>0)
+      ? '<div style="background:rgba(180,83,9,.08);border-radius:8px;padding:9px 14px;font-size:10.5px;color:#b45309;margin-bottom:8px">⚠ Esta factura tiene un descuento CFDI de '+fmtM(d.descuento)+'. Al declarar en el SAT, este monto se debe capturar por separado en "Descuentos y devoluciones" para bajar la base gravable — el SAT prellena con el Subtotal ('+fmtM(d.subTotal)+'), no con el Total ya descontado.</div>'
+      : '';
+    body.innerHTML = warn
+      +'<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:8px">'
+        +'<button class="mv-btn-sec" style="padding:5px 12px;font-size:11px" onclick="compCfdiImprimir()">🖨 Imprimir / PDF</button>'
+        +(hasPermission('docs_enviar')?'<button class="mv-btn-sec" style="padding:5px 12px;font-size:11px" onclick="ingCfdiCorreo()">✉ Enviar por correo</button>':'')
+      +'</div>'
+      +'<div id="ing-cfdi-frame-wrap" style="height:62vh"></div>';
+    var frw = document.getElementById('ing-cfdi-frame-wrap');
+    if (frw) {
+      var ifr = document.createElement('iframe');
+      ifr.style.cssText = 'width:100%;height:100%;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;background:#fff';
+      ifr.srcdoc = _tplPage(_tplCfdiHTML(d)).replace('</head>','<style>.no-print{display:none!important}body>div{padding-top:8px!important}</style></head>');
+      frw.appendChild(ifr);
     }
-    h += '</tbody></table>';
-    var iva = d.totalImpuestosTrasladados || Math.max(0, d.total - (d.subTotal - (d.descuento||0)));
-    h += '<div style="display:flex;justify-content:flex-end;margin-bottom:14px">';
-    h += '<div style="min-width:260px;border:1px solid var(--color-divider,#f0e0e4);border-radius:8px;overflow:hidden">';
-    h += '<div style="display:flex;justify-content:space-between;padding:6px 14px;border-bottom:1px solid var(--color-divider,#f0e0e4)"><span style="color:var(--text-secondary,#666)">Subtotal (sin descuento)</span><span>'+fmtM(d.subTotal)+'</span></div>';
-    if (d.descuento>0) h += '<div style="display:flex;justify-content:space-between;padding:6px 14px;border-bottom:1px solid var(--color-divider,#f0e0e4)"><span style="color:#b45309">Descuento CFDI</span><span style="color:#b45309">−'+fmtM(d.descuento)+'</span></div>';
-    if (iva>0) h += '<div style="display:flex;justify-content:space-between;padding:6px 14px;border-bottom:1px solid var(--color-divider,#f0e0e4)"><span style="color:var(--text-secondary,#666)">IVA</span><span>'+fmtM(iva)+'</span></div>';
-    h += '<div style="display:flex;justify-content:space-between;padding:8px 14px;background:var(--color-primary,#c46a7a);color:#fff"><span style="font-weight:700">Total '+esc(d.moneda)+'</span><span style="font-weight:700;font-size:14px">'+fmtM(d.total)+'</span></div>';
-    h += '</div></div>';
-    if (d.descuento>0) h += '<div style="background:rgba(180,83,9,.08);border-radius:8px;padding:9px 14px;font-size:10.5px;color:#b45309;margin-bottom:10px">⚠ Esta factura tiene un descuento CFDI de '+fmtM(d.descuento)+'. Al declarar en el SAT, este monto se debe capturar por separado en "Descuentos y devoluciones" para bajar la base gravable — el SAT prellena con el Subtotal ('+fmtM(d.subTotal)+'), no con el Total ya descontado.</div>';
-    h += '<div style="background:var(--color-surface,#f3f4f6);border-radius:8px;padding:9px 14px;font-size:10.5px;color:var(--text-secondary,#666);display:flex;gap:20px;flex-wrap:wrap;margin-bottom:10px">';
-    if (d.formaPago) h += '<div><b style="color:var(--text-primary,#444)">Forma pago:</b> '+esc(d.formaPago)+'</div>';
-    if (d.metodoPago) h += '<div><b style="color:var(--text-primary,#444)">Método:</b> '+esc(d.metodoPago)+'</div>';
-    if (d.moneda!=='MXN'&&d.tipoCambio&&d.tipoCambio!==1) h += '<div><b style="color:var(--text-primary,#444)">T.C.:</b> '+d.tipoCambio+'</div>';
-    if (d.fechaTimbrado) h += '<div><b style="color:var(--text-primary,#444)">Timbrado:</b> '+fmtD(d.fechaTimbrado)+'</div>';
-    h += '</div>';
-    if (d.uuid) h += '<div style="padding:7px 10px;background:var(--card-bg,#fff);border:1px dashed var(--color-divider,#e5e7eb);border-radius:6px;font-size:9px;color:var(--text-secondary,#9ca3af);word-break:break-all;text-align:center">UUID: '+esc(d.uuid)+'</div>';
-    h += '</div>';
-    body.innerHTML = h;
   } catch(ex) {
     body.innerHTML = '<div style="text-align:center;padding:40px;color:#dc2626">Error: '+String(ex.message).replace(/</g,'&lt;')+'</div>';
   }
+}
+
+/* ✉ desde el visor de factura de Ingresos — el destinatario es el
+   RECEPTOR del CFDI (paciente/razón social a la que se facturó) */
+function ingCfdiCorreo(){
+  var x = _cfdiActual;
+  if (!x) return;
+  var fmtM = function(v){ return '$'+(Number(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var adjuntos = x.fileId ? [{fileId:x.fileId, nombre:x.fileName||'Factura.xml'}] : [];
+  hfEnviarCorreo({
+    tipoDoc: 'factura-ingreso',
+    para: '',
+    referencia: (x.serie?x.serie+'-':'')+(x.folio||x.uuid||''),
+    variables: {
+      destinatario: (x.receptor&&x.receptor.nombre)||'',
+      paciente: (x.receptor&&x.receptor.nombre)||'',
+      folio: (x.serie?x.serie+'-':'')+(x.folio||''),
+      monto: fmtM(x.total)+' '+(x.moneda||'MXN'),
+      fecha: (x.fecha||'').substring(0,10),
+      referencia: (x.serie?x.serie+'-':'')+(x.folio||'')
+    },
+    adjuntos: adjuntos
+  });
 }
 
 function ingSwitchTab(tab) {
@@ -6391,6 +6375,11 @@ function _renderEgresosERP() {
           :'')
         +'<div style="grid-column:1/-1"><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Notas</div><div style="color:var(--text-secondary,#374151)">'+(r.notas||'—')+'</div></div>'
         +'<div style="grid-column:1/-1"><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Observaciones</div><div style="color:var(--text-secondary,#374151)">'+(r.observaciones||'—')+'</div></div>'
+        +(r.linkFacturaUrl
+          ?'<div style="grid-column:1/-1" id="eg-fiscal-'+r._rowNum+'" data-url="'+r.linkFacturaUrl.replace(/"/g,'&quot;')+'">'
+            +'<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#8e4756">Datos fiscales (CFDI)</div>'
+            +'<div class="eg-fiscal-body" style="color:var(--text-secondary,#374151);margin-top:2px">Cargando datos del XML…</div></div>'
+          :'')
         +'</div></td></tr>');
     });
   } else {
@@ -6661,6 +6650,46 @@ function egToggleRow(rowNum) {
   var open = det.style.display !== 'none';
   det.style.display = open ? 'none' : '';
   if (tog) tog.classList.toggle('open', !open);
+  if (!open) egCargarFiscal(rowNum);
+}
+
+/* Al expandir un egreso con factura vinculada, se cargan (una sola vez)
+   los datos fiscales del XML: razón social, RFC, folio, UUID, timbrado. */
+var _egFiscalCache = {};
+async function egCargarFiscal(rowNum){
+  var box = document.getElementById('eg-fiscal-'+rowNum);
+  if (!box || box.dataset.loaded) return;
+  box.dataset.loaded = '1';
+  _medsStyles();
+  var cont = box.querySelector('.eg-fiscal-body');
+  var url = box.dataset.url || '';
+  var fid = _egDriveFileId(url);
+  if (!fid){ if(cont) cont.textContent = 'El adjunto no es un archivo de Drive.'; return; }
+  try {
+    if (!_egFiscalCache[fid]){
+      var s = getSession()||{};
+      var r = await fetch(APPS_SCRIPT_URL+'?action=leerXmlFactura&fileId='+encodeURIComponent(fid)+'&token='+encodeURIComponent(s.token||getToken())+'&_t='+Date.now(), {redirect:'follow'});
+      _egFiscalCache[fid] = await r.json();
+    }
+    var d = _egFiscalCache[fid];
+    if (!d.ok) throw new Error(d.error||'No se pudo leer el archivo');
+    if (d.tipo !== 'xml'){
+      cont.innerHTML = '<span style="color:var(--text-secondary,#9ca3af)">Adjunto PDF/imagen (sin datos XML) — <a href="'+url.replace(/"/g,'&quot;')+'" target="_blank" style="color:var(--color-primary,#c46a7a);font-weight:700">ver archivo ↗</a></span>';
+      return;
+    }
+    var esc = function(v){ return String(v==null?'':v).replace(/</g,'&lt;'); };
+    var fmtM = function(v){ return '$'+(Number(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+    var folio = (d.serie?d.serie+'-':'')+(d.folio||'S/F');
+    cont.innerHTML = '<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;background:#faf4f5;border-radius:8px;padding:9px 12px;margin-top:3px;font-size:11.5px">'
+      +'<span><b style="color:#8e4756">'+esc(d.emisor&&d.emisor.nombre||'—')+'</b> · RFC '+esc(d.emisor&&d.emisor.rfc||'—')+'</span>'
+      +'<span>Factura <b>'+esc(folio)+'</b> · '+fmtM(d.total)+' '+esc(d.moneda||'MXN')+'</span>'
+      +'<span style="font-family:monospace;font-size:10px" title="Folio fiscal">UUID '+esc(d.uuid||'—')+'</span>'
+      +(d.fechaTimbrado?'<span style="color:var(--text-secondary,#6b7280)">Timbrada '+esc(d.fechaTimbrado.substring(0,10))+'</span>':'')
+      +'<button class="mv-btn-sec" style="padding:3px 12px;font-size:10.5px;margin-left:auto" onclick="compVerCfdiFile(\''+fid+'\',\'\',\''+esc(folio).replace(/'/g,"\\'")+'\')">👁 Ver factura completa</button>'
+      +'</div>';
+  } catch(e){
+    if (cont) cont.innerHTML = '<span style="color:#dc2626">'+String(e.message).replace(/</g,'&lt;')+'</span>';
+  }
 }
 
 async function egToggleField(rowNum, field, value) {
@@ -13324,7 +13353,7 @@ var _compAnio = null, _compMes = null;
 var _compFuente = 'facturas'; // 'facturas' (XML CFDI recibidos) | 'pagos' (comprobantes de pago)
 var _compFiltro = '';
 var _COMP_MESES_LBL = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
-var _COMP_ROOTS = {facturas:'1t8--HM1xymgqGyBbIsI2jhMVCgQUBm9n', pagos:'1D9H3nNIrkgg2wqJtKXzhuSLDH6hIUoPk'};
+var _COMP_ROOTS = {facturas:'1rIWggcMKPAtCRvRxBrQgYzSaCK6kp63w', pagos:'1D9H3nNIrkgg2wqJtKXzhuSLDH6hIUoPk'};
 
 async function loadComprobantes(anio, mes, fuente){
   var root = document.getElementById('comprobantes-root');
@@ -13409,14 +13438,20 @@ function _renderComprobantes(){
     +'<div class="mv-hdr"><div><div class="mv-title">📎 Centro de Comprobantes</div>'
     +'<div class="mv-sub">'+(esPagos
       ?'Comprobantes de pago (transferencias) guardados en Drive · Contabilidad\\Pagos — se vinculan al egreso pagado'
-      :'Facturas XML de proveedores en Drive · Contabilidad\\Facturas Recibidas — se cruzan solas contra Egresos')+'</div></div>'
+      :'Repositorio de XML del SAT por año/mes — si el egreso ya tiene factura adjunta se respeta; si no, el sistema busca por proveedor, monto y fecha')+'</div></div>'
     +'<a href="https://drive.google.com/drive/folders/'+_COMP_ROOTS[_compFuente]+'" target="_blank" class="mv-btn-sec" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px">📁 Abrir carpeta en Drive</a></div>'
-    +'<div style="display:flex;gap:8px;margin-bottom:14px">'+tabBtn('facturas','📄 Facturas recibidas')+tabBtn('pagos','💸 Comprobantes de pago')+'</div>'
+    +'<div style="display:flex;gap:8px;margin-bottom:14px">'+tabBtn('facturas','📄 XML de egresos (SAT)')+tabBtn('pagos','💸 Comprobantes de pago')+'</div>'
     +'<div class="mv-card" style="padding:12px 16px">'+navHtml+'</div>'
     +kpisHtml
-    +'<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center">'
+    +'<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
       +'<input class="mv-inp" style="max-width:380px" placeholder="'+(esPagos?'Buscar por nombre de archivo o proveedor…':'Buscar por proveedor, RFC, folio, UUID o monto…')+'" value="'+_medsEsc(_compFiltro)+'" oninput="_compFiltro=this.value;_renderComprobantes()">'
       +(f?'<button class="mv-btn-sec" style="padding:6px 12px;font-size:11px" onclick="_compFiltro=\'\';_renderComprobantes()">✕ Limpiar</button>':'')
+      +(function(){
+        if (esPagos || !puedeVincular) return '';
+        var nSug = (d.comprobantes||[]).filter(function(x){ return x.estado==='sugerido'; }).length;
+        if (!nSug) return '';
+        return '<button class="mv-btn" style="margin-left:auto;padding:7px 16px;font-size:11.5px;background:#166534" onclick="compVincularLote(this)">⚡ Vincular sugeridos ('+nSug+')</button>';
+      })()
     +'</div>'
     +'<div class="mv-card"><table class="mv-tbl"><thead><tr>'
     +(esPagos
@@ -13598,15 +13633,24 @@ function compCfdiImprimir(){
   w.document.close();
 }
 
-async function compVerCfdi(idx){
+function compVerCfdi(idx){
   var x = _compData && _compData.comprobantes[idx];
   if (!x) return;
+  compVerCfdiFile(x.fileId, x.pdfFileId||'', (x.serie?x.serie+'-':'')+(x.folio||x.fileName));
+}
+
+/* Visor genérico por fileId — lo usan Comprobantes, el detalle de Egresos
+   y el visor de facturas de Ingresos */
+async function compVerCfdiFile(fileId, pdfFileId, titulo){
+  if (!fileId) return;
+  _medsStyles();
+  var old = document.getElementById('cfdi-ovl'); if (old) old.remove();
   var ovl = document.createElement('div'); ovl.id='cfdi-ovl';
   ovl.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
   ovl.onclick=function(e){ if(e.target===ovl) compCfdiCerrar(); };
   ovl.innerHTML='<div style="background:var(--color-surface,#fff);border-radius:14px;width:min(860px,95vw);height:min(92vh,900px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.35)">'
     +'<div style="display:flex;align-items:center;gap:8px;padding:11px 16px;border-bottom:1px solid var(--color-divider,#e5e7eb)">'
-      +'<span style="font-size:13px;font-weight:700;color:var(--color-text,#333)">📄 '+_medsEsc((x.serie?x.serie+'-':'')+(x.folio||x.fileName))+'</span>'
+      +'<span style="font-size:13px;font-weight:700;color:var(--color-text,#333)">📄 '+_medsEsc(titulo||'Factura')+'</span>'
       +'<span id="cfdi-modal-status" style="font-size:11px;color:var(--text-secondary,#9ca3af)">Cargando XML…</span>'
       +'<div style="margin-left:auto;display:flex;gap:8px">'
         +'<button class="mv-btn-sec" style="padding:5px 12px;font-size:11px" onclick="compCfdiImprimir()" id="cfdi-btn-print" disabled>🖨 Imprimir / PDF</button>'
@@ -13618,11 +13662,11 @@ async function compVerCfdi(idx){
   document.body.appendChild(ovl);
   try {
     var tok = encodeURIComponent(getToken());
-    var r = await fetch(APPS_SCRIPT_URL+'?action=leerXmlFactura&fileId='+encodeURIComponent(x.fileId)+'&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+    var r = await fetch(APPS_SCRIPT_URL+'?action=leerXmlFactura&fileId='+encodeURIComponent(fileId)+'&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
     var d = await r.json();
     if (!d.ok || d.tipo!=='xml') throw new Error(d.error||'No se pudo leer el XML');
     _cfdiActual = d;
-    _cfdiActual._pdfFileId = x.pdfFileId || '';
+    _cfdiActual._pdfFileId = pdfFileId || '';
     var st = document.getElementById('cfdi-modal-status');
     if (st) st.textContent = '';
     var pb = document.getElementById('cfdi-btn-print'); if (pb) pb.disabled = false;
@@ -13654,6 +13698,27 @@ async function compVincular(idx, rowNum, btn){
   } catch(e){
     alert('Error de conexión: '+e.message);
     if(btn){btn.disabled=false;btn.textContent='Vincular';}
+  }
+}
+
+/* ⚡ Vincular en lote todos los sugeridos del mes (botón manual) */
+async function compVincularLote(btn){
+  if (!confirm('¿Vincular automáticamente todos los XML sugeridos de este mes a sus egresos? Los egresos que ya tienen factura adjunta no se tocan.')) return;
+  if (btn){ btn.disabled = true; btn.textContent = 'Vinculando…'; }
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'vincularComprobantesLote', anio:_compAnio, mes:_compMes, usuario:s.email||''
+    })});
+    var d = await r.json();
+    if (!d.ok){ alert(d.error||'No se pudo vincular en lote'); if(btn){btn.disabled=false;btn.textContent='⚡ Vincular sugeridos';} return; }
+    var msg = '✓ '+d.vinculados+' factura(s) vinculadas.';
+    if (d.errores && d.errores.length) msg += '\n\nErrores:\n'+d.errores.join('\n');
+    alert(msg);
+    await loadComprobantes(_compAnio, _compMes);
+  } catch(e){
+    alert('Error de conexión: '+e.message);
+    if(btn){btn.disabled=false;btn.textContent='⚡ Vincular sugeridos';}
   }
 }
 

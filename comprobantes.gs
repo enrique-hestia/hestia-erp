@@ -18,12 +18,14 @@
    providers.gs (readProveedores) y core.gs/finance.gs para el wiring.
    ══════════════════════════════════════════════════════════════ */
 
-/* Dos fuentes — las MISMAS carpetas donde ya suben archivos los flujos de
-   Egresos/CxP (EGRESOS_DRIVE_FACTURAS / EGRESOS_DRIVE_PAGOS en finance.gs);
-   ambas se organizan Año → Mes ("2026/Junio") vía _getOrCreateMonthFolder:
-     facturas → Contabilidad\Facturas Recibidas (XML CFDI + su PDF)
-     pagos    → Contabilidad\Pagos (comprobantes de transferencia/pago) */
-var COMP_FACTURAS_ROOT_ID = '1t8--HM1xymgqGyBbIsI2jhMVCgQUBm9n';
+/* Dos fuentes, organizadas Año → Mes:
+     facturas → repositorio de XML CFDI de egresos del SAT (carpeta 1rIW…,
+                donde se descargan por año/mes TODOS los XML de proveedores;
+                distinta de "Facturas Recibidas" 1t8--…, que es el destino de
+                los adjuntos manuales 📄 y no se toca)
+     pagos    → Contabilidad\Pagos (comprobantes de transferencia,
+                = EGRESOS_DRIVE_PAGOS de finance.gs) */
+var COMP_FACTURAS_ROOT_ID = '1rIWggcMKPAtCRvRxBrQgYzSaCK6kp63w';
 var COMP_PAGOS_ROOT_ID    = '1D9H3nNIrkgg2wqJtKXzhuSLDH6hIUoPk';
 function _compRootId(fuente) { return fuente === 'pagos' ? COMP_PAGOS_ROOT_ID : COMP_FACTURAS_ROOT_ID; }
 var COMP_MESES_NOMBRES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
@@ -305,6 +307,33 @@ function vincularComprobanteEgreso(body) {
 
     try { logAudit(body.usuario || 'sistema', 'Comprobantes', 'Vincular' + (campo === 'pago' ? 'Pago' : 'Factura'), 'fila ' + rowNum, '', '', (body.uuid || fileId)); } catch (e) {}
     return { ok: true, rowNum: rowNum, url: url, campo: campo };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+/* ── Vincular sugeridos en lote: toma todos los XML del mes cuyo estado
+   sea "sugerido" (UN candidato claro; los egresos con factura adjunta ya
+   quedaron fuera del cruce) y escribe cada hipervínculo de golpe —
+   igual que el "Vincular todo" de la Facturación de Ingresos. ──────── */
+function vincularComprobantesLote(body) {
+  try {
+    var anio = parseInt(body.anio, 10) || new Date().getFullYear();
+    var mes = parseInt(body.mes, 10) || (new Date().getMonth() + 1);
+    var data = readComprobantesMes(anio, mes, 'facturas');
+    if (!data.ok) return data;
+    var vinculados = 0, detalles = [], errores = [];
+    (data.comprobantes || []).forEach(function (x) {
+      if (x.estado !== 'sugerido' || !x.candidatos || !x.candidatos.length) return;
+      var c = x.candidatos[0];
+      var r = vincularComprobanteEgreso({
+        anio: anio, rowNum: c.rowNum, fileId: x.fileId, campo: 'factura',
+        uuid: x.uuid, etiqueta: (x.serie ? x.serie + '-' : '') + (x.folio || 'Factura XML'),
+        usuario: body.usuario || 'sistema'
+      });
+      if (r.ok) { vinculados++; detalles.push({ folio: (x.serie ? x.serie + '-' : '') + (x.folio || ''), proveedor: c.proveedor, monto: c.monto }); }
+      else errores.push((x.folio || x.fileName) + ': ' + r.error);
+    });
+    try { logAudit(body.usuario || 'sistema', 'Comprobantes', 'VincularLote', anio + '-' + mes, '', '', vinculados + ' vinculados'); } catch (e) {}
+    return { ok: true, vinculados: vinculados, detalles: detalles, errores: errores };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
