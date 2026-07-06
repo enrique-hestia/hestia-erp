@@ -337,9 +337,11 @@ function vincularComprobantesLote(body) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
-/* ── Menú: agrega "Comprobantes" DENTRO de Egresos (fin-gastos, la vista
-   Gastos Operativos que abre la pantalla de Egresos) — el sidebar la
-   renderiza como vista-con-submenú. Correr UNA VEZ desde el editor. ── */
+/* ── Menú (estructura aprobada por Enrique): "Comprobantes" DENTRO de
+   Egresos — primero Gastos Operativos (fin-gastos, la vista de Egresos)
+   y Comprobantes colgando de él. El sidebar renderiza la vista-con-hijos
+   como navegable + desplegable. Idempotente: si la fila ya está bien,
+   no toca nada; si tiene otro padre, la regresa a fin-gastos. ───────── */
 function configurarMenuComprobantes() {
   var ss = SpreadsheetApp.openById(SHEET_ID);
   var sh = ss.getSheetByName('Menu');
@@ -348,23 +350,18 @@ function configurarMenuComprobantes() {
   var hdrs = data[0];
   var idxCol = hdrs.indexOf('ID'), padreCol = hdrs.indexOf('Padre');
 
-  var existeFinGastos = false;
   for (var i = 1; i < data.length; i++) {
-    var id = String(data[i][idxCol] || '').trim();
-    if (id === 'comprobantes') {
-      // Ya existe: solo asegurar que cuelgue de fin-gastos (Egresos)
+    if (String(data[i][idxCol] || '').trim() === 'comprobantes') {
       if (String(data[i][padreCol] || '').trim() !== 'fin-gastos') {
         sh.getRange(i + 1, padreCol + 1).setValue('fin-gastos');
-        return { ok: true, aviso: 'La entrada "comprobantes" ya existía — se movió dentro de Egresos (fin-gastos)' };
+        return { ok: true, aviso: 'La entrada "comprobantes" se movió dentro de Egresos (fin-gastos)' };
       }
-      return { ok: true, aviso: 'Ya existe la entrada "comprobantes" dentro de Egresos' };
+      return { ok: true, aviso: 'Ya está bien: comprobantes dentro de Egresos (fin-gastos)' };
     }
-    if (id === 'fin-gastos') existeFinGastos = true;
   }
-  var padre = existeFinGastos ? 'fin-gastos' : '';
-  var fila = ['comprobantes', padre, 'Comprobantes', '', 'paperclip', 1, 'vista', 'comprobantes', 'TRUE'];
+  var fila = ['comprobantes', 'fin-gastos', 'Comprobantes', '', 'paperclip', 1, 'vista', 'comprobantes', 'TRUE'];
   sh.getRange(sh.getLastRow() + 1, 1, 1, fila.length).setValues([fila]);
-  return { ok: true, padre: padre || '(raíz)' };
+  return { ok: true, creada: true };
 }
 
 /* ══════════════════════════════════════════════════════════════
