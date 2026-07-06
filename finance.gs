@@ -3436,6 +3436,41 @@ function readPacienteLista(pacienteNombre) {
   } catch(e) { return {ok:false, error:e.message, lista:'General'}; }
 }
 
+/* Ficha completa de un paciente por nombre (o correo) — la fila entera
+   keyed por encabezado + _rowNum, para poder EDITARLO desde el formulario
+   de ingresos con el mismo flujo del catálogo (openEditModal). */
+function readPacienteFull(query) {
+  try {
+    var q = String(query||'').trim().toLowerCase();
+    if (!q) return {ok:false, error:'Falta el nombre del paciente'};
+    var ss = SpreadsheetApp.openById(PACIENTES_SS_ID);
+    var sh = ss.getSheets()[0];
+    var data = sh.getDataRange().getValues();
+    var headers = data[0].map(function(h){ return String(h).trim(); });
+    // Localizar columnas de nombre y email (por si el usuario tecleó el correo)
+    var iNombre = 1, iEmail = -1;
+    for (var c=0;c<headers.length;c++){
+      var hl = headers[c].toLowerCase();
+      if (hl.indexOf('nombre')>-1 && iNombre===1) iNombre = c;
+      if (hl.indexOf('mail')>-1 || hl==='e-mail' || hl==='email') iEmail = c;
+    }
+    for (var i=1;i<data.length;i++){
+      var nombre = String(data[i][iNombre]||'').trim().toLowerCase();
+      var email = iEmail>-1 ? String(data[i][iEmail]||'').trim().toLowerCase() : '';
+      if (nombre === q || (email && email === q)) {
+        var row = { _rowNum: i+1 };
+        for (var k=0;k<headers.length;k++){ if (headers[k]) row[headers[k]] = data[i][k]; }
+        // Normalizar fecha a yyyy-MM-dd si viene como Date
+        for (var kk in row){
+          if (row[kk] instanceof Date) row[kk] = Utilities.formatDate(row[kk], Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        }
+        return {ok:true, row:row};
+      }
+    }
+    return {ok:false, error:'Ese paciente no está en el catálogo. Regístralo con el botón + antes de editarlo.'};
+  } catch(e) { return {ok:false, error:e.message}; }
+}
+
 function saveProductoPrecio(productoId, nuevoPrecio, vigenciaDesde, usuario) {
   try {
     var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);

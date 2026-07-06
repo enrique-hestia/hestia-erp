@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.27 -->
+﻿<!-- app-build:2026.07.05.28 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -3935,6 +3935,52 @@ var _ingPacienteLista = 'General';
 
 var _ingPacienteCallback = null; // se activa al guardar paciente desde ingreso
 
+// Corregir el paciente YA registrado desde el formulario de ingresos —
+// reusa el flujo de edición del catálogo (openEditModal + cascade rename).
+window._pacEditFromIngreso = false;
+async function ingEditarPaciente() {
+  var pacEl = document.getElementById('ing-paciente');
+  var nombre = pacEl ? pacEl.value.trim() : '';
+  if (!nombre) { alert('Escribe o selecciona primero el paciente que quieres corregir.'); return; }
+  if (!hasPermission('editar_ingresos') && !hasPermission('bank_edit')) { alert('No tienes permiso para editar pacientes.'); return; }
+  try {
+    var tok = encodeURIComponent(getToken());
+    var r = await fetch(APPS_SCRIPT_URL+'?action=pacienteFull&paciente='+encodeURIComponent(nombre)+'&token='+tok+'&_t='+Date.now());
+    var d = await r.json();
+    if (!d.ok) { alert(d.error || 'No se encontró el paciente en el catálogo.'); return; }
+    _capturaRows['cap-pacientes'] = [d.row];
+    window._pacEditFromIngreso = { oldNombre: nombre };
+    openEditModal('cap-pacientes', 0);
+  } catch(e) { alert('Error de conexión: '+e.message); }
+}
+
+// Tras guardar la edición del paciente: si vino del formulario de ingresos,
+// refleja los datos nuevos en el form sin recargar la vista (no se pierde la
+// operación en curso); si no, comportamiento normal (recargar catálogo).
+function _pacEditAfterSave(viewId, newNombre) {
+  closeModal(viewId);
+  if (window._pacEditFromIngreso) {
+    var oldN = (window._pacEditFromIngreso.oldNombre || '');
+    window._pacEditFromIngreso = false;
+    var rs = (document.getElementById('pac-f-razon_social')||{}).value || '';
+    var rfc = (document.getElementById('pac-f-rfc')||{}).value || '';
+    if (Array.isArray(_ingPacientesDB)) {
+      var ent = _ingPacientesDB.find(function(p){ return p.nombre && p.nombre.toLowerCase() === oldN.toLowerCase(); });
+      if (ent) { ent.nombre = newNombre; ent.razonSocial = rs; ent.rfc = rfc; }
+      else _ingPacientesDB.push({nombre:newNombre, razonSocial:rs, rfc:rfc, lista:'General'});
+    }
+    var dl = document.getElementById('ing-pac-list');
+    if (dl) Array.prototype.forEach.call(dl.options, function(o){ if (o.value.toLowerCase()===oldN.toLowerCase()) o.value = newNombre; });
+    var pacEl = document.getElementById('ing-paciente'); if (pacEl) pacEl.value = newNombre;
+    var rsEl = document.getElementById('ing-razon-social'); if (rsEl) rsEl.value = rs || newNombre;
+    var rfcEl = document.getElementById('ing-rfc-info'); if (rfcEl) rfcEl.value = rfc || '—';
+    _ingData = null; // la lista de ingresos se recarga la próxima vez
+  } else {
+    _ingData = null; _ingPacientesDB = []; _ingPacientesTS = 0;
+    loadView(currentView, currentFechaInicio, currentFechaFin, true);
+  }
+}
+
 function ingNuevoPaciente() {
   _ingPacienteCallback = function(nombre) {
     var pacEl = document.getElementById('ing-paciente');
@@ -4241,6 +4287,7 @@ async function ingOpenDrawer() {
     +'<input id="ing-paciente" list="ing-pac-list" '+S+' placeholder="Nombre o correo del paciente" onchange="ingOnPacienteChange()" oninput="ingOnPacienteInput(this)" onblur="setTimeout(function(){var d=document.getElementById(\'ing-pac-dd\');if(d)d.style.display=\'none\'},200)" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
     +'<div id="ing-pac-dd" style="display:none;position:absolute;top:calc(100% + 3px);left:0;right:0;z-index:999;background:var(--card-bg,#fff);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.13);max-height:220px;overflow-y:auto"></div>'
     +'</div>'
+    +'<button onclick="ingEditarPaciente()" type="button" title="Corregir datos del paciente registrado (nombre, razón social, RFC…)" style="width:34px;height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:8px;cursor:pointer;font-size:14px;line-height:1">✎</button>'
     +'<button onclick="ingNuevoPaciente()" type="button" title="Registrar nuevo paciente" style="width:34px;height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:18px;font-weight:700;line-height:1">+</button>'
     +'</div>'
     +'<div id="ing-lista-label" style="font-size:10px;font-weight:600;color:#0369a1;margin-top:3px">Lista: General</div></div>'
@@ -17368,18 +17415,11 @@ function submitEditCaptura(viewId) {
           _cascadeRenamePaciente(_pacOldNombre, _newNombreCaptura, cfg.msgEl).then(function(n) {
             var extra = n > 0 ? ' Se actualizaron ' + n + ' registros de ingresos.' : '';
             showModalMsg(cfg.msgEl, 'ok', '✓ Registro actualizado correctamente.' + extra);
-            setTimeout(function() {
-              closeModal(viewId);
-              _ingData = null; _ingPacientesDB = []; _ingPacientesTS = 0;
-              loadView(currentView, currentFechaInicio, currentFechaFin, true);
-            }, 2000);
+            setTimeout(function() { _pacEditAfterSave(viewId, _newNombreCaptura); }, 2000);
           });
         } else {
           showModalMsg(cfg.msgEl, 'ok', '✓ Registro actualizado correctamente.');
-          setTimeout(function() {
-            closeModal(viewId);
-            loadView(currentView, currentFechaInicio, currentFechaFin, true);
-          }, 1500);
+          setTimeout(function() { _pacEditAfterSave(viewId, (document.getElementById('pac-f-nombre')||{}).value||''); }, 1500);
         }
       } else {
         showModalMsg(cfg.msgEl, 'err', 'Error: ' + (res.error || 'No se pudo actualizar.'));

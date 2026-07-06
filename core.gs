@@ -461,6 +461,12 @@ function doGet(e) {
       return jsonResponse(readPacienteLista(decodeURIComponent(pacNombre)));
     }
 
+    if (action === 'pacienteFull') {
+      if (typeof readPacienteFull !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza finance.gs en Apps Script y redespliega.'});
+      return jsonResponse(readPacienteFull(decodeURIComponent((e && e.parameter.paciente) || '')));
+    }
+
     if (action === 'getFormatos') {
       return jsonResponse(readFormatos());
     }
