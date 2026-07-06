@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.31 -->
+﻿<!-- app-build:2026.07.05.32 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -9017,7 +9017,7 @@ function renderConciliacion(data) {
         var pctVal = (pctDisp > 0 && pctDisp < 1) ? (pctDisp*100) : pctDisp;
         hh.push('<td style="text-align:right;color:#b45309;font-weight:600">'+(pctVal>0?pctVal.toFixed(2)+'%':'—')+'</td>');
         hh.push('<td style="color:var(--text-secondary,#374151);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(m.observaciones||'—')+'</td>');
-        hh.push('<td style="text-align:center"><div class="'+cbChkCls+'" onclick="event.stopPropagation();cfToggleLib('+rn+','+(!(m.liberado))+') " title="'+(m.liberado?'Marcar como NO liberado':'Marcar como liberado')+'">'+(m.liberado?'✓':'')+'</div></td>');
+        hh.push('<td style="text-align:center"><div class="'+cbChkCls+'" data-orig="'+(m.liberado?1:0)+'" onclick="event.stopPropagation();cfToggleLibLocal(this,'+rn+')" title="'+(m.liberado?'Marcar como NO liberado':'Marcar como liberado')+'">'+(m.liberado?'✓':'')+'</div></td>');
       }
       hh.push(actCells+'</tr>');
       hh.push('<tr class="cb-detrow" id="cb-det-'+aB.id+'-'+rn+'" style="display:none"><td colspan="'+detColSpan+'">'+cbDetailHTML(m, aB.id)+'</td></tr>');
@@ -9584,7 +9584,7 @@ function renderCashFlow(data) {
         +'<td>$'+Math.abs(Math.round(m.cobro||0)).toLocaleString('en-US')+'</td>'
         +'<td style="color:#dc2626;font-size:11px">'+(m.comisiones?'($'+Math.abs(Math.round(m.comisiones)).toLocaleString('en-US')+')':'\u2014')+'</td>'
         +'<td style="font-weight:600;color:#16a34a">$'+Math.round(Math.abs(m.totalVenta||m.monto||0)).toLocaleString('en-US')+'</td>'
-        +'<td style="text-align:center"><div class="'+chkCls+'" onclick="cfToggleLib('+rn+','+(!m.liberado)+')" title="'+(m.liberado?'Marcar como NO liberado':'Marcar como liberado')+'">'+(m.liberado?'\u2713':'')+'</div></td>'
+        +'<td style="text-align:center"><div class="'+chkCls+'" data-orig="'+(m.liberado?1:0)+'" onclick="cfToggleLibLocal(this,'+rn+')" title="'+(m.liberado?'Marcar como NO liberado':'Marcar como liberado')+'">'+(m.liberado?'\u2713':'')+'</div></td>'
         +'</tr>');
     });
     if(!movs.length) hh.push('<tr><td colspan="7"><div class="cf-empty">Sin movimientos \u00b7 <a href="javascript:cfOpenDrawer()" style="color:var(--color-primary,#c46a7a)">Capturar primero \u2192</a></div></td></tr>');
@@ -9748,6 +9748,70 @@ async function cfToggleLib(rowNum, liberado) {
       alert('Error al guardar: ' + (res.error || 'Respuesta inesperada del servidor'));
     }
   } catch(e) { alert('Error de conexión: ' + e.message); }
+}
+
+/* ── Liberado por LOTE ─────────────────────────────────────────────
+   Marcar el checkbox ya no guarda ni recarga en cada clic: solo cambia
+   el estado localmente y acumula los cambios. Un botón flotante los
+   guarda todos juntos — así se pueden liberar varios movimientos de
+   corrido sin que la tabla se recargue entre uno y otro. ──────────── */
+var _cfLibPending = {}; // rowNum → nuevo estado (true/false), solo los que cambiaron
+
+function cfToggleLibLocal(el, rowNum) {
+  if (!rowNum) return;
+  var orig = el.dataset.orig === '1';
+  var nowOn = el.classList.toggle('on');
+  el.textContent = nowOn ? '✓' : '';
+  el.title = nowOn ? 'Marcar como NO liberado (pendiente de guardar)' : 'Marcar como liberado (pendiente de guardar)';
+  if (nowOn === orig) delete _cfLibPending[rowNum];
+  else _cfLibPending[rowNum] = nowOn;
+  _cfLibUpdateBar();
+}
+
+function _cfLibUpdateBar() {
+  var n = Object.keys(_cfLibPending).length;
+  var bar = document.getElementById('cf-lib-bar');
+  if (!n) { if (bar) bar.remove(); return; }
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'cf-lib-bar';
+    bar.style.cssText = 'position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;align-items:center;gap:12px;background:var(--card-bg,#fff);border:1.5px solid var(--color-primary,#c46a7a);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.22);padding:10px 14px';
+    document.body.appendChild(bar);
+  }
+  bar.innerHTML = '<span style="font-size:12.5px;font-weight:700;color:var(--text-primary,#111)"><span id="cf-lib-count">'+n+'</span> cambio'+(n===1?'':'s')+' de liberado sin guardar</span>'
+    +'<button onclick="cfDescartarLiberados()" style="padding:7px 14px;background:var(--color-surface,#f3f4f6);color:var(--text-primary,#111);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Descartar</button>'
+    +'<button id="cf-lib-save" onclick="cfGuardarLiberados(this)" style="padding:7px 16px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">Guardar liberados</button>';
+}
+
+async function cfGuardarLiberados(btn) {
+  var entries = Object.keys(_cfLibPending);
+  if (!entries.length) return;
+  if (btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
+  var ok = 0, fail = 0;
+  for (var i = 0; i < entries.length; i++) {
+    var rn = entries[i];
+    try {
+      var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+        action:'saveLiberado', rowNum: parseInt(rn,10), liberado: _cfLibPending[rn], token: getToken()
+      })});
+      var res = await r.json();
+      if (res.ok || res.success) ok++; else fail++;
+    } catch(e){ fail++; }
+  }
+  _cfLibPending = {};
+  var bar = document.getElementById('cf-lib-bar'); if (bar) bar.remove();
+  if (fail) alert('Se guardaron '+ok+' liberados. '+fail+' fallaron — revisa e intenta de nuevo.');
+  // Una sola recarga al final
+  if (typeof loadCashFlowData    === 'function') loadCashFlowData();
+  if (typeof loadConciliacionData === 'function') loadConciliacionData();
+}
+
+function cfDescartarLiberados() {
+  _cfLibPending = {};
+  var bar = document.getElementById('cf-lib-bar'); if (bar) bar.remove();
+  // Recargar para regresar los checkboxes al estado guardado
+  if (typeof loadConciliacionData === 'function') loadConciliacionData();
+  else if (typeof loadCashFlowData === 'function') loadCashFlowData();
 }
 
 /* ════════════════════════════════════════════════════════════════
