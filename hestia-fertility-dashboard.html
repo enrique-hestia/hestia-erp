@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.06.36 -->
+﻿<!-- app-build:2026.07.06.37 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -14041,7 +14041,9 @@ function _sumStyles(){
   + '.sm-dato.clickable:hover td{background:rgba(196,106,122,.06)}'
   + '.sm-dato .sm-caret{display:inline-block;width:14px;color:var(--color-text-muted,#9ca3af);transition:transform .15s}'
   + '.sm-dato.open .sm-caret{transform:rotate(90deg)}'
-  + '.sm-sub td:first-child{padding-left:50px;color:var(--color-text,#374151)}'
+  + '.sm-grpu td{background:rgba(196,106,122,.10);font-weight:700;font-size:11.5px;text-transform:uppercase;letter-spacing:.02em;color:#9c4f5f}'
+  + '.sm-grpu td:first-child{padding-left:38px}'
+  + '.sm-sub td:first-child{padding-left:62px;color:var(--color-text,#374151)}'
   + '.sm-sub td{background:rgba(120,120,140,.03);font-size:12.5px}'
   + '.sm-sub.clickable{cursor:pointer}'
   + '.sm-sub.clickable:hover td{background:rgba(196,106,122,.05)}'
@@ -14128,6 +14130,11 @@ function _renderSummary(){
     +(rec.cuadraEgresos?'':'<div class="sm-cuadre-r warn"><span>Δ no cuadra</span><b>'+_sumMoney((rec.egresosBruto||0)-(rec.creditoAmex||0)-(rec.egresosPL||0))+'</b></div>')
     +'</div>';
   h+='</div>';
+  // Aviso: ingresos con fecha inválida que quedaron fuera de todo periodo
+  if((rec.ingresosSinFecha||0)>0){
+    h+='<div class="sm-note" style="border-color:#f0b429;background:rgba(240,180,41,.09);color:#8a6100">'
+      +'⚠️ <b>'+rec.ingresosSinFecha+' ingreso(s) sin fecha válida</b> ('+_sumMoney(rec.ingresosSinFechaMonto)+') no entran a ningún periodo y pueden estar causando el descuadre. Revisa la columna Fecha de esas filas en BD_Ingresos.</div>';
+  }
 
   // Tabla P&L
   h+='<table class="sm-table"><thead><tr>';
@@ -14162,7 +14169,21 @@ function _renderSummary(){
         +'<td class="hide-m">'+_sumMoney(l.prev)+'</td>'
         +'<td class="'+delta.cls+'">'+delta.txt+'</td></tr>';
       if(open && hasSubs){
+        var _lastGrupo=null;
         subs.forEach(function(si,sj){
+          // Subheader por grupo de la columna U (Ciclos, Complementos, etc.)
+          var gU=(si.grupo||'').trim();
+          if(gU!==_lastGrupo){
+            _lastGrupo=gU;
+            if(gU){
+              // total del grupo
+              var gTot=0,gPrev=0; subs.forEach(function(x){ if((x.grupo||'').trim()===gU){ gTot+=x.actual; gPrev+=x.prev; } });
+              h+='<tr class="sm-grpu"><td>'+_esc(gU)+'</td>'
+                +'<td>'+_sumMoney(gTot)+'</td>'
+                +'<td class="hide-m">'+_sumPct((_summaryData.metricas&&_summaryData.metricas.revenue)?gTot/_summaryData.metricas.revenue:null)+'</td>'
+                +'<td class="hide-m">'+_sumMoney(gPrev)+'</td><td></td></tr>';
+            }
+          }
           var skey=idx+'_'+sj;
           var sopen=!!_summarySubOpen[skey];
           var hasR=(si.rows&&si.rows.length);
@@ -14230,7 +14251,10 @@ async function summaryExport(){
     var delta=_sumDelta(l.actual,l.prev);
     aoa.push([ (l.tipo==='dato'?'   ':'')+(l.label||l.linea||''), Number(l.actual)||0, l.pct==null?'':(l.pct), Number(l.prev)||0, delta.txt ]);
     if(l.tipo==='dato' && l.subitems){
+      var _lg=null;
       l.subitems.forEach(function(si){
+        var g=(si.grupo||'').trim();
+        if(g!==_lg){ _lg=g; if(g) aoa.push([ '   ‣ '+g, '', '', '', '' ]); }
         aoa.push([ '      '+(si.label||'')+(si.cantidad>0?' (×'+si.cantidad+')':''), Number(si.actual)||0, '', Number(si.prev)||0, '' ]);
       });
     }

@@ -157,16 +157,28 @@ function _summaryReadIngresos(anio) {
   var sh = ss.getSheetByName('BD_Ingresos') || ss.getSheets()[0];
   if (!sh) return out;
   var data = sh.getDataRange().getValues();
-  function dt(v){ if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0'); return String(v||''); }
   function num(v){ if(typeof v==='number') return v; var n=parseFloat(String(v||'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
   for (var i=1;i<data.length;i++){
     var r=data[i];
     if (!String(r[0]||'').trim()) continue;
-    out.push({ op:String(r[0]||''), fecha:dt(r[2]).substring(0,10), paciente:String(r[3]||''),
+    out.push({ op:String(r[0]||''), fecha:_sumParseDate(r[2]), paciente:String(r[3]||''),
       categoria:String(r[4]||''), producto:String(r[5]||''), cantidad:num(r[8]),
-      total:num(r[9]), formaPago:String(r[12]||'') });
+      total:num(r[9]), formaPago:String(r[12]||''),
+      grupoU:String(r[20]||'').trim() });   // columna U (índice 20) = grupo/categoría del reporte
   }
   return out;
+}
+
+/* Parseo robusto de fecha → 'YYYY-MM-DD' (Date, ISO, dd/mm/yyyy, dd-mm-yyyy).
+   Devuelve '' si no se puede interpretar (para no descuadrar por fechas basura). */
+function _sumParseDate(v){
+  if (v instanceof Date && !isNaN(v)) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0');
+  var s = String(v||'').trim(); if (!s) return '';
+  var m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);           // yyyy-mm-dd
+  if (m) return m[1]+'-'+m[2].padStart(2,'0')+'-'+m[3].padStart(2,'0');
+  m = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);               // dd/mm/yyyy
+  if (m) return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+  return '';
 }
 
 function _sumInRange(f, ini, fin){ return f && f>=ini && f<=fin; }
@@ -199,16 +211,19 @@ function readSummary(fechaInicio, fechaFin) {
     var agg = {}; // 'GRUPO|Linea' -> {grupo,linea,orden,flag,actual,prev,subs:{}}
     function key(g,l){ return g+'|'+l; }
     function get(g,l,orden,flag){ var k=key(g,l); if(!agg[k]) agg[k]={grupo:g,linea:l,orden:orden||5,flag:flag||'',actual:0,prev:0,subs:{}}; return agg[k]; }
-    function addSub(line, label, monto, cant, isA, drill){
+    function addSub(line, label, monto, cant, isA, drill, grupo){
       label = String(label||'(sin nombre)').trim() || '(sin nombre)';
-      var s = line.subs[label];
-      if(!s){ s = line.subs[label] = {label:label, actual:0, prev:0, cantA:0, cantP:0, rows:[]}; }
+      grupo = String(grupo||'').trim();
+      var sk = grupo+'||'+label;
+      var s = line.subs[sk];
+      if(!s){ s = line.subs[sk] = {label:label, grupo:grupo, actual:0, prev:0, cantA:0, cantP:0, rows:[], _ord:Object.keys(line.subs).length}; }
       if(isA){ s.actual += monto; s.cantA += cant; if(drill) s.rows.push(drill); }
       else { s.prev += monto; s.cantP += cant; }
     }
 
     var amex = { actual:0, prev:0, rows:[] };
-    var recon = { ingresosTotal:0, egresosTotal:0, egresosBruto:0, egresosCancelado:0, sinClasificar:0 };
+    var recon = { ingresosTotal:0, egresosTotal:0, egresosBruto:0, egresosCancelado:0, sinClasificar:0,
+                  ingresosSinFecha:0, ingresosSinFechaMonto:0, egresosSinFecha:0 };
     var labInsMap = {}; // subtipo -> {subtipo,total,count}
     var LAB_SUBS = {'insumos lab':1,'insumos qx':1,'laboratorios':1,'medicamentos':1,'gases':1,'reportes':1,'renta equipo':1};
 
@@ -249,17 +264,19 @@ function readSummary(fechaInicio, fechaFin) {
       var ins = _summaryReadIngresos(yi);
       ins.forEach(function(r){
         var f=(r.fecha||'').substring(0,10);
+        if (!f && Number(r.total)){ recon.ingresosSinFecha++; recon.ingresosSinFechaMonto += Number(r.total)||0; }
         var enActual=_sumInRange(f, fi, ff), enPrev=_sumInRange(f, pi, pf);
         if (!enActual && !enPrev) return;
         var c = clasifIn(r.categoria);
         var line = get('REVENUE', c.linea, c.orden, c.flag);
-        // Sub-item de ingreso: agrupa por Producto (ej. Estimulación ovárica, IVF)
+        // Sub-item de ingreso: agrupa por Producto (ej. Estimulación ovárica, IVF), bajo el grupo de la columna U
         var subLbl = String(r.producto||'').trim() || String(r.categoria||'').trim() || '(sin producto)';
+        var grupoU = String(r.grupoU||'').trim();
         var cant = Number(r.cantidad)||0; if(!cant) cant=1;
         if (enActual){ line.actual+=r.total; recon.ingresosTotal+=r.total;
-          addSub(line, subLbl, r.total, cant, true, {fecha:f, nombre:r.paciente, concepto:r.producto+' · '+r.categoria, monto:r.total, cantidad:cant});
+          addSub(line, subLbl, r.total, cant, true, {fecha:f, nombre:r.paciente, concepto:r.producto+' · '+r.categoria, monto:r.total, cantidad:cant}, grupoU);
         }
-        if (enPrev){ line.prev+=r.total; addSub(line, subLbl, r.total, cant, false, null); }
+        if (enPrev){ line.prev+=r.total; addSub(line, subLbl, r.total, cant, false, null, grupoU); }
       });
     }
 
@@ -282,9 +299,16 @@ function readSummary(fechaInicio, fechaFin) {
       var arr=[]; Object.keys(agg).forEach(function(k){ if(agg[k].grupo===g) arr.push(agg[k]); });
       arr.sort(function(a,b){ return (a.orden-b.orden) || (a.linea<b.linea?-1:1); });
       return arr.map(function(l){
-        var subs = Object.keys(l.subs).map(function(k){ return l.subs[k]; })
-          .sort(function(a,b){ return b.actual-a.actual; })
-          .map(function(s){ return { label:s.label, cantidad:s.cantA, cantidadPrev:s.cantP,
+        var subsArr = Object.keys(l.subs).map(function(k){ return l.subs[k]; });
+        // Orden de grupos (columna U) por primera aparición; dentro de cada grupo, por monto desc
+        var grpOrder = {}; var gi = 0;
+        subsArr.forEach(function(s){ var gk=s.grupo||''; if(grpOrder[gk]===undefined) grpOrder[gk]=gi++; });
+        subsArr.sort(function(a,b){
+          var ga=grpOrder[a.grupo||''], gb=grpOrder[b.grupo||''];
+          if (ga!==gb) return ga-gb;
+          return b.actual-a.actual;
+        });
+        var subs = subsArr.map(function(s){ return { label:s.label, grupo:s.grupo||'', cantidad:s.cantA, cantidadPrev:s.cantP,
             actual:s.actual, prev:s.prev,
             rows:s.rows.sort(function(a,b){ return b.monto-a.monto; }) }; });
         return { tipo:'dato', grupo:g, linea:l.linea, label:l.linea, flag:l.flag,
@@ -333,7 +357,10 @@ function readSummary(fechaInicio, fechaFin) {
         egresosCancelado: recon.egresosCancelado,// cancelados (no cuentan)
         egresosPL: egSum,                        // COGS+OpEx+G&A+Taxes (devengado)
         // Identidad: bruto = P&L + crédito AMEX
-        cuadraEgresos: Math.abs(recon.egresosBruto - amex.actual - egSum)<0.5
+        cuadraEgresos: Math.abs(recon.egresosBruto - amex.actual - egSum)<0.5,
+        // Alertas: filas con fecha inválida que NO entran a ningún periodo (posible causa de descuadre)
+        ingresosSinFecha: recon.ingresosSinFecha,
+        ingresosSinFechaMonto: recon.ingresosSinFechaMonto
       }
     };
   } catch(ex){ return { ok:false, error:ex.message+' (L:'+ex.lineNumber+')' }; }
