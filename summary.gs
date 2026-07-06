@@ -208,7 +208,7 @@ function readSummary(fechaInicio, fechaFin) {
     }
 
     var amex = { actual:0, prev:0, rows:[] };
-    var recon = { ingresosTotal:0, egresosTotal:0 };
+    var recon = { ingresosTotal:0, egresosTotal:0, egresosBruto:0, egresosCancelado:0, sinClasificar:0 };
     var labInsMap = {}; // subtipo -> {subtipo,total,count}
     var LAB_SUBS = {'insumos lab':1,'insumos qx':1,'laboratorios':1,'medicamentos':1,'gases':1,'reportes':1,'renta equipo':1};
 
@@ -219,11 +219,13 @@ function readSummary(fechaInicio, fechaFin) {
     for (var y=yFrom; y<=yTo; y++){
       var eg; try { eg = readEgresosData(y); } catch(e){ continue; }
       (eg.rows||[]).forEach(function(r){
-        if (r.estatus === 'Cancelada') return;
         var f = (r.fecha||r.vencimiento||'').substring(0,10);
         var enActual = _sumInRange(f, fi, ff), enPrev = _sumInRange(f, pi, pf);
         if (!enActual && !enPrev) return;
         var monto = Number(r.monto)||0;
+        if (r.estatus === 'Cancelada'){ if(enActual) recon.egresosCancelado += monto; return; }
+        // Bruto de caja del periodo: TODO lo capturado no cancelado (incluye el pago AMEX/Crédito)
+        if (enActual) recon.egresosBruto += monto;
         var clave = String(r.contable||'')+'|'+String(r.subtipo||'');
         var c = clasifEg(clave);
         if (c.grupo === 'EXCLUDED') {
@@ -321,10 +323,17 @@ function readSummary(fechaInicio, fechaFin) {
       amexCredito: amex,
       labInsumos: labInsumos,
       reconc:{
-        ingresosTotal: recon.ingresosTotal, ingresosSum: revA,
-        egresosTotal: recon.egresosTotal, egresosSum: egSum,
+        // Ingresos: el reporte = todo lo capturado (no hay exclusiones)
+        ingresosBruto: recon.ingresosTotal,
+        ingresosSum: revA,
         cuadraIngresos: Math.abs(recon.ingresosTotal-revA)<0.5,
-        cuadraEgresos: Math.abs(recon.egresosTotal-egSum)<0.5
+        // Egresos: puente caja → P&L devengado
+        egresosBruto: recon.egresosBruto,        // TODO lo capturado (incluye pago AMEX), sin cancelados
+        creditoAmex: amex.actual,                // pago AMEX del periodo anterior (fuera del P&L)
+        egresosCancelado: recon.egresosCancelado,// cancelados (no cuentan)
+        egresosPL: egSum,                        // COGS+OpEx+G&A+Taxes (devengado)
+        // Identidad: bruto = P&L + crédito AMEX
+        cuadraEgresos: Math.abs(recon.egresosBruto - amex.actual - egSum)<0.5
       }
     };
   } catch(ex){ return { ok:false, error:ex.message+' (L:'+ex.lineNumber+')' }; }

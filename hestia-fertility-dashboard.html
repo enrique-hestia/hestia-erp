@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.06.35 -->
+﻿<!-- app-build:2026.07.06.36 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -14017,6 +14017,18 @@ function _sumStyles(){
   + '.sm-chip{font-size:12px;font-weight:600;border-radius:20px;padding:5px 12px;display:inline-flex;align-items:center;gap:6px}'
   + '.sm-chip.ok{background:rgba(16,145,90,.12);color:#10915a}'
   + '.sm-chip.bad{background:rgba(200,60,60,.12);color:#c83c3c}'
+  + '.sm-cuadre-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}'
+  + '@media(max-width:640px){.sm-cuadre-grid{grid-template-columns:1fr}}'
+  + '.sm-cuadre{border:1px solid var(--color-border,#e5e7eb);border-radius:11px;padding:12px 15px;background:var(--color-surface,#fff)}'
+  + '.sm-cuadre.ok{border-left:3px solid #10915a}'
+  + '.sm-cuadre.bad{border-left:3px solid #c83c3c;background:rgba(200,60,60,.03)}'
+  + '.sm-cuadre-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--color-text,#1a252f);margin-bottom:8px}'
+  + '.sm-cuadre-r{display:flex;justify-content:space-between;gap:12px;font-size:12.5px;padding:3px 0;color:var(--color-text-muted,#4b5563)}'
+  + '.sm-cuadre-r b{color:var(--color-text,#1a252f);font-variant-numeric:tabular-nums}'
+  + '.sm-cuadre-r.sub{color:#b45309}.sm-cuadre-r.sub b{color:#b45309}'
+  + '.sm-cuadre-r.tot{border-top:1px solid var(--color-border,#e5e7eb);margin-top:4px;padding-top:6px;font-weight:700}.sm-cuadre-r.tot b{font-size:14px}'
+  + '.sm-cuadre-r.note{font-size:11px;color:var(--color-text-muted,#9ca3af)}'
+  + '.sm-cuadre-r.warn{color:#c83c3c;font-weight:700}.sm-cuadre-r.warn b{color:#c83c3c}'
   + '.sm-table{width:100%;border-collapse:collapse;font-size:13.5px;background:var(--color-surface,#fff);border:1px solid var(--color-border,#e5e7eb);border-radius:12px;overflow:hidden}'
   + '.sm-table th{background:var(--color-bg,#f7f7f8);text-align:right;padding:9px 14px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--color-text-muted,#6b7280);font-weight:700;border-bottom:1px solid var(--color-border,#e5e7eb)}'
   + '.sm-table th:first-child{text-align:left}'
@@ -14097,11 +14109,24 @@ function _renderSummary(){
   h+='<button class="sm-btn primary" onclick="loadSummary()"><i data-lucide="refresh-cw" style="width:14px;height:14px"></i></button>';
   h+='</div></div>';
 
-  // Reconciliación
-  h+='<div class="sm-recon">';
-  h+='<span class="sm-chip '+(rec.cuadraIngresos?'ok':'bad')+'">'+(rec.cuadraIngresos?'✓':'✗')+' Ingresos cuadran · '+_sumMoney(rec.ingresosTotal)+'</span>';
-  h+='<span class="sm-chip '+(rec.cuadraEgresos?'ok':'bad')+'">'+(rec.cuadraEgresos?'✓':'✗')+' Egresos cuadran · '+_sumMoney(rec.egresosTotal)+'</span>';
-  if(!rec.cuadraEgresos) h+='<span class="sm-chip bad">Δ egresos '+_sumMoney((rec.egresosTotal||0)-(rec.egresosSum||0))+'</span>';
+  // Reconciliación — cuadre explícito que ata a los totales capturados
+  h+='<div class="sm-cuadre-grid">';
+  // Ingresos
+  h+='<div class="sm-cuadre '+(rec.cuadraIngresos?'ok':'bad')+'">'
+    +'<div class="sm-cuadre-h">'+(rec.cuadraIngresos?'✓':'✗')+' Ingresos</div>'
+    +'<div class="sm-cuadre-r"><span>Capturado en el periodo</span><b>'+_sumMoney(rec.ingresosBruto)+'</b></div>'
+    +'<div class="sm-cuadre-r tot"><span>= Revenue del reporte</span><b>'+_sumMoney(rec.ingresosSum)+'</b></div>'
+    +(rec.cuadraIngresos?'':'<div class="sm-cuadre-r warn"><span>Δ diferencia</span><b>'+_sumMoney((rec.ingresosBruto||0)-(rec.ingresosSum||0))+'</b></div>')
+    +'</div>';
+  // Egresos: puente caja → P&L
+  h+='<div class="sm-cuadre '+(rec.cuadraEgresos?'ok':'bad')+'">'
+    +'<div class="sm-cuadre-h">'+(rec.cuadraEgresos?'✓':'✗')+' Egresos · caja → P&amp;L</div>'
+    +'<div class="sm-cuadre-r"><span>Capturado (sin cancelados)</span><b>'+_sumMoney(rec.egresosBruto)+'</b></div>'
+    +'<div class="sm-cuadre-r sub"><span>− Pago AMEX (periodo anterior)</span><b>'+_sumMoney(rec.creditoAmex)+'</b></div>'
+    +'<div class="sm-cuadre-r tot"><span>= Egresos del P&amp;L</span><b>'+_sumMoney(rec.egresosPL)+'</b></div>'
+    +((rec.egresosCancelado||0)>0?'<div class="sm-cuadre-r note"><span>Cancelados excluidos</span><b>'+_sumMoney(rec.egresosCancelado)+'</b></div>':'')
+    +(rec.cuadraEgresos?'':'<div class="sm-cuadre-r warn"><span>Δ no cuadra</span><b>'+_sumMoney((rec.egresosBruto||0)-(rec.creditoAmex||0)-(rec.egresosPL||0))+'</b></div>')
+    +'</div>';
   h+='</div>';
 
   // Tabla P&L
