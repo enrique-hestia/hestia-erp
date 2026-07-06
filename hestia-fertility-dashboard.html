@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.30 -->
+﻿<!-- app-build:2026.07.05.31 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -3981,6 +3981,66 @@ function _pacEditAfterSave(viewId, newNombre) {
   }
 }
 
+/* Buscador de pacientes en ventana emergente — desde la captura de ingresos.
+   Filtra el catálogo por nombre, correo, razón social o RFC y al elegir uno
+   llena el campo Paciente (dispara autocompletado de razón social/RFC/lista). */
+async function ingBuscarPacientePopup() {
+  await ingLoadPacientes(true);
+  var old = document.getElementById('ing-pac-search-ovl'); if (old) old.remove();
+  var ovl = document.createElement('div'); ovl.id = 'ing-pac-search-ovl';
+  ovl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10001;display:flex;align-items:flex-start;justify-content:center;padding-top:8vh;backdrop-filter:blur(3px)';
+  ovl.onclick = function(e){ if (e.target === ovl) ovl.remove(); };
+  ovl.innerHTML = '<div style="background:var(--card-bg,#fff);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.35);width:min(520px,94vw);max-height:80vh;display:flex;flex-direction:column;overflow:hidden" onclick="event.stopPropagation()">'
+    +'<div style="display:flex;align-items:center;gap:8px;padding:14px 16px;border-bottom:1px solid var(--color-divider,#e5e7eb)">'
+      +'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary,#c46a7a)" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'
+      +'<input id="ing-pac-search-inp" type="text" placeholder="Buscar por nombre, correo, razón social o RFC…" autocomplete="off" oninput="_ingPacSearchRender(this.value)" style="flex:1;border:none;outline:none;font-size:14px;background:transparent;color:var(--text-primary,#111)">'
+      +'<button onclick="document.getElementById(\'ing-pac-search-ovl\').remove()" style="background:none;border:none;font-size:19px;cursor:pointer;color:#9ca3af">✕</button>'
+    +'</div>'
+    +'<div id="ing-pac-search-list" style="overflow-y:auto;flex:1"></div>'
+    +'<div style="padding:9px 16px;border-top:1px solid var(--color-divider,#e5e7eb);font-size:11px;color:var(--text-secondary,#9ca3af);display:flex;justify-content:space-between;align-items:center">'
+      +'<span id="ing-pac-search-count"></span>'
+      +'<button onclick="document.getElementById(\'ing-pac-search-ovl\').remove();ingNuevoPaciente()" style="background:none;border:none;color:var(--color-primary,#c46a7a);font-weight:700;font-size:11.5px;cursor:pointer">+ Registrar nuevo paciente</button>'
+    +'</div></div>';
+  document.body.appendChild(ovl);
+  _ingPacSearchRender('');
+  setTimeout(function(){ var i=document.getElementById('ing-pac-search-inp'); if(i) i.focus(); }, 40);
+}
+
+function _ingPacSearchRender(q) {
+  var list = document.getElementById('ing-pac-search-list');
+  var cnt = document.getElementById('ing-pac-search-count');
+  if (!list) return;
+  var esc = function(s){ return String(s==null?'':s).replace(/</g,'&lt;').replace(/"/g,'&quot;'); };
+  var query = (q||'').toLowerCase().trim();
+  var rows = (_ingPacientesDB||[]).filter(function(p){
+    if (!query) return true;
+    return ((p.nombre||'')+' '+(p.email||'')+' '+(p.razonSocial||'')+' '+(p.rfc||'')).toLowerCase().indexOf(query) > -1;
+  }).slice(0, 60);
+  if (cnt) cnt.textContent = (_ingPacientesDB||[]).length + ' pacientes en catálogo';
+  if (!rows.length) {
+    list.innerHTML = '<div style="padding:22px;text-align:center;font-size:12.5px;color:var(--text-secondary,#9ca3af)">Sin coincidencias'+(query?' con "'+esc(q)+'"':'')+'</div>';
+    return;
+  }
+  list.innerHTML = rows.map(function(p){
+    var nombreEsc = (p.nombre||'').replace(/'/g,"\\'");
+    return '<div onclick="ingSelectPacientePopup(decodeURIComponent(\''+encodeURIComponent(p.nombre||'')+'\'))" style="padding:10px 16px;cursor:pointer;border-bottom:1px solid var(--color-divider,#f0f0f0)" onmouseover="this.style.background=\'var(--color-surface,#faf7f8)\'" onmouseout="this.style.background=\'\'">'
+      +'<div style="font-weight:600;font-size:13px;color:var(--text-primary,#111)">'+esc(p.nombre||'—')+'</div>'
+      +'<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-top:1px">'
+        +(p.email?esc(p.email):'')
+        +(p.rfc?(p.email?' · ':'')+'RFC '+esc(p.rfc):'')
+        +(p.razonSocial && p.razonSocial!==p.nombre?(p.email||p.rfc?' · ':'')+esc(p.razonSocial):'')
+        +(p.lista && p.lista!=='General'?' · Lista '+esc(p.lista):'')
+      +'</div></div>';
+  }).join('');
+}
+
+function ingSelectPacientePopup(nombre) {
+  var el = document.getElementById('ing-paciente');
+  if (el) el.value = nombre;
+  var ovl = document.getElementById('ing-pac-search-ovl'); if (ovl) ovl.remove();
+  if (typeof ingOnPacienteChange === 'function') ingOnPacienteChange();
+}
+
 function ingNuevoPaciente() {
   _ingPacienteCallback = function(nombre) {
     var pacEl = document.getElementById('ing-paciente');
@@ -4289,6 +4349,7 @@ async function ingOpenDrawer() {
     +'<input id="ing-paciente" list="ing-pac-list" '+S+' placeholder="Nombre o correo del paciente" onchange="ingOnPacienteChange()" oninput="ingOnPacienteInput(this)" onblur="setTimeout(function(){var d=document.getElementById(\'ing-pac-dd\');if(d)d.style.display=\'none\'},200)" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
     +'<div id="ing-pac-dd" style="display:none;position:absolute;top:calc(100% + 3px);left:0;right:0;z-index:999;background:var(--card-bg,#fff);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.13);max-height:220px;overflow-y:auto"></div>'
     +'</div>'
+    +'<button onclick="ingBuscarPacientePopup()" type="button" title="Buscar paciente en el catálogo" style="width:34px;height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--card-bg,#fff);color:var(--text-secondary,#6b7280);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;cursor:pointer;line-height:1"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>'
     +'<button onclick="ingEditarPaciente()" type="button" title="Corregir datos del paciente registrado (nombre, razón social, RFC…)" style="width:34px;height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:8px;cursor:pointer;font-size:14px;line-height:1">✎</button>'
     +'<button onclick="ingNuevoPaciente()" type="button" title="Registrar nuevo paciente" style="width:34px;height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:18px;font-weight:700;line-height:1">+</button>'
     +'</div>'
