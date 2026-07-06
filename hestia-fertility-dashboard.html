@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.15 -->
+﻿<!-- app-build:2026.07.05.16 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -13861,6 +13861,10 @@ async function _correoGuardarPlantilla(btn){
 
 async function hfEnviarCorreo(cfg){
   if (!hasPermission('docs_enviar')) { alert('No tienes permiso para enviar documentos por correo (docs_enviar). Pídelo en Gestión de Roles.'); return; }
+  // Los estilos .mv-* viven en _medsStyles() — cargarlos SIEMPRE aquí:
+  // este modal se abre desde Egresos/Ingresos donde aún no existían y
+  // salía transparente, encimado sobre la vista.
+  _medsStyles();
   _correoCfg = cfg || {};
   _correoCfg.variables = _correoCfg.variables || {};
   _correoCfg.adjuntos = _correoCfg.adjuntos || [];
@@ -13878,7 +13882,7 @@ async function hfEnviarCorreo(cfg){
     return '<span style="font-size:11px;padding:4px 11px;border-radius:20px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider,#e5e7eb);color:var(--text-secondary,#6b7280)">📎 '+_medsEsc(a.nombre)+'</span>';
   }).join(' ');
 
-  ovl.innerHTML = '<div class="mv-modal" style="width:min(560px,94vw)" onclick="event.stopPropagation()">'
+  ovl.innerHTML = '<div class="mv-modal" style="width:min(560px,94vw);background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.35);max-height:88vh;overflow-y:auto;padding:24px" onclick="event.stopPropagation()">'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div style="font-size:15px;font-weight:800">✉ Enviar documento por correo</div>'
     +'<button onclick="hfCorreoCerrar()" style="background:none;border:none;font-size:19px;cursor:pointer;color:#9ca3af">✕</button></div>'
     +'<div class="mv-field"><label class="mv-flbl">Plantilla <a href="javascript:void(0)" onclick="_correoToggleEditor()" style="font-weight:700;color:var(--color-primary,#c46a7a);margin-left:6px">✎ Editar plantillas</a></label>'
