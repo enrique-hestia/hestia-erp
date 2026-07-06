@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.17 -->
+﻿<!-- app-build:2026.07.05.18 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6334,8 +6334,13 @@ function _renderEgresosERP() {
     pageRows.forEach(function(r) {
       var contBadge = r.contable==='Gasto'?'eg-badge-g':r.contable==='Costo'?'eg-badge-c':'eg-badge-cr';
       var provSafe = (r.proveedor||'').replace(/'/g,"\\'");
+      // Visor inteligente: si el adjunto es XML abre la réplica CFDI completa
+      // (imprimible); si es la factura original en PDF, muestra el PDF.
+      var factFid = _egDriveFileId(r.linkFacturaUrl||'');
       var factIcon = r.linkFacturaUrl
-        ? '<span onclick="egViewPDF(\''+r.linkFacturaUrl.replace(/'/g,"\\'")+'\',\'Factura · '+provSafe+'\')" style="cursor:pointer;font-size:13px" title="Ver factura">📄</span>'
+        ? (factFid
+          ? '<span onclick="compVerCfdiFile(\''+factFid+'\',\'\',\'Factura · '+provSafe+'\')" style="cursor:pointer;font-size:13px" title="Ver factura (XML → vista completa, PDF → original)">📄</span>'
+          : '<span onclick="egViewPDF(\''+r.linkFacturaUrl.replace(/'/g,"\\'")+'\',\'Factura · '+provSafe+'\')" style="cursor:pointer;font-size:13px" title="Ver factura">📄</span>')
         : '<span onclick="egOpenUpload('+r._rowNum+',\'factura\',\''+provSafe+'\')" style="cursor:pointer;font-size:11px;color:var(--color-primary,#c46a7a)" title="Adjuntar factura">＋</span>';
       var pagoIcon = r.linkPagoUrl
         ? '<span onclick="egViewPDF(\''+r.linkPagoUrl.replace(/'/g,"\\'")+'\',\'Pago · '+provSafe+'\')" style="cursor:pointer;font-size:13px" title="Ver pago">📎</span>'
@@ -13561,6 +13566,7 @@ function _renderComprobantes(){
    del SAT. Usa leerXmlFactura (parser completo con conceptos y sellos);
    el mismo HTML sirve para el modal y para imprimir. ══ */
 var _cfdiActual = null;
+var _cfdiArchivo = null; // cuando el visor muestra un PDF adjunto (no XML)
 
 var _CFDI_FORMAS_PAGO = {'01':'Efectivo','02':'Cheque nominativo','03':'Transferencia electrónica','04':'Tarjeta de crédito','05':'Monedero electrónico','06':'Dinero electrónico','08':'Vales de despensa','12':'Dación en pago','17':'Compensación','28':'Tarjeta de débito','29':'Tarjeta de servicios','30':'Aplicación de anticipos','99':'Por definir'};
 var _CFDI_USOS = {'G01':'Adquisición de mercancías','G02':'Devoluciones o descuentos','G03':'Gastos en general','I01':'Construcciones','I02':'Mobiliario y equipo','I04':'Equipo de cómputo','I08':'Otra maquinaria','D01':'Honorarios médicos','D02':'Gastos médicos','P01':'Por definir','S01':'Sin efectos fiscales','CP01':'Pagos','CN01':'Nómina'};
@@ -13688,9 +13694,23 @@ async function compVerCfdiFile(fileId, pdfFileId, titulo){
     var tok = encodeURIComponent(getToken());
     var r = await fetch(APPS_SCRIPT_URL+'?action=leerXmlFactura&fileId='+encodeURIComponent(fileId)+'&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
     var d = await r.json();
+    if (d.ok && d.tipo === 'archivo') {
+      // Es la factura ORIGINAL (PDF/imagen subida a mano): se muestra tal
+      // cual con el visor de Drive — Imprimir queda dentro del propio
+      // visor de Drive; Enviar por correo adjunta este archivo.
+      _cfdiActual = null;
+      _cfdiArchivo = { fileId: fileId, fileName: d.fileName || 'Factura.pdf' };
+      var stA = document.getElementById('cfdi-modal-status');
+      if (stA) stA.textContent = (d.fileName||'') + ' — archivo adjunto (no es XML)';
+      var mbA = document.getElementById('cfdi-btn-mail'); if (mbA) mbA.disabled = false;
+      var frA = document.getElementById('cfdi-frame');
+      if (frA) { frA.removeAttribute('srcdoc'); frA.src = 'https://drive.google.com/file/d/'+encodeURIComponent(fileId)+'/preview'; }
+      return;
+    }
     if (!d.ok || d.tipo!=='xml') throw new Error(d.error||'No se pudo leer el XML');
     _cfdiActual = d;
     _cfdiActual._pdfFileId = pdfFileId || '';
+    _cfdiArchivo = null;
     var st = document.getElementById('cfdi-modal-status');
     if (st) st.textContent = '';
     var pb = document.getElementById('cfdi-btn-print'); if (pb) pb.disabled = false;
@@ -13946,8 +13966,19 @@ async function hfCorreoEnviar(){
   }
 }
 
-/* Botón "Enviar por correo" del visor CFDI — adjunta XML (y PDF si hay) */
+/* Botón "Enviar por correo" del visor CFDI — adjunta XML (y PDF si hay);
+   si el visor muestra un PDF original (sin XML), adjunta ese archivo */
 function compCfdiCorreo(){
+  if (!_cfdiActual && _cfdiArchivo) {
+    hfEnviarCorreo({
+      tipoDoc: 'factura-egreso',
+      para: '',
+      referencia: _cfdiArchivo.fileName,
+      variables: { referencia: _cfdiArchivo.fileName, folio: 'adjunta' },
+      adjuntos: [{fileId:_cfdiArchivo.fileId, nombre:_cfdiArchivo.fileName}]
+    });
+    return;
+  }
   var x = _cfdiActual;
   if (!x) return;
   var adjuntos = [];
