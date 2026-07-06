@@ -707,6 +707,9 @@ function doPost(e) {
     if (body.action === 'updateEgresoField') {
       return jsonResponse(updateEgresoField(body));
     }
+    if (body.action === 'guardarReferenciaEgreso') {
+      return jsonResponse(guardarReferenciaEgreso(body));
+    }
     if (body.action === 'deleteEgreso') {
       return jsonResponse(deleteEgreso(body));
     }
@@ -2058,6 +2061,46 @@ function updateEgresoField(payload) {
   } catch(ex) {
     return {ok:false, error:ex.message};
   }
+}
+
+/* Guardar una REFERENCIA de texto en Link Factura / Link Pago (sin archivo) —
+   para cargos sin factura ni comprobante (ej. suscripciones extranjeras que
+   solo cobran). Se escribe como texto plano (borra cualquier hipervínculo
+   previo). Opcionalmente marca PAGADO en el mismo movimiento. Todo desde el
+   sistema, sin tocar la hoja a mano. */
+function guardarReferenciaEgreso(payload) {
+  try {
+    var anio = payload.anio || new Date().getFullYear();
+    var ssId = EGRESOS_IDS[anio] || EGRESOS_SS_2026;
+    var tabName = EGRESOS_TABS[anio] || 'Egresos' + anio;
+    var ss = SpreadsheetApp.openById(ssId);
+    var sheet = ss.getSheetByName(tabName) || ss.getSheets()[0];
+    if (!sheet) return {ok:false, error:'Pestaña no encontrada'};
+    var rowNum = parseInt(payload.rowNum);
+    if (!rowNum || rowNum < 2) return {ok:false, error:'Fila inválida'};
+
+    var headers = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0].map(function(h){return String(h).trim().toLowerCase();});
+    function findCol(sub){ for (var c=0;c<headers.length;c++){ if (headers[c].indexOf(sub)>-1) return c; } return -1; }
+
+    var campo = payload.campo === 'pago' ? 'pago' : 'factura';
+    var texto = String(payload.texto||'').trim();
+    var iDoc = findCol(campo === 'pago' ? 'link pago' : 'link factura');
+    if (iDoc < 0) return {ok:false, error:'No se encontró la columna Link '+(campo==='pago'?'Pago':'Factura')};
+
+    // Texto plano — RichText sin URL, para que el lector no lo tome como archivo
+    var rich = SpreadsheetApp.newRichTextValue().setText(texto).build();
+    sheet.getRange(rowNum, iDoc+1).setRichTextValue(rich);
+
+    // Marcar la casilla del documento correspondiente (FACTURACIÓN / PAGADO)
+    if (payload.marcarCasilla) {
+      var iChk = findCol(campo === 'pago' ? 'pagado' : 'facturaci');
+      if (iChk > -1) sheet.getRange(rowNum, iChk+1).setValue(true);
+    }
+
+    try { CacheService.getScriptCache().remove('gas_egresos_v1_'+anio); } catch(e){}
+    try { logAudit(payload.usuario||'sistema','Egresos','Referencia'+(campo==='pago'?'Pago':'Factura'),'Fila '+rowNum,'','',texto); } catch(ae){}
+    return {ok:true, rowNum:rowNum, campo:campo, texto:texto};
+  } catch(ex) { return {ok:false, error:ex.message}; }
 }
 
 function deleteEgreso(payload) {
