@@ -310,6 +310,84 @@ function vincularComprobanteEgreso(body) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
+/* ── Índice ligero de un mes de XMLs, cacheado 10 min (CacheService) —
+   parsear ~100 XMLs de Drive toma varios segundos; el caché hace que
+   las búsquedas por egreso sean casi instantáneas después de la 1a. ── */
+function _compIndexMes(anio, mes) {
+  var cache = CacheService.getScriptCache();
+  var key = 'compidx_' + anio + '_' + mes;
+  var cached = cache.get(key);
+  if (cached) { try { return JSON.parse(cached); } catch (e) {} }
+
+  var est = listComprobantesEstructura('facturas');
+  if (!est.ok) return [];
+  var anioObj = null;
+  for (var a = 0; a < est.anios.length; a++) if (est.anios[a].anio === anio) { anioObj = est.anios[a]; break; }
+  if (!anioObj) return [];
+  var mesObj = null;
+  for (var m = 0; m < anioObj.meses.length; m++) if (anioObj.meses[m].mes === mes) { mesObj = anioObj.meses[m]; break; }
+  if (!mesObj) return [];
+
+  var files = DriveApp.getFolderById(mesObj.folderId).getFiles();
+  var idx = [];
+  while (files.hasNext()) {
+    var f = files.next();
+    if (!/\.xml$/i.test(f.getName())) continue;
+    var p;
+    try { p = _compParseXmlLight(f.getBlob().getDataAsString('UTF-8')); } catch (pe) { continue; }
+    idx.push({
+      fileId: f.getId(), fileName: f.getName(),
+      serie: p.serie || '', folio: p.folio || '', fecha: (p.fecha || '').substring(0, 10),
+      total: p.total || 0, emisorNombre: p.emisorNombre || '',
+      emisorRfc: (p.emisorRfc || '').toUpperCase(), uuid: (p.uuid || '').toUpperCase()
+    });
+  }
+  try { cache.put(key, JSON.stringify(idx), 600); } catch (ce) {}
+  return idx;
+}
+
+/* ── Buscar el XML de UN egreso concreto (sin factura adjunta): por
+   monto (±$0.50) y proveedor (RFC del catálogo o nombre), en el mes
+   del egreso y los vecinos. Lo usa el detalle expandido de Egresos. ── */
+function buscarXmlParaEgreso(body) {
+  try {
+    var monto = Number(body.monto) || 0;
+    if (!monto) return { ok: false, error: 'Falta el monto del egreso' };
+    var fecha = String(body.fecha || '').substring(0, 10);
+    var anio = fecha ? parseInt(fecha.substring(0, 4), 10) : new Date().getFullYear();
+    var mesBase = fecha ? parseInt(fecha.substring(5, 7), 10) : (new Date().getMonth() + 1);
+
+    var provRfc = '';
+    var provNombre = String(body.proveedor || '').toLowerCase().replace(/[\s.,]+/g, ' ').trim();
+    try {
+      var provs = readProveedores();
+      (provs.rows || []).forEach(function (p) {
+        var n = String(p.nombre || '').toLowerCase().replace(/[\s.,]+/g, ' ').trim();
+        if (n && provNombre && (n === provNombre || provNombre.indexOf(n) > -1 || n.indexOf(provNombre) > -1)) {
+          provRfc = String(p.rfc || '').toUpperCase().replace(/[\s-]/g, '');
+        }
+      });
+    } catch (e) {}
+
+    var candidatos = [];
+    [mesBase, mesBase - 1, mesBase + 1].forEach(function (m) {
+      var y = anio, mm = m;
+      if (mm < 1) { mm = 12; y--; }
+      if (mm > 12) { mm = 1; y++; }
+      _compIndexMes(y, mm).forEach(function (x) {
+        if (Math.abs((x.total || 0) - monto) > 0.5) return;
+        var rfcOk = provRfc && x.emisorRfc.replace(/[\s-]/g, '') === provRfc;
+        var nomEmisor = String(x.emisorNombre || '').toLowerCase().replace(/[\s.,]+/g, ' ').trim();
+        var nombreOk = provNombre && nomEmisor && (nomEmisor.indexOf(provNombre) > -1 || provNombre.indexOf(nomEmisor) > -1);
+        candidatos.push(Object.assign({}, x, { matchProveedor: !!(rfcOk || nombreOk) }));
+      });
+    });
+    candidatos.sort(function (a, b) { return (b.matchProveedor ? 1 : 0) - (a.matchProveedor ? 1 : 0); });
+    var fuertes = candidatos.filter(function (c) { return c.matchProveedor; });
+    return { ok: true, encontrados: (fuertes.length ? fuertes : candidatos).slice(0, 5), soloMonto: !fuertes.length };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 /* ── Vincular sugeridos en lote: toma todos los XML del mes cuyo estado
    sea "sugerido" (UN candidato claro; los egresos con factura adjunta ya
    quedaron fuera del cruce) y escribe cada hipervínculo de golpe —

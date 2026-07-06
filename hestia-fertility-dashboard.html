@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.18 -->
+﻿<!-- app-build:2026.07.05.19 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6380,11 +6380,10 @@ function _renderEgresosERP() {
           :'')
         +'<div style="grid-column:1/-1"><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Notas</div><div style="color:var(--text-secondary,#374151)">'+(r.notas||'—')+'</div></div>'
         +'<div style="grid-column:1/-1"><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Observaciones</div><div style="color:var(--text-secondary,#374151)">'+(r.observaciones||'—')+'</div></div>'
-        +(r.linkFacturaUrl
-          ?'<div style="grid-column:1/-1" id="eg-fiscal-'+r._rowNum+'" data-url="'+r.linkFacturaUrl.replace(/"/g,'&quot;')+'">'
-            +'<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#8e4756">Datos fiscales (CFDI)</div>'
-            +'<div class="eg-fiscal-body" style="color:var(--text-secondary,#374151);margin-top:2px">Cargando datos del XML…</div></div>'
-          :'')
+        +'<div style="grid-column:1/-1" id="eg-fiscal-'+r._rowNum+'" data-url="'+(r.linkFacturaUrl||'').replace(/"/g,'&quot;')+'"'
+          +' data-prov="'+(r.proveedor||'').replace(/"/g,'&quot;')+'" data-monto="'+(r.monto||0)+'" data-fecha="'+((r.fecha||r.vencimiento||'').substring(0,10))+'">'
+          +'<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#8e4756">Datos fiscales (CFDI)</div>'
+          +'<div class="eg-fiscal-body" style="color:var(--text-secondary,#374151);margin-top:2px">'+(r.linkFacturaUrl?'Cargando datos del adjunto…':'Buscando el XML en el repositorio del SAT…')+'</div></div>'
         +'</div></td></tr>');
     });
   } else {
@@ -6658,9 +6657,14 @@ function egToggleRow(rowNum) {
   if (!open) egCargarFiscal(rowNum);
 }
 
-/* Al expandir un egreso con factura vinculada, se cargan (una sola vez)
-   los datos fiscales del XML: razón social, RFC, folio, UUID, timbrado. */
+/* Al expandir un egreso se cargan (una sola vez) los datos fiscales:
+   - XML vinculado  → razón social, RFC, folio, UUID, timbrado + badge XML
+   - PDF vinculado  → badge "Factura original (PDF)" + ver archivo
+   - SIN adjunto    → busca el XML en el repositorio del SAT por
+                      proveedor/monto/fecha y ofrece Ver + Vincular */
 var _egFiscalCache = {};
+function _egBadge(txt, bg, color){ return '<span style="font-size:9.5px;font-weight:700;padding:2px 10px;border-radius:20px;background:'+bg+';color:'+color+'">'+txt+'</span>'; }
+
 async function egCargarFiscal(rowNum){
   var box = document.getElementById('eg-fiscal-'+rowNum);
   if (!box || box.dataset.loaded) return;
@@ -6668,24 +6672,66 @@ async function egCargarFiscal(rowNum){
   _medsStyles();
   var cont = box.querySelector('.eg-fiscal-body');
   var url = box.dataset.url || '';
+  var esc = function(v){ return String(v==null?'':v).replace(/</g,'&lt;'); };
+  var fmtM = function(v){ return '$'+(Number(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var s = getSession()||{};
+
+  // ── Sin factura adjunta: buscar el XML en el repositorio del SAT ──
+  if (!url) {
+    try {
+      var rb = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+        action:'buscarXmlParaEgreso', proveedor: box.dataset.prov||'',
+        monto: parseFloat(box.dataset.monto)||0, fecha: box.dataset.fecha||'', usuario: s.email||''
+      })});
+      var db = await rb.json();
+      if (!db.ok) throw new Error(db.error||'No se pudo buscar el XML');
+      if (!db.encontrados || !db.encontrados.length) {
+        cont.innerHTML = _egBadge('SIN FACTURA NI XML','#f3f4f6','#6b7280')
+          +' <span style="color:var(--text-secondary,#9ca3af);font-size:11px">No hay adjunto y no se encontró un XML con este monto/proveedor en el repositorio del SAT.</span>';
+        return;
+      }
+      var x = db.encontrados[0];
+      var folioX = (x.serie?x.serie+'-':'')+(x.folio||'S/F');
+      var puedeVincular = hasPermission('editar_egresos') || hasPermission('bank_edit');
+      var anioEg = (box.dataset.fecha||'').substring(0,4) || new Date().getFullYear();
+      cont.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;background:#fdf6ec;border-radius:8px;padding:9px 12px;margin-top:3px;font-size:11.5px">'
+        +_egBadge(x.matchProveedor?'XML DEL SAT — SIN VINCULAR':'XML CON ESTE MONTO — VERIFICA','#FAEEDA','#854F0B')
+        +'<span><b style="color:#8e4756">'+esc(x.emisorNombre||'—')+'</b> · RFC '+esc(x.emisorRfc||'—')+'</span>'
+        +'<span>Factura <b>'+esc(folioX)+'</b> · '+fmtM(x.total)+'</span>'
+        +'<span style="font-family:monospace;font-size:10px" title="Folio fiscal">UUID '+esc(x.uuid||'—')+'</span>'
+        +'<span style="display:inline-flex;gap:6px;margin-left:auto">'
+          +'<button class="mv-btn-sec" style="padding:3px 12px;font-size:10.5px" onclick="compVerCfdiFile(\''+x.fileId+'\',\'\',\''+esc(folioX).replace(/'/g,"\\'")+'\')">👁 Ver factura</button>'
+          +(puedeVincular?'<button class="mv-btn" style="padding:3px 12px;font-size:10.5px;background:#166534" onclick="egVincularXmlDetectado('+rowNum+',\''+x.fileId+'\',\''+esc(folioX).replace(/'/g,"\\'")+'\','+anioEg+',this)">Vincular</button>':'')
+        +'</span>'
+        +(db.encontrados.length>1?'<span style="font-size:10px;color:#9ca3af;width:100%">+'+(db.encontrados.length-1)+' candidato(s) más en Egresos → Comprobantes</span>':'')
+        +'</div>';
+    } catch(e){
+      cont.innerHTML = '<span style="color:#b45309;font-size:11px">'+esc(e.message)+'</span>';
+    }
+    return;
+  }
+
+  // ── Con adjunto: distinguir XML vs factura original (PDF) ──
   var fid = _egDriveFileId(url);
   if (!fid){ if(cont) cont.textContent = 'El adjunto no es un archivo de Drive.'; return; }
   try {
     if (!_egFiscalCache[fid]){
-      var s = getSession()||{};
       var r = await fetch(APPS_SCRIPT_URL+'?action=leerXmlFactura&fileId='+encodeURIComponent(fid)+'&token='+encodeURIComponent(s.token||getToken())+'&_t='+Date.now(), {redirect:'follow'});
       _egFiscalCache[fid] = await r.json();
     }
     var d = _egFiscalCache[fid];
     if (!d.ok) throw new Error(d.error||'No se pudo leer el archivo');
     if (d.tipo !== 'xml'){
-      cont.innerHTML = '<span style="color:var(--text-secondary,#9ca3af)">Adjunto PDF/imagen (sin datos XML) — <a href="'+url.replace(/"/g,'&quot;')+'" target="_blank" style="color:var(--color-primary,#c46a7a);font-weight:700">ver archivo ↗</a></span>';
+      cont.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;background:#faf4f5;border-radius:8px;padding:9px 12px;margin-top:3px;font-size:11.5px">'
+        +_egBadge('FACTURA ORIGINAL (PDF)','#E6F1FB','#0C447C')
+        +'<span style="color:var(--text-secondary,#6b7280)">'+esc(d.fileName||'archivo adjunto')+' — sin datos XML (UUID no disponible)</span>'
+        +'<button class="mv-btn-sec" style="padding:3px 12px;font-size:10.5px;margin-left:auto" onclick="compVerCfdiFile(\''+fid+'\',\'\',\''+esc(d.fileName||'Factura').replace(/'/g,"\\'")+'\')">👁 Ver factura</button>'
+        +'</div>';
       return;
     }
-    var esc = function(v){ return String(v==null?'':v).replace(/</g,'&lt;'); };
-    var fmtM = function(v){ return '$'+(Number(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
     var folio = (d.serie?d.serie+'-':'')+(d.folio||'S/F');
-    cont.innerHTML = '<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;background:#faf4f5;border-radius:8px;padding:9px 12px;margin-top:3px;font-size:11.5px">'
+    cont.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;background:#faf4f5;border-radius:8px;padding:9px 12px;margin-top:3px;font-size:11.5px">'
+      +_egBadge('XML VINCULADO','#E1F5EE','#085041')
       +'<span><b style="color:#8e4756">'+esc(d.emisor&&d.emisor.nombre||'—')+'</b> · RFC '+esc(d.emisor&&d.emisor.rfc||'—')+'</span>'
       +'<span>Factura <b>'+esc(folio)+'</b> · '+fmtM(d.total)+' '+esc(d.moneda||'MXN')+'</span>'
       +'<span style="font-family:monospace;font-size:10px" title="Folio fiscal">UUID '+esc(d.uuid||'—')+'</span>'
@@ -6694,6 +6740,31 @@ async function egCargarFiscal(rowNum){
       +'</div>';
   } catch(e){
     if (cont) cont.innerHTML = '<span style="color:#dc2626">'+String(e.message).replace(/</g,'&lt;')+'</span>';
+  }
+}
+
+/* Vincular el XML detectado por la búsqueda automática al egreso */
+async function egVincularXmlDetectado(rowNum, fileId, etiqueta, anio, btn){
+  if (btn){ btn.disabled = true; btn.textContent = '…'; }
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'vincularComprobanteEgreso', anio: anio, rowNum: rowNum, fileId: fileId,
+      campo: 'factura', etiqueta: etiqueta, usuario: s.email||''
+    })});
+    var d = await r.json();
+    if (!d.ok){ alert(d.error||'No se pudo vincular'); if(btn){btn.disabled=false;btn.textContent='Vincular';} return; }
+    // Reflejar en local y recargar el bloque como "XML vinculado"
+    var urlNueva = 'https://drive.google.com/file/d/'+fileId+'/view';
+    if (typeof _egData !== 'undefined' && _egData && _egData.rows) {
+      var lr = _egData.rows.find(function(x){ return x._rowNum === rowNum; });
+      if (lr) lr.linkFacturaUrl = urlNueva;
+    }
+    var box = document.getElementById('eg-fiscal-'+rowNum);
+    if (box){ box.dataset.url = urlNueva; box.dataset.loaded = ''; egCargarFiscal(rowNum); }
+  } catch(e){
+    alert('Error de conexión: '+e.message);
+    if(btn){ btn.disabled = false; btn.textContent = 'Vincular'; }
   }
 }
 
@@ -13411,6 +13482,23 @@ async function loadComprobantes(anio, mes, fuente){
 
 function _compFmtUuid(u){ return u ? u.substring(0,8)+'…'+u.substring(u.length-4) : '—'; }
 
+/* El re-render completo destruye el input y se pierde el foco a cada
+   tecla — se filtra con debounce y se devuelve el cursor al buscador. */
+var _compFiltroTimer = null;
+function _compSetFiltro(v){
+  _compFiltro = v;
+  clearTimeout(_compFiltroTimer);
+  _compFiltroTimer = setTimeout(function(){
+    _renderComprobantes();
+    var inp = document.getElementById('comp-buscar');
+    if (inp){
+      inp.focus();
+      var n = inp.value.length;
+      try { inp.setSelectionRange(n, n); } catch(e){}
+    }
+  }, 300);
+}
+
 function _renderComprobantes(){
   var root = document.getElementById('comprobantes-root');
   if (!root || !_compData) return;
@@ -13473,8 +13561,8 @@ function _renderComprobantes(){
     +'<div class="mv-card" style="padding:12px 16px">'+navHtml+'</div>'
     +kpisHtml
     +'<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
-      +'<input class="mv-inp" style="max-width:380px" placeholder="'+(esPagos?'Buscar por nombre de archivo o proveedor…':'Buscar por proveedor, RFC, folio, UUID o monto…')+'" value="'+_medsEsc(_compFiltro)+'" oninput="_compFiltro=this.value;_renderComprobantes()">'
-      +(f?'<button class="mv-btn-sec" style="padding:6px 12px;font-size:11px" onclick="_compFiltro=\'\';_renderComprobantes()">✕ Limpiar</button>':'')
+      +'<input class="mv-inp" id="comp-buscar" style="max-width:380px" placeholder="'+(esPagos?'Buscar por nombre de archivo o proveedor…':'Buscar por proveedor, RFC, folio, UUID o monto…')+'" value="'+_medsEsc(_compFiltro)+'" oninput="_compSetFiltro(this.value)">'
+      +(f?'<button class="mv-btn-sec" style="padding:6px 12px;font-size:11px" onclick="_compSetFiltro(\'\')">✕ Limpiar</button>':'')
       +(function(){
         if (esPagos || !puedeVincular) return '';
         var nSug = (d.comprobantes||[]).filter(function(x){ return x.estado==='sugerido'; }).length;
