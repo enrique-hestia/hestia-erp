@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.29 -->
+﻿<!-- app-build:2026.07.05.30 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4252,7 +4252,9 @@ async function ingOpenDrawer() {
   var content = document.getElementById('ing-form-content');
   if (!view || !content) return;
   view.style.display = 'block';
-  await Promise.all([ingLoadProductos(), ingLoadPacientes()]);
+  // Siempre fresco al abrir la captura: refleja al instante cualquier cambio
+  // de precio/producto/paciente hecho en la BD, sin depender del caché.
+  await Promise.all([ingLoadProductos(true), ingLoadPacientes(true)]);
 
   var today = new Date().toISOString().substring(0,10);
   // Autocomplete pacientes — desde Registro de Pacientes (base real)
@@ -4307,7 +4309,9 @@ async function ingOpenDrawer() {
   h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">'
     +'<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);display:flex;align-items:center;gap:8px">'
       +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>Productos / Servicios</div>'
-    +'<div style="display:flex;gap:8px">'
+    +'<div style="display:flex;gap:8px;align-items:center">'
+      +'<button id="ing-refresh-prod" onclick="ingRefrescarProductos(this)" title="Traer los últimos precios/productos de la base sin salir de la captura" style="display:flex;align-items:center;gap:5px;font-size:11px;background:var(--card-bg,#fff);color:var(--text-secondary,#6b7280);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:6px 12px;cursor:pointer;font-weight:700">'
+        +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>Refrescar</button>'
       +'<button onclick="ingOpenProdModal(0,true)" style="display:flex;align-items:center;gap:5px;font-size:11px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:8px;padding:6px 14px;cursor:pointer;font-weight:700">'
         +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Nuevo producto</button>'
       +'<button onclick="ingAddLine()" style="display:flex;align-items:center;gap:5px;font-size:11px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-weight:700">'
@@ -4429,6 +4433,47 @@ function _ingBuildProdDatalist(lineNum) {
   activos.forEach(function(p){ h += _dlOpt(p, false); });
   inactivos.forEach(function(p){ h += _dlOpt(p, true); });
   return h;
+}
+
+/* Refresca el catálogo de productos EN VIVO (sin salir de la captura):
+   re-lee la base, reconstruye los dropdowns de cada línea y re-aplica el
+   precio nuevo a los productos ya elegidos. Para cuando se cambió un
+   precio/producto en la BD y debe verse al instante. */
+async function ingRefrescarProductos(btn) {
+  if (btn) { btn.disabled = true; btn.style.opacity = '.6'; }
+  var svg = btn ? btn.querySelector('svg') : null;
+  if (svg) { svg.style.transition = 'transform .6s'; svg.style.transform = 'rotate(360deg)'; }
+  try {
+    await ingLoadProductos(true);            // fuerza lectura fresca de la BD
+    // Reconstruir categorías por si hay nuevas
+    var catOptsHtml = '<option value="">— Categoría —</option>' + ING_CATEGORIAS.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join('');
+    for (var n = 1; n <= _ingLineCount; n++) {
+      var lineEl = document.getElementById('ing-line-'+n);
+      if (!lineEl) continue;
+      // Datalist de productos con precios frescos
+      var dl = document.getElementById('ing-prodlist-'+n);
+      if (dl) dl.innerHTML = _ingBuildProdDatalist(n);
+      // Mantener la categoría elegida al reconstruir su <select>
+      var catEl = document.getElementById('ing-cat-'+n);
+      if (catEl) { var cv = catEl.value; catEl.innerHTML = catOptsHtml; catEl.value = cv; }
+      // Re-aplicar el precio nuevo al producto ya seleccionado en la línea
+      var prodEl = document.getElementById('ing-prod-'+n);
+      if (prodEl && prodEl.value.trim()) ingOnProdSearch(n);
+    }
+    ingCalcTotal();
+    // Confirmación breve en el propio botón
+    if (btn) {
+      var orig = btn.innerHTML;
+      btn.innerHTML = '✓ Actualizado';
+      btn.style.color = '#166534'; btn.style.borderColor = '#166534';
+      setTimeout(function(){ btn.innerHTML = orig; btn.style.color = 'var(--text-secondary,#6b7280)'; btn.style.borderColor = 'var(--color-divider,#e5e7eb)'; }, 1600);
+    }
+  } catch(e) {
+    alert('No se pudo refrescar: '+e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+    if (svg) setTimeout(function(){ svg.style.transition='none'; svg.style.transform='none'; }, 650);
+  }
 }
 
 function ingOnProdSearch(lineNum) {
