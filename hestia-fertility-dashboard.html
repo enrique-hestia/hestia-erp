@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.16 -->
+﻿<!-- app-build:2026.07.05.17 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -7578,6 +7578,17 @@ async function loadMenu() {
     }, []);
     if (!egresosInserted && egresosRef) {
       menuItems.push(Object.assign({}, egresosRef, {id:'egresos', label:'Egresos', icono:'trending-down'}));
+    }
+    // Los hijos de los ítems fusionados (ej. "comprobantes" con Padre=
+    // fin-gastos en la hoja Menu) quedarían huérfanos y no se dibujarían:
+    // re-apuntarlos al nuevo ítem "egresos".
+    if (egresosRef) {
+      var _idsFusionados = [];
+      if (gastosItem) _idsFusionados.push(gastosItem.id);
+      if (costosItem) _idsFusionados.push(costosItem.id);
+      menuItems.forEach(function(i){
+        if (_idsFusionados.indexOf(i.padre) > -1) i.padre = 'egresos';
+      });
     }
     // Inyectar "Catálogo General" como primer hijo del grupo Productos
     var prodGroup = menuItems.filter(function(i){
