@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.32 -->
+﻿<!-- app-build:2026.07.05.33 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2506,6 +2506,33 @@ function _ingSetPage(p) {
   _renderIngresosERP();
 }
 
+// Orden de la lista de Ingresos (solo display, no toca la BD).
+// Default: OP descendente (el consecutivo más alto/reciente arriba).
+var _ingSort = { col: 'op', dir: -1 };
+function _ingNum(id){ var m=String(id||'').match(/(\d+)/); return m?parseInt(m[1],10):0; }
+function _ingSortOps(order, map){
+  var col = _ingSort.col, dir = _ingSort.dir;
+  var arr = order.slice();
+  arr.sort(function(a,b){
+    var oa=map[a], ob=map[b], va, vb;
+    if (col==='op'){ va=_ingNum(oa.id); vb=_ingNum(ob.id); }
+    else if (col==='total'){ va=oa.total||0; vb=ob.total||0; }
+    else if (col==='pagado'){ va=oa.pagado||0; vb=ob.pagado||0; }
+    else if (col==='fecha'){ va=(oa.fecha||''); vb=(ob.fecha||''); }
+    else if (col==='paciente'){ va=(oa.paciente||'').toLowerCase(); vb=(ob.paciente||'').toLowerCase(); }
+    else { va=_ingNum(oa.id); vb=_ingNum(ob.id); }
+    if (va<vb) return -1*dir; if (va>vb) return 1*dir;
+    // desempate estable por OP
+    return (_ingNum(oa.id)-_ingNum(ob.id))*dir;
+  });
+  return arr;
+}
+function ingSetSort(col){
+  if (_ingSort.col===col) _ingSort.dir*=-1; else { _ingSort.col=col; _ingSort.dir = (col==='paciente'?1:-1); }
+  _ingPage = 1;
+  _renderIngresosERP();
+}
+
 function _renderIngresosERP() {
   var el = document.getElementById('view-ingresos');
   if (!el || !_ingData) return;
@@ -2686,16 +2713,24 @@ function _renderIngresosERP() {
     if (r.pagosDetalle && r.pagosDetalle.length) op.pagosDetalle = r.pagosDetalle;
   });
 
+  // Orden (clic en encabezado). Por defecto: OP descendente (más reciente arriba).
+  _opsOrder = _ingSortOps(_opsOrder, _opsMap);
+
   var totalOps = _opsOrder.length;
   var start = (_ingPage-1)*_ingPerPage;
   var pageOps = _opsOrder.slice(start, start+_ingPerPage);
   var totalPages = Math.ceil(totalOps/_ingPerPage)||1;
 
+  function _ingTh(col, label, extra){
+    var active = _ingSort.col === col;
+    var arrow = active ? (_ingSort.dir>0?' ▲':' ▼') : '';
+    return '<th'+(extra||'')+' onclick="ingSetSort(\''+col+'\')" style="cursor:pointer;user-select:none'+(active?';color:var(--color-primary,#c46a7a)':'')+'" title="Ordenar por '+label+'">'+label+arrow+'</th>';
+  }
   h.push('<div class="ing-panel">'
-    +'<div class="ing-ph"><div class="ing-pt">Detalle de operaciones</div><div style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Página '+_ingPage+' de '+totalPages+'</div></div>'
+    +'<div class="ing-ph"><div class="ing-pt">Detalle de operaciones</div><div style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Clic en un encabezado para ordenar · Página '+_ingPage+' de '+totalPages+'</div></div>'
     +'<div style="overflow-x:auto;max-height:65vh;overflow-y:auto">'
     +'<table class="ing-tbl"><thead><tr>'
-    +'<th style="width:30px"></th><th>Fecha</th><th>OP</th><th>Paciente</th><th>Categoría</th><th>Items</th><th>Total</th><th>Pagado</th><th>F. Pago</th><th style="min-width:120px">Estado fiscal</th>'
+    +'<th style="width:30px"></th>'+_ingTh('fecha','Fecha')+_ingTh('op','OP')+_ingTh('paciente','Paciente')+'<th>Categoría</th><th>Items</th>'+_ingTh('total','Total',' style="text-align:right"')+_ingTh('pagado','Pagado',' style="text-align:right"')+'<th>F. Pago</th><th style="min-width:120px">Estado fiscal</th>'
     +((hasPermission('editar_ingresos')||hasPermission('borrar_ingresos'))?'<th style="width:80px">Acciones</th>':'')
     +'</tr></thead><tbody>');
 
@@ -6299,6 +6334,31 @@ function _egFilterRows() {
 
 function _egSetFilter(k, v) { _egFilters[k]=v; _egPage=1; _renderEgresosERP(); }
 function _egSetPage(p) { _egPage=p; _renderEgresosERP(); }
+
+// Orden de la lista de Egresos (solo display). Default: fecha descendente.
+var _egSort = { col: 'fecha', dir: -1 };
+function _egNum(id){ var m=String(id||'').match(/(\d+)/); return m?parseInt(m[1],10):0; }
+function _egSortRows(rows){
+  var col=_egSort.col, dir=_egSort.dir;
+  var arr=rows.slice();
+  arr.sort(function(a,b){
+    var va,vb;
+    if (col==='monto'){ va=a.monto||0; vb=b.monto||0; }
+    else if (col==='fecha'){ va=(a.fecha||a.vencimiento||''); vb=(b.fecha||b.vencimiento||''); }
+    else if (col==='proveedor'){ va=(a.proveedor||'').toLowerCase(); vb=(b.proveedor||'').toLowerCase(); }
+    else if (col==='concepto'){ va=(a.concepto||'').toLowerCase(); vb=(b.concepto||'').toLowerCase(); }
+    else if (col==='subtipo'){ va=(a.subtipo||'').toLowerCase(); vb=(b.subtipo||'').toLowerCase(); }
+    else { va=_egNum(a.id); vb=_egNum(b.id); }
+    if (va<vb) return -1*dir; if (va>vb) return 1*dir;
+    return (_egNum(a.id)-_egNum(b.id))*dir; // desempate estable por consecutivo
+  });
+  return arr;
+}
+function egSetSort(col){
+  if (_egSort.col===col) _egSort.dir*=-1; else { _egSort.col=col; _egSort.dir = ((col==='proveedor'||col==='concepto'||col==='subtipo')?1:-1); }
+  _egPage = 1;
+  _renderEgresosERP();
+}
 var _egSearchTimer = null;
 function _egSearchDebounce(v) { clearTimeout(_egSearchTimer); _egSearchTimer=setTimeout(function(){_egSetFilter('buscar',v);},300); }
 
@@ -6480,17 +6540,23 @@ function _renderEgresosERP() {
   // Layout: tabla + sidebar
   h.push('<div class="eg-grid">');
 
-  // Tabla
+  // Tabla — orden por clic en encabezado (solo display, no toca la BD)
+  filtered = _egSortRows(filtered);
   var start = (_egPage-1)*_egPerPage;
   var pageRows = filtered.slice(start, start+_egPerPage);
   var totalPages = Math.ceil(filtered.length/_egPerPage)||1;
   var canEdit = hasPermission('editar_ingresos');
 
+  function _egTh(col, label, extra){
+    var active = _egSort.col === col;
+    var arrow = active ? (_egSort.dir>0?' ▲':' ▼') : '';
+    return '<th'+(extra||'')+' onclick="egSetSort(\''+col+'\')" style="cursor:pointer;user-select:none'+(extra&&extra.indexOf('text-align')>-1?'':'')+(active?';color:var(--color-primary,#c46a7a)':'')+'" title="Ordenar por '+label+'">'+label+arrow+'</th>';
+  }
   h.push('<div class="eg-panel">'
-    +'<div class="eg-ph"><div class="eg-pt">Detalle de egresos</div><div style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Pág. '+_egPage+' de '+totalPages+'</div></div>'
+    +'<div class="eg-ph"><div class="eg-pt">Detalle de egresos</div><div style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Clic en un encabezado para ordenar · Pág. '+_egPage+' de '+totalPages+'</div></div>'
     +'<div style="overflow-x:auto;max-height:65vh;overflow-y:auto">'
     +'<table class="eg-tbl"><thead><tr>'
-    +'<th style="width:26px"></th><th>Fecha</th><th>Proveedor</th><th>Concepto</th><th>Subtipo</th><th style="text-align:right">Monto</th><th>F. Pago</th><th style="text-align:center">Fact</th><th style="text-align:center">Pag</th><th style="text-align:center">Cont</th><th style="text-align:center">Docs</th>'
+    +'<th style="width:26px"></th>'+_egTh('fecha','Fecha')+_egTh('proveedor','Proveedor')+_egTh('concepto','Concepto')+_egTh('subtipo','Subtipo')+_egTh('monto','Monto',' style="text-align:right"')+'<th>F. Pago</th><th style="text-align:center">Fact</th><th style="text-align:center">Pag</th><th style="text-align:center">Cont</th><th style="text-align:center">Docs</th>'
     +((hasPermission('editar_egresos')||hasPermission('borrar_egresos'))?'<th style="width:90px"></th>':'')
     +'</tr></thead><tbody>');
 
