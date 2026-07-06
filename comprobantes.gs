@@ -337,32 +337,34 @@ function vincularComprobantesLote(body) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
-/* ── Menú: agrega "Comprobantes" junto a Cuentas por Pagar (mismo
-   grupo padre que fin-cxp). Correr UNA VEZ desde el editor. ───────── */
+/* ── Menú: agrega "Comprobantes" DENTRO de Egresos (fin-gastos, la vista
+   Gastos Operativos que abre la pantalla de Egresos) — el sidebar la
+   renderiza como vista-con-submenú. Correr UNA VEZ desde el editor. ── */
 function configurarMenuComprobantes() {
   var ss = SpreadsheetApp.openById(SHEET_ID);
   var sh = ss.getSheetByName('Menu');
   if (!sh) return { ok: false, error: 'No se encontró la hoja Menu' };
   var data = sh.getDataRange().getValues();
   var hdrs = data[0];
-  var idxCol = hdrs.indexOf('ID'), padreCol = hdrs.indexOf('Padre'), ordenCol = hdrs.indexOf('Orden');
+  var idxCol = hdrs.indexOf('ID'), padreCol = hdrs.indexOf('Padre');
 
-  var padre = '', ordenMax = 0;
+  var existeFinGastos = false;
   for (var i = 1; i < data.length; i++) {
     var id = String(data[i][idxCol] || '').trim();
-    if (id === 'comprobantes') return { ok: true, aviso: 'Ya existe la entrada "comprobantes" en el menú' };
-    if (id === 'fin-cxp') padre = String(data[i][padreCol] || '').trim();
-  }
-  if (padre) {
-    for (var j = 1; j < data.length; j++) {
-      if (String(data[j][padreCol] || '').trim() === padre) {
-        ordenMax = Math.max(ordenMax, parseInt(data[j][ordenCol], 10) || 0);
+    if (id === 'comprobantes') {
+      // Ya existe: solo asegurar que cuelgue de fin-gastos (Egresos)
+      if (String(data[i][padreCol] || '').trim() !== 'fin-gastos') {
+        sh.getRange(i + 1, padreCol + 1).setValue('fin-gastos');
+        return { ok: true, aviso: 'La entrada "comprobantes" ya existía — se movió dentro de Egresos (fin-gastos)' };
       }
+      return { ok: true, aviso: 'Ya existe la entrada "comprobantes" dentro de Egresos' };
     }
+    if (id === 'fin-gastos') existeFinGastos = true;
   }
-  var fila = ['comprobantes', padre, 'Comprobantes', '', 'paperclip', ordenMax + 1, 'vista', 'comprobantes', 'TRUE'];
+  var padre = existeFinGastos ? 'fin-gastos' : '';
+  var fila = ['comprobantes', padre, 'Comprobantes', '', 'paperclip', 1, 'vista', 'comprobantes', 'TRUE'];
   sh.getRange(sh.getLastRow() + 1, 1, 1, fila.length).setValues([fila]);
-  return { ok: true, padre: padre || '(raíz)', orden: ordenMax + 1 };
+  return { ok: true, padre: padre || '(raíz)' };
 }
 
 /* ══════════════════════════════════════════════════════════════

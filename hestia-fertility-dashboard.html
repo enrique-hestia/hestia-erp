@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.14 -->
+﻿<!-- app-build:2026.07.05.15 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -7725,10 +7725,19 @@ function buildSidebar(items) {
       navigateTo(btn.getAttribute('data-view'));
     });
   });
-  // Eventos: grupos (toggle)
+  // Eventos: grupos (toggle). Si el encabezado también es vista (vista con
+  // hijos, ej. Gastos Operativos > Comprobantes), el clic ya navegó — aquí
+  // solo se asegura que el submenú quede desplegado, sin toggle (el toggle
+  // re-cerraría lo que setActiveNav acaba de abrir).
   container.querySelectorAll('[data-group]').forEach(function(btn) {
     btn.addEventListener('click', function() {
-      toggleGroup(btn.getAttribute('data-group'));
+      var gid = btn.getAttribute('data-group');
+      if (btn.hasAttribute('data-view')) {
+        var g = document.getElementById('group-' + gid);
+        if (g) g.classList.add('open');
+      } else {
+        toggleGroup(gid);
+      }
     });
   });
 
@@ -7750,13 +7759,17 @@ function buildMenuNode(item, allItems, depth) {
     : '';
 
   if (item.tipo === 'grupo' || children.length > 0) {
-    // Grupo colapsable
+    // Grupo colapsable. Si el nodo es una VISTA con hijos (ej. Gastos
+    // Operativos con Comprobantes adentro), el clic navega a la vista Y
+    // despliega el submenú — lleva data-view y data-group a la vez y
+    // buildSidebar le engancha ambos manejadores.
+    var esVistaConHijos = item.tipo !== 'grupo';
     var inner = '';
     children.forEach(function(child) {
       inner += buildMenuNode(child, allItems, depth + 1);
     });
     return '<div class="nav-group" id="group-' + item.id + '">' +
-      '<button class="nav-item nav-group-toggle" data-group="' + item.id + '"' + pl + '>' +
+      '<button class="nav-item nav-group-toggle" data-group="' + item.id + '"' + (esVistaConHijos ? ' data-view="' + item.id + '"' : '') + pl + '>' +
         '<i data-lucide="' + _safeIcon(item.icono) + '"></i>' +
         '<span>' + item.label + '</span>' +
         '<svg class="nav-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>' +
