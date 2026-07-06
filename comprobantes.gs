@@ -207,22 +207,28 @@ function readComprobantesMes(anio, mes, fuente) {
 
     xmls.sort(function (a, b) { return (a.fecha < b.fecha) ? 1 : -1; });
 
-    // Egresos del mes que siguen sin factura (para el resumen)
+    // Egresos del mes que siguen sin factura — lista completa para poder
+    // mostrarlos (y resolverlos) desde el propio Centro de Comprobantes
     var mesStr = String(anio) + '-' + String(mes).padStart(2, '0');
-    var egresosSinFactura = egRows.filter(function (r) {
+    var egresosSinFacturaLista = egRows.filter(function (r) {
       var f = r.fecha || r.vencimiento || '';
       return f.indexOf(mesStr) === 0 && !r.linkFacturaUrl && !r.linkFactura && (r.monto || 0) > 0;
-    }).length;
+    }).map(function (r) {
+      return { rowNum: r._rowNum, fecha: (r.fecha || r.vencimiento || '').substring(0, 10),
+               proveedor: r.proveedor, concepto: r.concepto, monto: r.monto, pagado: r.pagado };
+    });
+    egresosSinFacturaLista.sort(function (a, b) { return (a.fecha || '') < (b.fecha || '') ? 1 : -1; });
 
     return {
       ok: true, fuente: 'facturas', anio: anio, mes: mes, carpeta: mesObj.carpeta,
       comprobantes: xmls, estructura: est.anios,
+      egresosSinFacturaLista: egresosSinFacturaLista.slice(0, 200),
       resumen: {
         total: xmls.length,
         vinculados: xmls.filter(function (x) { return x.estado === 'vinculado'; }).length,
         sugeridos: xmls.filter(function (x) { return x.estado === 'sugerido' || x.estado === 'multiple'; }).length,
         sinCoincidencia: xmls.filter(function (x) { return x.estado === 'sinCoincidencia'; }).length,
-        egresosSinFactura: egresosSinFactura
+        egresosSinFactura: egresosSinFacturaLista.length
       }
     };
   } catch (ex) { return { ok: false, error: ex.message }; }

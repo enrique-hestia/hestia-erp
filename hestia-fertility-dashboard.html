@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.19 -->
+﻿<!-- app-build:2026.07.05.20 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6334,17 +6334,20 @@ function _renderEgresosERP() {
     pageRows.forEach(function(r) {
       var contBadge = r.contable==='Gasto'?'eg-badge-g':r.contable==='Costo'?'eg-badge-c':'eg-badge-cr';
       var provSafe = (r.proveedor||'').replace(/'/g,"\\'");
-      // Visor inteligente: si el adjunto es XML abre la réplica CFDI completa
-      // (imprimible); si es la factura original en PDF, muestra el PDF.
+      // Estado visible sin expandir: pill VERDE = factura/pago ya vinculado
+      // (clic para ver — XML abre la réplica CFDI, PDF el original);
+      // pill ÁMBAR = falta el documento (clic para adjuntar).
+      var _pillOk = 'display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:20px;border-radius:6px;background:#dcfce7;cursor:pointer;font-size:12px';
+      var _pillNo = 'display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:20px;border-radius:6px;background:#fef3c7;color:#b45309;cursor:pointer;font-size:12px;font-weight:800';
       var factFid = _egDriveFileId(r.linkFacturaUrl||'');
       var factIcon = r.linkFacturaUrl
         ? (factFid
-          ? '<span onclick="compVerCfdiFile(\''+factFid+'\',\'\',\'Factura · '+provSafe+'\')" style="cursor:pointer;font-size:13px" title="Ver factura (XML → vista completa, PDF → original)">📄</span>'
-          : '<span onclick="egViewPDF(\''+r.linkFacturaUrl.replace(/'/g,"\\'")+'\',\'Factura · '+provSafe+'\')" style="cursor:pointer;font-size:13px" title="Ver factura">📄</span>')
-        : '<span onclick="egOpenUpload('+r._rowNum+',\'factura\',\''+provSafe+'\')" style="cursor:pointer;font-size:11px;color:var(--color-primary,#c46a7a)" title="Adjuntar factura">＋</span>';
+          ? '<span onclick="compVerCfdiFile(\''+factFid+'\',\'\',\'Factura · '+provSafe+'\')" style="'+_pillOk+'" title="✓ Factura vinculada — clic para ver (XML → vista completa, PDF → original)">📄</span>'
+          : '<span onclick="egViewPDF(\''+r.linkFacturaUrl.replace(/'/g,"\\'")+'\',\'Factura · '+provSafe+'\')" style="'+_pillOk+'" title="✓ Factura vinculada — clic para ver">📄</span>')
+        : '<span onclick="egOpenUpload('+r._rowNum+',\'factura\',\''+provSafe+'\')" style="'+_pillNo+'" title="⚠ SIN factura — clic para adjuntar (o expande la fila para buscar el XML del SAT)">F</span>';
       var pagoIcon = r.linkPagoUrl
-        ? '<span onclick="egViewPDF(\''+r.linkPagoUrl.replace(/'/g,"\\'")+'\',\'Pago · '+provSafe+'\')" style="cursor:pointer;font-size:13px" title="Ver pago">📎</span>'
-        : '<span onclick="egOpenUpload('+r._rowNum+',\'pago\',\''+provSafe+'\')" style="cursor:pointer;font-size:11px;color:var(--color-primary,#c46a7a)" title="Adjuntar pago">＋</span>';
+        ? '<span onclick="egViewPDF(\''+r.linkPagoUrl.replace(/'/g,"\\'")+'\',\'Pago · '+provSafe+'\')" style="'+_pillOk+'" title="✓ Comprobante de pago vinculado — clic para ver">📎</span>'
+        : '<span onclick="egOpenUpload('+r._rowNum+',\'pago\',\''+provSafe+'\')" style="'+_pillNo+'" title="⚠ SIN comprobante de pago — clic para adjuntar">P</span>';
       var cotizIcon = r.linkCotizacionUrl
         ? '<span onclick="egViewPDF(\''+r.linkCotizacionUrl.replace(/'/g,"\\'")+'\',\'Cotización · '+provSafe+'\')" style="cursor:pointer;font-size:13px" title="Ver cotización">📋</span>'
         : '<span onclick="egOpenUpload('+r._rowNum+',\'cotizacion\',\''+provSafe+'\')" style="cursor:pointer;font-size:11px;color:var(--color-primary,#c46a7a)" title="Adjuntar cotización">＋</span>';
@@ -13452,6 +13455,7 @@ var _compData = null;
 var _compAnio = null, _compMes = null;
 var _compFuente = 'facturas'; // 'facturas' (XML CFDI recibidos) | 'pagos' (comprobantes de pago)
 var _compFiltro = '';
+var _compEstadoFiltro = ''; // '' | vinculado | sugerido | sinCoincidencia | egresosSinFactura
 var _COMP_MESES_LBL = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 var _COMP_ROOTS = {facturas:'1rIWggcMKPAtCRvRxBrQgYzSaCK6kp63w', pagos:'1D9H3nNIrkgg2wqJtKXzhuSLDH6hIUoPk'};
 
@@ -13514,6 +13518,17 @@ function _renderComprobantes(){
       : (x.emisorNombre+' '+x.emisorRfc+' '+x.folio+' '+x.uuid+' '+x.fileName+' '+String(x.total));
     return blob.toLowerCase().indexOf(f) > -1;
   });
+  // Filtro por estado (tarjetas KPI clickeables — solo pestaña de facturas)
+  var esSinFact = !esPagos && _compEstadoFiltro === 'egresosSinFactura';
+  if (!esPagos && _compEstadoFiltro && !esSinFact) {
+    rows = rows.filter(function(x){
+      return _compEstadoFiltro === 'sugerido' ? (x.estado==='sugerido'||x.estado==='multiple') : x.estado === _compEstadoFiltro;
+    });
+  }
+  var sfRows = esSinFact ? (d.egresosSinFacturaLista||[]).filter(function(e){
+    if (!f) return true;
+    return ((e.proveedor||'')+' '+(e.concepto||'')+' '+String(e.monto||'')).toLowerCase().indexOf(f) > -1;
+  }) : [];
 
   // Chips de años/meses disponibles en la carpeta
   var navHtml = '';
@@ -13533,7 +13548,7 @@ function _renderComprobantes(){
   var res = d.resumen || {};
   function tabBtn(id, lbl){
     var act = _compFuente === id;
-    return '<button onclick="_compFiltro=\'\';loadComprobantes(_compAnio,_compMes,\''+id+'\')" style="padding:7px 18px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid '
+    return '<button onclick="_compFiltro=\'\';_compEstadoFiltro=\'\';loadComprobantes(_compAnio,_compMes,\''+id+'\')" style="padding:7px 18px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid '
       +(act?'var(--color-primary,#c46a7a)':'var(--color-divider,#e5e7eb)')+';background:'+(act?'var(--color-primary,#c46a7a)':'var(--card-bg,#fff)')
       +';color:'+(act?'#fff':'var(--text-secondary,#6b7280)')+'">'+lbl+'</button>';
   }
@@ -13544,13 +13559,24 @@ function _renderComprobantes(){
       +'<div class="mv-ks"><div class="mv-ks-lbl">Sin vincular</div><div class="mv-ks-val" style="color:#b45309">'+(res.sinVincular||0)+'</div></div>'
       +'<div class="mv-ks"><div class="mv-ks-lbl">Egresos pagados del mes sin comprobante</div><div class="mv-ks-val" style="color:#dc2626">'+(res.egresosPagadosSinComprobante||0)+'</div></div>'
       +'</div>'
-    : '<div class="mv-kstrip" style="grid-template-columns:repeat(5,1fr)">'
-      +'<div class="mv-ks"><div class="mv-ks-lbl">XML en '+_COMP_MESES_LBL[d.mes-1]+' '+d.anio+'</div><div class="mv-ks-val">'+(res.total||0)+'</div></div>'
-      +'<div class="mv-ks"><div class="mv-ks-lbl">Vinculados</div><div class="mv-ks-val" style="color:#166534">'+(res.vinculados||0)+'</div></div>'
-      +'<div class="mv-ks"><div class="mv-ks-lbl">Con sugerencia</div><div class="mv-ks-val" style="color:#b45309">'+(res.sugeridos||0)+'</div></div>'
-      +'<div class="mv-ks"><div class="mv-ks-lbl">Sin coincidencia</div><div class="mv-ks-val" style="color:#9ca3af">'+(res.sinCoincidencia||0)+'</div></div>'
-      +'<div class="mv-ks"><div class="mv-ks-lbl">Egresos del mes sin factura</div><div class="mv-ks-val" style="color:#dc2626">'+(res.egresosSinFactura||0)+'</div></div>'
-      +'</div>';
+    : (function(){
+      // Cada tarjeta es un FILTRO: clic aplica, clic de nuevo lo quita
+      function kpiCard(filtro, lbl, val, color){
+        var activo = filtro !== '' && _compEstadoFiltro === filtro;
+        return '<div class="mv-ks" onclick="_compEstadoFiltro=\''+(activo?'':filtro)+'\';_renderComprobantes()"'
+          +' style="cursor:pointer'+(activo?';box-shadow:inset 0 0 0 2.5px var(--color-primary,#c46a7a)':'')+'"'
+          +' title="'+(activo?'Clic para quitar el filtro':'Clic para filtrar la tabla')+'">'
+          +'<div class="mv-ks-lbl">'+lbl+(activo?' ✕':'')+'</div>'
+          +'<div class="mv-ks-val"'+(color?' style="color:'+color+'"':'')+'>'+val+'</div></div>';
+      }
+      return '<div class="mv-kstrip" style="grid-template-columns:repeat(5,1fr)">'
+        +kpiCard('', 'XML en '+_COMP_MESES_LBL[d.mes-1]+' '+d.anio, (res.total||0), '')
+        +kpiCard('vinculado', 'Vinculados', (res.vinculados||0), '#166534')
+        +kpiCard('sugerido', 'Con sugerencia', (res.sugeridos||0), '#b45309')
+        +kpiCard('sinCoincidencia', 'Sin coincidencia', (res.sinCoincidencia||0), '#9ca3af')
+        +kpiCard('egresosSinFactura', 'Egresos del mes sin factura', (res.egresosSinFactura||0), '#dc2626')
+        +'</div>';
+    })();
   var h = '<div class="mv-w">'
     +'<div class="mv-hdr"><div><div class="mv-title">📎 Centro de Comprobantes</div>'
     +'<div class="mv-sub">'+(esPagos
@@ -13571,16 +13597,32 @@ function _renderComprobantes(){
       })()
     +'</div>'
     +'<div class="mv-card"><table class="mv-tbl"><thead><tr>'
-    +(esPagos
-      ? '<th>Archivo</th><th>Fecha</th><th>Estado</th><th style="min-width:280px">Acción</th>'
-      : '<th>Fecha</th><th>Emisor</th><th>Folio</th><th>UUID</th><th>Total</th><th>Archivos</th><th>Estado</th><th style="min-width:220px">Acción</th>')
+    +(esSinFact
+      ? '<th>Fecha</th><th>Proveedor</th><th>Concepto</th><th>Monto</th><th>Pagado</th><th style="min-width:280px">Acción</th>'
+      : (esPagos
+        ? '<th>Archivo</th><th>Fecha</th><th>Estado</th><th style="min-width:280px">Acción</th>'
+        : '<th>Fecha</th><th>Emisor</th><th>Folio</th><th>UUID</th><th>Total</th><th>Archivos</th><th>Estado</th><th style="min-width:220px">Acción</th>'))
     +'</tr></thead><tbody>';
 
-  var colSpan = esPagos ? 4 : 8;
+  var colSpan = esSinFact ? 6 : (esPagos ? 4 : 8);
   if (d.aviso) h += '<tr><td colspan="'+colSpan+'" style="text-align:center;padding:24px;color:#b45309">'+_medsEsc(d.aviso)+'</td></tr>';
-  else if (!rows.length) h += '<tr><td colspan="'+colSpan+'" style="text-align:center;padding:24px;color:var(--text-secondary,#9ca3af)">'+(f?'Nada coincide con la búsqueda':'Sin archivos en esta carpeta')+'</td></tr>';
+  else if (esSinFact && !sfRows.length) h += '<tr><td colspan="6" style="text-align:center;padding:24px;color:#166534;font-weight:700">✓ Todos los egresos del mes tienen factura vinculada'+(f?' (con este filtro de búsqueda)':'')+'</td></tr>';
+  else if (!esSinFact && !rows.length) h += '<tr><td colspan="'+colSpan+'" style="text-align:center;padding:24px;color:var(--text-secondary,#9ca3af)">'+(f?'Nada coincide con la búsqueda':(_compEstadoFiltro?'Sin XML en este estado':'Sin archivos en esta carpeta'))+'</td></tr>';
 
-  if (esPagos) rows.forEach(function(x){
+  if (esSinFact) sfRows.forEach(function(e){
+    var idxSF = (d.egresosSinFacturaLista||[]).indexOf(e);
+    h += '<tr>'
+      +'<td style="white-space:nowrap">'+_medsEsc(e.fecha||'—')+'</td>'
+      +'<td><b>'+_medsEsc(e.proveedor||'—')+'</b></td>'
+      +'<td style="max-width:280px;overflow:hidden;text-overflow:ellipsis" title="'+_medsEsc(e.concepto||'')+'">'+_medsEsc((e.concepto||'—').substring(0,60))+'</td>'
+      +'<td style="font-weight:700">'+_medsFmt(e.monto)+'</td>'
+      +'<td>'+(e.pagado?'<span style="color:#166534;font-weight:700">Pagado</span>':'<span style="color:#b45309;font-weight:700">Por pagar</span>')+'</td>'
+      +'<td>'+(puedeVincular
+        ?'<button class="mv-btn-sec" style="padding:4px 12px;font-size:10.5px" onclick="compBuscarXmlEgresoSF('+idxSF+',this)">🔍 Buscar su XML</button>'
+        :'<span style="font-size:10.5px;color:#9ca3af">Sin permiso para vincular</span>')+'</td>'
+      +'</tr>';
+  });
+  else if (esPagos) rows.forEach(function(x){
     var idx = d.comprobantes.indexOf(x);
     var estadoHtml, accionHtml;
     var mailBtn = puedeEnviar ? ' <button class="mv-btn-sec" style="padding:3px 10px;font-size:10.5px" onclick="compEnviarCorreoRow('+idx+')" title="Enviar comprobante por correo">✉ Enviar</button>' : '';
@@ -13851,6 +13893,55 @@ async function compVincularLote(btn){
   } catch(e){
     alert('Error de conexión: '+e.message);
     if(btn){btn.disabled=false;btn.textContent='⚡ Vincular sugeridos';}
+  }
+}
+
+/* 🔍 Desde la lista "Egresos del mes sin factura": buscar el XML de ese
+   egreso en el repositorio del SAT y ofrecer vincularlo ahí mismo */
+async function compBuscarXmlEgresoSF(idx, btn){
+  var e = _compData && (_compData.egresosSinFacturaLista||[])[idx];
+  if (!e) return;
+  var celda = btn ? btn.closest('td') : null;
+  if (btn){ btn.disabled = true; btn.textContent = 'Buscando…'; }
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'buscarXmlParaEgreso', proveedor:e.proveedor||'', monto:e.monto||0,
+      fecha:e.fecha||(_compAnio+'-'+String(_compMes).padStart(2,'0')+'-15'), usuario:s.email||''
+    })});
+    var d = await r.json();
+    if (!d.ok) throw new Error(d.error||'No se pudo buscar');
+    if (!d.encontrados || !d.encontrados.length){
+      if (celda) celda.innerHTML = '<span style="font-size:10.5px;color:#9ca3af">Sin XML con este monto/proveedor en el repositorio del SAT</span>';
+      return;
+    }
+    var x = d.encontrados[0];
+    var folio = (x.serie?x.serie+'-':'')+(x.folio||'S/F');
+    if (celda) celda.innerHTML = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:10.5px">'
+      +'<span'+(x.matchProveedor?'':' style="color:#b45309"')+'><b>'+_medsEsc(x.emisorNombre||'—')+'</b> · '+_medsEsc(folio)+' · '+_medsFmt(x.total)+(x.matchProveedor?'':' — solo coincide el monto, verifica')+'</span>'
+      +'<a href="javascript:void(0)" onclick="compVerCfdiFile(\''+x.fileId+'\',\'\',\''+_medsEsc(folio).replace(/'/g,"\\'")+'\')" style="color:var(--color-primary,#c46a7a);font-weight:700;text-decoration:none">👁 Ver</a>'
+      +'<button class="mv-btn" style="padding:3px 12px;font-size:10.5px;background:#166534" onclick="compVincularEgresoSF('+e.rowNum+',\''+x.fileId+'\',\''+_medsEsc(folio).replace(/'/g,"\\'")+'\',this)">Vincular</button>'
+      +(d.encontrados.length>1?'<span style="color:#9ca3af">+'+(d.encontrados.length-1)+' candidato(s) más</span>':'')
+      +'</div>';
+  } catch(err){
+    if (celda) celda.innerHTML = '<span style="font-size:10.5px;color:#dc2626">'+_medsEsc(err.message)+'</span>';
+  }
+}
+
+async function compVincularEgresoSF(rowNum, fileId, etiqueta, btn){
+  if (btn){ btn.disabled = true; btn.textContent = '…'; }
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+      action:'vincularComprobanteEgreso', anio:_compAnio, rowNum:rowNum, fileId:fileId,
+      campo:'factura', etiqueta:etiqueta, usuario:s.email||''
+    })});
+    var d = await r.json();
+    if (!d.ok){ alert(d.error||'No se pudo vincular'); if(btn){btn.disabled=false;btn.textContent='Vincular';} return; }
+    await loadComprobantes(_compAnio, _compMes);
+  } catch(e){
+    alert('Error de conexión: '+e.message);
+    if(btn){ btn.disabled = false; btn.textContent = 'Vincular'; }
   }
 }
 
