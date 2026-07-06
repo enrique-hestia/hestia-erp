@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.20 -->
+﻿<!-- app-build:2026.07.05.21 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -13606,7 +13606,14 @@ function _renderComprobantes(){
 
   var colSpan = esSinFact ? 6 : (esPagos ? 4 : 8);
   if (d.aviso) h += '<tr><td colspan="'+colSpan+'" style="text-align:center;padding:24px;color:#b45309">'+_medsEsc(d.aviso)+'</td></tr>';
-  else if (esSinFact && !sfRows.length) h += '<tr><td colspan="6" style="text-align:center;padding:24px;color:#166534;font-weight:700">✓ Todos los egresos del mes tienen factura vinculada'+(f?' (con este filtro de búsqueda)':'')+'</td></tr>';
+  else if (esSinFact && !sfRows.length) {
+    // Si el conteo dice que SÍ hay egresos sin factura pero no llegó la
+    // lista, el backend desplegado es anterior — avisar en vez de mentir.
+    if ((res.egresosSinFactura||0) > 0 && !d.egresosSinFacturaLista)
+      h += '<tr><td colspan="6" style="text-align:center;padding:24px;color:#b45309">Hay '+res.egresosSinFactura+' egresos sin factura, pero tu versión de comprobantes.gs en Apps Script no envía la lista — actualízala y redespliega para verlos aquí.</td></tr>';
+    else
+      h += '<tr><td colspan="6" style="text-align:center;padding:24px;color:#166534;font-weight:700">✓ Todos los egresos del mes tienen factura vinculada'+(f?' (con este filtro de búsqueda)':'')+'</td></tr>';
+  }
   else if (!esSinFact && !rows.length) h += '<tr><td colspan="'+colSpan+'" style="text-align:center;padding:24px;color:var(--text-secondary,#9ca3af)">'+(f?'Nada coincide con la búsqueda':(_compEstadoFiltro?'Sin XML en este estado':'Sin archivos en esta carpeta'))+'</td></tr>';
 
   if (esSinFact) sfRows.forEach(function(e){
