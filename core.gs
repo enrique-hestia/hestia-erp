@@ -412,6 +412,12 @@ function doGet(e) {
       return jsonResponse(readSummaryConfig());
     }
 
+    if (action === 'clasifProveedores') {
+      if (typeof readClasificacionProveedores !== 'function')
+        return jsonResponse({ok:false, error:'Agrega prov_defaults.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readClasificacionProveedores((e && e.parameter.force) === '1'));
+    }
+
     if (action === 'movimientosInventario') {
       return jsonResponse(readMovimientosInventario({
         sku: (e && e.parameter.sku) || '',

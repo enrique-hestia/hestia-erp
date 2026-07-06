@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.06.34 -->
+﻿<!-- app-build:2026.07.06.35 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -7243,6 +7243,8 @@ function egOpenForm() {
   var today = new Date().toISOString().substring(0, 10);
   // Proveedores: usa el datalist GLOBAL (catálogo central + nombres ya usados).
   try { _renderProvDatalist(); } catch(e){}
+  // Cargar mapa de clasificación por proveedor (recomendación automática al capturar)
+  try { _egLoadClasifProv(); } catch(e){}
   // Opciones desde Config_Dropdowns (Panel de Control > Formularios), con fallback a datos existentes
   function _ddOpts(sec, campo, fallback) {
     var vals = (_ddData && _ddData[sec] && _ddData[sec][campo] && _ddData[sec][campo].valores) || fallback || [];
@@ -7267,16 +7269,18 @@ function egOpenForm() {
     +'<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:14px">Datos del egreso</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
     +'<div><label '+LBL+'>Fecha de pago <span style="font-weight:400;color:var(--text-secondary,#9ca3af)">(si ya se pagó)</span></label><input type="date" id="eg-fecha" '+S+'></div>'
-    +'<div><label '+LBL+'>Proveedor *</label><input id="eg-proveedor" list="prov-datalist" '+S+' placeholder="Nombre del proveedor"></div>'
+    +'<div><label '+LBL+'>Proveedor *</label><input id="eg-proveedor" list="prov-datalist" '+S+' placeholder="Nombre del proveedor" oninput="egSugerirClasif()" onchange="egSugerirClasif()"></div>'
     +'<div><label '+LBL+'>Monto *</label><input type="number" id="eg-monto" '+S+' placeholder="0.00" step="0.01"></div>'
     +'</div>'
+    +'<div id="eg-clasif-banner" style="display:none;margin-bottom:14px"></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
     +'<div><label '+LBL+'>Contable</label><select id="eg-contable" '+S+'><option value="">— Seleccionar —</option>'+contOpts+'</select></div>'
     +'<div><label '+LBL+'>Tipo</label><select id="eg-tipo" '+S+'><option value="">— Seleccionar —</option>'+tipoOpts+'</select></div>'
     +'<div><label '+LBL+'>Subtipo</label><select id="eg-subtipo" '+S+'><option value="">— Seleccionar —</option>'+subOpts+'</select></div>'
     +'<div><label '+LBL+'>Forma de pago</label><select id="eg-fpago" '+S+'><option value="">— Seleccionar —</option>'+fpOpts+'</select></div>'
     +'</div>'
-    +'<div style="margin-bottom:14px"><label '+LBL+'>Concepto *</label><input id="eg-concepto" '+S+' placeholder="Descripción del egreso"></div>'
+    +'<div style="margin-bottom:14px"><label '+LBL+'>Concepto *</label><input id="eg-concepto" '+S+' placeholder="Descripción del egreso">'
+    +'<div style="margin-top:5px;text-align:right"><a href="javascript:void(0)" onclick="egFijarClasif()" style="font-size:11px;font-weight:600;color:var(--color-primary,#c46a7a);text-decoration:none" title="Guarda Contable/Tipo/Subtipo/Concepto como default de este proveedor para que se sugiera solo la próxima vez">📌 Fijar esta clasificación al proveedor</a></div></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
     +'<div><label '+LBL+'>Vencimiento <span style="font-weight:400;color:var(--text-secondary,#9ca3af)">(si no se ha pagado)</span></label><input type="date" id="eg-venc" '+S+'></div>'
     +'<div><label '+LBL+'>Póliza</label><input id="eg-poliza" '+S+' placeholder="Número de póliza"></div>'
@@ -7302,6 +7306,84 @@ function egOpenForm() {
 
   content.innerHTML = h;
   view.scrollTop = 0;
+}
+
+/* ── Auto-clasificación de gastos por proveedor frecuente ──────────── */
+var _egClasifProv = null;      // {map:{nombreLower:{...}}}
+var _egClasifLoading = false;
+function _egClasifKey(s){ return String(s||'').trim().toLowerCase().replace(/\s+/g,' '); }
+async function _egLoadClasifProv(force){
+  if (_egClasifProv && !force) return _egClasifProv;
+  if (_egClasifLoading) return null;
+  _egClasifLoading = true;
+  try {
+    var r = await fetch(APPS_SCRIPT_URL+'?action=clasifProveedores&token='+encodeURIComponent(getToken()));
+    var j = await r.json();
+    if (j && j.ok) { _egClasifProv = j; }
+  } catch(e){} finally { _egClasifLoading = false; }
+  // Si al terminar ya hay un proveedor escrito, reevaluar
+  try { egSugerirClasif(); } catch(e){}
+  return _egClasifProv;
+}
+function egSugerirClasif(){
+  var banner = document.getElementById('eg-clasif-banner');
+  if (!banner) return;
+  var provEl = document.getElementById('eg-proveedor');
+  var nombre = provEl ? provEl.value.trim() : '';
+  if (!nombre || !_egClasifProv || !_egClasifProv.map){ banner.style.display='none'; return; }
+  var rec = _egClasifProv.map[_egClasifKey(nombre)];
+  if (!rec){ banner.style.display='none'; return; }
+  // Solo recomendar si hay algo útil
+  if (!rec.contable && !rec.subtipo){ banner.style.display='none'; return; }
+  _egClasifRec = rec;
+  var esFijo = rec.fuente === 'fijo';
+  var chips = [rec.contable, rec.tipo, rec.subtipo].filter(Boolean).join(' · ');
+  var detalle = esFijo
+      ? 'Clasificación <b>fija</b> de este proveedor'
+      : 'Este proveedor casi siempre es así (' + (rec.comboVeces||rec.veces) + ' de ' + rec.veces + ' gastos · ' + (rec.pct||0) + '%)';
+  var concLine = rec.concepto ? '<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-top:2px">Concepto sugerido: <b>'+_esc(rec.concepto)+'</b></div>' : '';
+  banner.style.display='block';
+  banner.innerHTML =
+    '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:'+(esFijo?'rgba(196,106,122,.09)':'rgba(59,130,246,.08)')+';border:1px solid '+(esFijo?'rgba(196,106,122,.3)':'rgba(59,130,246,.25)')+';border-radius:10px;padding:10px 14px">'
+    + '<div style="flex:1;min-width:200px">'
+    +   '<div style="font-size:12.5px;font-weight:700;color:var(--text-primary,#111)">'+(esFijo?'📌':'💡')+' '+_esc(chips||'—')+'</div>'
+    +   '<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-top:1px">'+detalle+'</div>'+concLine
+    + '</div>'
+    + '<button type="button" onclick="egAplicarClasif()" style="padding:7px 14px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">Aplicar</button>'
+    + '</div>';
+}
+var _egClasifRec = null;
+function egAplicarClasif(){
+  var rec = _egClasifRec; if (!rec) return;
+  function setSel(id,val){ var el=document.getElementById(id); if(el&&val){ el.value=val;
+    // si es <select> y el valor no existe como opción, agregarlo
+    if(el.tagName==='SELECT' && el.value!==val){ var o=document.createElement('option'); o.value=val; o.textContent=val; el.appendChild(o); el.value=val; } } }
+  setSel('eg-contable', rec.contable);
+  setSel('eg-tipo', rec.tipo);
+  setSel('eg-subtipo', rec.subtipo);
+  var conc=document.getElementById('eg-concepto');
+  if (conc && rec.concepto && !conc.value.trim()) conc.value = rec.concepto;
+  setStatus('Clasificación aplicada desde el proveedor. Revisa antes de guardar.','ok');
+}
+// Fijar la clasificación ACTUAL del formulario al proveedor (siempre será esto)
+async function egFijarClasif(){
+  var provEl=document.getElementById('eg-proveedor');
+  var nombre=provEl?provEl.value.trim():'';
+  if(!nombre){ alert('Escribe primero el proveedor.'); return; }
+  var payload={ action:'guardarClasifProveedor', nombre:nombre,
+    contable:(document.getElementById('eg-contable')||{}).value||'',
+    tipo:(document.getElementById('eg-tipo')||{}).value||'',
+    subtipo:(document.getElementById('eg-subtipo')||{}).value||'',
+    concepto:(document.getElementById('eg-concepto')||{}).value||'',
+    usuario:(getSession()||{}).email||'sistema' };
+  if(!payload.contable && !payload.subtipo){ alert('Selecciona al menos Contable y Subtipo para fijarlos al proveedor.'); return; }
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify(payload)});
+    var j=await r.json();
+    if(!j.ok) throw new Error(j.error||'Error');
+    setStatus('Clasificación fijada a "'+nombre+'". La próxima captura la sugerirá automático.','ok');
+    _egClasifProv=null; await _egLoadClasifProv(true);
+  }catch(e){ alert('No se pudo fijar: '+(e.message||e)); }
 }
 
 function egCloseForm() {
@@ -13909,6 +13991,7 @@ var _compData = null;
 var _summaryData = null;
 var _summaryCfg  = null;
 var _summaryOpen = {}; // línea drill-down abierta
+var _summarySubOpen = {}; // sub-item (producto/subtipo) abierto
 
 function _sumMoney(v){ try { return fmtMoney(Number(v)||0, 'Finanzas'); } catch(e){ return '$'+(Number(v)||0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); } }
 function _sumPct(v){ return v==null ? '—' : (v*100).toFixed(1)+'%'; }
@@ -13946,6 +14029,12 @@ function _sumStyles(){
   + '.sm-dato.clickable:hover td{background:rgba(196,106,122,.06)}'
   + '.sm-dato .sm-caret{display:inline-block;width:14px;color:var(--color-text-muted,#9ca3af);transition:transform .15s}'
   + '.sm-dato.open .sm-caret{transform:rotate(90deg)}'
+  + '.sm-sub td:first-child{padding-left:50px;color:var(--color-text,#374151)}'
+  + '.sm-sub td{background:rgba(120,120,140,.03);font-size:12.5px}'
+  + '.sm-sub.clickable{cursor:pointer}'
+  + '.sm-sub.clickable:hover td{background:rgba(196,106,122,.05)}'
+  + '.sm-sub .sm-caret{display:inline-block;width:13px;color:var(--color-text-muted,#b0b0b8);transition:transform .15s;font-size:11px}'
+  + '.sm-sub.open .sm-caret{transform:rotate(90deg)}'
   + '.sm-metric td{font-weight:700;border-top:2px solid var(--color-border,#d8d8dc);background:rgba(196,106,122,.05)}'
   + '.sm-nd td:first-child{color:#c07b0a}'
   + '.sm-neg{color:#c83c3c}'
@@ -14035,25 +14124,42 @@ function _renderSummary(){
         +'<td class="hide-m">'+_sumMoney(l.prev)+'</td>'
         +'<td>'+delta.txt+'</td></tr>';
     } else { // dato
-      var hasRows=(l.rows&&l.rows.length);
+      var subs=(l.subitems||[]);
+      var hasSubs=subs.length>0;
       var open=!!_summaryOpen[idx];
-      var cls='sm-dato'+(l.flag==='nodeducible'?' sm-nd':'')+(hasRows?' clickable':'')+(open?' open':'');
-      h+='<tr class="'+cls+'"'+(hasRows?' onclick="summaryToggle('+idx+')"':'')+'>'
-        +'<td>'+(hasRows?'<span class="sm-caret">▸</span>':'<span class="sm-caret"></span>')+_esc(l.label)
+      var cls='sm-dato'+(l.flag==='nodeducible'?' sm-nd':'')+(hasSubs?' clickable':'')+(open?' open':'');
+      h+='<tr class="'+cls+'"'+(hasSubs?' onclick="summaryToggle('+idx+')"':'')+'>'
+        +'<td>'+(hasSubs?'<span class="sm-caret">▸</span>':'<span class="sm-caret"></span>')+_esc(l.label)
+          +(hasSubs?' <span style="font-size:10.5px;color:var(--color-text-muted,#9ca3af);font-weight:400">('+subs.length+')</span>':'')
           +(l.flag==='nodeducible'?' <span style="font-size:10px;background:#f5e6c8;color:#a06600;padding:1px 6px;border-radius:8px">no deducible</span>':'')+'</td>'
         +'<td class="'+neg+'">'+_sumMoney(l.actual)+'</td>'
         +'<td class="hide-m">'+_sumPct(l.pct)+'</td>'
         +'<td class="hide-m">'+_sumMoney(l.prev)+'</td>'
         +'<td class="'+delta.cls+'">'+delta.txt+'</td></tr>';
-      if(open && hasRows){
-        var dr='<tr class="sm-drill"><td colspan="5"><table>';
-        l.rows.slice().sort(function(a,b){return b.monto-a.monto;}).forEach(function(rw){
-          dr+='<tr><td>'+_esc(rw.fecha||'')+' · '+_esc(rw.nombre||'')+'</td>'
-            +'<td style="text-align:left;color:var(--color-text-muted,#6b7280)">'+_esc(rw.concepto||rw.subtipo||'')+'</td>'
-            +'<td style="text-align:right;font-weight:600">'+_sumMoney(rw.monto)+'</td></tr>';
+      if(open && hasSubs){
+        subs.forEach(function(si,sj){
+          var skey=idx+'_'+sj;
+          var sopen=!!_summarySubOpen[skey];
+          var hasR=(si.rows&&si.rows.length);
+          var sd=_sumDelta(si.actual,si.prev);
+          var qty=(si.cantidad&&si.cantidad>0)?' <span style="color:var(--color-text-muted,#9ca3af);font-weight:400">×'+(Math.round(si.cantidad*100)/100)+'</span>':'';
+          h+='<tr class="sm-sub'+(hasR?' clickable':'')+(sopen?' open':'')+'"'+(hasR?' onclick="summarySubToggle(\''+skey+'\')"':'')+'>'
+            +'<td>'+(hasR?'<span class="sm-caret">▸</span>':'<span class="sm-caret"></span>')+_esc(si.label)+qty+'</td>'
+            +'<td>'+_sumMoney(si.actual)+'</td>'
+            +'<td class="hide-m">'+_sumPct((_summaryData.metricas&&_summaryData.metricas.revenue)?si.actual/_summaryData.metricas.revenue:null)+'</td>'
+            +'<td class="hide-m">'+_sumMoney(si.prev)+'</td>'
+            +'<td class="'+sd.cls+'">'+sd.txt+'</td></tr>';
+          if(sopen && hasR){
+            var dr='<tr class="sm-drill"><td colspan="5"><table>';
+            si.rows.forEach(function(rw){
+              dr+='<tr><td>'+_esc(rw.fecha||'')+' · '+_esc(rw.nombre||'')+'</td>'
+                +'<td style="text-align:left;color:var(--color-text-muted,#6b7280)">'+_esc(rw.concepto||rw.subtipo||'')+'</td>'
+                +'<td style="text-align:right;font-weight:600">'+_sumMoney(rw.monto)+'</td></tr>';
+            });
+            dr+='</table></td></tr>';
+            h+=dr;
+          }
         });
-        dr+='</table></td></tr>';
-        h+=dr;
       }
     }
   });
@@ -14080,9 +14186,10 @@ function _renderSummary(){
 }
 
 function summaryToggle(idx){ _summaryOpen[idx]=!_summaryOpen[idx]; _renderSummary(); }
+function summarySubToggle(skey){ _summarySubOpen[skey]=!_summarySubOpen[skey]; _renderSummary(); }
 function summaryToggleAll(open){
-  _summaryOpen={};
-  if(open && _summaryData){ (_summaryData.lineas||[]).forEach(function(l,i){ if(l.tipo==='dato'&&l.rows&&l.rows.length) _summaryOpen[i]=true; }); }
+  _summaryOpen={}; _summarySubOpen={};
+  if(open && _summaryData){ (_summaryData.lineas||[]).forEach(function(l,i){ if(l.tipo==='dato'&&l.subitems&&l.subitems.length) _summaryOpen[i]=true; }); }
   _renderSummary();
 }
 function _esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -14097,6 +14204,11 @@ async function summaryExport(){
   (d.lineas||[]).forEach(function(l){
     var delta=_sumDelta(l.actual,l.prev);
     aoa.push([ (l.tipo==='dato'?'   ':'')+(l.label||l.linea||''), Number(l.actual)||0, l.pct==null?'':(l.pct), Number(l.prev)||0, delta.txt ]);
+    if(l.tipo==='dato' && l.subitems){
+      l.subitems.forEach(function(si){
+        aoa.push([ '      '+(si.label||'')+(si.cantidad>0?' (×'+si.cantidad+')':''), Number(si.actual)||0, '', Number(si.prev)||0, '' ]);
+      });
+    }
   });
   aoa.push([]);
   aoa.push(['Fuera del P&L — Pago AMEX (periodo anterior)', Number((d.amexCredito||{}).actual)||0]);

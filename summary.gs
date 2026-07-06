@@ -163,7 +163,8 @@ function _summaryReadIngresos(anio) {
     var r=data[i];
     if (!String(r[0]||'').trim()) continue;
     out.push({ op:String(r[0]||''), fecha:dt(r[2]).substring(0,10), paciente:String(r[3]||''),
-      categoria:String(r[4]||''), producto:String(r[5]||''), total:num(r[9]), formaPago:String(r[12]||'') });
+      categoria:String(r[4]||''), producto:String(r[5]||''), cantidad:num(r[8]),
+      total:num(r[9]), formaPago:String(r[12]||'') });
   }
   return out;
 }
@@ -194,10 +195,17 @@ function readSummary(fechaInicio, fechaFin) {
     function clasifEg(clave){ return mapEg[_sumNorm(clave)] || _summaryDefaultClass('egreso', clave); }
     function clasifIn(cat){ return mapIn[_sumNorm(cat)] || _summaryDefaultClass('ingreso', cat); }
 
-    // Acumuladores por línea
-    var agg = {}; // 'GRUPO|Linea' -> {grupo,linea,orden,flag,actual,prev,rows:[]}
+    // Acumuladores por línea (con sub-items agrupados por producto/concepto)
+    var agg = {}; // 'GRUPO|Linea' -> {grupo,linea,orden,flag,actual,prev,subs:{}}
     function key(g,l){ return g+'|'+l; }
-    function get(g,l,orden,flag){ var k=key(g,l); if(!agg[k]) agg[k]={grupo:g,linea:l,orden:orden||5,flag:flag||'',actual:0,prev:0,rows:[]}; return agg[k]; }
+    function get(g,l,orden,flag){ var k=key(g,l); if(!agg[k]) agg[k]={grupo:g,linea:l,orden:orden||5,flag:flag||'',actual:0,prev:0,subs:{}}; return agg[k]; }
+    function addSub(line, label, monto, cant, isA, drill){
+      label = String(label||'(sin nombre)').trim() || '(sin nombre)';
+      var s = line.subs[label];
+      if(!s){ s = line.subs[label] = {label:label, actual:0, prev:0, cantA:0, cantP:0, rows:[]}; }
+      if(isA){ s.actual += monto; s.cantA += cant; if(drill) s.rows.push(drill); }
+      else { s.prev += monto; s.cantP += cant; }
+    }
 
     var amex = { actual:0, prev:0, rows:[] };
     var recon = { ingresosTotal:0, egresosTotal:0 };
@@ -224,10 +232,13 @@ function readSummary(fechaInicio, fechaFin) {
           return;
         }
         var line = get(c.grupo, c.linea, c.orden, c.flag);
-        if (enActual){ line.actual+=monto; line.rows.push({fecha:f,nombre:r.proveedor,concepto:r.concepto,monto:monto,subtipo:r.subtipo}); recon.egresosTotal+=monto;
+        // Sub-item de egreso: agrupa por Subtipo (ej. Software, Renta) y drill = movimiento
+        var subLbl = String(r.subtipo||'').trim() || String(r.concepto||'').trim() || '(sin subtipo)';
+        if (enActual){ line.actual+=monto; recon.egresosTotal+=monto;
+          addSub(line, subLbl, monto, 1, true, {fecha:f, nombre:r.proveedor, concepto:r.concepto, monto:monto, subtipo:r.subtipo});
           var sk=_sumNorm(r.subtipo); if (LAB_SUBS[sk]){ if(!labInsMap[sk]) labInsMap[sk]={subtipo:r.subtipo,total:0,count:0}; labInsMap[sk].total+=monto; labInsMap[sk].count++; }
         }
-        if (enPrev) line.prev+=monto;
+        if (enPrev){ line.prev+=monto; addSub(line, subLbl, monto, 1, false, null); }
       });
     }
 
@@ -240,8 +251,13 @@ function readSummary(fechaInicio, fechaFin) {
         if (!enActual && !enPrev) return;
         var c = clasifIn(r.categoria);
         var line = get('REVENUE', c.linea, c.orden, c.flag);
-        if (enActual){ line.actual+=r.total; line.rows.push({fecha:f,nombre:r.paciente,concepto:r.producto+' ('+r.categoria+')',monto:r.total}); recon.ingresosTotal+=r.total; }
-        if (enPrev) line.prev+=r.total;
+        // Sub-item de ingreso: agrupa por Producto (ej. Estimulación ovárica, IVF)
+        var subLbl = String(r.producto||'').trim() || String(r.categoria||'').trim() || '(sin producto)';
+        var cant = Number(r.cantidad)||0; if(!cant) cant=1;
+        if (enActual){ line.actual+=r.total; recon.ingresosTotal+=r.total;
+          addSub(line, subLbl, r.total, cant, true, {fecha:f, nombre:r.paciente, concepto:r.producto+' · '+r.categoria, monto:r.total, cantidad:cant});
+        }
+        if (enPrev){ line.prev+=r.total; addSub(line, subLbl, r.total, cant, false, null); }
       });
     }
 
@@ -263,8 +279,15 @@ function readSummary(fechaInicio, fechaFin) {
     function lineasDe(g){
       var arr=[]; Object.keys(agg).forEach(function(k){ if(agg[k].grupo===g) arr.push(agg[k]); });
       arr.sort(function(a,b){ return (a.orden-b.orden) || (a.linea<b.linea?-1:1); });
-      return arr.map(function(l){ return { tipo:'dato', grupo:g, linea:l.linea, label:l.linea, flag:l.flag,
-        actual:l.actual, prev:l.prev, rows:l.rows }; });
+      return arr.map(function(l){
+        var subs = Object.keys(l.subs).map(function(k){ return l.subs[k]; })
+          .sort(function(a,b){ return b.actual-a.actual; })
+          .map(function(s){ return { label:s.label, cantidad:s.cantA, cantidadPrev:s.cantP,
+            actual:s.actual, prev:s.prev,
+            rows:s.rows.sort(function(a,b){ return b.monto-a.monto; }) }; });
+        return { tipo:'dato', grupo:g, linea:l.linea, label:l.linea, flag:l.flag,
+          actual:l.actual, prev:l.prev, subitems:subs };
+      });
     }
     function pct(v){ return revA>0 ? v/revA : null; }
     function sec(g,label,actual,prev){ return { tipo:'seccion', grupo:g, label:label, actual:actual, prev:prev, pct:pct(actual) }; }

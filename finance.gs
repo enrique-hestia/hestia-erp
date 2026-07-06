@@ -601,6 +601,11 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega summary.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(setupSummaryConfig());
     }
+    if (body.action === 'guardarClasifProveedor') {
+      if (typeof guardarClasifProveedor !== 'function')
+        return jsonResponse({ok:false, error:'Agrega prov_defaults.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(guardarClasifProveedor(body));
+    }
     if (body.action === 'savePlantillaCorreo') {
       if (typeof savePlantillaCorreo !== 'function')
         return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
