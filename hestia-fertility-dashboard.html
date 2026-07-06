@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.25 -->
+﻿<!-- app-build:2026.07.05.26 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6674,13 +6674,25 @@ async function egGuardarReferencia(){
   try {
     var s = getSession()||{};
     var anio = parseInt((currentFechaInicio||'').substring(0,4)) || new Date().getFullYear();
+    // Se escribe con la acción updateEgresoField (ya desplegada) — 'fields'
+    // pone el texto en Link Factura/Pago y, si se pidió, marca la casilla.
+    var colDoc = (tipo === 'pago') ? 'link pago' : 'link factura';
+    var fields = {};
+    fields[colDoc] = texto.trim();
+    if (marcar && tipo !== 'cotizacion') fields[tipo === 'pago' ? 'pagado' : 'facturaci'] = true;
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
-      action:'guardarReferenciaEgreso', anio:anio, rowNum:window._egDocRow,
-      campo: tipo==='cotizacion'?'factura':tipo, texto:texto.trim(),
-      marcarCasilla: marcar && tipo!=='cotizacion', usuario:s.email||''
+      action:'updateEgresoField', anio:anio, rowNum:window._egDocRow, usuario:s.email||'', fields:fields
     })});
     var d = await r.json();
     if (!d.ok){ if(st){ st.style.color='#dc2626'; st.textContent='Error: '+(d.error||'no se pudo guardar'); } return; }
+    // Reflejar en el estado local para que el pill cambie de inmediato
+    if (_egData && _egData.rows) {
+      var lr = _egData.rows.find(function(x){ return x._rowNum === window._egDocRow; });
+      if (lr) {
+        if (tipo === 'pago') lr.linkPago = texto.trim(); else lr.linkFactura = texto.trim();
+        if (marcar && tipo !== 'cotizacion') { if (tipo === 'pago') lr.pagado = true; else lr.facturacion = true; }
+      }
+    }
     if (st){ st.style.color='#16a34a'; st.textContent='✓ Guardado. Actualizando…'; }
     setTimeout(function(){ egCloseUpload(); if (typeof loadEgresosERP==='function') loadEgresosERP(); }, 700);
   } catch(e){
