@@ -1671,7 +1671,7 @@ function readEgresosData(anio) {
         iCont=col('contabilidad'), iPoliza=col('póliza')===-1?col('poliza'):col('póliza'),
         iFPago=col('forma de pago'), iObs=col('observaciones'), iLinkFact=col('link factura'),
         iLinkPago=col('link pago'), iLinkCotiz=col('cotiz'),
-        iUSD=col('usd'), iTC=col('tipo de cambio');
+        iUSD=col('usd'), iTC=col('tipo de cambio'), iEstatus=col('estatus');
 
     function num(v) { if (typeof v==='number') return v; var n=parseFloat(String(v||'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
     function dt(v) { if(!v)return''; if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0'); return String(v); }
@@ -1700,6 +1700,7 @@ function readEgresosData(anio) {
 
       allRows.push({
         _rowNum: r + 1,
+        id: String(row[0]||'').trim(),
         fecha: fecha,
         mes: iMes>-1 ? String(row[iMes]||'').trim() : '',
         proveedor: proveedor,
@@ -1723,7 +1724,8 @@ function readEgresosData(anio) {
         linkCotizacion: iLinkCotiz>-1 ? String(row[iLinkCotiz]||'').trim() : '',
         linkCotizacionUrl: '',
         montoUSD: iUSD>-1 ? num(row[iUSD]) : 0,
-        tipoCambio: iTC>-1 ? num(row[iTC]) : 0
+        tipoCambio: iTC>-1 ? num(row[iTC]) : 0,
+        estatus: iEstatus>-1 ? String(row[iEstatus]||'').trim() : ''
       });
     }
 

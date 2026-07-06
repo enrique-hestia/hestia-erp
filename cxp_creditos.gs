@@ -341,6 +341,83 @@ function aplicarAbonoCxP(body) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
+/* ── Traza de una orden cancelada: reconstruye a dónde fue su dinero,
+   para que el reporte/detalle muestre la historia completa —
+   "este pedido nunca se surtió; su $X quedó como crédito, aplicado a la
+   orden #Y junto con un depósito de $Z por la diferencia". ──────────── */
+function readTrazaCancelacion(cxpId) {
+  try {
+    cxpId = String(cxpId || '');
+    if (!cxpId) return { ok: false, error: 'Falta cxpId' };
+    var ss = _cxpCredSS();
+    var out = { ok: true, creditos: [], devoluciones: [], aplicaciones: [] };
+
+    // 1. Créditos generados por cancelar ESTA orden
+    var credSh = ss.getSheetByName(CXP_CRED_TAB);
+    var creditoIds = [];
+    if (credSh) {
+      var cd = credSh.getDataRange().getValues(); var ch = cd[0];
+      for (var i = 1; i < cd.length; i++) {
+        if (String(cd[i][_cxpColIdx(ch, 'CxPIdOrigen')]) !== cxpId) continue;
+        var cid = String(cd[i][_cxpColIdx(ch, 'ID')]);
+        creditoIds.push(cid);
+        out.creditos.push({
+          id: cid, monto: Number(cd[i][_cxpColIdx(ch, 'Monto')]) || 0,
+          disponible: Number(cd[i][_cxpColIdx(ch, 'MontoDisponible')]) || 0,
+          fecha: String(cd[i][_cxpColIdx(ch, 'Fecha')] || '')
+        });
+      }
+    }
+
+    // 2. Mapa de órdenes (Egresos) para nombrar la orden destino
+    var egTab = EGRESOS_TABS[2026] || 'Egresos2026';
+    var egSh = ss.getSheetByName(egTab);
+    var ordenInfo = {};
+    if (egSh) {
+      var ed = egSh.getDataRange().getValues();
+      for (var e = 1; e < ed.length; e++) {
+        var id = String(ed[e][0] || '');
+        if (id) ordenInfo[id] = { proveedor: String(ed[e][4] || ''), concepto: String(ed[e][8] || ''), monto: parseFloat(ed[e][9]) || 0, fecha: (ed[e][1] instanceof Date) ? Utilities.formatDate(ed[e][1], Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(ed[e][1] || '') };
+      }
+    }
+
+    // 3. Abonos que consumieron esos créditos → a qué orden se aplicaron,
+    //    y qué OTROS abonos (depósito por la diferencia) tuvo esa orden
+    var abSh = ss.getSheetByName(CXP_ABONO_TAB);
+    if (abSh && creditoIds.length) {
+      var ad = abSh.getDataRange().getValues(); var ah = ad[0];
+      var destinos = {}; // cxpId destino → {aplicadoCredito, otrosAbonos:[]}
+      for (var a = 1; a < ad.length; a++) {
+        var reversado = ad[a][_cxpColIdx(ah, 'Reversado')] === true || String(ad[a][_cxpColIdx(ah, 'Reversado')]).toUpperCase() === 'TRUE';
+        if (reversado) continue;
+        var credId = String(ad[a][_cxpColIdx(ah, 'CreditoId')] || '');
+        if (creditoIds.indexOf(credId) < 0) continue;
+        var destCxp = String(ad[a][_cxpColIdx(ah, 'CxPId')] || '');
+        if (!destinos[destCxp]) destinos[destCxp] = { cxpId: destCxp, aplicadoCredito: 0, otros: [] };
+        destinos[destCxp].aplicadoCredito += Number(ad[a][_cxpColIdx(ah, 'Monto')]) || 0;
+      }
+      // Depósito/pago por la diferencia en cada orden destino
+      Object.keys(destinos).forEach(function (destCxp) {
+        for (var b = 1; b < ad.length; b++) {
+          if (String(ad[b][_cxpColIdx(ah, 'CxPId')] || '') !== destCxp) continue;
+          if (String(ad[b][_cxpColIdx(ah, 'Origen')] || '') !== 'pago') continue;
+          var rev = ad[b][_cxpColIdx(ah, 'Reversado')] === true || String(ad[b][_cxpColIdx(ah, 'Reversado')]).toUpperCase() === 'TRUE';
+          if (rev) continue;
+          destinos[destCxp].otros.push({ monto: Number(ad[b][_cxpColIdx(ah, 'Monto')]) || 0, formaPago: String(ad[b][_cxpColIdx(ah, 'FormaPago')] || '') });
+        }
+        var info = ordenInfo[destCxp] || {};
+        out.aplicaciones.push({
+          cxpId: destCxp, proveedor: info.proveedor || '', concepto: info.concepto || '',
+          montoOrden: info.monto || 0, fecha: info.fecha || '',
+          aplicadoCredito: destinos[destCxp].aplicadoCredito,
+          deposito: destinos[destCxp].otros
+        });
+      });
+    }
+    return out;
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 /* ── Cancelar una orden — el dinero ya pagado se reversa según el MODO
    que elija el usuario:
      modo 'credito' (default): queda como saldo a favor del proveedor

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.22 -->
+﻿<!-- app-build:2026.07.05.23 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6156,8 +6156,11 @@ function _renderEgresosERP() {
 
   var data = _egData;
   var filtered = _egFilterRows();
-  var totalFiltered = filtered.reduce(function(s,r){return s+r.monto;},0);
-  var pagadoFiltered = filtered.filter(function(r){return r.pagado;}).reduce(function(s,r){return s+r.monto;},0);
+  // Las órdenes CANCELADAS quedan en la tabla como referencia histórica del
+  // proveedor, pero NO cuentan en ningún total (no son egreso ni pendiente).
+  function _egCancel(r){ return r.estatus === 'Cancelada'; }
+  var totalFiltered = filtered.filter(function(r){return !_egCancel(r);}).reduce(function(s,r){return s+r.monto;},0);
+  var pagadoFiltered = filtered.filter(function(r){return r.pagado && !_egCancel(r);}).reduce(function(s,r){return s+r.monto;},0);
   var pendFiltered = totalFiltered - pagadoFiltered;
 
   function fE(v){return '$'+Math.abs(Number(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
@@ -6171,8 +6174,8 @@ function _renderEgresosERP() {
   var _pIni = currentFechaInicio || '', _pFin = currentFechaFin || '';
   function _inRange(f){ return f && (!_pIni || f >= _pIni) && (!_pFin || f <= _pFin); }
   var _rowsAll = data.rows || [];
-  var _pagRows = _rowsAll.filter(function(r){ return  r.pagado && _inRange((r.fecha||'').substring(0,10)); });
-  var _penRows = _rowsAll.filter(function(r){ return !r.pagado && _inRange((r.vencimiento||'').substring(0,10)); });
+  var _pagRows = _rowsAll.filter(function(r){ return  r.pagado && r.estatus!=='Cancelada' && _inRange((r.fecha||'').substring(0,10)); });
+  var _penRows = _rowsAll.filter(function(r){ return !r.pagado && r.estatus!=='Cancelada' && _inRange((r.vencimiento||'').substring(0,10)); });
   function _sum(a){ return a.reduce(function(s,r){return s+(r.monto||0);},0); }
   var periodoPagado = _sum(_pagRows);
   var periodoPend   = _sum(_penRows);
@@ -6354,19 +6357,26 @@ function _renderEgresosERP() {
       var mailIcon = hasPermission('docs_enviar')
         ? ' <span onclick="egEnviarCorreoRow(decodeURIComponent(\''+encodeURIComponent(JSON.stringify({proveedor:r.proveedor||'',concepto:r.concepto||'',monto:r.monto||0,fecha:(r.fecha||'').substring(0,10),pagado:!!r.pagado,linkFacturaUrl:r.linkFacturaUrl||'',linkPagoUrl:r.linkPagoUrl||''}))+'\'))" style="cursor:pointer;font-size:13px" title="Enviar documentos por correo (factura/pago adjuntos)">✉</span>'
         : '';
-      h.push('<tr class="eg-row" onclick="egToggleRow('+r._rowNum+')" style="cursor:pointer">'
+      var esCancel = r.estatus === 'Cancelada';
+      var provCell = (r.proveedor||'—') + (esCancel?' <span style="font-size:9px;font-weight:800;padding:1px 7px;border-radius:20px;background:#e5e7eb;color:#6b7280;vertical-align:middle">CANCELADA</span>':'');
+      h.push('<tr class="eg-row" onclick="egToggleRow('+r._rowNum+')" style="cursor:pointer'+(esCancel?';opacity:.6':'')+'">'
         +'<td style="text-align:center"><span class="eg-row-toggle" id="eg-tog-'+r._rowNum+'">▶</span></td>'
         +'<td style="color:var(--text-secondary,#6b7280)">'+((r.fecha||'').substring(0,10)||'—')+'</td>'
-        +'<td style="font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis" title="'+r.proveedor+'">'+(r.proveedor||'—')+'</td>'
-        +'<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;color:var(--text-secondary,#374151)" title="'+r.concepto+'">'+(r.concepto||'—')+'</td>'
+        +'<td style="font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis" title="'+r.proveedor+'">'+provCell+'</td>'
+        +'<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;color:var(--text-secondary,#374151)'+(esCancel?';text-decoration:line-through':'')+'" title="'+r.concepto+'">'+(r.concepto||'—')+'</td>'
         +'<td><span class="eg-badge '+contBadge+'">'+(r.subtipo||'—')+'</span></td>'
-        +'<td style="text-align:right;font-weight:700;color:#991b1b">'+fE(r.monto)+'</td>'
+        +'<td style="text-align:right;font-weight:700;color:#991b1b'+(esCancel?';text-decoration:line-through':'')+'">'+fE(r.monto)+'</td>'
         +'<td style="font-size:10.5px;color:var(--text-secondary,#6b7280)">'+(r.formaPago||'—')+'</td>'
-        +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.facturacion?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'facturación\',this.checked)"'+(r.linkFacturaUrl?' title="Factura adjunta"':'')+'></td>'
-        +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.pagado?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'pagado\',this.checked)"'+(r.linkPagoUrl?' title="Pago adjunto"':'')+'></td>'
-        +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.contabilidad?' checked':'')+' onchange="egToggleField('+r._rowNum+',\'contabilidad\',this.checked)"></td>'
+        +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.facturacion?' checked':'')+(esCancel?' disabled':'')+' onchange="egToggleField('+r._rowNum+',\'facturación\',this.checked)"'+(r.linkFacturaUrl?' title="Factura adjunta"':'')+'></td>'
+        +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.pagado?' checked':'')+(esCancel?' disabled':'')+' onchange="egToggleField('+r._rowNum+',\'pagado\',this.checked)"'+(r.linkPagoUrl?' title="Pago adjunto"':'')+'></td>'
+        +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.contabilidad?' checked':'')+(esCancel?' disabled':'')+' onchange="egToggleField('+r._rowNum+',\'contabilidad\',this.checked)"></td>'
         +'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'+cotizIcon+' '+factIcon+' '+pagoIcon+mailIcon+'</td>'
-        +((hasPermission('editar_egresos')||hasPermission('borrar_egresos'))?'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'+(hasPermission('editar_egresos')?'<button class="btn-edit-row" onclick="egEditRow('+r._rowNum+')">✎</button>':'')+(hasPermission('borrar_egresos')?'<button class="btn-delete-row" onclick="egDeleteRow('+r._rowNum+')">🗑</button>':'')+'</td>':'')
+        +((hasPermission('editar_egresos')||hasPermission('borrar_egresos'))?'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'
+          +(esCancel?'<span style="font-size:10px;color:#9ca3af">—</span>'
+            :(hasPermission('editar_egresos')?'<button class="btn-edit-row" onclick="egEditRow('+r._rowNum+')">✎</button>'
+              +' <button class="btn-delete-row" style="color:#b45309;border-color:#b45309;background:rgba(180,83,9,.08)" onclick="cxpCancelarOrden('+r._rowNum+',decodeURIComponent(\''+encodeURIComponent(r.proveedor||'')+'\'))" title="Cancelar orden (queda en el histórico; el dinero pagado va a saldo a favor o devolución)">⊘</button>':'')
+              +(hasPermission('borrar_egresos')?'<button class="btn-delete-row" onclick="egDeleteRow('+r._rowNum+')">🗑</button>':''))
+          +'</td>':'')
         +'</tr>');
       var egColSpanDet = (hasPermission('editar_egresos')||hasPermission('borrar_egresos')) ? 12 : 11;
       var hasUSD = (r.montoUSD||0) > 0;
@@ -6387,6 +6397,9 @@ function _renderEgresosERP() {
           +' data-prov="'+(r.proveedor||'').replace(/"/g,'&quot;')+'" data-monto="'+(r.monto||0)+'" data-fecha="'+((r.fecha||r.vencimiento||'').substring(0,10))+'">'
           +'<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#8e4756">Datos fiscales (CFDI)</div>'
           +'<div class="eg-fiscal-body" style="color:var(--text-secondary,#374151);margin-top:2px">'+(r.linkFacturaUrl?'Cargando datos del adjunto…':'Buscando el XML en el repositorio del SAT…')+'</div></div>'
+        +(esCancel?'<div style="grid-column:1/-1" id="eg-traza-'+r._rowNum+'" data-cxpid="'+(r.id||'').replace(/"/g,'&quot;')+'">'
+          +'<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#6b7280">Movimiento de cancelación</div>'
+          +'<div class="eg-traza-body" style="color:var(--text-secondary,#374151);margin-top:2px">Cargando historia del pedido…</div></div>':'')
         +'</div></td></tr>');
     });
   } else {
@@ -6657,7 +6670,51 @@ function egToggleRow(rowNum) {
   var open = det.style.display !== 'none';
   det.style.display = open ? 'none' : '';
   if (tog) tog.classList.toggle('open', !open);
-  if (!open) egCargarFiscal(rowNum);
+  if (!open) { egCargarFiscal(rowNum); egCargarTraza(rowNum); }
+}
+
+/* Traza de un egreso CANCELADO: dónde terminó su dinero (crédito aplicado
+   a otra orden + depósito por la diferencia, o devolución al banco). */
+async function egCargarTraza(rowNum){
+  var box = document.getElementById('eg-traza-'+rowNum);
+  if (!box || box.dataset.loaded) return;
+  box.dataset.loaded = '1';
+  var cont = box.querySelector('.eg-traza-body');
+  var cxpId = box.dataset.cxpid || '';
+  var esc = function(v){ return String(v==null?'':v).replace(/</g,'&lt;'); };
+  var fmt = function(v){ return '$'+(Number(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  try {
+    var tok = encodeURIComponent(getToken());
+    var r = await fetch(APPS_SCRIPT_URL+'?action=trazaCancelacion&cxpId='+encodeURIComponent(cxpId)+'&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+    var d = await r.json();
+    if (!d.ok) throw new Error(d.error||'No se pudo leer la traza');
+    var h = '<div style="background:#f3f4f6;border-radius:8px;padding:10px 12px;margin-top:3px;font-size:11.5px;line-height:1.6">'
+      +'<div style="color:#6b7280">✕ Este pedido se canceló y <b>nunca se surtió</b> — queda solo como referencia histórica del proveedor.</div>';
+    var totalCred = (d.creditos||[]).reduce(function(s,c){return s+c.monto;},0);
+    if (totalCred > 0) {
+      h += '<div style="margin-top:5px">💳 El dinero pagado ('+fmt(totalCred)+') quedó como <b>saldo a favor del proveedor</b>.</div>';
+    }
+    if (d.aplicaciones && d.aplicaciones.length) {
+      d.aplicaciones.forEach(function(ap){
+        var dep = (ap.deposito||[]).reduce(function(s,x){return s+x.monto;},0);
+        var fps = (ap.deposito||[]).map(function(x){return x.formaPago;}).filter(Boolean).join(', ');
+        h += '<div style="margin-top:5px;padding-left:10px;border-left:2px solid #c46a7a">'
+          +'➡ Se aplicó '+fmt(ap.aplicadoCredito)+' a la orden <b>#'+esc(ap.cxpId)+'</b>'
+          +(ap.proveedor?' — '+esc(ap.proveedor):'')+(ap.concepto?' ('+esc(ap.concepto)+')':'')
+          +(dep>0?'<br>➕ más un <b>depósito de '+fmt(dep)+'</b>'+(fps?' por '+esc(fps):'')+' por la diferencia'+(ap.montoOrden?' — total de esa orden '+fmt(ap.montoOrden):''):'')
+          +'</div>';
+      });
+    } else if (totalCred > 0) {
+      h += '<div style="margin-top:5px;color:#b45309">Aún no se ha aplicado a otra orden — el saldo a favor sigue disponible.</div>';
+    }
+    if (!totalCred && (!d.aplicaciones||!d.aplicaciones.length)) {
+      h += '<div style="margin-top:5px;color:#6b7280">La orden se canceló sin pagos previos, o el dinero se registró como devolución al banco (ver conciliación).</div>';
+    }
+    h += '</div>';
+    cont.innerHTML = h;
+  } catch(e){
+    cont.innerHTML = '<span style="color:#b45309;font-size:11px">'+esc(e.message)+'</span>';
+  }
 }
 
 /* Al expandir un egreso se cargan (una sola vez) los datos fiscales:
@@ -19447,7 +19504,9 @@ window.cxpCancelarConfirmar = async function(rowNum, proveedor) {
       if (res.creditoRestaurado > 0) msg += '\n↩ Crédito anterior restaurado: '+fmt(res.creditoRestaurado)+'.';
       alert(msg);
       var ovl = document.getElementById('cxp-cancel-ovl'); if (ovl) ovl.remove();
-      loadCxPData();
+      // Recargar la vista desde la que se canceló (CxP o Egresos)
+      if (typeof _egData !== 'undefined' && _egData && document.getElementById('eg-root') && document.getElementById('eg-root').offsetParent !== null && typeof loadEgresosERP === 'function') loadEgresosERP();
+      else if (typeof loadCxPData === 'function') loadCxPData();
     } else {
       alert('Error al cancelar: ' + (res.error||'sin detalle'));
       if (btn){ btn.disabled = false; btn.textContent = 'Confirmar cancelación'; }

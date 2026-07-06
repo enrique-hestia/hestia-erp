@@ -394,6 +394,12 @@ function doGet(e) {
       return jsonResponse(readCreditosProveedor((e && e.parameter.proveedor) || ''));
     }
 
+    if (action === 'trazaCancelacion') {
+      if (typeof readTrazaCancelacion !== 'function')
+        return jsonResponse({ok:false, error:'Agrega cxp_creditos.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readTrazaCancelacion((e && e.parameter.cxpId) || ''));
+    }
+
     if (action === 'movimientosInventario') {
       return jsonResponse(readMovimientosInventario({
         sku: (e && e.parameter.sku) || '',
