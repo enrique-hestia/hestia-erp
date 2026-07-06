@@ -400,6 +400,18 @@ function doGet(e) {
       return jsonResponse(readTrazaCancelacion((e && e.parameter.cxpId) || ''));
     }
 
+    if (action === 'summary') {
+      if (typeof readSummary !== 'function')
+        return jsonResponse({ok:false, error:'Agrega summary.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readSummary((e && e.parameter.fechaInicio) || '', (e && e.parameter.fechaFin) || ''));
+    }
+
+    if (action === 'summaryConfig') {
+      if (typeof readSummaryConfig !== 'function')
+        return jsonResponse({ok:false, error:'Agrega summary.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readSummaryConfig());
+    }
+
     if (action === 'movimientosInventario') {
       return jsonResponse(readMovimientosInventario({
         sku: (e && e.parameter.sku) || '',

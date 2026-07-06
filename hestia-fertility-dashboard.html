@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.05.33 -->
+﻿<!-- app-build:2026.07.06.34 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1006,6 +1006,9 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 
 <!-- ══ VISTA: CENTRO DE COMPROBANTES (facturas XML de egresos por año/mes) ══ -->
 <div id="view-comprobantes" class="view" style="display:none"><div id="comprobantes-root"></div></div>
+
+<!-- ══ VISTA: SUMMARY (Estado de Resultados en vivo, Big-Four) ══ -->
+<div id="view-summary" class="view" style="display:none"><div id="summary-root"></div></div>
 
 <!-- ══ VISTA: PRESUPUESTO ══ -->
 <div id="view-presupuesto" class="view" style="display:none">
@@ -8117,6 +8120,21 @@ async function loadMenu() {
         icono:'bell', tipo:'vista', orden:0.5, seccion:_secRef, fuente:'recordatorios'
       });
     }
+    // Inyectar "Summary" (Estado de Resultados en vivo) en Finanzas, junto a Egresos
+    if (!menuItems.some(function(i){ return i.id==='summary'; })) {
+      var _egRef = menuItems.filter(function(i){ return i.id==='egresos'; })[0]
+                 || menuItems.filter(function(i){ return /^ingresos?$/i.test(String(i.id||'')); })[0];
+      if (_egRef) {
+        menuItems.push({
+          id:'summary', label:'Summary', padre:_egRef.padre||'',
+          icono:'bar-chart-3', tipo:'vista', orden:(Number(_egRef.orden)||3)+0.6,
+          seccion:_egRef.seccion, fuente:'summary'
+        });
+      } else {
+        var _secRefS = (menuItems.filter(function(i){ return i.seccion; })[0]||{}).seccion || '';
+        menuItems.push({ id:'summary', label:'Summary', padre:'', icono:'bar-chart-3', tipo:'vista', orden:0.6, seccion:_secRefS, fuente:'summary' });
+      }
+    }
     // Default: mes en curso (no año completo)
     var _now = new Date();
     var _y = _now.getFullYear();
@@ -11287,6 +11305,14 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     loadComprobantes();
     return;
   }
+  // Summary — Estado de Resultados en vivo (Big-Four) desde Ingresos+Egresos
+  if (viewId === 'summary') {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _smEl = document.getElementById('view-summary');
+    if (_smEl) _smEl.style.display = '';
+    loadSummary();
+    return;
+  }
   // Presupuesto — proyección y meta (página dedicada)
   if (/presupuesto|budget/i.test(viewId)) {
     document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
@@ -13876,6 +13902,318 @@ async function medsEliminarCombo(rowNum){
    columna Link Factura del egreso, como el flujo manual actual).
    ══════════════════════════════════════════════════════════════ */
 var _compData = null;
+/* ══════════════════════════════════════════════════════════════
+   SUMMARY — Estado de Resultados en vivo (Big-Four)
+   Calculado directo de Ingresos+Egresos para el rango activo.
+   ══════════════════════════════════════════════════════════════ */
+var _summaryData = null;
+var _summaryCfg  = null;
+var _summaryOpen = {}; // línea drill-down abierta
+
+function _sumMoney(v){ try { return fmtMoney(Number(v)||0, 'Finanzas'); } catch(e){ return '$'+(Number(v)||0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); } }
+function _sumPct(v){ return v==null ? '—' : (v*100).toFixed(1)+'%'; }
+function _sumDelta(a,p){
+  if (!p) return {txt:'—', cls:''};
+  var d=(a-p)/Math.abs(p);
+  var cls = d>0.0001?'up':(d<-0.0001?'down':'');
+  return {txt:(d>0?'+':'')+(d*100).toFixed(1)+'%', cls:cls};
+}
+function _sumStyles(){
+  if (document.getElementById('summary-styles')) return;
+  var s=document.createElement('style'); s.id='summary-styles';
+  s.textContent = ''
+  + '#summary-root{padding:20px 24px;max-width:1180px;margin:0 auto}'
+  + '.sm-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}'
+  + '.sm-title{font-size:20px;font-weight:700;color:var(--color-text,#1a252f);display:flex;align-items:center;gap:9px}'
+  + '.sm-sub{font-size:12.5px;color:var(--color-text-muted,#6b7280);margin-top:3px}'
+  + '.sm-actions{display:flex;gap:8px;flex-wrap:wrap}'
+  + '.sm-btn{border:1px solid var(--color-border,#e5e7eb);background:var(--color-surface,#fff);color:var(--color-text,#1a252f);border-radius:8px;padding:7px 12px;font-size:12.5px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px}'
+  + '.sm-btn:hover{background:var(--color-bg,#f7f7f8)}'
+  + '.sm-btn.primary{background:#c46a7a;border-color:#c46a7a;color:#fff}'
+  + '.sm-recon{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}'
+  + '.sm-chip{font-size:12px;font-weight:600;border-radius:20px;padding:5px 12px;display:inline-flex;align-items:center;gap:6px}'
+  + '.sm-chip.ok{background:rgba(16,145,90,.12);color:#10915a}'
+  + '.sm-chip.bad{background:rgba(200,60,60,.12);color:#c83c3c}'
+  + '.sm-table{width:100%;border-collapse:collapse;font-size:13.5px;background:var(--color-surface,#fff);border:1px solid var(--color-border,#e5e7eb);border-radius:12px;overflow:hidden}'
+  + '.sm-table th{background:var(--color-bg,#f7f7f8);text-align:right;padding:9px 14px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--color-text-muted,#6b7280);font-weight:700;border-bottom:1px solid var(--color-border,#e5e7eb)}'
+  + '.sm-table th:first-child{text-align:left}'
+  + '.sm-table td{padding:8px 14px;text-align:right;border-bottom:1px solid var(--color-border,#f0f0f2)}'
+  + '.sm-table td:first-child{text-align:left}'
+  + '.sm-seccion td{background:#1a252f;color:#fff;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.03em}'
+  + '.sm-seccion td .sm-val{color:#fff}'
+  + '.sm-dato td:first-child{padding-left:30px}'
+  + '.sm-dato.clickable{cursor:pointer}'
+  + '.sm-dato.clickable:hover td{background:rgba(196,106,122,.06)}'
+  + '.sm-dato .sm-caret{display:inline-block;width:14px;color:var(--color-text-muted,#9ca3af);transition:transform .15s}'
+  + '.sm-dato.open .sm-caret{transform:rotate(90deg)}'
+  + '.sm-metric td{font-weight:700;border-top:2px solid var(--color-border,#d8d8dc);background:rgba(196,106,122,.05)}'
+  + '.sm-nd td:first-child{color:#c07b0a}'
+  + '.sm-neg{color:#c83c3c}'
+  + '.sm-drill{background:var(--color-bg,#fafafb)}'
+  + '.sm-drill table{width:100%;border-collapse:collapse;font-size:12px;margin:0}'
+  + '.sm-drill td{padding:5px 14px;border-bottom:1px solid var(--color-border,#f0f0f2);color:var(--color-text-muted,#4b5563)}'
+  + '.sm-drill td:first-child{padding-left:44px}'
+  + '.sm-note{margin-top:16px;padding:13px 16px;border-radius:10px;background:rgba(120,120,140,.07);border:1px solid var(--color-border,#e5e7eb);font-size:12.5px;color:var(--color-text-muted,#4b5563)}'
+  + '.sm-note b{color:var(--color-text,#1a252f)}'
+  + '.sm-labgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-top:10px}'
+  + '.sm-labcard{border:1px solid var(--color-border,#e5e7eb);border-radius:10px;padding:11px 13px;background:var(--color-surface,#fff)}'
+  + '.sm-labcard .n{font-size:11px;color:var(--color-text-muted,#6b7280);text-transform:uppercase;letter-spacing:.03em}'
+  + '.sm-labcard .v{font-size:16px;font-weight:700;color:var(--color-text,#1a252f);margin-top:3px}'
+  + '.sm-labcard .c{font-size:11px;color:var(--color-text-muted,#9ca3af);margin-top:2px}'
+  + '.sm-cfgwrap{position:fixed;inset:0;background:rgba(20,25,35,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px}'
+  + '.sm-cfgbox{background:var(--color-surface,#fff);border-radius:14px;max-width:760px;width:100%;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.3)}'
+  + '.sm-cfghd{padding:16px 20px;border-bottom:1px solid var(--color-border,#e5e7eb);display:flex;justify-content:space-between;align-items:center}'
+  + '.sm-cfgbody{padding:14px 20px;overflow:auto}'
+  + '.sm-cfgft{padding:13px 20px;border-top:1px solid var(--color-border,#e5e7eb);display:flex;justify-content:space-between;gap:10px;align-items:center}'
+  + '.sm-cfgrow{display:grid;grid-template-columns:1.4fr 1fr 1.1fr 60px;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--color-border,#f0f0f2)}'
+  + '.sm-cfgrow input,.sm-cfgrow select{font-size:12px;padding:5px 7px;border:1px solid var(--color-border,#e5e7eb);border-radius:6px;background:var(--color-surface,#fff);color:var(--color-text,#1a252f);width:100%}'
+  + '.sm-cfgrow .k{font-size:12px;color:var(--color-text,#1a252f);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+  + '.sm-cfggrp{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#c46a7a;margin:14px 0 4px}'
+  + '@media(max-width:640px){.sm-table th.hide-m,.sm-table td.hide-m{display:none}}';
+  document.head.appendChild(s);
+}
+
+async function loadSummary(){
+  _sumStyles();
+  var root=document.getElementById('summary-root'); if(!root) return;
+  root.innerHTML='<div style="padding:60px;text-align:center;color:var(--color-text-muted,#9ca3af);font-size:13px">Calculando estado de resultados…</div>';
+  var fi=currentFechaInicio, ff=currentFechaFin;
+  try {
+    var url=APPS_SCRIPT_URL+'?action=summary&fechaInicio='+encodeURIComponent(fi)+'&fechaFin='+encodeURIComponent(ff)+'&token='+encodeURIComponent(getToken());
+    var r=await fetch(url); var j=await r.json();
+    if(!j.ok) throw new Error(j.error||'Error desconocido');
+    _summaryData=j; _summaryOpen={};
+    _renderSummary();
+  } catch(e){
+    root.innerHTML='<div style="padding:40px;text-align:center;color:#c83c3c;font-size:13px">No se pudo cargar el Summary: '+(e.message||e)+'<br><br>'
+      +'<button class="sm-btn" onclick="loadSummary()">Reintentar</button></div>';
+  }
+}
+
+function _renderSummary(){
+  var d=_summaryData; if(!d) return;
+  var root=document.getElementById('summary-root'); if(!root) return;
+  function periodoLbl(p){ return (p.inicio||'')+' → '+(p.fin||''); }
+  var rec=d.reconc||{};
+  var h='';
+  h+='<div class="sm-head"><div>';
+  h+='<div class="sm-title"><i data-lucide="bar-chart-3" style="width:22px;height:22px"></i>Summary · Estado de Resultados</div>';
+  h+='<div class="sm-sub">Periodo <b>'+periodoLbl(d.periodo)+'</b> &nbsp;·&nbsp; comparado vs <b>'+periodoLbl(d.prev)+'</b> &nbsp;·&nbsp; base devengado, calculado en vivo de Ingresos + Egresos</div>';
+  h+='</div><div class="sm-actions">';
+  h+='<button class="sm-btn" onclick="summaryToggleAll(true)">Expandir</button>';
+  h+='<button class="sm-btn" onclick="summaryToggleAll(false)">Colapsar</button>';
+  h+='<button class="sm-btn" onclick="summaryConfigOpen()"><i data-lucide="sliders-horizontal" style="width:14px;height:14px"></i>Configurar mapeo</button>';
+  h+='<button class="sm-btn" onclick="summaryExport()"><i data-lucide="file-spreadsheet" style="width:14px;height:14px"></i>Excel</button>';
+  h+='<button class="sm-btn" onclick="summaryPrint()"><i data-lucide="printer" style="width:14px;height:14px"></i>Imprimir</button>';
+  h+='<button class="sm-btn primary" onclick="loadSummary()"><i data-lucide="refresh-cw" style="width:14px;height:14px"></i></button>';
+  h+='</div></div>';
+
+  // Reconciliación
+  h+='<div class="sm-recon">';
+  h+='<span class="sm-chip '+(rec.cuadraIngresos?'ok':'bad')+'">'+(rec.cuadraIngresos?'✓':'✗')+' Ingresos cuadran · '+_sumMoney(rec.ingresosTotal)+'</span>';
+  h+='<span class="sm-chip '+(rec.cuadraEgresos?'ok':'bad')+'">'+(rec.cuadraEgresos?'✓':'✗')+' Egresos cuadran · '+_sumMoney(rec.egresosTotal)+'</span>';
+  if(!rec.cuadraEgresos) h+='<span class="sm-chip bad">Δ egresos '+_sumMoney((rec.egresosTotal||0)-(rec.egresosSum||0))+'</span>';
+  h+='</div>';
+
+  // Tabla P&L
+  h+='<table class="sm-table"><thead><tr>';
+  h+='<th>Concepto</th><th>Actual</th><th class="hide-m">% Rev</th><th class="hide-m">Periodo ant.</th><th>Δ</th>';
+  h+='</tr></thead><tbody>';
+  (d.lineas||[]).forEach(function(l,idx){
+    var delta=_sumDelta(l.actual,l.prev);
+    var neg = l.actual<0 ? ' sm-neg':'';
+    if(l.tipo==='seccion'){
+      h+='<tr class="sm-seccion"><td>'+_esc(l.label)+'</td>'
+        +'<td class="sm-val'+neg+'">'+_sumMoney(l.actual)+'</td>'
+        +'<td class="hide-m sm-val">'+_sumPct(l.pct)+'</td>'
+        +'<td class="hide-m sm-val">'+_sumMoney(l.prev)+'</td>'
+        +'<td class="sm-val">'+delta.txt+'</td></tr>';
+    } else if(l.tipo==='metric'){
+      h+='<tr class="sm-metric"><td>'+_esc(l.label)+'</td>'
+        +'<td class="'+neg+'">'+_sumMoney(l.actual)+'</td>'
+        +'<td class="hide-m">'+_sumPct(l.pct)+'</td>'
+        +'<td class="hide-m">'+_sumMoney(l.prev)+'</td>'
+        +'<td>'+delta.txt+'</td></tr>';
+    } else { // dato
+      var hasRows=(l.rows&&l.rows.length);
+      var open=!!_summaryOpen[idx];
+      var cls='sm-dato'+(l.flag==='nodeducible'?' sm-nd':'')+(hasRows?' clickable':'')+(open?' open':'');
+      h+='<tr class="'+cls+'"'+(hasRows?' onclick="summaryToggle('+idx+')"':'')+'>'
+        +'<td>'+(hasRows?'<span class="sm-caret">▸</span>':'<span class="sm-caret"></span>')+_esc(l.label)
+          +(l.flag==='nodeducible'?' <span style="font-size:10px;background:#f5e6c8;color:#a06600;padding:1px 6px;border-radius:8px">no deducible</span>':'')+'</td>'
+        +'<td class="'+neg+'">'+_sumMoney(l.actual)+'</td>'
+        +'<td class="hide-m">'+_sumPct(l.pct)+'</td>'
+        +'<td class="hide-m">'+_sumMoney(l.prev)+'</td>'
+        +'<td class="'+delta.cls+'">'+delta.txt+'</td></tr>';
+      if(open && hasRows){
+        var dr='<tr class="sm-drill"><td colspan="5"><table>';
+        l.rows.slice().sort(function(a,b){return b.monto-a.monto;}).forEach(function(rw){
+          dr+='<tr><td>'+_esc(rw.fecha||'')+' · '+_esc(rw.nombre||'')+'</td>'
+            +'<td style="text-align:left;color:var(--color-text-muted,#6b7280)">'+_esc(rw.concepto||rw.subtipo||'')+'</td>'
+            +'<td style="text-align:right;font-weight:600">'+_sumMoney(rw.monto)+'</td></tr>';
+        });
+        dr+='</table></td></tr>';
+        h+=dr;
+      }
+    }
+  });
+  h+='</tbody></table>';
+
+  // AMEX crédito (fuera del P&L)
+  var ax=d.amexCredito||{};
+  if((ax.actual||0)!==0){
+    h+='<div class="sm-note"><b>Fuera del P&amp;L — Pago American Express: '+_sumMoney(ax.actual)+'.</b> '
+      +'Es la liquidación de la tarjeta del periodo anterior (apalancamiento), no un gasto nuevo del periodo, por eso no afecta la utilidad. Sí es una salida de caja.</div>';
+  }
+
+  // Lab & Insumos
+  if(d.labInsumos && d.labInsumos.length){
+    h+='<div style="margin-top:22px"><div class="sm-cfggrp">Detalle Laboratorios &amp; Insumos</div><div class="sm-labgrid">';
+    d.labInsumos.forEach(function(x){
+      h+='<div class="sm-labcard"><div class="n">'+_esc(x.subtipo)+'</div><div class="v">'+_sumMoney(x.total)+'</div><div class="c">'+x.count+' movimientos</div></div>';
+    });
+    h+='</div></div>';
+  }
+
+  root.innerHTML=h;
+  try{ lucide.createIcons(); }catch(e){}
+}
+
+function summaryToggle(idx){ _summaryOpen[idx]=!_summaryOpen[idx]; _renderSummary(); }
+function summaryToggleAll(open){
+  _summaryOpen={};
+  if(open && _summaryData){ (_summaryData.lineas||[]).forEach(function(l,i){ if(l.tipo==='dato'&&l.rows&&l.rows.length) _summaryOpen[i]=true; }); }
+  _renderSummary();
+}
+function _esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+/* ── Exportar a Excel ── */
+async function summaryExport(){
+  if(!_summaryData) return;
+  try{ await _loadSheetJS(); }catch(e){ alert('No se pudo cargar el exportador.'); return; }
+  var d=_summaryData;
+  var aoa=[['Summary — Estado de Resultados'],['Periodo',d.periodo.inicio+' a '+d.periodo.fin,'','vs',d.prev.inicio+' a '+d.prev.fin],[],
+    ['Concepto','Actual','% Rev','Periodo anterior','Δ%']];
+  (d.lineas||[]).forEach(function(l){
+    var delta=_sumDelta(l.actual,l.prev);
+    aoa.push([ (l.tipo==='dato'?'   ':'')+(l.label||l.linea||''), Number(l.actual)||0, l.pct==null?'':(l.pct), Number(l.prev)||0, delta.txt ]);
+  });
+  aoa.push([]);
+  aoa.push(['Fuera del P&L — Pago AMEX (periodo anterior)', Number((d.amexCredito||{}).actual)||0]);
+  var ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[{wch:34},{wch:16},{wch:10},{wch:16},{wch:10}];
+  var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Summary');
+  XLSX.writeFile(wb,'Summary_'+d.periodo.inicio+'_'+d.periodo.fin+'.xlsx');
+}
+
+/* ── Imprimir ── */
+function summaryPrint(){
+  if(!_summaryData) return;
+  var d=_summaryData;
+  var rows='';
+  (d.lineas||[]).forEach(function(l){
+    var delta=_sumDelta(l.actual,l.prev);
+    var st = l.tipo==='seccion'?'background:#1a252f;color:#fff;font-weight:700':(l.tipo==='metric'?'font-weight:700;border-top:2px solid #999;background:#f3e9ec':'');
+    var pad = l.tipo==='dato'?'padding-left:26px':'';
+    rows+='<tr style="'+st+'"><td style="'+pad+'">'+_esc(l.label||l.linea||'')+'</td>'
+      +'<td class="r">'+_sumMoney(l.actual)+'</td><td class="r">'+_sumPct(l.pct)+'</td>'
+      +'<td class="r">'+_sumMoney(l.prev)+'</td><td class="r">'+delta.txt+'</td></tr>';
+  });
+  var w=window.open('','_blank');
+  w.document.write('<html><head><title>Summary '+d.periodo.inicio+'</title><style>'
+    +'body{font-family:Arial,Helvetica,sans-serif;color:#1a252f;padding:26px;font-size:12px}'
+    +'h1{font-size:18px;margin:0 0 3px}.sub{color:#666;font-size:11px;margin-bottom:16px}'
+    +'table{width:100%;border-collapse:collapse}td,th{padding:6px 10px;border-bottom:1px solid #eee}'
+    +'th{background:#f3f3f3;text-align:left;font-size:10px;text-transform:uppercase}.r{text-align:right}'
+    +'</style></head><body><h1>Hestia Fertility · Estado de Resultados</h1>'
+    +'<div class="sub">Periodo '+d.periodo.inicio+' a '+d.periodo.fin+' &nbsp;·&nbsp; vs '+d.prev.inicio+' a '+d.prev.fin+'</div>'
+    +'<table><thead><tr><th>Concepto</th><th class="r">Actual</th><th class="r">% Rev</th><th class="r">Periodo ant.</th><th class="r">Δ%</th></tr></thead><tbody>'
+    +rows+'</tbody></table>'
+    +'<p style="color:#666;font-size:10.5px;margin-top:14px">Pago AMEX (fuera del P&amp;L): '+_sumMoney((d.amexCredito||{}).actual)+'</p>'
+    +'</body></html>');
+  w.document.close(); setTimeout(function(){ w.print(); },350);
+}
+
+/* ── Editor de mapeo (Summary_Config) ── */
+async function summaryConfigOpen(){
+  _sumStyles();
+  var wrap=document.createElement('div'); wrap.className='sm-cfgwrap'; wrap.id='sm-cfgwrap';
+  wrap.innerHTML='<div class="sm-cfgbox"><div class="sm-cfghd"><div style="font-weight:700;font-size:15px">Configurar mapeo del Summary</div>'
+    +'<button class="sm-btn" onclick="document.getElementById(\'sm-cfgwrap\').remove()">✕</button></div>'
+    +'<div class="sm-cfgbody" id="sm-cfgbody"><div style="padding:30px;text-align:center;color:#9ca3af">Cargando configuración…</div></div>'
+    +'<div class="sm-cfgft"><button class="sm-btn" onclick="summaryConfigReseed()"><i data-lucide="rotate-cw" style="width:13px;height:13px"></i>Re-detectar claves nuevas</button>'
+    +'<div><button class="sm-btn" onclick="document.getElementById(\'sm-cfgwrap\').remove()">Cancelar</button> '
+    +'<button class="sm-btn primary" onclick="summaryConfigSave()">Guardar mapeo</button></div></div></div>';
+  document.body.appendChild(wrap);
+  try{ lucide.createIcons(); }catch(e){}
+  try{
+    var r=await fetch(APPS_SCRIPT_URL+'?action=summaryConfig&token='+encodeURIComponent(getToken()));
+    var j=await r.json();
+    if(!j.ok) throw new Error(j.error||'Error');
+    _summaryCfg=j; _renderSummaryConfig();
+  }catch(e){
+    document.getElementById('sm-cfgbody').innerHTML='<div style="padding:20px;color:#c83c3c">No se pudo cargar: '+(e.message||e)+'</div>';
+  }
+}
+function _renderSummaryConfig(){
+  var body=document.getElementById('sm-cfgbody'); if(!body||!_summaryCfg) return;
+  var GRUPOS=['REVENUE','COGS','OPEX','GA','TAXES','EXCLUDED'];
+  var rows=(_summaryCfg.rows||[]).slice().sort(function(a,b){
+    if(a.fuente!==b.fuente) return a.fuente<b.fuente?-1:1;
+    if(a.grupo!==b.grupo) return GRUPOS.indexOf(a.grupo)-GRUPOS.indexOf(b.grupo);
+    return (a.orden-b.orden)||(a.clave<b.clave?-1:1);
+  });
+  var h='<div style="font-size:12px;color:#6b7280;margin-bottom:10px">Cada clave (categoría de ingreso o Contable|Subtipo de egreso) se asigna a un grupo del P&amp;L y a una línea. Edita libremente; lo que no cuadre aparece como no clasificado.</div>';
+  var lastFuente='';
+  rows.forEach(function(rw,i){
+    if(rw.fuente!==lastFuente){ h+='<div class="sm-cfggrp">'+(rw.fuente==='ingreso'?'Ingresos (Revenue)':'Egresos')+'</div>'; lastFuente=rw.fuente; }
+    h+='<div class="sm-cfgrow" data-i="'+i+'">'
+      +'<div class="k" title="'+_esc(rw.clave)+'">'+_esc(rw.clave)+'</div>'
+      +'<select class="sm-cfg-grupo">'+GRUPOS.map(function(g){return '<option'+(g===rw.grupo?' selected':'')+'>'+g+'</option>';}).join('')+'</select>'
+      +'<input class="sm-cfg-linea" value="'+_esc(rw.linea)+'" placeholder="Línea"/>'
+      +'<input class="sm-cfg-orden" type="number" value="'+(rw.orden||5)+'" style="text-align:center"/>'
+      +'<input type="hidden" class="sm-cfg-fuente" value="'+_esc(rw.fuente)+'"/>'
+      +'<input type="hidden" class="sm-cfg-clave" value="'+_esc(rw.clave)+'"/>'
+      +'<input type="hidden" class="sm-cfg-flag" value="'+_esc(rw.flag||'')+'"/>'
+      +'</div>';
+  });
+  body.innerHTML=h;
+}
+async function summaryConfigReseed(){
+  var s=getSession()||{};
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'setupSummaryConfig',usuario:s.email||'sistema'})});
+    var j=await r.json();
+    if(!j.ok) throw new Error(j.error||'Error');
+    var r2=await fetch(APPS_SCRIPT_URL+'?action=summaryConfig&token='+encodeURIComponent(getToken()));
+    _summaryCfg=await r2.json(); _renderSummaryConfig();
+    setStatus('Detección lista: '+(j.agregadas||0)+' claves nuevas.','ok');
+  }catch(e){ alert('No se pudo re-detectar: '+(e.message||e)); }
+}
+async function summaryConfigSave(){
+  var body=document.getElementById('sm-cfgbody'); if(!body) return;
+  var out=[];
+  body.querySelectorAll('.sm-cfgrow').forEach(function(el){
+    out.push({
+      fuente: el.querySelector('.sm-cfg-fuente').value,
+      clave:  el.querySelector('.sm-cfg-clave').value,
+      grupo:  el.querySelector('.sm-cfg-grupo').value,
+      linea:  el.querySelector('.sm-cfg-linea').value,
+      orden:  Number(el.querySelector('.sm-cfg-orden').value)||5,
+      flag:   el.querySelector('.sm-cfg-flag').value
+    });
+  });
+  var s=getSession()||{};
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveSummaryConfig',rows:out,usuario:s.email||'sistema'})});
+    var j=await r.json();
+    if(!j.ok) throw new Error(j.error||'Error');
+    var w=document.getElementById('sm-cfgwrap'); if(w) w.remove();
+    setStatus('Mapeo guardado ('+out.length+' líneas). Recalculando…','ok');
+    loadSummary();
+  }catch(e){ alert('No se pudo guardar: '+(e.message||e)); }
+}
+
 var _compAnio = null, _compMes = null;
 var _compFuente = 'facturas'; // 'facturas' (XML CFDI recibidos) | 'pagos' (comprobantes de pago)
 var _compFiltro = '';
