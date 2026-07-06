@@ -615,12 +615,18 @@ function doPost(e) {
       return jsonResponse(configurarMenuMedicamentos());
     }
     if (body.action === 'setupCxPCreditosAbonos') {
+      if (typeof setupCxPCreditosAbonos !== 'function')
+        return jsonResponse({ok:false, error:'Agrega cxp_creditos.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(setupCxPCreditosAbonos());
     }
     if (body.action === 'aplicarAbonoCxP') {
+      if (typeof aplicarAbonoCxP !== 'function')
+        return jsonResponse({ok:false, error:'Agrega cxp_creditos.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(aplicarAbonoCxP(body));
     }
     if (body.action === 'cancelarOrdenCxP') {
+      if (typeof cancelarOrdenCxP !== 'function')
+        return jsonResponse({ok:false, error:'Agrega cxp_creditos.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(cancelarOrdenCxP(body));
     }
     if (body.action === 'saveMedicamento') {

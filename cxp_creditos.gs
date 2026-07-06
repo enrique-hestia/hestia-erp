@@ -245,6 +245,49 @@ function _cxpRutearABanco(formaPago, monto, fechaPago, ref) {
   }
 }
 
+/* ── Devolución de dinero del proveedor: ENTRADA a banco/caja ─────────
+   Espejo de _cxpRutearABanco pero como ingreso (depósito/reembolso),
+   para que la conciliación cuadre con el movimiento que aparecerá en el
+   estado de cuenta. Solo se usa cuando el usuario elige "me devolvieron
+   el dinero" al cancelar — el modo "saldo a favor" NO toca bancos. ── */
+function _cxpRutearDevolucionABanco(formaPago, monto, fecha, ref) {
+  if (!formaPago || monto <= 0) return;
+  var mesStr = fecha.substring(0, 7);
+  if (formaPago === 'Efectivo') {
+    try {
+      var ccSh = getCajaChicaSheet();
+      var ccData = ccSh.getDataRange().getValues();
+      var ccHdr = ccData[0].map(function (h) { return String(h).trim().toUpperCase(); });
+      var ciF = ccHdr.indexOf('FECHA'), ciC = ccHdr.indexOf('CONCEPTO'), ciE = ccHdr.indexOf('ENTRADA');
+      if (ciE < 0) throw new Error('La hoja de Caja Chica no tiene columna ENTRADA');
+      var ccRow = -1;
+      for (var ci = 1; ci < ccData.length; ci++) {
+        if (!String(ccData[ci][ciF] || '').trim() && !String(ccData[ci][ciC] || '').trim()) { ccRow = ci + 1; break; }
+      }
+      if (ccRow === -1) ccRow = ccSh.getLastRow() + 1;
+      ccSh.getRange(ccRow, ciF + 1).setValue(fecha);
+      ccSh.getRange(ccRow, ciC + 1).setValue(ref);
+      ccSh.getRange(ccRow, ciE + 1).setValue(monto);
+      SpreadsheetApp.flush();
+    } catch (ccErr) { Logger.log('_cxpRutearDevolucion Efectivo→CajaChica error: ' + ccErr.message); }
+    return;
+  }
+  var banco = '', bankRow = null;
+  if (formaPago === 'Santander' || formaPago === 'Transferencia') {
+    // Santander: [Fecha, Deposito, Retiro, Saldo, Descripcion, …]
+    banco = 'santander'; bankRow = [fecha, monto, 0, 0, ref, '', '', '', ''];
+  } else if (formaPago === 'AMEX') {
+    // AMEX: cargo negativo = crédito/reembolso a la tarjeta
+    banco = 'amex'; bankRow = [fecha, -monto, 0, ref, '', '', '', '', mesStr];
+  } else if (formaPago === 'Mercado Pago' || formaPago === 'TDC' || formaPago === 'TDD') {
+    // MP: el pago usa -monto; la devolución entra en positivo
+    banco = 'mercadopago'; bankRow = [mesStr, fecha, 0, 0, 0, monto, 0, false, ref, 'DEVOLUCIÓN'];
+  }
+  if (banco && bankRow) {
+    try { saveBankRow(banco, bankRow); } catch (bErr) { Logger.log('_cxpRutearDevolucion banco error: ' + bErr.message); }
+  }
+}
+
 /* ── Abonar (pago parcial y/o crédito) a una cuenta por pagar ────────
    No reemplaza pagarCxP (que sigue sirviendo para "pagar todo de un
    jalón" con ruteo a banco) — este es el camino nuevo para pagos
@@ -298,8 +341,18 @@ function aplicarAbonoCxP(body) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
-/* ── Cancelar una orden — reversa sus abonos (o su pago legado) a
-   crédito de proveedor en vez de solo borrar el registro ──────────── */
+/* ── Cancelar una orden — el dinero ya pagado se reversa según el MODO
+   que elija el usuario:
+     modo 'credito' (default): queda como saldo a favor del proveedor
+       (Creditos_Proveedor) — NO toca bancos ni conciliación; se aplica
+       al siguiente documento de CxP desde el modal de Pagar.
+     modo 'devolucion': el proveedor devolvió el dinero — se registra la
+       ENTRADA en el banco/caja indicado (formaPago + fechaDevolucion)
+       para que concilie con el depósito del estado de cuenta; NO se
+       genera crédito.
+   En ambos modos, los abonos que se habían pagado con un crédito previo
+   regresan a ese crédito (ese dinero nunca salió del banco en ESTA
+   orden). Si la orden no tenía pagos, solo se cancela. ─────────────── */
 function cancelarOrdenCxP(body) {
   try {
     var ss = _cxpCredSS();
@@ -308,6 +361,13 @@ function cancelarOrdenCxP(body) {
     if (!sh) return { ok: false, error: 'Hoja Egresos no encontrada' };
     var rowNum = parseInt(body.rowNum);
     if (!rowNum || rowNum < 2) return { ok: false, error: 'Fila inválida' };
+
+    var modo = body.modo === 'devolucion' ? 'devolucion' : 'credito';
+    var formaPago = String(body.formaPago || '').trim();
+    var fechaDev = String(body.fechaDevolucion || '').substring(0, 10) ||
+      Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    if (modo === 'devolucion' && !formaPago)
+      return { ok: false, error: 'Para registrar la devolución indica a qué banco/caja entró el dinero' };
 
     var estatusCol = _egColEnsure(sh, 'estatus', 'Estatus');
     var lastCol = Math.max(20, estatusCol);
@@ -320,34 +380,45 @@ function cancelarOrdenCxP(body) {
     var estatusActual = String(rowData[estatusCol - 1] || '').trim();
     if (estatusActual === 'Cancelada') return { ok: false, error: 'Esta orden ya está cancelada' };
 
-    var totalReversado = 0;
+    var refDev = 'DEVOLUCIÓN ' + proveedor + ' — orden cancelada #' + cxpId + (concepto ? ' · ' + concepto : '');
+    var creditoGenerado = 0, devolucionRegistrada = 0, creditoRestaurado = 0;
+
+    function reversarDineroReal(montoRev, notaOrigen) {
+      if (montoRev <= 0) return;
+      if (modo === 'devolucion') {
+        _cxpRutearDevolucionABanco(formaPago, montoRev, fechaDev, refDev);
+        devolucionRegistrada += montoRev;
+      } else {
+        _crearCreditoProveedor({
+          proveedor: proveedor, monto: montoRev,
+          origen: notaOrigen, cxpIdOrigen: cxpId, usuario: body.usuario || ''
+        });
+        creditoGenerado += montoRev;
+      }
+    }
+
     var abonos = _cxpAbonosPorId(cxpId, true);
     abonos.forEach(function (ab) {
       if (ab.origen === 'credito' && ab.creditoId) {
         _restaurarCredito(ab.creditoId, ab.monto);
+        creditoRestaurado += ab.monto;
       } else {
-        _crearCreditoProveedor({
-          proveedor: proveedor, monto: ab.monto,
-          origen: 'Orden cancelada #' + cxpId + ' — ' + concepto,
-          cxpIdOrigen: cxpId, usuario: body.usuario || ''
-        });
+        reversarDineroReal(ab.monto, 'Orden cancelada #' + cxpId + ' — ' + concepto);
       }
       _marcarAbonoReversado(ab._rowNum);
-      totalReversado += ab.monto;
     });
     // Pagada antes de que existiera este sistema: sin abonos registrados pero Pagado=TRUE
     if (pagado && abonos.length === 0 && monto > 0) {
-      _crearCreditoProveedor({
-        proveedor: proveedor, monto: monto,
-        origen: 'Orden cancelada #' + cxpId + ' — ' + concepto + ' (pago previo sin abono registrado)',
-        cxpIdOrigen: cxpId, usuario: body.usuario || ''
-      });
-      totalReversado = monto;
+      reversarDineroReal(monto, 'Orden cancelada #' + cxpId + ' — ' + concepto + ' (pago previo sin abono registrado)');
     }
 
     sh.getRange(rowNum, estatusCol).setValue('Cancelada');
     try { CacheService.getScriptCache().remove('gas_egresos_v1_2026'); } catch (e) {}
-    logAudit(body.usuario || 'sistema', 'CxP', 'Cancelar', cxpId, 'Estatus', 'Activa', 'Cancelada' + (totalReversado ? (' | crédito generado: $' + totalReversado.toFixed(2)) : ''));
-    return { ok: true, creditoGenerado: totalReversado };
+    var detalle = 'Cancelada [' + modo + ']'
+      + (creditoGenerado ? ' | crédito generado: $' + creditoGenerado.toFixed(2) : '')
+      + (devolucionRegistrada ? ' | devolución a ' + formaPago + ': $' + devolucionRegistrada.toFixed(2) : '')
+      + (creditoRestaurado ? ' | crédito restaurado: $' + creditoRestaurado.toFixed(2) : '');
+    logAudit(body.usuario || 'sistema', 'CxP', 'Cancelar', cxpId, 'Estatus', 'Activa', detalle);
+    return { ok: true, modo: modo, creditoGenerado: creditoGenerado, devolucionRegistrada: devolucionRegistrada, creditoRestaurado: creditoRestaurado };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
