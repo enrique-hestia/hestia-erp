@@ -158,13 +158,14 @@ function readBoardReport(fechaInicio, fechaFin){
     });
 
     // # ciclos y ticket (de sub-items de REVENUE con cantidad)
-    var ciclos=0, ventasReales=0;
+    var ciclos=0, ventasReales=0, ventasRealDesg={};
     (sum.lineas||[]).forEach(function(l){ if(l.tipo==='dato'&&l.grupo==='REVENUE'){
       var esVenta=_boardEsVentaGrupo(l.linea);
       (l.subitems||[]).forEach(function(s){
         var q=0;
         if(s.productos){ s.productos.forEach(function(p){ q+=_boardNum(p.cantidad); }); } else { q+=_boardNum(s.cantidad); }
-        ciclos+=q; if(esVenta) ventasReales+=q;
+        ciclos+=q;
+        if(esVenta){ ventasReales+=q; var k=_boardVentaKey(l.linea); ventasRealDesg[k]=(ventasRealDesg[k]||0)+q; }
       });
     } });
 
@@ -187,7 +188,7 @@ function readBoardReport(fechaInicio, fechaFin){
     // Presupuesto: proyectado (meta) vs real del trimestre + próximo Q.
     // Las "ventas" cuentan solo procedimientos (Alta/Baja/Surrogacy/Reprovida/Consulta),
     // no estudios/medicamentos/etc. — igual que el proyectado.
-    var presupuesto=_boardPresupuesto(ff, {ventas:ventasReales, ingresos:rev, egresos:egr, utilidad:rev-egr});
+    var presupuesto=_boardPresupuesto(ff, {ventas:ventasReales, ingresos:rev, egresos:egr, utilidad:rev-egr, desglose:ventasRealDesg});
 
     // Composición para donas
     var compIngresos=(sum.lineas||[]).filter(function(x){return x.tipo==='dato'&&x.grupo==='REVENUE'&&Math.abs(x.actual)>0.005;})
@@ -224,6 +225,22 @@ function _boardEsVentaGrupo(nombre){
 function _boardSumQtyProy(grupos){
   var t=0; (grupos||[]).forEach(function(g){ if(_boardEsVentaGrupo(g.grupo)) t += _boardNum(g.cantProy); }); return t;
 }
+// Nombre canónico del procedimiento para agrupar el desglose (Alta/Baja/Surrogacy/Reprovida/Consulta)
+function _boardVentaKey(nombre){
+  var n=String(nombre||'').toLowerCase();
+  if(/surrogacy/.test(n)) return 'Surrogacy';
+  if(/reprovid/.test(n)) return 'Reprovida';
+  if(/consulta/.test(n)) return 'Consulta';
+  if(/baja/.test(n)) return 'Baja';
+  if(/alta/.test(n)) return 'Alta';
+  return String(nombre||'').trim();
+}
+// Desglose de cantidades proyectadas por procedimiento → {Alta:n, Baja:n, ...}
+function _boardVentasDesgloseProy(grupos){
+  var map={};
+  (grupos||[]).forEach(function(g){ if(_boardEsVentaGrupo(g.grupo)){ var k=_boardVentaKey(g.grupo); map[k]=(map[k]||0)+_boardNum(g.cantProy); } });
+  return map;
+}
 function _boardPresLee(per){
   try{
     if(typeof readPresupuesto!=='function') return null;
@@ -235,7 +252,8 @@ function _boardPresLee(per){
     var metaEg  = (eg.totales && _boardNum(eg.totales.meta)>0) ? _boardNum(eg.totales.meta)
                 : (eg.totales ? _boardNum(eg.totales.proyeccion) : _boardNum(eg.proyeccion));
     return { periodo:per, ventas:_boardSumQtyProy(sig.ingresosGrupos), ingresos:metaIng,
-             egresos:metaEg, utilidad:metaIng-metaEg, fuente: metaGuardada?'guardada':'automatica' };
+             egresos:metaEg, utilidad:metaIng-metaEg, fuente: metaGuardada?'guardada':'automatica',
+             desglose:_boardVentasDesgloseProy(sig.ingresosGrupos) };
   }catch(e){ return null; }
 }
 function _boardPresupuesto(ff, real){
@@ -246,15 +264,21 @@ function _boardPresupuesto(ff, real){
     var out={ ok:true, periodo:perQ, periodoSiguiente:perNext, proyectado:null, real:real, siguiente:null, cumplimiento:null };
     var pQ=_boardPresLee(perQ);
     if(pQ){
-      out.proyectado={ ventas:pQ.ventas, ingresos:pQ.ingresos, egresos:pQ.egresos, utilidad:pQ.utilidad, fuente:pQ.fuente };
+      out.proyectado={ ventas:pQ.ventas, ingresos:pQ.ingresos, egresos:pQ.egresos, utilidad:pQ.utilidad, fuente:pQ.fuente, desglose:pQ.desglose };
       out.cumplimiento={
         ingresos: pQ.ingresos>0 ? _boardPct(real.ingresos, pQ.ingresos) : null,
         ventas:   pQ.ventas>0   ? _boardPct(real.ventas,  pQ.ventas)   : null,
         egresos:  pQ.egresos>0  ? _boardPct(real.egresos, pQ.egresos)  : null
       };
+      // Comparativo por procedimiento: proyectado vs real (une ambos por nombre canónico)
+      var comp={};
+      Object.keys(pQ.desglose||{}).forEach(function(k){ comp[k]=comp[k]||{grupo:k,proy:0,real:0}; comp[k].proy=pQ.desglose[k]; });
+      Object.keys((real&&real.desglose)||{}).forEach(function(k){ comp[k]=comp[k]||{grupo:k,proy:0,real:0}; comp[k].real=real.desglose[k]; });
+      out.comparativo=Object.keys(comp).map(function(k){ var c=comp[k]; c.cumplimiento=c.proy>0?_boardPct(c.real,c.proy):null; return c; }).sort(function(a,b){return b.proy-a.proy;});
     }
     var pN=_boardPresLee(perNext);
-    if(pN) out.siguiente={ periodo:perNext, ventas:pN.ventas, ingresos:pN.ingresos, egresos:pN.egresos, utilidad:pN.utilidad, fuente:pN.fuente };
+    if(pN) out.siguiente={ periodo:perNext, ventas:pN.ventas, ingresos:pN.ingresos, egresos:pN.egresos, utilidad:pN.utilidad, fuente:pN.fuente,
+      desglose:Object.keys(pN.desglose||{}).map(function(k){return {grupo:k,cant:pN.desglose[k]};}).sort(function(a,b){return b.cant-a.cant;}) };
     return out;
   }catch(ex){ return { ok:false, error:ex.message }; }
 }
