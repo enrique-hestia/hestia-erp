@@ -4486,6 +4486,75 @@ function _reverseIngresoBankTodos(opId, hdrRow, origRows, origFP, origFecha, ori
   }
 }
 
+/* ── Sincronía bancaria IDEMPOTENTE por OP ──────────────────────────
+   En vez de reversar+re-agregar (que acumulaba filas), borra las filas
+   de banco etiquetadas con [opId] y deja que se re-creen limpias; luego
+   recalcula el saldo corrido (consistente con saveBankRow). Así editar N
+   veces siempre deja UNA sola fila por forma de pago. Solo Santander/MP. */
+function _bankSheetByKey(key) {
+  var ss = SpreadsheetApp.openById(BANKS_SS_ID), sh = ss.getSheets(), gid = BANKS_GID[key];
+  for (var i = 0; i < sh.length; i++) if (sh[i].getSheetId() === gid) return sh[i];
+  return null;
+}
+function _bankObsIdx(key) { return key === 'santander' ? 4 : 8; }   // col donde va la obs con [OP-…]
+function _bankDeleteByOp(key, opId) {
+  try {
+    var sheet = _bankSheetByKey(key); if (!sheet) return 0;
+    var lr = sheet.getLastRow(); if (lr < 2) return 0;
+    var obsIdx = _bankObsIdx(key);
+    var vals = sheet.getRange(2, 1, lr - 1, sheet.getLastColumn()).getValues();
+    var tag = '[' + opId + ']', del = [];
+    for (var r = 0; r < vals.length; r++) { if (String(vals[r][obsIdx] || '').indexOf(tag) > -1) del.push(r + 2); }
+    for (var d = del.length - 1; d >= 0; d--) sheet.deleteRow(del[d]);
+    return del.length;
+  } catch (e) { Logger.log('_bankDeleteByOp ' + key + ': ' + e.message); return 0; }
+}
+/* Saldo de apertura ANTES de la primera fila de datos (para no perderlo al
+   recalcular). Santander lleva saldo inicial; MP es cumsum puro (apertura 0).
+   DEBE llamarse ANTES de borrar filas. */
+function _bankOpening(key) {
+  try {
+    if (key !== 'santander') return 0;             // MP: saldo corrido = cumsum puro
+    var sheet = _bankSheetByKey(key); if (!sheet) return 0;
+    if (sheet.getLastRow() < 2) return 0;
+    var r2 = sheet.getRange(2, 1, 1, 4).getValues()[0];
+    var saldo2 = parseFloat(r2[3]) || 0, dep2 = parseFloat(r2[1]) || 0, ret2 = parseFloat(r2[2]) || 0;
+    return saldo2 - (dep2 - ret2);                 // balance justo antes de la fila 2
+  } catch (e) { return 0; }
+}
+function _bankRecompute(key, opening) {
+  try {
+    var sheet = _bankSheetByKey(key); if (!sheet) return;
+    var lr = sheet.getLastRow(); if (lr < 2) return;
+    if (key === 'santander') {                     // saldo col4(idx3) = apertura + Σ(dep(idx1) − ret(idx2))
+      var v = sheet.getRange(2, 1, lr - 1, 4).getValues(), run = Number(opening) || 0, out = [];
+      for (var i = 0; i < v.length; i++) { run += (parseFloat(v[i][1]) || 0) - (parseFloat(v[i][2]) || 0); out.push([run]); }
+      sheet.getRange(2, 4, out.length, 1).setValues(out);
+    } else {                                        // MP: pct col5(idx4)=1−neto/cobro ; saldo col7(idx6)=cumsum neto(idx5)
+      var m = sheet.getRange(2, 1, lr - 1, 7).getValues(), runN = 0, pcts = [], sal = [];
+      for (var k = 0; k < m.length; k++) { var cobro = parseFloat(m[k][2]) || 0, neto = parseFloat(m[k][5]) || 0; pcts.push([cobro !== 0 ? (1 - (neto / cobro)) : 0]); runN += neto; sal.push([runN]); }
+      sheet.getRange(2, 5, pcts.length, 1).setValues(pcts);
+      sheet.getRange(2, 7, sal.length, 1).setValues(sal);
+    }
+  } catch (e) { Logger.log('_bankRecompute ' + key + ': ' + e.message); }
+}
+
+/* Reversa SOLO los movimientos originales en Efectivo (Caja Chica); los de
+   Santander/MP se manejan por _bankDeleteByOp. */
+function _reverseEfectivoOnly(opId, hdrRow, origRows, origFP, origFecha, origPagado, obsBank) {
+  var pagosArr = null;
+  try {
+    var hdrs = (hdrRow || []).map(function (h) { return String(h).trim().toLowerCase(); });
+    var iP = hdrs.indexOf('pagosdetalle');
+    if (iP > -1) { for (var i = 0; i < origRows.length; i++) { var s = String(origRows[i][iP] || '').trim(); if (s) { pagosArr = JSON.parse(s); break; } } }
+  } catch (e) { pagosArr = null; }
+  if (pagosArr && pagosArr.length) {
+    pagosArr.forEach(function (p) { if (String(p.fp || '').trim() === 'Efectivo') { var m = parseFloat(p.monto) || 0; if (m > 0) _reverseIngresoBank(opId, 'Efectivo', origFecha, m, obsBank); } });
+  } else if (String(origFP).trim() === 'Efectivo') {
+    _reverseIngresoBank(opId, 'Efectivo', origFecha, origPagado, obsBank);
+  }
+}
+
 function updateIngresoConBancos(payload) {
   try {
     if (!_tokenHasPermission(payload.token || '', 'editar_ingresos')) {
@@ -4516,7 +4585,12 @@ function updateIngresoConBancos(payload) {
     var origPagado  = origRows.reduce(function(s, r) { return s + (parseFloat(r[10]) || 0); }, 0);
     var origObsBank = (origObs ? origObs + ' · ' : '') + 'Px. ' + origPac;
 
-    _reverseIngresoBankTodos(opId, data[0], origRows, origFP, origFecha, origPagado, origObsBank);
+    // IDEMPOTENTE: en Santander/MP se borran las filas de esta OP (se re-crean
+    // limpias abajo, sin acumular reversos). Efectivo sí se reversa por su hoja.
+    var _sanOpen = _bankOpening('santander');   // capturar apertura ANTES de borrar
+    _bankDeleteByOp('santander', opId);
+    _bankDeleteByOp('mercadopago', opId);
+    _reverseEfectivoOnly(opId, data[0], origRows, origFP, origFecha, origPagado, origObsBank);
 
     var updateResult = updateIngreso(payload);
     if (!updateResult.ok) return updateResult;
@@ -4542,6 +4616,11 @@ function updateIngresoConBancos(payload) {
         saveBankRow('mercadopago', [mesStr, newFecha, amt, 0, 0, amt, 0, false, bankObs, 'CARGO']);
       }
     }
+
+    // Recalcula el saldo corrido tras borrar/recrear las filas de esta OP,
+    // preservando el saldo de apertura de Santander.
+    _bankRecompute('santander', _sanOpen);
+    _bankRecompute('mercadopago', 0);
 
     return {ok:true, op:opId, edited:true, bankSynced:true};
   } catch(ex) {
