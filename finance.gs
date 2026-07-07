@@ -1277,13 +1277,15 @@ function readBDCxP() {
 
     var resumen = {vencido:0,hoy:0,semana:0,mes:0,totalVencido:0,totalHoy:0,totalSemana:0,totalMes:0,totalPendiente:0};
     var rows = [];
-    var iCotiz = -1, iDiv = -1, iEstatus = -1, iRec = -1, hdr0 = raw[0]||[];
+    var iCotiz = -1, iDiv = -1, iEstatus = -1, iRec = -1, iUSD = -1, iTC = -1, hdr0 = raw[0]||[];
     for (var hc=0; hc<hdr0.length; hc++){
       var h0=String(hdr0[hc]).toLowerCase();
       if(iCotiz<0 && h0.indexOf('cotiz')>-1) iCotiz=hc;
       if(iDiv<0 && h0.indexOf('divisa')>-1) iDiv=hc;
       if(iEstatus<0 && h0.indexOf('estatus')>-1) iEstatus=hc;
       if(iRec<0 && h0.indexOf('recurrente')>-1) iRec=hc;
+      if(iUSD<0 && h0.indexOf('usd')>-1) iUSD=hc;
+      if(iTC<0 && h0.indexOf('tipo de cambio')>-1) iTC=hc;
     }
 
     for (var i=1;i<raw.length;i++) {
@@ -1319,6 +1321,8 @@ function readBDCxP() {
         linkPago:String(r[19]||''), linkPagoUrl:'',
         linkCotizacion: iCotiz>-1 ? String(r[iCotiz]||'') : '', linkCotizacionUrl:'',
         divisa: (iDiv>-1 && String(r[iDiv]||'').toUpperCase()==='USD') ? 'USD' : 'MXN',
+        montoUSD: iUSD>-1 ? num(r[iUSD]) : 0,
+        tipoCambio: iTC>-1 ? num(r[iTC]) : 0,
         recurrenteId: iRec>-1 ? String(r[iRec]||'').trim() : '',
         dias:dias, urgencia:urgencia
       });
