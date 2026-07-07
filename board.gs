@@ -83,32 +83,45 @@ function _boardNarrative(sum, kpis, per, serie){
   var pctTxt = function(v){ return (v>=0?'+':'')+(v*100).toFixed(1)+'%'; };
   var partes = [];
   var pl = per.tipo==='mes'?'el mes de '+per.label : (per.tipo==='trimestre'?'el trimestre '+per.label : (per.tipo==='año'?'el año '+sum.periodo.inicio.substring(0,4) : 'el periodo'));
-  // Ingresos
+  // Ingresos (solo se menciona crecimiento si hay periodo anterior con datos)
   var gRev = kpis.crecimientoIngresos;
   partes.push('Durante '+pl+', la clínica generó ingresos por '+fmt(kpis.ingresos)+
     (isFinite(gRev)&&kpis.ingresosPrev>0 ? ' ('+pctTxt(gRev)+' vs. el periodo anterior)':'')+'.');
-  // Top línea de ingreso
-  var revLines=(sum.lineas||[]).filter(function(x){return x.tipo==='dato'&&x.grupo==='REVENUE';}).sort(function(a,b){return b.actual-a.actual;});
+  // Top/bottom línea de ingreso — SOLO líneas con datos (> 0)
+  var revLines=(sum.lineas||[]).filter(function(x){return x.tipo==='dato'&&x.grupo==='REVENUE'&&x.actual>0;}).sort(function(a,b){return b.actual-a.actual;});
   if (revLines.length){
-    var top=revLines[0], low=revLines[revLines.length-1];
-    partes.push('La línea que más aportó fue '+top.linea+' con '+fmt(top.actual)+' ('+(kpis.ingresos>0?(top.actual/kpis.ingresos*100).toFixed(1):'0')+'% del total)'+
-      (revLines.length>1?', mientras que '+low.linea+' fue la de menor contribución':'')+'.');
+    var top=revLines[0];
+    var frase='La línea que más aportó fue '+top.linea+' con '+fmt(top.actual)+' ('+(kpis.ingresos>0?(top.actual/kpis.ingresos*100).toFixed(1):'0')+'% del total)';
+    if (revLines.length>=3){ var low=revLines[revLines.length-1]; frase+=', mientras que '+low.linea+' fue la de menor aporte con '+fmt(low.actual); }
+    partes.push(frase+'.');
   }
-  // Egresos y utilidad
-  partes.push('Los egresos operativos sumaron '+fmt(kpis.egresos)+', dejando una utilidad neta de '+fmt(kpis.utilidadNeta)+
-    ' (margen neto de '+(kpis.margenNeto*100).toFixed(1)+'%).');
-  // Meta
-  if (kpis.cumplimientoMeta!=null){
+  // Egresos y resultado
+  var perdida = kpis.utilidadNeta < 0;
+  if (perdida){
+    partes.push('Los egresos operativos sumaron '+fmt(kpis.egresos)+', mayores a los ingresos, dejando una pérdida de '+fmt(Math.abs(kpis.utilidadNeta))+' (margen de '+(kpis.margenNeto*100).toFixed(1)+'%).');
+    // ¿Por qué alcanzó el dinero para pagar pese a la pérdida?
+    var razones=[];
+    if (kpis.utilidadPrev > 0) razones.push('el remanente del periodo anterior, que cerró con una utilidad de '+fmt(kpis.utilidadPrev));
+    var amex = (sum.amexCredito && sum.amexCredito.actual) || 0;
+    if (amex > 0) razones.push('el apalancamiento con la tarjeta AMEX ('+fmt(amex)+'), cuyo pago se difiere al siguiente periodo');
+    if (razones.length) partes.push('Aun con el resultado negativo, la operación pudo cubrir sus pagos gracias a '+razones.join(' y ')+'.');
+    else partes.push('La diferencia se cubrió con la caja disponible de la clínica.');
+  } else {
+    partes.push('Los egresos operativos sumaron '+fmt(kpis.egresos)+', dejando una utilidad neta de '+fmt(kpis.utilidadNeta)+
+      ' (margen neto de '+(kpis.margenNeto*100).toFixed(1)+'%).');
+  }
+  // Meta (solo si existe)
+  if (kpis.cumplimientoMeta!=null && kpis.ingresosMeta>0){
     var cm=kpis.cumplimientoMeta;
     partes.push(cm>=1 ? 'Se superó la meta de ingresos en '+pctTxt(cm-1)+' ('+fmt(kpis.ingresos-kpis.ingresosMeta)+' por encima).'
       : 'Se alcanzó el '+(cm*100).toFixed(0)+'% de la meta de ingresos (faltaron '+fmt(kpis.ingresosMeta-kpis.ingresos)+').');
   }
-  // Tendencia del año
+  // Mejor mes (solo con datos suficientes)
   if (serie && serie.length){
     var conDatos=serie.filter(function(m){return m.ingresos>0||m.egresos>0;});
     if (conDatos.length>=2){
       var mejor=conDatos.slice().sort(function(a,b){return b.neto-a.neto;})[0];
-      partes.push('En lo que va del año, '+_BOARD_MESES[mejor.mesIdx]+' fue el mes de mayor utilidad ('+fmt(mejor.neto)+').');
+      partes.push('En los últimos doce meses, '+_BOARD_MESES[mejor.mesIdx]+' fue el mes de mayor utilidad ('+fmt(mejor.neto)+').');
     }
   }
   return partes.join(' ');
