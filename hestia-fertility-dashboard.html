@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.60 -->
+﻿<!-- app-build:2026.07.07.61 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6823,7 +6823,16 @@ async function proveedorReporte(){
     var d=await resp.json();
     if(!d.ok) throw new Error(d.error||'Sin respuesta del servidor');
     if(!d.rows||!d.rows.length){
-      res.innerHTML='<div style="padding:14px 0;font-size:12.5px;color:var(--color-text-muted)">Sin registros para <b>'+_escH(subject)+'</b> en el rango indicado (2024–2026).</div>';
+      var diagHtml='';
+      if(d.diag&&d.diag.length){
+        diagHtml='<div style="margin-top:10px;font-size:11px;color:var(--text-secondary,#9ca3af);line-height:1.7;border-top:1px dashed var(--color-divider,#e5e7eb);padding-top:8px">Diagnóstico por año:<br>'
+          +d.diag.map(function(g){
+            var linea='<b>'+g.anio+'</b>: '+(g.ok?(g.totalRows+' filas leídas, '+g.matched+' coinciden'):('<span style="color:#c0505c">error: '+_escH(g.error||'no se pudo leer')+'</span>'));
+            if(g.variantes&&g.variantes.length) linea+=' · nombres parecidos: '+g.variantes.map(_escH).join(' | ');
+            return linea;
+          }).join('<br>')+'</div>';
+      }
+      res.innerHTML='<div style="padding:14px 0;font-size:12.5px;color:var(--color-text-muted)">Sin registros para <b>'+_escH(subject)+'</b> en el rango indicado (2024–2026).'+diagHtml+'</div>';
       return;
     }
     var t=d.totales;
@@ -12803,8 +12812,12 @@ function _renderPresupuesto(){
     +(function(){
       // Candado: abrir/cerrar un trimestre terminado para editar la meta.
       // Gate: permiso dedicado 'abrir_periodo_presupuesto' (preparado) o el de edición.
-      var canOpenClose = (typeof hasPermission==='function' && hasPermission('abrir_periodo_presupuesto')) || canEdit;
-      var _perAbierto = !!d.periodoAbierto, _qTerminado = !!d.qTerminado;
+      // Permiso de SUPERVISOR: solo quien tenga 'abrir_periodo_presupuesto' (admin/director
+      // pasan por su comodín *). Se administra en Panel de Control → Gestión de Roles.
+      var canOpenClose = (typeof hasPermission==='function' && hasPermission('abrir_periodo_presupuesto'));
+      var _perAbierto = !!d.periodoAbierto;
+      // Si el backend aún no manda qTerminado (no redesplegado), se calcula aquí
+      var _qTerminado = (d.qTerminado!=null) ? !!d.qTerminado : _presQTerminado(sg.periodo);
       var _toggleBtn = (_qTerminado && canOpenClose)
         ? '<button onclick="presToggleAbierto(\''+sg.periodo+'\','+(_perAbierto?'false':'true')+')" style="border:none;border-radius:8px;padding:6px 13px;font-size:11.5px;font-weight:700;cursor:pointer;margin-left:10px;background:'+(_perAbierto?'#166534':'#b45309')+';color:#fff" title="'+(_perAbierto?'Cerrar el periodo: vuelve a solo lectura':'Abrir el periodo para ajustar la meta')+'">'+(_perAbierto?'🔒 Cerrar periodo':'🔓 Abrir para editar')+'</button>'
         : '';
@@ -13150,6 +13163,13 @@ async function presApplyAllProj(){
    PRESUPUESTO NUEVO — ingresos cantidad×precio, % maestro, histórico
    ══════════════════════════════════════════════════════════════ */
 var _presProdMap={}, _presEgMap={};
+// ¿El trimestre 'YYYY-Qn' ya terminó? (para mostrar el botón abrir/cerrar sin depender del backend)
+function _presQTerminado(periodo){
+  var m=String(periodo||'').match(/^(\d{4})-Q([1-4])$/); if(!m) return false;
+  var fin=new Date(parseInt(m[1],10), parseInt(m[2],10)*3, 0); fin.setHours(0,0,0,0);
+  var hoy=new Date(); hoy.setHours(0,0,0,0);
+  return fin<hoy;
+}
 function _presHistSelector(d){
   var cur=d.trimestreActual||''; var y=parseInt(cur.substring(0,4),10)||new Date().getFullYear(); var q=parseInt(cur.substring(6),10)||(Math.floor(new Date().getMonth()/3)+1);
   var arr=[]; var yy=y,qq=q+1; if(qq>4){qq=1;yy++;} arr.push([yy,qq,' (proyección)']);
@@ -18132,6 +18152,7 @@ var OP_PERMS_CATALOG = [
   {key:'editar_ingresos',  label:'Editar operaciones de ingreso',    cat:'Ingresos'},
   {key:'editar_egresos',   label:'Editar partidas de egreso',        cat:'Egresos'},
   {key:'borrar_egresos',   label:'Eliminar partidas de egreso',      cat:'Egresos'},
+  {key:'abrir_periodo_presupuesto', label:'Abrir/cerrar periodos del presupuesto (supervisor)', cat:'Presupuesto'},
   {key:'sheets_access',    label:'Acceso directo a Google Sheets',   cat:'General'},
   {key:'cf_capture',       label:'Capturar en Flujo de Efectivo',    cat:'Flujo de Efectivo'},
   {key:'export_data',      label:'Exportar datos',                   cat:'General'},

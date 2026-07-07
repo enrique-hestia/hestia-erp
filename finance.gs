@@ -1926,31 +1926,44 @@ function readReporteProveedor(body) {
   // Normaliza para comparar proveedores entre años (quita acentos, puntos, dobles espacios)
   function _normProv(s){ return String(s||'').trim().toLowerCase().replace(/\s+/g,' ').replace(/[.,]/g,'').replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i').replace(/[óòö]/g,'o').replace(/[úùü]/g,'u'); }
   var provNorm = _normProv(prov);
+  var provPfx = provNorm.substring(0, 5);   // prefijo para muestrear variantes del nombre
+  // Coincide si es igual, o si uno contiene al otro (tolera sufijos/prefijos entre años)
+  function _provMatch(rprov){
+    if (!prov) return true;
+    var rn = _normProv(rprov); if (!rn) return false;
+    return rn === provNorm || rn.indexOf(provNorm) > -1 || provNorm.indexOf(rn) > -1;
+  }
   var curYear = new Date().getFullYear();
   var allRows = [];
+  var diag = [];   // diagnóstico por año (para ver por qué no encuentra)
   var years = Object.keys(EGRESOS_IDS).map(Number).sort();
   years.forEach(function(anio) {
+    var dg = { anio:anio, ok:false, totalRows:0, matched:0, variantes:[] };
     try {
       var eg = readEgresosData(anio);
-      if (!eg.ok || !eg.rows) return;
+      if (!eg.ok || !eg.rows) { dg.error = (eg && eg.error) || 'sin filas'; diag.push(dg); return; }
+      dg.ok = true; dg.totalRows = eg.rows.length;
       var esHistoricoAnio = anio < curYear;
       eg.rows.forEach(function(r) {
+        // Muestrea proveedores parecidos (mismo prefijo) para detectar variantes de nombre
+        if (provPfx && _normProv(r.proveedor).indexOf(provPfx) > -1 && dg.variantes.indexOf(r.proveedor) < 0 && dg.variantes.length < 6) dg.variantes.push(r.proveedor);
         // Cuenta como gasto realizado si: pagado, o con fecha de pago, o —para años
         // pasados (2024/2025, formato viejo sin casilla "pagado")— cualquier monto.
         if (!r.pagado && !(r.fecha||'') && !(esHistoricoAnio && (r.monto||0)>0)) return;
         if (r.estatus === 'Cancelada') return;
-        if (prov && _normProv(r.proveedor) !== provNorm) return;
+        if (!_provMatch(r.proveedor)) return;
         if (fp && (r.formaPago||'').trim() !== fp) return;
         if (cont && (r.contable||'').trim() !== cont) return;
         if (sub && (r.subtipo||'').trim() !== sub) return;
         var fd = (r.fecha||'').substring(0,10);
         if (ini && fd && fd < ini) return;
         if (fin && fd && fd > fin) return;
-        allRows.push(r);
+        dg.matched++; allRows.push(r);
       });
-    } catch(e) { /* año no disponible */ }
+    } catch(e) { dg.error = e.message; }
+    diag.push(dg);
   });
-  if (!allRows.length) return {ok:true, proveedor:prov, rows:[],
+  if (!allRows.length) return {ok:true, proveedor:prov, rows:[], diag:diag,
     totales:{total:0,count:0,avg:0,ultimoPago:'',ultimaFormaPago:''},tendencia:[]};
   allRows.sort(function(a,b){ return (a.fecha||'').localeCompare(b.fecha||''); });
   var total = allRows.reduce(function(s,r){ return s+(r.monto||0); }, 0);
@@ -1964,7 +1977,7 @@ function readReporteProveedor(body) {
   var tendencia = Object.keys(byMes).sort().map(function(k){
     var p=k.split('-'); return {mes:k, label:(MN[parseInt(p[1],10)-1]||p[1])+' '+(p[0]||'').substring(2), monto:byMes[k]};
   });
-  return {ok:true, proveedor:prov, ini:ini, fin:fin, rows:allRows,
+  return {ok:true, proveedor:prov, ini:ini, fin:fin, rows:allRows, diag:diag,
     totales:{total:total, count:count, avg:count?total/count:0,
       ultimoPago:last.fecha||'', ultimaFormaPago:last.formaPago||''},
     tendencia:tendencia};
