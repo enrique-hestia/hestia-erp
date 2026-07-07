@@ -413,6 +413,17 @@ function doGet(e) {
       return jsonResponse(readAbonosOrden((e && e.parameter.cxpId) || ''));
     }
 
+    if (action === 'resumenSemanal') {
+      if (typeof readResumenSemanal !== 'function')
+        return jsonResponse({ok:false, error:'Agrega semanal.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readResumenSemanal((e && e.parameter.fecha) || ''));
+    }
+    if (action === 'semanalConfig') {
+      if (typeof readSemanalConfig !== 'function')
+        return jsonResponse({ok:false, error:'Agrega semanal.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse({ok:true, config: readSemanalConfig()});
+    }
+
     if (action === 'summary') {
       if (typeof readSummary !== 'function')
         return jsonResponse({ok:false, error:'Agrega summary.gs al proyecto de Apps Script y redespliega.'});

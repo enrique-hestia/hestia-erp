@@ -727,6 +727,11 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});
       return jsonResponse(presSetPeriodoAbierto(body));
     }
+    if (body.action === 'saveSemanalConfig') {
+      if (typeof saveSemanalConfig !== 'function')
+        return jsonResponse({ok:false, error:'Agrega semanal.gs en Apps Script y redespliega.'});
+      return jsonResponse(saveSemanalConfig(body));
+    }
     if (body.action === 'updateProductoSKU') {
       return jsonResponse(updateProductoSKU(body.productoId, body.sku, body.usuario));
     }
