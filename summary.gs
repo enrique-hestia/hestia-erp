@@ -88,6 +88,58 @@ function _summaryRevOrden(label){
   return 90; // no clasificado → al final, antes de "(Sin grupo)"
 }
 
+/* Clave normalizada (sin acentos/puntuación) para empatar contra el template. */
+function _sumKey(s){
+  return String(s||'').toLowerCase()
+    .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i').replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').replace(/ñ/g,'n')
+    .replace(/[^a-z0-9]+/g,' ').trim();
+}
+
+/* Orden EXACTO de subgrupos (nivel 2) tal como aparecen en la hoja de referencia. */
+var SUMMARY_SUBGROUP_ORDER = [
+  'ciclos iniciados','alta','complementos',
+  'andrology','egg donor','carrier','art lab','transfer and follow up','pgta','admin','initial consultation',
+  'consulta','suplementos','estudios','laboratorios','baja','almacenamiento','ciclos externos','externos','reprovida'
+];
+/* Orden EXACTO de productos (nivel 3) tal como aparecen en la hoja de referencia. */
+var SUMMARY_PRODUCT_ORDER = [
+  // Alta · Ciclos iniciados
+  'estimulacion ovarica controlada','pach estimulacion ovarica controlada',
+  // Alta · Alta
+  'congelacion de ovulos ef','fertilizacion in vitro ivf','pach congelamiento de ovulos','ivf transfer',
+  // Alta · Complementos
+  'histeroscopia','histeroscopia hospital externo','pgt a','pgt m','transferencia de embriones congelados fet',
+  'consultas ultrasonidos y tomas de muestra','formacion embriones con ovulos congelados feoc','violet','magenta','biopsia testicular',
+  // Surrogacy
+  'sperm vitrification','andrology evaluations','ovarian stimulation and retrieval','egg donor evaluations',
+  'endometrial prep','hysteroscopy','carrier evaluations','embryo formation frozen eggs','artlab cycle',
+  'fet surrogacy','follow up','pgta','admin','initial consultation',
+  // Ciclos Externos
+  'externos','histeroscopia ext','pgt a externos','violet externos','extras externos','entidad externa',
+  // Baja
+  'coito programado','inseminacion intrauterina preparacion','inseminacion intrauterina iiu','monitoreo iiucp','congelamiento de esperma',
+  // Almacenamiento
+  'mantenimiento congelacion 12 meses','24 anualidad criopreservacion mensual','24 anualidad criopreservacion anual',
+  // Estudios
+  'estudios andrologia','estudios ciclo','estudios consulta',
+  // Laboratorios
+  'muestra de semen','compra de ovulos',
+  // Consulta
+  'evaluacion de fertilidad en pareja','diagnostico de fertilidad en pareja','consulta fertilidad presencial',
+  'consulta fertilidad en linea','consulta de seguimiento revision resultados','consulta ginecologica presencial',
+  'consulta obstetrica','consulta nutricion','consulta genetica','psicologia','sesion acupuntura rosa','consulta descontada',
+  // Suplementos
+  'suplementos','medicamento','vacunas gardasil'
+];
+function _sumOrdIn(list, label){
+  var k = _sumKey(label);
+  var i = list.indexOf(k);
+  if (i > -1) return i;
+  // empate parcial: primer elemento del template contenido en la etiqueta o viceversa
+  for (var j=0;j<list.length;j++){ if (k.indexOf(list[j])>-1 || list[j].indexOf(k)>-1) return j; }
+  return 999;
+}
+
 /* ── Siembra/actualiza Summary_Config escaneando los datos reales.
    Corre UNA VEZ (o cuando quieras re-sembrar). No pisa lo que ya
    editaste: solo AGREGA las claves nuevas que falten. ─────────────── */
@@ -356,10 +408,12 @@ function readSummary(fechaInicio, fechaFin) {
       arr.sort(function(a,b){ return (a.orden-b.orden) || (b.actual-a.actual); });
       return arr.map(function(l1){
         var subsArr = Object.keys(l1.subs).map(function(k){ return l1.subs[k]; })
-          .sort(function(a,b){ return b.actual-a.actual; });
+          .sort(function(a,b){ var oa=_sumOrdIn(SUMMARY_SUBGROUP_ORDER,a.label), ob=_sumOrdIn(SUMMARY_SUBGROUP_ORDER,b.label);
+            return (oa-ob) || (b.actual-a.actual); });
         function prodsOf(s){
           return Object.keys(s.prods).map(function(k){ return s.prods[k]; })
-            .sort(function(a,b){ return b.actual-a.actual; })
+            .sort(function(a,b){ var oa=_sumOrdIn(SUMMARY_PRODUCT_ORDER,a.label), ob=_sumOrdIn(SUMMARY_PRODUCT_ORDER,b.label);
+              return (oa-ob) || (b.actual-a.actual); })
             .map(function(p){ return { label:p.label, cantidad:p.cantA, actual:p.actual, prev:p.prev,
               rows:p.rows.sort(function(a,b){ return b.monto-a.monto; }) }; });
         }
