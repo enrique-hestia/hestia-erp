@@ -142,46 +142,48 @@ function _sumOrdIn(list, label){
 
 /* ── EGRESOS: subtipo → subgrupo (nivel 2) tal como agrupa la hoja de referencia.
    El nivel 1 (COGS/OpEx/G&A/Taxes) ya lo da Summary_Config; aquí solo el nivel 2. */
+/* Subtipo → subgrupo, con nomenclatura de estado financiero en inglés.
+   Nómina/Retenciones = Payroll (G&A); impuestos reales = Taxes & Duties. */
 var SUMMARY_EG_SUBGROUP_MAP = {
   // COGS
-  'honorarios':'Honorarios', 'honorarios cons':'Honorarios',
-  'comisiones':'Comisiones por Venta',
-  'analisis clinicos':'Estudios e Insumos de Laboratorio',
-  'estudios genetica':'Estudios e Insumos de Laboratorio',
-  'laboratorios':'Estudios e Insumos de Laboratorio',
-  'insumos qx':'Estudios e Insumos de Laboratorio',
-  'insumos lab':'Estudios e Insumos de Laboratorio',
-  'gases':'Estudios e Insumos de Laboratorio',
-  'renta equipo':'Estudios e Insumos de Laboratorio',
-  'medicamentos':'Medicamentos',
-  'software':'Servicios', 'reportes':'Servicios',
+  'honorarios':'Professional Fees', 'honorarios cons':'Professional Fees',
+  'comisiones':'Sales Commissions',
+  'analisis clinicos':'Lab & Supplies',
+  'estudios genetica':'Lab & Supplies',
+  'laboratorios':'Lab & Supplies',
+  'insumos qx':'Lab & Supplies',
+  'insumos lab':'Lab & Supplies',
+  'gases':'Lab & Supplies',
+  'renta equipo':'Lab & Supplies',
+  'medicamentos':'Pharmaceuticals',
+  'software':'Software & Services', 'reportes':'Software & Services',
   // OpEx
-  'renta':'Inmueble', 'mtto renta':'Inmueble', 'mto renta':'Inmueble',
-  'valet parking':'Inmueble', 'mantenimiento':'Inmueble',
-  'marketing':'Marketing y Publicidad', 'whatsapp':'Marketing y Publicidad',
-  'mtto web':'Marketing y Publicidad', 'podcast':'Marketing y Publicidad', 'adds':'Marketing y Publicidad',
-  'servicios':'Servicios', 'servicio':'Servicios', 'contabilidad':'Servicios', 'rpbi':'Servicios',
-  // Taxes (Impuestos y Cuotas) — IMSS/Nómina, SAT/Impuestos, TESORERIA/ISN
-  'nomina':'Impuestos y Cuotas', 'nómina':'Impuestos y Cuotas', 'impuestos':'Impuestos y Cuotas',
-  'isn':'Impuestos y Cuotas', 'isn 3%':'Impuestos y Cuotas', 'isn 3':'Impuestos y Cuotas',
-  // G&A · Gastos Varios (todo lo demás Gasto cae aquí por defecto)
-  'gasto no deducibles':'Gastos Varios', 'no deducibles':'Gastos Varios', 'cuota':'Gastos Varios'
+  'renta':'Rent & Facilities', 'mtto renta':'Rent & Facilities', 'mto renta':'Rent & Facilities',
+  'valet parking':'Rent & Facilities', 'mantenimiento':'Rent & Facilities',
+  'marketing':'Marketing & Advertising', 'whatsapp':'Marketing & Advertising',
+  'mtto web':'Marketing & Advertising', 'podcast':'Marketing & Advertising', 'adds':'Marketing & Advertising',
+  'servicios':'Software & Services', 'servicio':'Software & Services', 'contabilidad':'Software & Services', 'rpbi':'Software & Services',
+  // G&A · Payroll — Nómina, IMSS, retenciones (NO son taxes, son nómina)
+  'nomina':'Payroll', 'nómina':'Payroll', 'retenciones':'Payroll', 'imss':'Payroll',
+  // Taxes & Duties — impuestos e ISN reales
+  'impuestos':'Taxes & Duties', 'isn':'Taxes & Duties', 'isn 3%':'Taxes & Duties', 'isn 3':'Taxes & Duties',
+  // G&A · Other
+  'gasto no deducibles':'Other G&A', 'no deducibles':'Other G&A', 'cuota':'Other G&A'
 };
-/* Orden de subgrupos dentro de su sección. "Servicios" siempre al final de su sección. */
+/* Orden de subgrupos dentro de su sección. "Software & Services" al final de su sección. */
 var SUMMARY_EG_SUBGROUP_ORDER = {
-  'honorarios':1, 'comisiones por venta':2, 'estudios e insumos de laboratorio':3,
-  'medicamentos':4, 'inmueble':5, 'marketing y publicidad':6,
-  'impuestos y cuotas':1, 'gastos varios':2, 'servicios':90
+  'professional fees':1, 'sales commissions':2, 'lab & supplies':3, 'pharmaceuticals':4,
+  'rent & facilities':5, 'marketing & advertising':6,
+  'payroll':7, 'other g&a':8, 'taxes & duties':1, 'software & services':90
 };
-/* Sección forzada para subgrupos curados que agrupan subtipos de secciones distintas
-   (ej. "Impuestos y Cuotas" junta Nómina[IMSS]+Impuestos[SAT]+ISN en Taxes). */
-var SUMMARY_EG_SUBGROUP_SECTION = { 'impuestos y cuotas':'TAXES' };
+/* Sección forzada: Payroll → G&A (aunque el subtipo sea Nómina), Taxes & Duties → Taxes. */
+var SUMMARY_EG_SUBGROUP_SECTION = { 'payroll':'GA', 'taxes & duties':'TAXES' };
 function _summaryEgSubgroup(subtipo, section){
   var k = _sumNorm(subtipo);
   if (SUMMARY_EG_SUBGROUP_MAP[k]) return SUMMARY_EG_SUBGROUP_MAP[k];
-  if (section === 'GA') return 'Gastos Varios';
-  if (section === 'TAXES') return 'Impuestos y Cuotas';
-  return String(subtipo||'').trim() || 'Otros';
+  if (section === 'GA') return 'Other G&A';
+  if (section === 'TAXES') return 'Taxes & Duties';
+  return String(subtipo||'').trim() || 'Other';
 }
 function _summaryEgSubgroupOrden(subgroup){
   var o = SUMMARY_EG_SUBGROUP_ORDER[_sumNorm(subgroup)];
@@ -452,14 +454,17 @@ function readSummary(fechaInicio, fechaFin) {
     }
     // REVENUE en 3 niveles: Grupo → Subgrupo → Producto (con aplanado si hay 1 solo subgrupo)
     function revLineas(){
-      var arr = Object.keys(revAgg).map(function(k){ return revAgg[k]; });
+      var arr = Object.keys(revAgg).map(function(k){ return revAgg[k]; })
+        .filter(function(l1){ return Math.abs(l1.actual)>0.005 || Math.abs(l1.prev)>0.005; }); // ocultar grupos en cero
       arr.sort(function(a,b){ return (a.orden-b.orden) || (b.actual-a.actual); });
       return arr.map(function(l1){
         var subsArr = Object.keys(l1.subs).map(function(k){ return l1.subs[k]; })
+          .filter(function(s){ return Math.abs(s.actual)>0.005 || Math.abs(s.prev)>0.005; })
           .sort(function(a,b){ var oa=_sumOrdIn(SUMMARY_SUBGROUP_ORDER,a.label), ob=_sumOrdIn(SUMMARY_SUBGROUP_ORDER,b.label);
             return (oa-ob) || (b.actual-a.actual); });
         function prodsOf(s){
           return Object.keys(s.prods).map(function(k){ return s.prods[k]; })
+            .filter(function(p){ return Math.abs(p.actual)>0.005 || Math.abs(p.prev)>0.005; })
             .sort(function(a,b){ var oa=_sumOrdIn(SUMMARY_PRODUCT_ORDER,a.label), ob=_sumOrdIn(SUMMARY_PRODUCT_ORDER,b.label);
               return (oa-ob) || (b.actual-a.actual); })
             .map(function(p){ return { label:p.label, cantidad:p.cantA, actual:p.actual, prev:p.prev,

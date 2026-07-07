@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.06.47 -->
+﻿<!-- app-build:2026.07.06.48 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -14697,19 +14697,20 @@ function _renderBoard(){
   _boardDrawCharts(d,th);
 }
 function _bKpi(l,v,d,c){ return '<div class="bd-kpi"><div class="l">'+_esc(l)+'</div><div class="v">'+v+'</div>'+(d?'<div class="d '+(c||'mut')+'">'+_esc(d)+'</div>':'')+'</div>'; }
-function _bLineTable(arr,total){ var h='<table class="bd-tbl">'; (arr||[]).forEach(function(x){ var p=total>0?(x.valor/total*100):0; h+='<tr><td>'+_esc(x.label)+'</td><td class="pctcell">'+p.toFixed(1)+'%</td><td>'+_bMoney(x.valor)+'</td></tr>'; }); return h+'</table>'; }
+function _bLineTable(arr,total){ var h='<table class="bd-tbl">'; (arr||[]).forEach(function(x){ if(Math.abs(x.valor)<=0.005) return; var p=total>0?(x.valor/total*100):0; h+='<tr><td>'+_esc(x.label)+'</td><td class="pctcell">'+p.toFixed(1)+'%</td><td>'+_bMoney(x.valor)+'</td></tr>'; }); return h+'</table>'; }
 /* Tabla detallada de ingresos: grupo → subgrupo → producto (desde d.lineas). */
 function _boardIngresosTable(detailed){
   var d=_boardData; var tot=(d.kpis&&d.kpis.ingresos)||0;
   var h='<table class="bd-tbl" style="font-size:12px">';
   (d.lineas||[]).forEach(function(l){
-    if(l.tipo!=='dato'||l.grupo!=='REVENUE') return;
+    if(l.tipo!=='dato'||l.grupo!=='REVENUE'||Math.abs(l.actual)<=0.005) return;
     h+='<tr style="background:#2b2b2b"><td style="color:#fff;font-weight:800;font-size:11px">'+_esc(l.label)+'</td><td class="pctcell" style="color:#ddd">'+(tot>0?(l.actual/tot*100).toFixed(1):'0')+'%</td><td style="color:#fff;font-weight:800">'+_bMoney(l.actual)+'</td></tr>';
     if(!detailed) return;
     (l.subitems||[]).forEach(function(s){
+      if(Math.abs(s.actual)<=0.005) return;
       if(s.productos && s.productos.length){
         h+='<tr><td style="padding-left:16px;font-weight:700;color:#9c4f5f;text-transform:uppercase;font-size:10.5px">'+_esc(s.label)+(s.cantidad>0?' ×'+s.cantidad:'')+'</td><td class="pctcell">'+(tot>0?(s.actual/tot*100).toFixed(1):'0')+'%</td><td style="font-weight:700">'+_bMoney(s.actual)+'</td></tr>';
-        s.productos.forEach(function(p){ h+='<tr><td style="padding-left:30px;color:#666;font-size:11px">'+_esc(p.label)+(p.cantidad>0?' ×'+p.cantidad:'')+'</td><td></td><td style="color:#777;font-size:11px">'+_bMoney(p.actual)+'</td></tr>'; });
+        s.productos.forEach(function(p){ if(Math.abs(p.actual)<=0.005) return; h+='<tr><td style="padding-left:30px;color:#666;font-size:11px">'+_esc(p.label)+(p.cantidad>0?' ×'+p.cantidad:'')+'</td><td></td><td style="color:#777;font-size:11px">'+_bMoney(p.actual)+'</td></tr>'; });
       } else {
         h+='<tr><td style="padding-left:16px">'+_esc(s.label)+(s.cantidad>0?' ×'+s.cantidad:'')+'</td><td class="pctcell">'+(tot>0?(s.actual/tot*100).toFixed(1):'0')+'%</td><td>'+_bMoney(s.actual)+'</td></tr>';
       }

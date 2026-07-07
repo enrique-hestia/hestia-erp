@@ -150,10 +150,10 @@ function readBoardReport(fechaInicio, fechaFin){
     var egSecs={COGS:'COGS',OPEX:'OpEx',GA:'G&A',TAXES:'Taxes'};
     var egresosDetalle=[];
     (sum.lineas||[]).forEach(function(l){
-      if(l.tipo==='seccion' && egSecs[l.grupo]) egresosDetalle.push({nivel:'seccion',label:l.label,valor:l.actual});
-      else if(l.tipo==='dato' && egSecs[l.grupo]){
+      if(l.tipo==='seccion' && egSecs[l.grupo] && Math.abs(l.actual)>0.005) egresosDetalle.push({nivel:'seccion',label:l.label,valor:l.actual});
+      else if(l.tipo==='dato' && egSecs[l.grupo] && Math.abs(l.actual)>0.005){
         egresosDetalle.push({nivel:'sub',label:l.linea,valor:l.actual,
-          proveedores:(l.subitems||[]).slice(0,6).map(function(s){return {label:s.label,valor:s.actual};})});
+          proveedores:(l.subitems||[]).filter(function(s){return Math.abs(s.actual)>0.005;}).slice(0,6).map(function(s){return {label:s.label,valor:s.actual};})});
       }
     });
 
@@ -180,7 +180,7 @@ function readBoardReport(fechaInicio, fechaFin){
     var narrativa=_boardNarrative(sum, kpis, per, serie);
 
     // Composición para donas
-    var compIngresos=(sum.lineas||[]).filter(function(x){return x.tipo==='dato'&&x.grupo==='REVENUE';})
+    var compIngresos=(sum.lineas||[]).filter(function(x){return x.tipo==='dato'&&x.grupo==='REVENUE'&&Math.abs(x.actual)>0.005;})
       .map(function(l){return {label:l.linea, valor:l.actual};}).sort(function(a,b){return b.valor-a.valor;});
     var compEgresos=[
       {label:'COGS', valor:_boardNum(m.cogs)},
