@@ -158,10 +158,15 @@ function readBoardReport(fechaInicio, fechaFin){
     });
 
     // # ciclos y ticket (de sub-items de REVENUE con cantidad)
-    var ciclos=0;
-    (sum.lineas||[]).forEach(function(l){ if(l.tipo==='dato'&&l.grupo==='REVENUE'){ (l.subitems||[]).forEach(function(s){
-      if(s.productos){ s.productos.forEach(function(p){ ciclos+=_boardNum(p.cantidad); }); } else { ciclos+=_boardNum(s.cantidad); }
-    }); } });
+    var ciclos=0, ventasReales=0;
+    (sum.lineas||[]).forEach(function(l){ if(l.tipo==='dato'&&l.grupo==='REVENUE'){
+      var esVenta=_boardEsVentaGrupo(l.linea);
+      (l.subitems||[]).forEach(function(s){
+        var q=0;
+        if(s.productos){ s.productos.forEach(function(p){ q+=_boardNum(p.cantidad); }); } else { q+=_boardNum(s.cantidad); }
+        ciclos+=q; if(esVenta) ventasReales+=q;
+      });
+    } });
 
     var kpis={
       ingresos:rev, egresos:egr, utilidadNeta:net,
@@ -179,8 +184,10 @@ function readBoardReport(fechaInicio, fechaFin){
 
     var narrativa=_boardNarrative(sum, kpis, per, serie);
 
-    // Presupuesto: proyectado (meta) vs real del trimestre + próximo Q
-    var presupuesto=_boardPresupuesto(ff, {ventas:ciclos, ingresos:rev, egresos:egr, utilidad:rev-egr});
+    // Presupuesto: proyectado (meta) vs real del trimestre + próximo Q.
+    // Las "ventas" cuentan solo procedimientos (Alta/Baja/Surrogacy/Reprovida/Consulta),
+    // no estudios/medicamentos/etc. — igual que el proyectado.
+    var presupuesto=_boardPresupuesto(ff, {ventas:ventasReales, ingresos:rev, egresos:egr, utilidad:rev-egr});
 
     // Composición para donas
     var compIngresos=(sum.lineas||[]).filter(function(x){return x.tipo==='dato'&&x.grupo==='REVENUE'&&Math.abs(x.actual)>0.005;})
@@ -205,8 +212,17 @@ function readBoardReport(fechaInicio, fechaFin){
 /* ── Presupuesto: proyectado (meta guardada, o automática si no hay) vs REAL
    del trimestre del reporte + proyección del próximo trimestre. Reusa
    readPresupuesto (presupuesto.gs). ─────────────────────────────────── */
+// La "cantidad de ventas" solo cuenta procedimientos/tratamientos: Alta, Baja,
+// Surrogacy, Reprovida, Consulta. NO cuenta Estudios, Medicamento, Laboratorio,
+// Almacenamiento, Suplementos ni Ciclos Externos (esos sí suman al MONTO, no a la
+// cantidad). Filtro por nombre de línea (columna U).
+function _boardEsVentaGrupo(nombre){
+  var n=String(nombre||'').toLowerCase();
+  if(/estudio|medicamento|laborator|almacen|suplemento|extern/.test(n)) return false;
+  return /alta|baja|surrogacy|reprovid|consulta/.test(n);
+}
 function _boardSumQtyProy(grupos){
-  var t=0; (grupos||[]).forEach(function(g){ t += _boardNum(g.cantProy); }); return t;
+  var t=0; (grupos||[]).forEach(function(g){ if(_boardEsVentaGrupo(g.grupo)) t += _boardNum(g.cantProy); }); return t;
 }
 function _boardPresLee(per){
   try{

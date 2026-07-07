@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.56 -->
+﻿<!-- app-build:2026.07.07.57 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -19309,7 +19309,7 @@ function renderCxP(data) {
   html += '<div class="cxp-card">';
   html += '<div class="cxp-card-hdr"><div><div class="cxp-card-title">Detalle de cuentas por pagar</div><div class="cxp-card-sub" id="cxp-detsub"></div></div></div>';
   html += '<div class="cxp-tbl-wrap"><table class="cxp-tbl" id="cxp-tbl">';
-  html += '<thead><tr><th style="width:32px;padding:8px"><input type="checkbox" id="cxp-cb-all" title="Seleccionar todos" onchange="_cxpCbAll(this.checked)"></th><th>Estado</th><th>Proveedor</th><th>Concepto</th><th>Categoría</th><th style="text-align:right">Monto</th><th>Vencimiento</th><th>Fact.</th><th style="text-align:center;width:90px">Acción</th></tr></thead>';
+  html += '<thead><tr><th style="width:32px;padding:8px"><input type="checkbox" id="cxp-cb-all" title="Seleccionar todos" onchange="_cxpCbAll(this.checked)"></th><th>Estado</th><th>Proveedor</th><th>Concepto</th><th>Categoría</th><th style="text-align:right">Monto</th><th>Vencimiento</th><th>Fact.</th><th style="text-align:center;width:220px">Acción</th></tr></thead>';
   html += '<tbody id="cxp-tbody"></tbody></table></div></div>';
   html += '</div>'; // cxp-wrap
 
@@ -19462,13 +19462,13 @@ function _cxpBuildNewRows(rows) {
       + '<td style="text-align:center;font-size:12px">'+factIcon+'</td>'
       + '<td style="text-align:center;white-space:nowrap">'
         + '<button onclick="cxpOpenPay('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),'+(row.saldoPendiente!=null?row.saldoPendiente:row.monto)+',\''+(row.divisa||'MXN')+'\')" style="padding:4px 10px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;margin-right:4px">Pagar</button>'
+        + (row.recurrenteId ? '<button onclick="cxpRegresarProgramacion('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor||'')+'\'))" style="padding:4px 9px;background:#f59e0b;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;margin-right:4px;white-space:nowrap" title="Regresar a Programación del mes (Gastos Fijos) para reprogramarla por el monto correcto — solo aparece en cuentas que vienen de un gasto fijo">↩ Reprogramar</button>' : '')
         + '<button onclick="cxpOpenEdit('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(JSON.stringify(row))+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:6px;font-size:12px;cursor:pointer" title="Editar">✎</button>'
         + '<button onclick="cxpFactura('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),decodeURIComponent(\''+encodeURIComponent(row.linkFacturaUrl||'')+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.08);border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px;opacity:'+(row.linkFacturaUrl?'1':'.45')+'" title="'+(row.linkFacturaUrl?'Ver factura':'Subir factura')+'">📄</button>'
         + '<button onclick="cxpCotiz('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),decodeURIComponent(\''+encodeURIComponent(row.linkCotizacionUrl||'')+'\'))" style="padding:4px 8px;background:rgba(196,106,122,.1);border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px;opacity:'+(row.linkCotizacionUrl?'1':'.45')+'" title="'+(row.linkCotizacionUrl?'Ver cotización':'Adjuntar cotización')+'">📋</button>'
         // Sin ⊘ aquí: una CxP no pagada es solo cotización/compromiso, no movió
         // bancos — se elimina con 🗑 sin generar crédito. El cancelar con saldo
         // a favor/devolución solo aplica en Egresos (ahí sí ya salió el dinero).
-        + (row.recurrenteId ? '<button onclick="cxpRegresarProgramacion('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor||'')+'\'))" style="padding:4px 8px;background:rgba(245,158,11,.12);color:#b45309;border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px" title="Regresar a Programación del mes (Gastos Fijos) para reprogramarla">↩</button>' : '')
         + '<button onclick="cxpDeleteRow('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor||'')+'\'))" style="padding:4px 8px;background:rgba(220,38,38,.08);color:#dc2626;border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px" title="Eliminar esta CxP">🗑</button>'
       + '</td>'
       + '</tr>';
