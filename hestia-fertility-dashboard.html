@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.55 -->
+﻿<!-- app-build:2026.07.07.56 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -14834,6 +14834,8 @@ function _renderBoard(){
   h+=_bKpi('Ticket promedio',_bMoney(k.ticketPromedio),(k.ciclos||0)+' ciclos/servicios','mut');
   if(k.cumplimientoMeta!=null) h+=_bKpi('Cumplimiento meta',(k.cumplimientoMeta*100).toFixed(0)+'%',(k.cumplimientoMeta>=1?'Superada':'En progreso'),k.cumplimientoMeta>=1?'up':'down');
   h+='</div>';
+  // Presupuesto: proyectado vs real + próximo Q
+  h+=_boardPresupuestoSection();
   // Charts
   h+='<div class="bd-charts">';
   h+='<div class="bd-card"><h4>Ingresos vs Egresos · '+d.periodo.inicio.substring(0,4)+'</h4><canvas id="bd-c-serie"></canvas></div>';
@@ -14858,6 +14860,49 @@ function _renderBoard(){
   _boardDrawCharts(d,th);
 }
 function _bKpi(l,v,d,c){ return '<div class="bd-kpi"><div class="l">'+_esc(l)+'</div><div class="v">'+v+'</div>'+(d?'<div class="d '+(c||'mut')+'">'+_esc(d)+'</div>':'')+'</div>'; }
+/* Sección Presupuesto en el dashboard: narrativa proyectado vs real + mini KPIs
+   + gráfico comparativo + tarjeta de proyección del próximo trimestre. */
+function _boardPresupuestoSection(){
+  var d=_boardData; var p=d.presupuesto; if(!p||!p.ok||!p.proyectado) return '';
+  var pr=p.proyectado, re=p.real||{}, cu=p.cumplimiento||{}, sg=p.siguiente;
+  var fmtInt=function(n){ return (Number(n)||0).toLocaleString('en-US'); };
+  var cumpIng = cu.ingresos!=null?cu.ingresos:0;
+  var col=function(pct){ return pct>=100?'#3f8f5e':pct>=85?'#b8860b':'#c0505c'; };
+  var fuente = pr.fuente==='guardada'?'meta fijada':'proyección automática';
+  var h='<div class="bd-card" style="margin-bottom:18px">';
+  h+='<h4>Presupuesto '+_esc(p.periodo)+' — Proyectado vs Real</h4>';
+  h+='<div class="bd-narr" style="margin:6px 0 12px">Se proyectaron <b>'+fmtInt(pr.ventas)+'</b> ventas por <b>'+_bMoney(pr.ingresos)+'</b> ('+fuente+'); '
+    +'se lograron <b>'+fmtInt(re.ventas)+'</b> por <b>'+_bMoney(re.ingresos)+'</b> = <b style="color:'+col(cumpIng)+'">'+cumpIng.toFixed(0)+'% de la meta</b>. '
+    +(sg?'Para <b>'+_esc(sg.periodo)+'</b> se proyectan <b>'+fmtInt(sg.ventas)+'</b> ventas por <b>'+_bMoney(sg.ingresos)+'</b> (utilidad '+_bMoney(sg.utilidad)+').':'')
+    +'</div>';
+  h+='<div class="bd-kpis" style="margin-bottom:12px">';
+  h+=_bPresKpi('Ventas', fmtInt(re.ventas)+' / '+fmtInt(pr.ventas), cu.ventas, false);
+  h+=_bPresKpi('Ingresos', _bMoneyK(re.ingresos)+' / '+_bMoneyK(pr.ingresos), cu.ingresos, false);
+  h+=_bPresKpi('Egresos', _bMoneyK(re.egresos)+' / '+_bMoneyK(pr.egresos), cu.egresos, true);
+  h+=_bPresKpi('Utilidad', _bMoneyK(re.utilidad)+' / '+_bMoneyK(pr.utilidad), null, false);
+  h+='</div>';
+  h+='<div class="bd-two">';
+  h+='<div><canvas id="bd-c-pres" style="max-height:220px"></canvas></div>';
+  if(sg){
+    h+='<div style="align-self:center">'
+      +'<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--bd-acc)">Proyección próximo trimestre · '+_esc(sg.periodo)+'</div>'
+      +'<table class="bd-tbl" style="margin-top:6px">'
+      +'<tr><td>Ventas proyectadas</td><td>'+fmtInt(sg.ventas)+'</td></tr>'
+      +'<tr><td>Ingresos</td><td>'+_bMoney(sg.ingresos)+'</td></tr>'
+      +'<tr><td>Egresos</td><td>'+_bMoney(sg.egresos)+'</td></tr>'
+      +'<tr><td>Utilidad proyectada</td><td style="'+_bValCol(sg.utilidad)+'">'+_bMoney(sg.utilidad)+'</td></tr>'
+      +'</table>'
+      +'<div style="font-size:10.5px;color:var(--text-secondary,#9ca3af);margin-top:5px">'+(sg.fuente==='guardada'?'Meta fijada para el trimestre':'Proyección automática (cantidad × precio real)')+'</div>'
+      +'</div>';
+  }
+  h+='</div></div>';
+  return h;
+}
+function _bPresKpi(l,v,pct,inverse){
+  var c='mut', badge='';
+  if(pct!=null){ var good = inverse ? pct<=100 : pct>=100; c=good?'up':'down'; badge=pct.toFixed(0)+'% '+(inverse?'del presup.':'de meta'); }
+  return '<div class="bd-kpi"><div class="l">'+_esc(l)+' (real / proy)</div><div class="v" style="font-size:16px">'+v+'</div>'+(badge?'<div class="d '+c+'">'+badge+'</div>':'')+'</div>';
+}
 function _bLineTable(arr,total){ var h='<table class="bd-tbl">'; (arr||[]).forEach(function(x){ if(Math.abs(x.valor)<=0.005) return; var p=total>0?(x.valor/total*100):0; h+='<tr><td>'+_esc(x.label)+'</td><td class="pctcell">'+p.toFixed(1)+'%</td><td>'+_bMoney(x.valor)+'</td></tr>'; }); return h+'</table>'; }
 /* Tabla detallada de ingresos: grupo → subgrupo → producto (desde d.lineas). */
 function _boardIngresosTable(detailed){
@@ -14922,6 +14967,14 @@ function _boardDrawCharts(d,th){
   if(ctxM && d.meta){ _boardCharts.push(new Chart(ctxM,{type:'bar',data:{labels:['Ingresos'],
     datasets:[{label:'Meta',data:[d.kpis.ingresosMeta],backgroundColor:'#cfc9c2'},{label:'Real',data:[d.kpis.ingresos],backgroundColor:th.acc}]},
     options:{responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:11}}}},scales:{y:{ticks:{callback:function(v){return '$'+_bK(v);},font:{size:10}}}}}})); }
+  // Presupuesto: proyectado vs real (ingresos/egresos/utilidad)
+  var ctxP=document.getElementById('bd-c-pres');
+  var p=d.presupuesto;
+  if(ctxP && p && p.ok && p.proyectado){ _boardCharts.push(new Chart(ctxP,{type:'bar',
+    data:{labels:['Ingresos','Egresos','Utilidad'],
+      datasets:[{label:'Proyectado',data:[p.proyectado.ingresos,p.proyectado.egresos,p.proyectado.utilidad],backgroundColor:'#cfc9c2'},
+                {label:'Real',data:[p.real.ingresos,p.real.egresos,p.real.utilidad],backgroundColor:th.acc}]},
+    options:{responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:11}}},title:{display:true,text:'Presupuesto '+p.periodo+' · Proyectado vs Real',font:{size:11}}},scales:{y:{ticks:{callback:function(v){return '$'+_bK(v);},font:{size:10}}}}}})); }
 }
 
 /* ── Portada persistida por navegador (para imágenes subidas grandes) ── */
@@ -15037,6 +15090,38 @@ function _boardSlideDefs(){
       +'<div style="font-size:14px;line-height:1.8"><div>Meta de ingresos: <b>'+_bMoney(k.ingresosMeta)+'</b></div><div>Ingreso real: <b>'+_bMoney(k.ingresos)+'</b></div>'
       +'<div style="margin-top:8px;font-size:18px;font-weight:800;color:'+(k.cumplimientoMeta>=1?'#3f8f5e':'#c0505c')+'">'+(k.cumplimientoMeta>=1?'+'+_bMoney(k.ingresos-k.ingresosMeta)+' sobre la meta':_bMoney(k.ingresosMeta-k.ingresos)+' por debajo')+'</div></div></div>')});
   }
+  // 7b Presupuesto: Proyectado vs Real (cantidad de ventas) + próximo trimestre
+  if(d.presupuesto && d.presupuesto.ok && d.presupuesto.proyectado){
+    var pp=d.presupuesto, ppr=pp.proyectado, pre=pp.real||{}, pcu=pp.cumplimiento||{}, psg=pp.siguiente;
+    var fInt=function(n){ return (Number(n)||0).toLocaleString('en-US'); };
+    var cIng=pcu.ingresos!=null?pcu.ingresos:0;
+    var cCol=cIng>=100?'#3f8f5e':(cIng>=85?'#b8860b':'#c0505c');
+    var pf=ppr.fuente==='guardada'?'meta fijada':'proyección automática';
+    slides.push({t:'Presupuesto · Proyectado vs Real', chart:'presProy', html:frame('','<h2>Presupuesto '+_esc(pp.periodo)+'</h2><h1>Proyectado vs Real</h1>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:center">'
+      +'<div style="position:relative;height:230px"><canvas id="bd-s-presProy"></canvas></div>'
+      +'<div style="font-size:14px;line-height:1.7">'
+        +'<p class="narr" style="margin:0 0 12px">Se proyectaron <b>'+fInt(ppr.ventas)+'</b> ventas por <b>'+_bMoney(ppr.ingresos)+'</b> ('+pf+'); se lograron <b>'+fInt(pre.ventas)+'</b> por <b>'+_bMoney(pre.ingresos)+'</b>.</p>'
+        +'<div style="font-size:22px;font-weight:800;color:'+cCol+'">'+cIng.toFixed(0)+'% de la meta</div>'
+        +'<table class="bd-tbl" style="margin-top:10px;font-size:13px">'
+        +'<tr><td>Ventas</td><td>'+fInt(pre.ventas)+' / '+fInt(ppr.ventas)+'</td></tr>'
+        +'<tr><td>Ingresos</td><td>'+_bMoney(pre.ingresos)+' / '+_bMoney(ppr.ingresos)+'</td></tr>'
+        +'<tr><td>Egresos</td><td>'+_bMoney(pre.egresos)+' / '+_bMoney(ppr.egresos)+'</td></tr>'
+        +'<tr><td>Utilidad</td><td style="'+_bValCol(pre.utilidad)+'">'+_bMoney(pre.utilidad)+' / '+_bMoney(ppr.utilidad)+'</td></tr>'
+        +'</table><div style="font-size:11px;color:#9a9a9a;margin-top:4px">real / proyectado</div>'
+      +'</div></div>')});
+    if(psg){
+      var deltaTxt = ppr.ingresos>0 ? ' Representa un '+(psg.ingresos>=ppr.ingresos?'crecimiento':'ajuste')+' de '+(((psg.ingresos-ppr.ingresos)/ppr.ingresos)*100).toFixed(0)+'% vs '+pp.periodo+'.' : '';
+      slides.push({t:'Proyección próximo trimestre', html:frame('','<h2>Proyección</h2><h1>Próximo trimestre · '+_esc(psg.periodo)+'</h1>'
+        +'<div class="bd-skpis" style="grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">'
+        +'<div class="bd-skpi"><div class="l">Ventas proyectadas</div><div class="v">'+fInt(psg.ventas)+'</div><div class="d">&nbsp;</div></div>'
+        +'<div class="bd-skpi"><div class="l">Ingresos</div><div class="v">'+_bMoneyK(psg.ingresos)+'</div><div class="d">&nbsp;</div></div>'
+        +'<div class="bd-skpi"><div class="l">Egresos</div><div class="v">'+_bMoneyK(psg.egresos)+'</div><div class="d">&nbsp;</div></div>'
+        +'<div class="bd-skpi"><div class="l">Utilidad proyectada</div><div class="v" style="'+_bValCol(psg.utilidad)+'">'+_bMoneyK(psg.utilidad)+'</div><div class="d">&nbsp;</div></div>'
+        +'</div>'
+        +'<p class="narr">Para <b>'+_esc(psg.periodo)+'</b> se proyectan <b>'+fInt(psg.ventas)+'</b> ventas por <b>'+_bMoney(psg.ingresos)+'</b>, con egresos estimados de <b>'+_bMoney(psg.egresos)+'</b> y una utilidad proyectada de <b>'+_bMoney(psg.utilidad)+'</b>. '+(psg.fuente==='guardada'?'Basado en la meta fijada para el trimestre.':'Proyección automática por cantidad × precio real con el crecimiento histórico.')+deltaTxt+'</p>')});
+    }
+  }
   // 8 Comparativo anual
   slides.push({t:'Comparativo Anual', chart:'serieBig', html:frame('','<h2>Comparativo Anual</h2><h1>Últimos 12 meses</h1>'
     +'<div style="position:relative;height:260px"><canvas id="bd-s-serieBig"></canvas></div>'
@@ -15086,6 +15171,7 @@ function _boardSlideChart(kind){
   else if(kind==='ding') donut('bd-s-ing',d.compIngresos);
   else if(kind==='degr') donut('bd-s-egr',d.compEgresos);
   else if(kind==='meta'){ var el=document.getElementById('bd-s-meta'); if(el) _boardCharts.push(new Chart(el,{type:'bar',data:{labels:['Ingresos'],datasets:[{label:'Meta',data:[d.kpis.ingresosMeta],backgroundColor:'#cfc9c2'},{label:'Real',data:[d.kpis.ingresos],backgroundColor:th.acc}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}},scales:{y:{ticks:{callback:function(v){return '$'+_bK(v);}}}}}})); }
+  else if(kind==='presProy'){ var elp=document.getElementById('bd-s-presProy'); var pp2=d.presupuesto; if(elp&&pp2&&pp2.proyectado) _boardCharts.push(new Chart(elp,{type:'bar',data:{labels:['Ingresos','Egresos','Utilidad'],datasets:[{label:'Proyectado',data:[pp2.proyectado.ingresos,pp2.proyectado.egresos,pp2.proyectado.utilidad],backgroundColor:'#cfc9c2'},{label:'Real',data:[pp2.real.ingresos,pp2.real.egresos,pp2.real.utilidad],backgroundColor:th.acc}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}},scales:{y:{ticks:{callback:function(v){return '$'+_bK(v);}}}}}})); }
 }
 /* CSS auto-contenido para la ventana de impresión (no hereda estilos de la app). */
 function _boardPrintCSS(th){

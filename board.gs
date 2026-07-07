@@ -179,6 +179,9 @@ function readBoardReport(fechaInicio, fechaFin){
 
     var narrativa=_boardNarrative(sum, kpis, per, serie);
 
+    // Presupuesto: proyectado (meta) vs real del trimestre + próximo Q
+    var presupuesto=_boardPresupuesto(ff, {ventas:ciclos, ingresos:rev, egresos:egr, utilidad:rev-egr});
+
     // Composición para donas
     var compIngresos=(sum.lineas||[]).filter(function(x){return x.tipo==='dato'&&x.grupo==='REVENUE'&&Math.abs(x.actual)>0.005;})
       .map(function(l){return {label:l.linea, valor:l.actual};}).sort(function(a,b){return b.valor-a.valor;});
@@ -193,9 +196,51 @@ function readBoardReport(fechaInicio, fechaFin){
       ok:true, periodo:sum.periodo, prev:sum.prev, tipoPeriodo:per,
       kpis:kpis, narrativa:narrativa, serie:serie, meta:meta,
       compIngresos:compIngresos, compEgresos:compEgresos, egresosDetalle:egresosDetalle,
+      presupuesto:presupuesto,
       lineas:sum.lineas, reconc:sum.reconc, amexCredito:sum.amexCredito, metricas:sum.metricas
     };
   } catch(ex){ return { ok:false, error:ex.message+' (L:'+ex.lineNumber+')' }; }
+}
+
+/* ── Presupuesto: proyectado (meta guardada, o automática si no hay) vs REAL
+   del trimestre del reporte + proyección del próximo trimestre. Reusa
+   readPresupuesto (presupuesto.gs). ─────────────────────────────────── */
+function _boardSumQtyProy(grupos){
+  var t=0; (grupos||[]).forEach(function(g){ t += _boardNum(g.cantProy); }); return t;
+}
+function _boardPresLee(per){
+  try{
+    if(typeof readPresupuesto!=='function') return null;
+    var pr = readPresupuesto(per);
+    if(!pr || !pr.ok) return null;
+    var sig = pr.siguiente||{}, eg = pr.egresos||{};
+    var metaGuardada = (sig.totales && _boardNum(sig.totales.meta)>0);
+    var metaIng = metaGuardada ? _boardNum(sig.totales.meta) : _boardNum(sig.ingresosTotalProy);
+    var metaEg  = (eg.totales && _boardNum(eg.totales.meta)>0) ? _boardNum(eg.totales.meta)
+                : (eg.totales ? _boardNum(eg.totales.proyeccion) : _boardNum(eg.proyeccion));
+    return { periodo:per, ventas:_boardSumQtyProy(sig.ingresosGrupos), ingresos:metaIng,
+             egresos:metaEg, utilidad:metaIng-metaEg, fuente: metaGuardada?'guardada':'automatica' };
+  }catch(e){ return null; }
+}
+function _boardPresupuesto(ff, real){
+  try{
+    var y=parseInt(ff.substring(0,4),10), mo=parseInt(ff.substring(5,7),10), q=Math.ceil(mo/3);
+    var perQ=y+'-Q'+q, nq=q+1, ny=y; if(nq>4){nq=1;ny=y+1;}
+    var perNext=ny+'-Q'+nq;
+    var out={ ok:true, periodo:perQ, periodoSiguiente:perNext, proyectado:null, real:real, siguiente:null, cumplimiento:null };
+    var pQ=_boardPresLee(perQ);
+    if(pQ){
+      out.proyectado={ ventas:pQ.ventas, ingresos:pQ.ingresos, egresos:pQ.egresos, utilidad:pQ.utilidad, fuente:pQ.fuente };
+      out.cumplimiento={
+        ingresos: pQ.ingresos>0 ? _boardPct(real.ingresos, pQ.ingresos) : null,
+        ventas:   pQ.ventas>0   ? _boardPct(real.ventas,  pQ.ventas)   : null,
+        egresos:  pQ.egresos>0  ? _boardPct(real.egresos, pQ.egresos)  : null
+      };
+    }
+    var pN=_boardPresLee(perNext);
+    if(pN) out.siguiente={ periodo:perNext, ventas:pN.ventas, ingresos:pN.ingresos, egresos:pN.egresos, utilidad:pN.utilidad, fuente:pN.fuente };
+    return out;
+  }catch(ex){ return { ok:false, error:ex.message }; }
 }
 
 /* ── Config de la plantilla (portada, colores, título) ──────────── */
