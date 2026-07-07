@@ -35,6 +35,14 @@ function _presQ(month) { return Math.floor((month - 1) / 3) + 1; }          // m
 function _presQKey(y, q) { return y + '-Q' + q; }
 function _presPrevQ(y, q) { return q > 1 ? { y: y, q: q - 1 } : { y: y - 1, q: 4 }; }
 function _presNextQ(y, q) { return q < 4 ? { y: y, q: q + 1 } : { y: y + 1, q: 1 }; }
+/* ¿El trimestre ('YYYY-Qn') ya terminó? (su último día es anterior a hoy) */
+function _presQEnded(periodo) {
+  var m = String(periodo || '').trim().match(/^(\d{4})-Q([1-4])$/); if (!m) return false;
+  var y = parseInt(m[1], 10), q = parseInt(m[2], 10);
+  var fin = new Date(y, q * 3, 0);          // último día del último mes del trimestre
+  var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  return fin < hoy;
+}
 
 /* ── Diagnóstico: vuelca la estructura real de la pestaña Budget ──
    Correr desde el editor y revisar "Registro de ejecución" (Ctrl+Enter).
@@ -280,8 +288,9 @@ function readPresupuesto(periodo) {
     if (periodo && /^\d{4}-Q[1-4]$/.test(String(periodo).trim())) {
       var pm = String(periodo).trim().match(/^(\d{4})-Q([1-4])$/);
       tgtY = parseInt(pm[1], 10); tgtQ = parseInt(pm[2], 10);
-      // histórico = el trimestre elegido ya terminó (es anterior al siguiente por default)
-      esHistorico = (tgtY < nx.y) || (tgtY === nx.y && tgtQ < nx.q);
+      // histórico = SOLO si el trimestre YA TERMINÓ. El trimestre EN CURSO y los
+      // futuros son editables (permite ajustar el Q actual apenas empezado).
+      esHistorico = (tgtY < curY) || (tgtY === curY && tgtQ < curQ);
     }
     var perActual = _presQKey(curY, curQ);
     var perSig = _presQKey(tgtY, tgtQ);
@@ -475,6 +484,7 @@ function savePresupuestoMeta(body) {
   try {
     if (!body || !String(body.periodo || '').trim() || !String(body.linea || '').trim())
       return { ok: false, error: 'Periodo y línea son obligatorios.' };
+    if (_presQEnded(body.periodo)) return { ok: false, error: 'Ese trimestre ya terminó; el presupuesto no se puede modificar.' };
     var ss = SpreadsheetApp.openById(ER_SS_ID);
     var sh = ss.getSheetByName(PRES_METAS_TAB);
     if (!sh) { setupPresupuesto(); sh = ss.getSheetByName(PRES_METAS_TAB); }
@@ -500,6 +510,7 @@ function savePresupuestoMetasBatch(body) {
   try {
     if (!body || !String(body.periodo || '').trim() || !Array.isArray(body.metas))
       return { ok: false, error: 'Datos incompletos.' };
+    if (_presQEnded(body.periodo)) return { ok: false, error: 'Ese trimestre ya terminó; el presupuesto no se puede modificar.' };
     var ss = SpreadsheetApp.openById(ER_SS_ID);
     var sh = ss.getSheetByName(PRES_METAS_TAB);
     if (!sh) { setupPresupuesto(); sh = ss.getSheetByName(PRES_METAS_TAB); }
