@@ -382,6 +382,11 @@ function readPresupuesto(periodo) {
     var margenProy = totProy - egProy;
     var margenPct = totProy > 0 ? (margenProy / totProy) * 100 : 0;
 
+    // Adjuntar budget guardado (meta por producto) a la estructura nueva de ingresos
+    (ingProd.grupos || []).forEach(function (G) { (G.subgrupos || []).forEach(function (S) { (S.productos || []).forEach(function (p) {
+      p.budget = (metaSig[p.producto] && metaSig[p.producto].metaIngreso) || 0;
+    }); }); });
+
     // ── Tendencia mensual (income + egresos) para la gráfica ──
     var tendencia = _presTendencia(histM, egQ.m || {}, tgtY, tgtQ, totProy, egProy);
 
