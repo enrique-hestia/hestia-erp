@@ -4497,6 +4497,18 @@ function _bankSheetByKey(key) {
   return null;
 }
 function _bankObsIdx(key) { return key === 'santander' ? 4 : 8; }   // col donde va la obs con [OP-…]
+/* Comisión MP (col D idx3, negativa) ya registrada para esta OP — para
+   conservarla al re-crear la fila en una edición. Llamar ANTES de borrar. */
+function _bankMpComisionDeOp(opId) {
+  try {
+    var sheet = _bankSheetByKey('mercadopago'); if (!sheet) return 0;
+    var lr = sheet.getLastRow(); if (lr < 2) return 0;
+    var vals = sheet.getRange(2, 1, lr - 1, Math.max(9, sheet.getLastColumn())).getValues();
+    var tag = '[' + opId + ']', com = 0;
+    for (var r = 0; r < vals.length; r++) { if (String(vals[r][8] || '').indexOf(tag) > -1) com += parseFloat(vals[r][3]) || 0; }
+    return com;   // negativa (o 0 si no había comisión)
+  } catch (e) { return 0; }
+}
 function _bankDeleteByOp(key, opId) {
   try {
     var sheet = _bankSheetByKey(key); if (!sheet) return 0;
@@ -4588,6 +4600,7 @@ function updateIngresoConBancos(payload) {
     // IDEMPOTENTE: en Santander/MP se borran las filas de esta OP (se re-crean
     // limpias abajo, sin acumular reversos). Efectivo sí se reversa por su hoja.
     var _sanOpen = _bankOpening('santander');   // capturar apertura ANTES de borrar
+    var _mpCom = _bankMpComisionDeOp(opId);     // conservar comisión MP ya registrada
     _bankDeleteByOp('santander', opId);
     _bankDeleteByOp('mercadopago', opId);
     _reverseEfectivoOnly(opId, data[0], origRows, origFP, origFecha, origPagado, origObsBank);
@@ -4602,6 +4615,7 @@ function updateIngresoConBancos(payload) {
     var mesStr   = newFecha.substring(0, 7);
     var bankObs  = (newObs ? newObs + ' · ' : '') + 'Px. ' + newPac + ' [' + opId + ']';
 
+    var _mpComApplied = false;
     for (var pi = 0; pi < payments.length; pi++) {
       var pay = payments[pi];
       var fp  = pay.formaPago;
@@ -4613,7 +4627,9 @@ function updateIngresoConBancos(payload) {
       } else if (fp === 'Santander') {
         saveBankRow('santander', [newFecha, amt, 0, 0, bankObs, 0, 0, '', '']);
       } else if (fp === 'TDC' || fp === 'TDD' || fp === 'AMEX' || fp === 'Transferencia') {
-        saveBankRow('mercadopago', [mesStr, newFecha, amt, 0, 0, amt, 0, false, bankObs, 'CARGO']);
+        // Conserva la comisión MP ya registrada (se aplica una sola vez)
+        var com = _mpComApplied ? 0 : _mpCom; _mpComApplied = true;
+        saveBankRow('mercadopago', [mesStr, newFecha, amt, com, 0, amt + com, 0, false, bankObs, 'CARGO']);
       }
     }
 
