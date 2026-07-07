@@ -140,6 +140,44 @@ function _sumOrdIn(list, label){
   return 999;
 }
 
+/* ── EGRESOS: subtipo → subgrupo (nivel 2) tal como agrupa la hoja de referencia.
+   El nivel 1 (COGS/OpEx/G&A/Taxes) ya lo da Summary_Config; aquí solo el nivel 2. */
+var SUMMARY_EG_SUBGROUP_MAP = {
+  // COGS
+  'honorarios':'Honorarios', 'honorarios cons':'Honorarios',
+  'comisiones':'Comisiones por Venta',
+  'analisis clinicos':'Estudios e Insumos de Laboratorio',
+  'estudios genetica':'Estudios e Insumos de Laboratorio',
+  'laboratorios':'Estudios e Insumos de Laboratorio',
+  'insumos qx':'Estudios e Insumos de Laboratorio',
+  'insumos lab':'Estudios e Insumos de Laboratorio',
+  'gases':'Estudios e Insumos de Laboratorio',
+  'renta equipo':'Estudios e Insumos de Laboratorio',
+  'medicamentos':'Medicamentos',
+  'software':'Servicios', 'reportes':'Servicios',
+  // OpEx
+  'renta':'Inmueble', 'mtto renta':'Inmueble', 'mto renta':'Inmueble',
+  'valet parking':'Inmueble', 'mantenimiento':'Inmueble',
+  'marketing':'Marketing y Publicidad', 'whatsapp':'Marketing y Publicidad',
+  'mtto web':'Marketing y Publicidad', 'podcast':'Marketing y Publicidad', 'adds':'Marketing y Publicidad',
+  'servicios':'Servicios', 'servicio':'Servicios', 'contabilidad':'Servicios', 'rpbi':'Servicios'
+  // (G&A y Taxes: se agregan al recibir las 2 capturas faltantes)
+};
+/* Orden de subgrupos dentro de su sección. "Servicios" siempre al final de su sección. */
+var SUMMARY_EG_SUBGROUP_ORDER = {
+  'honorarios':1, 'comisiones por venta':2, 'estudios e insumos de laboratorio':3,
+  'medicamentos':4, 'inmueble':5, 'marketing y publicidad':6, 'nomina':7, 'nómina':7,
+  'gastos varios':8, 'no deducibles':9, 'impuestos':10, 'servicios':90
+};
+function _summaryEgSubgroup(subtipo){
+  var k = _sumNorm(subtipo);
+  return SUMMARY_EG_SUBGROUP_MAP[k] || (String(subtipo||'').trim() || 'Otros');
+}
+function _summaryEgSubgroupOrden(subgroup){
+  var o = SUMMARY_EG_SUBGROUP_ORDER[_sumNorm(subgroup)];
+  return (o===undefined) ? 50 : o;
+}
+
 /* ── Siembra/actualiza Summary_Config escaneando los datos reales.
    Corre UNA VEZ (o cuando quieras re-sembrar). No pisa lo que ya
    editaste: solo AGREGA las claves nuevas que falten. ─────────────── */
@@ -284,12 +322,13 @@ function readSummary(fechaInicio, fechaFin) {
     var agg = {}; // 'GRUPO|Linea' -> {grupo,linea,orden,flag,actual,prev,subs:{}}
     function key(g,l){ return g+'|'+l; }
     function get(g,l,orden,flag){ var k=key(g,l); if(!agg[k]) agg[k]={grupo:g,linea:l,orden:orden||5,flag:flag||'',actual:0,prev:0,subs:{}}; return agg[k]; }
-    function addSub(line, label, monto, cant, isA, drill, grupo){
+    function addSub(line, label, monto, cant, isA, drill, grupo, meta){
       label = String(label||'(sin nombre)').trim() || '(sin nombre)';
       grupo = String(grupo||'').trim();
       var sk = grupo+'||'+label;
       var s = line.subs[sk];
-      if(!s){ s = line.subs[sk] = {label:label, grupo:grupo, actual:0, prev:0, cantA:0, cantP:0, rows:[], _ord:Object.keys(line.subs).length}; }
+      if(!s){ s = line.subs[sk] = {label:label, grupo:grupo, meta:meta||'', actual:0, prev:0, cantA:0, cantP:0, rows:[], _ord:Object.keys(line.subs).length}; }
+      else if(meta && !s.meta){ s.meta = meta; }
       if(isA){ s.actual += monto; s.cantA += cant; if(drill) s.rows.push(drill); }
       else { s.prev += monto; s.cantP += cant; }
     }
@@ -335,14 +374,17 @@ function readSummary(fechaInicio, fechaFin) {
           if (enPrev) amex.prev+=monto;
           return;
         }
-        var line = get(c.grupo, c.linea, c.orden, c.flag);
-        // Sub-item de egreso: agrupa por Subtipo (ej. Software, Renta) y drill = movimiento
-        var subLbl = String(r.subtipo||'').trim() || String(r.concepto||'').trim() || '(sin subtipo)';
+        // Nivel 2 (dato) = SUBGRUPO curado (Honorarios, Inmueble, Medicamentos…) desde el subtipo
+        var sub2 = _summaryEgSubgroup(r.subtipo);
+        var line = get(c.grupo, sub2, _summaryEgSubgroupOrden(sub2), c.flag);
+        // Nivel 3 (sub-item) = PROVEEDOR, con concepto·tipo como meta
+        var provLbl = String(r.proveedor||'').trim() || String(r.concepto||'').trim() || '(sin proveedor)';
+        var meta = [String(r.concepto||'').trim(), String(r.subtipo||'').trim(), String(r.tipo||'').trim()].filter(Boolean).join(' · ');
         if (enActual){ line.actual+=monto; recon.egresosTotal+=monto;
-          addSub(line, subLbl, monto, 1, true, {fecha:f, nombre:r.proveedor, concepto:r.concepto, monto:monto, subtipo:r.subtipo});
+          addSub(line, provLbl, monto, 1, true, {fecha:f, nombre:r.proveedor, concepto:(String(r.concepto||'')+' · '+String(r.subtipo||'')), monto:monto, subtipo:r.subtipo}, '', meta);
           var sk=_sumNorm(r.subtipo); if (LAB_SUBS[sk]){ if(!labInsMap[sk]) labInsMap[sk]={subtipo:r.subtipo,total:0,count:0}; labInsMap[sk].total+=monto; labInsMap[sk].count++; }
         }
-        if (enPrev){ line.prev+=monto; addSub(line, subLbl, monto, 1, false, null); }
+        if (enPrev){ line.prev+=monto; addSub(line, provLbl, monto, 1, false, null, '', meta); }
       });
     }
 
@@ -386,16 +428,11 @@ function readSummary(fechaInicio, fechaFin) {
       var arr=[]; Object.keys(agg).forEach(function(k){ if(agg[k].grupo===g) arr.push(agg[k]); });
       arr.sort(function(a,b){ return (a.orden-b.orden) || (a.linea<b.linea?-1:1); });
       return arr.map(function(l){
-        var subsArr = Object.keys(l.subs).map(function(k){ return l.subs[k]; });
-        // Orden de grupos (columna U) por primera aparición; dentro de cada grupo, por monto desc
-        var grpOrder = {}; var gi = 0;
-        subsArr.forEach(function(s){ var gk=s.grupo||''; if(grpOrder[gk]===undefined) grpOrder[gk]=gi++; });
-        subsArr.sort(function(a,b){
-          var ga=grpOrder[a.grupo||''], gb=grpOrder[b.grupo||''];
-          if (ga!==gb) return ga-gb;
-          return b.actual-a.actual;
-        });
-        var subs = subsArr.map(function(s){ return { label:s.label, grupo:s.grupo||'', cantidad:s.cantA, cantidadPrev:s.cantP,
+        // Sub-items (proveedores) ordenados por monto desc; ocultar los de $0
+        var subsArr = Object.keys(l.subs).map(function(k){ return l.subs[k]; })
+          .filter(function(s){ return Math.abs(s.actual)>0.005 || Math.abs(s.prev)>0.005; })
+          .sort(function(a,b){ return b.actual-a.actual; });
+        var subs = subsArr.map(function(s){ return { label:s.label, meta:s.meta||'', cantidad:s.cantA, cantidadPrev:s.cantP,
             actual:s.actual, prev:s.prev,
             rows:s.rows.sort(function(a,b){ return b.monto-a.monto; }) }; });
         return { tipo:'dato', grupo:g, linea:l.linea, label:l.linea, flag:l.flag,
