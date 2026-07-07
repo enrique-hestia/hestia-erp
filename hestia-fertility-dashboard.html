@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.51 -->
+﻿<!-- app-build:2026.07.07.52 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -19326,6 +19326,7 @@ function _cxpBuildNewRows(rows) {
         // Sin ⊘ aquí: una CxP no pagada es solo cotización/compromiso, no movió
         // bancos — se elimina con 🗑 sin generar crédito. El cancelar con saldo
         // a favor/devolución solo aplica en Egresos (ahí sí ya salió el dinero).
+        + (row.recurrenteId ? '<button onclick="cxpRegresarProgramacion('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor||'')+'\'))" style="padding:4px 8px;background:rgba(245,158,11,.12);color:#b45309;border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px" title="Regresar a Programación del mes (Gastos Fijos) para reprogramarla">↩</button>' : '')
         + '<button onclick="cxpDeleteRow('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor||'')+'\'))" style="padding:4px 8px;background:rgba(220,38,38,.08);color:#dc2626;border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px" title="Eliminar esta CxP">🗑</button>'
       + '</td>'
       + '</tr>';
@@ -21120,6 +21121,19 @@ window.cxpDeleteRow = async function(rowNum, proveedor) {
     if (res.ok) { loadCxPData(); }
     else { alert('Error al eliminar: ' + (res.error||'sin detalle')); }
   } catch(e) { alert('Error al eliminar: ' + e.message); }
+};
+
+// Regresa una CxP que vino de un gasto fijo a "Programación del mes" para reprogramarla.
+window.cxpRegresarProgramacion = async function(rowNum, proveedor) {
+  if (!rowNum || rowNum < 2) { alert('No se pudo identificar la fila. Recarga e intenta.'); return; }
+  if (!confirm('¿Regresar la cuenta de "' + proveedor + '" a Programación del mes (Gastos Fijos)?\n\nSe quita de Cuentas por Pagar para que la reprogrames por el monto correcto. Solo funciona si no está pagada ni tiene abonos.')) return;
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify({action:'regresarCxPaProgramacion', rowNum:rowNum, usuario:s.email||''})});
+    var res = await r.json();
+    if (res.ok) { setStatus('Regresada a programación — reprográmala en Gastos Fijos.','ok'); loadCxPData(); }
+    else { alert('No se pudo regresar: ' + (res.error||'sin detalle')); }
+  } catch(e) { alert('Error: ' + e.message); }
 };
 
 // Cancelar una orden: el usuario ELIGE qué pasa con el dinero ya pagado —

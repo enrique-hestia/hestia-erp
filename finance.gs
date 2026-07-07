@@ -541,6 +541,11 @@ function doPost(e) {
     if (body.action === 'deleteGastoFijo')         return jsonResponse(deleteGastoFijo(body));
     if (body.action === 'programarGastoFijo')      return jsonResponse(programarGastoFijo(body));
     if (body.action === 'programarGastosFijosBatch') return jsonResponse(programarGastosFijosBatch(body));
+    if (body.action === 'regresarCxPaProgramacion') {
+      if (typeof regresarCxPaProgramacion !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza gastosfijos.gs en Apps Script y redespliega.'});
+      return jsonResponse(regresarCxPaProgramacion(body));
+    }
     if (body.action === 'bulkUpdateCxPMonto')         return jsonResponse(bulkUpdateCxPMonto(body));
     if (body.action === 'conciliaAMEX')              return jsonResponse(conciliaAMEX(body));
     if (body.action === 'amexCorte')                 return jsonResponse(readAmexCorte(body));
@@ -1249,12 +1254,13 @@ function readBDCxP() {
 
     var resumen = {vencido:0,hoy:0,semana:0,mes:0,totalVencido:0,totalHoy:0,totalSemana:0,totalMes:0,totalPendiente:0};
     var rows = [];
-    var iCotiz = -1, iDiv = -1, iEstatus = -1, hdr0 = raw[0]||[];
+    var iCotiz = -1, iDiv = -1, iEstatus = -1, iRec = -1, hdr0 = raw[0]||[];
     for (var hc=0; hc<hdr0.length; hc++){
       var h0=String(hdr0[hc]).toLowerCase();
       if(iCotiz<0 && h0.indexOf('cotiz')>-1) iCotiz=hc;
       if(iDiv<0 && h0.indexOf('divisa')>-1) iDiv=hc;
       if(iEstatus<0 && h0.indexOf('estatus')>-1) iEstatus=hc;
+      if(iRec<0 && h0.indexOf('recurrente')>-1) iRec=hc;
     }
 
     for (var i=1;i<raw.length;i++) {
@@ -1290,6 +1296,7 @@ function readBDCxP() {
         linkPago:String(r[19]||''), linkPagoUrl:'',
         linkCotizacion: iCotiz>-1 ? String(r[iCotiz]||'') : '', linkCotizacionUrl:'',
         divisa: (iDiv>-1 && String(r[iDiv]||'').toUpperCase()==='USD') ? 'USD' : 'MXN',
+        recurrenteId: iRec>-1 ? String(r[iRec]||'').trim() : '',
         dias:dias, urgencia:urgencia
       });
     }
@@ -1699,7 +1706,8 @@ function readEgresosData(anio) {
         iCont=col('contabilidad'), iPoliza=col('póliza')===-1?col('poliza'):col('póliza'),
         iFPago=col('forma de pago'), iObs=col('observaciones'), iLinkFact=col('link factura'),
         iLinkPago=col('link pago'), iLinkCotiz=col('cotiz'),
-        iUSD=col('usd'), iTC=col('tipo de cambio'), iEstatus=col('estatus');
+        iUSD=col('usd'), iTC=col('tipo de cambio'), iEstatus=col('estatus'),
+        iRec=col('recurrente');
 
     function num(v) { if (typeof v==='number') return v; var n=parseFloat(String(v||'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
     function dt(v) { if(!v)return''; if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0'); return String(v); }
@@ -1753,7 +1761,8 @@ function readEgresosData(anio) {
         linkCotizacionUrl: '',
         montoUSD: iUSD>-1 ? num(row[iUSD]) : 0,
         tipoCambio: iTC>-1 ? num(row[iTC]) : 0,
-        estatus: iEstatus>-1 ? String(row[iEstatus]||'').trim() : ''
+        estatus: iEstatus>-1 ? String(row[iEstatus]||'').trim() : '',
+        recurrenteId: iRec>-1 ? String(row[iRec]||'').trim() : ''
       });
     }
 

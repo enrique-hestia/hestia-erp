@@ -458,6 +458,34 @@ function programarGastoFijo(b) {
   } catch(ex){ return {ok:false, error:ex.message}; }
 }
 
+/* Regresa una CxP (fila de Egresos) que vino de un gasto fijo de vuelta a
+   "Programación del mes": borra la fila para que el gasto fijo reaparezca como
+   por programar. Solo si NO está pagada y sin abonos parciales. */
+function regresarCxPaProgramacion(b) {
+  try {
+    var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
+    var egSh = ss.getSheetByName(EGRESOS_TABS[2026] || 'Egresos2026');
+    var rowNum = parseInt(b.rowNum);
+    if (!rowNum || rowNum < 2 || rowNum > egSh.getLastRow()) return { ok: false, error: 'Fila inválida' };
+    var iRec1 = _egColEnsure(egSh, 'recurrente', 'RecurrenteID');
+    var lastCol = egSh.getLastColumn();
+    var row = egSh.getRange(rowNum, 1, 1, lastCol).getValues()[0];
+    var recId = String(row[iRec1 - 1] || '').trim();
+    if (!recId) return { ok: false, error: 'Esta cuenta no viene de un gasto fijo; no se puede regresar a programación.' };
+    var cxpId = String(row[0] || '');
+    var pagado = row[13] === true || String(row[13]).toUpperCase() === 'TRUE';
+    if (pagado) return { ok: false, error: 'Esta cuenta ya está pagada. Cancélala primero antes de regresarla a programación.' };
+    // Abonos parciales activos → no borrar sin reversar
+    try { if (typeof _cxpSumAbonosActivos === 'function' && _cxpSumAbonosActivos(cxpId) > 0.01)
+      return { ok: false, error: 'Esta cuenta tiene abonos parciales. Cancélala (⊘) para reversarlos antes de regresarla.' }; } catch (e) {}
+    var proveedor = String(row[4] || ''), concepto = String(row[8] || ''), periodo = _gfToYM(row[2]);
+    egSh.deleteRow(rowNum);
+    try { CacheService.getScriptCache().remove('gas_egresos_v1_2026'); } catch (e) {}
+    try { logAudit(b.usuario || 'sistema', 'GastoFijo', 'Regresar a programación', recId, 'Mes', periodo, proveedor + ' · ' + concepto); } catch (e) {}
+    return { ok: true, recurrenteId: recId, periodo: periodo, proveedor: proveedor };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 function programarGastosFijosBatch(b) {
   try {
     var items=b.items||[]; if(!items.length) return {ok:false, error:'Sin partidas'};
