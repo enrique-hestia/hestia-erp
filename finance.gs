@@ -1904,16 +1904,23 @@ function readReporteProveedor(body) {
   var ini  = String(body.ini||'');
   var fin  = String(body.fin||'');
   if (!prov && !fp && !cont && !sub) return {ok:false, error:'Selecciona al menos un filtro (proveedor, forma de pago, contable o subtipo).'};
-  var provLow = prov.toLowerCase();
+  // Normaliza para comparar proveedores entre años (quita acentos, puntos, dobles espacios)
+  function _normProv(s){ return String(s||'').trim().toLowerCase().replace(/\s+/g,' ').replace(/[.,]/g,'').replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i').replace(/[óòö]/g,'o').replace(/[úùü]/g,'u'); }
+  var provNorm = _normProv(prov);
+  var curYear = new Date().getFullYear();
   var allRows = [];
   var years = Object.keys(EGRESOS_IDS).map(Number).sort();
   years.forEach(function(anio) {
     try {
       var eg = readEgresosData(anio);
       if (!eg.ok || !eg.rows) return;
+      var esHistoricoAnio = anio < curYear;
       eg.rows.forEach(function(r) {
-        if (!r.pagado) return;
-        if (prov && (r.proveedor||'').trim().toLowerCase() !== provLow) return;
+        // Cuenta como gasto realizado si: pagado, o con fecha de pago, o —para años
+        // pasados (2024/2025, formato viejo sin casilla "pagado")— cualquier monto.
+        if (!r.pagado && !(r.fecha||'') && !(esHistoricoAnio && (r.monto||0)>0)) return;
+        if (r.estatus === 'Cancelada') return;
+        if (prov && _normProv(r.proveedor) !== provNorm) return;
         if (fp && (r.formaPago||'').trim() !== fp) return;
         if (cont && (r.contable||'').trim() !== cont) return;
         if (sub && (r.subtipo||'').trim() !== sub) return;
