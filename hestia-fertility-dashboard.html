@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.06.41 -->
+﻿<!-- app-build:2026.07.06.42 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1835,6 +1835,20 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
         </p>
         <div id="rep-cfg-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px;margin-bottom:14px"></div>
         <div id="rep-tpl-gallery" style="background:var(--color-surface-offset);border-radius:8px;padding:12px 14px;margin-top:4px"></div>
+      </div>
+
+      <div class="pc-card" style="margin-top:14px">
+        <div class="pc-card-title">Estado de Resultados (Summary)</div>
+        <p style="font-size:12px;color:var(--color-text-muted);margin:0 0 14px">
+          Imprime el P&amp;L completo con la jerarquía Grupo → Subgrupo → Producto/Proveedor, comparativo con el periodo anterior y marca de agua Hestia. Usa el rango de fechas seleccionado en el encabezado.
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button onclick="summaryPrintFromPanel()" id="pc-sum-print-btn" style="padding:9px 20px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:7px">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            Imprimir Estado de Resultados
+          </button>
+          <button onclick="navigateTo('summary')" style="padding:9px 18px;background:var(--color-surface,#f3f4f6);color:var(--color-text,#374151);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">Abrir Summary</button>
+        </div>
       </div>
     </div>
 
@@ -14321,32 +14335,91 @@ async function summaryExport(){
   XLSX.writeFile(wb,'Summary_'+d.periodo.inicio+'_'+d.periodo.fin+'.xlsx');
 }
 
-/* ── Imprimir ── */
+/* ── Imprimir el Summary desde Panel de Control (carga datos si hace falta) ── */
+async function summaryPrintFromPanel(){
+  var btn=document.getElementById('pc-sum-print-btn');
+  var prev=btn?btn.innerHTML:'';
+  if(btn){ btn.disabled=true; btn.innerHTML='Cargando…'; }
+  try{
+    var url=APPS_SCRIPT_URL+'?action=summary&fechaInicio='+encodeURIComponent(currentFechaInicio)+'&fechaFin='+encodeURIComponent(currentFechaFin)+'&token='+encodeURIComponent(getToken());
+    var r=await fetch(url); var j=await r.json();
+    if(!j.ok) throw new Error(j.error||'No se pudo generar');
+    _summaryData=j;
+    summaryPrint();
+  }catch(e){ alert('No se pudo generar el Estado de Resultados: '+(e.message||e)); }
+  finally{ if(btn){ btn.disabled=false; btn.innerHTML=prev; } }
+}
+
+/* ── Imprimir · Estado de Resultados con jerarquía completa + branding Hestia ── */
 function summaryPrint(){
   if(!_summaryData) return;
   var d=_summaryData;
   var rows='';
+  function money(v){ return _sumMoney(v); }
+  function pctRev(v){ var rev=(d.metricas&&d.metricas.revenue)||0; return rev>0?(v/rev*100).toFixed(1)+'%':'—'; }
   (d.lineas||[]).forEach(function(l){
     var delta=_sumDelta(l.actual,l.prev);
-    var st = l.tipo==='seccion'?'background:#1a252f;color:#fff;font-weight:700':(l.tipo==='metric'?'font-weight:700;border-top:2px solid #999;background:#f3e9ec':'');
-    var pad = l.tipo==='dato'?'padding-left:26px':'';
-    rows+='<tr style="'+st+'"><td style="'+pad+'">'+_esc(l.label||l.linea||'')+'</td>'
-      +'<td class="r">'+_sumMoney(l.actual)+'</td><td class="r">'+_sumPct(l.pct)+'</td>'
-      +'<td class="r">'+_sumMoney(l.prev)+'</td><td class="r">'+delta.txt+'</td></tr>';
+    if(l.tipo==='seccion'){
+      rows+='<tr class="sec"><td>'+_esc(l.label)+'</td><td class="r">'+money(l.actual)+'</td><td class="r">'+_sumPct(l.pct)+'</td><td class="r">'+money(l.prev)+'</td><td class="r">'+delta.txt+'</td></tr>';
+    } else if(l.tipo==='metric'){
+      rows+='<tr class="met"><td>'+_esc(l.label)+'</td><td class="r">'+money(l.actual)+'</td><td class="r">'+_sumPct(l.pct)+'</td><td class="r">'+money(l.prev)+'</td><td class="r">'+delta.txt+'</td></tr>';
+    } else { // dato (grupo)
+      rows+='<tr class="grp"><td>'+_esc(l.label)+'</td><td class="r">'+money(l.actual)+'</td><td class="r">'+_sumPct(l.pct)+'</td><td class="r">'+money(l.prev)+'</td><td class="r">'+delta.txt+'</td></tr>';
+      (l.subitems||[]).forEach(function(si){
+        var qty=(si.cantidad>0)?' <span class="q">×'+si.cantidad+'</span>':'';
+        var meta=si.meta?' <span class="m">'+_esc(si.meta)+'</span>':'';
+        if(si.productos && si.productos.length){
+          rows+='<tr class="sg"><td>'+_esc(si.label)+'</td><td class="r">'+money(si.actual)+'</td><td class="r">'+pctRev(si.actual)+'</td><td class="r">'+money(si.prev)+'</td><td></td></tr>';
+          si.productos.forEach(function(pi){
+            var pq=(pi.cantidad>0)?' <span class="q">×'+pi.cantidad+'</span>':'';
+            rows+='<tr class="it"><td>'+_esc(pi.label)+pq+'</td><td class="r">'+money(pi.actual)+'</td><td class="r">'+pctRev(pi.actual)+'</td><td class="r">'+money(pi.prev)+'</td><td></td></tr>';
+          });
+        } else {
+          rows+='<tr class="it"><td>'+_esc(si.label)+qty+meta+'</td><td class="r">'+money(si.actual)+'</td><td class="r">'+pctRev(si.actual)+'</td><td class="r">'+money(si.prev)+'</td><td></td></tr>';
+        }
+      });
+    }
   });
+  // Participación por línea
+  var partRows='';
+  (d.lineas||[]).filter(function(x){return x.tipo==='dato'&&x.grupo==='REVENUE';}).forEach(function(rl){
+    partRows+='<tr><td>'+_esc(rl.label)+'</td><td class="r">'+pctRev(rl.actual)+'</td><td class="r">'+money(rl.actual)+'</td></tr>';
+  });
+  var logo=(typeof _tplLogoURL!=='undefined'&&_tplLogoURL)?_tplLogoURL:(typeof _HF_LOGO_DEFAULT!=='undefined'?_HF_LOGO_DEFAULT:'');
   var w=window.open('','_blank');
-  w.document.write('<html><head><title>Summary '+d.periodo.inicio+'</title><style>'
-    +'body{font-family:Arial,Helvetica,sans-serif;color:#1a252f;padding:26px;font-size:12px}'
-    +'h1{font-size:18px;margin:0 0 3px}.sub{color:#666;font-size:11px;margin-bottom:16px}'
-    +'table{width:100%;border-collapse:collapse}td,th{padding:6px 10px;border-bottom:1px solid #eee}'
-    +'th{background:#f3f3f3;text-align:left;font-size:10px;text-transform:uppercase}.r{text-align:right}'
-    +'</style></head><body><h1>Hestia Fertility · Estado de Resultados</h1>'
-    +'<div class="sub">Periodo '+d.periodo.inicio+' a '+d.periodo.fin+' &nbsp;·&nbsp; vs '+d.prev.inicio+' a '+d.prev.fin+'</div>'
+  w.document.write('<html><head><title>Estado de Resultados '+d.periodo.inicio+'</title><style>'
+    +'@page{margin:16mm}'
+    +'body{font-family:Arial,Helvetica,sans-serif;color:#1a252f;font-size:11px;position:relative}'
+    +'.wm{position:fixed;top:42%;left:50%;transform:translate(-50%,-50%) rotate(-24deg);font-size:96px;font-weight:800;color:rgba(196,106,122,.06);letter-spacing:6px;z-index:0;white-space:nowrap}'
+    +'.hd{display:flex;align-items:center;justify-content:space-between;border-bottom:2.5px solid #c46a7a;padding-bottom:10px;margin-bottom:6px}'
+    +'.hd .t{font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#8a8a8a}'
+    +'.hd h1{font-size:19px;margin:2px 0 0}'
+    +'.hd img{height:52px}'
+    +'.sub{color:#666;font-size:10.5px;margin-bottom:14px}'
+    +'table{width:100%;border-collapse:collapse;position:relative;z-index:1}'
+    +'td,th{padding:4.5px 9px}'
+    +'thead th{background:#f3f3f3;text-align:right;font-size:9px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1.5px solid #ddd}'
+    +'thead th:first-child{text-align:left}.r{text-align:right}'
+    +'tr.sec td{background:#1a252f;color:#fff;font-weight:700;text-transform:uppercase;font-size:10px}'
+    +'tr.grp td{font-weight:700;border-top:1px solid #e5e5e5}tr.grp td:first-child{padding-left:22px}'
+    +'tr.sg td{background:rgba(196,106,122,.10);font-weight:700;color:#9c4f5f;text-transform:uppercase;font-size:9.5px}tr.sg td:first-child{padding-left:32px}'
+    +'tr.it td{color:#555}tr.it td:first-child{padding-left:46px}'
+    +'tr.met td{font-weight:700;border-top:2px solid #999;background:#f6eef0}'
+    +'tr td{border-bottom:1px solid #f0f0f0}'
+    +'.q,.m{color:#999;font-weight:400;font-size:9.5px}'
+    +'h2{font-size:12px;margin:18px 0 4px;color:#9c4f5f;text-transform:uppercase;letter-spacing:.03em}'
+    +'.foot{margin-top:16px;color:#888;font-size:9.5px;border-top:1px solid #eee;padding-top:8px}'
+    +'</style></head><body>'
+    +'<div class="wm">HESTIA FERTILITY</div>'
+    +'<div class="hd"><div><div class="t">Hestia Fertility</div><h1>Estado de Resultados</h1></div>'
+    +(logo?'<img src="'+logo+'" onerror="this.style.display=\'none\'">':'')+'</div>'
+    +'<div class="sub">Periodo <b>'+d.periodo.inicio+'</b> a <b>'+d.periodo.fin+'</b> &nbsp;·&nbsp; comparado vs '+d.prev.inicio+' a '+d.prev.fin+' &nbsp;·&nbsp; base devengado</div>'
     +'<table><thead><tr><th>Concepto</th><th class="r">Actual</th><th class="r">% Rev</th><th class="r">Periodo ant.</th><th class="r">Δ%</th></tr></thead><tbody>'
     +rows+'</tbody></table>'
-    +'<p style="color:#666;font-size:10.5px;margin-top:14px">Pago AMEX (fuera del P&amp;L): '+_sumMoney((d.amexCredito||{}).actual)+'</p>'
+    +(partRows?'<h2>% Participación por Línea</h2><table><tbody>'+partRows+'</tbody></table>':'')
+    +'<div class="foot">Pago AMEX (fuera del P&amp;L): '+money((d.amexCredito||{}).actual)+' &nbsp;·&nbsp; Generado por el ERP Hestia el '+new Date().toLocaleDateString('es-MX')+'</div>'
     +'</body></html>');
-  w.document.close(); setTimeout(function(){ w.print(); },350);
+  w.document.close(); setTimeout(function(){ w.print(); },400);
 }
 
 /* ── Editor de mapeo (Summary_Config) ── */

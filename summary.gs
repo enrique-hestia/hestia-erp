@@ -160,18 +160,28 @@ var SUMMARY_EG_SUBGROUP_MAP = {
   'valet parking':'Inmueble', 'mantenimiento':'Inmueble',
   'marketing':'Marketing y Publicidad', 'whatsapp':'Marketing y Publicidad',
   'mtto web':'Marketing y Publicidad', 'podcast':'Marketing y Publicidad', 'adds':'Marketing y Publicidad',
-  'servicios':'Servicios', 'servicio':'Servicios', 'contabilidad':'Servicios', 'rpbi':'Servicios'
-  // (G&A y Taxes: se agregan al recibir las 2 capturas faltantes)
+  'servicios':'Servicios', 'servicio':'Servicios', 'contabilidad':'Servicios', 'rpbi':'Servicios',
+  // Taxes (Impuestos y Cuotas) — IMSS/Nómina, SAT/Impuestos, TESORERIA/ISN
+  'nomina':'Impuestos y Cuotas', 'nómina':'Impuestos y Cuotas', 'impuestos':'Impuestos y Cuotas',
+  'isn':'Impuestos y Cuotas', 'isn 3%':'Impuestos y Cuotas', 'isn 3':'Impuestos y Cuotas',
+  // G&A · Gastos Varios (todo lo demás Gasto cae aquí por defecto)
+  'gasto no deducibles':'Gastos Varios', 'no deducibles':'Gastos Varios', 'cuota':'Gastos Varios'
 };
 /* Orden de subgrupos dentro de su sección. "Servicios" siempre al final de su sección. */
 var SUMMARY_EG_SUBGROUP_ORDER = {
   'honorarios':1, 'comisiones por venta':2, 'estudios e insumos de laboratorio':3,
-  'medicamentos':4, 'inmueble':5, 'marketing y publicidad':6, 'nomina':7, 'nómina':7,
-  'gastos varios':8, 'no deducibles':9, 'impuestos':10, 'servicios':90
+  'medicamentos':4, 'inmueble':5, 'marketing y publicidad':6,
+  'impuestos y cuotas':1, 'gastos varios':2, 'servicios':90
 };
-function _summaryEgSubgroup(subtipo){
+/* Sección forzada para subgrupos curados que agrupan subtipos de secciones distintas
+   (ej. "Impuestos y Cuotas" junta Nómina[IMSS]+Impuestos[SAT]+ISN en Taxes). */
+var SUMMARY_EG_SUBGROUP_SECTION = { 'impuestos y cuotas':'TAXES' };
+function _summaryEgSubgroup(subtipo, section){
   var k = _sumNorm(subtipo);
-  return SUMMARY_EG_SUBGROUP_MAP[k] || (String(subtipo||'').trim() || 'Otros');
+  if (SUMMARY_EG_SUBGROUP_MAP[k]) return SUMMARY_EG_SUBGROUP_MAP[k];
+  if (section === 'GA') return 'Gastos Varios';
+  if (section === 'TAXES') return 'Impuestos y Cuotas';
+  return String(subtipo||'').trim() || 'Otros';
 }
 function _summaryEgSubgroupOrden(subgroup){
   var o = SUMMARY_EG_SUBGROUP_ORDER[_sumNorm(subgroup)];
@@ -374,11 +384,12 @@ function readSummary(fechaInicio, fechaFin) {
           if (enPrev) amex.prev+=monto;
           return;
         }
-        // Nivel 2 (dato) = SUBGRUPO curado (Honorarios, Inmueble, Medicamentos…) desde el subtipo
-        var sub2 = _summaryEgSubgroup(r.subtipo);
-        var line = get(c.grupo, sub2, _summaryEgSubgroupOrden(sub2), c.flag);
-        // Nivel 3 (sub-item) = PROVEEDOR, con concepto·tipo como meta
-        var provLbl = String(r.proveedor||'').trim() || String(r.concepto||'').trim() || '(sin proveedor)';
+        // Nivel 2 (dato) = SUBGRUPO curado (Honorarios, Inmueble, Impuestos y Cuotas…) desde el subtipo
+        var sub2 = _summaryEgSubgroup(r.subtipo, c.grupo);
+        var section = SUMMARY_EG_SUBGROUP_SECTION[_sumNorm(sub2)] || c.grupo;
+        var line = get(section, sub2, _summaryEgSubgroupOrden(sub2), c.flag);
+        // Nivel 3 (sub-item) = PROVEEDOR (o subtipo si no hay proveedor, como en Gastos Varios)
+        var provLbl = String(r.proveedor||'').trim() || String(r.subtipo||'').trim() || String(r.concepto||'').trim() || '(sin proveedor)';
         var meta = [String(r.concepto||'').trim(), String(r.subtipo||'').trim(), String(r.tipo||'').trim()].filter(Boolean).join(' · ');
         if (enActual){ line.actual+=monto; recon.egresosTotal+=monto;
           addSub(line, provLbl, monto, 1, true, {fecha:f, nombre:r.proveedor, concepto:(String(r.concepto||'')+' · '+String(r.subtipo||'')), monto:monto, subtipo:r.subtipo}, '', meta);
