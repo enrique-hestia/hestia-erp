@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.59 -->
+﻿<!-- app-build:2026.07.07.60 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -21717,7 +21717,7 @@ function _cxpBuildForm(data) {
   var h = '<div style="padding:4px">'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'
       + '<div><label '+LBL+'>Proveedor * <a href="javascript:void(0)" onclick="cxpNuevoProveedor()" style="font-weight:700;color:var(--color-primary,#c46a7a);text-decoration:none">+ Nuevo</a></label><input id="cxp-f-prov" list="prov-datalist" '+S+' placeholder="Nombre del proveedor" value="'+(data&&data.proveedor||'').replace(/"/g,'&quot;')+'"></div>'
-      + '<div><label '+LBL+'>Monto *</label><input type="number" id="cxp-f-monto" '+S+' placeholder="0.00" step="0.01" value="'+(data&&data.monto||'')+'"></div>'
+      + '<div><label '+LBL+'>Monto *</label><input type="number" id="cxp-f-monto" '+S+' placeholder="0.00" step="0.01" value="'+(data&&data.monto||'')+'" oninput="if(typeof cxpFormDivisaCalc===\'function\')cxpFormDivisaCalc()"></div>'
     + '</div>'
     + '<div style="margin-bottom:12px"><label '+LBL+'>Concepto *</label><input id="cxp-f-concepto" '+S+' placeholder="Descripción del gasto" value="'+(data&&data.concepto||'').replace(/"/g,'&quot;')+'"></div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">'
@@ -21729,6 +21729,11 @@ function _cxpBuildForm(data) {
       + '<div><label '+LBL+'>Vencimiento *</label><input type="date" id="cxp-f-venc" '+S+' value="'+(data&&data.vencimiento||'')+'"></div>'
       + '<div><label '+LBL+'>Póliza</label><input id="cxp-f-poliza" '+S+' placeholder="Número" value="'+(data&&data.poliza||'')+'"></div>'
       + '<div><label '+LBL+'>Notas</label><input id="cxp-f-notas" '+S+' placeholder="Notas" value="'+(data&&data.notas||'').replace(/"/g,'&quot;')+'"></div>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">'
+      + '<div><label '+LBL+'>Divisa</label><select id="cxp-f-divisa" '+S+' onchange="cxpFormDivisaToggle()"><option value="MXN"'+((data&&String(data.divisa).toUpperCase()==='USD')?'':' selected')+'>MXN — Pesos</option><option value="USD"'+((data&&String(data.divisa).toUpperCase()==='USD')?' selected':'')+'>USD — Dólares</option></select></div>'
+      + '<div id="cxp-f-tc-wrap" style="'+((data&&String(data.divisa).toUpperCase()==='USD')?'':'display:none')+'"><label '+LBL+'>Tipo de cambio aprox.</label><input type="number" id="cxp-f-tc" '+S+' placeholder="Ej. 18.50" step="0.0001" value="'+((data&&data.tipoCambio)||'')+'" oninput="cxpFormDivisaCalc()"></div>'
+      + '<div id="cxp-f-mxncalc-wrap" style="'+((data&&String(data.divisa).toUpperCase()==='USD')?'':'display:none')+';align-self:end"><div id="cxp-f-mxncalc" style="font-size:11px;color:#166534;font-weight:700;padding-bottom:9px"></div></div>'
     + '</div>'
     + '<div style="margin-bottom:14px"><label '+LBL+'>Observaciones</label><textarea id="cxp-f-obs" '+S+' rows="2" style="resize:vertical">'+(data&&data.observaciones||'')+'</textarea></div>';
   // Cotización del proveedor (drag & drop). En edición sube directo a la fila; en alta se
@@ -21758,6 +21763,33 @@ function cxpNuevoProveedor(){
     var inp = document.getElementById('cxp-f-prov');
     if (inp) inp.value = p.nombre;
   });
+}
+
+// Divisa en registrar/editar CxP: muestra tipo de cambio + equivalente MXN cuando es USD
+window.cxpFormDivisaToggle = function(){
+  var usd = ((document.getElementById('cxp-f-divisa')||{}).value||'MXN')==='USD';
+  var tw=document.getElementById('cxp-f-tc-wrap'), mw=document.getElementById('cxp-f-mxncalc-wrap');
+  if(tw) tw.style.display=usd?'':'none';
+  if(mw) mw.style.display=usd?'':'none';
+  cxpFormDivisaCalc();
+};
+window.cxpFormDivisaCalc = function(){
+  var div=(document.getElementById('cxp-f-divisa')||{}).value||'MXN';
+  var monto=parseFloat((document.getElementById('cxp-f-monto')||{}).value)||0;
+  var tc=parseFloat((document.getElementById('cxp-f-tc')||{}).value)||0;
+  var out=document.getElementById('cxp-f-mxncalc');
+  if(out) out.textContent=(div==='USD'&&monto>0&&tc>0)?('≈ $'+(monto*tc).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' MXN'):'';
+};
+// Lee divisa/TC del formulario CxP y devuelve {divisa, tc, montoMXN, montoUSD} o null si falta TC
+function _cxpLeerDivisa(montoRaw){
+  var divisa=(document.getElementById('cxp-f-divisa')||{}).value||'MXN';
+  var tc=parseFloat((document.getElementById('cxp-f-tc')||{}).value)||0;
+  var montoNum=parseFloat(montoRaw)||0;
+  if(divisa==='USD'){
+    if(!(tc>0)){ alert('Captura el tipo de cambio aproximado para la divisa USD'); return null; }
+    return {divisa:'USD', tc:tc, montoUSD:montoNum, montoMXN:Math.round(montoNum*tc*100)/100};
+  }
+  return {divisa:'MXN', tc:0, montoUSD:0, montoMXN:montoNum};
 }
 
 window.cxpOpenCapture = function() {
@@ -21795,12 +21827,14 @@ window.cxpSubmitCapture = async function() {
   var concepto = (document.getElementById('cxp-f-concepto')||{}).value||'';
   var venc = (document.getElementById('cxp-f-venc')||{}).value||'';
   if(!prov||!monto||!concepto||!venc){alert('Completa proveedor, monto, concepto y vencimiento');return;}
+  var _dv=_cxpLeerDivisa(monto); if(!_dv) return;   // USD sin TC → cancela
   var btn = document.getElementById('cxp-cap-btn');
   if(btn){btn.disabled=true;btn.textContent='Guardando…';}
   try {
     var s=getSession()||{};
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
-      action:'saveCxP', proveedor:prov, monto:monto, concepto:concepto, vencimiento:venc,
+      action:'saveCxP', proveedor:prov, monto:_dv.montoMXN, concepto:concepto, vencimiento:venc,
+      divisa:_dv.divisa, tipoCambio:_dv.tc, montoUSD:_dv.montoUSD,
       contable:(document.getElementById('cxp-f-contable')||{}).value||'Gasto',
       tipo:(document.getElementById('cxp-f-tipo')||{}).value||'Variable',
       subtipo:(document.getElementById('cxp-f-subtipo')||{}).value||'',
@@ -21822,12 +21856,14 @@ window.cxpSubmitEdit = async function(rowNum) {
   var concepto = (document.getElementById('cxp-f-concepto')||{}).value||'';
   var venc = (document.getElementById('cxp-f-venc')||{}).value||'';
   if(!prov||!monto||!concepto){alert('Completa proveedor, monto y concepto');return;}
+  var _dv=_cxpLeerDivisa(monto); if(!_dv) return;
   var btn = document.getElementById('cxp-edit-btn');
   if(btn){btn.disabled=true;btn.textContent='Actualizando…';}
   try {
     var s=getSession()||{};
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
-      action:'updateCxP', rowNum:rowNum, proveedor:prov, monto:monto, concepto:concepto, vencimiento:venc,
+      action:'updateCxP', rowNum:rowNum, proveedor:prov, monto:_dv.montoMXN, concepto:concepto, vencimiento:venc,
+      divisa:_dv.divisa, tipoCambio:_dv.tc, montoUSD:_dv.montoUSD,
       contable:(document.getElementById('cxp-f-contable')||{}).value||'',
       tipo:(document.getElementById('cxp-f-tipo')||{}).value||'',
       subtipo:(document.getElementById('cxp-f-subtipo')||{}).value||'',

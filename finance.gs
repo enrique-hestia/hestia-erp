@@ -1195,6 +1195,22 @@ function _getNextCxPID(sheet) {
   return 'CXP-' + String((m ? parseInt(m[1],10) : 0) + 1).padStart(5,'0');
 }
 
+// Escribe Divisa + (si USD) Monto USD y Tipo de Cambio en la fila de la CxP.
+function _cxpGuardarDivisa(sh, rowNum, body) {
+  var div = String(body.divisa||'MXN').toUpperCase()==='USD' ? 'USD' : 'MXN';
+  var iDiv = _egColEnsure(sh, 'divisa', 'Divisa');
+  sh.getRange(rowNum, iDiv).setValue(div);
+  var iUSD = _egColEnsure(sh, 'usd', 'Monto USD');
+  var iTC  = _egColEnsure(sh, 'tipo de cambio', 'Tipo de Cambio');
+  if (div === 'USD') {
+    sh.getRange(rowNum, iUSD).setValue(parseFloat(body.montoUSD)||0);
+    sh.getRange(rowNum, iTC).setValue(parseFloat(body.tipoCambio)||0);
+  } else {
+    sh.getRange(rowNum, iUSD).setValue('');
+    sh.getRange(rowNum, iTC).setValue('');
+  }
+}
+
 function saveCxP(body) {
   // Guarda directamente en Egresos2026 SIN fecha (col B vacía = CxP)
   try {
@@ -1232,7 +1248,9 @@ function saveCxP(body) {
           SpreadsheetApp.newRichTextValue().setText('Cotización').setLinkUrl(body.linkCotizacion).build());
       } catch(_c) { /* no romper el guardado si falla el link */ }
     }
-    logAudit(body.usuario||'sistema','CxP','Crear',String(newId),'','',body.proveedor+' | $'+monto+' | Vence: '+body.vencimiento);
+    // Divisa + tipo de cambio (CxP en moneda extranjera). Monto (col J) se guarda ya en MXN.
+    try { _cxpGuardarDivisa(sh, newRowNum, body); } catch(_d) {}
+    logAudit(body.usuario||'sistema','CxP','Crear',String(newId),'','',body.proveedor+' | $'+monto+' | '+(String(body.divisa||'MXN').toUpperCase())+' | Vence: '+body.vencimiento);
     return {ok:true, id:newId, monto:monto, rowNum:newRowNum};
   } catch(ex) { return {ok:false, error:ex.message}; }
 }
@@ -1386,6 +1404,7 @@ function updateCxP(body) {
     if (body.vencimiento!==undefined) sh.getRange(rn,12).setValue(body.vencimiento);
     if (body.poliza!==undefined) sh.getRange(rn,16).setValue(body.poliza);
     if (body.observaciones!==undefined) sh.getRange(rn,18).setValue(body.observaciones);
+    if (body.divisa!==undefined) { try { _cxpGuardarDivisa(sh, rn, body); } catch(_d) {} }
     logAudit(body.usuario||'sistema','CxP','Editar',String(oldRow[0]),'Proveedor',oldProv,body.proveedor||oldProv);
     return {ok:true, rowNum:rn};
   } catch(ex) { return {ok:false, error:ex.message}; }
