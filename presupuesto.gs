@@ -36,12 +36,31 @@ function _presQKey(y, q) { return y + '-Q' + q; }
 function _presPrevQ(y, q) { return q > 1 ? { y: y, q: q - 1 } : { y: y - 1, q: 4 }; }
 function _presNextQ(y, q) { return q < 4 ? { y: y, q: q + 1 } : { y: y + 1, q: 1 }; }
 /* ¿El trimestre ('YYYY-Qn') ya terminó? (su último día es anterior a hoy) */
+// Periodos abiertos manualmente (candado): override del bloqueo por "trimestre terminado".
+function _presPeriodoAbierto(periodo){
+  try{ var arr=JSON.parse(PropertiesService.getScriptProperties().getProperty('PRES_ABIERTOS')||'[]'); return arr.indexOf(String(periodo||'').trim())>-1; }catch(e){ return false; }
+}
 function _presQEnded(periodo) {
   var m = String(periodo || '').trim().match(/^(\d{4})-Q([1-4])$/); if (!m) return false;
+  if (_presPeriodoAbierto(periodo)) return false;   // periodo abierto → editable aunque haya terminado
   var y = parseInt(m[1], 10), q = parseInt(m[2], 10);
   var fin = new Date(y, q * 3, 0);          // último día del último mes del trimestre
   var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
   return fin < hoy;
+}
+// Abre/cierra un trimestre para edición (candado). Gate de permisos en el frontend.
+function presSetPeriodoAbierto(body){
+  try{
+    var periodo=String(body.periodo||'').trim();
+    if(!/^\d{4}-Q[1-4]$/.test(periodo)) return {ok:false, error:'Periodo inválido (usa YYYY-Qn)'};
+    var props=PropertiesService.getScriptProperties();
+    var arr=JSON.parse(props.getProperty('PRES_ABIERTOS')||'[]');
+    var i=arr.indexOf(periodo);
+    if(body.abierto){ if(i<0) arr.push(periodo); } else { if(i>-1) arr.splice(i,1); }
+    props.setProperty('PRES_ABIERTOS', JSON.stringify(arr));
+    try{ logAudit(body.usuario||'sistema','Presupuesto', body.abierto?'Abrir periodo':'Cerrar periodo', periodo,'','',''); }catch(e){}
+    return {ok:true, periodo:periodo, abierto:!!body.abierto, abiertos:arr};
+  }catch(ex){ return {ok:false, error:ex.message}; }
 }
 
 /* ── Diagnóstico: vuelca la estructura real de la pestaña Budget ──
@@ -290,7 +309,8 @@ function readPresupuesto(periodo) {
       tgtY = parseInt(pm[1], 10); tgtQ = parseInt(pm[2], 10);
       // histórico = SOLO si el trimestre YA TERMINÓ. El trimestre EN CURSO y los
       // futuros son editables (permite ajustar el Q actual apenas empezado).
-      esHistorico = (tgtY < curY) || (tgtY === curY && tgtQ < curQ);
+      // Un periodo ABIERTO manualmente (candado) también se vuelve editable.
+      esHistorico = ((tgtY < curY) || (tgtY === curY && tgtQ < curQ)) && !_presPeriodoAbierto(String(periodo).trim());
     }
     var perActual = _presQKey(curY, curQ);
     var perSig = _presQKey(tgtY, tgtQ);
@@ -415,6 +435,8 @@ function readPresupuesto(periodo) {
       },
       periodoConsultado: perSig,
       esHistorico: esHistorico,
+      periodoAbierto: _presPeriodoAbierto(perSig),   // candado: abierto manualmente para editar
+      qTerminado: (function(){ var mm=String(perSig).match(/^(\d{4})-Q([1-4])$/); if(!mm) return false; return new Date(parseInt(mm[1]),parseInt(mm[2])*3,0) < new Date(new Date().setHours(0,0,0,0)); })(),
       realTrimestre: (histQ[perSig] && histQ[perSig].__total) || 0,   // lo que REALMENTE pasó ese Q (para histórico)
       egRealTrimestre: (egHistQ[perSig] && egHistQ[perSig].__total) || 0,
       siguiente: {

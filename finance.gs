@@ -722,6 +722,11 @@ function doPost(e) {
     if (body.action === 'savePresupuestoMetasBatch') {
       return jsonResponse(savePresupuestoMetasBatch(body));
     }
+    if (body.action === 'presSetPeriodoAbierto') {
+      if (typeof presSetPeriodoAbierto !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});
+      return jsonResponse(presSetPeriodoAbierto(body));
+    }
     if (body.action === 'updateProductoSKU') {
       return jsonResponse(updateProductoSKU(body.productoId, body.sku, body.usuario));
     }

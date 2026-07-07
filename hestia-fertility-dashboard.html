@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.58 -->
+﻿<!-- app-build:2026.07.07.59 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12647,6 +12647,22 @@ async function loadPresupuesto(periodo){
   }
 }
 
+// Abre/cierra un trimestre para editar la meta (candado). Recarga la vista.
+window.presToggleAbierto = async function(periodo, abrir){
+  var msg = abrir
+    ? '¿Abrir el periodo '+periodo+' para editar la meta?\n\nEl trimestre ya terminó; al abrirlo podrás ajustar el budget/meta (por ejemplo bajarlo si quedó imposible). Ciérralo cuando termines.'
+    : '¿Cerrar el periodo '+periodo+'?\n\nVolverá a solo lectura (histórico).';
+  if(!confirm(msg)) return;
+  try{
+    var s=getSession()||{};
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'presSetPeriodoAbierto',periodo:periodo,abierto:!!abrir,usuario:s.email||'sistema'})});
+    var res=await r.json();
+    if(!res.ok){ alert('No se pudo: '+(res.error||'sin detalle')); return; }
+    setStatus(abrir?('Periodo '+periodo+' abierto para edición'):('Periodo '+periodo+' cerrado'),'ok');
+    loadPresupuesto(periodo);
+  }catch(e){ alert('Error: '+(e.message||e)); }
+};
+
 function _renderPresupuesto(){
   var root = document.getElementById('pres-root');
   if (!root || !_presData) return;
@@ -12784,9 +12800,23 @@ function _renderPresupuesto(){
       +'</div>'
       +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+_presHistSelector(d)+'</div>'
     +'</div>'
-    +(_esHist?'<div style="font-size:11.5px;color:#b45309;background:rgba(245,158,11,.10);border:1px dashed rgba(245,158,11,.4);border-radius:9px;padding:9px 12px;margin-bottom:12px">📅 Estás viendo el <b>histórico</b> de '+sg.periodo+' (solo lectura): budget guardado vs lo que realmente pasó.</div>'
-      :(canEdit?'<div id="pr-rep-ing-master" style="'+(window._presTab==='ing'?'':'display:none')+'">'+_presMasterBar('ing')+'</div>'
-        +'<div id="pr-rep-eg-master" style="'+(window._presTab==='eg'?'':'display:none')+'">'+_presMasterBar('eg')+'</div>':''))
+    +(function(){
+      // Candado: abrir/cerrar un trimestre terminado para editar la meta.
+      // Gate: permiso dedicado 'abrir_periodo_presupuesto' (preparado) o el de edición.
+      var canOpenClose = (typeof hasPermission==='function' && hasPermission('abrir_periodo_presupuesto')) || canEdit;
+      var _perAbierto = !!d.periodoAbierto, _qTerminado = !!d.qTerminado;
+      var _toggleBtn = (_qTerminado && canOpenClose)
+        ? '<button onclick="presToggleAbierto(\''+sg.periodo+'\','+(_perAbierto?'false':'true')+')" style="border:none;border-radius:8px;padding:6px 13px;font-size:11.5px;font-weight:700;cursor:pointer;margin-left:10px;background:'+(_perAbierto?'#166534':'#b45309')+';color:#fff" title="'+(_perAbierto?'Cerrar el periodo: vuelve a solo lectura':'Abrir el periodo para ajustar la meta')+'">'+(_perAbierto?'🔒 Cerrar periodo':'🔓 Abrir para editar')+'</button>'
+        : '';
+      if (_esHist) {
+        return '<div style="font-size:11.5px;color:#b45309;background:rgba(245,158,11,.10);border:1px dashed rgba(245,158,11,.4);border-radius:9px;padding:9px 12px;margin-bottom:12px;display:flex;align-items:center;flex-wrap:wrap">📅 Estás viendo el <b style="margin:0 4px">histórico</b> de '+sg.periodo+' (solo lectura): budget guardado vs lo que realmente pasó.'+_toggleBtn+'</div>';
+      }
+      var bannerAbierto = (_perAbierto && _qTerminado)
+        ? '<div style="font-size:11.5px;color:#166534;background:rgba(22,101,52,.08);border:1px solid rgba(22,101,52,.35);border-radius:9px;padding:9px 12px;margin-bottom:12px;display:flex;align-items:center;flex-wrap:wrap">🔓 Periodo <b style="margin:0 4px">'+sg.periodo+'</b> ABIERTO para edición — ajusta la meta y ciérralo al terminar.'+_toggleBtn+'</div>'
+        : '';
+      return bannerAbierto + (canEdit?'<div id="pr-rep-ing-master" style="'+(window._presTab==='ing'?'':'display:none')+'">'+_presMasterBar('ing')+'</div>'
+        +'<div id="pr-rep-eg-master" style="'+(window._presTab==='eg'?'':'display:none')+'">'+_presMasterBar('eg')+'</div>':'');
+    })()
     +'<div id="pr-rep-ing" style="'+(window._presTab==='ing'?'':'display:none')+'">'+_presBuildIngresos(sg.ingresosGrupos||[],canEdit&&!_esHist)+'</div>'
     +'<div id="pr-rep-eg" style="'+(window._presTab==='eg'?'':'display:none')+'">'+_presBuildEgresos(eg.grupos||[],canEdit&&!_esHist)+'</div>'
     +'<div style="font-size:10.5px;color:var(--text-secondary,#9ca3af);margin-top:8px;line-height:1.6">Ingresos = <b>cantidad × precio promedio real</b> (importe = cant × precio). El <b>% maestro</b> mueve todas las líneas proporcional; también editas cantidad/importe individual. Precio unitario = importe ÷ cantidad realizada.</div>'
@@ -14702,7 +14732,22 @@ async function summaryConfigSave(){
    BOARD DECK — Informe Ejecutivo de Resultados (presentación a socios)
    ══════════════════════════════════════════════════════════════ */
 var _boardData=null, _boardCfg=null, _boardCharts=[], _boardSlide=0;
+var _boardQuarter=null; // trimestre a presentar (null = usa el rango de fechas global)
 var _BOARD_MESES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+// Fechas de un trimestre "YYYY-Qn"
+function _boardQuarterDates(q){
+  var mm=String(q||'').match(/(\d{4})-Q([1-4])/); if(!mm) return null;
+  var y=parseInt(mm[1],10), qn=parseInt(mm[2],10), m0=(qn-1)*3, lastM=m0+3;
+  var lastDay=new Date(y,lastM,0).getDate();
+  return { fi:y+'-'+String(m0+1).padStart(2,'0')+'-01', ff:y+'-'+String(lastM).padStart(2,'0')+'-'+String(lastDay).padStart(2,'0') };
+}
+// Últimos 6 trimestres hasta el actual (para el selector)
+function _boardQuarterOptions(){
+  var d=new Date(), y=d.getFullYear(), q=Math.floor(d.getMonth()/3)+1, out=[];
+  for(var i=0;i<6;i++){ out.unshift(y+'-Q'+q); q--; if(q<1){q=4;y--;} }
+  return out;
+}
+function boardSetQuarter(v){ _boardQuarter = v||null; loadBoard(); }
 function _bMoney(v){ try{ return fmtMoney(Number(v)||0,'Summary'); }catch(e){ return '$'+(Math.round(Number(v)||0)).toLocaleString('en-US'); } }
 function _bK(v){ v=Number(v)||0; var a=Math.abs(v); if(a>=1e6) return (v/1e6).toFixed(2)+'M'; if(a>=1e3) return (v/1e3).toFixed(0)+'K'; return v.toFixed(0); }
 function _bMoneyK(v){ v=Number(v)||0; return (v<0?'-$':'$')+_bK(Math.abs(v)); }
@@ -14789,7 +14834,9 @@ async function loadBoard(){
   root.innerHTML='<div style="padding:60px;text-align:center;color:var(--color-text-muted,#9ca3af);font-size:13px">Preparando el informe ejecutivo…</div>';
   try{
     var tok=encodeURIComponent(getToken());
-    var u1=APPS_SCRIPT_URL+'?action=boardReport&fechaInicio='+encodeURIComponent(currentFechaInicio)+'&fechaFin='+encodeURIComponent(currentFechaFin)+'&token='+tok;
+    var _bfi=currentFechaInicio, _bff=currentFechaFin;
+    if(_boardQuarter){ var _qd=_boardQuarterDates(_boardQuarter); if(_qd){ _bfi=_qd.fi; _bff=_qd.ff; } }
+    var u1=APPS_SCRIPT_URL+'?action=boardReport&fechaInicio='+encodeURIComponent(_bfi)+'&fechaFin='+encodeURIComponent(_bff)+'&token='+tok;
     var u2=APPS_SCRIPT_URL+'?action=boardConfig&token='+tok;
     var res=await Promise.all([fetch(u1).then(function(r){return r.json();}), fetch(u2).then(function(r){return r.json();}).catch(function(){return null;})]);
     var j=res[0]; _boardCfg=res[1]||{config:{}};
@@ -14816,6 +14863,11 @@ function _renderBoard(){
   h+='<div class="bd-ttl"><i data-lucide="presentation" style="width:22px;height:22px"></i>Board Deck · Informe Ejecutivo</div>';
   h+='<div class="bd-sub">'+_esc(per.label)+' &nbsp;·&nbsp; '+d.periodo.inicio+' → '+d.periodo.fin+' &nbsp;·&nbsp; base devengado</div>';
   h+='</div><div class="bd-acts">';
+  h+='<div style="display:flex;flex-direction:column;gap:2px"><label style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Trimestre a presentar</label>'
+    +'<select class="bd-btn" onchange="boardSetQuarter(this.value)" title="Elige el trimestre a presentar: muestra su resultado real vs meta y el siguiente como proyección" style="padding:6px 10px;cursor:pointer">'
+    +'<option value="">Rango de fechas actual</option>'
+    +_boardQuarterOptions().map(function(q){ return '<option value="'+q+'"'+(_boardQuarter===q?' selected':'')+'>'+q+(q===(new Date().getFullYear()+'-Q'+(Math.floor(new Date().getMonth()/3)+1))?' (en curso)':'')+'</option>'; }).join('')
+    +'</select></div>';
   h+='<button class="bd-btn" onclick="boardConfigOpen()"><i data-lucide="palette" style="width:14px;height:14px"></i>Plantilla</button>';
   h+='<button class="bd-btn primary" onclick="boardPresent()"><i data-lucide="monitor-play" style="width:14px;height:14px"></i>Generar presentación</button>';
   h+='<button class="bd-btn" onclick="loadBoard()"><i data-lucide="refresh-cw" style="width:14px;height:14px"></i></button>';
