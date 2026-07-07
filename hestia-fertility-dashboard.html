@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.06.46 -->
+﻿<!-- app-build:2026.07.06.47 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -14566,10 +14566,12 @@ function _boardStyles(){
   +'.bd-acts{display:flex;gap:8px;flex-wrap:wrap}'
   +'.bd-btn{border:1px solid var(--color-border,#e5e7eb);background:var(--color-surface,#fff);color:var(--color-text,#1a252f);border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px}'
   +'.bd-btn:hover{background:var(--color-bg,#f7f7f8)}'
-  +'.bd-btn.primary{background:#c46a7a;border-color:#c46a7a;color:#fff}'
-  +'.bd-narr{background:var(--color-surface,#fff);border:1px solid var(--color-border,#e5e7eb);border-left:3px solid #c46a7a;border-radius:12px;padding:15px 18px;font-size:13.5px;line-height:1.6;color:var(--color-text,#374151);margin-bottom:16px}'
+  +'.bd-btn.primary{background:var(--bd-acc,#c46a7a);border-color:var(--bd-acc,#c46a7a);color:#fff}'
+  +'.bd-narr{background:var(--color-surface,#fff);border:1px solid var(--color-border,#e5e7eb);border-left:3px solid var(--bd-acc,#c46a7a);border-radius:12px;padding:15px 18px;font-size:13.5px;line-height:1.6;color:var(--color-text,#374151);margin-bottom:16px}'
   +'.bd-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(178px,1fr));gap:11px;margin-bottom:18px}'
-  +'.bd-kpi{border:1px solid var(--color-border,#e5e7eb);border-radius:12px;padding:13px 15px;background:var(--color-surface,#fff)}'
+  +'.bd-kpi{border:1px solid var(--color-border,#e5e7eb);border-top:3px solid var(--bd-acc,#c46a7a);border-radius:10px;padding:13px 15px;background:var(--color-surface,#fff)}'
+  +'.bd-ttl i{color:var(--bd-acc,#c46a7a)}'
+  +'.bd-card h4{color:var(--bd-acc,#c46a7a) !important}'
   +'.bd-kpi .l{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--color-text-muted,#6b7280)}'
   +'.bd-kpi .v{font-size:21px;font-weight:800;color:var(--color-text,#1a252f);margin-top:4px}'
   +'.bd-kpi .d{font-size:11.5px;font-weight:700;margin-top:2px}'
@@ -14645,6 +14647,7 @@ function _renderBoard(){
   var d=_boardData; if(!d) return; var root=document.getElementById('board-root'); if(!root) return;
   _boardKillCharts();
   var k=d.kpis, th=_bTheme();
+  root.style.setProperty('--bd-acc',th.acc); root.style.setProperty('--bd-ing',th.ing); root.style.setProperty('--bd-egr',th.egr);
   var per=d.tipoPeriodo||{label:''};
   var gI=_bGrow(k.crecimientoIngresos), gU=_bGrow(k.crecimientoUtilidad);
   var h='';
@@ -14695,6 +14698,25 @@ function _renderBoard(){
 }
 function _bKpi(l,v,d,c){ return '<div class="bd-kpi"><div class="l">'+_esc(l)+'</div><div class="v">'+v+'</div>'+(d?'<div class="d '+(c||'mut')+'">'+_esc(d)+'</div>':'')+'</div>'; }
 function _bLineTable(arr,total){ var h='<table class="bd-tbl">'; (arr||[]).forEach(function(x){ var p=total>0?(x.valor/total*100):0; h+='<tr><td>'+_esc(x.label)+'</td><td class="pctcell">'+p.toFixed(1)+'%</td><td>'+_bMoney(x.valor)+'</td></tr>'; }); return h+'</table>'; }
+/* Tabla detallada de ingresos: grupo → subgrupo → producto (desde d.lineas). */
+function _boardIngresosTable(detailed){
+  var d=_boardData; var tot=(d.kpis&&d.kpis.ingresos)||0;
+  var h='<table class="bd-tbl" style="font-size:12px">';
+  (d.lineas||[]).forEach(function(l){
+    if(l.tipo!=='dato'||l.grupo!=='REVENUE') return;
+    h+='<tr style="background:#2b2b2b"><td style="color:#fff;font-weight:800;font-size:11px">'+_esc(l.label)+'</td><td class="pctcell" style="color:#ddd">'+(tot>0?(l.actual/tot*100).toFixed(1):'0')+'%</td><td style="color:#fff;font-weight:800">'+_bMoney(l.actual)+'</td></tr>';
+    if(!detailed) return;
+    (l.subitems||[]).forEach(function(s){
+      if(s.productos && s.productos.length){
+        h+='<tr><td style="padding-left:16px;font-weight:700;color:#9c4f5f;text-transform:uppercase;font-size:10.5px">'+_esc(s.label)+(s.cantidad>0?' ×'+s.cantidad:'')+'</td><td class="pctcell">'+(tot>0?(s.actual/tot*100).toFixed(1):'0')+'%</td><td style="font-weight:700">'+_bMoney(s.actual)+'</td></tr>';
+        s.productos.forEach(function(p){ h+='<tr><td style="padding-left:30px;color:#666;font-size:11px">'+_esc(p.label)+(p.cantidad>0?' ×'+p.cantidad:'')+'</td><td></td><td style="color:#777;font-size:11px">'+_bMoney(p.actual)+'</td></tr>'; });
+      } else {
+        h+='<tr><td style="padding-left:16px">'+_esc(s.label)+(s.cantidad>0?' ×'+s.cantidad:'')+'</td><td class="pctcell">'+(tot>0?(s.actual/tot*100).toFixed(1):'0')+'%</td><td>'+_bMoney(s.actual)+'</td></tr>';
+      }
+    });
+  });
+  return h+'</table>';
+}
 /* Tabla detallada de egresos: sección → subgrupo (→ proveedores si detailed). */
 function _boardEgresosTable(detailed){
   var d=_boardData; var tot=(d.kpis&&d.kpis.egresos)||0; var det=d.egresosDetalle||[];
@@ -14779,7 +14801,7 @@ function _boardSlideDefs(){
     +'<div class="rgt" style="'+(cover?'background-image:url(\''+cover.replace(/'/g,"%27")+'\')':'')+'">'+(cover?'':'<div style="text-align:center"><div style="font-size:13px">Portada</div><div style="font-size:11px;margin-top:4px">Súbela en «Plantilla»</div></div>')+'</div>'
     +'</div>'});
   // 2 Contents
-  var idx=[['Resumen Ejecutivo','Panorama del periodo y KPIs'],['Ingresos','Desglose por línea de negocio'],['Egresos','COGS, OpEx, G&A e impuestos'],['Estado de Resultados','P&L completo'],['Presupuesto vs Meta','Cumplimiento del objetivo'],['Comparativo Anual','Tendencia de ingresos y egresos']];
+  var idx=[['Resumen Ejecutivo','Panorama del periodo'],['Indicadores Financieros','KPIs clave del negocio'],['Ingresos','Líneas de negocio y detalle'],['Egresos','COGS, OpEx, G&A e impuestos'],['Estado de Resultados','P&L completo'],['Márgenes y Rentabilidad','Puente Revenue → Utilidad'],['Presupuesto vs Meta','Cumplimiento del objetivo'],['Comparativo Anual','Tendencia 12 meses']];
   slides.push({t:'Contenido', html:frame('','<h1>Contenido</h1><ul class="bd-contents">'
     +idx.map(function(it,i){return '<li><div class="n">'+(i+1)+'</div><div><div class="tt">'+it[0]+'</div><div class="ds">'+it[1]+'</div></div></li>';}).join('')+'</ul>')});
   // 3 Resumen ejecutivo
@@ -14794,11 +14816,29 @@ function _boardSlideDefs(){
     +'<div style="display:grid;grid-template-columns:1.1fr 1fr;gap:22px;align-items:center">'
     +'<p class="narr">'+_esc(d.narrativa||'')+'</p>'
     +'<div style="position:relative;height:190px"><canvas id="bd-s-serie"></canvas></div></div>')});
+  // 3b Indicadores Financieros
+  function fk(l,v,d2){ return '<div class="bd-skpi"><div class="l">'+l+'</div><div class="v">'+v+'</div><div class="d" style="color:#9a9a9a">'+(d2||'')+'</div></div>'; }
+  slides.push({t:'Indicadores Financieros', html:frame('','<h2>Indicadores Financieros</h2><h1>KPIs clave</h1>'
+    +'<div class="bd-skpis" style="grid-template-columns:repeat(4,1fr);gap:12px">'
+    +fk('Ingresos',_bMoneyK(k.ingresos),_bGrow(k.crecimientoIngresos).t+' YoY periodo')
+    +fk('Egresos',_bMoneyK(k.egresos),_bGrow(k.crecimientoEgresos).t)
+    +fk('Utilidad Neta',_bMoneyK(k.utilidadNeta),'Margen '+_bPct(k.margenNeto))
+    +fk('Margen Bruto',_bPct(k.margenBruto),'Ingresos − COGS')
+    +fk('EBITDA',_bMoneyK(k.ebitda),'Margen '+_bPct(k.margenEbitda))
+    +fk('Ticket Promedio',_bMoneyK(k.ticketPromedio),(k.ciclos||0)+' ciclos/servicios')
+    +fk('Crecimiento',_bGrow(k.crecimientoIngresos).t,'ingresos vs periodo ant.')
+    +fk(k.cumplimientoMeta!=null?'Cumplimiento Meta':'Utilidad prev.',k.cumplimientoMeta!=null?(k.cumplimientoMeta*100).toFixed(0)+'%':_bMoneyK(k.utilidadPrev||0),k.cumplimientoMeta!=null?(k.cumplimientoMeta>=1?'Superada':'En progreso'):'periodo anterior')
+    +'</div>'
+    +'<div style="margin-top:16px;font-size:11.5px;color:#8a8a8a;line-height:1.6">Margen bruto = utilidad después de costos directos (COGS). EBITDA = utilidad antes de intereses, impuestos y depreciación. Margen neto = utilidad final sobre ingresos. Ticket promedio = ingreso por ciclo/servicio.</div>')});
   // 4 Ingresos
   slides.push({t:'Ingresos', chart:'ding', html:frame('','<h2>Ingresos</h2><h1>Desglose por línea</h1>'
     +'<div style="display:grid;grid-template-columns:1.3fr 1fr;gap:24px;align-items:center">'
     +'<div>'+_bLineTable(d.compIngresos,k.ingresos)+'<div style="margin-top:10px;font-weight:800;font-size:14px;border-top:2px solid #333;padding-top:8px;display:flex;justify-content:space-between"><span>Total Ingresos</span><span>'+_bMoney(k.ingresos)+'</span></div></div>'
     +'<div style="position:relative;height:230px"><canvas id="bd-s-ing"></canvas></div></div>')});
+  // 4b Ingresos — detalle (grupo → subgrupo → producto)
+  slides.push({t:'Ingresos · Detalle', html:frame('','<h2>Ingresos</h2><h1>Detalle por producto</h1>'
+    +'<div style="max-height:400px;overflow:auto">'+_boardIngresosTable(true)
+    +'<div style="margin-top:8px;font-weight:800;font-size:14px;border-top:2px solid #333;padding-top:8px;display:flex;justify-content:space-between"><span>Total Ingresos</span><span>'+_bMoney(k.ingresos)+'</span></div></div>')});
   // 5 Egresos — detalle por sección y subgrupo
   slides.push({t:'Egresos', chart:'degr', html:frame('','<h2>Egresos</h2><h1>Detalle de gastos</h1>'
     +'<div style="display:grid;grid-template-columns:1.35fr 1fr;gap:24px;align-items:start">'
@@ -14806,6 +14846,21 @@ function _boardSlideDefs(){
     +'<div style="position:relative;height:230px"><canvas id="bd-s-egr"></canvas></div></div>')});
   // 6 P&L
   slides.push({t:'Estado de Resultados', html:frame('','<h2>Estado de Resultados</h2><h1>P&amp;L '+_esc(per.label)+'</h1>'+_boardPLTable())});
+  // 6b Márgenes y Rentabilidad (puente Revenue → Utilidad)
+  var m=d.metricas||{};
+  function wf(lbl,val,tipo){ var col=tipo==='pos'?'#3f8f5e':(tipo==='neg'?'#c0505c':'#2b2b2b'); var bg=tipo==='sub'?'#faf3f4':'transparent';
+    return '<tr style="background:'+bg+'"><td style="'+(tipo==='sub'?'font-weight:800':'')+'">'+lbl+'</td><td style="text-align:right;font-weight:'+(tipo==='sub'?'800':'600')+';color:'+col+'">'+(tipo==='neg'?'−':'')+_bMoney(Math.abs(val))+'</td></tr>'; }
+  slides.push({t:'Márgenes', html:frame('','<h2>Márgenes y Rentabilidad</h2><h1>Del ingreso a la utilidad</h1>'
+    +'<div class="bd-skpis" style="grid-template-columns:repeat(3,1fr);margin-bottom:18px">'
+    +'<div class="bd-skpi"><div class="l">Margen Bruto</div><div class="v">'+_bPct(k.margenBruto)+'</div><div class="d">'+_bMoneyK(k.grossProfit||m.grossProfit)+'</div></div>'
+    +'<div class="bd-skpi"><div class="l">Margen EBITDA</div><div class="v">'+_bPct(k.margenEbitda)+'</div><div class="d">'+_bMoneyK(k.ebitda)+'</div></div>'
+    +'<div class="bd-skpi"><div class="l">Margen Neto</div><div class="v">'+_bPct(k.margenNeto)+'</div><div class="d">'+_bMoneyK(k.utilidadNeta)+'</div></div>'
+    +'</div>'
+    +'<table class="bd-tbl" style="font-size:13px">'
+    +wf('Ingresos',m.revenue,'')+wf('Costos directos (COGS)',m.cogs,'neg')+wf('= Utilidad Bruta',m.grossProfit,'sub')
+    +wf('Gastos operativos (OpEx)',m.opex,'neg')+wf('Gastos generales (G&A)',m.ga,'neg')+wf('= EBITDA',m.ebitda,'sub')
+    +wf('Impuestos',m.taxes,'neg')+wf('= Utilidad Neta',m.netProfit,'sub')
+    +'</table>')});
   // 7 Presupuesto
   if(d.meta && k.ingresosMeta>0){
     slides.push({t:'Presupuesto', chart:'meta', html:frame('','<h2>Presupuesto vs Meta</h2><h1>'+(k.cumplimientoMeta>=1?'Meta superada':'Cumplimiento '+(k.cumplimientoMeta*100).toFixed(0)+'%')+'</h1>'
@@ -14883,7 +14938,7 @@ function boardConfigOpen(){
   _boardStyles(); try{ _sumStyles(); }catch(e){}  // el modal reutiliza .sm-cfg* / .sm-btn de Summary
   var th=_bTheme(); var c=(_boardCfg&&_boardCfg.config)||{};
   var wrap=document.createElement('div'); wrap.className='sm-cfgwrap'; wrap.id='bd-cfgwrap';
-  function color(id,lbl,val){ return '<label style="font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 0">'+lbl+'<input type="color" id="'+id+'" value="'+(val||'#cccccc')+'" style="width:46px;height:28px;border:1px solid #ddd;border-radius:6px;cursor:pointer"></label>'; }
+  function color(id,lbl,val){ return '<label style="font-size:12px;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 0">'+lbl+'<input type="color" id="'+id+'" value="'+(val||'#cccccc')+'" oninput="_boardLiveColors()" style="width:46px;height:28px;border:1px solid #ddd;border-radius:6px;cursor:pointer"></label>'; }
   wrap.innerHTML='<div class="sm-cfgbox"><div class="sm-cfghd"><div style="font-weight:700;font-size:15px">Plantilla del Board Deck</div>'
     +'<button class="sm-btn" onclick="document.getElementById(\'bd-cfgwrap\').remove()">✕</button></div>'
     +'<div class="sm-cfgbody">'
@@ -14905,10 +14960,18 @@ function boardConfigOpen(){
     +'<div class="sm-cfgft"><span></span><div><button class="sm-btn" onclick="document.getElementById(\'bd-cfgwrap\').remove()">Cancelar</button> <button class="sm-btn primary" onclick="boardConfigSave()">Guardar plantilla</button></div></div></div>';
   document.body.appendChild(wrap);
 }
-var _BOARD_PRESETS={neutro:{acc:'#c46a7a',prim:'#6b6b6b',ing:'#8a9a8f',egr:'#c8969c'},rosa:{acc:'#c46a7a',prim:'#1a252f',ing:'#7fa886',egr:'#d98a94'},marino:{acc:'#c46a7a',prim:'#1a365d',ing:'#3b6ea5',egr:'#c8969c'}};
-function _boardPresetBtns(){ var n={neutro:'Neutro elegante',rosa:'Rosa + salvia',marino:'Rosa + marino'};
-  return Object.keys(_BOARD_PRESETS).map(function(k){ return '<button class="sm-btn" style="font-size:11px;padding:5px 9px" onclick="_boardApplyPreset(\''+k+'\')">'+n[k]+'</button>'; }).join(''); }
-function _boardApplyPreset(k){ var p=_BOARD_PRESETS[k]; if(!p)return; ['acc','prim','ing','egr'].forEach(function(x){ var el=document.getElementById('bd-c-'+x); if(el)el.value=p[x]; }); }
+var _BOARD_PRESETS={neutro:{acc:'#8a7f82',prim:'#4a4a4a',ing:'#8a9a8f',egr:'#c8969c'},rosa:{acc:'#c46a7a',prim:'#1a252f',ing:'#7fa886',egr:'#d98a94'},marino:{acc:'#1a365d',prim:'#1a365d',ing:'#3b6ea5',egr:'#c8969c'}};
+function _boardPresetBtns(){ var n={neutro:'Neutro elegante',rosa:'Rosa + salvia',marino:'Azul marino'};
+  return Object.keys(_BOARD_PRESETS).map(function(k){ var p=_BOARD_PRESETS[k]; return '<button class="sm-btn" style="font-size:11px;padding:5px 9px;display:inline-flex;align-items:center;gap:6px" onclick="_boardApplyPreset(\''+k+'\')"><span style="width:11px;height:11px;border-radius:3px;background:'+p.acc+';display:inline-block"></span>'+n[k]+'</button>'; }).join(''); }
+function _boardApplyPreset(k){ var p=_BOARD_PRESETS[k]; if(!p)return; ['acc','prim','ing','egr'].forEach(function(x){ var el=document.getElementById('bd-c-'+x); if(el)el.value=p[x]; }); _boardLiveColors(); }
+/* Aplica los colores del modal al tablero en vivo (preview detrás del modal). */
+function _boardLiveColors(){
+  var root=document.getElementById('board-root'); if(!root) return;
+  var g=function(id){ var e=document.getElementById(id); return e?e.value:''; };
+  if(g('bd-c-acc')) root.style.setProperty('--bd-acc',g('bd-c-acc'));
+  if(g('bd-c-ing')) root.style.setProperty('--bd-ing',g('bd-c-ing'));
+  if(g('bd-c-egr')) root.style.setProperty('--bd-egr',g('bd-c-egr'));
+}
 function _boardCoverPick(ev){ var f=ev.target.files&&ev.target.files[0]; if(!f)return;
   var rd=new FileReader(); rd.onload=function(){ try{ localStorage.setItem(_boardCoverKey(),rd.result); }catch(e){ alert('La imagen es muy grande para guardar en el navegador. Usa una URL.'); return; }
     var pv=document.getElementById('bd-cover-prev'); if(pv) pv.style.backgroundImage='url('+rd.result+')'; }; rd.readAsDataURL(f); }
