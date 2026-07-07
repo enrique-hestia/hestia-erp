@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.64 -->
+﻿<!-- app-build:2026.07.07.65 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -15514,13 +15514,18 @@ function _boardPrintCSS(th){
 function boardPrint(){
   if(!_boardData){ alert('Genera primero el reporte.'); return; }
   _boardStyles();
-  var openDeck=document.getElementById('bd-stage');
-  var host, temp=false;
-  if(openDeck){ host=openDeck; }
-  else { host=document.createElement('div'); host.style.cssText='position:fixed;left:-99999px;top:0;width:1000px'; document.body.appendChild(host); temp=true; }
+  var deckAbierto=!!document.getElementById('bd-stage');
+  // SIEMPRE se imprime desde un host ancho fuera de pantalla (no desde el deck
+  // abierto, que escala las diapositivas y deja las gráficas diminutas).
+  var host=document.createElement('div');
+  host.style.cssText='position:fixed;left:-99999px;top:0;width:1100px;background:#fff';
+  document.body.appendChild(host);
   _boardKillCharts();
   var slides=_boardSlideDefs();
-  host.innerHTML=slides.map(function(sl){ return '<div class="bd-slide">'+sl.html+'</div>'; }).join('');
+  // Cada diapositiva con ancho fijo para que las gráficas se rendericen a tamaño completo.
+  host.innerHTML=slides.map(function(sl){ return '<div class="bd-slide" style="width:1100px">'+sl.html+'</div>'; }).join('');
+  // Forzar tamaño de los contenedores de canvas (por si el CSS del deck no aplica fuera de él)
+  host.querySelectorAll('canvas').forEach(function(cv){ var p=cv.parentNode; if(p && !p.style.height) p.style.height='300px'; if(p) p.style.width='100%'; });
   setTimeout(function(){
     slides.forEach(function(sl){ if(sl.chart) _boardSlideChart(sl.chart); });
     setTimeout(function(){
@@ -15529,12 +15534,12 @@ function boardPrint(){
       for(var i=0;i<sc.length;i++){ try{ var img=document.createElement('img'); img.className='chart'; img.src=sc[i].toDataURL('image/png'); if(cc[i]) cc[i].parentNode.replaceChild(img,cc[i]); }catch(e){} }
       var th=_bTheme();
       var w=window.open('','_blank');
-      if(!w){ alert('El navegador bloqueó la ventana. Permite ventanas emergentes (pop-ups) para este sitio e intenta de nuevo.'); if(temp)host.remove(); return; }
+      if(!w){ alert('El navegador bloqueó la ventana. Permite ventanas emergentes (pop-ups) para este sitio e intenta de nuevo.'); host.remove(); return; }
       w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+_esc(th.subtitulo+' — '+th.empresa)+'</title>'+_boardPrintCSS(th)+'</head><body>'+clone.innerHTML+'</body></html>');
       w.document.close();
-      setTimeout(function(){ try{ w.focus(); w.print(); }catch(e){} if(temp){ host.remove(); } else { _boardKillCharts(); _boardRenderStage(); } }, 550);
-    }, 750);
-  }, 80);
+      setTimeout(function(){ try{ w.focus(); w.print(); }catch(e){} host.remove(); if(deckAbierto){ _boardKillCharts(); _boardRenderStage(); } }, 600);
+    }, 800);
+  }, 100);
 }
 
 /* ── Configurar plantilla (portada, colores, títulos) ─────────── */
