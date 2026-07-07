@@ -485,6 +485,19 @@ function doGet(e) {
       return jsonResponse(readPacienteFull(decodeURIComponent((e && e.parameter.paciente) || '')));
     }
 
+    if (action === 'getDropdowns') {
+      if (typeof readDropdowns !== 'function')
+        return jsonResponse({ok:false, error:'Falta readDropdowns() — actualiza finance.gs en Apps Script y redespliega.'});
+      return jsonResponse(readDropdowns());
+    }
+
+    if (action === 'saveDropdown') {
+      if (typeof saveDropdownValues !== 'function')
+        return jsonResponse({ok:false, error:'Falta saveDropdownValues() — actualiza finance.gs en Apps Script y redespliega.'});
+      var ddData = e.parameter.data || '{}';
+      return jsonResponse(saveDropdownValues(JSON.parse(decodeURIComponent(ddData))));
+    }
+
     if (action === 'getFormatos') {
       return jsonResponse(readFormatos());
     }
