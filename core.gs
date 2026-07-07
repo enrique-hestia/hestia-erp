@@ -320,7 +320,7 @@ function doGet(e) {
 
     // Presupuesto: proyección del siguiente trimestre + meta + pace
     if (action === 'presupuesto') {
-      return jsonResponse(readPresupuesto());
+      return jsonResponse(readPresupuesto((e && e.parameter.periodo) || ''));
     }
 
     // Análisis de Egresos: histórico, ranking, recomendaciones

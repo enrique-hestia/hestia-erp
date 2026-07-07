@@ -188,7 +188,81 @@ function _presCrecimientoReal(histQ, refY, refQ) {
 }
 
 /* ── Motor principal ────────────────────────────────────────────── */
-function readPresupuesto() {
+/* Crecimiento interanual de una serie total por trimestre (trailing 4Q vs prev 4Q). */
+function _presCrecCantTotal(map, refY, refQ) {
+  var ult = 0, prev = 0, yy = refY, qq = refQ;
+  for (var i = 0; i < 4; i++) { var p = _presPrevQ(yy, qq); ult += map[_presQKey(p.y, p.q)] || 0; yy = p.y; qq = p.q; }
+  for (var j = 0; j < 4; j++) { var p2 = _presPrevQ(yy, qq); prev += map[_presQKey(p2.y, p2.q)] || 0; yy = p2.y; qq = p2.q; }
+  if (prev <= 0) return null;
+  return (ult - prev) / prev;
+}
+
+/* ── Proyección de INGRESOS por producto = cantidad × precio promedio real,
+   agrupada como el Board Deck (columna U → categoría → producto).
+   Reutiliza helpers de summary.gs (_summaryReadIngresos, _summaryRevOrden,
+   _sumOrdIn, SUMMARY_SUBGROUP_ORDER, SUMMARY_PRODUCT_ORDER). ───────────── */
+function _presIngresosProy(tY, tQ) {
+  var q = {}, qCantTot = {};
+  var thisYear = new Date().getFullYear();
+  for (var y = thisYear - 2; y <= thisYear; y++) {
+    var rows; try { rows = _summaryReadIngresos(y); } catch (e) { rows = []; }
+    rows.forEach(function (r) {
+      var f = (r.fecha || '').substring(0, 10); if (f.length < 7) return;
+      var yy = parseInt(f.substring(0, 4), 10), mo = parseInt(f.substring(5, 7), 10);
+      var qk = _presQKey(yy, _presQ(mo));
+      var g = String(r.grupoU || '').trim() || String(r.categoria || '').trim() || '(Sin grupo)';
+      var s = String(r.categoria || '').trim() || g;
+      var p = String(r.producto || '').trim() || s;
+      var cant = Number(r.cantidad) || 0, imp = Number(r.total) || 0;
+      if (!q[qk]) q[qk] = {}; if (!q[qk][g]) q[qk][g] = {}; if (!q[qk][g][s]) q[qk][g][s] = {};
+      if (!q[qk][g][s][p]) q[qk][g][s][p] = { cant: 0, imp: 0 };
+      q[qk][g][s][p].cant += cant; q[qk][g][s][p].imp += imp;
+      qCantTot[qk] = (qCantTot[qk] || 0) + cant;
+    });
+  }
+  var hoy = new Date(), cy = hoy.getFullYear(), cq = _presQ(hoy.getMonth() + 1);
+  var rec = _presPrevQ(cy, cq), kRec = _presQKey(rec.y, rec.q), kAA = _presQKey(tY - 1, tQ);
+  var gTot = _presCrecCantTotal(qCantTot, cy, cq); if (gTot === null) gTot = 0;
+  gTot = Math.min(Math.max(gTot, 0), PRES_CREC_MAX);
+
+  function cellP(k, g, s, p) { return (((q[k] || {})[g] || {})[s] || {})[p] || { cant: 0, imp: 0 }; }
+  var allG = {};
+  [kRec, kAA].forEach(function (k) { Object.keys(q[k] || {}).forEach(function (g) { allG[g] = 1; }); });
+  var grupos = [], totImp = 0;
+  Object.keys(allG).forEach(function (g) {
+    var subMap = {};
+    [kRec, kAA].forEach(function (k) { Object.keys((q[k] || {})[g] || {}).forEach(function (s) { subMap[s] = 1; }); });
+    var subgrupos = [], gImp = 0, gCant = 0, gAA = 0, gRe = 0;
+    Object.keys(subMap).forEach(function (s) {
+      var prodMap = {};
+      [kRec, kAA].forEach(function (k) { Object.keys(((q[k] || {})[g] || {})[s] || {}).forEach(function (p) { prodMap[p] = 1; }); });
+      var productos = [], sImp = 0, sCant = 0;
+      Object.keys(prodMap).forEach(function (p) {
+        var re = cellP(kRec, g, s, p), aa = cellP(kAA, g, s, p);
+        var precio = re.cant > 0 ? re.imp / re.cant : (aa.cant > 0 ? aa.imp / aa.cant : 0);
+        var baseCant = Math.max(aa.cant, re.cant);
+        var cantProy = Math.round(baseCant * (1 + gTot)); if (cantProy < Math.round(baseCant)) cantProy = Math.round(baseCant);
+        var impProy = cantProy * precio;
+        if (impProy <= 0 && re.imp <= 0 && aa.imp <= 0) return;
+        productos.push({ producto: p, cantAnioAnt: aa.cant, cantReciente: re.cant, cantProy: cantProy,
+          precio: precio, importeProy: impProy, impReciente: re.imp, impAnioAnt: aa.imp });
+        sImp += impProy; sCant += cantProy; gAA += aa.imp; gRe += re.imp;
+      });
+      if (!productos.length) return;
+      productos.sort(function (a, b) { return (_sumOrdIn(SUMMARY_PRODUCT_ORDER, a.producto) - _sumOrdIn(SUMMARY_PRODUCT_ORDER, b.producto)) || (b.importeProy - a.importeProy); });
+      subgrupos.push({ sub: s, importeProy: sImp, cantProy: sCant, productos: productos });
+      gImp += sImp; gCant += sCant;
+    });
+    if (gImp <= 0.5) return;
+    subgrupos.sort(function (a, b) { return (_sumOrdIn(SUMMARY_SUBGROUP_ORDER, a.sub) - _sumOrdIn(SUMMARY_SUBGROUP_ORDER, b.sub)) || (b.importeProy - a.importeProy); });
+    grupos.push({ grupo: g, orden: _summaryRevOrden(g), importeProy: gImp, cantProy: gCant, anioAntImp: gAA, recienteImp: gRe, subgrupos: subgrupos });
+    totImp += gImp;
+  });
+  grupos.sort(function (a, b) { return (a.orden - b.orden) || (b.importeProy - a.importeProy); });
+  return { grupos: grupos, totalImporte: totImp, crecimientoCant: gTot, kReciente: kRec, kAnioAnt: kAA };
+}
+
+function readPresupuesto(periodo) {
   try {
     var hi = _presHistoricoIngresos();
     if (!hi.ok) return { ok: false, error: hi.error };
@@ -201,8 +275,18 @@ function readPresupuesto() {
     var curY = hoy.getFullYear(), curQ = _presQ(hoy.getMonth() + 1);
     var nx = _presNextQ(curY, curQ);
     var tgtY = nx.y, tgtQ = nx.q;
+    // Permite consultar un trimestre específico (histórico o futuro): periodo = 'YYYY-Qn'
+    var esHistorico = false;
+    if (periodo && /^\d{4}-Q[1-4]$/.test(String(periodo).trim())) {
+      var pm = String(periodo).trim().match(/^(\d{4})-Q([1-4])$/);
+      tgtY = parseInt(pm[1], 10); tgtQ = parseInt(pm[2], 10);
+      // histórico = el trimestre elegido ya terminó (es anterior al siguiente por default)
+      esHistorico = (tgtY < nx.y) || (tgtY === nx.y && tgtQ < nx.q);
+    }
     var perActual = _presQKey(curY, curQ);
     var perSig = _presQKey(tgtY, tgtQ);
+    // Motor nuevo: ingresos por producto (cantidad × precio real), agrupado como Board Deck
+    var ingProd = _presIngresosProy(tgtY, tgtQ);
 
     // Crecimiento real interanual (total) — referencia para líneas sin histórico propio
     var gRealTotal = _presCrecimientoReal(histQ, curY, curQ);
@@ -269,10 +353,31 @@ function readPresupuesto() {
       var proy = Math.max(base * (1 + g), Math.max(aa, rec));
       if (proy <= 0 && rec <= 0 && aa <= 0) return;
       var meta = egMetaSig[sub] || 0;
-      egLineasProy.push({ linea: sub, grupo: (egQ.contableBySub[sub] || 'Gasto'), anioAnterior: aa, reciente: rec, crecimientoUsado: g, proyeccion: proy, meta: meta });
+      // Sección (COGS/OpEx/G&A/Taxes) y subgrupo (Payroll, Rent…) como el Board Deck
+      var cont = egQ.contableBySub[sub] || 'Gasto';
+      var seccion = 'GA', subg = sub;
+      try { var c = _summaryDefaultClass('egreso', cont + '|' + sub); subg = _summaryEgSubgroup(sub, c.grupo);
+        seccion = SUMMARY_EG_SUBGROUP_SECTION[_sumNorm(subg)] || c.grupo; } catch (e) {}
+      egLineasProy.push({ linea: sub, grupo: cont, seccion: seccion, subgrupo: subg, anioAnterior: aa, reciente: rec, crecimientoUsado: g, proyeccion: proy, meta: meta });
       egTotAnioAnt += aa; egTotReciente += rec; egTotProy += proy; egTotMeta += meta;
     });
     egLineasProy.sort(function (a, b) { return b.proyeccion - a.proyeccion; });
+    // Agrupar egresos: sección → subgrupo → subtipos (para render tipo Board Deck)
+    var egSecOrden = { COGS: 1, OPEX: 2, GA: 3, TAXES: 4 };
+    var egSecMap = {};
+    egLineasProy.forEach(function (l) {
+      var sec = l.seccion || 'GA';
+      if (!egSecMap[sec]) egSecMap[sec] = { seccion: sec, orden: egSecOrden[sec] || 9, importeProy: 0, subs: {} };
+      var S = egSecMap[sec]; S.importeProy += l.proyeccion;
+      if (!S.subs[l.subgrupo]) S.subs[l.subgrupo] = { sub: l.subgrupo, importeProy: 0, lineas: [] };
+      S.subs[l.subgrupo].importeProy += l.proyeccion; S.subs[l.subgrupo].lineas.push(l);
+    });
+    var egGrupos = Object.keys(egSecMap).map(function (k) {
+      var S = egSecMap[k];
+      S.subgrupos = Object.keys(S.subs).map(function (sk) { var sg = S.subs[sk]; sg.lineas.sort(function (a, b) { return b.proyeccion - a.proyeccion; }); return sg; })
+        .sort(function (a, b) { return (_summaryEgSubgroupOrden(a.sub) - _summaryEgSubgroupOrden(b.sub)) || (b.importeProy - a.importeProy); });
+      delete S.subs; return S;
+    }).sort(function (a, b) { return a.orden - b.orden; });
     var egProy = egTotProy;
     var margenProy = totProy - egProy;
     var margenPct = totProy > 0 ? (margenProy / totProy) * 100 : 0;
@@ -294,15 +399,23 @@ function readPresupuesto() {
         diasTranscurridos: diasTransc, diasTotales: diasTotales,
         proyeccionCierre: proyCierre, cumplimientoPct: cumplimiento, semaforo: semaforo
       },
+      periodoConsultado: perSig,
+      esHistorico: esHistorico,
+      realTrimestre: (histQ[perSig] && histQ[perSig].__total) || 0,   // lo que REALMENTE pasó ese Q (para histórico)
+      egRealTrimestre: (egHistQ[perSig] && egHistQ[perSig].__total) || 0,
       siguiente: {
         periodo: perSig,
         lineas: lineasProy,
-        totales: { anioAnterior: totAnioAnt, reciente: totReciente, base: totBase, conservador: totCons, proyeccion: totProy, optimista: totOpt, meta: (metas[perSig] && metas[perSig].__total) || 0 }
+        ingresosGrupos: ingProd.grupos,              // NUEVO: cantidad × precio, agrupado como Board Deck
+        ingresosTotalProy: ingProd.totalImporte,
+        crecimientoCant: ingProd.crecimientoCant,
+        totales: { anioAnterior: totAnioAnt, reciente: totReciente, base: totBase, conservador: totCons, proyeccion: ingProd.totalImporte || totProy, optimista: totOpt, meta: (metas[perSig] && metas[perSig].__total) || 0 }
       },
       egresos: {
         reciente: egTotReciente, proyeccion: egProy,
         margenProyectado: margenProy, margenPct: margenPct,
         lineas: egLineasProy,
+        grupos: egGrupos,                            // NUEVO: sección → subgrupo → subtipos
         totales: { anioAnterior: egTotAnioAnt, reciente: egTotReciente, proyeccion: egTotProy, meta: egTotMeta }
       },
       tendencia: tendencia,
