@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.53 -->
+﻿<!-- app-build:2026.07.07.54 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -7519,7 +7519,8 @@ async function egSubmit() {
         var banco='', bankRow=null;
         if (fp==='Santander') { banco='santander'; bankRow=[fecha,0,amt,0,obs,0,0,'','']; }
         else if (fp==='AMEX') { banco='amex'; bankRow=[fecha,amt,0,obs,0,0,'','',mesStr]; }
-        else if (fp==='Mercado Pago') { banco='mercadopago'; bankRow=[mesStr,fecha,0,0,0,0,0,false,obs,'pago']; }
+        // Egreso por MP = RETIRO: cobro y neto negativos = movimiento completo (no importe 0)
+        else if (fp==='Mercado Pago') { banco='mercadopago'; bankRow=[mesStr,fecha,-amt,0,0,-amt,0,false,obs,'PAGO']; }
         if (banco && bankRow) {
           try { await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveBankRow',banco:banco,row:bankRow})}); } catch(be){}
         }

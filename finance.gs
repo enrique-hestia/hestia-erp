@@ -1484,8 +1484,9 @@ function pagarCxP(body) {
         bankRow = [fechaPago, monto, 0, ref, usdAmt, tc, '', '', mesStr];
       } else if (formaPago === 'Mercado Pago' || formaPago === 'TDC' || formaPago === 'TDD') {
         banco = 'mercadopago';
-        // neto negativo = salida de fondos de Mercado Pago
-        bankRow = [mesStr, fechaPago, 0, 0, 0, -monto, 0, false, ref, 'PAGO'];
+        // Egreso por MP = RETIRO. Cobro y Neto negativos para que la conciliación
+        // lo muestre COMPLETO (badge Retiro + importe visible), no solo en Neto.
+        bankRow = [mesStr, fechaPago, -monto, 0, 0, -monto, 0, false, ref, 'PAGO'];
       }
       if (banco && bankRow) {
         try { saveBankRow(banco, bankRow); } catch(bErr) { Logger.log('pagarCxP banco error: ' + bErr.message); }
