@@ -412,6 +412,17 @@ function doGet(e) {
       return jsonResponse(readSummaryConfig());
     }
 
+    if (action === 'boardReport') {
+      if (typeof readBoardReport !== 'function')
+        return jsonResponse({ok:false, error:'Agrega board.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readBoardReport((e && e.parameter.fechaInicio) || '', (e && e.parameter.fechaFin) || ''));
+    }
+    if (action === 'boardConfig') {
+      if (typeof readBoardConfig !== 'function')
+        return jsonResponse({ok:false, error:'Agrega board.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readBoardConfig());
+    }
+
     if (action === 'clasifProveedores') {
       if (typeof readClasificacionProveedores !== 'function')
         return jsonResponse({ok:false, error:'Agrega prov_defaults.gs al proyecto de Apps Script y redespliega.'});

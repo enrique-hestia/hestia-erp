@@ -507,6 +507,8 @@ function readSummary(fechaInicio, fechaFin) {
       lineas: lineas,
       metricas:{ revenue:revA, cogs:cogsA, grossProfit:gpA, opex:opexA, clinicContribution:ccA,
                  ga:gaA, ebitda:ebitdaA, da:da, ebit:ebitA, taxes:taxA, netProfit:netA },
+      metricasPrev:{ revenue:revP, cogs:cogsP, grossProfit:gpP, opex:opexP, clinicContribution:ccP,
+                 ga:gaP, ebitda:ebitdaP, da:da, ebit:ebitP, taxes:taxP, netProfit:netP },
       amexCredito: amex,
       labInsumos: labInsumos,
       reconc:{
