@@ -67,6 +67,30 @@ function _summaryDefaultClass(fuente, clave) {
   return { grupo:'GA', linea:'Gastos Varios', orden:5 };
 }
 
+/* Orden de los grupos de Revenue (nivel de la columna U de BD_Ingresos),
+   tal como aparecen en la hoja de referencia. El grupo de cada ingreso es
+   el valor de la columna U (ej. "Ciclo Alta", "Complementos", "Surrogacy"…);
+   estas reglas solo definen EN QUÉ ORDEN se listan. Lo no listado va al final. */
+var SUMMARY_REV_RULES = [
+  { re: /alta/,                         ord: 1,  label:'Alta' },
+  { re: /complement/,                   ord: 2,  label:'Complementos' },
+  { re: /surrogacy|gestaci|subrog/,     ord: 3,  label:'Surrogacy' },
+  { re: /androl/,                       ord: 4,  label:'Andrology' },
+  { re: /egg\s*donor|ovodon|donant|donadora/, ord: 5, label:'Egg Donor' },
+  { re: /externo/,                      ord: 6,  label:'Ciclos Externos' },
+  { re: /baja/,                         ord: 7,  label:'Baja' },
+  { re: /estudio/,                      ord: 8,  label:'Estudios' },
+  { re: /consulta/,                     ord: 9,  label:'Consultas' },
+  { re: /reprovi/,                      ord: 10, label:'Reprovida' },
+  { re: /medicament|farmac/,            ord: 11, label:'Medicamentos' },
+  { re: /almacen|congel|criopreserv/,   ord: 12, label:'Almacenamiento' }
+];
+function _summaryRevOrden(label){
+  var l = _sumNorm(label);
+  for (var i=0;i<SUMMARY_REV_RULES.length;i++){ if (SUMMARY_REV_RULES[i].re.test(l)) return SUMMARY_REV_RULES[i].ord; }
+  return 90; // no clasificado → al final, antes de "(Sin grupo)"
+}
+
 /* ── Siembra/actualiza Summary_Config escaneando los datos reales.
    Corre UNA VEZ (o cuando quieras re-sembrar). No pisa lo que ya
    editaste: solo AGREGA las claves nuevas que falten. ─────────────── */
@@ -267,16 +291,17 @@ function readSummary(fechaInicio, fechaFin) {
         if (!f && Number(r.total)){ recon.ingresosSinFecha++; recon.ingresosSinFechaMonto += Number(r.total)||0; }
         var enActual=_sumInRange(f, fi, ff), enPrev=_sumInRange(f, pi, pf);
         if (!enActual && !enPrev) return;
-        var c = clasifIn(r.categoria);
-        var line = get('REVENUE', c.linea, c.orden, c.flag);
-        // Sub-item de ingreso: agrupa por Producto (ej. Estimulación ovárica, IVF), bajo el grupo de la columna U
+        // Grupo de Revenue = valor de la columna U (Ciclo Alta, Complementos, Surrogacy…),
+        // con fallback a la categoría si U está vacía. Orden según la hoja de referencia.
+        var grpLabel = String(r.grupoU||'').trim() || String(r.categoria||'').trim() || '(Sin grupo)';
+        var line = get('REVENUE', grpLabel, _summaryRevOrden(grpLabel), '');
+        // Sub-item (redespliegue) = Producto
         var subLbl = String(r.producto||'').trim() || String(r.categoria||'').trim() || '(sin producto)';
-        var grupoU = String(r.grupoU||'').trim();
         var cant = Number(r.cantidad)||0; if(!cant) cant=1;
         if (enActual){ line.actual+=r.total; recon.ingresosTotal+=r.total;
-          addSub(line, subLbl, r.total, cant, true, {fecha:f, nombre:r.paciente, concepto:r.producto+' · '+r.categoria, monto:r.total, cantidad:cant}, grupoU);
+          addSub(line, subLbl, r.total, cant, true, {fecha:f, nombre:r.paciente, concepto:r.producto+' · '+r.categoria, monto:r.total, cantidad:cant}, '');
         }
-        if (enPrev){ line.prev+=r.total; addSub(line, subLbl, r.total, cant, false, null, grupoU); }
+        if (enPrev){ line.prev+=r.total; addSub(line, subLbl, r.total, cant, false, null, ''); }
       });
     }
 
