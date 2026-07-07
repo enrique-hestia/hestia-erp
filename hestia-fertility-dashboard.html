@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.62 -->
+﻿<!-- app-build:2026.07.07.63 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -14958,8 +14958,11 @@ function _boardPresupuestoSection(){
   h+=_bPresKpi('Egresos', _bMoneyK(re.egresos)+' / '+_bMoneyK(pr.egresos), cu.egresos, true);
   h+=_bPresKpi('Utilidad', _bMoneyK(re.utilidad)+' / '+_bMoneyK(pr.utilidad), null, false);
   h+='</div>';
+  // Scorecard ejecutivo: metas fijadas vs logradas (ingresos/egresos/utilidad)
+  h+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--bd-acc);margin:4px 0 4px">Resumen de metas — fijadas vs logradas</div>';
+  h+=_bMetasScorecard(p);
   if(comp.length){
-    h+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--bd-acc);margin-bottom:4px">Ventas por procedimiento — proyectado vs real</div>';
+    h+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--bd-acc);margin:12px 0 4px">Ventas por procedimiento — proyectado vs real</div>';
     h+=_bComparTable(comp);
   }
   h+='<div class="bd-two" style="margin-top:12px">';
@@ -14989,6 +14992,29 @@ function _bPresKpi(l,v,pct,inverse){
 function _bDesgProy(comp){ return (comp||[]).filter(function(c){return c.proy>0;}).map(function(c){return c.proy+' '+c.grupo;}).join(', '); }
 function _bDesgReal(comp){ return (comp||[]).filter(function(c){return c.real>0;}).map(function(c){return c.real+' '+c.grupo;}).join(', '); }
 function _bDesgList(arr){ return (arr||[]).filter(function(c){return c.cant>0;}).map(function(c){return c.cant+' '+c.grupo;}).join(', '); }
+// Scorecard ejecutivo: meta fijada, logrado, variación $ y %, estado (verde/rojo).
+function _bMetasScorecard(p){
+  var pr=p.proyectado||{}, re=p.real||{};
+  function fila(concepto, meta, real, inverse){
+    var vAbs=(Number(real)||0)-(Number(meta)||0);
+    var vPct=meta ? (vAbs/Math.abs(meta)*100) : null;
+    var bueno = inverse ? (real<=meta) : (real>=meta);
+    var col = bueno?'#3f8f5e':'#c0505c';
+    var estado = inverse ? (bueno?'En presupuesto':'Excedido') : (bueno?'Alcanzada':'No alcanzada');
+    return '<tr><td style="font-weight:700">'+_esc(concepto)+'</td>'
+      +'<td style="text-align:right">'+_bMoney(meta)+'</td>'
+      +'<td style="text-align:right;font-weight:700">'+_bMoney(real)+'</td>'
+      +'<td style="text-align:right;color:'+col+'">'+(vAbs>=0?'+':'')+_bMoney(vAbs)+'</td>'
+      +'<td style="text-align:right;color:'+col+';font-weight:700">'+(vPct!=null?(vPct>=0?'+':'')+vPct.toFixed(1)+'%':'—')+'</td>'
+      +'<td style="text-align:center"><span style="font-size:10px;font-weight:700;padding:2px 9px;border-radius:10px;background:'+(bueno?'rgba(63,143,94,.12)':'rgba(192,80,92,.12)')+';color:'+col+'">'+estado+'</span></td></tr>';
+  }
+  return '<table class="bd-tbl" style="font-size:12.5px">'
+    +'<tr style="font-weight:800;color:var(--text-secondary,#6b7280);text-transform:uppercase;font-size:10px;letter-spacing:.4px"><td>Concepto</td><td style="text-align:right">Meta fijada</td><td style="text-align:right">Logrado</td><td style="text-align:right">Variación</td><td style="text-align:right">%</td><td style="text-align:center">Estado</td></tr>'
+    +fila('Ingresos', pr.ingresos, re.ingresos, false)
+    +fila('Egresos', pr.egresos, re.egresos, true)
+    +fila('Utilidad', pr.utilidad, re.utilidad, false)
+    +'</table>';
+}
 function _bComparTable(comp){
   var h='<table class="bd-tbl" style="font-size:12.5px"><tr style="font-weight:800;color:var(--text-secondary,#6b7280)"><td>Procedimiento</td><td style="text-align:right">Proyectado</td><td style="text-align:right">Real</td><td style="text-align:right">Meta</td></tr>';
   (comp||[]).forEach(function(c){ var pct=c.cumplimiento; var cl=pct==null?'#9ca3af':(pct>=100?'#3f8f5e':pct>=85?'#b8860b':'#c0505c');
@@ -15189,6 +15215,14 @@ function _boardSlideDefs(){
     var cIng=pcu.ingresos!=null?pcu.ingresos:0;
     var cCol=cIng>=100?'#3f8f5e':(cIng>=85?'#b8860b':'#c0505c');
     var pf=ppr.fuente==='guardada'?'meta fijada':'proyección automática';
+    // Slide ejecutiva: scorecard de metas fijadas vs logradas
+    slides.push({t:'Presupuesto · Metas fijadas vs logradas', html:frame('','<h2>Presupuesto '+_esc(pp.periodo)+'</h2><h1>Metas fijadas vs logradas</h1>'
+      +'<p class="narr" style="margin:0 0 14px">Comparativo del desempeño del trimestre contra las metas fijadas ('+pf+'). Ingresos y utilidad se evalúan por cumplimiento; egresos, por control de presupuesto (no exceder).</p>'
+      +'<div style="font-size:14px">'+_bMetasScorecard(pp)+'</div>'
+      +'<div style="margin-top:16px;display:flex;gap:16px;flex-wrap:wrap">'
+        +'<div style="font-size:26px;font-weight:800;color:'+cCol+'">'+(cIng>=100?'✓ Meta de ingresos alcanzada':'Meta de ingresos no alcanzada')+' · '+cIng.toFixed(0)+'%</div>'
+      +'</div>'
+      +'<div style="margin-top:10px;font-size:12px;color:#8a8a8a">Se lograron <b>'+fInt(pre.ventas)+'</b> de <b>'+fInt(ppr.ventas)+'</b> procedimientos proyectados'+(_bDesgReal(pp.comparativo)?' ('+_esc(_bDesgReal(pp.comparativo))+')':'')+'.</div>')});
     slides.push({t:'Presupuesto · Proyectado vs Real', chart:'presProy', html:frame('','<h2>Presupuesto '+_esc(pp.periodo)+'</h2><h1>Proyectado vs Real</h1>'
       +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:center">'
       +'<div style="position:relative;height:230px"><canvas id="bd-s-presProy"></canvas></div>'
