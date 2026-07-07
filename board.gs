@@ -29,34 +29,37 @@ var _BOARD_MESES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agos
 function _boardMesLabel(iso){ var m=parseInt(iso.substring(5,7),10)-1; return (_BOARD_MESES[m]||'')+' '+iso.substring(0,4); }
 function _boardTrimestre(iso){ var m=parseInt(iso.substring(5,7),10); var q=Math.floor((m-1)/3)+1; return 'Q'+q+' '+iso.substring(0,4); }
 
-/* Serie mensual del año: {mes, mesIdx, ingresos, egresos, neto}. */
-function _boardSeries(year){
-  var meses = [];
-  for (var i=0;i<12;i++) meses.push({mes:_BOARD_MESES[i].substring(0,3), mesIdx:i, ingresos:0, egresos:0, neto:0});
-  // Ingresos
-  try {
-    var ins = _summaryReadIngresos(year);
-    ins.forEach(function(r){
-      var f=(r.fecha||'').substring(0,10);
-      if (f.substring(0,4)!==String(year)) return;
-      var mi=parseInt(f.substring(5,7),10)-1;
-      if (mi>=0 && mi<12) meses[mi].ingresos += _boardNum(r.total);
-    });
-  } catch(e){}
-  // Egresos (excluye Cancelada y Crédito/AMEX del P&L)
-  try {
-    var eg = readEgresosData(year);
-    (eg.rows||[]).forEach(function(r){
-      if (r.estatus==='Cancelada') return;
-      if (_sumNorm(r.contable)==='credito' || _sumNorm(r.contable)==='crédito') return;
-      var f=(r.fecha||r.vencimiento||'').substring(0,10);
-      if (f.substring(0,4)!==String(year)) return;
-      var mi=parseInt(f.substring(5,7),10)-1;
-      if (mi>=0 && mi<12) meses[mi].egresos += _boardNum(r.monto);
-    });
-  } catch(e){}
-  meses.forEach(function(m){ m.neto = m.ingresos - m.egresos; });
-  return meses;
+/* Serie de los ÚLTIMOS 12 MESES terminando en el mes del periodo (un año hacia
+   atrás), con el valor del mismo mes del año anterior para comparar (YoY).
+   Devuelve [{label:'Jun 25', anio, mesIdx, ingresos, egresos, neto,
+              ingresosPrevAnio, egresosPrevAnio}]. */
+function _boardSeries(endIso){
+  var endY=parseInt(endIso.substring(0,4),10), endM=parseInt(endIso.substring(5,7),10)-1; // 0-based
+  var MES3=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  var buckets={}; // 'YYYY-MM' -> {ing, egr}
+  function add(key, field, val){ if(!buckets[key]) buckets[key]={ing:0,egr:0}; buckets[key][field]+=val; }
+  // Leer 3 años para cubrir la ventana móvil + el overlay del año anterior
+  for (var y=endY-2; y<=endY; y++){
+    try { _summaryReadIngresos(y).forEach(function(r){ var f=(r.fecha||'').substring(0,7); if(f.length===7) add(f,'ing',_boardNum(r.total)); }); } catch(e){}
+    try {
+      var eg=readEgresosData(y);
+      (eg.rows||[]).forEach(function(r){
+        if(r.estatus==='Cancelada') return;
+        if(_sumNorm(r.contable)==='credito'||_sumNorm(r.contable)==='crédito') return;
+        var f=(r.fecha||r.vencimiento||'').substring(0,7); if(f.length===7) add(f,'egr',_boardNum(r.monto));
+      });
+    } catch(e2){}
+  }
+  var out=[];
+  for (var i=11;i>=0;i--){
+    var d=new Date(endY, endM-i, 1);
+    var key=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+    var pk=(d.getFullYear()-1)+'-'+String(d.getMonth()+1).padStart(2,'0');
+    var b=buckets[key]||{ing:0,egr:0}, p=buckets[pk]||{ing:0,egr:0};
+    out.push({ label:MES3[d.getMonth()]+" '"+String(d.getFullYear()).slice(-2), anio:d.getFullYear(), mesIdx:d.getMonth(),
+      ingresos:b.ing, egresos:b.egr, neto:b.ing-b.egr, ingresosPrevAnio:p.ing, egresosPrevAnio:p.egr });
+  }
+  return out;
 }
 
 /* Meta / presupuesto del periodo (best-effort; null si no hay presupuesto.gs). */
@@ -127,8 +130,19 @@ function readBoardReport(fechaInicio, fechaFin){
     var egrPrev=_boardNum(mp.cogs)+_boardNum(mp.opex)+_boardNum(mp.ga)+_boardNum(mp.taxes);
 
     var meta=_boardMeta(fi,ff);
-    var serie=_boardSeries(year);
+    var serie=_boardSeries(ff);
     var per=_boardPeriodType(fi,ff);
+
+    // Detalle de egresos: secciones (COGS/OpEx/G&A/Taxes) con sus subgrupos y proveedores
+    var egSecs={COGS:'COGS',OPEX:'OpEx',GA:'G&A',TAXES:'Taxes'};
+    var egresosDetalle=[];
+    (sum.lineas||[]).forEach(function(l){
+      if(l.tipo==='seccion' && egSecs[l.grupo]) egresosDetalle.push({nivel:'seccion',label:l.label,valor:l.actual});
+      else if(l.tipo==='dato' && egSecs[l.grupo]){
+        egresosDetalle.push({nivel:'sub',label:l.linea,valor:l.actual,
+          proveedores:(l.subitems||[]).slice(0,6).map(function(s){return {label:s.label,valor:s.actual};})});
+      }
+    });
 
     // # ciclos y ticket (de sub-items de REVENUE con cantidad)
     var ciclos=0;
@@ -165,7 +179,7 @@ function readBoardReport(fechaInicio, fechaFin){
     return {
       ok:true, periodo:sum.periodo, prev:sum.prev, tipoPeriodo:per,
       kpis:kpis, narrativa:narrativa, serie:serie, meta:meta,
-      compIngresos:compIngresos, compEgresos:compEgresos,
+      compIngresos:compIngresos, compEgresos:compEgresos, egresosDetalle:egresosDetalle,
       lineas:sum.lineas, reconc:sum.reconc, amexCredito:sum.amexCredito, metricas:sum.metricas
     };
   } catch(ex){ return { ok:false, error:ex.message+' (L:'+ex.lineNumber+')' }; }

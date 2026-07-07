@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.06.44 -->
+﻿<!-- app-build:2026.07.06.45 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -14684,23 +14684,50 @@ function _renderBoard(){
       +'<div style="text-align:center;font-size:12.5px;margin-top:8px;font-weight:700;color:'+(k.cumplimientoMeta>=1?'#3f8f5e':'#c0505c')+'">'
       +(k.cumplimientoMeta>=1?'Meta superada por '+_bMoney(k.ingresos-k.ingresosMeta):'Faltó '+_bMoney(k.ingresosMeta-k.ingresos)+' para la meta')+'</div></div>';
   } else {
-    h+='<div class="bd-card"><h4>Composición de egresos (detalle)</h4>'+_bLineTable(d.compEgresos,k.egresos)+'</div>';
+    h+='<div class="bd-card"><h4>Egresos por sección</h4>'+_boardEgresosTable(false)+'</div>';
   }
   h+='</div>';
+  // Detalle completo de egresos (secciones → subgrupos → proveedores)
+  h+='<div class="bd-card" style="margin-bottom:18px"><h4>Egresos a detalle — de nómina a gastos varios</h4>'+_boardEgresosTable(true)+'</div>';
   root.innerHTML=h;
   try{ lucide.createIcons(); }catch(e){}
   _boardDrawCharts(d,th);
 }
 function _bKpi(l,v,d,c){ return '<div class="bd-kpi"><div class="l">'+_esc(l)+'</div><div class="v">'+v+'</div>'+(d?'<div class="d '+(c||'mut')+'">'+_esc(d)+'</div>':'')+'</div>'; }
 function _bLineTable(arr,total){ var h='<table class="bd-tbl">'; (arr||[]).forEach(function(x){ var p=total>0?(x.valor/total*100):0; h+='<tr><td>'+_esc(x.label)+'</td><td class="pctcell">'+p.toFixed(1)+'%</td><td>'+_bMoney(x.valor)+'</td></tr>'; }); return h+'</table>'; }
+/* Tabla detallada de egresos: sección → subgrupo (→ proveedores si detailed). */
+function _boardEgresosTable(detailed){
+  var d=_boardData; var tot=(d.kpis&&d.kpis.egresos)||0; var det=d.egresosDetalle||[];
+  if(!det.length) return _bLineTable(d.compEgresos, tot);
+  var h='<table class="bd-tbl" style="font-size:12px">';
+  det.forEach(function(x){
+    if(x.nivel==='seccion'){
+      h+='<tr style="background:#2b2b2b"><td style="color:#fff;font-weight:800;text-transform:uppercase;font-size:10.5px">'+_esc(x.label)+'</td><td class="pctcell" style="color:#ddd">'+(tot>0?(x.valor/tot*100).toFixed(1):'0')+'%</td><td style="color:#fff;font-weight:800">'+_bMoney(x.valor)+'</td></tr>';
+    } else {
+      h+='<tr><td style="padding-left:16px;font-weight:600">'+_esc(x.label)+'</td><td class="pctcell">'+(tot>0?(x.valor/tot*100).toFixed(1):'0')+'%</td><td>'+_bMoney(x.valor)+'</td></tr>';
+      if(detailed && x.proveedores){ x.proveedores.forEach(function(p){
+        h+='<tr><td style="padding-left:32px;color:#9a9a9a;font-size:11px">'+_esc(p.label)+'</td><td></td><td style="color:#777;font-size:11px">'+_bMoney(p.valor)+'</td></tr>';
+      }); }
+    }
+  });
+  return h+'</table>';
+}
 
+function _boardSerieDatasets(serie,th){
+  var hayPY=serie.some(function(m){return (m.ingresosPrevAnio||0)>0;});
+  var ds=[
+    {label:'Ingresos',data:serie.map(function(m){return m.ingresos;}),borderColor:th.ing,backgroundColor:th.ing+'2e',fill:true,tension:.35,pointRadius:2,order:2},
+    {label:'Egresos',data:serie.map(function(m){return m.egresos;}),borderColor:th.egr,backgroundColor:th.egr+'2e',fill:true,tension:.35,pointRadius:2,order:2}
+  ];
+  if(hayPY) ds.push({label:'Ingresos año ant.',data:serie.map(function(m){return m.ingresosPrevAnio;}),borderColor:th.ing,borderDash:[5,4],backgroundColor:'transparent',fill:false,tension:.35,pointRadius:0,borderWidth:1.4,order:1});
+  return ds;
+}
 function _boardDrawCharts(d,th){
   if(typeof Chart==='undefined') return;
   var serie=d.serie||[];
   var ctxS=document.getElementById('bd-c-serie');
-  if(ctxS){ _boardCharts.push(new Chart(ctxS,{type:'line',data:{labels:serie.map(function(m){return m.mes;}),
-    datasets:[{label:'Ingresos',data:serie.map(function(m){return m.ingresos;}),borderColor:th.ing,backgroundColor:th.ing+'33',fill:true,tension:.35,pointRadius:2},
-              {label:'Egresos',data:serie.map(function(m){return m.egresos;}),borderColor:th.egr,backgroundColor:th.egr+'33',fill:true,tension:.35,pointRadius:2}]},
+  if(ctxS){ _boardCharts.push(new Chart(ctxS,{type:'line',data:{labels:serie.map(function(m){return m.label||m.mes;}),
+    datasets:_boardSerieDatasets(serie,th)},
     options:{responsive:true,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:11}}}},scales:{y:{ticks:{callback:function(v){return '$'+_bK(v);},font:{size:10}}},x:{ticks:{font:{size:10}}}}}})); }
   function donut(id,arr){ var el=document.getElementById(id); if(!el||!arr||!arr.length) return;
     _boardCharts.push(new Chart(el,{type:'doughnut',data:{labels:arr.map(function(x){return x.label;}),
@@ -14766,30 +14793,30 @@ function _boardSlideDefs(){
     +'</div>'
     +'<div style="display:grid;grid-template-columns:1.1fr 1fr;gap:22px;align-items:center">'
     +'<p class="narr">'+_esc(d.narrativa||'')+'</p>'
-    +'<div><canvas id="bd-s-serie" height="150"></canvas></div></div>')});
+    +'<div style="position:relative;height:190px"><canvas id="bd-s-serie"></canvas></div></div>')});
   // 4 Ingresos
   slides.push({t:'Ingresos', chart:'ding', html:frame('','<h2>Ingresos</h2><h1>Desglose por línea</h1>'
     +'<div style="display:grid;grid-template-columns:1.3fr 1fr;gap:24px;align-items:center">'
     +'<div>'+_bLineTable(d.compIngresos,k.ingresos)+'<div style="margin-top:10px;font-weight:800;font-size:14px;border-top:2px solid #333;padding-top:8px;display:flex;justify-content:space-between"><span>Total Ingresos</span><span>'+_bMoney(k.ingresos)+'</span></div></div>'
-    +'<div><canvas id="bd-s-ing" height="200"></canvas></div></div>')});
-  // 5 Egresos
-  slides.push({t:'Egresos', chart:'degr', html:frame('','<h2>Egresos</h2><h1>COGS · OpEx · G&amp;A · Impuestos</h1>'
-    +'<div style="display:grid;grid-template-columns:1.3fr 1fr;gap:24px;align-items:center">'
-    +'<div>'+_bLineTable(d.compEgresos,k.egresos)+'<div style="margin-top:10px;font-weight:800;font-size:14px;border-top:2px solid #333;padding-top:8px;display:flex;justify-content:space-between"><span>Total Egresos</span><span>'+_bMoney(k.egresos)+'</span></div></div>'
-    +'<div><canvas id="bd-s-egr" height="200"></canvas></div></div>')});
+    +'<div style="position:relative;height:230px"><canvas id="bd-s-ing"></canvas></div></div>')});
+  // 5 Egresos — detalle por sección y subgrupo
+  slides.push({t:'Egresos', chart:'degr', html:frame('','<h2>Egresos</h2><h1>Detalle de gastos</h1>'
+    +'<div style="display:grid;grid-template-columns:1.35fr 1fr;gap:24px;align-items:start">'
+    +'<div style="max-height:390px;overflow:auto">'+_boardEgresosTable(true)+'<div style="margin-top:8px;font-weight:800;font-size:14px;border-top:2px solid #333;padding-top:8px;display:flex;justify-content:space-between"><span>Total Egresos</span><span>'+_bMoney(k.egresos)+'</span></div></div>'
+    +'<div style="position:relative;height:230px"><canvas id="bd-s-egr"></canvas></div></div>')});
   // 6 P&L
   slides.push({t:'Estado de Resultados', html:frame('','<h2>Estado de Resultados</h2><h1>P&amp;L '+_esc(per.label)+'</h1>'+_boardPLTable())});
   // 7 Presupuesto
   if(d.meta && k.ingresosMeta>0){
     slides.push({t:'Presupuesto', chart:'meta', html:frame('','<h2>Presupuesto vs Meta</h2><h1>'+(k.cumplimientoMeta>=1?'Meta superada':'Cumplimiento '+(k.cumplimientoMeta*100).toFixed(0)+'%')+'</h1>'
       +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:center">'
-      +'<canvas id="bd-s-meta" height="200"></canvas>'
+      +'<div style="position:relative;height:220px"><canvas id="bd-s-meta"></canvas></div>'
       +'<div style="font-size:14px;line-height:1.8"><div>Meta de ingresos: <b>'+_bMoney(k.ingresosMeta)+'</b></div><div>Ingreso real: <b>'+_bMoney(k.ingresos)+'</b></div>'
       +'<div style="margin-top:8px;font-size:18px;font-weight:800;color:'+(k.cumplimientoMeta>=1?'#3f8f5e':'#c0505c')+'">'+(k.cumplimientoMeta>=1?'+'+_bMoney(k.ingresos-k.ingresosMeta)+' sobre la meta':_bMoney(k.ingresosMeta-k.ingresos)+' por debajo')+'</div></div></div>')});
   }
   // 8 Comparativo anual
-  slides.push({t:'Comparativo Anual', chart:'serieBig', html:frame('','<h2>Comparativo Anual</h2><h1>Ingresos vs Egresos '+yr+'</h1>'
-    +'<canvas id="bd-s-serieBig" height="150"></canvas>'
+  slides.push({t:'Comparativo Anual', chart:'serieBig', html:frame('','<h2>Comparativo Anual</h2><h1>Últimos 12 meses</h1>'
+    +'<div style="position:relative;height:260px"><canvas id="bd-s-serieBig"></canvas></div>'
     +'<p class="narr" style="margin-top:14px">'+_esc(_boardYearAnalysis())+'</p>')});
   return slides;
 }
@@ -14825,9 +14852,8 @@ function boardNav(dir){ _boardSlide+=dir; _boardRenderStage(); }
 function _boardSlideChart(kind){
   if(typeof Chart==='undefined') return; var d=_boardData, th=_bTheme();
   function serie(id,h){ var el=document.getElementById(id); if(!el)return; var s=d.serie||[];
-    _boardCharts.push(new Chart(el,{type:'line',data:{labels:s.map(function(m){return m.mes;}),
-      datasets:[{label:'Ingresos',data:s.map(function(m){return m.ingresos;}),borderColor:th.ing,backgroundColor:th.ing+'33',fill:true,tension:.35,pointRadius:2},
-                {label:'Egresos',data:s.map(function(m){return m.egresos;}),borderColor:th.egr,backgroundColor:th.egr+'33',fill:true,tension:.35,pointRadius:2}]},
+    _boardCharts.push(new Chart(el,{type:'line',data:{labels:s.map(function(m){return m.label||m.mes;}),
+      datasets:_boardSerieDatasets(s,th)},
       options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:11}}}},scales:{y:{ticks:{callback:function(v){return '$'+_bK(v);}}}}}})); }
   function donut(id,arr){ var el=document.getElementById(id); if(!el||!arr)return;
     _boardCharts.push(new Chart(el,{type:'doughnut',data:{labels:arr.map(function(x){return x.label;}),datasets:[{data:arr.map(function(x){return x.valor;}),backgroundColor:_BOARD_DONUT,borderColor:'#fff',borderWidth:1}]},
