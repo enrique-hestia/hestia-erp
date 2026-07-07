@@ -4609,7 +4609,14 @@ function updateIngresoConBancos(payload) {
     // IDEMPOTENTE: en Santander/MP se borran las filas de esta OP (se re-crean
     // limpias abajo, sin acumular reversos). Efectivo sí se reversa por su hoja.
     var _sanOpen = _bankOpening('santander');   // capturar apertura ANTES de borrar
-    var _mpCom = _bankMpComisionDeOp(opId);     // conservar comisión MP ya registrada
+    // Comisión MP: si el front la manda explícita (modal de edición) se usa esa;
+    // si no, se conserva la ya registrada leyéndola de la fila anterior.
+    var _mpCom;
+    if (payload.comisionMP != null && payload.comisionMP !== '') {
+      _mpCom = -Math.abs(parseFloat(payload.comisionMP) || 0);
+    } else {
+      _mpCom = _bankMpComisionDeOp(opId);
+    }
     _bankDeleteByOp('santander', opId);
     _bankDeleteByOp('mercadopago', opId);
     _reverseEfectivoOnly(opId, data[0], origRows, origFP, origFecha, origPagado, origObsBank);

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.52 -->
+﻿<!-- app-build:2026.07.07.53 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6153,9 +6153,27 @@ async function ingSubmit() {
   var payload = _ingCollectPayload();
   if (!payload) return;
 
-  // En modo edición la comisión ya fue registrada al crear el ingreso —
-  // no volver a pedirla. Solo se recaptura en ingresos NUEVOS.
+  // En edición SÍ confirmamos la comisión MP: el modal se pre-carga con la
+  // comisión actualmente registrada (leída del banco) para conservarla con un
+  // clic, o corregirla si un edit anterior la borró. Otras formas de pago: directo.
   if (_ingEditMode) {
+    var mpEdit = payload._payments.filter(function(p){ return p.formaPago==='TDC'||p.formaPago==='TDD'||p.formaPago==='AMEX'; });
+    var mpEditTotal = mpEdit.reduce(function(s,p){ return s + p.monto; }, 0);
+    if (mpEditTotal > 0) {
+      var prevCom = 0;
+      try {
+        var rc = await fetch(APPS_SCRIPT_URL + '?action=mpComOp&opId=' + encodeURIComponent(_ingEditMode) + '&token=' + encodeURIComponent(getToken()), {redirect:'follow'});
+        var jc = await rc.json(); prevCom = Math.abs(parseFloat(jc.comision) || 0);
+      } catch (e) {}
+      _ingPendingBankData = payload;
+      var d1 = document.getElementById('ing-com-cobro-display'); if (d1) d1.textContent = '$' + mpEditTotal.toLocaleString('en-US', {minimumFractionDigits:2});
+      var d2 = document.getElementById('ing-com-cobro-val');     if (d2) d2.textContent = '$' + mpEditTotal.toLocaleString('en-US', {minimumFractionDigits:2});
+      document.getElementById('ing-com-com-val').textContent  = '$' + prevCom.toLocaleString('en-US', {minimumFractionDigits:2});
+      document.getElementById('ing-com-neto-val').textContent = '$' + (mpEditTotal - prevCom).toLocaleString('en-US', {minimumFractionDigits:2});
+      document.getElementById('ing-com-monto').value = prevCom ? prevCom : '';
+      document.getElementById('modal-ing-comision').style.display = 'flex';
+      return;
+    }
     await _ingSaveAndBank(payload, 0);
     return;
   }
@@ -6205,6 +6223,7 @@ async function ingConfirmComision() {
   var comBtn = document.getElementById('ing-com-save-btn');
   if (comBtn) { comBtn.disabled = true; comBtn.textContent = 'Guardando…'; }
   document.getElementById('modal-ing-comision').style.display = 'none';
+  _ingPendingBankData.comisionMP = com;   // en edición el backend la usa; en alta el front la aplica
   await _ingSaveAndBank(_ingPendingBankData, com);
   _ingPendingBankData = null;
   if (comBtn) { comBtn.disabled = false; comBtn.textContent = 'Guardar en Mercado Pago'; }

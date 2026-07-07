@@ -285,6 +285,13 @@ function doGet(e) {
       return jsonResponse(readBDCxP());
     }
 
+    // Comisión MP actualmente registrada para un OP (para pre-cargar el modal al editar)
+    if (action === 'mpComOp') {
+      var _opMp = (e && (e.parameter.opId || e.parameter.op)) || '';
+      var _cmp = (typeof _bankMpComisionDeOp === 'function' && _opMp) ? _bankMpComisionDeOp(_opMp) : 0;
+      return jsonResponse({ ok:true, opId:_opMp, comision: Math.abs(_cmp) });
+    }
+
     // Gastos fijos (recurrentes): catálogo, propuestas del mes, proyección
     if (action === 'gfAll') {
       var _per = e.parameter.periodo || '';
