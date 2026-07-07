@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.06.38 -->
+﻿<!-- app-build:2026.07.06.39 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -13991,7 +13991,18 @@ var _compData = null;
 var _summaryData = null;
 var _summaryCfg  = null;
 var _summaryOpen = {}; // línea drill-down abierta
-var _summarySubOpen = {}; // sub-item (producto/subtipo) abierto
+var _summarySubOpen = {}; // sub-item (subgrupo/producto/subtipo) abierto
+var _summaryProdOpen = {}; // producto (nivel 3) abierto
+function _smRevPct(v){ var rev=(_summaryData&&_summaryData.metricas&&_summaryData.metricas.revenue)||0; return rev>0?v/rev:null; }
+function _smDrill(rows){
+  var dr='<tr class="sm-drill"><td colspan="5"><table>';
+  (rows||[]).forEach(function(rw){
+    dr+='<tr><td>'+_esc(rw.fecha||'')+' · '+_esc(rw.nombre||'')+'</td>'
+      +'<td style="text-align:left;color:var(--color-text-muted,#6b7280)">'+_esc(rw.concepto||rw.subtipo||'')+'</td>'
+      +'<td style="text-align:right;font-weight:600">'+_sumMoney(rw.monto)+'</td></tr>';
+  });
+  return dr+'</table></td></tr>';
+}
 
 function _sumMoney(v){ try { return fmtMoney(Number(v)||0, 'Finanzas'); } catch(e){ return '$'+(Number(v)||0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); } }
 function _sumPct(v){ return v==null ? '—' : (v*100).toFixed(1)+'%'; }
@@ -14041,9 +14052,15 @@ function _sumStyles(){
   + '.sm-dato.clickable:hover td{background:rgba(196,106,122,.06)}'
   + '.sm-dato .sm-caret{display:inline-block;width:14px;color:var(--color-text-muted,#9ca3af);transition:transform .15s}'
   + '.sm-dato.open .sm-caret{transform:rotate(90deg)}'
-  + '.sm-grpu td{background:rgba(196,106,122,.10);font-weight:700;font-size:11.5px;text-transform:uppercase;letter-spacing:.02em;color:#9c4f5f}'
-  + '.sm-grpu td:first-child{padding-left:38px}'
-  + '.sm-sub td:first-child{padding-left:62px;color:var(--color-text,#374151)}'
+  + '.sm-qty{color:var(--color-text-muted,#9ca3af);font-weight:400}'
+  + '.sm-sub td:first-child{padding-left:44px;color:var(--color-text,#374151)}'
+  + '.sm-sub.isgrp td{background:rgba(196,106,122,.08);font-weight:700}'
+  + '.sm-sub.isgrp td:first-child{padding-left:38px;color:#9c4f5f}'
+  + '.sm-prod td:first-child{padding-left:66px;color:var(--color-text-muted,#4b5563)}'
+  + '.sm-prod td{background:rgba(120,120,140,.03);font-size:12.5px}'
+  + '.sm-prod.clickable{cursor:pointer}.sm-prod.clickable:hover td{background:rgba(196,106,122,.05)}'
+  + '.sm-prod .sm-caret{display:inline-block;width:13px;color:var(--color-text-muted,#b0b0b8);transition:transform .15s;font-size:11px}'
+  + '.sm-prod.open .sm-caret{transform:rotate(90deg)}'
   + '.sm-sub td{background:rgba(120,120,140,.03);font-size:12.5px}'
   + '.sm-sub.clickable{cursor:pointer}'
   + '.sm-sub.clickable:hover td{background:rgba(196,106,122,.05)}'
@@ -14072,6 +14089,14 @@ function _sumStyles(){
   + '.sm-cfgrow input,.sm-cfgrow select{font-size:12px;padding:5px 7px;border:1px solid var(--color-border,#e5e7eb);border-radius:6px;background:var(--color-surface,#fff);color:var(--color-text,#1a252f);width:100%}'
   + '.sm-cfgrow .k{font-size:12px;color:var(--color-text,#1a252f);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
   + '.sm-cfggrp{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#c46a7a;margin:14px 0 4px}'
+  + '.sm-part{border:1px solid var(--color-border,#e5e7eb);border-radius:11px;padding:8px 14px;background:var(--color-surface,#fff)}'
+  + '.sm-part-row{display:grid;grid-template-columns:140px 1fr 60px 120px;gap:12px;align-items:center;padding:5px 0;font-size:12.5px}'
+  + '.sm-part-lbl{font-weight:600;color:var(--color-text,#1a252f);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+  + '.sm-part-bar{background:var(--color-bg,#f0f0f2);border-radius:6px;height:9px;overflow:hidden}'
+  + '.sm-part-bar span{display:block;height:100%;background:#c46a7a;border-radius:6px}'
+  + '.sm-part-val{text-align:right;font-weight:700;color:#9c4f5f;font-variant-numeric:tabular-nums}'
+  + '.sm-part-amt{text-align:right;color:var(--color-text-muted,#6b7280);font-variant-numeric:tabular-nums}'
+  + '@media(max-width:640px){.sm-part-row{grid-template-columns:1fr 50px;}.sm-part-bar,.sm-part-amt{display:none}}'
   + '@media(max-width:640px){.sm-table th.hide-m,.sm-table td.hide-m{display:none}}';
   document.head.appendChild(s);
 }
@@ -14169,41 +14194,37 @@ function _renderSummary(){
         +'<td class="hide-m">'+_sumMoney(l.prev)+'</td>'
         +'<td class="'+delta.cls+'">'+delta.txt+'</td></tr>';
       if(open && hasSubs){
-        var _lastGrupo=null;
         subs.forEach(function(si,sj){
-          // Subheader por grupo de la columna U (Ciclos, Complementos, etc.)
-          var gU=(si.grupo||'').trim();
-          if(gU!==_lastGrupo){
-            _lastGrupo=gU;
-            if(gU){
-              // total del grupo
-              var gTot=0,gPrev=0; subs.forEach(function(x){ if((x.grupo||'').trim()===gU){ gTot+=x.actual; gPrev+=x.prev; } });
-              h+='<tr class="sm-grpu"><td>'+_esc(gU)+'</td>'
-                +'<td>'+_sumMoney(gTot)+'</td>'
-                +'<td class="hide-m">'+_sumPct((_summaryData.metricas&&_summaryData.metricas.revenue)?gTot/_summaryData.metricas.revenue:null)+'</td>'
-                +'<td class="hide-m">'+_sumMoney(gPrev)+'</td><td></td></tr>';
-            }
-          }
           var skey=idx+'_'+sj;
           var sopen=!!_summarySubOpen[skey];
+          var hasProd=(si.productos&&si.productos.length);
           var hasR=(si.rows&&si.rows.length);
+          var expandable=hasProd||hasR;
           var sd=_sumDelta(si.actual,si.prev);
-          var qty=(si.cantidad&&si.cantidad>0)?' <span style="color:var(--color-text-muted,#9ca3af);font-weight:400">×'+(Math.round(si.cantidad*100)/100)+'</span>':'';
-          h+='<tr class="sm-sub'+(hasR?' clickable':'')+(sopen?' open':'')+'"'+(hasR?' onclick="summarySubToggle(\''+skey+'\')"':'')+'>'
-            +'<td>'+(hasR?'<span class="sm-caret">▸</span>':'<span class="sm-caret"></span>')+_esc(si.label)+qty+'</td>'
+          var qty=(si.cantidad&&si.cantidad>0)?' <span class="sm-qty">×'+(Math.round(si.cantidad*100)/100)+'</span>':'';
+          h+='<tr class="sm-sub'+(hasProd?' isgrp':'')+(expandable?' clickable':'')+(sopen?' open':'')+'"'+(expandable?' onclick="summarySubToggle(\''+skey+'\')"':'')+'>'
+            +'<td>'+(expandable?'<span class="sm-caret">▸</span>':'<span class="sm-caret"></span>')+_esc(si.label)+qty+'</td>'
             +'<td>'+_sumMoney(si.actual)+'</td>'
-            +'<td class="hide-m">'+_sumPct((_summaryData.metricas&&_summaryData.metricas.revenue)?si.actual/_summaryData.metricas.revenue:null)+'</td>'
+            +'<td class="hide-m">'+_sumPct(_smRevPct(si.actual))+'</td>'
             +'<td class="hide-m">'+_sumMoney(si.prev)+'</td>'
             +'<td class="'+sd.cls+'">'+sd.txt+'</td></tr>';
-          if(sopen && hasR){
-            var dr='<tr class="sm-drill"><td colspan="5"><table>';
-            si.rows.forEach(function(rw){
-              dr+='<tr><td>'+_esc(rw.fecha||'')+' · '+_esc(rw.nombre||'')+'</td>'
-                +'<td style="text-align:left;color:var(--color-text-muted,#6b7280)">'+_esc(rw.concepto||rw.subtipo||'')+'</td>'
-                +'<td style="text-align:right;font-weight:600">'+_sumMoney(rw.monto)+'</td></tr>';
+          if(sopen && hasProd){
+            si.productos.forEach(function(pi,pj){
+              var pkey=skey+'_'+pj;
+              var popen=!!_summaryProdOpen[pkey];
+              var hasPR=(pi.rows&&pi.rows.length);
+              var pd=_sumDelta(pi.actual,pi.prev);
+              var pqty=(pi.cantidad&&pi.cantidad>0)?' <span class="sm-qty">×'+(Math.round(pi.cantidad*100)/100)+'</span>':'';
+              h+='<tr class="sm-prod'+(hasPR?' clickable':'')+(popen?' open':'')+'"'+(hasPR?' onclick="summaryProdToggle(\''+pkey+'\')"':'')+'>'
+                +'<td>'+(hasPR?'<span class="sm-caret">▸</span>':'<span class="sm-caret"></span>')+_esc(pi.label)+pqty+'</td>'
+                +'<td>'+_sumMoney(pi.actual)+'</td>'
+                +'<td class="hide-m">'+_sumPct(_smRevPct(pi.actual))+'</td>'
+                +'<td class="hide-m">'+_sumMoney(pi.prev)+'</td>'
+                +'<td class="'+pd.cls+'">'+pd.txt+'</td></tr>';
+              if(popen && hasPR) h+=_smDrill(pi.rows);
             });
-            dr+='</table></td></tr>';
-            h+=dr;
+          } else if(sopen && hasR){
+            h+=_smDrill(si.rows);
           }
         });
       }
@@ -14216,6 +14237,23 @@ function _renderSummary(){
   if((ax.actual||0)!==0){
     h+='<div class="sm-note"><b>Fuera del P&amp;L — Pago American Express: '+_sumMoney(ax.actual)+'.</b> '
       +'Es la liquidación de la tarjeta del periodo anterior (apalancamiento), no un gasto nuevo del periodo, por eso no afecta la utilidad. Sí es una salida de caja.</div>';
+  }
+
+  // % Participación por Línea (de Revenue)
+  var revLines=(d.lineas||[]).filter(function(x){ return x.tipo==='dato'&&x.grupo==='REVENUE'; });
+  if(revLines.length){
+    var revTot=(d.metricas&&d.metricas.revenue)||0;
+    h+='<div style="margin-top:22px"><div class="sm-cfggrp">% Participación por Línea</div><div class="sm-part">';
+    revLines.forEach(function(rl){
+      var p=revTot>0?rl.actual/revTot:0;
+      h+='<div class="sm-part-row">'
+        +'<div class="sm-part-lbl">'+_esc(rl.label)+'</div>'
+        +'<div class="sm-part-bar"><span style="width:'+(Math.max(1,Math.round(p*100)))+'%"></span></div>'
+        +'<div class="sm-part-val">'+(p*100).toFixed(2)+'%</div>'
+        +'<div class="sm-part-amt">'+_sumMoney(rl.actual)+'</div>'
+        +'</div>';
+    });
+    h+='</div></div>';
   }
 
   // Lab & Insumos
@@ -14233,9 +14271,17 @@ function _renderSummary(){
 
 function summaryToggle(idx){ _summaryOpen[idx]=!_summaryOpen[idx]; _renderSummary(); }
 function summarySubToggle(skey){ _summarySubOpen[skey]=!_summarySubOpen[skey]; _renderSummary(); }
+function summaryProdToggle(pkey){ _summaryProdOpen[pkey]=!_summaryProdOpen[pkey]; _renderSummary(); }
 function summaryToggleAll(open){
-  _summaryOpen={}; _summarySubOpen={};
-  if(open && _summaryData){ (_summaryData.lineas||[]).forEach(function(l,i){ if(l.tipo==='dato'&&l.subitems&&l.subitems.length) _summaryOpen[i]=true; }); }
+  _summaryOpen={}; _summarySubOpen={}; _summaryProdOpen={};
+  if(open && _summaryData){
+    (_summaryData.lineas||[]).forEach(function(l,i){
+      if(l.tipo==='dato'&&l.subitems&&l.subitems.length){
+        _summaryOpen[i]=true;
+        l.subitems.forEach(function(si,sj){ if(si.productos&&si.productos.length) _summarySubOpen[i+'_'+sj]=true; });
+      }
+    });
+  }
   _renderSummary();
 }
 function _esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -14251,11 +14297,16 @@ async function summaryExport(){
     var delta=_sumDelta(l.actual,l.prev);
     aoa.push([ (l.tipo==='dato'?'   ':'')+(l.label||l.linea||''), Number(l.actual)||0, l.pct==null?'':(l.pct), Number(l.prev)||0, delta.txt ]);
     if(l.tipo==='dato' && l.subitems){
-      var _lg=null;
       l.subitems.forEach(function(si){
-        var g=(si.grupo||'').trim();
-        if(g!==_lg){ _lg=g; if(g) aoa.push([ '   ‣ '+g, '', '', '', '' ]); }
-        aoa.push([ '      '+(si.label||'')+(si.cantidad>0?' (×'+si.cantidad+')':''), Number(si.actual)||0, '', Number(si.prev)||0, '' ]);
+        var q=si.cantidad>0?' (×'+si.cantidad+')':'';
+        if(si.productos && si.productos.length){
+          aoa.push([ '   ‣ '+(si.label||''), Number(si.actual)||0, '', Number(si.prev)||0, '' ]);
+          si.productos.forEach(function(pi){
+            aoa.push([ '        '+(pi.label||'')+(pi.cantidad>0?' (×'+pi.cantidad+')':''), Number(pi.actual)||0, '', Number(pi.prev)||0, '' ]);
+          });
+        } else {
+          aoa.push([ '      '+(si.label||'')+q, Number(si.actual)||0, '', Number(si.prev)||0, '' ]);
+        }
       });
     }
   });

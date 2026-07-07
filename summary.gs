@@ -242,6 +242,20 @@ function readSummary(fechaInicio, fechaFin) {
       else { s.prev += monto; s.cantP += cant; }
     }
 
+    // Acumulador de REVENUE en 3 niveles: Grupo (col U) → Subgrupo (categoría) → Producto → movimientos
+    var revAgg = {}; // l1 -> {label,orden,actual,prev,subs:{ l2 -> {label,actual,prev,cantA,cantP,_ord,prods:{ prod -> {label,actual,prev,cantA,cantP,rows:[]} }} }}
+    function getRev(l1, orden){ if(!revAgg[l1]) revAgg[l1]={label:l1,orden:orden||90,actual:0,prev:0,subs:{}}; return revAgg[l1]; }
+    function addRev(l1line, l2, prod, monto, cant, isA, drill){
+      l2 = String(l2||'').trim() || l1line.label;
+      prod = String(prod||'(sin producto)').trim() || '(sin producto)';
+      var s = l1line.subs[l2];
+      if(!s){ s = l1line.subs[l2] = {label:l2, actual:0, prev:0, cantA:0, cantP:0, _ord:Object.keys(l1line.subs).length, prods:{}}; }
+      var p = s.prods[prod];
+      if(!p){ p = s.prods[prod] = {label:prod, actual:0, prev:0, cantA:0, cantP:0, _ord:Object.keys(s.prods).length, rows:[]}; }
+      if(isA){ s.actual+=monto; s.cantA+=cant; p.actual+=monto; p.cantA+=cant; if(drill) p.rows.push(drill); }
+      else { s.prev+=monto; s.cantP+=cant; p.prev+=monto; p.cantP+=cant; }
+    }
+
     var amex = { actual:0, prev:0, rows:[] };
     var recon = { ingresosTotal:0, egresosTotal:0, egresosBruto:0, egresosCancelado:0, sinClasificar:0,
                   ingresosSinFecha:0, ingresosSinFechaMonto:0, egresosSinFecha:0 };
@@ -288,23 +302,22 @@ function readSummary(fechaInicio, fechaFin) {
         if (!f && Number(r.total)){ recon.ingresosSinFecha++; recon.ingresosSinFechaMonto += Number(r.total)||0; }
         var enActual=_sumInRange(f, fi, ff), enPrev=_sumInRange(f, pi, pf);
         if (!enActual && !enPrev) return;
-        // Grupo de Revenue = valor de la columna U (Ciclo Alta, Complementos, Surrogacy…),
-        // con fallback a la categoría si U está vacía. Orden según la hoja de referencia.
-        var grpLabel = String(r.grupoU||'').trim() || String(r.categoria||'').trim() || '(Sin grupo)';
-        var line = get('REVENUE', grpLabel, _summaryRevOrden(grpLabel), '');
-        // Sub-item (redespliegue) = Producto
-        var subLbl = String(r.producto||'').trim() || String(r.categoria||'').trim() || '(sin producto)';
+        // 3 niveles: Grupo (col U) → Subgrupo (categoría) → Producto
+        var l1 = String(r.grupoU||'').trim() || String(r.categoria||'').trim() || '(Sin grupo)';
+        var l2 = String(r.categoria||'').trim();
+        var prod = String(r.producto||'').trim() || l2 || '(sin producto)';
         var cant = Number(r.cantidad)||0; if(!cant) cant=1;
+        var line = getRev(l1, _summaryRevOrden(l1));
         if (enActual){ line.actual+=r.total; recon.ingresosTotal+=r.total;
-          addSub(line, subLbl, r.total, cant, true, {fecha:f, nombre:r.paciente, concepto:r.producto+' · '+r.categoria, monto:r.total, cantidad:cant}, '');
+          addRev(line, l2, prod, r.total, cant, true, {fecha:f, nombre:r.paciente, concepto:r.producto+' · '+r.categoria, monto:r.total, cantidad:cant});
         }
-        if (enPrev){ line.prev+=r.total; addSub(line, subLbl, r.total, cant, false, null, ''); }
+        if (enPrev){ line.prev+=r.total; addRev(line, l2, prod, r.total, cant, false, null); }
       });
     }
 
     // Totales por grupo
     function grpTot(g,campo){ var t=0; Object.keys(agg).forEach(function(k){ if(agg[k].grupo===g) t+=agg[k][campo]||0; }); return t; }
-    var revA=grpTot('REVENUE','actual'), revP=grpTot('REVENUE','prev');
+    var revA=0, revP=0; Object.keys(revAgg).forEach(function(k){ revA+=revAgg[k].actual; revP+=revAgg[k].prev; });
     var cogsA=grpTot('COGS','actual'), cogsP=grpTot('COGS','prev');
     var opexA=grpTot('OPEX','actual'), opexP=grpTot('OPEX','prev');
     var gaA=grpTot('GA','actual'), gaP=grpTot('GA','prev');
@@ -337,13 +350,39 @@ function readSummary(fechaInicio, fechaFin) {
           actual:l.actual, prev:l.prev, subitems:subs };
       });
     }
+    // REVENUE en 3 niveles: Grupo → Subgrupo → Producto (con aplanado si hay 1 solo subgrupo)
+    function revLineas(){
+      var arr = Object.keys(revAgg).map(function(k){ return revAgg[k]; });
+      arr.sort(function(a,b){ return (a.orden-b.orden) || (b.actual-a.actual); });
+      return arr.map(function(l1){
+        var subsArr = Object.keys(l1.subs).map(function(k){ return l1.subs[k]; })
+          .sort(function(a,b){ return b.actual-a.actual; });
+        function prodsOf(s){
+          return Object.keys(s.prods).map(function(k){ return s.prods[k]; })
+            .sort(function(a,b){ return b.actual-a.actual; })
+            .map(function(p){ return { label:p.label, cantidad:p.cantA, actual:p.actual, prev:p.prev,
+              rows:p.rows.sort(function(a,b){ return b.monto-a.monto; }) }; });
+        }
+        var subitems;
+        if (subsArr.length <= 1){
+          // Un solo subgrupo → mostrar productos directos (nivel 2 = producto)
+          subitems = subsArr.length ? prodsOf(subsArr[0]) : [];
+        } else {
+          // Varios subgrupos → nivel 2 = subgrupo, nivel 3 = producto
+          subitems = subsArr.map(function(s){ return { label:s.label, cantidad:s.cantA,
+            actual:s.actual, prev:s.prev, productos:prodsOf(s) }; });
+        }
+        return { tipo:'dato', grupo:'REVENUE', linea:l1.label, label:l1.label,
+          actual:l1.actual, prev:l1.prev, subitems:subitems };
+      });
+    }
     function pct(v){ return revA>0 ? v/revA : null; }
     function sec(g,label,actual,prev){ return { tipo:'seccion', grupo:g, label:label, actual:actual, prev:prev, pct:pct(actual) }; }
     function met(label,actual,prev){ return { tipo:'metric', label:label, actual:actual, prev:prev, pct:pct(actual) }; }
     function stamp(list){ return list.map(function(x){ x.pct=pct(x.actual); return x; }); }
 
     var lineas = [];
-    lineas.push(sec('REVENUE','Revenue',revA,revP));  lineas = lineas.concat(stamp(lineasDe('REVENUE')));
+    lineas.push(sec('REVENUE','Revenue',revA,revP));  lineas = lineas.concat(stamp(revLineas()));
     lineas.push(sec('COGS','COGS',cogsA,cogsP));       lineas = lineas.concat(stamp(lineasDe('COGS')));
     lineas.push(met('Gross Profit',gpA,gpP));
     lineas.push(sec('OPEX','OpEx',opexA,opexP));       lineas = lineas.concat(stamp(lineasDe('OPEX')));
