@@ -649,6 +649,11 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega cxp_creditos.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(cancelarOrdenCxP(body));
     }
+    if (body.action === 'repararAbonosCruzados') {
+      if (typeof repararAbonosCruzados !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza cxp_creditos.gs en Apps Script y redespliega.'});
+      return jsonResponse(repararAbonosCruzados());
+    }
     if (body.action === 'saveMedicamento') {
       return jsonResponse(saveMedicamento(body));
     }

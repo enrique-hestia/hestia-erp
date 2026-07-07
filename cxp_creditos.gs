@@ -107,14 +107,51 @@ function _consumirCredito(creditoId, monto) {
   var data = sh.getDataRange().getValues();
   var hdrs = data[0];
   var idCol = _cxpColIdx(hdrs, 'ID'), dispCol = _cxpColIdx(hdrs, 'MontoDisponible');
+  var provCol = _cxpColIdx(hdrs, 'Proveedor');
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][idCol]) !== String(creditoId)) continue;
     var disp = Number(data[i][dispCol]) || 0;
     if (monto > disp + 0.01) return { ok: false, error: 'El crédito solo tiene $' + disp.toFixed(2) + ' disponible' };
     sh.getRange(i + 1, dispCol + 1).setValue(Math.max(0, disp - monto));
-    return { ok: true };
+    return { ok: true, proveedor: String(data[i][provCol] || '') };
   }
   return { ok: false, error: 'Crédito no encontrado' };
+}
+function _cxpNormProv(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+
+/* ── Reparación: reversa abonos de crédito CRUZADOS (crédito de un proveedor
+   aplicado por error a una orden de OTRO proveedor) y restaura el crédito.
+   Corre UNA vez desde el editor de Apps Script (o vía POST) para corregir
+   casos históricos como el crédito de LEPSI PRISMA abonado a CRISBEN. ── */
+function repararAbonosCruzados() {
+  try {
+    var ss = _cxpCredSS();
+    var abSh = ss.getSheetByName(CXP_ABONO_TAB); if (!abSh) return { ok: false, error: 'Sin hoja de abonos' };
+    var credSh = ss.getSheetByName(CXP_CRED_TAB); if (!credSh) return { ok: false, error: 'Sin hoja de créditos' };
+    var ad = abSh.getDataRange().getValues(), ah = ad[0];
+    var cd = credSh.getDataRange().getValues(), ch = cd[0];
+    var credProv = {}; var idC = _cxpColIdx(ch, 'ID'), pC = _cxpColIdx(ch, 'Proveedor');
+    for (var i = 1; i < cd.length; i++) credProv[String(cd[i][idC])] = String(cd[i][pC] || '');
+    var iRev = _cxpColIdx(ah, 'Reversado'), iOrig = _cxpColIdx(ah, 'Origen'), iCred = _cxpColIdx(ah, 'CreditoId'),
+        iProv = _cxpColIdx(ah, 'Proveedor'), iMonto = _cxpColIdx(ah, 'Monto'), iCxp = _cxpColIdx(ah, 'CxPId');
+    var corregidos = [];
+    for (var a = 1; a < ad.length; a++) {
+      var rev = ad[a][iRev] === true || String(ad[a][iRev]).toUpperCase() === 'TRUE';
+      if (rev) continue;
+      if (String(ad[a][iOrig] || '') !== 'credito') continue;
+      var credId = String(ad[a][iCred] || ''); if (!credId) continue;
+      var provCred = credProv[credId] || '', provOrden = String(ad[a][iProv] || '');
+      if (!provCred || !provOrden) continue;
+      if (_cxpNormProv(provCred) === _cxpNormProv(provOrden)) continue;   // mismo proveedor: ok
+      var monto = Number(ad[a][iMonto]) || 0;
+      abSh.getRange(a + 1, iRev + 1).setValue(true);       // marca el abono reversado
+      _restaurarCredito(credId, monto);                    // devuelve el saldo al crédito original
+      corregidos.push({ cxpId: String(ad[a][iCxp] || ''), ordenProveedor: provOrden, creditoDe: provCred, monto: monto });
+    }
+    try { CacheService.getScriptCache().remove('gas_egresos_v1_2026'); } catch (e) {}
+    try { logAudit('sistema', 'CxP', 'Reparar abonos cruzados', '', '', '', corregidos.length + ' reversados'); } catch (e) {}
+    return { ok: true, corregidos: corregidos.length, detalle: corregidos };
+  } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
 function _restaurarCredito(creditoId, monto) {
@@ -322,6 +359,11 @@ function aplicarAbonoCxP(body) {
       if (!creditoId) return { ok: false, error: 'Falta indicar qué crédito aplicar' };
       var okCred = _consumirCredito(creditoId, montoCredito);
       if (!okCred.ok) return okCred;
+      // BLINDAJE: un crédito solo se puede aplicar a órdenes del MISMO proveedor.
+      if (okCred.proveedor && _cxpNormProv(okCred.proveedor) !== _cxpNormProv(proveedor)) {
+        _restaurarCredito(creditoId, montoCredito);   // deshace el consumo
+        return { ok: false, error: 'Ese crédito es de "' + okCred.proveedor + '" y no se puede aplicar a una orden de "' + proveedor + '". Cada crédito solo aplica al mismo proveedor.' };
+      }
       _registrarAbono({ cxpId: cxpId, proveedor: proveedor, concepto: concepto, monto: montoCredito, origen: 'credito', creditoId: creditoId, usuario: body.usuario || '', fecha: fechaPago });
     }
     if (montoPagoCash > 0) {
