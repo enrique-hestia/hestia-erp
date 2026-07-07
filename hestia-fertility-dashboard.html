@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.54 -->
+﻿<!-- app-build:2026.07.07.55 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6687,6 +6687,7 @@ function _renderEgresosERP() {
           +' data-prov="'+(r.proveedor||'').replace(/"/g,'&quot;')+'" data-monto="'+(r.monto||0)+'" data-fecha="'+((r.fecha||r.vencimiento||'').substring(0,10))+'">'
           +'<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#8e4756">Datos fiscales (CFDI)</div>'
           +'<div class="eg-fiscal-body" style="color:var(--text-secondary,#374151);margin-top:2px">'+(r.linkFacturaUrl?'Cargando datos del adjunto…':((!r.linkFacturaUrl&&r.linkFactura)?'':'Buscando el XML en el repositorio del SAT…'))+'</div></div>'
+        +((r.pagado&&!esCancel)?'<div style="grid-column:1/-1" id="eg-abonos-'+r._rowNum+'" data-cxpid="'+(r.id||'').replace(/"/g,'&quot;')+'"></div>':'')
         +(esCancel?'<div style="grid-column:1/-1" id="eg-traza-'+r._rowNum+'" data-cxpid="'+(r.id||'').replace(/"/g,'&quot;')+'">'
           +'<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#6b7280">Movimiento de cancelación</div>'
           +'<div class="eg-traza-body" style="color:var(--text-secondary,#374151);margin-top:2px">Cargando historia del pedido…</div></div>':'')
@@ -7011,7 +7012,42 @@ function egToggleRow(rowNum) {
   var open = det.style.display !== 'none';
   det.style.display = open ? 'none' : '';
   if (tog) tog.classList.toggle('open', !open);
-  if (!open) { egCargarFiscal(rowNum); egCargarTraza(rowNum); }
+  if (!open) { egCargarFiscal(rowNum); egCargarTraza(rowNum); egCargarAbonos(rowNum); }
+}
+
+/* Traza "pagado con": si la orden se pagó con crédito de proveedor (documento
+   anterior) + pago del banco, muestra el desglose en el detalle. */
+async function egCargarAbonos(rowNum){
+  var box = document.getElementById('eg-abonos-'+rowNum);
+  if (!box || box.dataset.loaded) return;
+  box.dataset.loaded = '1';
+  var cxpId = box.dataset.cxpid || '';
+  if (!cxpId) return;
+  var esc = function(v){ return String(v==null?'':v).replace(/</g,'&lt;'); };
+  var fmt = function(v){ return '$'+(Number(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  try {
+    var tok = encodeURIComponent(getToken());
+    var r = await fetch(APPS_SCRIPT_URL+'?action=abonosOrden&cxpId='+encodeURIComponent(cxpId)+'&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+    var d = await r.json();
+    if (!d.ok || !d.abonos || !d.abonos.length) return; // pago simple: nada que desglosar
+    // Solo tiene sentido mostrarlo si hubo crédito (documento anterior) mezclado con pago
+    if (!(d.totalCredito > 0)) return;
+    var h = '<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#166534;margin-bottom:3px">Pagado con</div>'
+      + '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 12px;font-size:11.5px;line-height:1.6">';
+    d.abonos.forEach(function(a){
+      if (a.origen === 'credito') {
+        h += '<div>💳 <b>'+fmt(a.monto)+'</b> con saldo a favor (documento anterior'
+          + (a.ordenOrigen ? ' <b>#'+esc(a.ordenOrigen)+'</b>' : '')
+          + (a.ordenOrigenConcepto ? ' — '+esc(a.ordenOrigenConcepto) : '')
+          + ') — no salió del banco.</div>';
+      } else {
+        h += '<div>💵 <b>'+fmt(a.monto)+'</b> pago real por <b>'+esc(a.formaPago||'banco')+'</b> — este es el que concilia.</div>';
+      }
+    });
+    h += '<div style="margin-top:5px;padding-top:5px;border-top:1px dashed #bbf7d0;color:#166534">Total: crédito '+fmt(d.totalCredito)+' + banco '+fmt(d.totalPago)+' = <b>'+fmt(d.totalCredito+d.totalPago)+'</b></div>';
+    h += '</div>';
+    box.innerHTML = h;
+  } catch(e){ /* silencioso: es informativo */ }
 }
 
 /* Traza de un egreso CANCELADO: dónde terminó su dinero (crédito aplicado

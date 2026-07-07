@@ -407,6 +407,12 @@ function doGet(e) {
       return jsonResponse(readTrazaCancelacion((e && e.parameter.cxpId) || ''));
     }
 
+    if (action === 'abonosOrden') {
+      if (typeof readAbonosOrden !== 'function')
+        return jsonResponse({ok:false, error:'Agrega cxp_creditos.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readAbonosOrden((e && e.parameter.cxpId) || ''));
+    }
+
     if (action === 'summary') {
       if (typeof readSummary !== 'function')
         return jsonResponse({ok:false, error:'Agrega summary.gs al proyecto de Apps Script y redespliega.'});

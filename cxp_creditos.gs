@@ -460,6 +460,50 @@ function readTrazaCancelacion(cxpId) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
+/* ── Desglose de cómo se PAGÓ una orden que recibió abonos: crédito (documento
+   anterior de proveedor) + pago en efectivo/banco. Para mostrar la traza
+   "pagado con el documento #Y ($X) + pago del banco ($Z)" en la orden receptora. */
+function readAbonosOrden(cxpId) {
+  try {
+    cxpId = String(cxpId || ''); if (!cxpId) return { ok: false, error: 'Falta cxpId' };
+    var sh = _cxpCredSS().getSheetByName(CXP_ABONO_TAB);
+    if (!sh) return { ok: true, abonos: [], totalCredito: 0, totalPago: 0 };
+    var data = sh.getDataRange().getValues(), hdrs = data[0];
+    var iCxP = _cxpColIdx(hdrs, 'CxPId'), iMonto = _cxpColIdx(hdrs, 'Monto'),
+        iOrigen = _cxpColIdx(hdrs, 'Origen'), iCred = _cxpColIdx(hdrs, 'CreditoId'),
+        iFP = _cxpColIdx(hdrs, 'FormaPago'), iFecha = _cxpColIdx(hdrs, 'Fecha'), iRev = _cxpColIdx(hdrs, 'Reversado');
+    // Mapa crédito → orden origen (documento anterior)
+    var ss = _cxpCredSS(), credSh = ss.getSheetByName(CXP_CRED_TAB), credOrigen = {};
+    if (credSh) {
+      var cd = credSh.getDataRange().getValues(), ch = cd[0];
+      var ciId = _cxpColIdx(ch, 'ID'), ciOrig = _cxpColIdx(ch, 'CxPIdOrigen');
+      for (var c = 1; c < cd.length; c++) credOrigen[String(cd[c][ciId])] = String(cd[c][ciOrig] || '');
+    }
+    // Info de órdenes (proveedor/concepto) para nombrar el documento anterior
+    var egSh = ss.getSheetByName(EGRESOS_TABS[2026] || 'Egresos2026'), egInfo = {};
+    if (egSh) { var ed = egSh.getDataRange().getValues();
+      for (var e = 1; e < ed.length; e++) { var id = String(ed[e][0] || ''); if (id) egInfo[id] = { proveedor: String(ed[e][4] || ''), concepto: String(ed[e][8] || '') }; } }
+    var out = [], totalCredito = 0, totalPago = 0;
+    for (var i = 1; i < data.length; i++) {
+      var r = data[i];
+      if (String(r[iCxP]) !== cxpId) continue;
+      var reversado = r[iRev] === true || String(r[iRev]).toUpperCase() === 'TRUE';
+      if (reversado) continue;
+      var monto = Number(r[iMonto]) || 0, origen = String(r[iOrigen] || 'pago');
+      var credId = String(r[iCred] || ''), ordenOrigen = credId ? (credOrigen[credId] || '') : '';
+      if (origen === 'credito') totalCredito += monto; else totalPago += monto;
+      out.push({
+        monto: monto, origen: origen, formaPago: String(r[iFP] || ''),
+        fecha: (r[iFecha] instanceof Date) ? Utilities.formatDate(r[iFecha], Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(r[iFecha] || ''),
+        creditoId: credId, ordenOrigen: ordenOrigen,
+        ordenOrigenProveedor: (ordenOrigen && egInfo[ordenOrigen]) ? egInfo[ordenOrigen].proveedor : '',
+        ordenOrigenConcepto: (ordenOrigen && egInfo[ordenOrigen]) ? egInfo[ordenOrigen].concepto : ''
+      });
+    }
+    return { ok: true, abonos: out, totalCredito: totalCredito, totalPago: totalPago };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 /* ── Cancelar una orden — el dinero ya pagado se reversa según el MODO
    que elija el usuario:
      modo 'credito' (default): queda como saldo a favor del proveedor
