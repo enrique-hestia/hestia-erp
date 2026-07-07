@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.65 -->
+﻿<!-- app-build:2026.07.07.66 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -14905,10 +14905,17 @@ async function loadResumenSemanal(fecha){
     var tok=encodeURIComponent(getToken());
     var r=await fetch(APPS_SCRIPT_URL+'?action=resumenSemanal&fecha='+encodeURIComponent(_semRef)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
     var j=await r.json();
-    if(!j.ok) throw new Error(j.error||'Error');
+    if(!j.ok){
+      // Si el backend no trae 'ok', la acción no llegó a readResumenSemanal (falta redeploy)
+      var det = j.error || (j.view||j.action||Object.keys(j||{}).slice(0,4).join(', ')) || 'sin detalle';
+      throw new Error(det);
+    }
     _semData=j; _renderSemanal();
   }catch(e){
-    root.innerHTML='<div style="padding:40px;text-align:center;color:#c83c3c;font-size:13px">No se pudo generar el Resumen Semanal: '+_esc(e.message||e)+'<br><br><button class="bd-btn" onclick="loadResumenSemanal()">Reintentar</button></div>';
+    var msg=_esc(e.message||e);
+    root.innerHTML='<div style="padding:40px;text-align:center;color:#c83c3c;font-size:13px;line-height:1.7">No se pudo generar el Resumen Semanal: <b>'+msg+'</b>'
+      +'<div style="margin-top:10px;font-size:12px;color:#6b7280;max-width:520px;margin-left:auto;margin-right:auto">Si la primera vez: agrega <b>semanal.gs</b> al proyecto de Apps Script, redespliega <b>core.gs</b> + <b>finance.gs</b> (nueva versión del Web App) y corre <b>setupSemanalConfig()</b> una vez.</div>'
+      +'<br><button class="bd-btn" onclick="loadResumenSemanal()">Reintentar</button></div>';
   }
 }
 function _renderSemanal(){
