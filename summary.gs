@@ -73,17 +73,14 @@ function _summaryDefaultClass(fuente, clave) {
    estas reglas solo definen EN QUÉ ORDEN se listan. Lo no listado va al final. */
 var SUMMARY_REV_RULES = [
   { re: /alta/,                         ord: 1,  label:'Alta' },
-  { re: /complement/,                   ord: 2,  label:'Complementos' },
-  { re: /surrogacy|gestaci|subrog/,     ord: 3,  label:'Surrogacy' },
-  { re: /androl/,                       ord: 4,  label:'Andrology' },
-  { re: /egg\s*donor|ovodon|donant|donadora/, ord: 5, label:'Egg Donor' },
-  { re: /externo/,                      ord: 6,  label:'Ciclos Externos' },
-  { re: /baja/,                         ord: 7,  label:'Baja' },
-  { re: /estudio/,                      ord: 8,  label:'Estudios' },
-  { re: /consulta/,                     ord: 9,  label:'Consultas' },
-  { re: /reprovi/,                      ord: 10, label:'Reprovida' },
-  { re: /medicament|farmac/,            ord: 11, label:'Medicamentos' },
-  { re: /almacen|congel|criopreserv/,   ord: 12, label:'Almacenamiento' }
+  { re: /surrogacy|gestaci|subrog/,     ord: 2,  label:'Surrogacy' },
+  { re: /externo/,                      ord: 3,  label:'Ciclos Externos' },
+  { re: /baja/,                         ord: 4,  label:'Baja' },
+  { re: /almacen|criopreserv/,          ord: 5,  label:'Almacenamiento' },
+  { re: /estudio/,                      ord: 6,  label:'Estudios' },
+  { re: /laboratorio/,                  ord: 7,  label:'Laboratorios' },
+  { re: /consulta/,                     ord: 8,  label:'Consulta' },
+  { re: /reprovi/,                      ord: 9,  label:'Reprovida' }
 ];
 function _summaryRevOrden(label){
   var l = _sumNorm(label);
