@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.95 -->
+﻿<!-- app-build:2026.07.07.96 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -13113,7 +13113,7 @@ async function loadHistoricoMetas(){
 function _renderHistoricoMetas(hist){
   var body=document.getElementById('pres-hist-body'); if(!body) return;
   var fM=_presFM;
-  var h='<table class="pr-tbl" style="min-width:520px"><thead><tr><th>Trimestre</th><th>Meta fijada</th><th>Real logrado</th><th>Cumplimiento</th><th>Estado</th></tr></thead><tbody>';
+  var h='<table class="pr-tbl" style="min-width:600px"><thead><tr><th>Trimestre</th><th>Meta fijada</th><th>Real logrado</th><th>Cumplimiento</th><th>Ganancia / pérdida</th><th>Estado</th></tr></thead><tbody>';
   hist.forEach(function(q){
     var esProy=q.tipo==='proyeccion', esAct=q.tipo==='actual';
     var cump=q.cumplimiento;
@@ -13121,9 +13121,13 @@ function _renderHistoricoMetas(hist){
     var estado = esProy ? '<span style="color:#6b7280">proyección</span>'
       : (q.meta<=0 ? '<span style="color:#9ca3af">sin meta</span>'
       : (q.alcanzada ? '<span style="color:#166534;font-weight:700">✓ alcanzada</span>' : '<span style="color:#991b1b;font-weight:700">✗ no</span>'));
+    // Ganancia (o pérdida) real = ingresos reales − egresos reales del trimestre. Solo para Q cerrados/en curso.
+    var g=Number(q.gananciaReal)||0; var hayReal=(q.real>0||q.egresoReal>0);
+    var gCell = esProy ? '<span style="color:#9ca3af">—</span>'
+      : (hayReal ? '<span style="color:'+(g>=0?'#166534':'#991b1b')+';font-weight:700">'+(g>=0?'':'−')+fM(Math.abs(g))+'</span>'+(esAct?' <span style="font-size:8.5px;color:#9ca3af">parcial</span>':'') : '<span style="color:#9ca3af">—</span>');
     h+='<tr'+(esAct?' style="background:rgba(196,106,122,.06)"':'')+'><td style="font-weight:700">'+q.periodo+(esAct?' <span style="font-size:9px;color:#c46a7a">(en curso)</span>':(esProy?' <span style="font-size:9px;color:#6b7280">(futuro)</span>':''))+'</td>'
       +'<td>'+(q.meta>0?fM(q.meta):'—')+'</td><td style="font-weight:700">'+(q.real>0?fM(q.real):(esProy?'—':fM(0)))+'</td>'
-      +'<td style="color:'+col+';font-weight:700">'+(cump!=null?cump+'%':'—')+'</td><td style="text-align:center">'+estado+'</td></tr>';
+      +'<td style="color:'+col+';font-weight:700">'+(cump!=null?cump+'%':'—')+'</td><td>'+gCell+'</td><td style="text-align:center">'+estado+'</td></tr>';
   });
   h+='</tbody></table>';
   body.innerHTML=h;
@@ -13964,7 +13968,14 @@ function _chatMount(){
     +'</div>'
     +'<div style="padding:8px 12px;border-bottom:1px solid var(--color-divider,#e5e7eb)"><select id="chat-canal-sel" onchange="chatSwitch(this.value)" style="width:100%;padding:7px 9px;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--color-surface,#fafafa);color:var(--text-primary,#111)"></select></div>'
     +'<div id="chat-msgs" style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:7px;background:var(--color-surface,#fafafa)"></div>'
-    +'<div style="padding:10px 12px;border-top:1px solid var(--color-divider,#e5e7eb);display:flex;gap:7px">'
+    +'<div id="chat-emoji" style="display:none;padding:5px 10px;border-top:1px solid var(--color-divider,#e5e7eb);flex-wrap:wrap;gap:2px"></div>'
+    +'<div style="padding:6px 12px 0;display:flex;gap:4px;align-items:center">'
+      +'<button onclick="chatEmojiToggle()" title="Emojis" style="border:none;background:none;font-size:18px;cursor:pointer;padding:2px 4px">😀</button>'
+      +'<button onclick="chatAttach()" title="Adjuntar archivo (máx 9 MB)" style="border:none;background:none;font-size:16px;cursor:pointer;padding:2px 4px">📎</button>'
+      +'<button onclick="chatTareaOpen()" title="Asignar tarea" style="border:none;background:none;font-size:16px;cursor:pointer;padding:2px 4px">📌</button>'
+      +'<input type="file" id="chat-file" style="display:none" onchange="_chatFileChosen(event)">'
+    +'</div>'
+    +'<div style="padding:6px 12px 10px;display:flex;gap:7px">'
       +'<input id="chat-input" type="text" maxlength="2000" placeholder="Escribe un mensaje…" onkeydown="if(event.key===\'Enter\'){chatSendMsg();}" style="flex:1;padding:9px 11px;border:1px solid var(--color-divider,#e5e7eb);border-radius:9px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
       +'<button onclick="chatSendMsg()" style="padding:9px 14px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer">Enviar</button>'
     +'</div>';
@@ -14003,7 +14014,7 @@ function chatRender(){
     var hora=('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
     h+='<div style="align-self:'+(mine?'flex-end':'flex-start')+';max-width:82%">'
       +(mine?'':'<div style="font-size:9.5px;color:#9c4f5f;font-weight:700;margin-bottom:1px">'+_chatEsc(m.deNombre||m.deEmail)+'</div>')
-      +'<div style="background:'+(mine?'var(--color-primary,#c46a7a)':'var(--card-bg,#fff)')+';color:'+(mine?'#fff':'var(--text-primary,#111)')+';border:1px solid '+(mine?'transparent':'var(--color-divider,#e5e7eb)')+';border-radius:12px;padding:6px 10px;font-size:12.5px;line-height:1.4;word-break:break-word">'+_chatEsc(m.mensaje)+'</div>'
+      +'<div style="background:'+(mine?'var(--color-primary,#c46a7a)':'var(--card-bg,#fff)')+';color:'+(mine?'#fff':'var(--text-primary,#111)')+';border:1px solid '+(mine?'transparent':'var(--color-divider,#e5e7eb)')+';border-radius:12px;padding:6px 10px;font-size:12.5px;line-height:1.4;word-break:break-word">'+_chatMsgHtml(m.mensaje)+'</div>'
       +'<div style="font-size:9px;color:#c9c9c9;text-align:'+(mine?'right':'left')+';margin-top:1px">'+hora+'</div></div>';
   });
   box.innerHTML=h; box.scrollTop=box.scrollHeight;
@@ -14036,6 +14047,68 @@ function _chatUpdateBadge(){
   var total=0, canales={general:1}; Object.keys(_chat.byCanal).forEach(function(c){canales[c]=1;});
   Object.keys(canales).forEach(function(c){ if(_chat.open && c===_chat.canal) return; total+=_chatUnread(c); });
   var b=document.getElementById('chat-badge'); if(b){ if(total>0){ b.textContent=total>99?'99+':String(total); b.style.display=''; } else b.style.display='none'; }
+}
+function _chatMsgHtml(msg){ msg=String(msg||'');
+  var m=msg.match(/^📎 (.+) \| (https?:\/\/\S+)$/);
+  if(m) return '📎 <a href="'+_chatEsc(m[2])+'" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">'+_chatEsc(m[1])+'</a>';
+  return _chatEsc(msg);
+}
+function chatEmojiToggle(){ var e=document.getElementById('chat-emoji'); if(!e) return;
+  if(!e.getAttribute('data-filled')){ var ems=['😀','😉','😍','🤔','😅','😢','👍','🙏','👏','💪','🔥','🎉','✅','❌','⚠️','📌','💰','📈','📉','🕐','👀','🚀','😴','🙌'];
+    e.innerHTML=ems.map(function(m){ return '<button onclick="chatEmojiIns(\''+m+'\')" style="border:none;background:none;font-size:18px;cursor:pointer;padding:2px 4px">'+m+'</button>'; }).join('');
+    e.setAttribute('data-filled','1'); e.style.display='flex'; }
+  else e.style.display=(e.style.display==='none'?'flex':'none');
+}
+function chatEmojiIns(em){ var inp=document.getElementById('chat-input'); if(!inp) return; inp.value=(inp.value||'')+em; inp.focus(); }
+function chatAttach(){ var inp=document.getElementById('chat-file'); if(inp) inp.click(); }
+function _chatFileChosen(ev){
+  var file=ev.target.files&&ev.target.files[0]; ev.target.value=''; if(!file) return;
+  if(file.size>9*1024*1024){ alert('Archivo muy grande (máx 9 MB).'); return; }
+  var canal=_chat.canal;
+  var opt={ts:Date.now(),canal:canal,deEmail:_chat.me,deNombre:_chat.meNombre,mensaje:'📎 '+file.name+' (subiendo…)'};
+  (_chat.byCanal[canal]=_chat.byCanal[canal]||[]).push(opt); _chatSetSeen(canal,opt.ts); chatRender();
+  var rd=new FileReader();
+  rd.onload=function(){ var b64=String(rd.result||'').replace(/^data:[^;]+;base64,/,'');
+    fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'chatUpload',email:_chat.me,nombre:_chat.meNombre,canal:canal,filename:file.name,mimeType:file.type||'application/octet-stream',dataBase64:b64})})
+      .then(function(r){return r.json();}).then(function(res){
+        if(res&&res.ok){ opt.mensaje='📎 '+file.name+' | '+res.url; if(res.ts) opt.ts=res.ts; _chatSetSeen(canal,opt.ts); }
+        else { opt.mensaje='📎 '+file.name+' (no se pudo subir'+(res&&res.error?': '+res.error:'')+')'; }
+        chatRender();
+      }).catch(function(){ opt.mensaje='📎 '+file.name+' (error al subir)'; chatRender(); });
+  };
+  rd.readAsDataURL(file);
+}
+function chatTareaOpen(){
+  var peers=_chatPeers(); var pre=''; if(_chat.canal.indexOf('dm:')===0){ var pe=_chat.canal.substring(3).split('|'); pre=pe[0]===_chat.me?pe[1]:pe[0]; }
+  if(!peers.length){ alert('No hay contactos para asignar. Conéctate con alguien o revisa el directorio de usuarios.'); return; }
+  var opts=peers.map(function(p){ return '<option value="'+_chatEsc(p.email)+'"'+(p.email===pre?' selected':'')+'>'+_chatEsc(p.nombre)+'</option>'; }).join('');
+  var ovl=document.createElement('div'); ovl.id='chat-tarea-ovl'; ovl.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9300;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
+  ovl.onclick=function(e){ if(e.target===ovl) ovl.remove(); };
+  ovl.innerHTML='<div style="background:var(--card-bg,#fff);border-radius:14px;box-shadow:0 16px 50px rgba(0,0,0,.3);width:320px;max-width:92vw;padding:16px" onclick="event.stopPropagation()">'
+    +'<div style="font-size:14px;font-weight:800;margin-bottom:12px;color:var(--text-primary,#111)">📌 Asignar tarea</div>'
+    +'<label style="font-size:10px;color:#9ca3af;font-weight:700">Para</label><select id="chat-tarea-para" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;margin:3px 0 9px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'+opts+'</select>'
+    +'<label style="font-size:10px;color:#9ca3af;font-weight:700">Tarea</label><input id="chat-tarea-txt" type="text" placeholder="¿Qué hay que hacer?" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;margin:3px 0 9px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
+    +'<label style="font-size:10px;color:#9ca3af;font-weight:700">Para el día (opcional)</label><input id="chat-tarea-fecha" type="date" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;margin:3px 0 13px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end"><button onclick="document.getElementById(\'chat-tarea-ovl\').remove()" style="padding:8px 14px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;cursor:pointer">Cancelar</button><button onclick="chatTareaSave()" style="padding:8px 16px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Asignar</button></div>'
+  +'</div>';
+  document.body.appendChild(ovl);
+}
+function chatTareaSave(){
+  var para=(document.getElementById('chat-tarea-para')||{}).value||'';
+  var txt=((document.getElementById('chat-tarea-txt')||{}).value||'').trim();
+  var fecha=(document.getElementById('chat-tarea-fecha')||{}).value||'';
+  if(!para||!txt){ alert('Elige a quién y escribe la tarea.'); return; }
+  var paraNombre=(_chatPeers().filter(function(p){return p.email===para;})[0]||{}).nombre||para;
+  var recBody={action:'saveRecordatorio',usuario:para,titulo:txt,detalle:'Tarea asignada por '+_chat.meNombre+' (chat)',origen:'chat',referencia:_chat.me};
+  if(fecha) recBody.fecha=fecha;
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(recBody)}).catch(function(){});
+  var canal=_chatDM(_chat.me,para); var msg='📌 Tarea para '+paraNombre+': '+txt+(fecha?(' (para '+fecha+')'):'');
+  var opt={ts:Date.now(),canal:canal,deEmail:_chat.me,deNombre:_chat.meNombre,mensaje:msg};
+  (_chat.byCanal[canal]=_chat.byCanal[canal]||[]).push(opt); _chatSetSeen(canal,opt.ts);
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'chatSend',email:_chat.me,nombre:_chat.meNombre,canal:canal,mensaje:msg})}).catch(function(){});
+  _chat.canal=canal; if(_chat.open) chatRender();
+  var ovl=document.getElementById('chat-tarea-ovl'); if(ovl) ovl.remove();
+  if(typeof setStatus==='function') setStatus('Tarea asignada a '+paraNombre+' (le aparece en sus Recordatorios)','ok');
 }
 (function(){ var iv=setInterval(function(){ try{ if(typeof getSession==='function' && getSession() && getSession().email){ _chatMount(); if(_chat.mounted) clearInterval(iv); } }catch(e){} }, 1500); })();
 

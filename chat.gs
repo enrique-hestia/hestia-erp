@@ -32,6 +32,31 @@ function chatSend(body) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
+// Adjuntar archivo: guarda en Drive (carpeta Chat_Adjuntos), lo comparte por link y
+// publica un mensaje con el enlace. Límite ~9 MB. Devuelve la URL.
+function chatUpload(body) {
+  try {
+    var email = String((body && body.email) || '').trim().toLowerCase();
+    var nombre = String((body && body.nombre) || '').trim() || email;
+    var canal = String((body && body.canal) || 'general').trim() || 'general';
+    var name = String((body && body.filename) || 'archivo').trim() || 'archivo';
+    var mime = String((body && body.mimeType) || 'application/octet-stream');
+    var data = String((body && body.dataBase64) || '').replace(/^data:[^;]+;base64,/, '');
+    if (!email) return { ok: false, error: 'Sin usuario.' };
+    if (!data) return { ok: false, error: 'Archivo vacío.' };
+    var bytes = Utilities.base64Decode(data);
+    if (bytes.length > 9 * 1024 * 1024) return { ok: false, error: 'Archivo muy grande (máx 9 MB).' };
+    var blob = Utilities.newBlob(bytes, mime, name);
+    var it = DriveApp.getFoldersByName('Chat_Adjuntos');
+    var folder = it.hasNext() ? it.next() : DriveApp.createFolder('Chat_Adjuntos');
+    var f = folder.createFile(blob);
+    try { f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
+    var url = f.getUrl();
+    var sent = chatSend({ email: email, nombre: nombre, canal: canal, mensaje: '📎 ' + name + ' | ' + url });
+    return { ok: true, url: url, name: name, ts: sent && sent.ts };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 // Registra el "latido" del usuario y devuelve la lista de conectados (ping < 90s).
 function _chatPresence(email, nombre) {
   var out = [];

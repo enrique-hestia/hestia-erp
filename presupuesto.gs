@@ -269,8 +269,10 @@ function presSetEscenarios(body) {
 function readHistoricoMetas() {
   try {
     var hist = _presHistoricoIngresos();
+    var egHist = _presHistoricoEgresos();       // egresos reales por trimestre (para ganancia/pérdida)
     var metasInfo = _presLeerMetas();
     var histQ = (hist && hist.q) || {};
+    var egQ = (egHist && egHist.q) || {};
     var metas = (metasInfo && metasInfo.map) || {};
     var hoy = new Date(), y = hoy.getFullYear(), q = _presQ(hoy.getMonth() + 1);
     var list = [], yy = y, qq = q;
@@ -282,10 +284,13 @@ function readHistoricoMetas() {
       var per = _presQKey(p.y, p.q);
       var meta = (metas[per] && metas[per].__total) || 0;
       var real = (histQ[per] && histQ[per].__total) || 0;
+      var egresoReal = (egQ[per] && egQ[per].__total) || 0;
       var tipo = per === nextKey ? 'proyeccion' : (per === curKey ? 'actual' : 'pasado');
       return { periodo: per, tipo: tipo, meta: meta, real: real,
         cumplimiento: meta > 0 ? Math.round(real / meta * 100) : null,
-        alcanzada: meta > 0 ? (real >= meta) : null };
+        alcanzada: meta > 0 ? (real >= meta) : null,
+        egresoReal: egresoReal,
+        gananciaReal: real - egresoReal };          // ganancia (o pérdida si es negativo) real del trimestre
     });
     return { ok: true, historico: out, trimestreActual: curKey };
   } catch (ex) { return { ok: false, error: ex.message }; }
