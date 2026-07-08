@@ -306,6 +306,15 @@ function _sumParseDate(v){
 
 function _sumInRange(f, ini, fin){ return f && f>=ini && f<=fin; }
 function _sumFmtDate(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+// ¿El rango es exactamente un mes calendario completo? (día 1 → último día, mismo mes/año)
+function _sumEsMesCompleto(fi, ff){
+  var a=String(fi).split('-'), b=String(ff).split('-');
+  if(a.length<3||b.length<3) return false;
+  if(a[0]!==b[0]||a[1]!==b[1]) return false;
+  if(String(a[2])!=='01') return false;
+  var last=new Date(parseInt(a[0],10), parseInt(a[1],10), 0).getDate();
+  return parseInt(b[2],10)===last;
+}
 
 /* ── El reporte ─────────────────────────────────────────────────── */
 function readSummary(fechaInicio, fechaFin) {
@@ -314,12 +323,22 @@ function readSummary(fechaInicio, fechaFin) {
     var ff = String(fechaFin||'').substring(0,10);
     if (!fi || !ff) { var hoy=new Date(); ff=_sumFmtDate(hoy); fi=ff.substring(0,8)+'01'; }
 
-    // Periodo anterior: mismo tamaño, inmediatamente antes
-    var dIni=new Date(fi+'T12:00:00'), dFin=new Date(ff+'T12:00:00');
-    var dias = Math.round((dFin-dIni)/86400000)+1;
-    var pFin=new Date(dIni.getTime()-86400000);
-    var pIni=new Date(pFin.getTime()-(dias-1)*86400000);
-    var pi=_sumFmtDate(pIni), pf=_sumFmtDate(pFin);
+    // Periodo anterior. Si el rango es UN MES COMPLETO → compara contra el MISMO
+    // mes del año pasado (YoY). Si no → mismo tamaño inmediatamente antes.
+    var pi, pf, comparaYoY = false;
+    if (_sumEsMesCompleto(fi, ff)) {
+      var yA = parseInt(fi.substring(0,4),10) - 1, mA = parseInt(fi.substring(5,7),10);
+      var lastA = new Date(yA, mA, 0).getDate();
+      pi = yA + '-' + String(mA).padStart(2,'0') + '-01';
+      pf = yA + '-' + String(mA).padStart(2,'0') + '-' + String(lastA).padStart(2,'0');
+      comparaYoY = true;
+    } else {
+      var dIni=new Date(fi+'T12:00:00'), dFin=new Date(ff+'T12:00:00');
+      var dias = Math.round((dFin-dIni)/86400000)+1;
+      var pFin=new Date(dIni.getTime()-86400000);
+      var pIni=new Date(pFin.getTime()-(dias-1)*86400000);
+      pi=_sumFmtDate(pIni); pf=_sumFmtDate(pFin);
+    }
 
     var cfg = readSummaryConfig();
     var mapEg={}, mapIn={};
@@ -508,7 +527,7 @@ function readSummary(fechaInicio, fechaFin) {
     var egSum = cogsA+opexA+gaA+taxA;
     return {
       ok:true,
-      periodo:{ inicio:fi, fin:ff }, prev:{ inicio:pi, fin:pf },
+      periodo:{ inicio:fi, fin:ff }, prev:{ inicio:pi, fin:pf, yoy:comparaYoY },
       lineas: lineas,
       metricas:{ revenue:revA, cogs:cogsA, grossProfit:gpA, opex:opexA, clinicContribution:ccA,
                  ga:gaA, ebitda:ebitdaA, da:da, ebit:ebitA, taxes:taxA, netProfit:netA },
