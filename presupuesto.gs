@@ -168,6 +168,33 @@ function _presHistoricoEgresos() {
   return { q: q, m: m, subtipos: Object.keys(subSet), contableBySub: contableBySub };
 }
 
+/* ── Histórico de metas por trimestre (últimos ~7 Q + el siguiente proyectado):
+   meta fijada vs real logrado + cumplimiento, para ver la racha. Solo 2 lecturas. */
+function readHistoricoMetas() {
+  try {
+    var hist = _presHistoricoIngresos();
+    var metasInfo = _presLeerMetas();
+    var histQ = (hist && hist.q) || {};
+    var metas = (metasInfo && metasInfo.map) || {};
+    var hoy = new Date(), y = hoy.getFullYear(), q = _presQ(hoy.getMonth() + 1);
+    var list = [], yy = y, qq = q;
+    for (var i = 0; i < 7; i++) { list.unshift({ y: yy, q: qq }); qq--; if (qq < 1) { qq = 4; yy--; } }
+    var yn = y, qn = q + 1; if (qn > 4) { qn = 1; yn++; }
+    list.push({ y: yn, q: qn });
+    var curKey = _presQKey(y, q), nextKey = _presQKey(yn, qn);
+    var out = list.map(function (p) {
+      var per = _presQKey(p.y, p.q);
+      var meta = (metas[per] && metas[per].__total) || 0;
+      var real = (histQ[per] && histQ[per].__total) || 0;
+      var tipo = per === nextKey ? 'proyeccion' : (per === curKey ? 'actual' : 'pasado');
+      return { periodo: per, tipo: tipo, meta: meta, real: real,
+        cumplimiento: meta > 0 ? Math.round(real / meta * 100) : null,
+        alcanzada: meta > 0 ? (real >= meta) : null };
+    });
+    return { ok: true, historico: out, trimestreActual: curKey };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 /* ── Lee metas del almacén que administra la PÁGINA (Presupuesto_Metas) ─
    El usuario nunca edita esta hoja a mano: la página escribe vía
    savePresupuestoMeta. Una fila con Línea = "TOTAL" fija el total del

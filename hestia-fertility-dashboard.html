@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.76 -->
+﻿<!-- app-build:2026.07.07.77 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12953,6 +12953,11 @@ function _renderPresupuesto(){
     +'<div class="pr-ks"><div class="pr-ks-l">Brecha vs meta</div><div class="pr-ks-v" style="color:'+(brecha>=0?'#166534':'#991b1b')+'">'+(a.meta>0?fM(brecha):'—')+'</div></div>'
     +'</div>');
 
+  // Histórico de metas por trimestre (racha meta vs real) — se carga aparte
+  h.push('<div class="pr-sc" id="pres-hist-card"><div class="pr-sh"><span>Histórico de metas — ¿llegamos a la meta?</span><span style="font-size:11px;font-weight:400;color:var(--text-secondary,#9ca3af)">meta fijada vs real por trimestre</span></div>'
+    +'<div style="position:relative;height:190px"><canvas id="presHistChart"></canvas></div>'
+    +'<div id="pres-hist-body" style="overflow-x:auto;margin-top:10px;font-size:12px;color:var(--text-secondary,#9ca3af)">Cargando histórico…</div></div>');
+
   // Gráfica tendencia
   var _crecAp = (d.crecimientoAplicado!=null?d.crecimientoAplicado:d.crecimientoRealTotal);
   var _crecNota = (d.crecimientoTope!=null && d.crecimientoRealTotal>d.crecimientoTope)
@@ -13028,6 +13033,7 @@ function _renderPresupuesto(){
   h.push('</div>');
   root.innerHTML = h.join('');
   try { presSimUpdate(); } catch(e){}
+  try { loadHistoricoMetas(); } catch(e){}
   setTimeout(function(){ if(typeof _tourStart==='function') _tourStart(_PRES_TOUR,'hestia_tour_pres_v1'); },700);
 
   // Gráfica
@@ -13062,6 +13068,50 @@ function presChartToggle(){
   if(ds[0]) ds[0].hidden=!ing; if(ds[1]) ds[1].hidden=!ing;
   if(ds[2]) ds[2].hidden=!eg;  if(ds[3]) ds[3].hidden=!eg;
   _presChart.update();
+}
+
+/* ── Histórico de metas por trimestre (racha meta vs real) ──────────── */
+var _presHistChart=null;
+async function loadHistoricoMetas(){
+  var body=document.getElementById('pres-hist-body'); if(!body) return;
+  try{
+    var tok=encodeURIComponent(getToken());
+    var r=await fetch(APPS_SCRIPT_URL+'?action=historicoMetas&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
+    var d=await r.json();
+    if(!d.ok){ body.innerHTML='<span style="color:#b45309">'+(d.error||'No se pudo cargar el histórico.')+'</span>'; return; }
+    _renderHistoricoMetas(d.historico||[]);
+  }catch(e){ body.innerHTML='<span style="color:#b45309">Error: '+(e.message||e)+'</span>'; }
+}
+function _renderHistoricoMetas(hist){
+  var body=document.getElementById('pres-hist-body'); if(!body) return;
+  var fM=_presFM;
+  var h='<table class="pr-tbl" style="min-width:520px"><thead><tr><th>Trimestre</th><th>Meta fijada</th><th>Real logrado</th><th>Cumplimiento</th><th>Estado</th></tr></thead><tbody>';
+  hist.forEach(function(q){
+    var esProy=q.tipo==='proyeccion', esAct=q.tipo==='actual';
+    var cump=q.cumplimiento;
+    var col=cump==null?'#9ca3af':(cump>=100?'#166534':cump>=85?'#b45309':'#991b1b');
+    var estado = esProy ? '<span style="color:#6b7280">proyección</span>'
+      : (q.meta<=0 ? '<span style="color:#9ca3af">sin meta</span>'
+      : (q.alcanzada ? '<span style="color:#166534;font-weight:700">✓ alcanzada</span>' : '<span style="color:#991b1b;font-weight:700">✗ no</span>'));
+    h+='<tr'+(esAct?' style="background:rgba(196,106,122,.06)"':'')+'><td style="font-weight:700">'+q.periodo+(esAct?' <span style="font-size:9px;color:#c46a7a">(en curso)</span>':(esProy?' <span style="font-size:9px;color:#6b7280">(futuro)</span>':''))+'</td>'
+      +'<td>'+(q.meta>0?fM(q.meta):'—')+'</td><td style="font-weight:700">'+(q.real>0?fM(q.real):(esProy?'—':fM(0)))+'</td>'
+      +'<td style="color:'+col+';font-weight:700">'+(cump!=null?cump+'%':'—')+'</td><td style="text-align:center">'+estado+'</td></tr>';
+  });
+  h+='</tbody></table>';
+  body.innerHTML=h;
+  try{
+    var ctx=document.getElementById('presHistChart');
+    if(ctx && typeof Chart!=='undefined'){
+      if(_presHistChart){ _presHistChart.destroy(); _presHistChart=null; }
+      _presHistChart=new Chart(ctx.getContext('2d'),{ type:'bar',
+        data:{ labels:hist.map(function(q){return q.periodo;}), datasets:[
+          {label:'Meta fijada', data:hist.map(function(q){return q.meta||null;}), backgroundColor:'#e5cdd3'},
+          {label:'Real logrado', data:hist.map(function(q){return q.real||null;}), backgroundColor:hist.map(function(q){return q.tipo==='proyeccion'?'rgba(196,106,122,.35)':(q.alcanzada?'#166534':'#c46a7a');}) }
+        ]},
+        options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:11}}}},scales:{y:{ticks:{callback:function(v){return '$'+(v/1e6).toFixed(1)+'M';},font:{size:10}}},x:{ticks:{font:{size:10}}}}}
+      });
+    }
+  }catch(e){}
 }
 
 /* ── Simulador de meta en la barra del hero ─────────────────────── */

@@ -335,6 +335,12 @@ function doGet(e) {
     if (action === 'presupuesto') {
       return jsonResponse(readPresupuesto((e && e.parameter.periodo) || ''));
     }
+    // Presupuesto: histórico de metas por trimestre (racha meta vs real)
+    if (action === 'historicoMetas') {
+      if (typeof readHistoricoMetas !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});
+      return jsonResponse(readHistoricoMetas());
+    }
 
     // Análisis de Egresos: histórico, ranking, recomendaciones
     if (action === 'analisisEgresos') {
