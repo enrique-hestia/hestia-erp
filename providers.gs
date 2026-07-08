@@ -111,6 +111,10 @@ function readProveedores() {
     if (raw.length < 2) return { ok: true, rows: [], kpis: { total: 0, activos: 0, inactivos: 0 }, categorias: PROV_CATEGORIAS, _setup: true };
 
     function dt(v) { if (!v) return ''; if (v instanceof Date) return v.getFullYear() + '-' + String(v.getMonth() + 1).padStart(2, '0') + '-' + String(v.getDate()).padStart(2, '0'); return String(v); }
+    // Columnas fiscales (agregadas al final por _provColEnsure)
+    var hdrL = raw[0].map(function (x) { return String(x).trim().toLowerCase(); });
+    var iReg = hdrL.indexOf('régimen fiscal'), iCP = hdrL.indexOf('código postal'),
+        iFP = hdrL.indexOf('forma pago habitual'), iUso = hdrL.indexOf('uso cfdi');
     var rows = [], activos = 0, inactivos = 0, catSet = {};
 
     for (var i = 1; i < raw.length; i++) {
@@ -137,7 +141,11 @@ function readProveedores() {
         estatus: estatus,
         notas: String(r[12] || '').trim(),
         fechaAlta: dt(r[13]),
-        usuarioAlta: String(r[14] || '').trim()
+        usuarioAlta: String(r[14] || '').trim(),
+        regimenFiscal: iReg > -1 ? String(r[iReg] || '').trim() : '',
+        codigoPostal: iCP > -1 ? String(r[iCP] || '').trim() : '',
+        formaPagoHabitual: iFP > -1 ? String(r[iFP] || '').trim() : '',
+        usoCfdi: iUso > -1 ? String(r[iUso] || '').trim() : ''
       });
     }
     rows.sort(function (a, b) { return a.nombre.toLowerCase() < b.nombre.toLowerCase() ? -1 : 1; });
@@ -148,6 +156,66 @@ function readProveedores() {
   } catch (ex) {
     return { ok: false, error: ex.message, rows: [] };
   }
+}
+
+/* ── Datos fiscales del proveedor desde los XML recibidos (emisor=proveedor) ──
+   Escanea las facturas recibidas de los últimos meses, filtra por RFC o nombre
+   del emisor y devuelve RFC, razón social, régimen, CP (LugarExpedicion),
+   forma de pago habitual (moda) y uso CFDI típico (moda). ── */
+function buscarDatosFiscalesProveedor(query) {
+  try {
+    query = String(query || '').trim();
+    if (query.length < 3) return { ok: false, error: 'Escribe al menos 3 caracteres (RFC o nombre).' };
+    if (typeof listComprobantesEstructura !== 'function' || typeof _compParseXmlLight !== 'function')
+      return { ok: false, error: 'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.' };
+    var qRfc = query.toUpperCase().replace(/[\s-]/g, '');
+    var qNom = query.toLowerCase().replace(/[\s.,]+/g, ' ').trim();
+    var esRfc = /^[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}$/i.test(qRfc);
+    var est = listComprobantesEstructura('facturas');
+    if (!est.ok) return { ok: false, error: est.error || 'No se pudo leer el repositorio de facturas.' };
+    var meses = [];
+    (est.anios || []).forEach(function (a) { (a.meses || []).forEach(function (m) { meses.push({ folderId: m.folderId, anio: a.anio, mes: m.mes }); }); });
+    meses.sort(function (a, b) { return (b.anio - a.anio) || (b.mes - a.mes); });
+    meses = meses.slice(0, 8);
+    var hallazgos = [], escaneados = 0;
+    for (var i = 0; i < meses.length && escaneados < 1000; i++) {
+      var files; try { files = DriveApp.getFolderById(meses[i].folderId).getFiles(); } catch (e) { continue; }
+      while (files.hasNext()) {
+        var f = files.next(); if (!/\.xml$/i.test(f.getName())) continue;
+        escaneados++;
+        var p; try { p = _compParseXmlLight(f.getBlob().getDataAsString('UTF-8')); } catch (e) { continue; }
+        var erfc = String(p.emisorRfc || '').toUpperCase().replace(/[\s-]/g, '');
+        var enom = String(p.emisorNombre || '').toLowerCase().replace(/[\s.,]+/g, ' ').trim();
+        var match = esRfc ? (erfc === qRfc) : (enom.indexOf(qNom) > -1 || qNom.indexOf(enom) > -1);
+        if (!match) continue;
+        hallazgos.push({ fecha: (p.fecha || '').substring(0, 10), rfc: erfc, razonSocial: p.emisorNombre || '',
+          regimenFiscal: p.emisorRegimen || '', codigoPostal: p.lugarExpedicion || '',
+          formaPago: p.formaPago || '', usoCfdi: p.receptorUsoCfdi || '', folio: p.folio || '' });
+      }
+    }
+    if (!hallazgos.length) return { ok: true, encontrado: false, escaneados: escaneados, message: 'No encontré facturas de ese proveedor en los últimos meses.' };
+    hallazgos.sort(function (a, b) { return a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0; });
+    var top = hallazgos[0];
+    function moda(key) { var c = {}; hallazgos.forEach(function (h) { if (h[key]) c[h[key]] = (c[h[key]] || 0) + 1; }); var best = '', n = 0; Object.keys(c).forEach(function (k) { if (c[k] > n) { n = c[k]; best = k; } }); return best; }
+    var distintos = {}; hallazgos.forEach(function (h) { distintos[(h.razonSocial || '') + '|' + (h.rfc || '')] = 1; });
+    return { ok: true, encontrado: true, escaneados: escaneados, numFacturas: hallazgos.length,
+      conflicto: Object.keys(distintos).length > 1,
+      datos: { rfc: top.rfc, razonSocial: top.razonSocial, regimenFiscal: top.regimenFiscal,
+        codigoPostal: top.codigoPostal, formaPagoHabitual: moda('formaPago'), usoCfdi: moda('usoCfdi'),
+        folioReferencia: top.folio, fechaReferencia: top.fecha } };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// Asegura columnas fiscales al final de la hoja Proveedores (sin romper el orden base).
+function _provColEnsure(sh, header) {
+  var lc = Math.max(sh.getLastColumn(), 1);
+  var hdrs = sh.getRange(1, 1, 1, lc).getValues()[0];
+  for (var c = 0; c < hdrs.length; c++) { if (String(hdrs[c]).trim().toLowerCase() === header.toLowerCase()) return c + 1; }
+  var col = lc + 1; sh.getRange(1, col).setValue(header); return col;
+}
+function _provWriteFiscal(sh, rowNum, body) {
+  var map = { 'Régimen Fiscal': 'regimenFiscal', 'Código Postal': 'codigoPostal', 'Forma pago habitual': 'formaPagoHabitual', 'Uso CFDI': 'usoCfdi' };
+  Object.keys(map).forEach(function (h) { var v = body[map[h]]; if (v !== undefined) { var col = _provColEnsure(sh, h); sh.getRange(rowNum, col).setValue(String(v || '')); } });
 }
 
 /* ── Siguiente ID PROV-##### ────────────────────────────────────── */
@@ -206,6 +274,7 @@ function saveProveedor(body) {
     var fechaStr = fecha.getFullYear() + '-' + String(fecha.getMonth() + 1).padStart(2, '0') + '-' + String(fecha.getDate()).padStart(2, '0');
     var row = [id].concat(f).concat([fechaStr, String(body.usuario || '')]);
     sh.appendRow(row);
+    try { _provWriteFiscal(sh, sh.getLastRow(), body); } catch (e) {}
     try { logAudit(body.usuario || '', 'Proveedores', 'Alta', id, 'nombre', '', body.nombre); } catch (e) {}
     return { ok: true, id: id, message: 'Proveedor registrado.' };
   } catch (ex) {
@@ -227,6 +296,7 @@ function updateProveedor(body) {
     var f = _provFields(body);
     // Cols B..M (2..13) = nombre..notas. ID, fecha alta y usuario alta se conservan.
     sh.getRange(rowNum, 2, 1, f.length).setValues([f]);
+    try { _provWriteFiscal(sh, rowNum, body); } catch (e) {}
     try { logAudit(body.usuario || '', 'Proveedores', 'Edición', String(body.id || rowNum), 'nombre', '', body.nombre); } catch (e) {}
     return { ok: true, message: 'Proveedor actualizado.' };
   } catch (ex) {

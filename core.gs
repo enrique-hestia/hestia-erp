@@ -324,6 +324,12 @@ function doGet(e) {
     if (action === 'proveedores') {
       return jsonResponse(readProveedores());
     }
+    // Datos fiscales del proveedor desde los XML recibidos (autollenado del alta)
+    if (action === 'datosFiscalesProveedor') {
+      if (typeof buscarDatosFiscalesProveedor !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza providers.gs + comprobantes.gs en Apps Script y redespliega.'});
+      return jsonResponse(buscarDatosFiscalesProveedor((e && e.parameter.q) || ''));
+    }
 
     // Presupuesto: proyección del siguiente trimestre + meta + pace
     if (action === 'presupuesto') {

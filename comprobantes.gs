@@ -89,7 +89,11 @@ function _compParseXmlLight(content) {
     metodoPago: attrDe('Comprobante', 'MetodoPago'),
     emisorRfc: attrDe('Emisor', 'Rfc'),
     emisorNombre: attrDe('Emisor', 'Nombre'),
+    emisorRegimen: attrDe('Emisor', 'RegimenFiscal'),
+    lugarExpedicion: attrDe('Comprobante', 'LugarExpedicion'),
+    formaPago: attrDe('Comprobante', 'FormaPago'),
     receptorRfc: attrDe('Receptor', 'Rfc'),
+    receptorUsoCfdi: attrDe('Receptor', 'UsoCFDI'),
     uuid: attrDe('TimbreFiscalDigital', 'UUID')
   };
 }

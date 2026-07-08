@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.73 -->
+﻿<!-- app-build:2026.07.07.74 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -13892,6 +13892,11 @@ function provOpenForm(row, onSaved){
       +inp('cuenta','CLABE / Cuenta', row&&row.cuenta)
       +inp('diasCredito','Días de crédito', row&&row.diasCredito, false, 'number')
       +estSel
+      +'<div class="pv-field full" style="border-top:1px dashed var(--color-divider,#e5e7eb);margin-top:4px;padding-top:8px"><label class="pv-flbl" style="color:var(--color-primary,#c46a7a);font-weight:700">Datos fiscales (CFDI) <button type="button" onclick="provBuscarFiscal(false)" style="margin-left:8px;padding:4px 10px;background:rgba(196,106,122,.1);color:var(--color-primary,#c46a7a);border:1px solid rgba(196,106,122,.3);border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">🔍 Cargar del XML</button> <span id="pf-fiscal-msg" style="font-size:11px;color:var(--text-secondary,#9ca3af)"></span></label></div>'
+      +inp('regimenFiscal','Régimen Fiscal (SAT)', row&&row.regimenFiscal)
+      +inp('codigoPostal','Código Postal (dom. fiscal)', row&&row.codigoPostal)
+      +inp('formaPagoHabitual','Forma de pago habitual', row&&row.formaPagoHabitual)
+      +inp('usoCfdi','Uso CFDI típico', row&&row.usoCfdi)
       +inp('notas','Notas', row&&row.notas, true)
     +'</div>'
     +'<div class="pv-mf"><div id="pf-msg" style="margin-right:auto;font-size:12px;align-self:center;color:#991b1b"></div>'
@@ -13899,7 +13904,33 @@ function provOpenForm(row, onSaved){
       +'<button class="pv-btn" id="pf-save" onclick="provSave()">'+(isEdit?'Guardar cambios':'Registrar')+'</button></div>'
     +'</div>';
   document.body.appendChild(ovl);
-  setTimeout(function(){ var n=document.getElementById('pf-nombre'); if(n) n.focus(); }, 50);
+  setTimeout(function(){
+    var n=document.getElementById('pf-nombre'); if(n) n.focus();
+    // Autollenado fiscal al salir del RFC o del nombre (si aún no hay régimen)
+    var rfc=document.getElementById('pf-rfc');
+    if(rfc) rfc.addEventListener('blur', function(){ var reg=document.getElementById('pf-regimenFiscal'); if(rfc.value.trim().length>=10 && (!reg||!reg.value.trim())) provBuscarFiscal(true); });
+    if(n) n.addEventListener('blur', function(){ var reg=document.getElementById('pf-regimenFiscal'); var r2=document.getElementById('pf-rfc'); if(n.value.trim().length>=4 && (!r2||!r2.value.trim()) && (!reg||!reg.value.trim())) provBuscarFiscal(true); });
+  }, 50);
+}
+// Autollenado de datos fiscales del proveedor desde los XML (emisor). auto=true = silencioso.
+async function provBuscarFiscal(auto){
+  var rfcEl=document.getElementById('pf-rfc'), nomEl=document.getElementById('pf-nombre');
+  var q=(rfcEl&&rfcEl.value.trim())||(nomEl&&nomEl.value.trim())||'';
+  var msg=document.getElementById('pf-fiscal-msg');
+  if(q.length<3){ if(msg&&!auto) msg.textContent='Captura el RFC o el nombre primero.'; return; }
+  if(msg){ msg.style.color='var(--text-secondary,#9ca3af)'; msg.textContent='Buscando en los XML…'; }
+  try{
+    var tok=encodeURIComponent(getToken());
+    var r=await fetch(APPS_SCRIPT_URL+'?action=datosFiscalesProveedor&q='+encodeURIComponent(q)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
+    var d=await r.json();
+    if(!d.ok){ if(msg){ msg.style.color='#b45309'; msg.textContent=d.error||'No se pudo buscar.'; } return; }
+    if(!d.encontrado){ if(msg){ msg.style.color='#9ca3af'; msg.textContent=auto?'':(d.message||'Sin facturas de ese proveedor.'); } return; }
+    var f=d.datos;
+    function setIf(id,val,force){ var el=document.getElementById('pf-'+id); if(el&&val&&(force||!el.value.trim())) el.value=val; }
+    setIf('rfc',f.rfc,true); setIf('nombre',f.razonSocial,false); setIf('regimenFiscal',f.regimenFiscal,true);
+    setIf('codigoPostal',f.codigoPostal,true); setIf('formaPagoHabitual',f.formaPagoHabitual,true); setIf('usoCfdi',f.usoCfdi,true);
+    if(msg){ msg.style.color='#166534'; msg.textContent='✓ Cargado de '+d.numFacturas+' factura(s) (última '+f.fechaReferencia+')'+(d.conflicto?' · ⚠ hay variaciones, revisa':''); }
+  }catch(e){ if(msg){ msg.style.color='#b45309'; msg.textContent='Error: '+(e.message||e); } }
 }
 function provCloseForm(){ var o=document.getElementById('pv-modal-ovl'); if(o) o.remove(); _provEditRow=null; _provOnSaved=null; }
 function provEditRow(rowNum){
@@ -13917,6 +13948,8 @@ async function provSave(){
     nombre:nombre, comercial:val('comercial'), rfc:val('rfc'), categoria:val('categoria'),
     contacto:val('contacto'), telefono:val('telefono'), email:val('email'), banco:val('banco'),
     cuenta:val('cuenta'), diasCredito:val('diasCredito'), estatus:val('estatus'), notas:val('notas'),
+    regimenFiscal:val('regimenFiscal'), codigoPostal:val('codigoPostal'),
+    formaPagoHabitual:val('formaPagoHabitual'), usoCfdi:val('usoCfdi'),
     usuario:s.email||''
   };
   if (_provEditRow){ payload.action='updateProveedor'; payload.rowNum=_provEditRow._rowNum; payload.id=_provEditRow.id; }
