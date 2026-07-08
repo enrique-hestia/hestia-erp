@@ -599,7 +599,17 @@ function readEstadoResultadosMensual(fechaInicio, fechaFin){
    mix de servicios por línea). El resto (CAC, embudo, rentabilidad por
    servicio) NO se toca aquí (no hay fuente) — el front conserva su placeholder. */
 function _rgCiclos(lineas){
-  var n=0; (lineas||[]).forEach(function(l){ if(l.tipo==='dato'&&l.grupo==='REVENUE'){ (l.subitems||[]).forEach(function(s){ if(s.productos){ s.productos.forEach(function(p){ n+=_erN(p.cantidad); }); } else { n+=_erN(s.cantidad); } }); } }); return Math.round(n);
+  // Un "ciclo" = solo líneas ALTA o BAJA (los ciclos de tratamiento), no todos
+  // los productos (estudios, medicamentos, surrogacy, consultas, etc.).
+  var n=0;
+  (lineas||[]).forEach(function(l){
+    if(l.tipo!=='dato' || l.grupo!=='REVENUE') return;
+    var nom=String(l.linea||l.label||'').toLowerCase();
+    if(/estudio/.test(nom)) return;
+    if(!/alta|baja/.test(nom)) return;
+    (l.subitems||[]).forEach(function(s){ if(s.productos){ s.productos.forEach(function(p){ n+=_erN(p.cantidad); }); } else { n+=_erN(s.cantidad); } });
+  });
+  return Math.round(n);
 }
 function readResumenGeneral(fechaInicio, fechaFin){
   try{
