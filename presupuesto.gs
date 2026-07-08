@@ -168,6 +168,48 @@ function _presHistoricoEgresos() {
   return { q: q, m: m, subtipos: Object.keys(subSet), contableBySub: contableBySub };
 }
 
+/* ══ AGRUPACIÓN DEL PRESUPUESTO (config) — grupos personalizados de productos
+   para capturar/mover la meta por bucket, no producto por producto. Hoja
+   'Presupuesto_Grupos' (Grupo | Producto | IncluirMaestro). ══════════════ */
+var PRES_GRUPOS_TAB = 'Presupuesto_Grupos';
+function readGruposPresupuesto() {
+  try {
+    var ss = SpreadsheetApp.openById(ER_SS_ID);
+    var sh = ss.getSheetByName(PRES_GRUPOS_TAB);
+    if (!sh) return { ok: true, grupos: [], productoAGrupo: {}, _setup: false };
+    var raw = sh.getDataRange().getValues();
+    var byGrupo = {}, productoAGrupo = {};
+    for (var i = 1; i < raw.length; i++) {
+      var g = String(raw[i][0] || '').trim(); var p = String(raw[i][1] || '').trim();
+      if (!g || !p) continue;
+      var incl = raw[i][2] === true || String(raw[i][2]).toUpperCase() === 'TRUE' || raw[i][2] === '' || raw[i][2] == null;
+      if (!byGrupo[g]) byGrupo[g] = { nombre: g, incluirMaestro: incl, productos: [] };
+      byGrupo[g].productos.push(p);
+      byGrupo[g].incluirMaestro = incl;   // el último gana (mismo valor por grupo)
+      productoAGrupo[p] = g;
+    }
+    return { ok: true, grupos: Object.keys(byGrupo).map(function (k) { return byGrupo[k]; }), productoAGrupo: productoAGrupo, _setup: true };
+  } catch (ex) { return { ok: false, error: ex.message, grupos: [], productoAGrupo: {} }; }
+}
+function saveGruposPresupuesto(body) {
+  try {
+    var ss = SpreadsheetApp.openById(ER_SS_ID);
+    var sh = ss.getSheetByName(PRES_GRUPOS_TAB);
+    if (!sh) sh = ss.insertSheet(PRES_GRUPOS_TAB);
+    sh.clear();
+    sh.getRange(1, 1, 1, 3).setValues([['Grupo', 'Producto', 'IncluirMaestro']]);
+    var rows = [];
+    (body.grupos || []).forEach(function (g) {
+      var nom = String(g.nombre || '').trim(); if (!nom) return;
+      var incl = g.incluirMaestro !== false;
+      (g.productos || []).forEach(function (p) { p = String(p || '').trim(); if (p) rows.push([nom, p, incl]); });
+    });
+    if (rows.length) sh.getRange(2, 1, rows.length, 3).setValues(rows);
+    try { logAudit(body.usuario || 'sistema', 'Presupuesto', 'Guardar grupos', '', '', '', rows.length + ' asignaciones'); } catch (e) {}
+    return { ok: true, guardados: rows.length };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 /* ── Histórico de metas por trimestre (últimos ~7 Q + el siguiente proyectado):
    meta fijada vs real logrado + cumplimiento, para ver la racha. Solo 2 lecturas. */
 function readHistoricoMetas() {

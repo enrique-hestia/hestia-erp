@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.78 -->
+﻿<!-- app-build:2026.07.07.79 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12910,6 +12910,7 @@ function _renderPresupuesto(){
     +'</div>'
     +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
     +(canEdit?'<button class="pr-btn" onclick="presOpenMeta()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Fijar / editar meta</button>':'')
+    +(canEdit?'<button onclick="presGruposConfigOpen()" title="Agrupar productos para capturar la meta por bucket, no producto por producto" style="display:inline-flex;align-items:center;gap:6px;padding:9px 14px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;margin-left:6px">⚙ Grupos</button>':'')
     +'<button onclick="presShowManual()" title="Manual completo de Presupuesto" style="display:inline-flex;align-items:center;gap:5px;padding:8px 12px;background:var(--color-surface,#f1f1f1);color:var(--text-secondary,#374151);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:9px;font-size:11px;font-weight:600;cursor:pointer">📖 Manual</button>'
     +'<button onclick="_tourStart(_PRES_TOUR)" title="Tutorial interactivo" style="width:34px;height:34px;border-radius:50%;background:transparent;color:var(--color-primary,#c46a7a);border:2px solid var(--color-primary,#c46a7a);font-size:17px;font-weight:900;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1">?</button>'
     +'</div>'
@@ -13112,6 +13113,57 @@ function _renderHistoricoMetas(hist){
       });
     }
   }catch(e){}
+}
+
+/* ── Configuración de grupos del presupuesto (D1) ──────────────────── */
+async function presGruposConfigOpen(){
+  if(!_presData||!_presData.siguiente){ alert('Abre el Presupuesto primero.'); return; }
+  var prods=[];
+  (_presData.siguiente.ingresosGrupos||[]).forEach(function(g){ (g.subgrupos||[]).forEach(function(s){ (s.productos||[]).forEach(function(p){ prods.push({grupoU:g.grupo, producto:p.producto}); }); }); });
+  var existing={productoAGrupo:{}, grupos:[]};
+  try{ var tok=encodeURIComponent(getToken()); var r=await fetch(APPS_SCRIPT_URL+'?action=gruposPresupuesto&token='+tok+'&_t='+Date.now(),{redirect:'follow'}); existing=await r.json(); }catch(e){}
+  var pag=(existing&&existing.productoAGrupo)||{}, maestro={}; ((existing&&existing.grupos)||[]).forEach(function(g){ maestro[g.nombre]=g.incluirMaestro!==false; });
+  window._presGrpMaestro=maestro;
+  var gruposUnicos=Object.keys(maestro);
+  var listaHtml=prods.map(function(p){
+    return '<tr><td style="text-align:left;padding:5px 10px;border-bottom:1px solid var(--color-divider,#f0f0f0);font-size:11.5px">'+_esc(p.producto)+' <span style="color:#9ca3af;font-size:9.5px">('+_esc(p.grupoU)+')</span></td>'
+      +'<td style="padding:4px 8px;border-bottom:1px solid var(--color-divider,#f0f0f0)"><input list="pres-grp-dl" class="pres-grp-in" data-prod="'+encodeURIComponent(p.producto)+'" oninput="_presGrpRefreshMaestro()" value="'+_esc(pag[p.producto]||'')+'" placeholder="(sin agrupar → oculto)" style="width:100%;box-sizing:border-box;padding:5px 8px;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11.5px"></td></tr>';
+  }).join('');
+  var ovl=document.createElement('div'); ovl.id='pres-grp-ovl'; ovl.className='pr-mov';
+  ovl.onclick=function(e){ if(e.target===ovl) ovl.remove(); };
+  ovl.innerHTML='<div class="pr-modal" style="max-width:660px" onclick="event.stopPropagation()">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--color-divider,#e5e7eb)"><div style="font-size:15px;font-weight:800">Configuración del Presupuesto — Grupos</div><button onclick="document.getElementById(\'pres-grp-ovl\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280">×</button></div>'
+    +'<div style="padding:16px 20px">'
+    +'<div style="font-size:11.5px;color:#6b7280;margin-bottom:12px">Escribe a qué <b>grupo</b> pertenece cada producto (ej. "Ciclos"). Los que dejes vacíos se <b>ocultan</b> del tablero. En la captura moverás el grupo completo (por importe, reparto proporcional), no producto por producto.</div>'
+    +'<datalist id="pres-grp-dl">'+gruposUnicos.map(function(g){return '<option value="'+_esc(g)+'">';}).join('')+'</datalist>'
+    +'<div style="max-height:330px;overflow-y:auto;border:1px solid var(--color-divider,#e5e7eb);border-radius:10px"><table style="width:100%;border-collapse:collapse"><thead><tr style="position:sticky;top:0;background:var(--card-bg,#fff);z-index:1"><th style="text-align:left;padding:7px 10px;font-size:10px;color:#9ca3af;text-transform:uppercase">Producto</th><th style="text-align:left;padding:7px 10px;font-size:10px;color:#9ca3af;text-transform:uppercase">Grupo</th></tr></thead><tbody>'+listaHtml+'</tbody></table></div>'
+    +'<div id="pres-grp-maestro" style="margin-top:12px"></div>'
+    +'</div>'
+    +'<div style="display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--color-divider,#e5e7eb)"><button class="pr-btn" style="flex:1" onclick="presGruposConfigSave()">Guardar grupos</button><button onclick="document.getElementById(\'pres-grp-ovl\').remove()" style="padding:10px 18px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider,#e5e7eb);border-radius:9px;cursor:pointer">Cancelar</button></div>'
+    +'</div>';
+  document.body.appendChild(ovl);
+  _presGrpRefreshMaestro();
+}
+function _presGrpRefreshMaestro(){
+  var box=document.getElementById('pres-grp-maestro'); if(!box) return;
+  var grupos={}; document.querySelectorAll('.pres-grp-in').forEach(function(inp){ var g=inp.value.trim(); if(g) grupos[g]=1; });
+  var prev=window._presGrpMaestro||{}, keys=Object.keys(grupos);
+  box.innerHTML = keys.length ? '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#9ca3af;margin-bottom:6px">Incluir en % maestro (desmarca los que NO se deben mover)</div>'
+    +keys.map(function(g){ var on=prev[g]!==false; return '<label style="display:inline-flex;align-items:center;gap:6px;margin:0 12px 6px 0;font-size:12px;cursor:pointer"><input type="checkbox" class="pres-grp-maestro-ck" data-grupo="'+encodeURIComponent(g)+'" '+(on?'checked':'')+' style="width:14px;height:14px;accent-color:#c46a7a"> '+_esc(g)+'</label>'; }).join('') : '<span style="font-size:11px;color:#9ca3af">Aún no defines grupos.</span>';
+}
+async function presGruposConfigSave(){
+  var byGrupo={};
+  document.querySelectorAll('.pres-grp-in').forEach(function(inp){ var g=inp.value.trim(); var p=decodeURIComponent(inp.getAttribute('data-prod')); if(g){ if(!byGrupo[g]) byGrupo[g]={nombre:g,incluirMaestro:true,productos:[]}; byGrupo[g].productos.push(p); } });
+  document.querySelectorAll('.pres-grp-maestro-ck').forEach(function(ck){ var g=decodeURIComponent(ck.getAttribute('data-grupo')); if(byGrupo[g]) byGrupo[g].incluirMaestro=ck.checked; });
+  var grupos=Object.keys(byGrupo).map(function(k){return byGrupo[k];});
+  try{
+    var s=getSession()||{};
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'saveGruposPresupuesto',grupos:grupos,usuario:s.email||'sistema'})});
+    var res=await r.json();
+    if(!res.ok){ alert('No se pudo guardar: '+(res.error||'')); return; }
+    var ovl=document.getElementById('pres-grp-ovl'); if(ovl) ovl.remove();
+    setStatus('Grupos guardados ('+(res.guardados||0)+' asignaciones).','ok');
+  }catch(e){ alert('Error: '+(e.message||e)); }
 }
 
 /* ── Simulador de meta en la barra del hero ─────────────────────── */

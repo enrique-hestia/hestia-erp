@@ -341,6 +341,12 @@ function doGet(e) {
         return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});
       return jsonResponse(readHistoricoMetas());
     }
+    // Presupuesto: grupos personalizados (config de agrupación)
+    if (action === 'gruposPresupuesto') {
+      if (typeof readGruposPresupuesto !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});
+      return jsonResponse(readGruposPresupuesto());
+    }
 
     // Análisis de Egresos: histórico, ranking, recomendaciones
     if (action === 'analisisEgresos') {
