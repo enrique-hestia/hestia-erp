@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.66 -->
+﻿<!-- app-build:2026.07.07.67 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -8336,6 +8336,30 @@ async function loadMenu() {
         seccion:(_refSem&&_refSem.seccion)||_secSem, fuente:'semanal'
       });
     }
+    // ── Reorganizar Finanzas: agrupar las vistas del CFO en un submenú "CFO" ──
+    // Finanzas (sección) → CFO (grupo colapsable) → Summary · Board Deck ·
+    // Resumen Semanal · Estado de Resultados · Flujo de Efectivo.
+    (function(){
+      function find(pred){ return menuItems.filter(pred)[0]; }
+      function blob(i){ return (String(i.id||'')+' '+String(i.fuente||'')+' '+String(i.label||'')).toLowerCase(); }
+      var cfoMembers = [
+        find(function(i){ return i.id==='summary'; }),
+        find(function(i){ return i.id==='board'; }),
+        find(function(i){ return i.id==='semanal'; }),
+        find(function(i){ return /estado.?de.?resultados|estado-resultados/.test(blob(i)); }),
+        find(function(i){ return /flujo/.test(blob(i)) || /cashflow|fin.?cf/.test(String(i.id||'')); })
+      ].filter(Boolean);
+      if (cfoMembers.length >= 2){
+        var _ref = cfoMembers[0];
+        var _sec = _ref.seccion || (menuItems.filter(function(i){ return i.seccion; })[0]||{}).seccion || '';
+        var _padreCFO = _ref.padre || '';   // CFO queda al mismo nivel donde estaban las vistas
+        var _ordCFO = Math.min.apply(null, cfoMembers.map(function(m){ return Number(m.orden)||99; }));
+        if (!menuItems.some(function(i){ return i.id==='cfo'; })){
+          menuItems.push({ id:'cfo', label:'CFO', padre:_padreCFO, icono:'briefcase', tipo:'grupo', orden:_ordCFO-0.001, seccion:_sec });
+        }
+        cfoMembers.forEach(function(m, idx){ m.padre='cfo'; m.orden=idx+1; m.seccion=_sec; });
+      }
+    })();
     // Default: mes en curso (no año completo)
     var _now = new Date();
     var _y = _now.getFullYear();
