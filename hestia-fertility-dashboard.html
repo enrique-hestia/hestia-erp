@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.97 -->
+﻿<!-- app-build:2026.07.07.98 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12997,7 +12997,14 @@ function _renderPresupuesto(){
       +'<div class="pr-card base"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Base (esperado)</div><div style="font-size:21px;font-weight:800;color:var(--color-primary,#c46a7a)">'+fM(_escBase)+'</div><div style="font-size:9px;color:var(--text-secondary,#9ca3af);margin-top:2px">proyección del modelo (no editable)</div></div>'
       +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280);display:flex;align-items:center;justify-content:space-between;gap:5px">Optimista '+_escPctCtl('pr-esc-opt','+',_optP)+'</div><div id="pr-scen-opt" style="font-size:21px;font-weight:800">'+fM(_escBase*(1+_optP/100))+'</div></div>'
       +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Meta capturada</div><div id="pr-scen-meta" style="font-size:21px;font-weight:800">'+(tt.meta>0?fM(tt.meta):'—')+'</div></div>'
-    +'</div></div>');
+    +'</div>'
+    +(function(){ var _egP=(eg&&eg.proyeccion)||0, _u=_escBase-_egP, _pos=_u>=0;
+      return '<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:center;padding:10px 14px;border-radius:12px;background:'+(_pos?'rgba(22,101,52,.06)':'rgba(153,27,27,.06)')+';border:1px solid var(--color-divider,#e5e7eb)">'
+        +'<span style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">'+(_pos?'💰 Utilidad esperada':'⚠ Pérdida esperada')+' (con la Base)</span>'
+        +'<span style="font-size:22px;font-weight:800;color:'+(_pos?'#166534':'#991b1b')+'">'+(_pos?'':'−')+fM(Math.abs(_u))+'</span>'
+        +'<span style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">= ingresos base '+fM(_escBase)+' − egresos proyectados '+fM(_egP)+'</span>'
+      +'</div>'; })()
+    +'</div>');
 
   // ── Reporte editable con pestañas: Income / Expenses ──
   if (!window._presTab) window._presTab='ing';
@@ -13967,6 +13974,7 @@ function _chatMount(){
       +'<div style="display:flex;align-items:center;gap:8px"><span id="chat-online-n" style="font-size:10.5px;color:#166534;font-weight:700">● 0 en línea</span><button onclick="chatToggle()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af;line-height:1">×</button></div>'
     +'</div>'
     +'<div style="padding:8px 12px;border-bottom:1px solid var(--color-divider,#e5e7eb)"><select id="chat-canal-sel" onchange="chatSwitch(this.value)" style="width:100%;padding:7px 9px;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--color-surface,#fafafa);color:var(--text-primary,#111)"></select></div>'
+    +'<div id="chat-dm-status" style="display:none;padding:5px 12px;font-size:10.5px;line-height:1.4;border-bottom:1px solid var(--color-divider,#e5e7eb);background:var(--color-surface,#fafafa)"></div>'
     +'<div id="chat-msgs" style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:7px;background:var(--color-surface,#fafafa)"></div>'
     +'<div id="chat-emoji" style="display:none;padding:5px 10px;border-top:1px solid var(--color-divider,#e5e7eb);flex-wrap:wrap;gap:2px"></div>'
     +'<div style="padding:6px 12px 0;display:flex;gap:4px;align-items:center">'
@@ -14004,6 +14012,15 @@ function chatRender(){
   peers.forEach(function(p){ var c=_chatDM(_chat.me,p.email); var u=_chatUnread(c); opts+='<option value="'+_chatEsc(c)+'">'+(p.online?'🟢 ':'⚪ ')+_chatEsc(p.nombre)+(u?(' ('+u+')'):'')+'</option>'; });
   sel.innerHTML=opts; sel.value=_chat.canal;
   var on=document.getElementById('chat-online-n'); if(on) on.textContent='● '+(_chat.online||[]).length+' en línea';
+  var st=document.getElementById('chat-dm-status');
+  if(st){ if(_chat.canal.indexOf('dm:')===0){ var pe=_chat.canal.substring(3).split('|'); var oe=pe[0]===_chat.me?pe[1]:pe[0];
+      var onl=(_chat.online||[]).some(function(u){return String(u.email||'').toLowerCase()===oe;});
+      var nom=(_chatPeers().filter(function(p){return p.email===oe;})[0]||{}).nombre||oe;
+      st.style.display='block';
+      st.innerHTML= onl ? '<span style="color:#166534;font-weight:700">🟢 '+_chatEsc(nom)+' está en línea</span> — lo recibe al instante.'
+                        : '<span style="color:#9ca3af;font-weight:700">⚪ '+_chatEsc(nom)+' no está en línea</span> — se guarda y le llega cuando se conecte.';
+    } else st.style.display='none';
+  }
   var box=document.getElementById('chat-msgs'); if(!box) return;
   var arr=(_chat.byCanal[_chat.canal]||[]).slice().sort(function(a,b){return a.ts-b.ts;});
   if(!arr.length){ box.innerHTML='<div style="margin:auto;color:#9ca3af;font-size:12px;text-align:center">Sin mensajes aún.<br>Escribe el primero 👋</div>'; return; }
