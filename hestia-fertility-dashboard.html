@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.80 -->
+﻿<!-- app-build:2026.07.07.81 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -13121,54 +13121,127 @@ function _renderHistoricoMetas(hist){
   }catch(e){}
 }
 
-/* ── Configuración de grupos del presupuesto (D1) ──────────────────── */
+/* ── Editor VISUAL de grupos del presupuesto (tablero arrastrable + subgrupos) ── */
 async function presGruposConfigOpen(){
   if(!_presData||!_presData.siguiente){ alert('Abre el Presupuesto primero.'); return; }
   var prods=[];
-  (_presData.siguiente.ingresosGrupos||[]).forEach(function(g){ (g.subgrupos||[]).forEach(function(s){ (s.productos||[]).forEach(function(p){ prods.push({grupoU:g.grupo, producto:p.producto}); }); }); });
-  var existing={productoAGrupo:{}, grupos:[]};
+  (_presData.siguiente.ingresosGrupos||[]).forEach(function(g){ (g.subgrupos||[]).forEach(function(s){ (s.productos||[]).forEach(function(p){ prods.push({producto:p.producto, grupoU:g.grupo, sub:s.sub}); }); }); });
+  var existing={grupos:[],productoARuta:{}};
   try{ var tok=encodeURIComponent(getToken()); var r=await fetch(APPS_SCRIPT_URL+'?action=gruposPresupuesto&token='+tok+'&_t='+Date.now(),{redirect:'follow'}); existing=await r.json(); }catch(e){}
-  var pag=(existing&&existing.productoAGrupo)||{}, maestro={}; ((existing&&existing.grupos)||[]).forEach(function(g){ maestro[g.nombre]=g.incluirMaestro!==false; });
-  window._presGrpMaestro=maestro;
-  var gruposUnicos=Object.keys(maestro);
-  var listaHtml=prods.map(function(p){
-    return '<tr><td style="text-align:left;padding:5px 10px;border-bottom:1px solid var(--color-divider,#f0f0f0);font-size:11.5px">'+_esc(p.producto)+' <span style="color:#9ca3af;font-size:9.5px">('+_esc(p.grupoU)+')</span></td>'
-      +'<td style="padding:4px 8px;border-bottom:1px solid var(--color-divider,#f0f0f0)"><input list="pres-grp-dl" class="pres-grp-in" data-prod="'+encodeURIComponent(p.producto)+'" oninput="_presGrpRefreshMaestro()" value="'+_esc(pag[p.producto]||'')+'" placeholder="(sin agrupar → oculto)" style="width:100%;box-sizing:border-box;padding:5px 8px;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11.5px"></td></tr>';
-  }).join('');
+  var grupos=(existing.grupos||[]).map(function(g){ return {nombre:g.nombre, incluirMaestro:g.incluirMaestro!==false, subs:(g.subs||[]).map(function(s){return {nombre:s};})}; });
+  var ruta={}, er=(existing.productoARuta||{});
+  Object.keys(er).forEach(function(pn){ ruta[pn]={grupo:er[pn].grupo||'', sub:er[pn].sub||''}; });
+  var seeded=!(existing.grupos&&existing.grupos.length);
+  if(seeded){
+    var sd={};
+    prods.forEach(function(p){ var gn=(typeof _presClasificar==='function')?_presClasificar(p.producto):'Otros'; if(!sd[gn]) sd[gn]={nombre:gn,incluirMaestro:true,subs:[]}; ruta[p.producto]={grupo:gn,sub:''}; });
+    grupos=Object.keys(sd).map(function(k){return sd[k];});
+    grupos.sort(function(a,b){ var ia=_PRES_GRUPO_ORDEN.indexOf(a.nombre), ib=_PRES_GRUPO_ORDEN.indexOf(b.nombre); return (ia<0?99:ia)-(ib<0?99:ib); });
+  }
+  window._presGE={prods:prods, grupos:grupos, ruta:ruta, seeded:seeded};
   var ovl=document.createElement('div'); ovl.id='pres-grp-ovl'; ovl.className='pr-mov';
   ovl.onclick=function(e){ if(e.target===ovl) ovl.remove(); };
-  ovl.innerHTML='<div class="pr-modal" style="max-width:660px" onclick="event.stopPropagation()">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--color-divider,#e5e7eb)"><div style="font-size:15px;font-weight:800">Configuración del Presupuesto — Grupos</div><button onclick="document.getElementById(\'pres-grp-ovl\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280">×</button></div>'
-    +'<div style="padding:16px 20px">'
-    +'<div style="font-size:11.5px;color:#6b7280;margin-bottom:12px">Escribe a qué <b>grupo</b> pertenece cada producto (ej. "Ciclos"). Los que dejes vacíos se <b>ocultan</b> del tablero. En la captura moverás el grupo completo (por importe, reparto proporcional), no producto por producto.</div>'
-    +'<datalist id="pres-grp-dl">'+gruposUnicos.map(function(g){return '<option value="'+_esc(g)+'">';}).join('')+'</datalist>'
-    +'<div style="max-height:330px;overflow-y:auto;border:1px solid var(--color-divider,#e5e7eb);border-radius:10px"><table style="width:100%;border-collapse:collapse"><thead><tr style="position:sticky;top:0;background:var(--card-bg,#fff);z-index:1"><th style="text-align:left;padding:7px 10px;font-size:10px;color:#9ca3af;text-transform:uppercase">Producto</th><th style="text-align:left;padding:7px 10px;font-size:10px;color:#9ca3af;text-transform:uppercase">Grupo</th></tr></thead><tbody>'+listaHtml+'</tbody></table></div>'
-    +'<div id="pres-grp-maestro" style="margin-top:12px"></div>'
-    +'</div>'
-    +'<div style="display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--color-divider,#e5e7eb)"><button class="pr-btn" style="flex:1" onclick="presGruposConfigSave()">Guardar grupos</button><button onclick="document.getElementById(\'pres-grp-ovl\').remove()" style="padding:10px 18px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider,#e5e7eb);border-radius:9px;cursor:pointer">Cancelar</button></div>'
+  ovl.innerHTML='<div class="pr-modal" style="max-width:920px;width:96%" onclick="event.stopPropagation()">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:15px 20px;border-bottom:1px solid var(--color-divider,#e5e7eb)"><div><div style="font-size:15px;font-weight:800">Grupos del Presupuesto</div><div style="font-size:11px;color:#9ca3af">Arrastra productos a un grupo/subgrupo, o usa el menú de cada tarjeta. Lo que quede en «Sin agrupar» se omite de la meta.</div></div><button onclick="document.getElementById(\'pres-grp-ovl\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280">×</button></div>'
+    +'<div id="pge-board" style="padding:14px 18px;max-height:66vh;overflow:auto"></div>'
+    +'<div style="display:flex;gap:10px;padding:13px 20px;border-top:1px solid var(--color-divider,#e5e7eb)"><div id="pge-msg" style="margin-right:auto;font-size:11px;align-self:center;color:#9ca3af"></div><button class="pr-btn" onclick="presGruposConfigSave()">Guardar grupos</button><button onclick="document.getElementById(\'pres-grp-ovl\').remove()" style="padding:10px 18px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider,#e5e7eb);border-radius:9px;cursor:pointer">Cancelar</button></div>'
     +'</div>';
   document.body.appendChild(ovl);
-  _presGrpRefreshMaestro();
+  if(seeded){ var m=document.getElementById('pge-msg'); if(m) m.textContent='Grupos sugeridos automáticamente — ajústalos y guarda.'; }
+  _presGERender();
 }
-function _presGrpRefreshMaestro(){
-  var box=document.getElementById('pres-grp-maestro'); if(!box) return;
-  var grupos={}; document.querySelectorAll('.pres-grp-in').forEach(function(inp){ var g=inp.value.trim(); if(g) grupos[g]=1; });
-  var prev=window._presGrpMaestro||{}, keys=Object.keys(grupos);
-  box.innerHTML = keys.length ? '<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#9ca3af;margin-bottom:6px">Incluir en % maestro (desmarca los que NO se deben mover)</div>'
-    +keys.map(function(g){ var on=prev[g]!==false; return '<label style="display:inline-flex;align-items:center;gap:6px;margin:0 12px 6px 0;font-size:12px;cursor:pointer"><input type="checkbox" class="pres-grp-maestro-ck" data-grupo="'+encodeURIComponent(g)+'" '+(on?'checked':'')+' style="width:14px;height:14px;accent-color:#c46a7a"> '+_esc(g)+'</label>'; }).join('') : '<span style="font-size:11px;color:#9ca3af">Aún no defines grupos.</span>';
+function _presGEProds(grupo,sub){ return (window._presGE.prods||[]).filter(function(p){ var r=window._presGE.ruta[p.producto]; if(!r||!r.grupo) return grupo===''; return r.grupo===grupo && (sub==null || (r.sub||'')===sub); }); }
+function _presGEDrag(e,enc){ try{ e.dataTransfer.setData('text/plain',enc); }catch(_){} window._presGEDragging=enc; }
+function _presGEDrop(e,gEnc,sEnc){ e.preventDefault(); e.stopPropagation(); var enc=window._presGEDragging||(e.dataTransfer&&e.dataTransfer.getData('text/plain')); if(!enc) return; _presGEAssign(enc, gEnc?(gEnc+'|'+(sEnc||'')):''); }
+function _presGEAssign(prodEnc,val){ var prod=decodeURIComponent(prodEnc); var GE=window._presGE; if(!GE) return;
+  if(!val){ delete GE.ruta[prod]; } else { var parts=val.split('|'); GE.ruta[prod]={grupo:decodeURIComponent(parts[0]||''), sub:parts[1]?decodeURIComponent(parts[1]):''}; }
+  _presGERender();
 }
+function _presGEAssignSelect(prod){
+  var r=window._presGE.ruta[prod]||{grupo:'',sub:''};
+  var opts='<option value=""'+(!r.grupo?' selected':'')+'>(sin agrupar)</option>';
+  (window._presGE.grupos||[]).forEach(function(G){ var gEnc=encodeURIComponent(G.nombre);
+    opts+='<option value="'+gEnc+'|"'+((r.grupo===G.nombre&&!r.sub)?' selected':'')+'>'+_esc(G.nombre)+'</option>';
+    (G.subs||[]).forEach(function(S){ opts+='<option value="'+gEnc+'|'+encodeURIComponent(S.nombre)+'"'+((r.grupo===G.nombre&&(r.sub||'')===S.nombre)?' selected':'')+'>&nbsp;&nbsp;'+_esc(G.nombre)+' › '+_esc(S.nombre)+'</option>'; });
+  });
+  return '<select onchange="_presGEAssign(\''+encodeURIComponent(prod)+'\',this.value)" style="font-size:10px;border:1px solid var(--color-divider,#e5e7eb);border-radius:5px;padding:2px 3px;max-width:118px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'+opts+'</select>';
+}
+function _presGECard(prod,inGroup){
+  var enc=encodeURIComponent(prod);
+  return '<div draggable="true" ondragstart="_presGEDrag(event,\''+enc+'\')" style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;padding:4px 7px;font-size:11px;margin-bottom:5px;cursor:grab;display:flex;align-items:center;gap:5px">'
+    +'<span style="color:#c9c9c9;font-size:12px">⋮⋮</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+_esc(prod)+'">'+_esc(prod)+'</span>'
+    +(inGroup ? '<button onclick="_presGEAssign(\''+enc+'\',\'\')" title="Quitar del grupo" style="border:none;background:none;color:#9ca3af;cursor:pointer;font-size:13px;line-height:1">×</button>' : _presGEAssignSelect(prod))
+    +'</div>';
+}
+function _presGEZone(gEnc,sEnc,cards){
+  return '<div ondragover="event.preventDefault();this.style.background=\'rgba(196,106,122,.08)\'" ondragleave="this.style.background=\'\'" ondrop="this.style.background=\'\';_presGEDrop(event,\''+gEnc+'\',\''+sEnc+'\')" style="min-height:30px;border:1px dashed var(--color-divider,#e5e7eb);border-radius:8px;padding:6px">'+(cards||'<div style="font-size:10px;color:#c9c9c9;text-align:center;padding:3px">arrastra aquí</div>')+'</div>';
+}
+function _presGERender(){
+  var board=document.getElementById('pge-board'); if(!board||!window._presGE) return;
+  var GE=window._presGE;
+  var poolCards=GE.prods.filter(function(p){ var r=GE.ruta[p.producto]; return !r||!r.grupo; }).map(function(p){ return _presGECard(p.producto,false); }).join('');
+  var poolCount=GE.prods.filter(function(p){ var r=GE.ruta[p.producto]; return !r||!r.grupo; }).length;
+  var gruposHtml=(GE.grupos||[]).map(function(G){
+    var gEnc=encodeURIComponent(G.nombre);
+    var directCards=_presGEProds(G.nombre,'').map(function(p){ return _presGECard(p.producto,true); }).join('');
+    var subsHtml=(G.subs||[]).map(function(S){ var sEnc=encodeURIComponent(S.nombre);
+      var cards=_presGEProds(G.nombre,S.nombre).map(function(p){ return _presGECard(p.producto,true); }).join('');
+      return '<div style="margin-top:7px"><div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;font-weight:700;text-transform:uppercase;color:#9c4f5f;margin-bottom:3px">↳ '+_esc(S.nombre)+'<button onclick="_presGEDelSub(\''+gEnc+'\',\''+sEnc+'\')" title="Eliminar subgrupo" style="border:none;background:none;color:#9ca3af;cursor:pointer;font-size:13px">×</button></div>'+_presGEZone(gEnc,sEnc,cards)+'</div>';
+    }).join('');
+    return '<div style="background:var(--color-surface,#fafafa);border:1px solid var(--color-divider,#e5e7eb);border-radius:11px;padding:10px;width:236px;box-sizing:border-box">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;gap:6px">'
+        +'<div style="font-weight:800;font-size:12.5px;cursor:text;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" onclick="_presGERename(\''+gEnc+'\')" title="Clic para renombrar">📁 '+_esc(G.nombre)+'</div>'
+        +'<div style="display:flex;gap:5px;align-items:center;flex-shrink:0">'
+          +'<label style="font-size:9.5px;display:inline-flex;align-items:center;gap:3px;cursor:pointer" title="Incluir en % maestro"><input type="checkbox" '+(G.incluirMaestro!==false?'checked':'')+' onchange="_presGEToggleMaestro(\''+gEnc+'\')" style="accent-color:#c46a7a">%m</label>'
+          +'<button onclick="_presGEDelGrupo(\''+gEnc+'\')" title="Eliminar grupo" style="border:none;background:none;color:#9ca3af;cursor:pointer;font-size:15px;line-height:1">×</button>'
+        +'</div></div>'
+      +_presGEZone(gEnc,'',directCards)
+      +subsHtml
+      +'<button onclick="_presGENewSub(\''+gEnc+'\')" style="margin-top:7px;width:100%;font-size:10.5px;padding:4px;border:1px dashed var(--color-divider,#e5e7eb);border-radius:7px;background:none;color:#6b7280;cursor:pointer">+ Subgrupo</button>'
+      +'</div>';
+  }).join('');
+  board.innerHTML='<div style="display:grid;grid-template-columns:250px 1fr;gap:12px;align-items:start">'
+    +'<div style="background:var(--color-surface,#fafafa);border:1px solid var(--color-divider,#e5e7eb);border-radius:11px;padding:10px">'
+      +'<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:#6b7280;margin-bottom:7px;display:flex;justify-content:space-between">Sin agrupar · se omiten<span style="color:#9ca3af">'+poolCount+'</span></div>'
+      +_presGEZone('','',poolCards)
+    +'</div>'
+    +'<div><button onclick="_presGENewGrupo()" style="margin-bottom:10px;font-size:11.5px;font-weight:700;padding:7px 14px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;cursor:pointer">+ Nuevo grupo</button>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start">'+(gruposHtml||'<div style="font-size:11.5px;color:#9ca3af;padding:10px">Crea un grupo y arrastra productos.</div>')+'</div></div>'
+    +'</div>';
+}
+function _presGENewGrupo(){ var n=prompt('Nombre del nuevo grupo:'); if(!n) return; n=n.trim(); if(!n) return;
+  if(window._presGE.grupos.some(function(g){return g.nombre===n;})){ alert('Ya existe un grupo con ese nombre.'); return; }
+  window._presGE.grupos.push({nombre:n, incluirMaestro:true, subs:[]}); _presGERender(); }
+function _presGEDelGrupo(gEnc){ var gn=decodeURIComponent(gEnc); if(!confirm('¿Eliminar el grupo «'+gn+'»? Sus productos vuelven a «Sin agrupar».')) return;
+  var GE=window._presGE; GE.grupos=GE.grupos.filter(function(g){return g.nombre!==gn;});
+  Object.keys(GE.ruta).forEach(function(pn){ if(GE.ruta[pn].grupo===gn) delete GE.ruta[pn]; }); _presGERender(); }
+function _presGERename(gEnc){ var gn=decodeURIComponent(gEnc); var n=prompt('Renombrar grupo:', gn); if(!n) return; n=n.trim(); if(!n||n===gn) return;
+  var GE=window._presGE; if(GE.grupos.some(function(g){return g.nombre===n;})){ alert('Ya existe un grupo con ese nombre.'); return; }
+  GE.grupos.forEach(function(g){ if(g.nombre===gn) g.nombre=n; });
+  Object.keys(GE.ruta).forEach(function(pn){ if(GE.ruta[pn].grupo===gn) GE.ruta[pn].grupo=n; }); _presGERender(); }
+function _presGEToggleMaestro(gEnc){ var gn=decodeURIComponent(gEnc); window._presGE.grupos.forEach(function(g){ if(g.nombre===gn) g.incluirMaestro=!(g.incluirMaestro!==false); }); _presGERender(); }
+function _presGENewSub(gEnc){ var gn=decodeURIComponent(gEnc); var n=prompt('Nombre del subgrupo dentro de «'+gn+'»:'); if(!n) return; n=n.trim(); if(!n) return;
+  var G=window._presGE.grupos.filter(function(g){return g.nombre===gn;})[0]; if(!G) return;
+  if((G.subs||[]).some(function(s){return s.nombre===n;})){ alert('Ese subgrupo ya existe.'); return; }
+  G.subs=G.subs||[]; G.subs.push({nombre:n}); _presGERender(); }
+function _presGEDelSub(gEnc,sEnc){ var gn=decodeURIComponent(gEnc), sn=decodeURIComponent(sEnc); var GE=window._presGE;
+  var G=GE.grupos.filter(function(g){return g.nombre===gn;})[0]; if(!G) return;
+  G.subs=(G.subs||[]).filter(function(s){return s.nombre!==sn;});
+  Object.keys(GE.ruta).forEach(function(pn){ var r=GE.ruta[pn]; if(r.grupo===gn && (r.sub||'')===sn) r.sub=''; }); _presGERender(); }
 async function presGruposConfigSave(){
-  var byGrupo={};
-  document.querySelectorAll('.pres-grp-in').forEach(function(inp){ var g=inp.value.trim(); var p=decodeURIComponent(inp.getAttribute('data-prod')); if(g){ if(!byGrupo[g]) byGrupo[g]={nombre:g,incluirMaestro:true,productos:[]}; byGrupo[g].productos.push(p); } });
-  document.querySelectorAll('.pres-grp-maestro-ck').forEach(function(ck){ var g=decodeURIComponent(ck.getAttribute('data-grupo')); if(byGrupo[g]) byGrupo[g].incluirMaestro=ck.checked; });
-  var grupos=Object.keys(byGrupo).map(function(k){return byGrupo[k];});
+  var GE=window._presGE; if(!GE) return;
+  var body=(GE.grupos||[]).map(function(G,gi){
+    var directos=GE.prods.filter(function(p){ var r=GE.ruta[p.producto]; return r&&r.grupo===G.nombre&&!r.sub; }).map(function(p){return p.producto;});
+    var subgrupos=(G.subs||[]).map(function(S){ return {nombre:S.nombre, productos:GE.prods.filter(function(p){ var r=GE.ruta[p.producto]; return r&&r.grupo===G.nombre&&(r.sub||'')===S.nombre; }).map(function(p){return p.producto;})}; });
+    return {nombre:G.nombre, incluirMaestro:G.incluirMaestro!==false, orden:gi, directos:directos, subgrupos:subgrupos};
+  });
   try{
     var s=getSession()||{};
-    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'saveGruposPresupuesto',grupos:grupos,usuario:s.email||'sistema'})});
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'saveGruposPresupuesto',grupos:body,usuario:s.email||'sistema'})});
     var res=await r.json();
     if(!res.ok){ alert('No se pudo guardar: '+(res.error||'')); return; }
     var ovl=document.getElementById('pres-grp-ovl'); if(ovl) ovl.remove();
-    setStatus('Grupos guardados ('+(res.guardados||0)+' asignaciones).','ok');
+    setStatus('Grupos guardados.','ok');
     if(typeof loadPresupuesto==='function' && _presData) loadPresupuesto(_presData.periodoConsultado||(_presData.siguiente&&_presData.siguiente.periodo));
   }catch(e){ alert('Error: '+(e.message||e)); }
 }
@@ -13556,107 +13629,133 @@ function presApplyProjAll(tipo){
   if(tipo==='ing'){ var metas=[]; Object.keys(_presProdMap).forEach(function(k){var p=_presProdMap[k]; p._budCant=p.cantProy||0; p._budImp=p.importeProy||0; var ci=document.getElementById(k+'-c');if(ci)ci.value=p._budCant; var im=document.getElementById(k+'-imp');if(im)im.textContent=_presFM(p._budImp); _presProdDlUI(k); metas.push({linea:p.producto,metaIngreso:p._budImp});}); _presIngTotUI(); _presBatchSave(metas); }
   else { var metasE=[]; Object.keys(_presEgMap).forEach(function(k){var l=_presEgMap[k]; l.meta=l.proyeccion||0; var ei=document.getElementById(k+'-b');if(ei)ei.value=Math.round(l.meta); _presEgRowUI(k); metasE.push({linea:'EG:'+l.linea,metaIngreso:l.meta});}); _presEgTotUI(); _presBatchSave(metasE); } }
 
-/* ══ Vista AGRUPADA de captura de ingresos (D2) ═══════════════════════
-   Colapsa los productos en los buckets definidos en ⚙ Grupos. Solo se
-   muestran los buckets; los productos sin grupo se ocultan. Se captura la
-   meta por IMPORTE del bucket y se reparte proporcional a sus productos.
-   El % maestro / cuadrar solo mueve los buckets con "incluir en % maestro". */
+/* ══ Vista AGRUPADA de captura de ingresos (D2, anidada grupo→subgrupo) ══
+   Colapsa los productos en los buckets/subgrupos definidos en ⚙ Grupos.
+   Se captura la meta por IMPORTE a nivel grupo O subgrupo; se reparte
+   proporcional a sus productos. Productos sin grupo se ocultan (se omiten).
+   El % maestro / cuadrar solo mueven grupos con "incluir en % maestro". */
 function _presBuildIngresosGrouped(grupos, canEdit){
   _presProdMap={}; _presGrupoMap=[];
   var fM=_presFM, primary='var(--color-primary,#c46a7a)', kc=0;
-  var cfg=window._presGruposCfg||{grupos:[],productoAGrupo:{}};
-  var pag=cfg.productoAGrupo||{};
-  var maestroDe={}; (cfg.grupos||[]).forEach(function(g){ maestroDe[g.nombre]=g.incluirMaestro!==false; });
-  // Reunir productos por bucket (respetando el orden de config)
-  var byG={}, ocultos=0, orden=(cfg.grupos||[]).map(function(g){return g.nombre;});
+  var cfg=window._presGruposCfg||{grupos:[],productoARuta:{}};
+  var rutaDe=cfg.productoARuta||{};
+  var allByName={};
   (grupos||[]).forEach(function(G){ (G.subgrupos||[]).forEach(function(S){ (S.productos||[]).forEach(function(p){
     p._budCant=(p.budget>0&&p.precio>0)?Math.round(p.budget/p.precio):(p.cantProy||0); p._budImp=p._budCant*(p.precio||0);
-    var gn=pag[p.producto];
-    if(gn){ (byG[gn]=byG[gn]||[]).push(p); var key='ip'+(kc++); _presProdMap[key]=p; p._gk=key; }
-    else ocultos++;
+    allByName[p.producto]=p;
   }); }); });
-  var totImp=0, totProy=0;
-  var h='<div style="overflow-x:auto"><table class="pr-tbl"><thead><tr><th>Grupo</th><th>Productos</th><th>Importe budget</th><th>Proyección</th><th>Δ vs proy.</th><th style="text-align:center">% maestro</th></tr></thead><tbody>';
-  var hayBucket=false;
-  orden.forEach(function(gn){
-    var prods=byG[gn]; if(!prods||!prods.length) return; hayBucket=true;
-    var gi=_presGrupoMap.length;
-    var gImp=0,gProy=0; prods.forEach(function(p){ gImp+=p._budImp; gProy+=p.importeProy||0; });
-    _presGrupoMap.push({nombre:gn, incluirMaestro:maestroDe[gn]!==false, prods:prods});
+  var usados={}, totImp=0, totProy=0, hayBucket=false;
+  var h='<div style="overflow-x:auto"><table class="pr-tbl"><thead><tr><th>Grupo / Subgrupo</th><th>Prod.</th><th>Importe budget</th><th>Proyección</th><th>Δ vs proy.</th><th style="text-align:center">% maestro</th></tr></thead><tbody>';
+  (cfg.grupos||[]).forEach(function(gc){
+    var gn=gc.nombre;
+    var directos=[], subMap={}, subOrder=[];
+    (gc.subs||[]).forEach(function(s){ subMap[s]=[]; subOrder.push(s); });
+    Object.keys(rutaDe).forEach(function(pn){
+      var r=rutaDe[pn]; if(r.grupo!==gn) return; var p=allByName[pn]; if(!p) return; usados[pn]=1;
+      if(r.sub){ if(!subMap[r.sub]){ subMap[r.sub]=[]; subOrder.push(r.sub); } subMap[r.sub].push(p); }
+      else directos.push(p);
+    });
+    var allProds=directos.slice(); subOrder.forEach(function(s){ (subMap[s]||[]).forEach(function(p){ allProds.push(p); }); });
+    if(!allProds.length) return; hayBucket=true;
+    allProds.forEach(function(p){ var key='ip'+(kc++); _presProdMap[key]=p; p._gk=key; });
+    var gi=_presGrupoMap.length, incl=gc.incluirMaestro!==false;
+    var gImp=0,gProy=0; allProds.forEach(function(p){ gImp+=p._budImp; gProy+=p.importeProy||0; });
     totImp+=gImp; totProy+=gProy; var dl=gProy>0?(gImp-gProy):null;
     h+='<tr style="background:var(--color-primary-hl,rgba(196,106,122,.06))">'
       +'<td style="font-weight:800">'+_esc(gn)+'</td>'
-      +'<td style="color:var(--text-secondary,#9ca3af)">'+prods.length+'</td>'
+      +'<td style="color:var(--text-secondary,#9ca3af)">'+allProds.length+'</td>'
       +'<td style="text-align:right">'+(canEdit
           ? '<input id="pgi-'+gi+'-imp" type="number" step="1000" min="0" value="'+Math.round(gImp)+'" onchange="presGrupoImp('+gi+',this.value)" style="width:118px;text-align:right;border:1.5px solid var(--color-primary,#c46a7a);border-radius:7px;padding:6px 8px;font-size:12px;font-weight:700;color:'+primary+';background:var(--color-surface,#fafafa)">'
           : '<span id="pgi-'+gi+'-imp-t" style="font-weight:800;color:'+primary+'">'+fM(gImp)+'</span>')+'</td>'
       +'<td style="color:var(--text-secondary,#9ca3af)">'+fM(gProy)+'</td>'
       +'<td id="pgi-'+gi+'-dl" style="font-weight:700;color:'+(dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b'))+'">'+(dl==null?'—':fM(dl))+'</td>'
-      +'<td style="text-align:center">'+(maestroDe[gn]!==false?'<span style="color:#166534;font-weight:700" title="Se mueve con el % maestro">✓</span>':'<span style="color:#9ca3af" title="Fijo — no lo mueve el % maestro">—</span>')+'</td>'
+      +'<td style="text-align:center">'+(incl?'<span style="color:#166534;font-weight:700" title="Se mueve con el % maestro">✓</span>':'<span style="color:#9ca3af" title="Fijo — no lo mueve el % maestro">—</span>')+'</td>'
       +'</tr>';
-    // detalle de productos (solo lectura, para ver qué contiene el bucket)
-    prods.forEach(function(p){
-      h+='<tr><td style="padding-left:26px;color:var(--text-secondary,#6b7280);max-width:220px;overflow:hidden;text-overflow:ellipsis" title="'+_esc(p.producto)+'">'+_esc(p.producto)+'</td>'
-        +'<td></td><td id="'+p._gk+'-imp" style="color:var(--text-secondary,#9ca3af)">'+fM(p._budImp)+'</td>'
-        +'<td style="color:var(--text-secondary,#c9c9c9)">'+fM(p.importeProy)+'</td><td></td><td></td></tr>';
+    directos.forEach(function(p){ h+=_presProdDetailRow(p,fM,26); });
+    var subsModel=[];
+    subOrder.forEach(function(s){
+      var prods=subMap[s]||[]; if(!prods.length) return;
+      var si=subsModel.length, sImp=0,sProy=0; prods.forEach(function(p){ sImp+=p._budImp; sProy+=p.importeProy||0; });
+      subsModel.push({nombre:s, si:si, prods:prods});
+      var sdl=sProy>0?(sImp-sProy):null;
+      h+='<tr style="background:rgba(0,0,0,.015)">'
+        +'<td style="padding-left:20px;font-weight:700;color:#9c4f5f;font-size:10.5px;text-transform:uppercase">'+_esc(s)+'</td>'
+        +'<td style="color:var(--text-secondary,#9ca3af)">'+prods.length+'</td>'
+        +'<td style="text-align:right">'+(canEdit
+            ? '<input id="pgs-'+gi+'-'+si+'-imp" type="number" step="500" min="0" value="'+Math.round(sImp)+'" onchange="presSubImp('+gi+','+si+',this.value)" style="width:104px;text-align:right;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;padding:5px 7px;font-size:11.5px">'
+            : fM(sImp))+'</td>'
+        +'<td style="color:var(--text-secondary,#9ca3af)">'+fM(sProy)+'</td>'
+        +'<td id="pgs-'+gi+'-'+si+'-dl" style="color:'+(sdl==null?'#9ca3af':(sdl>=0?'#166534':'#991b1b'))+'">'+(sdl==null?'—':fM(sdl))+'</td><td></td></tr>';
+      prods.forEach(function(p){ h+=_presProdDetailRow(p,fM,38); });
     });
+    _presGrupoMap.push({nombre:gn, incluirMaestro:incl, gi:gi, directos:directos, subs:subsModel, allProds:allProds});
   });
+  var ocultos=0; Object.keys(allByName).forEach(function(pn){ if(!usados[pn]) ocultos++; });
   if(!hayBucket) h+='<tr><td colspan="6" style="text-align:center;padding:1.6rem;color:var(--text-secondary,#9ca3af)">No hay productos asignados a grupos todavía. Usa <b>⚙ Grupos</b> para configurarlos.</td></tr>';
   h+='<tr style="border-top:2px solid var(--color-divider,#d1d5db)"><td style="font-weight:800">TOTAL</td><td></td><td id="pr-ing-tot" style="font-weight:800;color:'+primary+'">'+fM(totImp)+'</td><td style="font-weight:800;color:var(--text-secondary,#9ca3af)">'+fM(totProy)+'</td><td></td><td></td></tr></tbody></table></div>';
-  if(ocultos>0) h+='<div style="font-size:11px;color:var(--text-secondary,#9ca3af);margin-top:8px">Vista agrupada activa · '+ocultos+' producto(s) sin grupo están ocultos. Cambia la configuración en <b>⚙ Grupos</b>.</div>';
+  if(ocultos>0) h+='<div style="font-size:11px;color:var(--text-secondary,#9ca3af);margin-top:8px">Vista agrupada activa · '+ocultos+' producto(s) sin grupo están ocultos. Configúralos en <b>⚙ Grupos</b>.</div>';
   return h;
 }
-// Distribuye el importe de un bucket proporcional a sus productos y guarda
-function presGrupoImp(gi, val){
-  var G=_presGrupoMap[gi]; if(!G) return;
-  var tgt=Math.max(0,parseFloat(val)||0);
-  var prods=G.prods;
-  var wsum=0; prods.forEach(function(p){ wsum+=p._budImp; });
-  if(wsum<=0){ prods.forEach(function(p){ wsum+=(p.importeProy||0); }); if(wsum>0) prods.forEach(function(p){ p._budImp=p.importeProy||0; }); }
-  if(wsum<=0){ // sin peso: reparte parejo por precio
-    var precioSum=0; prods.forEach(function(p){ precioSum+=(p.precio||0); });
-    prods.forEach(function(p){ p._budImp=precioSum>0?tgt*((p.precio||0)/precioSum):(tgt/prods.length); });
-  } else {
-    var f=tgt/wsum; prods.forEach(function(p){ p._budImp=p._budImp*f; });
-  }
-  var metas=[];
-  prods.forEach(function(p){ p._budCant=(p.precio||0)>0?Math.max(0,Math.round(p._budImp/(p.precio||1))):0; p._budImp=p._budCant*(p.precio||0);
-    var pc=document.getElementById(p._gk+'-imp'); if(pc) pc.textContent=_presFM(p._budImp);
-    metas.push({linea:p.producto,metaIngreso:p._budImp});
-  });
-  _presGrupoRowUI(gi); _presIngTotUI(); _presBatchSave(metas);
+function _presProdDetailRow(p,fM,pad){
+  var dl=p.importeProy>0?(p._budImp-p.importeProy):null;
+  return '<tr><td style="padding-left:'+pad+'px;color:var(--text-secondary,#6b7280);max-width:220px;overflow:hidden;text-overflow:ellipsis" title="'+_esc(p.producto)+'">'+_esc(p.producto)+'</td>'
+    +'<td></td><td id="'+p._gk+'-imp" style="color:var(--text-secondary,#9ca3af)">'+fM(p._budImp)+'</td>'
+    +'<td style="color:var(--text-secondary,#c9c9c9)">'+fM(p.importeProy)+'</td>'
+    +'<td id="'+p._gk+'-dl" style="color:'+(dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b'))+'">'+(dl==null?'—':fM(dl))+'</td><td></td></tr>';
 }
-function _presGrupoRowUI(gi){
-  var G=_presGrupoMap[gi]; if(!G) return;
-  var gImp=0,gProy=0; G.prods.forEach(function(p){ gImp+=p._budImp; gProy+=p.importeProy||0; });
+// Reparte un importe objetivo proporcional a los productos, recalcula cant×precio y refresca celdas
+function _presDistribute(prods, tgt){
+  tgt=Math.max(0,tgt||0);
+  var wsum=0; prods.forEach(function(p){ wsum+=p._budImp; });
+  if(wsum<=0){ prods.forEach(function(p){ p._budImp=p.importeProy||0; wsum+=p._budImp; }); }
+  if(wsum<=0){ var ps=0; prods.forEach(function(p){ ps+=(p.precio||0); }); prods.forEach(function(p){ p._budImp=ps>0?tgt*((p.precio||0)/ps):(tgt/(prods.length||1)); }); }
+  else { var f=tgt/wsum; prods.forEach(function(p){ p._budImp=p._budImp*f; }); }
+  var metas=[];
+  prods.forEach(function(p){ p._budCant=(p.precio||0)>0?Math.max(0,Math.round(p._budImp/(p.precio||1))):0; p._budImp=p._budCant*(p.precio||0); _presProdCellUI(p); metas.push({linea:p.producto,metaIngreso:p._budImp}); });
+  return metas;
+}
+function _presProdCellUI(p){
+  var pc=document.getElementById(p._gk+'-imp'); if(pc) pc.textContent=_presFM(p._budImp);
+  var dl=p.importeProy>0?(p._budImp-p.importeProy):null;
+  var dc=document.getElementById(p._gk+'-dl'); if(dc){ dc.textContent=dl==null?'—':_presFM(dl); dc.style.color=dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b'); }
+}
+function presGrupoImp(gi,val){ var G=_presGrupoMap[gi]; if(!G) return;
+  var metas=_presDistribute(G.allProds, parseFloat(val)||0);
+  G.subs.forEach(function(S){ _presSubRowUI(gi,S.si); }); _presGrupoRowUI(gi); _presIngTotUI(); _presBatchSave(metas); }
+function presSubImp(gi,si,val){ var G=_presGrupoMap[gi]; if(!G) return; var S=G.subs[si]; if(!S) return;
+  var metas=_presDistribute(S.prods, parseFloat(val)||0);
+  _presSubRowUI(gi,si); _presGrupoRowUI(gi); _presIngTotUI(); _presBatchSave(metas); }
+function _presGrupoRowUI(gi){ var G=_presGrupoMap[gi]; if(!G) return;
+  var gImp=0,gProy=0; G.allProds.forEach(function(p){ gImp+=p._budImp; gProy+=p.importeProy||0; });
   var inp=document.getElementById('pgi-'+gi+'-imp'); if(inp && document.activeElement!==inp) inp.value=Math.round(gImp);
   var t=document.getElementById('pgi-'+gi+'-imp-t'); if(t) t.textContent=_presFM(gImp);
   var dl=gProy>0?(gImp-gProy):null;
-  var dc=document.getElementById('pgi-'+gi+'-dl'); if(dc){ dc.textContent=dl==null?'—':_presFM(dl); dc.style.color=dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b'); }
-}
-// % maestro y cuadrar en modo agrupado: solo mueven buckets con incluirMaestro
+  var dc=document.getElementById('pgi-'+gi+'-dl'); if(dc){ dc.textContent=dl==null?'—':_presFM(dl); dc.style.color=dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b'); } }
+function _presSubRowUI(gi,si){ var G=_presGrupoMap[gi]; if(!G) return; var S=G.subs[si]; if(!S) return;
+  var sImp=0,sProy=0; S.prods.forEach(function(p){ sImp+=p._budImp; sProy+=p.importeProy||0; });
+  var inp=document.getElementById('pgs-'+gi+'-'+si+'-imp'); if(inp && document.activeElement!==inp) inp.value=Math.round(sImp);
+  var dl=sProy>0?(sImp-sProy):null;
+  var dc=document.getElementById('pgs-'+gi+'-'+si+'-dl'); if(dc){ dc.textContent=dl==null?'—':_presFM(dl); dc.style.color=dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b'); } }
+function _presRefreshGrupo(gi){ var G=_presGrupoMap[gi]; if(!G) return; G.subs.forEach(function(S){ _presSubRowUI(gi,S.si); }); _presGrupoRowUI(gi); }
+// % maestro y cuadrar en modo agrupado: solo mueven grupos con incluirMaestro
 function _presMasterApplyGrouped(f){
   var metas=[];
   _presGrupoMap.forEach(function(G,gi){ if(G.incluirMaestro===false) return;
-    G.prods.forEach(function(p){ p._budCant=Math.max(0,Math.round(p._budCant*f)); p._budImp=p._budCant*(p.precio||0);
-      var pc=document.getElementById(p._gk+'-imp'); if(pc)pc.textContent=_presFM(p._budImp);
-      metas.push({linea:p.producto,metaIngreso:p._budImp}); });
-    _presGrupoRowUI(gi);
+    G.allProds.forEach(function(p){ p._budCant=Math.max(0,Math.round(p._budCant*f)); p._budImp=p._budCant*(p.precio||0); _presProdCellUI(p); metas.push({linea:p.producto,metaIngreso:p._budImp}); });
+    _presRefreshGrupo(gi);
   });
   _presIngTotUI(); _presBatchSave(metas);
 }
 function _presMasterTargetGrouped(tgt){
   var fijo=0, movible=0;
-  _presGrupoMap.forEach(function(G){ var s=0; G.prods.forEach(function(p){s+=p._budImp;}); if(G.incluirMaestro===false) fijo+=s; else movible+=s; });
-  var need=tgt-fijo; if(movible<=0){ alert('No hay grupos móviles (marca "incluir en % maestro" en ⚙ Grupos).'); return; }
-  if(need<0) need=0;
+  _presGrupoMap.forEach(function(G){ var s=0; G.allProds.forEach(function(p){s+=p._budImp;}); if(G.incluirMaestro===false) fijo+=s; else movible+=s; });
+  if(movible<=0){ alert('No hay grupos móviles (marca "incluir en % maestro" en ⚙ Grupos).'); return; }
+  var need=tgt-fijo; if(need<0) need=0;
   _presMasterApplyGrouped(need/movible);
 }
 function _presApplyProjAllGrouped(){
   var metas=[];
-  _presGrupoMap.forEach(function(G,gi){ G.prods.forEach(function(p){ p._budCant=p.cantProy||0; p._budImp=p.importeProy||0;
-    var pc=document.getElementById(p._gk+'-imp'); if(pc)pc.textContent=_presFM(p._budImp);
-    metas.push({linea:p.producto,metaIngreso:p._budImp}); }); _presGrupoRowUI(gi); });
+  _presGrupoMap.forEach(function(G,gi){ G.allProds.forEach(function(p){ p._budCant=p.cantProy||0; p._budImp=p.importeProy||0; _presProdCellUI(p); metas.push({linea:p.producto,metaIngreso:p._budImp}); }); _presRefreshGrupo(gi); });
   _presIngTotUI(); _presBatchSave(metas);
 }
 

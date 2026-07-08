@@ -172,40 +172,56 @@ function _presHistoricoEgresos() {
    para capturar/mover la meta por bucket, no producto por producto. Hoja
    'Presupuesto_Grupos' (Grupo | Producto | IncluirMaestro). ══════════════ */
 var PRES_GRUPOS_TAB = 'Presupuesto_Grupos';
+// Hoja: Grupo | Subgrupo | Producto | IncluirMaestro | Orden  (subgrupo/producto pueden ir vacíos)
 function readGruposPresupuesto() {
   try {
     var ss = SpreadsheetApp.openById(ER_SS_ID);
     var sh = ss.getSheetByName(PRES_GRUPOS_TAB);
-    if (!sh) return { ok: true, grupos: [], productoAGrupo: {}, _setup: false };
+    if (!sh) return { ok: true, grupos: [], productoARuta: {}, _setup: false };
     var raw = sh.getDataRange().getValues();
-    var byGrupo = {}, productoAGrupo = {};
+    var gInfo = {}, order = [], productoARuta = {};
     for (var i = 1; i < raw.length; i++) {
-      var g = String(raw[i][0] || '').trim(); var p = String(raw[i][1] || '').trim();
-      if (!g || !p) continue;
-      var incl = raw[i][2] === true || String(raw[i][2]).toUpperCase() === 'TRUE' || raw[i][2] === '' || raw[i][2] == null;
-      if (!byGrupo[g]) byGrupo[g] = { nombre: g, incluirMaestro: incl, productos: [] };
-      byGrupo[g].productos.push(p);
-      byGrupo[g].incluirMaestro = incl;   // el último gana (mismo valor por grupo)
-      productoAGrupo[p] = g;
+      var g = String(raw[i][0] || '').trim(); if (!g) continue;
+      var sub = String(raw[i][1] || '').trim();
+      var p = String(raw[i][2] || '').trim();
+      var inclRaw = raw[i][3];
+      var incl = inclRaw === true || String(inclRaw).toUpperCase() === 'TRUE' || inclRaw === '' || inclRaw == null;
+      var ord = Number(raw[i][4]) || 0;
+      if (!gInfo[g]) { gInfo[g] = { nombre: g, incluirMaestro: incl, orden: ord, subs: [], _subset: {} }; order.push(g); }
+      gInfo[g].incluirMaestro = incl; gInfo[g].orden = ord;
+      if (sub && !gInfo[g]._subset[sub]) { gInfo[g]._subset[sub] = 1; gInfo[g].subs.push(sub); }
+      if (p) productoARuta[p] = { grupo: g, sub: sub };
     }
-    return { ok: true, grupos: Object.keys(byGrupo).map(function (k) { return byGrupo[k]; }), productoAGrupo: productoAGrupo, _setup: true };
-  } catch (ex) { return { ok: false, error: ex.message, grupos: [], productoAGrupo: {} }; }
+    order.sort(function (a, b) { return (gInfo[a].orden - gInfo[b].orden) || a.localeCompare(b); });
+    var grupos = order.map(function (g) { var G = gInfo[g]; return { nombre: G.nombre, incluirMaestro: G.incluirMaestro, orden: G.orden, subs: G.subs }; });
+    return { ok: true, grupos: grupos, productoARuta: productoARuta, _setup: true };
+  } catch (ex) { return { ok: false, error: ex.message, grupos: [], productoARuta: {} }; }
 }
+// body.grupos: [{nombre, incluirMaestro, orden, directos:[prod...], subgrupos:[{nombre, productos:[prod...]}]}]
 function saveGruposPresupuesto(body) {
   try {
     var ss = SpreadsheetApp.openById(ER_SS_ID);
     var sh = ss.getSheetByName(PRES_GRUPOS_TAB);
     if (!sh) sh = ss.insertSheet(PRES_GRUPOS_TAB);
     sh.clear();
-    sh.getRange(1, 1, 1, 3).setValues([['Grupo', 'Producto', 'IncluirMaestro']]);
+    sh.getRange(1, 1, 1, 5).setValues([['Grupo', 'Subgrupo', 'Producto', 'IncluirMaestro', 'Orden']]);
     var rows = [];
-    (body.grupos || []).forEach(function (g) {
+    (body.grupos || []).forEach(function (g, gi) {
       var nom = String(g.nombre || '').trim(); if (!nom) return;
       var incl = g.incluirMaestro !== false;
-      (g.productos || []).forEach(function (p) { p = String(p || '').trim(); if (p) rows.push([nom, p, incl]); });
+      var ord = (g.orden != null) ? g.orden : gi;
+      var wrote = false;
+      (g.directos || g.productos || []).forEach(function (p) { p = String(p || '').trim(); if (p) { rows.push([nom, '', p, incl, ord]); wrote = true; } });
+      (g.subgrupos || []).forEach(function (s) {
+        var sn = String(s.nombre || '').trim(); if (!sn) return;
+        var prods = s.productos || [];
+        if (!prods.length) { rows.push([nom, sn, '', incl, ord]); wrote = true; }
+        prods.forEach(function (p) { p = String(p || '').trim(); if (p) { rows.push([nom, sn, p, incl, ord]); wrote = true; } });
+      });
+      if (!wrote) rows.push([nom, '', '', incl, ord]);
     });
-    if (rows.length) sh.getRange(2, 1, rows.length, 3).setValues(rows);
-    try { logAudit(body.usuario || 'sistema', 'Presupuesto', 'Guardar grupos', '', '', '', rows.length + ' asignaciones'); } catch (e) {}
+    if (rows.length) sh.getRange(2, 1, rows.length, 5).setValues(rows);
+    try { logAudit(body.usuario || 'sistema', 'Presupuesto', 'Guardar grupos', '', '', '', rows.length + ' filas'); } catch (e) {}
     return { ok: true, guardados: rows.length };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
