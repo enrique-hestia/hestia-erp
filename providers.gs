@@ -206,6 +206,119 @@ function buscarDatosFiscalesProveedor(query) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
+/* ══ AUTOCOMPLETAR PROVEEDORES DESDE XML (masivo) ═══════════════════════════
+   Escanea TODOS los XML de egresos una sola vez, arma un índice por RFC del
+   emisor (razón social, régimen, CP, forma pago, uso CFDI + variantes de nombre)
+   y propone llenar cada proveedor del catálogo. Match alto (RFC o nombre casi
+   idéntico) = confianza alta; parecido = confianza baja (el usuario confirma). */
+function _provNorm(s) {
+  s = String(s || '').toLowerCase();
+  s = s.replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i').replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').replace(/ñ/g,'n');
+  s = s.replace(/[.,&\-_/]/g,' ').replace(/\b(sa de cv|s a de c v|sapi de cv|s de rl de cv|s de r l de c v|s c|sc|sa|de cv|the|inc|llc|co)\b/g,' ');
+  return s.replace(/\s+/g,' ').trim();
+}
+function _provSimil(a, b) {
+  if (!a || !b) return 0; if (a === b) return 1;
+  if (a.indexOf(b) >= 0 || b.indexOf(a) >= 0) return 0.9;
+  var ta = a.split(' ').filter(Boolean), tb = b.split(' ').filter(Boolean);
+  if (!ta.length || !tb.length) return 0;
+  var setb = {}; tb.forEach(function (t) { setb[t] = 1; });
+  var inter = 0; ta.forEach(function (t) { if (setb[t]) inter++; });
+  return inter / (ta.length + tb.length - inter);
+}
+function _provEmisorIndex(maxFiles) {
+  maxFiles = maxFiles || 3000;
+  if (typeof listComprobantesEstructura !== 'function' || typeof _compParseXmlLight !== 'function')
+    return { ok: false, error: 'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.' };
+  var est = listComprobantesEstructura('facturas');
+  if (!est.ok) return { ok: false, error: est.error || 'No se pudo leer el repositorio de facturas.' };
+  var meses = [];
+  (est.anios || []).forEach(function (a) { (a.meses || []).forEach(function (m) { meses.push({ folderId: m.folderId, anio: a.anio, mes: m.mes }); }); });
+  meses.sort(function (a, b) { return (b.anio - a.anio) || (b.mes - a.mes); });
+  var idx = {}, escaneados = 0;
+  for (var i = 0; i < meses.length && escaneados < maxFiles; i++) {
+    var files; try { files = DriveApp.getFolderById(meses[i].folderId).getFiles(); } catch (e) { continue; }
+    while (files.hasNext() && escaneados < maxFiles) {
+      var f = files.next(); if (!/\.xml$/i.test(f.getName())) continue; escaneados++;
+      var p; try { p = _compParseXmlLight(f.getBlob().getDataAsString('UTF-8')); } catch (e) { continue; }
+      var rfc = String(p.emisorRfc || '').toUpperCase().replace(/[\s-]/g, ''); if (!rfc) continue;
+      var e = idx[rfc]; if (!e) { e = idx[rfc] = { rfc: rfc, nombres: {}, regimen: {}, cp: {}, fp: {}, uso: {}, count: 0, ult: '' }; }
+      e.count++;
+      var nom = String(p.emisorNombre || '').trim(); if (nom) e.nombres[nom] = (e.nombres[nom] || 0) + 1;
+      if (p.emisorRegimen) e.regimen[p.emisorRegimen] = (e.regimen[p.emisorRegimen] || 0) + 1;
+      if (p.lugarExpedicion) e.cp[p.lugarExpedicion] = (e.cp[p.lugarExpedicion] || 0) + 1;
+      if (p.formaPago) e.fp[p.formaPago] = (e.fp[p.formaPago] || 0) + 1;
+      if (p.receptorUsoCfdi) e.uso[p.receptorUsoCfdi] = (e.uso[p.receptorUsoCfdi] || 0) + 1;
+      var fe = (p.fecha || '').substring(0, 10); if (fe > e.ult) e.ult = fe;
+    }
+  }
+  function moda(o) { var b = '', n = 0; Object.keys(o).forEach(function (k) { if (o[k] > n) { n = o[k]; b = k; } }); return b; }
+  var out = {};
+  Object.keys(idx).forEach(function (rfc) { var e = idx[rfc]; out[rfc] = {
+    rfc: rfc, razonSocial: moda(e.nombres), nombres: Object.keys(e.nombres),
+    regimenFiscal: moda(e.regimen), codigoPostal: moda(e.cp), formaPagoHabitual: moda(e.fp), usoCfdi: moda(e.uso),
+    numFacturas: e.count, ultimaFecha: e.ult }; });
+  return { ok: true, index: out, escaneados: escaneados, rfcs: Object.keys(out).length };
+}
+function autocompletarProveedoresDesdeXML(body) {
+  try {
+    var idxRes = _provEmisorIndex((body && body.maxFiles) || 3000);
+    if (!idxRes.ok) return idxRes;
+    var index = idxRes.index;
+    var byNorm = {};
+    Object.keys(index).forEach(function (rfc) {
+      (index[rfc].nombres || []).forEach(function (nm) { var k = _provNorm(nm); if (k && !byNorm[k]) byNorm[k] = rfc; });
+      var kr = _provNorm(index[rfc].razonSocial); if (kr && !byNorm[kr]) byNorm[kr] = rfc;
+    });
+    var provs = readProveedores(); if (!provs.ok) return provs;
+    var proposals = [];
+    provs.rows.forEach(function (pr) {
+      var em = null, conf = 'baja', score = 0;
+      var rfc = String(pr.rfc || '').toUpperCase().replace(/[\s-]/g, '');
+      if (rfc && index[rfc]) { em = index[rfc]; conf = 'alta'; score = 100; }
+      else {
+        var nn = _provNorm(pr.nombre);
+        if (nn && byNorm[nn]) { em = index[byNorm[nn]]; conf = 'alta'; score = 95; }
+        else {
+          var best = null, bs = 0;
+          Object.keys(index).forEach(function (r) {
+            var s0 = _provSimil(nn, _provNorm(index[r].razonSocial));
+            (index[r].nombres || []).forEach(function (nm) { var s = _provSimil(nn, _provNorm(nm)); if (s > s0) s0 = s; });
+            if (s0 > bs) { bs = s0; best = r; }
+          });
+          if (best && bs >= 0.55) { em = index[best]; score = Math.round(bs * 100); conf = bs >= 0.85 ? 'alta' : 'baja'; }
+        }
+      }
+      if (!em) return;
+      var prop = {};
+      function add(field, val) { if (val && String(pr[field] || '').trim().toLowerCase() !== String(val).trim().toLowerCase()) prop[field] = val; }
+      add('rfc', em.rfc); add('regimenFiscal', em.regimenFiscal); add('codigoPostal', em.codigoPostal);
+      add('formaPagoHabitual', em.formaPagoHabitual); add('usoCfdi', em.usoCfdi);
+      if (!Object.keys(prop).length) return; // ya está completo/igual
+      proposals.push({ rowNum: pr._rowNum, id: pr.id, nombre: pr.nombre, rfcActual: pr.rfc,
+        confianza: conf, score: score, razonSocialXml: em.razonSocial, numFacturas: em.numFacturas, propuesta: prop });
+    });
+    proposals.sort(function (a, b) { return (b.score - a.score) || (a.nombre < b.nombre ? -1 : 1); });
+    return { ok: true, proposals: proposals, escaneados: idxRes.escaneados, rfcsXml: idxRes.rfcs, totalProv: provs.rows.length };
+  } catch (ex) { return { ok: false, error: ex.message + ' (L:' + (ex.lineNumber || '?') + ')' }; }
+}
+function aplicarAutocompletarProveedores(body) {
+  try {
+    var ss = SpreadsheetApp.openById(CXP_SS_ID); var sh = ss.getSheetByName(PROV_TAB);
+    if (!sh) return { ok: false, error: 'La hoja Proveedores no existe.' };
+    var n = 0;
+    (body.items || []).forEach(function (it) {
+      var rowNum = parseInt(it.rowNum, 10); if (!(rowNum >= 2)) return;
+      var pr = it.propuesta || {};
+      if (pr.rfc) sh.getRange(rowNum, 4).setValue(String(pr.rfc)); // col D = RFC
+      try { _provWriteFiscal(sh, rowNum, pr); } catch (e) {}
+      n++;
+    });
+    try { logAudit(body.usuario || 'sistema', 'Proveedores', 'Autocompletar XML', '', '', '', n + ' proveedores'); } catch (e) {}
+    return { ok: true, actualizados: n };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 // Asegura columnas fiscales al final de la hoja Proveedores (sin romper el orden base).
 function _provColEnsure(sh, header) {
   var lc = Math.max(sh.getLastColumn(), 1);

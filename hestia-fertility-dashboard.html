@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.86 -->
+﻿<!-- app-build:2026.07.07.87 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -14188,7 +14188,10 @@ function _renderProveedores(){
     +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Proveedores</h1>'
     +'<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">Catálogo centralizado · se usa en Egresos, Cuentas por Pagar y demás módulos</div>'
     +'</div>'
-    +(canEdit?'<button class="pv-btn" onclick="provOpenForm()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Nuevo proveedor</button>':'')
+    +(canEdit?'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+      +'<button onclick="provAutoXmlOpen()" title="Lee todos los XML de egresos y llena RFC + datos fiscales de los proveedores automáticamente" style="display:inline-flex;align-items:center;gap:6px;padding:9px 15px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer">🔍 Autocompletar desde XML</button>'
+      +'<button class="pv-btn" onclick="provOpenForm()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Nuevo proveedor</button>'
+      +'</div>':'')
     +'</div>');
   // KPIs
   h.push('<div class="pv-kstrip">'
@@ -14301,6 +14304,63 @@ async function provBuscarFiscal(auto){
     setIf('codigoPostal',f.codigoPostal,true); setIf('formaPagoHabitual',f.formaPagoHabitual,true); setIf('usoCfdi',f.usoCfdi,true);
     if(msg){ msg.style.color='#166534'; msg.textContent='✓ Cargado de '+d.numFacturas+' factura(s) (última '+f.fechaReferencia+')'+(d.conflicto?' · ⚠ hay variaciones, revisa':''); }
   }catch(e){ if(msg){ msg.style.color='#b45309'; msg.textContent='Error: '+(e.message||e); } }
+}
+/* ── Autocompletar TODOS los proveedores desde los XML de egresos ─────── */
+async function provAutoXmlOpen(){
+  var ovl=document.createElement('div'); ovl.id='prov-auto-ovl';
+  ovl.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9998;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
+  ovl.onclick=function(e){ if(e.target===ovl) ovl.remove(); };
+  ovl.innerHTML='<div style="background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);max-width:960px;width:96%;max-height:90vh;overflow:auto" onclick="event.stopPropagation()">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:16px 22px;border-bottom:1px solid var(--color-divider,#e5e7eb)"><div><div style="font-size:16px;font-weight:800">Autocompletar proveedores desde XML</div><div style="font-size:11.5px;color:#9ca3af">Leo los XML de egresos, comparo y propongo RFC + datos fiscales. Tú confirmas antes de guardar.</div></div><button onclick="document.getElementById(\'prov-auto-ovl\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280">×</button></div>'
+    +'<div id="prov-auto-body" style="padding:18px 22px">'+(typeof hestiaLoader==='function'?hestiaLoader('Leyendo XML y comparando… (puede tardar 1-2 min)'):'Leyendo XML…')+'</div>'
+    +'</div>';
+  document.body.appendChild(ovl);
+  try{
+    var s=getSession()||{};
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'autocompletarProveedores',usuario:s.email||''})});
+    var res=await r.json();
+    if(!document.getElementById('prov-auto-ovl')) return;
+    var b=document.getElementById('prov-auto-body');
+    if(!res.ok){ if(b) b.innerHTML='<div style="color:#b45309;font-size:13px;line-height:1.6">'+_esc(res.error||'No se pudo procesar.')+'<br><span style="color:#9ca3af">Si dice actualiza providers.gs/comprobantes.gs, súbelos al Apps Script y redespliega.</span></div>'; return; }
+    window._provAutoProps=res.proposals||[];
+    _provAutoRender(res);
+  }catch(e){ var b=document.getElementById('prov-auto-body'); if(b) b.innerHTML='<div style="color:#b45309">Error: '+_esc(e.message||e)+'</div>'; }
+}
+function _provAutoRender(res){
+  var props=window._provAutoProps||[]; var b=document.getElementById('prov-auto-body'); if(!b) return;
+  if(!props.length){ b.innerHTML='<div style="font-size:13px;color:#166534;line-height:1.6">✓ Todo al día: no encontré datos nuevos por llenar.<br><span style="color:#9ca3af">Escaneé '+(res.escaneados||0)+' XML · '+(res.rfcsXml||0)+' emisores · '+(res.totalProv||0)+' proveedores.</span></div>'; return; }
+  var altas=props.filter(function(p){return p.confianza==='alta';}).length;
+  function fld(p,k,lbl){ var v=p.propuesta[k]; return v?('<div style="font-size:10px"><span style="color:#9ca3af">'+lbl+':</span> <b>'+_esc(v)+'</b></div>'):''; }
+  var rows=props.map(function(p,i){
+    var pre=p.confianza==='alta';
+    var badge=pre?'<span style="background:#dcfce7;color:#166534;padding:1px 7px;border-radius:10px;font-size:9.5px;font-weight:700">Alta '+p.score+'%</span>':'<span style="background:#fef3c7;color:#92400e;padding:1px 7px;border-radius:10px;font-size:9.5px;font-weight:700">Revisar '+p.score+'%</span>';
+    return '<tr style="border-bottom:1px solid var(--color-divider,#f0f0f0)'+(pre?'':';background:rgba(245,158,11,.05)')+'">'
+      +'<td style="padding:6px 8px;vertical-align:top"><input type="checkbox" class="prov-auto-ck" data-i="'+i+'" '+(pre?'checked':'')+' style="width:15px;height:15px;accent-color:#c46a7a"></td>'
+      +'<td style="padding:6px 8px;font-size:12px;font-weight:600;vertical-align:top">'+_esc(p.nombre)+'<div style="font-size:9.5px;color:#9ca3af;font-weight:400">XML: '+_esc(p.razonSocialXml||'—')+' · '+p.numFacturas+' fact.</div></td>'
+      +'<td style="padding:6px 8px;vertical-align:top">'+badge+'</td>'
+      +'<td style="padding:6px 8px;vertical-align:top">'+(fld(p,'rfc','RFC')+fld(p,'regimenFiscal','Régimen')+fld(p,'codigoPostal','CP')+fld(p,'formaPagoHabitual','Forma pago')+fld(p,'usoCfdi','Uso CFDI')||'—')+'</td>'
+      +'</tr>';
+  }).join('');
+  b.innerHTML='<div style="font-size:12px;color:#6b7280;margin-bottom:10px">Escaneé <b>'+(res.escaneados||0)+'</b> XML · '+(res.rfcsXml||0)+' emisores · <b>'+props.length+'</b> proveedores con datos por llenar (<b>'+altas+'</b> de confianza alta, ya pre-marcados; los de <span style="color:#92400e">Revisar</span> quedan sin marcar hasta que los apruebes).</div>'
+    +'<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap"><button onclick="_provAutoSel(1)" style="font-size:11px;padding:4px 10px;border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;background:var(--card-bg,#fff);cursor:pointer">Marcar todos</button><button onclick="_provAutoSel(0)" style="font-size:11px;padding:4px 10px;border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;background:var(--card-bg,#fff);cursor:pointer">Desmarcar</button><button onclick="_provAutoSel(2)" style="font-size:11px;padding:4px 10px;border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;background:var(--card-bg,#fff);cursor:pointer">Solo confianza alta</button></div>'
+    +'<div style="max-height:52vh;overflow:auto;border:1px solid var(--color-divider,#e5e7eb);border-radius:10px"><table style="width:100%;border-collapse:collapse"><thead><tr style="position:sticky;top:0;background:var(--card-bg,#fff);z-index:1"><th style="padding:6px 8px"></th><th style="padding:6px 8px;text-align:left;font-size:9.5px;color:#9ca3af;text-transform:uppercase">Proveedor</th><th style="padding:6px 8px;text-align:left;font-size:9.5px;color:#9ca3af;text-transform:uppercase">Match</th><th style="padding:6px 8px;text-align:left;font-size:9.5px;color:#9ca3af;text-transform:uppercase">Datos a llenar</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+    +'<div style="display:flex;gap:10px;margin-top:14px;justify-content:flex-end"><button onclick="document.getElementById(\'prov-auto-ovl\').remove()" style="padding:9px 18px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider,#e5e7eb);border-radius:9px;cursor:pointer">Cancelar</button><button class="pv-btn" id="prov-auto-apply" onclick="provAutoXmlApply()">Aplicar seleccionados</button></div>';
+}
+function _provAutoSel(mode){ document.querySelectorAll('.prov-auto-ck').forEach(function(ck){ var p=(window._provAutoProps||[])[+ck.getAttribute('data-i')]; ck.checked = mode===1?true:(mode===0?false:(p&&p.confianza==='alta')); }); }
+async function provAutoXmlApply(){
+  var items=[]; document.querySelectorAll('.prov-auto-ck:checked').forEach(function(ck){ var p=(window._provAutoProps||[])[+ck.getAttribute('data-i')]; if(p) items.push({rowNum:p.rowNum, propuesta:p.propuesta}); });
+  if(!items.length){ alert('No seleccionaste ningún proveedor.'); return; }
+  if(!confirm('¿Guardar datos fiscales en '+items.length+' proveedor(es)?')) return;
+  var btn=document.getElementById('prov-auto-apply'); if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  try{
+    var s=getSession()||{};
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'aplicarAutocompletarProveedores',items:items,usuario:s.email||''})});
+    var res=await r.json();
+    if(!res.ok){ alert('No se pudo guardar: '+(res.error||'')); if(btn){btn.disabled=false;btn.textContent='Aplicar seleccionados';} return; }
+    var ovl=document.getElementById('prov-auto-ovl'); if(ovl) ovl.remove();
+    if(typeof setStatus==='function') setStatus((res.actualizados||0)+' proveedor(es) actualizados desde XML.','ok');
+    if(typeof loadProveedores==='function') loadProveedores();
+  }catch(e){ alert('Error: '+(e.message||e)); if(btn){btn.disabled=false;btn.textContent='Aplicar seleccionados';} }
 }
 function provCloseForm(){ var o=document.getElementById('pv-modal-ovl'); if(o) o.remove(); _provEditRow=null; _provOnSaved=null; }
 function provEditRow(rowNum){

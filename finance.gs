@@ -723,6 +723,16 @@ function doPost(e) {
     if (body.action === 'updateProveedor') {
       return jsonResponse(updateProveedor(body));
     }
+    if (body.action === 'autocompletarProveedores') {
+      if (typeof autocompletarProveedoresDesdeXML !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza providers.gs en Apps Script y redespliega.'});
+      return jsonResponse(autocompletarProveedoresDesdeXML(body));
+    }
+    if (body.action === 'aplicarAutocompletarProveedores') {
+      if (typeof aplicarAutocompletarProveedores !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza providers.gs en Apps Script y redespliega.'});
+      return jsonResponse(aplicarAutocompletarProveedores(body));
+    }
     if (body.action === 'setupPresupuesto') {
       return jsonResponse(setupPresupuesto());
     }
