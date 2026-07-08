@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.83 -->
+﻿<!-- app-build:2026.07.07.84 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -13169,8 +13169,7 @@ function _presGEAssignSelect(prod){
   var existentes={};
   var opts='<option value=""'+(!r.grupo?' selected':'')+'>(sin agrupar)</option>';
   (GE.grupos||[]).forEach(function(G){ var gEnc=encodeURIComponent(G.nombre); existentes[G.nombre]=1;
-    opts+='<option value="'+gEnc+'|"'+((r.grupo===G.nombre&&!r.sub)?' selected':'')+'>'+_esc(G.nombre)+'</option>';
-    (G.subs||[]).forEach(function(S){ opts+='<option value="'+gEnc+'|'+encodeURIComponent(S.nombre)+'"'+((r.grupo===G.nombre&&(r.sub||'')===S.nombre)?' selected':'')+'>&nbsp;&nbsp;'+_esc(G.nombre)+' › '+_esc(S.nombre)+'</option>'; });
+    opts+='<option value="'+gEnc+'|"'+(r.grupo===G.nombre?' selected':'')+'>'+_esc(G.nombre)+'</option>';
   });
   var sug=(_PRES_GRUPO_ORDEN||[]).filter(function(n){ return !existentes[n]; });
   if(sug.length){ opts+='<optgroup label="Crear grupo sugerido">'+sug.map(function(n){ return '<option value="new:'+encodeURIComponent(n)+'">＋ '+_esc(n)+'</option>'; }).join('')+'</optgroup>'; }
@@ -13194,11 +13193,10 @@ function _presGERender(){
   var poolCount=GE.prods.filter(function(p){ var r=GE.ruta[p.producto]; return !r||!r.grupo; }).length;
   var gruposHtml=(GE.grupos||[]).map(function(G){
     var gEnc=encodeURIComponent(G.nombre);
-    var directCards=_presGEProds(G.nombre,'').map(function(p){ return _presGECard(p.producto,true); }).join('');
-    var subsHtml=(G.subs||[]).map(function(S){ var sEnc=encodeURIComponent(S.nombre);
-      var cards=_presGEProds(G.nombre,S.nombre).map(function(p){ return _presGECard(p.producto,true); }).join('');
-      return '<div style="margin-top:7px"><div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;font-weight:700;text-transform:uppercase;color:#9c4f5f;margin-bottom:3px">↳ '+_esc(S.nombre)+'<button onclick="_presGEDelSub(\''+gEnc+'\',\''+sEnc+'\')" title="Eliminar subgrupo" style="border:none;background:none;color:#9ca3af;cursor:pointer;font-size:13px">×</button></div>'+_presGEZone(gEnc,sEnc,cards)+'</div>';
-    }).join('');
+    // Productos del grupo, agrupados por Ciclo Alta/Baja (solo lectura) — el subgrupo se arma solo
+    var prodsInG=_presGEProds(G.nombre,null);
+    var byC={}, cOrder=[]; prodsInG.forEach(function(p){ var c=p.grupoU||'(Sin ciclo)'; if(!byC[c]){byC[c]=[];cOrder.push(c);} byC[c].push(p); });
+    var inner=cOrder.map(function(c){ return '<div style="font-size:9px;font-weight:700;text-transform:uppercase;color:#9c4f5f;margin:5px 0 3px">'+_esc(c)+'</div>'+byC[c].map(function(p){ return _presGECard(p.producto,true); }).join(''); }).join('');
     return '<div style="background:var(--color-surface,#fafafa);border:1px solid var(--color-divider,#e5e7eb);border-radius:11px;padding:10px;width:236px;box-sizing:border-box">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;gap:6px">'
         +'<div style="font-weight:800;font-size:12.5px;cursor:text;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" onclick="_presGERename(\''+gEnc+'\')" title="Clic para renombrar">📁 '+_esc(G.nombre)+'</div>'
@@ -13206,12 +13204,11 @@ function _presGERender(){
           +'<label style="font-size:9.5px;display:inline-flex;align-items:center;gap:3px;cursor:pointer" title="Incluir en % maestro"><input type="checkbox" '+(G.incluirMaestro!==false?'checked':'')+' onchange="_presGEToggleMaestro(\''+gEnc+'\')" style="accent-color:#c46a7a">%m</label>'
           +'<button onclick="_presGEDelGrupo(\''+gEnc+'\')" title="Eliminar grupo" style="border:none;background:none;color:#9ca3af;cursor:pointer;font-size:15px;line-height:1">×</button>'
         +'</div></div>'
-      +_presGEZone(gEnc,'',directCards)
-      +subsHtml
-      +'<button onclick="_presGENewSub(\''+gEnc+'\')" style="margin-top:7px;width:100%;font-size:10.5px;padding:4px;border:1px dashed var(--color-divider,#e5e7eb);border-radius:7px;background:none;color:#6b7280;cursor:pointer">+ Subgrupo</button>'
+      +_presGEZone(gEnc,'',inner)
       +'</div>';
   }).join('');
-  board.innerHTML='<div style="display:grid;grid-template-columns:250px 1fr;gap:12px;align-items:start">'
+  board.innerHTML='<div style="font-size:11px;color:#6b7280;margin-bottom:10px;background:rgba(196,106,122,.06);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:7px 10px">Mete al presupuesto <b>solo lo que quieras</b>. Dentro de cada grupo, los productos se separan <b>automáticamente por Ciclo Alta/Baja</b> como subgrupos.</div>'
+    +'<div style="display:grid;grid-template-columns:250px 1fr;gap:12px;align-items:start">'
     +'<div style="background:var(--color-surface,#fafafa);border:1px solid var(--color-divider,#e5e7eb);border-radius:11px;padding:10px">'
       +'<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:#6b7280;margin-bottom:7px;display:flex;justify-content:space-between">Sin agrupar · se omiten<span style="color:#9ca3af">'+poolCount+'</span></div>'
       +_presGEZone('','',poolCards)
@@ -13657,56 +13654,62 @@ function _presBuildIngresosGrouped(grupos, canEdit){
   var allByName={};
   (grupos||[]).forEach(function(G){ (G.subgrupos||[]).forEach(function(S){ (S.productos||[]).forEach(function(p){
     p._budCant=(p.budget>0&&p.precio>0)?Math.round(p.budget/p.precio):(p.cantProy||0); p._budImp=p._budCant*(p.precio||0);
+    p._ciclo=String(G.grupo||'').trim()||'(Sin ciclo)'; // Ciclo Alta/Baja (col U) → subgrupo automático
     allByName[p.producto]=p;
   }); }); });
-  var usados={}, totImp=0, totProy=0, hayBucket=false;
-  var h='<div style="overflow-x:auto"><table class="pr-tbl"><thead><tr><th>Grupo / Subgrupo</th><th>Prod.</th><th>Importe budget</th><th>Proyección</th><th>Δ vs proy.</th><th style="text-align:center">% maestro</th></tr></thead><tbody>';
+  var usados={}, totCant=0, totImp=0, totProy=0, hayBucket=false;
+  function pp(imp,cant){ return cant>0 ? fM(imp/cant) : '—'; }
+  var h='<div style="overflow-x:auto"><table class="pr-tbl"><thead><tr><th>Grupo / Subgrupo (Ciclo)</th><th>Cant. budget</th><th>Precio prom.</th><th>Importe budget</th><th>Proyección</th><th>Δ vs proy.</th><th style="text-align:center">% maestro</th></tr></thead><tbody>';
   (cfg.grupos||[]).forEach(function(gc){
     var gn=gc.nombre;
-    var directos=[], subMap={}, subOrder=[];
-    (gc.subs||[]).forEach(function(s){ subMap[s]=[]; subOrder.push(s); });
+    // Subgrupo = Ciclo Alta/Baja del producto (automático). Un sub manual guardado tiene prioridad.
+    var subMap={}, subOrder=[];
     Object.keys(rutaDe).forEach(function(pn){
       var r=rutaDe[pn]; if(r.grupo!==gn) return; var p=allByName[pn]; if(!p) return; usados[pn]=1;
-      if(r.sub){ if(!subMap[r.sub]){ subMap[r.sub]=[]; subOrder.push(r.sub); } subMap[r.sub].push(p); }
-      else directos.push(p);
+      var sk=(r.sub&&String(r.sub).trim())||p._ciclo;
+      if(!subMap[sk]){ subMap[sk]=[]; subOrder.push(sk); } subMap[sk].push(p);
     });
-    var allProds=directos.slice(); subOrder.forEach(function(s){ (subMap[s]||[]).forEach(function(p){ allProds.push(p); }); });
+    var allProds=[]; subOrder.forEach(function(s){ (subMap[s]||[]).forEach(function(p){ allProds.push(p); }); });
     if(!allProds.length) return; hayBucket=true;
     allProds.forEach(function(p){ var key='ip'+(kc++); _presProdMap[key]=p; p._gk=key; });
     var gi=_presGrupoMap.length, incl=gc.incluirMaestro!==false;
-    var gImp=0,gProy=0; allProds.forEach(function(p){ gImp+=p._budImp; gProy+=p.importeProy||0; });
-    totImp+=gImp; totProy+=gProy; var dl=gProy>0?(gImp-gProy):null;
+    var gCant=0,gImp=0,gProy=0; allProds.forEach(function(p){ gCant+=p._budCant; gImp+=p._budImp; gProy+=p.importeProy||0; });
+    totCant+=gCant; totImp+=gImp; totProy+=gProy; var dl=gProy>0?(gImp-gProy):null;
+    var multiSub=subOrder.length>1;
     h+='<tr style="background:var(--color-primary-hl,rgba(196,106,122,.06))">'
-      +'<td style="font-weight:800">'+_esc(gn)+'</td>'
-      +'<td style="color:var(--text-secondary,#9ca3af)">'+allProds.length+'</td>'
+      +'<td style="font-weight:800">'+_esc(gn)+' <span style="color:#c9c9c9;font-weight:400;font-size:10px">· '+allProds.length+' item'+(allProds.length!==1?'s':'')+'</span></td>'
       +'<td style="text-align:right">'+(canEdit
-          ? '<input id="pgi-'+gi+'-imp" type="number" step="1000" min="0" value="'+Math.round(gImp)+'" onchange="presGrupoImp('+gi+',this.value)" style="width:118px;text-align:right;border:1.5px solid var(--color-primary,#c46a7a);border-radius:7px;padding:6px 8px;font-size:12px;font-weight:700;color:'+primary+';background:var(--color-surface,#fafafa)">'
-          : '<span id="pgi-'+gi+'-imp-t" style="font-weight:800;color:'+primary+'">'+fM(gImp)+'</span>')+'</td>'
+          ? '<input id="pgi-'+gi+'-c" type="number" step="1" min="0" value="'+gCant+'" onchange="presGrupoCant('+gi+',this.value)" style="width:74px;text-align:right;border:1.5px solid var(--color-primary,#c46a7a);border-radius:7px;padding:6px 8px;font-size:12px;font-weight:700;background:var(--color-surface,#fafafa)">'
+          : '<b>'+gCant+'</b>')+'</td>'
+      +'<td id="pgi-'+gi+'-pp" style="color:var(--text-secondary,#9ca3af)">'+pp(gImp,gCant)+'</td>'
+      +'<td id="pgi-'+gi+'-imp-t" style="font-weight:800;color:'+primary+'">'+fM(gImp)+'</td>'
       +'<td style="color:var(--text-secondary,#9ca3af)">'+fM(gProy)+'</td>'
       +'<td id="pgi-'+gi+'-dl" style="font-weight:700;color:'+(dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b'))+'">'+(dl==null?'—':fM(dl))+'</td>'
       +'<td style="text-align:center">'+(incl?'<span style="color:#166534;font-weight:700" title="Se mueve con el % maestro">✓</span>':'<span style="color:#9ca3af" title="Fijo — no lo mueve el % maestro">—</span>')+'</td>'
       +'</tr>';
-    // Los productos NO se listan: quedan colapsados dentro del grupo/subgrupo (se contemplan, no se muestran).
+    // Subgrupos (Ciclo) — solo cuando hay más de uno; productos colapsados (no se listan).
     var subsModel=[];
     subOrder.forEach(function(s){
-      var prods=subMap[s]||[]; if(!prods.length) return;
-      var si=subsModel.length, sImp=0,sProy=0; prods.forEach(function(p){ sImp+=p._budImp; sProy+=p.importeProy||0; });
+      var prods=subMap[s]||[]; var si=subsModel.length;
       subsModel.push({nombre:s, si:si, prods:prods});
+      if(!multiSub) return;
+      var sCant=0,sImp=0,sProy=0; prods.forEach(function(p){ sCant+=p._budCant; sImp+=p._budImp; sProy+=p.importeProy||0; });
       var sdl=sProy>0?(sImp-sProy):null;
       h+='<tr style="background:rgba(0,0,0,.015)">'
-        +'<td style="padding-left:20px;font-weight:700;color:#9c4f5f;font-size:10.5px;text-transform:uppercase">'+_esc(s)+' <span style="color:#c9c9c9;font-weight:400;text-transform:none">· '+prods.length+' item'+(prods.length!==1?'s':'')+'</span></td>'
-        +'<td style="color:var(--text-secondary,#9ca3af)">'+prods.length+'</td>'
+        +'<td style="padding-left:20px;font-weight:700;color:#9c4f5f;font-size:10.5px;text-transform:uppercase">'+_esc(s)+' <span style="color:#c9c9c9;font-weight:400;text-transform:none">· '+prods.length+'</span></td>'
         +'<td style="text-align:right">'+(canEdit
-            ? '<input id="pgs-'+gi+'-'+si+'-imp" type="number" step="500" min="0" value="'+Math.round(sImp)+'" onchange="presSubImp('+gi+','+si+',this.value)" style="width:104px;text-align:right;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;padding:5px 7px;font-size:11.5px">'
-            : fM(sImp))+'</td>'
+            ? '<input id="pgs-'+gi+'-'+si+'-c" type="number" step="1" min="0" value="'+sCant+'" onchange="presSubCant('+gi+','+si+',this.value)" style="width:66px;text-align:right;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;padding:5px 7px;font-size:11.5px">'
+            : sCant)+'</td>'
+        +'<td id="pgs-'+gi+'-'+si+'-pp" style="color:var(--text-secondary,#9ca3af)">'+pp(sImp,sCant)+'</td>'
+        +'<td id="pgs-'+gi+'-'+si+'-imp" style="font-weight:600;color:'+primary+'">'+fM(sImp)+'</td>'
         +'<td style="color:var(--text-secondary,#9ca3af)">'+fM(sProy)+'</td>'
         +'<td id="pgs-'+gi+'-'+si+'-dl" style="color:'+(sdl==null?'#9ca3af':(sdl>=0?'#166534':'#991b1b'))+'">'+(sdl==null?'—':fM(sdl))+'</td><td></td></tr>';
     });
-    _presGrupoMap.push({nombre:gn, incluirMaestro:incl, gi:gi, directos:directos, subs:subsModel, allProds:allProds});
+    _presGrupoMap.push({nombre:gn, incluirMaestro:incl, gi:gi, multiSub:multiSub, subs:subsModel, allProds:allProds});
   });
   var ocultos=0; Object.keys(allByName).forEach(function(pn){ if(!usados[pn]) ocultos++; });
-  if(!hayBucket) h+='<tr><td colspan="6" style="text-align:center;padding:1.6rem;color:var(--text-secondary,#9ca3af)">No hay productos asignados a grupos todavía. Usa <b>⚙ Grupos</b> para configurarlos.</td></tr>';
-  h+='<tr style="border-top:2px solid var(--color-divider,#d1d5db)"><td style="font-weight:800">TOTAL</td><td></td><td id="pr-ing-tot" style="font-weight:800;color:'+primary+'">'+fM(totImp)+'</td><td style="font-weight:800;color:var(--text-secondary,#9ca3af)">'+fM(totProy)+'</td><td></td><td></td></tr></tbody></table></div>';
+  if(!hayBucket) h+='<tr><td colspan="7" style="text-align:center;padding:1.6rem;color:var(--text-secondary,#9ca3af)">No hay productos asignados a grupos todavía. Usa <b>⚙ Grupos</b> para configurarlos.</td></tr>';
+  h+='<tr style="border-top:2px solid var(--color-divider,#d1d5db)"><td style="font-weight:800">TOTAL</td><td style="text-align:right;font-weight:800">'+totCant+'</td><td></td><td id="pr-ing-tot" style="font-weight:800;color:'+primary+'">'+fM(totImp)+'</td><td style="font-weight:800;color:var(--text-secondary,#9ca3af)">'+fM(totProy)+'</td><td></td><td></td></tr></tbody></table></div>';
   if(ocultos>0) h+='<div style="font-size:11px;color:var(--text-secondary,#9ca3af);margin-top:8px">Vista agrupada activa · '+ocultos+' producto(s) sin grupo están ocultos. Configúralos en <b>⚙ Grupos</b>.</div>';
   return h;
 }
@@ -13728,26 +13731,36 @@ function _presDistribute(prods, tgt){
   prods.forEach(function(p){ p._budCant=(p.precio||0)>0?Math.max(0,Math.round(p._budImp/(p.precio||1))):0; p._budImp=p._budCant*(p.precio||0); _presProdCellUI(p); metas.push({linea:p.producto,metaIngreso:p._budImp}); });
   return metas;
 }
-function _presProdCellUI(p){
-  var pc=document.getElementById(p._gk+'-imp'); if(pc) pc.textContent=_presFM(p._budImp);
-  var dl=p.importeProy>0?(p._budImp-p.importeProy):null;
-  var dc=document.getElementById(p._gk+'-dl'); if(dc){ dc.textContent=dl==null?'—':_presFM(dl); dc.style.color=dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b'); }
+function _presProdCellUI(p){ /* productos colapsados: no hay celda por producto, no-op seguro */ }
+// Reparte una CANTIDAD objetivo proporcional a los productos (por su cantidad actual), recalcula importe = cant×precio
+function _presDistributeCant(prods, targetCant){
+  targetCant=Math.max(0,Math.round(targetCant||0));
+  var wsum=0; prods.forEach(function(p){ wsum+=p._budCant; });
+  if(wsum<=0){ prods.forEach(function(p){ p._budCant=p.cantProy||0; wsum+=p._budCant; }); }
+  if(wsum<=0){ var per=Math.floor(targetCant/(prods.length||1)); prods.forEach(function(p){ p._budCant=per; }); }
+  else { var f=targetCant/wsum; prods.forEach(function(p){ p._budCant=Math.max(0,Math.round(p._budCant*f)); }); }
+  var metas=[];
+  prods.forEach(function(p){ p._budImp=p._budCant*(p.precio||0); metas.push({linea:p.producto,metaIngreso:p._budImp}); });
+  return metas;
 }
-function presGrupoImp(gi,val){ var G=_presGrupoMap[gi]; if(!G) return;
-  var metas=_presDistribute(G.allProds, parseFloat(val)||0);
+function presGrupoCant(gi,val){ var G=_presGrupoMap[gi]; if(!G) return;
+  var metas=_presDistributeCant(G.allProds, parseFloat(val)||0);
   G.subs.forEach(function(S){ _presSubRowUI(gi,S.si); }); _presGrupoRowUI(gi); _presIngTotUI(); _presBatchSave(metas); }
-function presSubImp(gi,si,val){ var G=_presGrupoMap[gi]; if(!G) return; var S=G.subs[si]; if(!S) return;
-  var metas=_presDistribute(S.prods, parseFloat(val)||0);
+function presSubCant(gi,si,val){ var G=_presGrupoMap[gi]; if(!G) return; var S=G.subs[si]; if(!S) return;
+  var metas=_presDistributeCant(S.prods, parseFloat(val)||0);
   _presSubRowUI(gi,si); _presGrupoRowUI(gi); _presIngTotUI(); _presBatchSave(metas); }
 function _presGrupoRowUI(gi){ var G=_presGrupoMap[gi]; if(!G) return;
-  var gImp=0,gProy=0; G.allProds.forEach(function(p){ gImp+=p._budImp; gProy+=p.importeProy||0; });
-  var inp=document.getElementById('pgi-'+gi+'-imp'); if(inp && document.activeElement!==inp) inp.value=Math.round(gImp);
+  var gCant=0,gImp=0,gProy=0; G.allProds.forEach(function(p){ gCant+=p._budCant; gImp+=p._budImp; gProy+=p.importeProy||0; });
+  var inp=document.getElementById('pgi-'+gi+'-c'); if(inp && document.activeElement!==inp) inp.value=gCant;
+  var pp=document.getElementById('pgi-'+gi+'-pp'); if(pp) pp.textContent=gCant>0?_presFM(gImp/gCant):'—';
   var t=document.getElementById('pgi-'+gi+'-imp-t'); if(t) t.textContent=_presFM(gImp);
   var dl=gProy>0?(gImp-gProy):null;
   var dc=document.getElementById('pgi-'+gi+'-dl'); if(dc){ dc.textContent=dl==null?'—':_presFM(dl); dc.style.color=dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b'); } }
 function _presSubRowUI(gi,si){ var G=_presGrupoMap[gi]; if(!G) return; var S=G.subs[si]; if(!S) return;
-  var sImp=0,sProy=0; S.prods.forEach(function(p){ sImp+=p._budImp; sProy+=p.importeProy||0; });
-  var inp=document.getElementById('pgs-'+gi+'-'+si+'-imp'); if(inp && document.activeElement!==inp) inp.value=Math.round(sImp);
+  var sCant=0,sImp=0,sProy=0; S.prods.forEach(function(p){ sCant+=p._budCant; sImp+=p._budImp; sProy+=p.importeProy||0; });
+  var inp=document.getElementById('pgs-'+gi+'-'+si+'-c'); if(inp && document.activeElement!==inp) inp.value=sCant;
+  var pp=document.getElementById('pgs-'+gi+'-'+si+'-pp'); if(pp) pp.textContent=sCant>0?_presFM(sImp/sCant):'—';
+  var im=document.getElementById('pgs-'+gi+'-'+si+'-imp'); if(im) im.textContent=_presFM(sImp);
   var dl=sProy>0?(sImp-sProy):null;
   var dc=document.getElementById('pgs-'+gi+'-'+si+'-dl'); if(dc){ dc.textContent=dl==null?'—':_presFM(dl); dc.style.color=dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b'); } }
 function _presRefreshGrupo(gi){ var G=_presGrupoMap[gi]; if(!G) return; G.subs.forEach(function(S){ _presSubRowUI(gi,S.si); }); _presGrupoRowUI(gi); }
