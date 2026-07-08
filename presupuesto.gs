@@ -319,9 +319,9 @@ function _presLeerMetas() {
         map[per].__total += meta;
       }
     }
-    // Income total: suma por línea si hay; si no, la fila TOTAL.
+    // El TOTAL explícito ("Fijar meta del trimestre") MANDA sobre la suma por línea.
+    // Si no hay fila TOTAL, el total es la suma de las metas por producto/línea.
     Object.keys(map).forEach(function (p) {
-      if (map[p].__total > 0) return;
       if (map[p].__tot != null) map[p].__total = map[p].__tot;
     });
     return { map: map, _setup: true };
@@ -631,6 +631,14 @@ function _presTendencia(histM, egM, tgtY, tgtQ, totProySig, egProySig) {
 }
 
 /* ── Guardar / actualizar una meta ──────────────────────────────── */
+// Borra la(s) fila(s) TOTAL de un periodo (para que la suma por producto vuelva a gobernar).
+function _presClearTotal(sh, per) {
+  var lr = sh.getLastRow(); if (lr < 2) return;
+  var vals = sh.getRange(2, 1, lr - 1, 2).getValues();
+  for (var i = vals.length - 1; i >= 0; i--) { // de abajo hacia arriba para no romper índices
+    if (String(vals[i][0]).trim() === per && String(vals[i][1]).trim().toUpperCase() === 'TOTAL') sh.deleteRow(i + 2);
+  }
+}
 function savePresupuestoMeta(body) {
   try {
     if (!body || !String(body.periodo || '').trim() || !String(body.linea || '').trim())
@@ -640,6 +648,8 @@ function savePresupuestoMeta(body) {
     var sh = ss.getSheetByName(PRES_METAS_TAB);
     if (!sh) { setupPresupuesto(); sh = ss.getSheetByName(PRES_METAS_TAB); }
     var per = String(body.periodo).trim(), lin = String(body.linea).trim();
+    // Si capturan una meta POR PRODUCTO, se retira el TOTAL fijo para que gobierne la suma (última acción manda).
+    if (lin.toUpperCase() !== 'TOTAL') { try { _presClearTotal(sh, per); } catch (e) {} }
     var fila = [per, lin, _presNum(body.metaIngreso), _presNum(body.metaMargen), _presNum(body.crecimiento), String(body.notas || '')];
     // Buscar fila existente (mismo periodo + línea)
     var lr = sh.getLastRow(), found = 0;
@@ -666,6 +676,7 @@ function savePresupuestoMetasBatch(body) {
     var sh = ss.getSheetByName(PRES_METAS_TAB);
     if (!sh) { setupPresupuesto(); sh = ss.getSheetByName(PRES_METAS_TAB); }
     var per = String(body.periodo).trim();
+    try { _presClearTotal(sh, per); } catch (e) {} // captura por producto → quita el TOTAL fijo
     var lr = sh.getLastRow(), existing = {};
     if (lr > 1) {
       var vals = sh.getRange(2, 1, lr - 1, 2).getValues();
