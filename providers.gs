@@ -226,8 +226,10 @@ function _provSimil(a, b) {
   var inter = 0; ta.forEach(function (t) { if (setb[t]) inter++; });
   return inter / (ta.length + tb.length - inter);
 }
-function _provEmisorIndex(maxFiles) {
-  maxFiles = maxFiles || 3000;
+function _provEmisorIndex(maxFiles, maxMs) {
+  maxFiles = maxFiles || 1500;
+  maxMs = maxMs || 200000; // presupuesto de tiempo: corta antes del límite de Apps Script (6 min)
+  var t0 = Date.now();
   if (typeof listComprobantesEstructura !== 'function' || typeof _compParseXmlLight !== 'function')
     return { ok: false, error: 'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.' };
   var est = listComprobantesEstructura('facturas');
@@ -235,10 +237,11 @@ function _provEmisorIndex(maxFiles) {
   var meses = [];
   (est.anios || []).forEach(function (a) { (a.meses || []).forEach(function (m) { meses.push({ folderId: m.folderId, anio: a.anio, mes: m.mes }); }); });
   meses.sort(function (a, b) { return (b.anio - a.anio) || (b.mes - a.mes); });
-  var idx = {}, escaneados = 0;
-  for (var i = 0; i < meses.length && escaneados < maxFiles; i++) {
+  var idx = {}, escaneados = 0, truncado = false;
+  for (var i = 0; i < meses.length && escaneados < maxFiles && !truncado; i++) {
     var files; try { files = DriveApp.getFolderById(meses[i].folderId).getFiles(); } catch (e) { continue; }
     while (files.hasNext() && escaneados < maxFiles) {
+      if (Date.now() - t0 > maxMs) { truncado = true; break; } // se acabó el tiempo → devuelve lo que llevo
       var f = files.next(); if (!/\.xml$/i.test(f.getName())) continue; escaneados++;
       var p; try { p = _compParseXmlLight(f.getBlob().getDataAsString('UTF-8')); } catch (e) { continue; }
       var rfc = String(p.emisorRfc || '').toUpperCase().replace(/[\s-]/g, ''); if (!rfc) continue;
@@ -254,17 +257,31 @@ function _provEmisorIndex(maxFiles) {
   }
   function moda(o) { var b = '', n = 0; Object.keys(o).forEach(function (k) { if (o[k] > n) { n = o[k]; b = k; } }); return b; }
   var out = {};
-  Object.keys(idx).forEach(function (rfc) { var e = idx[rfc]; out[rfc] = {
-    rfc: rfc, razonSocial: moda(e.nombres), nombres: Object.keys(e.nombres),
+  Object.keys(idx).forEach(function (rfc) { var e = idx[rfc];
+    var nomKeys = Object.keys(e.nombres).sort(function(a,b){ return e.nombres[b]-e.nombres[a]; }).slice(0, 8); // top 8 variantes (para que quepa en caché)
+    out[rfc] = {
+    rfc: rfc, razonSocial: moda(e.nombres), nombres: nomKeys,
     regimenFiscal: moda(e.regimen), codigoPostal: moda(e.cp), formaPagoHabitual: moda(e.fp), usoCfdi: moda(e.uso),
     numFacturas: e.count, ultimaFecha: e.ult }; });
   return { ok: true, index: out, escaneados: escaneados, rfcs: Object.keys(out).length };
 }
+var _PROV_IDX_CACHE_KEY = 'prov_emisor_idx_v1';
 function autocompletarProveedoresDesdeXML(body) {
   try {
-    var idxRes = _provEmisorIndex((body && body.maxFiles) || 3000);
-    if (!idxRes.ok) return idxRes;
-    var index = idxRes.index;
+    body = body || {};
+    var index = null, escaneados = 0, truncado = false, fromCache = false;
+    var cache = null; try { cache = CacheService.getScriptCache(); } catch (e) {}
+    // 1) Índice cacheado (rápido) salvo que pidan reconstruir
+    if (cache && !body.rebuild) {
+      try { var c = cache.get(_PROV_IDX_CACHE_KEY); if (c) { index = JSON.parse(c); fromCache = true; } } catch (e) {}
+    }
+    // 2) Si no hay caché, escanear con presupuesto de tiempo (default 1200 archivos / 200s)
+    if (!index) {
+      var idxRes = _provEmisorIndex((body.maxFiles) || 1500, (body.maxMs) || 120000);
+      if (!idxRes.ok) return idxRes;
+      index = idxRes.index; escaneados = idxRes.escaneados; truncado = !!idxRes.truncado;
+      if (cache) { try { cache.put(_PROV_IDX_CACHE_KEY, JSON.stringify(index), 21600); } catch (e) {} } // 6 h
+    }
     var byNorm = {};
     Object.keys(index).forEach(function (rfc) {
       (index[rfc].nombres || []).forEach(function (nm) { var k = _provNorm(nm); if (k && !byNorm[k]) byNorm[k] = rfc; });
@@ -299,7 +316,8 @@ function autocompletarProveedoresDesdeXML(body) {
         confianza: conf, score: score, razonSocialXml: em.razonSocial, numFacturas: em.numFacturas, propuesta: prop });
     });
     proposals.sort(function (a, b) { return (b.score - a.score) || (a.nombre < b.nombre ? -1 : 1); });
-    return { ok: true, proposals: proposals, escaneados: idxRes.escaneados, rfcsXml: idxRes.rfcs, totalProv: provs.rows.length };
+    return { ok: true, proposals: proposals, escaneados: escaneados, rfcsXml: Object.keys(index).length,
+      totalProv: provs.rows.length, truncado: truncado, fromCache: fromCache };
   } catch (ex) { return { ok: false, error: ex.message + ' (L:' + (ex.lineNumber || '?') + ')' }; }
 }
 function aplicarAutocompletarProveedores(body) {

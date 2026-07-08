@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.89 -->
+﻿<!-- app-build:2026.07.07.90 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -14346,25 +14346,35 @@ async function provBuscarFiscal(auto){
   }catch(e){ if(msg){ msg.style.color='#b45309'; msg.textContent='Error: '+(e.message||e); } }
 }
 /* ── Autocompletar TODOS los proveedores desde los XML de egresos ─────── */
-async function provAutoXmlOpen(){
-  var ovl=document.createElement('div'); ovl.id='prov-auto-ovl';
-  ovl.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9998;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
-  ovl.onclick=function(e){ if(e.target===ovl) ovl.remove(); };
-  ovl.innerHTML='<div style="background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);max-width:960px;width:96%;max-height:90vh;overflow:auto" onclick="event.stopPropagation()">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:16px 22px;border-bottom:1px solid var(--color-divider,#e5e7eb)"><div><div style="font-size:16px;font-weight:800">Autocompletar proveedores desde XML</div><div style="font-size:11.5px;color:#9ca3af">Leo los XML de egresos, comparo y propongo RFC + datos fiscales. Tú confirmas antes de guardar.</div></div><button onclick="document.getElementById(\'prov-auto-ovl\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280">×</button></div>'
-    +'<div id="prov-auto-body" style="padding:18px 22px">'+(typeof hestiaLoader==='function'?hestiaLoader('Leyendo XML y comparando… (puede tardar 1-2 min)'):'Leyendo XML…')+'</div>'
-    +'</div>';
-  document.body.appendChild(ovl);
+async function provAutoXmlOpen(rebuild){
+  var yaAbierto=document.getElementById('prov-auto-ovl');
+  var ovl=yaAbierto||document.createElement('div'); ovl.id='prov-auto-ovl';
+  if(!yaAbierto){
+    ovl.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9998;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
+    ovl.onclick=function(e){ if(e.target===ovl) ovl.remove(); };
+    ovl.innerHTML='<div style="background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);max-width:960px;width:96%;max-height:90vh;overflow:auto" onclick="event.stopPropagation()">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;padding:16px 22px;border-bottom:1px solid var(--color-divider,#e5e7eb)"><div><div style="font-size:16px;font-weight:800">Autocompletar proveedores desde XML</div><div style="font-size:11.5px;color:#9ca3af">Leo los XML de egresos, comparo y propongo RFC + datos fiscales. Tú confirmas antes de guardar.</div></div><button onclick="document.getElementById(\'prov-auto-ovl\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280">×</button></div>'
+      +'<div id="prov-auto-body" style="padding:18px 22px"></div>'
+      +'</div>';
+    document.body.appendChild(ovl);
+  }
+  var b0=document.getElementById('prov-auto-body'); if(b0) b0.innerHTML=(typeof hestiaLoader==='function'?hestiaLoader(rebuild?'Reconstruyendo índice (lee más XML)…':'Leyendo XML y comparando…'):'Leyendo XML…')+'<div style="font-size:11px;color:#9ca3af;margin-top:10px">La primera vez tarda un poco; luego queda en caché y es instantáneo.</div>';
   try{
     var s=getSession()||{};
-    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'autocompletarProveedores',usuario:s.email||''})});
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'autocompletarProveedores',rebuild:!!rebuild,usuario:s.email||''})});
     var res=await r.json();
     if(!document.getElementById('prov-auto-ovl')) return;
     var b=document.getElementById('prov-auto-body');
-    if(!res.ok){ if(b) b.innerHTML='<div style="color:#b45309;font-size:13px;line-height:1.6">'+_esc(res.error||'No se pudo procesar.')+'<br><span style="color:#9ca3af">Si dice actualiza providers.gs/comprobantes.gs, súbelos al Apps Script y redespliega.</span></div>'; return; }
+    if(!res.ok){ if(b) b.innerHTML='<div style="color:#b45309;font-size:13px;line-height:1.6">'+_esc(res.error||'No se pudo procesar.')+'<br><span style="color:#9ca3af">Si dice «actualiza providers.gs/comprobantes.gs», súbelos al Apps Script y <b>vuelve a desplegar</b>.</span></div>'; return; }
     window._provAutoProps=res.proposals||[];
     _provAutoRender(res);
-  }catch(e){ var b=document.getElementById('prov-auto-body'); if(b) b.innerHTML='<div style="color:#b45309">Error: '+_esc(e.message||e)+'</div>'; }
+  }catch(e){
+    var b=document.getElementById('prov-auto-body');
+    var esFetch=/failed to fetch|networkerror|load failed/i.test(String(e&&e.message||e));
+    if(b) b.innerHTML= esFetch
+      ? '<div style="font-size:13px;line-height:1.7;color:var(--text-primary,#111)"><b style="color:#b45309">Se cortó la conexión (timeout).</b><br>Es porque leer todos los XML de Drive tardó demasiado. Ya se guarda lo que alcanzó a leer en caché, así que <b>vuelve a dar clic</b> y esta vez debería responder rápido.<br><span style="color:#9ca3af">Si vuelve a fallar 2-3 veces seguidas, avísame y reduzco el lote de escaneo.</span><br><button onclick="provAutoXmlOpen()" style="margin-top:12px;padding:9px 16px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">🔁 Reintentar</button></div>'
+      : '<div style="color:#b45309">Error: '+_esc(e.message||e)+'</div>';
+  }
 }
 function _provAutoRender(res){
   var props=window._provAutoProps||[]; var b=document.getElementById('prov-auto-body'); if(!b) return;
@@ -14381,8 +14391,11 @@ function _provAutoRender(res){
       +'<td style="padding:6px 8px;vertical-align:top">'+(fld(p,'rfc','RFC')+fld(p,'regimenFiscal','Régimen')+fld(p,'codigoPostal','CP')+fld(p,'formaPagoHabitual','Forma pago')+fld(p,'usoCfdi','Uso CFDI')||'—')+'</td>'
       +'</tr>';
   }).join('');
-  b.innerHTML='<div style="font-size:12px;color:#6b7280;margin-bottom:10px">Escaneé <b>'+(res.escaneados||0)+'</b> XML · '+(res.rfcsXml||0)+' emisores · <b>'+props.length+'</b> proveedores con datos por llenar (<b>'+altas+'</b> de confianza alta, ya pre-marcados; los de <span style="color:#92400e">Revisar</span> quedan sin marcar hasta que los apruebes).</div>'
-    +'<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap"><button onclick="_provAutoSel(1)" style="font-size:11px;padding:4px 10px;border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;background:var(--card-bg,#fff);cursor:pointer">Marcar todos</button><button onclick="_provAutoSel(0)" style="font-size:11px;padding:4px 10px;border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;background:var(--card-bg,#fff);cursor:pointer">Desmarcar</button><button onclick="_provAutoSel(2)" style="font-size:11px;padding:4px 10px;border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;background:var(--card-bg,#fff);cursor:pointer">Solo confianza alta</button></div>'
+  var fuente=res.fromCache?' · <span style="color:#166534">desde caché (rápido)</span>':'';
+  var avisoTrunc=res.truncado?'<div style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:8px;padding:8px 11px;margin-bottom:10px;font-size:11.5px;line-height:1.5">⏱ El escaneo se cortó por tiempo — leí <b>'+(res.escaneados||0)+'</b> XML (los más recientes). Aplica lo que veas y, si faltan proveedores, usa <b>🔄 Reconstruir índice</b> para leer más.</div>':'';
+  b.innerHTML=avisoTrunc
+    +'<div style="font-size:12px;color:#6b7280;margin-bottom:10px">Escaneé <b>'+(res.escaneados||0)+'</b> XML · '+(res.rfcsXml||0)+' emisores'+fuente+' · <b>'+props.length+'</b> proveedores con datos por llenar (<b>'+altas+'</b> de confianza alta, ya pre-marcados; los de <span style="color:#92400e">Revisar</span> quedan sin marcar hasta que los apruebes).</div>'
+    +'<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap"><button onclick="_provAutoSel(1)" style="font-size:11px;padding:4px 10px;border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;background:var(--card-bg,#fff);cursor:pointer">Marcar todos</button><button onclick="_provAutoSel(0)" style="font-size:11px;padding:4px 10px;border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;background:var(--card-bg,#fff);cursor:pointer">Desmarcar</button><button onclick="_provAutoSel(2)" style="font-size:11px;padding:4px 10px;border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;background:var(--card-bg,#fff);cursor:pointer">Solo confianza alta</button><button onclick="provAutoXmlOpen(true)" title="Vuelve a leer los XML (ignora el caché) para incluir facturas nuevas o leer más" style="font-size:11px;padding:4px 10px;border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;background:var(--card-bg,#fff);cursor:pointer;margin-left:auto">🔄 Reconstruir índice</button></div>'
     +'<div style="max-height:52vh;overflow:auto;border:1px solid var(--color-divider,#e5e7eb);border-radius:10px"><table style="width:100%;border-collapse:collapse"><thead><tr style="position:sticky;top:0;background:var(--card-bg,#fff);z-index:1"><th style="padding:6px 8px"></th><th style="padding:6px 8px;text-align:left;font-size:9.5px;color:#9ca3af;text-transform:uppercase">Proveedor</th><th style="padding:6px 8px;text-align:left;font-size:9.5px;color:#9ca3af;text-transform:uppercase">Match</th><th style="padding:6px 8px;text-align:left;font-size:9.5px;color:#9ca3af;text-transform:uppercase">Datos a llenar</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
     +'<div style="display:flex;gap:10px;margin-top:14px;justify-content:flex-end"><button onclick="document.getElementById(\'prov-auto-ovl\').remove()" style="padding:9px 18px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider,#e5e7eb);border-radius:9px;cursor:pointer">Cancelar</button><button class="pv-btn" id="prov-auto-apply" onclick="provAutoXmlApply()">Aplicar seleccionados</button></div>';
 }
