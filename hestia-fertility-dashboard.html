@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.88 -->
+﻿<!-- app-build:2026.07.07.89 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12983,12 +12983,18 @@ function _renderPresupuesto(){
     +'</div>'
     +'<div style="position:relative;height:250px"><canvas id="presChart"></canvas></div></div>');
 
-  // Proyección siguiente trimestre — escenarios
-  h.push('<div class="pr-sc"><div class="pr-sh">Proyección '+sg.periodo+' · con base en el comportamiento de ventas</div>'
+  // Proyección siguiente trimestre — escenarios (Conservador/Optimista con % editable sobre la Base)
+  var _escBase = tt.proyeccion||0;
+  var _ep = d.escenariosPct||{}; var _consP = (_ep.conservador!=null?_ep.conservador:10), _optP = (_ep.optimista!=null?_ep.optimista:8);
+  window._presEscPct = {conservador:_consP, optimista:_optP};
+  function _escPctCtl(id,signo,val){ return canEdit
+    ? '<span style="white-space:nowrap">'+signo+'<input type="number" id="'+id+'" value="'+val+'" min="0" max="300" step="1" onchange="presSetEscenario(\''+(id==='pr-esc-cons'?'conservador':'optimista')+'\',this.value)" style="width:40px;text-align:right;border:1px solid var(--color-divider,#e5e7eb);border-radius:5px;padding:1px 3px;font-size:10px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">% vs base</span>'
+    : '<span>'+signo+val+'% vs base</span>'; }
+  h.push('<div class="pr-sc"><div class="pr-sh">Proyección '+sg.periodo+' · con base en el comportamiento de ventas <span style="font-size:10px;font-weight:400;color:var(--text-secondary,#9ca3af)">· ajusta los % de Conservador/Optimista según tu mercado</span></div>'
     +'<div class="pr-scen">'
-      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Conservador</div><div style="font-size:21px;font-weight:800">'+fM(tt.conservador)+'</div></div>'
-      +'<div class="pr-card base"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Base (esperado)</div><div style="font-size:21px;font-weight:800;color:var(--color-primary,#c46a7a)">'+fM(tt.proyeccion)+'</div></div>'
-      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Optimista</div><div style="font-size:21px;font-weight:800">'+fM(tt.optimista)+'</div></div>'
+      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280);display:flex;align-items:center;justify-content:space-between;gap:5px">Conservador '+_escPctCtl('pr-esc-cons','−',_consP)+'</div><div id="pr-scen-cons" style="font-size:21px;font-weight:800">'+fM(_escBase*(1-_consP/100))+'</div></div>'
+      +'<div class="pr-card base"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Base (esperado)</div><div style="font-size:21px;font-weight:800;color:var(--color-primary,#c46a7a)">'+fM(_escBase)+'</div><div style="font-size:9px;color:var(--text-secondary,#9ca3af);margin-top:2px">proyección del modelo (no editable)</div></div>'
+      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280);display:flex;align-items:center;justify-content:space-between;gap:5px">Optimista '+_escPctCtl('pr-esc-opt','+',_optP)+'</div><div id="pr-scen-opt" style="font-size:21px;font-weight:800">'+fM(_escBase*(1+_optP/100))+'</div></div>'
       +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Meta capturada</div><div id="pr-scen-meta" style="font-size:21px;font-weight:800">'+(tt.meta>0?fM(tt.meta):'—')+'</div></div>'
     +'</div></div>');
 
@@ -13785,6 +13791,16 @@ function presToggleMaestro(nivel, gi, checked, si){
   var s=getSession()||{};
   fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'presSetLock',key:key,movible:movible,usuario:s.email||''})}).catch(function(){});
 }
+// Escenarios: Conservador/Optimista se recalculan como Base × (1 ∓ %). El % lo define el usuario (persiste).
+function presSetEscenario(tipo, val){
+  var pct=Math.max(0, parseFloat(val)||0);
+  var base=(_presData&&_presData.siguiente&&_presData.siguiente.totales&&_presData.siguiente.totales.proyeccion)||0;
+  window._presEscPct=window._presEscPct||{}; window._presEscPct[tipo]=pct;
+  if(tipo==='conservador'){ var el=document.getElementById('pr-scen-cons'); if(el) el.textContent=_presFM(base*(1-pct/100)); }
+  else { var e2=document.getElementById('pr-scen-opt'); if(e2) e2.textContent=_presFM(base*(1+pct/100)); }
+  var body={action:'presSetEscenarios',usuario:(getSession()||{}).email||''}; body[tipo]=pct;
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(body)}).catch(function(){});
+}
 // % maestro / cuadrar / proyección: solo mueven grupos Y subgrupos con el checkbox marcado (movible)
 function _presMasterApplyGrouped(f){
   var metas=[];
@@ -13930,7 +13946,7 @@ var _PRES_TOUR = [
    body:'<b>Líneas sólidas</b> = tu historial real. <b>Punteadas</b> = la proyección del próximo trimestre. Rosa = ingresos, café = egresos. Los checkboxes de arriba ocultan/muestran cada una.'},
   {el:'.pr-scen',
    title:'5· Escenarios del próximo trimestre',
-   body:'<b>Conservador</b> (bajo) · <b>Base</b> (lo más probable, el recomendado) · <b>Optimista</b> (Base +12%) · <b>Meta capturada</b> (la que tú fijas más abajo).'},
+   body:'<b>Base (esperado)</b> = la proyección del modelo con tu historial real (no editable). <b>Conservador</b> y <b>Optimista</b> se calculan como Base <b>∓ un % que TÚ defines</b> (edítalos en las tarjetas según cómo veas tu mercado — el 12% ya no está fijo). <b>Meta capturada</b> = la que fijas más abajo.'},
   {el:'button[onclick="presGruposConfigOpen()"]',
    title:'6· ⚙ Grupos — LO PRIMERO que debes hacer',
    body:'Aquí eliges <b>qué productos entran al presupuesto</b>. Se abre un tablero: arrastra (o usa el menú de cada tarjeta) para meter productos a un <b>grupo</b> (ej. "Tratamientos"). <b>Lo que dejes en «Sin agrupar» se omite</b> — no se cuenta. Dentro de cada grupo, los productos se separan solos por <b>Ciclo Alta/Baja</b> (eso es el subgrupo, automático). "✨ Autollenar" te lo precarga por categoría para que solo ajustes.'},
@@ -14005,10 +14021,11 @@ function presShowManual(){
     +p('El slider te permite explorar qué pasaría con distintas metas <b>sin guardarlas</b>. Calcula en tiempo real: brecha pendiente, ingreso diario necesario en los días restantes, y el semáforo actualizado. "Guardar como meta" lo fija oficialmente y recarga los datos.')
 
     +h2('Escenarios del siguiente trimestre')
+    +p('La <b>Base</b> la calcula el modelo con tu historial (no se edita). <b>Conservador</b> y <b>Optimista</b> son la Base ajustada por un <b>% que tú defines</b> en las propias tarjetas — porque el mercado se mueve a favor o en contra y ese margen depende de tu negocio. Los % se guardan y se recuerdan.')
     +'<table style="width:100%;border-collapse:collapse;margin-bottom:14px"><thead><tr style="background:'+S+'">'+th('Escenario')+th('Cómo se calcula')+'</tr></thead><tbody>'
-    +tr(['Conservador','MAX(piso, base × (1 + MAX(crec×0.5, 2%)))'])
-    +tr(['<span style="color:var(--color-primary,#c46a7a)"><b>Base (esperado)</b></span>','MAX(base × (1 + crecimiento), piso) — <b>el recomendado</b>'])
-    +tr(['Optimista','Base × 1.12 (doce puntos porcentuales adicionales)'])
+    +tr(['Conservador','Base × (1 − tu %). Ejemplo: Base −10%'])
+    +tr(['<span style="color:var(--color-primary,#c46a7a)"><b>Base (esperado)</b></span>','Proyección del modelo (MAX de historial reciente y año anterior, con piso) — <b>el recomendado</b>, no editable'])
+    +tr(['Optimista','Base × (1 + tu %). Ejemplo: Base +8%. Antes estaba fijo en +12%; ahora tú lo ajustas'])
     +tr(['Meta capturada','La cifra que definiste con "Fijar / editar meta"'],true)
     +'</tbody></table>'
 

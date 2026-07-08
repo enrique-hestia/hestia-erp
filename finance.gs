@@ -757,6 +757,11 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});
       return jsonResponse(presSetLock(body));
     }
+    if (body.action === 'presSetEscenarios') {
+      if (typeof presSetEscenarios !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});
+      return jsonResponse(presSetEscenarios(body));
+    }
     if (body.action === 'presSetPeriodoAbierto') {
       if (typeof presSetPeriodoAbierto !== 'function')
         return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});

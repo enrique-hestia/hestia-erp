@@ -245,6 +245,25 @@ function presSetLock(body) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
+/* ══ % de los escenarios Conservador / Optimista (sobre la Base) ═══════════
+   El usuario los define porque el mercado varía; NO están fijos en el código.
+   Script Property PRES_ESCENARIOS = { conservador: 10, optimista: 8 } (en %). */
+function _presEscenariosCfg() {
+  try { var raw = PropertiesService.getScriptProperties().getProperty('PRES_ESCENARIOS'); var m = raw ? JSON.parse(raw) : {};
+    return { conservador: (m.conservador != null ? Number(m.conservador) : 10), optimista: (m.optimista != null ? Number(m.optimista) : 8) };
+  } catch (e) { return { conservador: 10, optimista: 8 }; }
+}
+function presSetEscenarios(body) {
+  try {
+    var p = PropertiesService.getScriptProperties();
+    var raw = p.getProperty('PRES_ESCENARIOS'); var m = raw ? JSON.parse(raw) : {};
+    if (body.conservador !== undefined && body.conservador !== '' && body.conservador !== null) m.conservador = Math.max(0, Number(body.conservador) || 0);
+    if (body.optimista   !== undefined && body.optimista   !== '' && body.optimista   !== null) m.optimista   = Math.max(0, Number(body.optimista)   || 0);
+    p.setProperty('PRES_ESCENARIOS', JSON.stringify(m));
+    return { ok: true, escenarios: m };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 /* ── Histórico de metas por trimestre (últimos ~7 Q + el siguiente proyectado):
    meta fijada vs real logrado + cumplimiento, para ver la racha. Solo 2 lecturas. */
 function readHistoricoMetas() {
@@ -549,8 +568,14 @@ function readPresupuesto(periodo) {
         ingresosGrupos: ingProd.grupos,              // NUEVO: cantidad × precio, agrupado como Board Deck
         ingresosTotalProy: ingProd.totalImporte,
         crecimientoCant: ingProd.crecimientoCant,
-        totales: { anioAnterior: totAnioAnt, reciente: totReciente, base: totBase, conservador: totCons, proyeccion: ingProd.totalImporte || totProy, optimista: totOpt, meta: (metas[perSig] && metas[perSig].__total) || 0 }
+        totales: (function(){ var _b = ingProd.totalImporte || totProy; var _e = _presEscenariosCfg();
+          return { anioAnterior: totAnioAnt, reciente: totReciente, base: totBase,
+            conservador: Math.round(_b * (1 - (_e.conservador||0)/100)),
+            proyeccion: _b,
+            optimista: Math.round(_b * (1 + (_e.optimista||0)/100)),
+            meta: (metas[perSig] && metas[perSig].__total) || 0 }; })()
       },
+      escenariosPct: _presEscenariosCfg(),
       egresos: {
         reciente: egTotReciente, proyeccion: egProy,
         margenProyectado: margenProy, margenPct: margenPct,
