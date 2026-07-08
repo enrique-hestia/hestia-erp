@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.72 -->
+﻿<!-- app-build:2026.07.07.73 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -19773,6 +19773,7 @@ function renderCxP(data) {
     + '<div style="display:flex;gap:8px;align-items:center">'
     + '<button onclick="cxpOpenCapture()" style="display:inline-flex;align-items:center;gap:6px;padding:7px 16px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Registrar CxP</button>'
     + '<button onclick="loadCxPData()" style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--text-secondary,#6b7280);background:transparent;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:20px;padding:5px 11px;cursor:pointer">↺ Actualizar</button>'
+    + (hasPermission('bank_capture') ? '<button onclick="cxpRepararCruzados()" title="Reversa abonos de crédito aplicados por error a otro proveedor (ej. crédito de Lepsi abonado a CRISBEN) y restaura el crédito" style="display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:#b45309;background:rgba(245,158,11,.08);border:1.5px solid rgba(245,158,11,.3);border-radius:20px;padding:5px 11px;cursor:pointer">🔧 Reparar créditos cruzados</button>' : '')
     + '</div></div></div>';
 
   // ── Filtros + estado (fecha por vencimiento, agrupación, búsqueda) ──
@@ -21789,6 +21790,26 @@ window.cxpRegresarProgramacion = async function(rowNum, proveedor) {
     var res = await r.json();
     if (res.ok) { setStatus('Regresada a programación — reprográmala en Gastos Fijos.','ok'); loadCxPData(); }
     else { alert('No se pudo regresar: ' + (res.error||'sin detalle')); }
+  } catch(e) { alert('Error: ' + e.message); }
+};
+
+// Reparar abonos de crédito CRUZADOS (crédito de un proveedor abonado por error a
+// una orden de OTRO proveedor). Reversa esos abonos y restaura el crédito.
+window.cxpRepararCruzados = async function() {
+  if (!confirm('¿Reparar abonos de crédito cruzados?\n\nBusca abonos donde un crédito de un proveedor se aplicó por error a una orden de OTRO proveedor (ej. crédito de Lepsi Prisma abonado a CRISBEN), los reversa y devuelve el saldo al crédito original. Es seguro; solo corrige lo mal aplicado.')) return;
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify({action:'repararAbonosCruzados', usuario:s.email||'sistema'})});
+    var res = await r.json();
+    if (!res.ok) { alert('No se pudo: ' + (res.error||'sin detalle')); return; }
+    var n = res.corregidos||0;
+    if (n>0) {
+      var det = (res.detalle||[]).map(function(d){ return '• $'+(Number(d.monto)||0).toLocaleString('en-US',{minimumFractionDigits:2})+' — crédito de '+d.creditoDe+' que estaba en orden de '+d.ordenProveedor; }).join('\n');
+      alert('Listo: se corrigieron '+n+' abono(s) cruzado(s).\n\n'+det+'\n\nEl crédito volvió a su proveedor original.');
+    } else {
+      alert('No se encontraron abonos cruzados por corregir. Todo está en orden.');
+    }
+    loadCxPData();
   } catch(e) { alert('Error: ' + e.message); }
 };
 
