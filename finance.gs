@@ -737,6 +737,11 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});
       return jsonResponse(saveGruposPresupuesto(body));
     }
+    if (body.action === 'saveMenu') {
+      if (typeof saveMenu !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza core.gs en Apps Script y redespliega.'});
+      return jsonResponse(saveMenu(body));
+    }
     if (body.action === 'presSetPeriodoAbierto') {
       if (typeof presSetPeriodoAbierto !== 'function')
         return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});

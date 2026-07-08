@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.82 -->
+﻿<!-- app-build:2026.07.07.83 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1572,10 +1572,10 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
         <div style="display:flex;gap:10px;align-items:flex-start">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
           <div style="font-size:12px;color:var(--color-text);line-height:1.6">
-            Los items del menú se editan directamente en la pestaña <strong>Menu</strong> del
-            <a href="https://docs.google.com/spreadsheets/d/1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4/edit#gid=0" target="_blank" style="color:var(--color-primary)">Sheets ERP principal</a>.
-            Columnas: <code style="background:var(--color-surface-offset);padding:1px 5px;border-radius:4px;font-size:11px">ID · Padre · Label · Seccion · Icono · Orden · Tipo · Fuente · Activo</code>.
-            Después de guardar en Sheets, presiona <strong>Recargar</strong> para reflejar los cambios.
+            Edita el menú <strong>aquí mismo</strong>: arrastra <strong>⋮⋮</strong> para reordenar, cambia el <strong>label</strong>, el <strong>ícono</strong>, muévelo a otro <strong>submenú (padre)</strong> o actívalo/desactívalo, y pulsa <strong>💾 Guardar cambios</strong>.
+            El <code style="background:var(--color-surface-offset);padding:1px 5px;border-radius:4px;font-size:11px">ID</code>, <code style="background:var(--color-surface-offset);padding:1px 5px;border-radius:4px;font-size:11px">Tipo</code> y <code style="background:var(--color-surface-offset);padding:1px 5px;border-radius:4px;font-size:11px">Fuente</code> quedan fijos (conectan cada item con su vista).
+            También puedes editar todo en la pestaña <strong>Menu</strong> del
+            <a href="https://docs.google.com/spreadsheets/d/1FMB2Qmv5z36sUDlVpwzjihNzrfS55k8MG32J04IBaR4/edit#gid=0" target="_blank" style="color:var(--color-primary)">Sheets ERP</a> y presionar <strong>↺ Recargar</strong>.
           </div>
         </div>
       </div>
@@ -18776,48 +18776,77 @@ function pcLoadMenu() {
 }
 
 function pcFilterMenu() {
-  var q = (document.getElementById('pc-menu-search') || {}).value || '';
-  if (!q.trim()) { pcRenderMenuTable(_pcMenuAll); return; }
-  var lq = q.toLowerCase();
-  pcRenderMenuTable(_pcMenuAll.filter(function(it){
-    return (it.label||'').toLowerCase().indexOf(lq) > -1
-        || (it.id||'').toLowerCase().indexOf(lq) > -1
-        || (it.seccion||'').toLowerCase().indexOf(lq) > -1
-        || (it.fuente||'').toLowerCase().indexOf(lq) > -1;
-  }));
+  _pcMenuFilter = (document.getElementById('pc-menu-search') || {}).value || '';
+  pcMenuRenderEditable();
 }
 
+var _pcMenuEdit = null, _pcMenuFilter = '', _pcMenuDirty = false, _pcMenuDragIdx = null;
+// Compat: algunos llamadores antiguos usan pcRenderMenuTable
 function pcRenderMenuTable(items) {
+  _pcMenuEdit = (items||[]).slice().sort(function(a,b){ return (a.orden||0)-(b.orden||0); });
+  _pcMenuDirty = false;
+  pcMenuRenderEditable();
+}
+function pcMenuRenderEditable() {
   var wrap  = document.getElementById('pc-menu-table-wrap');
   var empty = document.getElementById('pc-menu-empty');
-  if (!items || !items.length) {
+  if (!_pcMenuEdit || !_pcMenuEdit.length) {
     if (wrap) wrap.innerHTML = '';
-    if (empty) { empty.style.display = ''; empty.textContent = 'Sin resultados.'; }
+    if (empty) { empty.style.display = ''; empty.textContent = 'Sin items en el menú.'; }
     return;
   }
   if (empty) empty.style.display = 'none';
-  var sorted = items.slice().sort(function(a,b){ return (a.orden||0)-(b.orden||0); });
-  var html = '<table class="menu-table"><thead><tr>'
-    + '<th>ID</th><th>Label</th><th>Sección</th><th>Padre</th>'
-    + '<th>Tipo</th><th>Fuente</th><th>Icono</th><th>Orden</th><th>Estado</th>'
-    + '</tr></thead><tbody>';
-  sorted.forEach(function(it) {
+  var filtering = !!(_pcMenuFilter && _pcMenuFilter.trim());
+  var filtered = _pcMenuEdit;
+  if (filtering) { var lq=_pcMenuFilter.toLowerCase(); filtered=_pcMenuEdit.filter(function(it){
+    return (it.label||'').toLowerCase().indexOf(lq)>-1||(it.id||'').toLowerCase().indexOf(lq)>-1||(it.seccion||'').toLowerCase().indexOf(lq)>-1||(it.fuente||'').toLowerCase().indexOf(lq)>-1; }); }
+  var grupos = _pcMenuEdit.filter(function(it){ return it.tipo==='grupo'; });
+  var h='';
+  h+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">'
+    +'<button id="pc-menu-save" onclick="pcMenuSave()" '+(_pcMenuDirty?'':'disabled ')+'style="padding:7px 14px;font-size:12px;font-weight:700;background:'+(_pcMenuDirty?'var(--color-primary,#c46a7a)':'var(--color-surface-offset,#eee)')+';color:'+(_pcMenuDirty?'#fff':'#9ca3af')+';border:none;border-radius:8px;cursor:'+(_pcMenuDirty?'pointer':'default')+'">💾 Guardar cambios</button>'
+    +'<button onclick="pcLoadMenu()" style="padding:7px 12px;font-size:12px;background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;cursor:pointer">↩ Descartar</button>'
+    +'<span style="font-size:11px;color:var(--color-text-muted,#9ca3af)">'+(filtering?'Filtro activo — borra el buscador para reordenar arrastrando.':'Arrastra ⋮⋮ para reordenar · editables: label, ícono, padre y activo (id/tipo/fuente son fijos para no romper el ruteo).')+'</span>'
+    +'</div>';
+  h+='<datalist id="pc-menu-icons">'+['home','circle','dollar-sign','bar-chart-3','pie-chart','file-text','settings','users','calendar','clipboard-list','wallet','building-2','flask-conical','pill','stethoscope','receipt','trending-up','layers','folder','box','credit-card','clock'].map(function(n){return '<option value="'+n+'">';}).join('')+'</datalist>';
+  h+='<table class="menu-table"><thead><tr><th style="width:20px"></th><th>ID</th><th>Label</th><th>Padre (submenú)</th><th>Icono</th><th>Tipo</th><th>Fuente</th><th style="text-align:center">Activo</th></tr></thead><tbody>';
+  filtered.forEach(function(it) {
+    var idx = _pcMenuEdit.indexOf(it);
     var activo = it.activo !== false && String(it.activo).toLowerCase() !== 'false';
-    html += '<tr>'
-      + '<td><code style="font-size:10px;background:var(--color-surface-offset);padding:2px 5px;border-radius:4px">' + (it.id||'') + '</code></td>'
-      + '<td style="font-weight:600">' + (it.label||'—') + '</td>'
-      + '<td style="color:var(--color-text-muted)">' + (it.seccion||'—') + '</td>'
-      + '<td style="font-size:11px;color:var(--color-text-muted)">' + (it.padre||'—') + '</td>'
-      + '<td>' + (it.tipo||'—') + '</td>'
-      + '<td style="font-size:11px">' + (it.fuente||'—') + '</td>'
-      + '<td style="text-align:center">' + (it.icono ? '<i data-lucide="' + it.icono + '" style="width:14px;height:14px"></i>' : '—') + '</td>'
-      + '<td style="text-align:center;color:var(--color-text-muted)">' + (it.orden||'—') + '</td>'
-      + '<td><span class="menu-badge' + (activo ? '' : ' off') + '">' + (activo ? 'Activo' : 'Inactivo') + '</span></td>'
+    var padreOpts='<option value="">(raíz / menú principal)</option>'+grupos.filter(function(g){return g.id!==it.id;}).map(function(g){ return '<option value="'+_esc(g.id)+'"'+(it.padre===g.id?' selected':'')+'>'+_esc(g.label||g.id)+'</option>'; }).join('');
+    h += '<tr draggable="'+(filtering?'false':'true')+'" ondragstart="_pcMenuDrag(event,'+idx+')" ondragover="event.preventDefault()" ondrop="_pcMenuDrop(event,'+idx+')" style="'+(filtering?'':'cursor:grab')+'">'
+      + '<td style="text-align:center;color:#c9c9c9">'+(filtering?'':'⋮⋮')+'</td>'
+      + '<td><code style="font-size:10px;background:var(--color-surface-offset);padding:2px 5px;border-radius:4px">' + _esc(it.id||'') + '</code></td>'
+      + '<td><input value="'+_esc(it.label||'')+'" onchange="_pcMenuField('+idx+',\'label\',this.value)" style="width:100%;min-width:110px;box-sizing:border-box;padding:4px 7px;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"></td>'
+      + '<td><select onchange="_pcMenuField('+idx+',\'padre\',this.value)" '+(it.tipo==='grupo'?'disabled title="Un grupo no puede colgar de otro" ':'')+'style="max-width:150px;padding:4px 6px;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'+padreOpts+'</select></td>'
+      + '<td><input value="'+_esc(it.icono||'')+'" list="pc-menu-icons" onchange="_pcMenuField('+idx+',\'icono\',this.value)" style="width:82px;padding:4px 7px;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"></td>'
+      + '<td style="font-size:11px;color:var(--color-text-muted)">' + _esc(it.tipo||'—') + '</td>'
+      + '<td style="font-size:10.5px;color:var(--color-text-muted);max-width:110px;overflow:hidden;text-overflow:ellipsis" title="'+_esc(it.fuente||'')+'">' + _esc(it.fuente||'—') + '</td>'
+      + '<td style="text-align:center"><input type="checkbox" '+(activo?'checked':'')+' onchange="_pcMenuField('+idx+',\'activo\',this.checked)" style="width:15px;height:15px;accent-color:#c46a7a"></td>'
       + '</tr>';
   });
-  html += '</tbody></table>';
-  wrap.innerHTML = html;
-  try { lucide.createIcons(); } catch(e){}
+  h += '</tbody></table>';
+  wrap.innerHTML = h;
+}
+function _pcMenuMarkDirty(){ _pcMenuDirty=true; var b=document.getElementById('pc-menu-save'); if(b){ b.disabled=false; b.style.background='var(--color-primary,#c46a7a)'; b.style.color='#fff'; b.style.cursor='pointer'; } }
+function _pcMenuField(idx, field, val){ var it=_pcMenuEdit&&_pcMenuEdit[idx]; if(!it) return; it[field]=val;
+  if(field==='padre'){ _pcMenuDirty=true; pcMenuRenderEditable(); } else { _pcMenuMarkDirty(); } }
+function _pcMenuDrag(e, idx){ _pcMenuDragIdx=idx; try{ e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',String(idx)); }catch(_){} }
+function _pcMenuDrop(e, idx){ e.preventDefault(); var from=_pcMenuDragIdx; if(from==null||from===idx) return;
+  var arr=_pcMenuEdit, moved=arr.splice(from,1)[0]; arr.splice(idx,0,moved);
+  arr.forEach(function(it,i){ it.orden=(i+1)*10; }); _pcMenuDirty=true; pcMenuRenderEditable(); }
+async function pcMenuSave(){
+  if(!_pcMenuDirty||!_pcMenuEdit) return;
+  var s=getSession()||{};
+  var items=_pcMenuEdit.map(function(it){ return {id:it.id, padre:it.padre||'', label:it.label||'', icono:it.icono||'', orden:it.orden||0, activo:it.activo!==false}; });
+  var b=document.getElementById('pc-menu-save'); if(b){ b.disabled=true; b.textContent='Guardando…'; }
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'saveMenu',items:items,usuario:s.email||'sistema'})});
+    var res=await r.json();
+    if(!res.ok){ alert('No se pudo guardar el menú: '+(res.error||'')); if(b){b.disabled=false;b.textContent='💾 Guardar cambios';} return; }
+    _pcMenuDirty=false;
+    if(typeof setStatus==='function') setStatus('Menú guardado ('+(res.updated||0)+' items).','ok');
+    pcLoadMenu(); // recarga (limpia cache) y refresca el sidebar
+  }catch(e){ alert('Error: '+(e.message||e)); if(b){b.disabled=false;b.textContent='💾 Guardar cambios';} }
 }
 
 /* ── Conexiones ─────────────────────────────────────────────── */

@@ -699,7 +699,7 @@ function doGet(e) {
 
     // action === 'clearcache' — limpia cache del script (admin)
     if (action === 'clearcache') {
-      try { CacheService.getScriptCache().removeAll(['erp_menu_v2_' + fechaInicio + '_' + fechaFin, 'erp_banks_v1']); } catch(e) {}
+      try { CacheService.getScriptCache().removeAll(['erp_menu_v2_' + fechaInicio + '_' + fechaFin, 'erp_menu_v3_' + fechaInicio + '_' + fechaFin, 'erp_banks_v1']); } catch(e) {}
       return jsonResponse({ ok: true, msg: 'Cache cleared' });
     }
 
@@ -799,6 +799,34 @@ function readMenu(ss) {
         activo:  r[8] !== false
       };
     });
+}
+
+/* Actualiza SOLO los campos editables del menú (padre, label, icono, orden, activo)
+   por id, in-place. NUNCA toca id/tipo/fuente/seccion para no romper el ruteo, y no
+   borra filas que no vengan en el body (evita perder items por accidente). */
+function saveMenu(body) {
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var sh = ss.getSheetByName('Menu');
+    if (!sh) return { ok:false, error:'No existe la hoja Menu' };
+    var vals = sh.getDataRange().getValues();
+    if (vals.length < 2) return { ok:false, error:'Hoja Menu vacía' };
+    var idRow = {};
+    for (var i = 1; i < vals.length; i++) { var id = String(vals[i][0]||'').trim(); if (id) idRow[id] = i; }
+    var updated = 0;
+    (body.items || []).forEach(function(it){
+      var id = String(it.id||'').trim(); if (!id || !(id in idRow)) return; var i = idRow[id];
+      if (it.padre  !== undefined) vals[i][1] = String(it.padre||'');
+      if (it.label  !== undefined) vals[i][2] = String(it.label||'');
+      if (it.icono  !== undefined) vals[i][4] = String(it.icono||'');
+      if (it.orden  !== undefined) vals[i][5] = Number(it.orden)||0;
+      if (it.activo !== undefined) vals[i][8] = !(it.activo === false || String(it.activo).toLowerCase() === 'false');
+      updated++;
+    });
+    sh.getRange(1, 1, vals.length, vals[0].length).setValues(vals);
+    try { logAudit(body.usuario||'sistema', 'Panel', 'Guardar menú', '', '', '', updated + ' items'); } catch(e) {}
+    return { ok:true, updated:updated };
+  } catch (ex) { return { ok:false, error:ex.message }; }
 }
 
 /* ══════════════════════════════════════════════════════════════
