@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.98 -->
+﻿<!-- app-build:2026.07.07.99 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12988,15 +12988,17 @@ function _renderPresupuesto(){
   var _escBase = tt.proyeccion||0;
   var _ep = d.escenariosPct||{}; var _consP = (_ep.conservador!=null?_ep.conservador:10), _optP = (_ep.optimista!=null?_ep.optimista:8);
   window._presEscPct = {conservador:_consP, optimista:_optP};
+  var _egP=(eg&&eg.proyeccion)||0; window._presEgProy=_egP;
+  function _uHtml(id,ing){ var u=ing-_egP, p=u>=0; return '<div id="'+id+'" style="font-size:10.5px;font-weight:700;margin-top:4px;color:'+(p?'#166534':'#991b1b')+'">Utilidad '+(p?'':'−')+fM(Math.abs(u))+'</div>'; }
   function _escPctCtl(id,signo,val){ return canEdit
     ? '<span style="white-space:nowrap">'+signo+'<input type="number" id="'+id+'" value="'+val+'" min="0" max="300" step="1" onchange="presSetEscenario(\''+(id==='pr-esc-cons'?'conservador':'optimista')+'\',this.value)" style="width:40px;text-align:right;border:1px solid var(--color-divider,#e5e7eb);border-radius:5px;padding:1px 3px;font-size:10px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">% vs base</span>'
     : '<span>'+signo+val+'% vs base</span>'; }
-  h.push('<div class="pr-sc"><div class="pr-sh">Proyección '+sg.periodo+' · con base en el comportamiento de ventas <span style="font-size:10px;font-weight:400;color:var(--text-secondary,#9ca3af)">· ajusta los % de Conservador/Optimista según tu mercado</span></div>'
+  h.push('<div class="pr-sc"><div class="pr-sh">Proyección '+sg.periodo+' · con base en el comportamiento de ventas <span style="font-size:10px;font-weight:400;color:var(--text-secondary,#9ca3af)">· ajusta los % de Conservador/Optimista según tu mercado · cada tarjeta muestra su utilidad (egresos proy. '+fM(_egP)+')</span></div>'
     +'<div class="pr-scen">'
-      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280);display:flex;align-items:center;justify-content:space-between;gap:5px">Conservador '+_escPctCtl('pr-esc-cons','−',_consP)+'</div><div id="pr-scen-cons" style="font-size:21px;font-weight:800">'+fM(_escBase*(1-_consP/100))+'</div></div>'
-      +'<div class="pr-card base"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Base (esperado)</div><div style="font-size:21px;font-weight:800;color:var(--color-primary,#c46a7a)">'+fM(_escBase)+'</div><div style="font-size:9px;color:var(--text-secondary,#9ca3af);margin-top:2px">proyección del modelo (no editable)</div></div>'
-      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280);display:flex;align-items:center;justify-content:space-between;gap:5px">Optimista '+_escPctCtl('pr-esc-opt','+',_optP)+'</div><div id="pr-scen-opt" style="font-size:21px;font-weight:800">'+fM(_escBase*(1+_optP/100))+'</div></div>'
-      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Meta capturada</div><div id="pr-scen-meta" style="font-size:21px;font-weight:800">'+(tt.meta>0?fM(tt.meta):'—')+'</div></div>'
+      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280);display:flex;align-items:center;justify-content:space-between;gap:5px">Conservador '+_escPctCtl('pr-esc-cons','−',_consP)+'</div><div id="pr-scen-cons" style="font-size:21px;font-weight:800">'+fM(_escBase*(1-_consP/100))+'</div>'+_uHtml('pr-scen-cons-u',_escBase*(1-_consP/100))+'</div>'
+      +'<div class="pr-card base"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Base (esperado)</div><div style="font-size:21px;font-weight:800;color:var(--color-primary,#c46a7a)">'+fM(_escBase)+'</div>'+_uHtml('pr-scen-base-u',_escBase)+'</div>'
+      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280);display:flex;align-items:center;justify-content:space-between;gap:5px">Optimista '+_escPctCtl('pr-esc-opt','+',_optP)+'</div><div id="pr-scen-opt" style="font-size:21px;font-weight:800">'+fM(_escBase*(1+_optP/100))+'</div>'+_uHtml('pr-scen-opt-u',_escBase*(1+_optP/100))+'</div>'
+      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Meta capturada</div><div id="pr-scen-meta" style="font-size:21px;font-weight:800">'+(tt.meta>0?fM(tt.meta):'—')+'</div>'+(tt.meta>0?_uHtml('pr-scen-meta-u',tt.meta):'<div id="pr-scen-meta-u" style="font-size:10.5px;color:#9ca3af;margin-top:4px">Utilidad —</div>')+'</div>'
     +'</div>'
     +(function(){ var _egP=(eg&&eg.proyeccion)||0, _u=_escBase-_egP, _pos=_u>=0;
       return '<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:center;padding:10px 14px;border-radius:12px;background:'+(_pos?'rgba(22,101,52,.06)':'rgba(153,27,27,.06)')+';border:1px solid var(--color-divider,#e5e7eb)">'
@@ -13817,9 +13819,11 @@ function presToggleMaestro(nivel, gi, checked, si){
 function presSetEscenario(tipo, val){
   var pct=Math.max(0, parseFloat(val)||0);
   var base=(_presData&&_presData.siguiente&&_presData.siguiente.totales&&_presData.siguiente.totales.proyeccion)||0;
+  var egP=Number(window._presEgProy)||0;
   window._presEscPct=window._presEscPct||{}; window._presEscPct[tipo]=pct;
-  if(tipo==='conservador'){ var el=document.getElementById('pr-scen-cons'); if(el) el.textContent=_presFM(base*(1-pct/100)); }
-  else { var e2=document.getElementById('pr-scen-opt'); if(e2) e2.textContent=_presFM(base*(1+pct/100)); }
+  function setU(id,ing){ var u=ing-egP,p=u>=0; var e=document.getElementById(id); if(e){ e.textContent='Utilidad '+(p?'':'−')+_presFM(Math.abs(u)); e.style.color=p?'#166534':'#991b1b'; } }
+  if(tipo==='conservador'){ var ing=base*(1-pct/100); var el=document.getElementById('pr-scen-cons'); if(el) el.textContent=_presFM(ing); setU('pr-scen-cons-u',ing); }
+  else { var ing2=base*(1+pct/100); var e2=document.getElementById('pr-scen-opt'); if(e2) e2.textContent=_presFM(ing2); setU('pr-scen-opt-u',ing2); }
   var body={action:'presSetEscenarios',usuario:(getSession()||{}).email||''}; body[tipo]=pct;
   fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(body)}).catch(function(){});
 }
@@ -16354,8 +16358,12 @@ function _boardSlideDefs(){
         +'</div>'
         +(psg.desglose&&psg.desglose.length?'<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#8a8a8a;margin-bottom:4px">Composición de las '+fInt(psg.ventas)+' ventas proyectadas</div><table class="bd-tbl" style="font-size:13px;margin-bottom:14px"><tr style="font-weight:800;color:#8a8a8a"><td>Procedimiento</td><td style="text-align:right">Cantidad</td></tr>'+psg.desglose.filter(function(x){return x.cant>0;}).map(function(x){return '<tr><td>'+_esc(x.grupo)+'</td><td style="text-align:right;font-weight:700">'+fInt(x.cant)+'</td></tr>';}).join('')+'</table>':'')
         +'<p class="narr">Para <b>'+_esc(psg.periodo)+'</b> se proyectan <b>'+fInt(psg.ventas)+'</b> ventas por <b>'+_bMoney(psg.ingresos)+'</b>'+(_bDesgList(psg.desglose)?' ('+_esc(_bDesgList(psg.desglose))+')':'')+', con egresos estimados de <b>'+_bMoney(psg.egresos)+'</b> y una utilidad proyectada de <b>'+_bMoney(psg.utilidad)+'</b>. '+(psg.fuente==='guardada'?'Basado en la meta fijada para el trimestre.':'Proyección automática por cantidad × precio real con el crecimiento histórico.')+' Sin medicamentos ni estudios en la cantidad.'+deltaTxt+'</p>')});
+      // 7d Escenarios (Conservador/Base/Optimista/Meta) con utilidad de cada uno + rango
+      if(psg.escenarios) slides.push({t:'Escenarios · '+_esc(psg.periodo), html:frame('', _bEscBody(psg))});
     }
   }
+  // 7e Ganancia / pérdida mensual (últimos 12 meses)
+  if((d.serie||[]).some(function(m){return (m.ingresos||m.egresos);})) slides.push({t:'Ganancia / pérdida', html:frame('', _bGLBody(d.serie))});
   // 8 Comparativo anual
   slides.push({t:'Comparativo Anual', chart:'serieBig', html:frame('','<h2>Comparativo Anual</h2><h1>Últimos 12 meses</h1>'
     +'<div style="position:relative;height:260px"><canvas id="bd-s-serieBig"></canvas></div>'
@@ -16380,6 +16388,37 @@ function _boardYearAnalysis(){
   return 'En el año, los ingresos acumulados suman '+_bMoney(totI)+' contra '+_bMoney(totE)+' de egresos, con una utilidad acumulada de '+_bMoney(totI-totE)+'. '
     +_BOARD_MESES[mejor.mesIdx]+' fue el mes más rentable ('+_bMoney(mejor.neto)+') y '+_BOARD_MESES[peor.mesIdx]+' el más apretado ('+_bMoney(peor.neto)+'). '
     +'Los egresos se mantienen '+(totE>totI?'por encima':'por debajo')+' de la tendencia de ingresos.';
+}
+// Slide de ESCENARIOS del próximo trimestre (Conservador/Base/Optimista/Meta + utilidad c/u + rango)
+function _bEscBody(psg){
+  var esc=psg.escenarios||{}; var egP=Number(esc.egresos)||0;
+  function card(lbl,ing,acc){ var u=(Number(ing)||0)-egP,p=u>=0;
+    return '<div class="bd-skpi"'+(acc?' style="border:2px solid #c46a7a"':'')+'><div class="l">'+lbl+'</div><div class="v">'+_bMoneyK(ing)+'</div><div class="d" style="color:'+(p?'#3f8f5e':'#c0505c')+'">Utilidad '+(p?'':'−')+_bMoneyK(Math.abs(u))+'</div></div>'; }
+  var vals=[esc.conservador,esc.base,esc.optimista].concat(esc.meta>0?[esc.meta]:[]).map(function(x){return Number(x)||0;});
+  var mn=Math.min.apply(null,vals), mx=Math.max.apply(null,vals), sp=(mx-mn)||1;
+  function px(v){ return (60+((Number(v)||0)-mn)/sp*500).toFixed(1); }
+  var svg='<svg viewBox="0 0 600 72" width="100%" style="margin:8px 0 10px"><line x1="60" y1="42" x2="560" y2="42" stroke="#ddd" stroke-width="6" stroke-linecap="round"/><line x1="'+px(esc.conservador)+'" y1="42" x2="'+px(esc.optimista)+'" y2="42" stroke="#1D9E75" stroke-width="6" stroke-linecap="round"/>'
+    +'<circle cx="'+px(esc.conservador)+'" cy="42" r="6" fill="#1D9E75"/><text x="'+px(esc.conservador)+'" y="26" text-anchor="middle" font-size="10" fill="#666">'+_bMoneyK(esc.conservador)+'</text><text x="'+px(esc.conservador)+'" y="62" text-anchor="middle" font-size="9" fill="#999">conservador</text>'
+    +'<circle cx="'+px(esc.base)+'" cy="42" r="7.5" fill="#c46a7a"/><text x="'+px(esc.base)+'" y="26" text-anchor="middle" font-size="10" fill="#c46a7a">'+_bMoneyK(esc.base)+' base</text>'
+    +(esc.meta>0?'<circle cx="'+px(esc.meta)+'" cy="42" r="5" fill="#555"/><text x="'+px(esc.meta)+'" y="62" text-anchor="middle" font-size="9" fill="#999">meta</text>':'')
+    +'<circle cx="'+px(esc.optimista)+'" cy="42" r="6" fill="#378ADD"/><text x="'+px(esc.optimista)+'" y="26" text-anchor="middle" font-size="10" fill="#666">'+_bMoneyK(esc.optimista)+'</text><text x="'+px(esc.optimista)+'" y="62" text-anchor="middle" font-size="9" fill="#999">optimista</text>'
+    +'</svg>';
+  return '<h2>Escenarios '+_esc(psg.periodo)+'</h2><h1>Rango de resultado según el mercado</h1>'
+    +'<div class="bd-skpis" style="grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px">'
+    +card('Conservador',esc.conservador,false)+card('Base (esperado)',esc.base,true)+card('Optimista',esc.optimista,false)+card('Meta capturada',esc.meta,false)+'</div>'+svg
+    +'<p class="narr">En el peor caso cerraríamos en <b>'+_bMoney(esc.conservador)+'</b>, lo esperado es <b>'+_bMoney(esc.base)+'</b> y con el mercado a favor hasta <b>'+_bMoney(esc.optimista)+'</b>. La meta fijada es <b>'+_bMoney(esc.meta||0)+'</b>. La utilidad de cada escenario ya descuenta los egresos proyectados ('+_bMoney(egP)+').</p>';
+}
+// Slide de GANANCIA/PÉRDIDA mensual (barras del neto de los últimos 12 meses)
+function _bGLBody(serie){
+  serie=serie||[]; var mx=1; serie.forEach(function(m){ mx=Math.max(mx,Math.abs(Number(m.neto)||0)); });
+  var W=640,H=210,plotH=150,zeroY=20+plotH/2,step=(W-70)/Math.max(serie.length,1),bw=step*0.6;
+  var bars=serie.map(function(m,i){ var v=Number(m.neto)||0; var hh=Math.abs(v)/mx*(plotH/2); var x=60+i*step+(step-bw)/2; var y=v>=0?zeroY-hh:zeroY; var col=v>=0?'#1D9E75':'#c0505c';
+    return '<rect x="'+x.toFixed(1)+'" y="'+y.toFixed(1)+'" width="'+bw.toFixed(1)+'" height="'+Math.max(hh,1).toFixed(1)+'" rx="2" fill="'+col+'"/>'
+      +'<text x="'+(x+bw/2).toFixed(1)+'" y="'+(H-6)+'" text-anchor="middle" font-size="8" fill="#999">'+_esc(String(m.label||'').substring(0,3))+'</text>'; }).join('');
+  var totNeto=serie.reduce(function(a,m){return a+(Number(m.neto)||0);},0);
+  return '<h2>Rentabilidad</h2><h1>Ganancia / pérdida por mes</h1>'
+    +'<svg viewBox="0 0 '+W+' '+H+'" width="100%"><line x1="55" y1="'+zeroY+'" x2="'+(W-10)+'" y2="'+zeroY+'" stroke="#bbb" stroke-width="1"/><text x="50" y="'+(zeroY+3)+'" text-anchor="end" font-size="9" fill="#999">$0</text>'+bars+'</svg>'
+    +'<p class="narr">Utilidad mensual (ingresos − egresos) de los últimos 12 meses. Las barras <span style="color:#c0505c">rojas</span> son meses en <b>pérdida</b> y las <span style="color:#1D9E75">verdes</span> en <b>ganancia</b>. Acumulado del periodo mostrado: <b>'+_bMoney(totNeto)+'</b>.</p>';
 }
 function _boardRenderStage(){
   var stage=document.getElementById('bd-stage'); if(!stage) return;

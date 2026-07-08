@@ -251,9 +251,14 @@ function _boardPresLee(per){
     var metaIng = metaGuardada ? _boardNum(sig.totales.meta) : _boardNum(sig.ingresosTotalProy);
     var metaEg  = (eg.totales && _boardNum(eg.totales.meta)>0) ? _boardNum(eg.totales.meta)
                 : (eg.totales ? _boardNum(eg.totales.proyeccion) : _boardNum(eg.proyeccion));
+    var baseIng = _boardNum(sig.ingresosTotalProy) || _boardNum(sig.totales && sig.totales.proyeccion) || metaIng;
+    var escenarios = { base:baseIng,
+      conservador:_boardNum(sig.totales && sig.totales.conservador) || baseIng,
+      optimista:_boardNum(sig.totales && sig.totales.optimista) || baseIng,
+      meta:_boardNum(sig.totales && sig.totales.meta), egresos:metaEg };
     return { periodo:per, ventas:_boardSumQtyProy(sig.ingresosGrupos), ingresos:metaIng,
              egresos:metaEg, utilidad:metaIng-metaEg, fuente: metaGuardada?'guardada':'automatica',
-             desglose:_boardVentasDesgloseProy(sig.ingresosGrupos) };
+             desglose:_boardVentasDesgloseProy(sig.ingresosGrupos), escenarios:escenarios };
   }catch(e){ return null; }
 }
 function _boardPresupuesto(ff, real){
@@ -278,7 +283,7 @@ function _boardPresupuesto(ff, real){
     }
     var pN=_boardPresLee(perNext);
     if(pN) out.siguiente={ periodo:perNext, ventas:pN.ventas, ingresos:pN.ingresos, egresos:pN.egresos, utilidad:pN.utilidad, fuente:pN.fuente,
-      desglose:Object.keys(pN.desglose||{}).map(function(k){return {grupo:k,cant:pN.desglose[k]};}).sort(function(a,b){return b.cant-a.cant;}) };
+      desglose:Object.keys(pN.desglose||{}).map(function(k){return {grupo:k,cant:pN.desglose[k]};}).sort(function(a,b){return b.cant-a.cant;}), escenarios:pN.escenarios };
     return out;
   }catch(ex){ return { ok:false, error:ex.message }; }
 }
