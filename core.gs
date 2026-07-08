@@ -430,6 +430,12 @@ function doGet(e) {
       return jsonResponse(readSummary((e && e.parameter.fechaInicio) || '', (e && e.parameter.fechaFin) || ''));
     }
 
+    if (action === 'estadoResultadosMensual') {
+      if (typeof readEstadoResultadosMensual !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza summary.gs en Apps Script y redespliega.'});
+      return jsonResponse(readEstadoResultadosMensual((e && e.parameter.fechaInicio) || '', (e && e.parameter.fechaFin) || ''));
+    }
+
     if (action === 'summaryConfig') {
       if (typeof readSummaryConfig !== 'function')
         return jsonResponse({ok:false, error:'Agrega summary.gs al proyecto de Apps Script y redespliega.'});

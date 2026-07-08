@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.68 -->
+﻿<!-- app-build:2026.07.07.69 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -10390,6 +10390,130 @@ function changePLPrevYear(val) { currentPLPrevYear = val; viewCache = {}; loadVi
 /* ════════════════════════════════════════════════════════════════
    ESTADO DE RESULTADOS — P&L jerárquico filtrado por fecha
    ════════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════════════
+   ESTADO DE RESULTADOS — nuevo diseño: meses en columnas (rango >1 mes) o
+   detalle de un mes, en vivo (motor Summary). Tema Hestia.
+   ══════════════════════════════════════════════════════════════════════ */
+var _erData=null, _erShowPct=false, _erCharts=[];
+function _erKillCharts(){ _erCharts.forEach(function(c){ try{c.destroy();}catch(e){} }); _erCharts=[]; }
+function _erMoney(v){ v=Number(v)||0; return (v<0?'-$':'$')+Math.abs(v).toLocaleString('en-US',{maximumFractionDigits:0}); }
+function _erMoney2(v){ v=Number(v)||0; return (v<0?'-$':'$')+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function _erK(v){ v=Number(v)||0; var a=Math.abs(v); return (v<0?'-$':'$')+(a>=1e6?(a/1e6).toFixed(1)+'M':a>=1e3?(a/1e3).toFixed(0)+'K':a.toFixed(0)); }
+function _erEsCosto(g){ return /COGS|OPEX|GA|TAXES|DA/.test(g||''); }
+function _erBtn(oc,inner){ return '<button onclick="'+oc+'" style="padding:6px 12px;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;background:var(--card-bg,#fff);color:var(--text-secondary,#6b7280);font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px">'+inner+'</button>'; }
+async function loadEstadoResultados(){
+  var root=document.getElementById('view-estado-resultados'); if(!root) return;
+  root.innerHTML='<div style="padding:60px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:13px">Calculando el estado de resultados…</div>';
+  try{
+    var tok=encodeURIComponent(getToken());
+    var r=await fetch(APPS_SCRIPT_URL+'?action=estadoResultadosMensual&fechaInicio='+encodeURIComponent(currentFechaInicio)+'&fechaFin='+encodeURIComponent(currentFechaFin)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
+    var j=await r.json();
+    if(!j.ok){ throw new Error(j.error || (j.view||Object.keys(j||{}).slice(0,3).join(', ')) || 'sin detalle'); }
+    _erData=j; _renderER();
+  }catch(e){
+    root.innerHTML='<div style="padding:40px;text-align:center;color:#c83c3c;font-size:13px;line-height:1.7">No se pudo generar el Estado de Resultados: <b>'+_esc(e.message||e)+'</b><div style="margin-top:8px;font-size:12px;color:#6b7280">Si es la primera vez, actualiza <b>summary.gs</b> y redespliega <b>core.gs</b> en Apps Script.</div><br>'+_erBtn('loadEstadoResultados()','Reintentar')+'</div>';
+  }
+}
+function _erSpark(vals,color){
+  var mx=Math.max.apply(null,vals.map(function(v){return Math.abs(Number(v)||0);})); if(!mx||!isFinite(mx)) mx=1;
+  var w=60,hh=18,n=vals.length; if(n<2) return '';
+  var pts=vals.map(function(v,i){ var x=(i/(n-1))*(w-4)+2; var y=hh-2-(Math.abs(Number(v)||0)/mx)*(hh-4); return x.toFixed(0)+','+y.toFixed(0); }).join(' ');
+  return '<svg width="'+w+'" height="'+hh+'" viewBox="0 0 '+w+' '+hh+'"><polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.5"/></svg>';
+}
+function _erRowHtml(r,months,rev){
+  var esSec=r.tipo==='seccion', esMet=r.tipo==='metric', esDato=r.tipo==='dato';
+  var costo=_erEsCosto(r.grupo), esNet=esMet&&/net profit/i.test(r.label||'');
+  var stickBg='var(--card-bg,#fff)', rowStyle='', lblStyle='', valCol='var(--text-primary,#111)';
+  if(esSec){ var inc=/REVENUE/.test(r.grupo); rowStyle='background:'+(inc?'rgba(63,143,94,.08)':'rgba(192,80,92,.07)'); stickBg=inc?'#eef6f1':'#fbf0f1'; lblStyle='font-weight:800;color:'+(inc?'#2f7a53':'#a94452'); valCol=inc?'#2f7a53':'#a94452'; }
+  else if(esMet){ rowStyle='border-top:1.5px solid var(--color-divider,#e5e7eb)'+(esNet?';background:rgba(196,106,122,.09)':''); stickBg=esNet?'#f7edf0':'var(--card-bg,#fff)'; lblStyle='font-weight:800;color:var(--text-primary,#111)'; }
+  else { lblStyle='color:var(--text-secondary,#374151)'; if(costo) valCol='#b45309'; }
+  var pad=esDato?'6px 12px 6px 28px':'8px 12px';
+  function fmt(v){ v=Number(v)||0; if(_erShowPct) return rev?(v/rev*100).toFixed(1)+'%':'—'; var disp=(costo&&(esSec||esDato))?-Math.abs(v):v; return _erMoney(disp); }
+  var h='<tr style="'+rowStyle+'"><td style="padding:'+pad+';position:sticky;left:0;background:'+stickBg+';'+lblStyle+';white-space:nowrap;z-index:1">'+_esc(r.label||r.linea)+'</td>';
+  months.forEach(function(mo){ var v=(r.valores&&r.valores[mo.key])||0; if(Math.abs(v)<0.005){ h+='<td style="text-align:right;padding:'+pad+';color:#cbd5e1">—</td>'; return; } var col=esMet?(v<0?'#c0505c':'#3f8f5e'):valCol; h+='<td style="text-align:right;padding:'+pad+';color:'+col+((esSec||esMet)?';font-weight:700':'')+';white-space:nowrap">'+fmt(v)+'</td>'; });
+  var tcol=esMet?((Number(r.total)||0)<0?'#c0505c':'#3f8f5e'):valCol;
+  h+='<td style="text-align:right;padding:'+pad+';font-weight:800;color:'+tcol+';white-space:nowrap">'+fmt(r.total)+'</td>';
+  if(esSec||esMet){ var vals=months.map(function(mo){ return (r.valores&&r.valores[mo.key])||0; }); h+='<td style="padding:3px 6px">'+_erSpark(vals, esSec?(/REVENUE/.test(r.grupo)?'#3f8f5e':'#c0505c'):'#c46a7a')+'</td>'; }
+  else h+='<td></td>';
+  return h+'</tr>';
+}
+function _erMatrixHtml(d){
+  var months=d.months||[], rev=Number(d.totalIngresos)||0;
+  var h='<table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:'+(240+months.length*95+140)+'px">';
+  h+='<thead><tr style="color:var(--text-secondary,#6b7280)"><th style="text-align:left;padding:9px 12px;position:sticky;left:0;background:var(--card-bg,#fff);font-weight:700;z-index:3">Concepto</th>';
+  months.forEach(function(mo){ h+='<th style="text-align:right;padding:9px 9px;font-weight:600;white-space:nowrap">'+_esc(mo.label)+'</th>'; });
+  h+='<th style="text-align:right;padding:9px 12px;font-weight:800;color:var(--text-primary,#111)">Total</th><th style="text-align:center;padding:9px 8px;font-weight:600">Tend.</th></tr></thead><tbody>';
+  (d.rows||[]).forEach(function(r){ h+=_erRowHtml(r, months, rev); });
+  return h+'</tbody></table>';
+}
+function _erDetailHtml(d){
+  var rev=Number(d.totalIngresos)||0;
+  var h='<table style="width:100%;border-collapse:collapse;font-size:13px">';
+  (d.rows||[]).forEach(function(r){
+    var esSec=r.tipo==='seccion', esMet=r.tipo==='metric', esDato=r.tipo==='dato', costo=_erEsCosto(r.grupo), esNet=esMet&&/net profit/i.test(r.label||'');
+    var v=Number(r.total)||0; if(esDato && Math.abs(v)<0.005) return;
+    var disp=(costo&&(esSec||esDato))?-Math.abs(v):v, rowStyle='', lbl='', col='var(--text-primary,#111)';
+    if(esSec){ var inc=/REVENUE/.test(r.grupo); rowStyle='background:'+(inc?'rgba(63,143,94,.08)':'rgba(192,80,92,.07)'); lbl='font-weight:800;color:'+(inc?'#2f7a53':'#a94452'); col=inc?'#2f7a53':'#a94452'; }
+    else if(esMet){ rowStyle='border-top:1.5px solid var(--color-divider,#e5e7eb)'+(esNet?';background:rgba(196,106,122,.09)':''); lbl='font-weight:800'; col=v<0?'#c0505c':'#3f8f5e'; }
+    else { lbl='color:var(--text-secondary,#374151)'; if(costo) col='#b45309'; }
+    var pad=esDato?'6px 14px 6px 28px':'8px 14px';
+    h+='<tr style="'+rowStyle+'"><td style="padding:'+pad+';'+lbl+'">'+_esc(r.label||r.linea)+'</td><td style="text-align:right;padding:'+pad+';font-weight:'+((esSec||esMet)?'800':'600')+';color:'+col+'">'+_erMoney2(disp)+'</td><td style="text-align:right;padding:'+pad+';color:var(--text-secondary,#9ca3af);width:64px">'+(rev?(v/rev*100).toFixed(1)+'%':'—')+'</td></tr>';
+  });
+  return h+'</table>';
+}
+function _renderER(){
+  var d=_erData, root=document.getElementById('view-estado-resultados'); if(!d||!root) return;
+  _erKillCharts();
+  var m=d.metricas||{}, months=d.months||[], multi=months.length>1;
+  var rev=Number(d.totalIngresos)||0, egr=Number(d.totalEgresos)||0, util=Number(d.totalUtilidad)||0, ebitda=Number(m.ebitda)||0;
+  var C='background:var(--card-bg,#fff);border:1px solid var(--color-divider,#eee);border-radius:14px;padding:16px 18px';
+  var h='<div style="padding:4px 2px">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:10px;margin-bottom:14px">'
+    +'<div><div style="font-size:20px;font-weight:800;color:var(--text-primary,#111)">Estado de Resultados</div>'
+    +'<div style="font-size:12.5px;color:var(--text-secondary,#6b7280)">'+d.periodo.inicio+' → '+d.periodo.fin+' · '+(multi?months.length+' meses en columnas':'detalle del mes')+' · MXN</div></div>'
+    +'<div style="display:flex;gap:7px;align-items:center">'+_erBtn('erTogglePct()',(_erShowPct?'Ver importes':'Ver % s/ingresos'))+_erBtn('erPrint()','<i data-lucide=\'printer\' style=\'width:14px;height:14px\'></i>Imprimir')+_erBtn('loadEstadoResultados()','<i data-lucide=\'refresh-cw\' style=\'width:14px;height:14px\'></i>')+'</div></div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px">';
+  function kp(l,v,sub,col){ return '<div style="background:var(--color-surface,#faf9f8);border-radius:12px;padding:12px 14px"><div style="font-size:11px;color:var(--text-secondary,#9ca3af);text-transform:uppercase;letter-spacing:.4px;font-weight:700">'+l+'</div><div style="font-size:22px;font-weight:800;color:'+(col||'var(--text-primary,#111)')+';margin-top:2px">'+v+'</div><div style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">'+(sub||'&nbsp;')+'</div></div>'; }
+  h+=kp('Ingresos',_erMoney(rev),'total del rango');
+  h+=kp('Egresos',_erMoney(egr),'COGS+OpEx+G&A+Imp.','#b45309');
+  h+=kp('EBITDA',_erMoney(ebitda),'margen '+(rev?(ebitda/rev*100).toFixed(1):'0')+'%',ebitda<0?'#c0505c':'#3f8f5e');
+  h+=kp('Utilidad neta',_erMoney(util),'margen '+(rev?(util/rev*100).toFixed(1):'0')+'%',util<0?'#c0505c':'#3f8f5e');
+  h+='</div>';
+  h+='<div style="'+C+';margin-bottom:16px;overflow-x:auto">'+(multi?_erMatrixHtml(d):_erDetailHtml(d))+'</div>';
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">'
+    +'<div style="'+C+'"><div style="font-size:13px;font-weight:800;margin-bottom:6px;color:var(--text-primary,#111)">Ingresos · Egresos · Utilidad por mes</div><canvas id="er-c-trend" style="max-height:220px"></canvas></div>'
+    +'<div style="'+C+'"><div style="font-size:13px;font-weight:800;margin-bottom:6px;color:var(--text-primary,#111)">Composición por mes</div><canvas id="er-c-comp" style="max-height:220px"></canvas></div></div>';
+  h+='</div>';
+  root.innerHTML=h;
+  try{ lucide.createIcons(); }catch(e){}
+  _erDrawCharts();
+}
+function _erDrawCharts(){
+  if(typeof Chart==='undefined') return; var d=_erData; if(!d) return; var serie=d.serie||[];
+  var t=document.getElementById('er-c-trend');
+  if(t){ _erCharts.push(new Chart(t,{type:'line',data:{labels:serie.map(function(s){return s.label;}),datasets:[
+    {label:'Ingresos',data:serie.map(function(s){return s.ingresos;}),borderColor:'#3f8f5e',borderWidth:2,tension:.3,fill:false,pointRadius:2},
+    {label:'Egresos',data:serie.map(function(s){return s.egresos;}),borderColor:'#c0505c',borderWidth:2,tension:.3,fill:false,pointRadius:2},
+    {label:'Utilidad',data:serie.map(function(s){return s.utilidad;}),borderColor:'#3f6fd6',borderWidth:2,borderDash:[5,3],tension:.3,fill:false,pointRadius:2}
+  ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:11}}}},scales:{y:{ticks:{callback:function(v){return _erK(v);},font:{size:10}}}}}})); }
+  var c=document.getElementById('er-c-comp');
+  if(c){ _erCharts.push(new Chart(c,{type:'bar',data:{labels:serie.map(function(s){return s.label;}),datasets:[
+    {label:'Ingresos',data:serie.map(function(s){return s.ingresos;}),backgroundColor:'#9FE1CB'},
+    {label:'Egresos',data:serie.map(function(s){return s.egresos;}),backgroundColor:'#F09595'}
+  ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:11}}}},scales:{y:{ticks:{callback:function(v){return _erK(v);},font:{size:10}}}}}})); }
+}
+window.erTogglePct=function(){ _erShowPct=!_erShowPct; _renderER(); };
+window.erPrint=function(){
+  var el=document.getElementById('view-estado-resultados'); if(!el) return;
+  var w=window.open('','_blank'); if(!w){ alert('Permite las ventanas emergentes para imprimir.'); return; }
+  var clone=el.cloneNode(true);
+  var sc=el.querySelectorAll('canvas'), cc=clone.querySelectorAll('canvas');
+  for(var i=0;i<sc.length;i++){ try{ var img=document.createElement('img'); img.src=sc[i].toDataURL('image/png'); img.style.maxWidth='100%'; if(cc[i]) cc[i].parentNode.replaceChild(img,cc[i]); }catch(e){} }
+  var titulo='Estado de Resultados '+((_erData&&_erData.periodo)?(_erData.periodo.inicio+' a '+_erData.periodo.fin):'');
+  w.document.write('<html><head><meta charset="utf-8"><title>'+_esc(titulo)+'</title><style>@page{size:landscape;margin:12mm}body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:10px}table{width:100%;border-collapse:collapse;font-size:11px}td,th{padding:4px 6px}button{display:none!important}canvas{display:none}</style></head><body><h2>'+_esc(titulo)+'</h2>'+clone.innerHTML+'</body></html>');
+  w.document.close(); setTimeout(function(){ try{ w.print(); }catch(e){} }, 400);
+};
+
 function renderEstadoResultados(data) {
   var el = document.getElementById('view-estado-resultados');
   if (!el) return;
@@ -11553,6 +11677,14 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     var _swEl = document.getElementById('view-semanal');
     if (_swEl) _swEl.style.display = '';
     loadResumenSemanal();
+    return;
+  }
+  // Estado de Resultados — nuevo diseño (meses en columnas / detalle) en vivo
+  if (/estado.?de.?resultados|estado-resultados/i.test(viewId) || (_foundViewItem && /estado.?result/i.test(_foundViewItem.fuente||''))) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _erEl2 = document.getElementById('view-estado-resultados');
+    if (_erEl2) _erEl2.style.display = '';
+    loadEstadoResultados();
     return;
   }
   // Presupuesto — proyección y meta (página dedicada)

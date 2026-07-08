@@ -535,3 +535,61 @@ function readSummary(fechaInicio, fechaFin) {
     };
   } catch(ex){ return { ok:false, error:ex.message+' (L:'+ex.lineNumber+')' }; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   ESTADO DE RESULTADOS MENSUAL — pivotea el P&L por mes en el rango.
+   Reusa readSummary (mismo motor que cuadra) por mes + total del rango.
+   ══════════════════════════════════════════════════════════════════════ */
+function _erN(v){ return (typeof v==='number')?v:(parseFloat(String(v||'').replace(/[$,\s]/g,''))||0); }
+function _erMesLbl(y,m){ var M=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']; return M[m-1]+' '+String(y).substring(2); }
+function _erEnumMonths(fi, ff){
+  var a=fi.substring(0,7).split('-'), b=ff.substring(0,7).split('-');
+  var y=parseInt(a[0],10), m=parseInt(a[1],10), yE=parseInt(b[0],10), mE=parseInt(b[1],10);
+  var out=[], guard=0;
+  while((y<yE || (y===yE && m<=mE)) && guard++<60){
+    var lastDay=new Date(y, m, 0).getDate();
+    out.push({ key:y+'-'+String(m).padStart(2,'0'),
+      ini:y+'-'+String(m).padStart(2,'0')+'-01',
+      fin:y+'-'+String(m).padStart(2,'0')+'-'+String(lastDay).padStart(2,'0'),
+      label:_erMesLbl(y,m) });
+    m++; if(m>12){m=1;y++;}
+  }
+  return out;
+}
+function _erLineKey(l){
+  if(l.tipo==='seccion') return 'sec|'+l.grupo;
+  if(l.tipo==='metric')  return 'met|'+l.label;
+  return 'dato|'+(l.grupo||'')+'|'+(l.linea||l.label||'');
+}
+function readEstadoResultadosMensual(fechaInicio, fechaFin){
+  try{
+    var fi=String(fechaInicio||'').substring(0,10), ff=String(fechaFin||'').substring(0,10);
+    if(!fi||!ff){ var hoy=new Date(); ff=_sumFmtDate(hoy); fi=ff.substring(0,8)+'01'; }
+    var months=_erEnumMonths(fi, ff);
+    if(months.length>18) months=months.slice(months.length-18); // tope de seguridad
+    // Total del rango completo: orden canónico + totales + métricas
+    var full=readSummary(fi, ff);
+    if(!full.ok) return full;
+    var order=full.lineas.map(_erLineKey), rowsMap={};
+    full.lineas.forEach(function(l){ var k=_erLineKey(l);
+      rowsMap[k]={ key:k, tipo:l.tipo, grupo:l.grupo||'', linea:l.linea||'',
+        label:l.label||l.linea||'', total:_erN(l.actual), valores:{} }; });
+    // Por mes
+    var serie=[];
+    months.forEach(function(mo){
+      var s=readSummary(mo.ini, mo.fin);
+      var mm=(s&&s.ok)?s.metricas:{};
+      var rev=_erN(mm.revenue);
+      var eg=(s&&s.ok&&s.reconc)?_erN(s.reconc.egresosPL):(_erN(mm.cogs)+_erN(mm.opex)+_erN(mm.ga)+_erN(mm.taxes));
+      serie.push({ key:mo.key, label:mo.label, ingresos:rev, egresos:eg, utilidad:_erN(mm.netProfit) });
+      if(s&&s.ok){ s.lineas.forEach(function(l){ var k=_erLineKey(l); if(rowsMap[k]) rowsMap[k].valores[mo.key]=_erN(l.actual); }); }
+    });
+    var rows=order.map(function(k){ return rowsMap[k]; }).filter(Boolean);
+    return { ok:true, periodo:{inicio:fi,fin:ff},
+      months:months.map(function(m){ return {key:m.key,label:m.label}; }),
+      rows:rows, serie:serie, metricas:full.metricas, metricasPrev:full.metricasPrev, reconc:full.reconc,
+      totalIngresos:_erN(full.metricas.revenue),
+      totalEgresos:(full.reconc?_erN(full.reconc.egresosPL):0),
+      totalUtilidad:_erN(full.metricas.netProfit) };
+  }catch(ex){ return {ok:false, error:ex.message+' (L:'+(ex.lineNumber||'?')+')'}; }
+}
