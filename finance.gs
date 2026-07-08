@@ -762,6 +762,16 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});
       return jsonResponse(presSetEscenarios(body));
     }
+    if (body.action === 'chatSend') {
+      if (typeof chatSend !== 'function')
+        return jsonResponse({ok:false, error:'Agrega chat.gs en Apps Script y redespliega.'});
+      return jsonResponse(chatSend(body));
+    }
+    if (body.action === 'chatPoll') {
+      if (typeof chatPoll !== 'function')
+        return jsonResponse({ok:false, error:'Agrega chat.gs en Apps Script y redespliega.'});
+      return jsonResponse(chatPoll(body));
+    }
     if (body.action === 'presSetPeriodoAbierto') {
       if (typeof presSetPeriodoAbierto !== 'function')
         return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});
