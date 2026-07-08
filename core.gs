@@ -811,21 +811,38 @@ function saveMenu(body) {
     if (!sh) return { ok:false, error:'No existe la hoja Menu' };
     var vals = sh.getDataRange().getValues();
     if (vals.length < 2) return { ok:false, error:'Hoja Menu vacía' };
+    var ncol = vals[0].length;
     var idRow = {};
     for (var i = 1; i < vals.length; i++) { var id = String(vals[i][0]||'').trim(); if (id) idRow[id] = i; }
-    var updated = 0;
+    var updated = 0, creados = 0;
     (body.items || []).forEach(function(it){
-      var id = String(it.id||'').trim(); if (!id || !(id in idRow)) return; var i = idRow[id];
-      if (it.padre  !== undefined) vals[i][1] = String(it.padre||'');
-      if (it.label  !== undefined) vals[i][2] = String(it.label||'');
-      if (it.icono  !== undefined) vals[i][4] = String(it.icono||'');
-      if (it.orden  !== undefined) vals[i][5] = Number(it.orden)||0;
-      if (it.activo !== undefined) vals[i][8] = !(it.activo === false || String(it.activo).toLowerCase() === 'false');
-      updated++;
+      var id = String(it.id||'').trim(); if (!id) return;
+      if (id in idRow) {
+        var i = idRow[id];
+        if (it.padre  !== undefined) vals[i][1] = String(it.padre||'');
+        if (it.label  !== undefined) vals[i][2] = String(it.label||'');
+        if (it.icono  !== undefined) vals[i][4] = String(it.icono||'');
+        if (it.orden  !== undefined) vals[i][5] = Number(it.orden)||0;
+        if (it.activo !== undefined) vals[i][8] = !(it.activo === false || String(it.activo).toLowerCase() === 'false');
+        updated++;
+      } else {
+        // Item NUEVO (submenú creado desde la página): se agrega con sus campos.
+        var row = new Array(ncol);
+        row[0] = id;
+        row[1] = String(it.padre||'');
+        row[2] = String(it.label||'');
+        row[3] = String(it.seccion||'');
+        row[4] = String(it.icono||'circle');
+        row[5] = Number(it.orden)||0;
+        row[6] = String(it.tipo||'vista');
+        row[7] = String(it.fuente||'');
+        if (ncol > 8) row[8] = !(it.activo === false || String(it.activo).toLowerCase() === 'false');
+        vals.push(row); idRow[id] = vals.length-1; creados++;
+      }
     });
-    sh.getRange(1, 1, vals.length, vals[0].length).setValues(vals);
-    try { logAudit(body.usuario||'sistema', 'Panel', 'Guardar menú', '', '', '', updated + ' items'); } catch(e) {}
-    return { ok:true, updated:updated };
+    sh.getRange(1, 1, vals.length, ncol).setValues(vals);
+    try { logAudit(body.usuario||'sistema', 'Panel', 'Guardar menú', '', '', '', updated + ' items, ' + creados + ' nuevos'); } catch(e) {}
+    return { ok:true, updated:updated, creados:creados };
   } catch (ex) { return { ok:false, error:ex.message }; }
 }
 

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.84 -->
+﻿<!-- app-build:2026.07.07.85 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -18800,6 +18800,18 @@ function pcRenderMenuTable(items) {
   _pcMenuDirty = false;
   pcMenuRenderEditable();
 }
+function _pcMenuIsGrupoMap(){ var m={}; _pcMenuEdit.forEach(function(it){ if(it.tipo==='grupo') m[it.id]=1; }); return m; }
+function _pcMenuEP(it, isGrupo){ return (it.padre && isGrupo[it.padre]) ? it.padre : ''; } // padre efectivo
+function _pcMenuTree(){ // filas en orden jerárquico (padre → hijos), sin mutar
+  var isGrupo=_pcMenuIsGrupoMap();
+  var tops=_pcMenuEdit.filter(function(it){ return !_pcMenuEP(it,isGrupo); }).slice().sort(function(a,b){return (a.orden||0)-(b.orden||0);});
+  var kids={}; _pcMenuEdit.forEach(function(it){ var ep=_pcMenuEP(it,isGrupo); if(ep){ (kids[ep]=kids[ep]||[]).push(it); } });
+  Object.keys(kids).forEach(function(k){ kids[k].sort(function(a,b){return (a.orden||0)-(b.orden||0);}); });
+  var rows=[]; tops.forEach(function(t){ rows.push({it:t,child:false}); if(isGrupo[t.id]){ (kids[t.id]||[]).forEach(function(c){ rows.push({it:c,child:true}); }); } });
+  _pcMenuEdit.forEach(function(it){ if(!rows.some(function(r){return r.it===it;})) rows.push({it:it,child:false}); });
+  return {rows:rows, isGrupo:isGrupo};
+}
+function _pcMenuReorden(){ var t=_pcMenuTree(); var o=0; t.rows.forEach(function(r){ o+=10; r.it.orden=o; }); }
 function pcMenuRenderEditable() {
   var wrap  = document.getElementById('pc-menu-table-wrap');
   var empty = document.getElementById('pc-menu-empty');
@@ -18810,30 +18822,41 @@ function pcMenuRenderEditable() {
   }
   if (empty) empty.style.display = 'none';
   var filtering = !!(_pcMenuFilter && _pcMenuFilter.trim());
-  var filtered = _pcMenuEdit;
-  if (filtering) { var lq=_pcMenuFilter.toLowerCase(); filtered=_pcMenuEdit.filter(function(it){
-    return (it.label||'').toLowerCase().indexOf(lq)>-1||(it.id||'').toLowerCase().indexOf(lq)>-1||(it.seccion||'').toLowerCase().indexOf(lq)>-1||(it.fuente||'').toLowerCase().indexOf(lq)>-1; }); }
+  var isGrupo=_pcMenuIsGrupoMap();
   var grupos = _pcMenuEdit.filter(function(it){ return it.tipo==='grupo'; });
+  var rows;
+  if (filtering) { var lq=_pcMenuFilter.toLowerCase(); rows=_pcMenuEdit.filter(function(it){
+      return (it.label||'').toLowerCase().indexOf(lq)>-1||(it.id||'').toLowerCase().indexOf(lq)>-1||(it.seccion||'').toLowerCase().indexOf(lq)>-1||(it.fuente||'').toLowerCase().indexOf(lq)>-1;
+    }).map(function(it){ return {it:it, child:!!_pcMenuEP(it,isGrupo)}; }); }
+  else { rows=_pcMenuTree().rows; }
   var h='';
   h+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">'
     +'<button id="pc-menu-save" onclick="pcMenuSave()" '+(_pcMenuDirty?'':'disabled ')+'style="padding:7px 14px;font-size:12px;font-weight:700;background:'+(_pcMenuDirty?'var(--color-primary,#c46a7a)':'var(--color-surface-offset,#eee)')+';color:'+(_pcMenuDirty?'#fff':'#9ca3af')+';border:none;border-radius:8px;cursor:'+(_pcMenuDirty?'pointer':'default')+'">💾 Guardar cambios</button>'
     +'<button onclick="pcLoadMenu()" style="padding:7px 12px;font-size:12px;background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;cursor:pointer">↩ Descartar</button>'
-    +'<span style="font-size:11px;color:var(--color-text-muted,#9ca3af)">'+(filtering?'Filtro activo — borra el buscador para reordenar arrastrando.':'Arrastra ⋮⋮ para reordenar · editables: label, ícono, padre y activo (id/tipo/fuente son fijos para no romper el ruteo).')+'</span>'
+    +'<button onclick="_pcMenuAddSubmenu()" style="padding:7px 12px;font-size:12px;background:var(--card-bg,#fff);border:1px solid var(--color-primary,#c46a7a);color:var(--color-primary,#c46a7a);border-radius:8px;cursor:pointer;font-weight:700">＋ Nuevo submenú</button>'
+    +'<span style="font-size:11px;color:var(--color-text-muted,#9ca3af)">'+(filtering?'Filtro activo — borra el buscador para reordenar.':'Ordena con ▲▼ o arrastra ⋮⋮ (suéltalo sobre un submenú para meterlo ahí). Los submenús salen sangrados con ↳.')+'</span>'
     +'</div>';
   h+='<datalist id="pc-menu-icons">'+['home','circle','dollar-sign','bar-chart-3','pie-chart','file-text','settings','users','calendar','clipboard-list','wallet','building-2','flask-conical','pill','stethoscope','receipt','trending-up','layers','folder','box','credit-card','clock'].map(function(n){return '<option value="'+n+'">';}).join('')+'</datalist>';
-  h+='<table class="menu-table"><thead><tr><th style="width:20px"></th><th>ID</th><th>Label</th><th>Padre (submenú)</th><th>Icono</th><th>Tipo</th><th>Fuente</th><th style="text-align:center">Activo</th></tr></thead><tbody>';
-  filtered.forEach(function(it) {
-    var idx = _pcMenuEdit.indexOf(it);
+  h+='<table class="menu-table"><thead><tr><th style="width:58px"></th><th>Menú / Submenú</th><th>Padre</th><th>Icono</th><th>Tipo</th><th style="text-align:center">Activo</th></tr></thead><tbody>';
+  rows.forEach(function(row){
+    var it=row.it, idx=_pcMenuEdit.indexOf(it);
     var activo = it.activo !== false && String(it.activo).toLowerCase() !== 'false';
+    var isGrp = it.tipo==='grupo';
     var padreOpts='<option value="">(raíz / menú principal)</option>'+grupos.filter(function(g){return g.id!==it.id;}).map(function(g){ return '<option value="'+_esc(g.id)+'"'+(it.padre===g.id?' selected':'')+'>'+_esc(g.label||g.id)+'</option>'; }).join('');
-    h += '<tr draggable="'+(filtering?'false':'true')+'" ondragstart="_pcMenuDrag(event,'+idx+')" ondragover="event.preventDefault()" ondrop="_pcMenuDrop(event,'+idx+')" style="'+(filtering?'':'cursor:grab')+'">'
-      + '<td style="text-align:center;color:#c9c9c9">'+(filtering?'':'⋮⋮')+'</td>'
-      + '<td><code style="font-size:10px;background:var(--color-surface-offset);padding:2px 5px;border-radius:4px">' + _esc(it.id||'') + '</code></td>'
-      + '<td><input value="'+_esc(it.label||'')+'" onchange="_pcMenuField('+idx+',\'label\',this.value)" style="width:100%;min-width:110px;box-sizing:border-box;padding:4px 7px;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"></td>'
-      + '<td><select onchange="_pcMenuField('+idx+',\'padre\',this.value)" '+(it.tipo==='grupo'?'disabled title="Un grupo no puede colgar de otro" ':'')+'style="max-width:150px;padding:4px 6px;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'+padreOpts+'</select></td>'
-      + '<td><input value="'+_esc(it.icono||'')+'" list="pc-menu-icons" onchange="_pcMenuField('+idx+',\'icono\',this.value)" style="width:82px;padding:4px 7px;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"></td>'
-      + '<td style="font-size:11px;color:var(--color-text-muted)">' + _esc(it.tipo||'—') + '</td>'
-      + '<td style="font-size:10.5px;color:var(--color-text-muted);max-width:110px;overflow:hidden;text-overflow:ellipsis" title="'+_esc(it.fuente||'')+'">' + _esc(it.fuente||'—') + '</td>'
+    var ctrl = filtering ? '' :
+      '<button onclick="_pcMenuMove('+idx+',-1)" title="Subir" style="border:none;background:none;cursor:pointer;color:#9ca3af;font-size:11px;padding:0 2px">▲</button>'
+      +'<button onclick="_pcMenuMove('+idx+',1)" title="Bajar" style="border:none;background:none;cursor:pointer;color:#9ca3af;font-size:11px;padding:0 2px">▼</button>'
+      +'<span style="color:#d1d1d1;cursor:grab">⋮⋮</span>';
+    var lblCell = '<div style="display:flex;align-items:center;gap:6px'+(row.child?';padding-left:22px':'')+'">'
+      +(row.child?'<span style="color:#c9c9c9">↳</span>':(isGrp?'<span style="font-size:13px">📁</span>':''))
+      +'<input value="'+_esc(it.label||'')+'" onchange="_pcMenuField('+idx+',\'label\',this.value)" style="'+(isGrp?'font-weight:700;':'')+'width:100%;min-width:110px;box-sizing:border-box;padding:4px 7px;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
+      +'<code style="font-size:9px;color:#b8b8b8;white-space:nowrap">'+_esc(it.id||'')+'</code></div>';
+    h += '<tr draggable="'+(filtering?'false':'true')+'" ondragstart="_pcMenuDrag(event,'+idx+')" ondragover="event.preventDefault()" ondrop="_pcMenuDrop(event,'+idx+')" style="'+(isGrp?'background:rgba(196,106,122,.05);':'')+'">'
+      + '<td style="white-space:nowrap;text-align:center">'+ctrl+'</td>'
+      + '<td>'+lblCell+'</td>'
+      + '<td><select onchange="_pcMenuField('+idx+',\'padre\',this.value)" '+(isGrp?'disabled title="Un submenú no puede colgar de otro" ':'')+'style="max-width:150px;padding:4px 6px;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'+padreOpts+'</select></td>'
+      + '<td><input value="'+_esc(it.icono||'')+'" list="pc-menu-icons" onchange="_pcMenuField('+idx+',\'icono\',this.value)" style="width:78px;padding:4px 7px;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"></td>'
+      + '<td style="font-size:11px;color:var(--color-text-muted)" title="Fuente: '+_esc(it.fuente||'—')+'">' + (isGrp?'submenú':_esc(it.tipo||'—')) + '</td>'
       + '<td style="text-align:center"><input type="checkbox" '+(activo?'checked':'')+' onchange="_pcMenuField('+idx+',\'activo\',this.checked)" style="width:15px;height:15px;accent-color:#c46a7a"></td>'
       + '</tr>';
   });
@@ -18842,22 +18865,40 @@ function pcMenuRenderEditable() {
 }
 function _pcMenuMarkDirty(){ _pcMenuDirty=true; var b=document.getElementById('pc-menu-save'); if(b){ b.disabled=false; b.style.background='var(--color-primary,#c46a7a)'; b.style.color='#fff'; b.style.cursor='pointer'; } }
 function _pcMenuField(idx, field, val){ var it=_pcMenuEdit&&_pcMenuEdit[idx]; if(!it) return; it[field]=val;
-  if(field==='padre'){ _pcMenuDirty=true; pcMenuRenderEditable(); } else { _pcMenuMarkDirty(); } }
+  if(field==='padre'){ _pcMenuReorden(); _pcMenuDirty=true; pcMenuRenderEditable(); } else { _pcMenuMarkDirty(); } }
+function _pcMenuMove(idx, dir){ var it=_pcMenuEdit[idx]; if(!it) return;
+  var isGrupo=_pcMenuIsGrupoMap(), ep=_pcMenuEP(it,isGrupo);
+  var sibs=_pcMenuEdit.filter(function(x){ return _pcMenuEP(x,isGrupo)===ep; }).sort(function(a,b){return (a.orden||0)-(b.orden||0);});
+  var pos=sibs.indexOf(it), swap=sibs[pos+dir]; if(!swap) return;
+  var o=it.orden; it.orden=swap.orden; swap.orden=o;
+  _pcMenuReorden(); _pcMenuDirty=true; pcMenuRenderEditable(); }
 function _pcMenuDrag(e, idx){ _pcMenuDragIdx=idx; try{ e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',String(idx)); }catch(_){} }
-function _pcMenuDrop(e, idx){ e.preventDefault(); var from=_pcMenuDragIdx; if(from==null||from===idx) return;
-  var arr=_pcMenuEdit, moved=arr.splice(from,1)[0]; arr.splice(idx,0,moved);
-  arr.forEach(function(it,i){ it.orden=(i+1)*10; }); _pcMenuDirty=true; pcMenuRenderEditable(); }
+function _pcMenuDrop(e, targetIdx){ e.preventDefault(); var from=_pcMenuDragIdx; if(from==null||from===targetIdx) return;
+  var D=_pcMenuEdit[from], T=_pcMenuEdit[targetIdx]; if(!D||!T||D===T) return;
+  var isGrupo=_pcMenuIsGrupoMap(), newPadre;
+  if(D.tipo==='grupo') newPadre='';                       // submenús siempre a nivel raíz
+  else if(T.tipo==='grupo') newPadre=T.id;                // soltar sobre un submenú → entra ahí
+  else newPadre=_pcMenuEP(T,isGrupo);                     // junto a T (mismo padre)
+  D.padre=newPadre; D.orden=(T.orden||0)+0.5;
+  _pcMenuReorden(); _pcMenuDirty=true; pcMenuRenderEditable(); }
+function _pcMenuSlug(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').substring(0,28)||('m'+Date.now()); }
+function _pcMenuAddSubmenu(){ var label=prompt('Nombre del nuevo submenú (agrupador):'); if(!label) return; label=label.trim(); if(!label) return;
+  var id=_pcMenuSlug(label), base=id, n=1;
+  while(_pcMenuEdit.some(function(it){return it.id===id;})){ id=base+'-'+(++n); }
+  _pcMenuEdit.push({id:id, padre:'', label:label, seccion:'', icono:'folder', orden:99999, tipo:'grupo', fuente:'', activo:true, _new:true});
+  _pcMenuReorden(); _pcMenuDirty=true; pcMenuRenderEditable();
+  setTimeout(function(){ if(typeof setStatus==='function') setStatus('Submenú «'+label+'» creado — arrástrale items y Guarda.','ok'); },50); }
 async function pcMenuSave(){
   if(!_pcMenuDirty||!_pcMenuEdit) return;
   var s=getSession()||{};
-  var items=_pcMenuEdit.map(function(it){ return {id:it.id, padre:it.padre||'', label:it.label||'', icono:it.icono||'', orden:it.orden||0, activo:it.activo!==false}; });
+  var items=_pcMenuEdit.map(function(it){ return {id:it.id, padre:it.padre||'', label:it.label||'', icono:it.icono||'', orden:it.orden||0, activo:it.activo!==false, seccion:it.seccion||'', tipo:it.tipo||'vista', fuente:it.fuente||'', _new:!!it._new}; });
   var b=document.getElementById('pc-menu-save'); if(b){ b.disabled=true; b.textContent='Guardando…'; }
   try{
     var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'saveMenu',items:items,usuario:s.email||'sistema'})});
     var res=await r.json();
     if(!res.ok){ alert('No se pudo guardar el menú: '+(res.error||'')); if(b){b.disabled=false;b.textContent='💾 Guardar cambios';} return; }
     _pcMenuDirty=false;
-    if(typeof setStatus==='function') setStatus('Menú guardado ('+(res.updated||0)+' items).','ok');
+    if(typeof setStatus==='function') setStatus('Menú guardado ('+(res.updated||0)+' items'+(res.creados?', '+res.creados+' nuevos':'')+').','ok');
     pcLoadMenu(); // recarga (limpia cache) y refresca el sidebar
   }catch(e){ alert('Error: '+(e.message||e)); if(b){b.disabled=false;b.textContent='💾 Guardar cambios';} }
 }
