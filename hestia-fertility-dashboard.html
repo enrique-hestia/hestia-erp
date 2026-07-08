@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.75 -->
+﻿<!-- app-build:2026.07.07.76 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -19990,7 +19990,7 @@ function _cxpBuildNewRows(rows) {
       + '<td style="font-size:11px;color:var(--text-secondary,#6b7280)">'+row.subtipo+'</td>'
       + '<td style="text-align:right;font-weight:700;font-size:13px">'+fMXN(row.saldoPendiente!=null?row.saldoPendiente:row.monto)+(row.divisa==='USD'?' <span style="font-size:9px;color:#0369a1;font-weight:800">MXN</span>':'')
         + ((row.divisa==='USD'&&(row.montoUSD>0)) ? '<div style="font-size:9.5px;font-weight:700;color:#0369a1;margin-top:1px">US$ '+Number(row.montoUSD).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+(row.tipoCambio>0?' · TC '+Number(row.tipoCambio).toFixed(2):'')+'</div>' : '')
-        + ((row.montoAbonado>0) ? '<div style="font-size:9.5px;font-weight:600;color:#166534">de '+fMXN(row.monto)+' — abonado '+fMXN(row.montoAbonado)+'</div>' : '')
+        + ((row.montoAbonado>0) ? '<div style="font-size:9.5px;font-weight:600;color:#166534">de '+fMXN(row.monto)+' — abonado '+fMXN(row.montoAbonado)+(hasPermission('bank_capture')?' <a href="javascript:void(0)" onclick="event.stopPropagation();cxpRevertirAbono(decodeURIComponent(\''+encodeURIComponent(row.id||'')+'\'),decodeURIComponent(\''+encodeURIComponent(row.proveedor||'')+'\'),'+row.montoAbonado+')" style="color:#b45309;font-weight:700;margin-left:4px" title="Revertir el abono de esta orden (ej. crédito mal aplicado)">↩ revertir</a>':'')+'</div>' : '')
       + '</td>'
       + '<td style="font-size:11px">'+(row.vencimiento||'—')+'</td>'
       + '<td style="text-align:center;font-size:12px">'+factIcon+'</td>'
@@ -21848,6 +21848,22 @@ window.cxpRepararCruzados = async function() {
     }
     loadCxPData();
   } catch(e) { alert('Error: ' + e.message); }
+};
+
+// Revierte el abono de UNA orden específica (sin importar su origen). Para casos
+// como CRISBEN donde el abono no quedó marcado como crédito y el reparador no lo ve.
+window.cxpRevertirAbono = async function(cxpId, proveedor, monto) {
+  if (!cxpId) { alert('No se pudo identificar la cuenta.'); return; }
+  if (!confirm('¿Revertir el abono de $'+(Number(monto)||0).toLocaleString('en-US',{minimumFractionDigits:2})+' en la cuenta de "'+proveedor+'"?\n\nLa cuenta vuelve a su saldo completo y, si el abono venía de un crédito de proveedor, ese crédito se restaura.')) return;
+  try {
+    var s = getSession()||{};
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify({action:'revertirAbonosDeOrden', cxpId:cxpId, usuario:s.email||'sistema'})});
+    var res = await r.json();
+    if (!res.ok) { alert('No se pudo: '+(res.error||'sin detalle')); return; }
+    if (res.revertidos>0) setStatus('Abono revertido ('+res.revertidos+'). '+(res.creditosRestaurados>0?'Crédito restaurado.':''),'ok');
+    else alert('No había abonos activos en esa cuenta.');
+    loadCxPData();
+  } catch(e) { alert('Error: '+(e.message||e)); }
 };
 
 // Cancelar una orden: el usuario ELIGE qué pasa con el dinero ya pagado —

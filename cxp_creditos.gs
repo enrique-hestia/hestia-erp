@@ -165,6 +165,35 @@ function repararAbonosCruzados() {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
+/* Revierte TODOS los abonos activos de una orden (por CxPId), sin importar su
+   origen. Restaura el crédito si el abono referenciaba uno. Escape manual para
+   casos como CRISBEN donde el abono no quedó marcado como 'credito'. */
+function revertirAbonosDeOrden(body) {
+  try {
+    var cxpId = String((body && body.cxpId) || '').trim();
+    if (!cxpId) return { ok: false, error: 'Falta el ID de la cuenta.' };
+    var sh = _cxpCredSS().getSheetByName(CXP_ABONO_TAB);
+    if (!sh) return { ok: false, error: 'Sin hoja de abonos' };
+    var data = sh.getDataRange().getValues(), hdrs = data[0];
+    var iCxp = _cxpColIdx(hdrs, 'CxPId'), iRev = _cxpColIdx(hdrs, 'Reversado'),
+        iCred = _cxpColIdx(hdrs, 'CreditoId'), iMonto = _cxpColIdx(hdrs, 'Monto');
+    var revertidos = 0, totalRev = 0, creditosRestaurados = 0;
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][iCxp]) !== cxpId) continue;
+      var rev = data[i][iRev] === true || String(data[i][iRev]).toUpperCase() === 'TRUE';
+      if (rev) continue;
+      var monto = Number(data[i][iMonto]) || 0;
+      sh.getRange(i + 1, iRev + 1).setValue(true);
+      revertidos++; totalRev += monto;
+      var credId = String(data[i][iCred] || '');
+      if (credId) { _restaurarCredito(credId, monto); creditosRestaurados++; }
+    }
+    try { CacheService.getScriptCache().remove('gas_egresos_v1_2026'); } catch (e) {}
+    try { logAudit((body && body.usuario) || 'sistema', 'CxP', 'Revertir abonos de orden', cxpId, '', String(totalRev.toFixed(2)), revertidos + ' abonos'); } catch (e) {}
+    return { ok: true, revertidos: revertidos, montoRevertido: totalRev, creditosRestaurados: creditosRestaurados };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 function _restaurarCredito(creditoId, monto) {
   var sh = _cxpCredSS().getSheetByName(CXP_CRED_TAB);
   if (!sh) return;

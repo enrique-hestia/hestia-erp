@@ -659,6 +659,11 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega cxp_creditos.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(cancelarOrdenCxP(body));
     }
+    if (body.action === 'revertirAbonosDeOrden') {
+      if (typeof revertirAbonosDeOrden !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza cxp_creditos.gs en Apps Script y redespliega.'});
+      return jsonResponse(revertirAbonosDeOrden(body));
+    }
     if (body.action === 'repararAbonosCruzados') {
       if (typeof repararAbonosCruzados !== 'function')
         return jsonResponse({ok:false, error:'Actualiza cxp_creditos.gs en Apps Script y redespliega.'});
@@ -2148,6 +2153,21 @@ function updateEgresoField(payload) {
     for (var key in fields) {
       var ci2 = findCol(key);
       if (ci2 > -1) sheet.getRange(rowNum, ci2+1).setValue(fields[key]);
+    }
+    // Al marcar PAGADO por checkbox y no haber fecha de pago, poner la de hoy
+    // (col Fecha) + actualizar Mes — para que no quede el egreso con fecha vacía.
+    if (('pagado' in fields) && (fields.pagado === true || fields.pagado === 'true')) {
+      var iFP = findCol('fecha');
+      if (iFP > -1) {
+        var actualF = sheet.getRange(rowNum, iFP + 1).getValue();
+        if (!actualF || String(actualF).trim() === '') {
+          var hoyP = new Date();
+          sheet.getRange(rowNum, iFP + 1).setValue(hoyP);
+          var mesesP = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          var iMesP = findCol('mes');
+          if (iMesP > -1) sheet.getRange(rowNum, iMesP + 1).setValue(mesesP[hoyP.getMonth()] + '-' + String(hoyP.getFullYear()).slice(-2));
+        }
+      }
     }
 
     return {ok:true, rowNum:rowNum};
