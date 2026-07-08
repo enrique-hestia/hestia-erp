@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.100 -->
+﻿<!-- app-build:2026.07.07.101 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -16430,21 +16430,24 @@ function _boardRenderStage(){
   if(sl.chart) setTimeout(function(){ _boardSlideChart(sl.chart); },30);
 }
 function boardNav(dir){ _boardSlide+=dir; _boardRenderStage(); }
-function _boardSlideChart(kind){
+function _boardSlideChart(kind, scope){
   if(typeof Chart==='undefined') return; var d=_boardData, th=_bTheme();
-  function serie(id,h){ var el=document.getElementById(id); if(!el)return; var s=d.serie||[];
+  // Buscar el canvas DENTRO del contenedor dado (host de impresión) para no chocar con
+  // los canvas del deck que tienen el mismo id; sin animación para capturarlos ya dibujados.
+  function q(id){ return scope ? scope.querySelector('#'+id) : document.getElementById(id); }
+  function serie(id){ var el=q(id); if(!el)return; var s=d.serie||[];
     _boardCharts.push(new Chart(el,{type:'line',data:{labels:s.map(function(m){return m.label||m.mes;}),
       datasets:_boardSerieDatasets(s,th)},
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:11}}}},scales:{y:{ticks:{callback:function(v){return '$'+_bK(v);}}}}}})); }
-  function donut(id,arr){ var el=document.getElementById(id); if(!el||!arr)return;
+      options:{responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{position:'bottom',labels:{boxWidth:10,font:{size:11}}}},scales:{y:{ticks:{callback:function(v){return '$'+_bK(v);}}}}}})); }
+  function donut(id,arr){ var el=q(id); if(!el||!arr)return;
     _boardCharts.push(new Chart(el,{type:'doughnut',data:{labels:arr.map(function(x){return x.label;}),datasets:[{data:arr.map(function(x){return x.valor;}),backgroundColor:_BOARD_DONUT,borderColor:'#fff',borderWidth:1}]},
-      options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom',labels:{boxWidth:9,font:{size:10}}}}}})); }
+      options:{responsive:true,maintainAspectRatio:false,animation:false,cutout:'55%',plugins:{legend:{position:'bottom',labels:{boxWidth:9,font:{size:10}}}}}})); }
   if(kind==='serie') serie('bd-s-serie');
   else if(kind==='serieBig') serie('bd-s-serieBig');
   else if(kind==='ding') donut('bd-s-ing',d.compIngresos);
   else if(kind==='degr') donut('bd-s-egr',d.compEgresos);
-  else if(kind==='meta'){ var el=document.getElementById('bd-s-meta'); if(el) _boardCharts.push(new Chart(el,{type:'bar',data:{labels:['Ingresos'],datasets:[{label:'Meta',data:[d.kpis.ingresosMeta],backgroundColor:'#cfc9c2'},{label:'Real',data:[d.kpis.ingresos],backgroundColor:th.acc}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}},scales:{y:{ticks:{callback:function(v){return '$'+_bK(v);}}}}}})); }
-  else if(kind==='presProy'){ var elp=document.getElementById('bd-s-presProy'); var pp2=d.presupuesto; if(elp&&pp2&&pp2.proyectado) _boardCharts.push(new Chart(elp,{type:'bar',data:{labels:['Ingresos','Egresos','Utilidad'],datasets:[{label:'Proyectado',data:[pp2.proyectado.ingresos,pp2.proyectado.egresos,pp2.proyectado.utilidad],backgroundColor:'#cfc9c2'},{label:'Real',data:[pp2.real.ingresos,pp2.real.egresos,pp2.real.utilidad],backgroundColor:th.acc}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}},scales:{y:{ticks:{callback:function(v){return '$'+_bK(v);}}}}}})); }
+  else if(kind==='meta'){ var el=q('bd-s-meta'); if(el) _boardCharts.push(new Chart(el,{type:'bar',data:{labels:['Ingresos'],datasets:[{label:'Meta',data:[d.kpis.ingresosMeta],backgroundColor:'#cfc9c2'},{label:'Real',data:[d.kpis.ingresos],backgroundColor:th.acc}]},options:{responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{position:'bottom'}},scales:{y:{ticks:{callback:function(v){return '$'+_bK(v);}}}}}})); }
+  else if(kind==='presProy'){ var elp=q('bd-s-presProy'); var pp2=d.presupuesto; if(elp&&pp2&&pp2.proyectado) _boardCharts.push(new Chart(elp,{type:'bar',data:{labels:['Ingresos','Egresos','Utilidad'],datasets:[{label:'Proyectado',data:[pp2.proyectado.ingresos,pp2.proyectado.egresos,pp2.proyectado.utilidad],backgroundColor:'#cfc9c2'},{label:'Real',data:[pp2.real.ingresos,pp2.real.egresos,pp2.real.utilidad],backgroundColor:th.acc}]},options:{responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{position:'bottom'}},scales:{y:{ticks:{callback:function(v){return '$'+_bK(v);}}}}}})); }
 }
 /* CSS auto-contenido para la ventana de impresión (no hereda estilos de la app). */
 function _boardPrintCSS(th){
@@ -16488,7 +16491,7 @@ function boardPrint(){
   // Forzar tamaño de los contenedores de canvas (por si el CSS del deck no aplica fuera de él)
   host.querySelectorAll('canvas').forEach(function(cv){ var p=cv.parentNode; if(p && !p.style.height) p.style.height='300px'; if(p) p.style.width='100%'; });
   setTimeout(function(){
-    slides.forEach(function(sl){ if(sl.chart) _boardSlideChart(sl.chart); });
+    slides.forEach(function(sl){ if(sl.chart) _boardSlideChart(sl.chart, host); });
     setTimeout(function(){
       var clone=host.cloneNode(true);
       var sc=host.querySelectorAll('canvas'), cc=clone.querySelectorAll('canvas');
