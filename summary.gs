@@ -284,7 +284,7 @@ function _summaryReadIngresos(anio) {
   for (var i=1;i<data.length;i++){
     var r=data[i];
     if (!String(r[0]||'').trim()) continue;
-    out.push({ op:String(r[0]||''), fecha:_sumParseDate(r[2]), paciente:String(r[3]||''),
+    out.push({ op:String(r[0]||''), fecha:_sumParseDate(r[2]), fechaRaw:(r[2] instanceof Date ? r[2].toISOString().substring(0,10) : String(r[2]||'')), paciente:String(r[3]||''),
       categoria:String(r[4]||''), producto:String(r[5]||''), cantidad:num(r[8]),
       total:num(r[9]), formaPago:String(r[12]||''),
       grupoU:String(r[20]||'').trim() });   // columna U (índice 20) = grupo/categoría del reporte
@@ -296,11 +296,19 @@ function _summaryReadIngresos(anio) {
    Devuelve '' si no se puede interpretar (para no descuadrar por fechas basura). */
 function _sumParseDate(v){
   if (v instanceof Date && !isNaN(v)) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0');
+  // Fecha guardada como número de serie de Excel/Sheets (epoch 1899-12-30)
+  if (typeof v === 'number' && isFinite(v) && v > 20000 && v < 80000){
+    var ep = new Date(Date.UTC(1899,11,30) + Math.floor(v)*86400000);
+    return ep.getUTCFullYear()+'-'+String(ep.getUTCMonth()+1).padStart(2,'0')+'-'+String(ep.getUTCDate()).padStart(2,'0');
+  }
   var s = String(v||'').trim(); if (!s) return '';
-  var m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);           // yyyy-mm-dd
+  s = s.replace(/^'+/,'');                                              // apóstrofo de texto
+  var m = s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/);            // yyyy-mm-dd / yyyy.mm.dd
   if (m) return m[1]+'-'+m[2].padStart(2,'0')+'-'+m[3].padStart(2,'0');
-  m = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})/);               // dd/mm/yyyy
+  m = s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})/);                // dd/mm/yyyy / dd.mm.yyyy
   if (m) return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+  m = s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2})(?!\d)/);          // dd/mm/yy → 20yy
+  if (m) return '20'+m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
   return '';
 }
 
@@ -380,7 +388,7 @@ function readSummary(fechaInicio, fechaFin) {
 
     var amex = { actual:0, prev:0, rows:[] };
     var recon = { ingresosTotal:0, egresosTotal:0, egresosBruto:0, egresosCancelado:0, sinClasificar:0,
-                  ingresosSinFecha:0, ingresosSinFechaMonto:0, egresosSinFecha:0 };
+                  ingresosSinFecha:0, ingresosSinFechaMonto:0, egresosSinFecha:0, ingresosSinFechaLista:[] };
     var labInsMap = {}; // subtipo -> {subtipo,total,count}
     var LAB_SUBS = {'insumos lab':1,'insumos qx':1,'laboratorios':1,'medicamentos':1,'gases':1,'reportes':1,'renta equipo':1};
 
@@ -425,7 +433,8 @@ function readSummary(fechaInicio, fechaFin) {
       var ins = _summaryReadIngresos(yi);
       ins.forEach(function(r){
         var f=(r.fecha||'').substring(0,10);
-        if (!f && Number(r.total)){ recon.ingresosSinFecha++; recon.ingresosSinFechaMonto += Number(r.total)||0; }
+        if (!f && Number(r.total)){ recon.ingresosSinFecha++; recon.ingresosSinFechaMonto += Number(r.total)||0;
+          if (recon.ingresosSinFechaLista.length < 60) recon.ingresosSinFechaLista.push({ op:r.op, fechaRaw:r.fechaRaw, total:Number(r.total)||0 }); }
         var enActual=_sumInRange(f, fi, ff), enPrev=_sumInRange(f, pi, pf);
         if (!enActual && !enPrev) return;
         // 3 niveles: Grupo (col U) → Subgrupo (categoría) → Producto
@@ -549,7 +558,8 @@ function readSummary(fechaInicio, fechaFin) {
         cuadraEgresos: Math.abs(recon.egresosBruto - amex.actual - egSum)<0.5,
         // Alertas: filas con fecha inválida que NO entran a ningún periodo (posible causa de descuadre)
         ingresosSinFecha: recon.ingresosSinFecha,
-        ingresosSinFechaMonto: recon.ingresosSinFechaMonto
+        ingresosSinFechaMonto: recon.ingresosSinFechaMonto,
+        ingresosSinFechaLista: recon.ingresosSinFechaLista
       }
     };
   } catch(ex){ return { ok:false, error:ex.message+' (L:'+ex.lineNumber+')' }; }

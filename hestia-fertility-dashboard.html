@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.81 -->
+﻿<!-- app-build:2026.07.07.82 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -13124,46 +13124,57 @@ function _renderHistoricoMetas(hist){
 /* ── Editor VISUAL de grupos del presupuesto (tablero arrastrable + subgrupos) ── */
 async function presGruposConfigOpen(){
   if(!_presData||!_presData.siguiente){ alert('Abre el Presupuesto primero.'); return; }
-  var prods=[];
-  (_presData.siguiente.ingresosGrupos||[]).forEach(function(g){ (g.subgrupos||[]).forEach(function(s){ (s.productos||[]).forEach(function(p){ prods.push({producto:p.producto, grupoU:g.grupo, sub:s.sub}); }); }); });
-  var existing={grupos:[],productoARuta:{}};
-  try{ var tok=encodeURIComponent(getToken()); var r=await fetch(APPS_SCRIPT_URL+'?action=gruposPresupuesto&token='+tok+'&_t='+Date.now(),{redirect:'follow'}); existing=await r.json(); }catch(e){}
-  var grupos=(existing.grupos||[]).map(function(g){ return {nombre:g.nombre, incluirMaestro:g.incluirMaestro!==false, subs:(g.subs||[]).map(function(s){return {nombre:s};})}; });
-  var ruta={}, er=(existing.productoARuta||{});
-  Object.keys(er).forEach(function(pn){ ruta[pn]={grupo:er[pn].grupo||'', sub:er[pn].sub||''}; });
-  var seeded=!(existing.grupos&&existing.grupos.length);
-  if(seeded){
-    var sd={};
-    prods.forEach(function(p){ var gn=(typeof _presClasificar==='function')?_presClasificar(p.producto):'Otros'; if(!sd[gn]) sd[gn]={nombre:gn,incluirMaestro:true,subs:[]}; ruta[p.producto]={grupo:gn,sub:''}; });
-    grupos=Object.keys(sd).map(function(k){return sd[k];});
-    grupos.sort(function(a,b){ var ia=_PRES_GRUPO_ORDEN.indexOf(a.nombre), ib=_PRES_GRUPO_ORDEN.indexOf(b.nombre); return (ia<0?99:ia)-(ib<0?99:ib); });
-  }
-  window._presGE={prods:prods, grupos:grupos, ruta:ruta, seeded:seeded};
+  // 1) Modal visible de inmediato con indicador de carga (no parece pausado)
   var ovl=document.createElement('div'); ovl.id='pres-grp-ovl'; ovl.className='pr-mov';
   ovl.onclick=function(e){ if(e.target===ovl) ovl.remove(); };
   ovl.innerHTML='<div class="pr-modal" style="max-width:920px;width:96%" onclick="event.stopPropagation()">'
     +'<div style="display:flex;justify-content:space-between;align-items:center;padding:15px 20px;border-bottom:1px solid var(--color-divider,#e5e7eb)"><div><div style="font-size:15px;font-weight:800">Grupos del Presupuesto</div><div style="font-size:11px;color:#9ca3af">Arrastra productos a un grupo/subgrupo, o usa el menú de cada tarjeta. Lo que quede en «Sin agrupar» se omite de la meta.</div></div><button onclick="document.getElementById(\'pres-grp-ovl\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280">×</button></div>'
-    +'<div id="pge-board" style="padding:14px 18px;max-height:66vh;overflow:auto"></div>'
+    +'<div id="pge-board" style="padding:14px 18px;max-height:66vh;overflow:auto"><div style="padding:44px 16px;text-align:center;color:#9ca3af;font-size:13px">'+(typeof hestiaLoader==='function'?hestiaLoader('Cargando productos y grupos…'):'Cargando productos y grupos…')+'</div></div>'
     +'<div style="display:flex;gap:10px;padding:13px 20px;border-top:1px solid var(--color-divider,#e5e7eb)"><div id="pge-msg" style="margin-right:auto;font-size:11px;align-self:center;color:#9ca3af"></div><button class="pr-btn" onclick="presGruposConfigSave()">Guardar grupos</button><button onclick="document.getElementById(\'pres-grp-ovl\').remove()" style="padding:10px 18px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider,#e5e7eb);border-radius:9px;cursor:pointer">Cancelar</button></div>'
     +'</div>';
   document.body.appendChild(ovl);
-  if(seeded){ var m=document.getElementById('pge-msg'); if(m) m.textContent='Grupos sugeridos automáticamente — ajústalos y guarda.'; }
+  // 2) Cargar productos + config
+  var prods=[];
+  (_presData.siguiente.ingresosGrupos||[]).forEach(function(g){ (g.subgrupos||[]).forEach(function(s){ (s.productos||[]).forEach(function(p){ prods.push({producto:p.producto, grupoU:g.grupo, sub:s.sub}); }); }); });
+  var existing={grupos:[],productoARuta:{}};
+  try{ var tok=encodeURIComponent(getToken()); var r=await fetch(APPS_SCRIPT_URL+'?action=gruposPresupuesto&token='+tok+'&_t='+Date.now(),{redirect:'follow'}); existing=await r.json(); }catch(e){}
+  if(!document.getElementById('pres-grp-ovl')) return; // el usuario cerró mientras cargaba
+  var grupos=(existing.grupos||[]).map(function(g){ return {nombre:g.nombre, incluirMaestro:g.incluirMaestro!==false, subs:(g.subs||[]).map(function(s){return {nombre:s};})}; });
+  var ruta={}, er=(existing.productoARuta||{});
+  Object.keys(er).forEach(function(pn){ ruta[pn]={grupo:er[pn].grupo||'', sub:er[pn].sub||''}; });
+  // Arranca VACÍO: todos los productos en el pool (se omiten). El usuario mete solo lo que quiera.
+  var seeded=!(existing.grupos&&existing.grupos.length);
+  window._presGE={prods:prods, grupos:grupos, ruta:ruta, seeded:seeded};
+  if(seeded){ var m=document.getElementById('pge-msg'); if(m) m.textContent='Empieza vacío: mete al presupuesto SOLO lo que quieras; el resto se omite. Usa «Autollenar» si quieres precargar por categoría.'; }
   _presGERender();
 }
 function _presGEProds(grupo,sub){ return (window._presGE.prods||[]).filter(function(p){ var r=window._presGE.ruta[p.producto]; if(!r||!r.grupo) return grupo===''; return r.grupo===grupo && (sub==null || (r.sub||'')===sub); }); }
 function _presGEDrag(e,enc){ try{ e.dataTransfer.setData('text/plain',enc); }catch(_){} window._presGEDragging=enc; }
 function _presGEDrop(e,gEnc,sEnc){ e.preventDefault(); e.stopPropagation(); var enc=window._presGEDragging||(e.dataTransfer&&e.dataTransfer.getData('text/plain')); if(!enc) return; _presGEAssign(enc, gEnc?(gEnc+'|'+(sEnc||'')):''); }
+function _presGEEnsureGrupo(name){ var GE=window._presGE; if(!GE.grupos.some(function(g){return g.nombre===name;})) GE.grupos.push({nombre:name,incluirMaestro:true,subs:[]}); }
 function _presGEAssign(prodEnc,val){ var prod=decodeURIComponent(prodEnc); var GE=window._presGE; if(!GE) return;
-  if(!val){ delete GE.ruta[prod]; } else { var parts=val.split('|'); GE.ruta[prod]={grupo:decodeURIComponent(parts[0]||''), sub:parts[1]?decodeURIComponent(parts[1]):''}; }
+  if(val==='__new__'){ var n=prompt('Nombre del nuevo grupo:'); if(!n||!n.trim()){ _presGERender(); return; } n=n.trim(); _presGEEnsureGrupo(n); GE.ruta[prod]={grupo:n,sub:''}; }
+  else if(val && val.indexOf('new:')===0){ var gn=decodeURIComponent(val.slice(4)); _presGEEnsureGrupo(gn); GE.ruta[prod]={grupo:gn,sub:''}; }
+  else if(!val){ delete GE.ruta[prod]; }
+  else { var parts=val.split('|'); GE.ruta[prod]={grupo:decodeURIComponent(parts[0]||''), sub:parts[1]?decodeURIComponent(parts[1]):''}; }
   _presGERender();
 }
+function _presGEAutofill(){ var GE=window._presGE; if(!GE) return;
+  GE.prods.forEach(function(p){ var r=GE.ruta[p.producto]; if(r&&r.grupo) return; var gn=(typeof _presClasificar==='function')?_presClasificar(p.producto):'Otros'; _presGEEnsureGrupo(gn); GE.ruta[p.producto]={grupo:gn,sub:''}; });
+  _presGERender();
+}
+function _presGEClear(){ if(!confirm('¿Mandar TODOS los productos a «Sin agrupar»? Se omitirán del presupuesto.')) return; window._presGE.ruta={}; _presGERender(); }
 function _presGEAssignSelect(prod){
-  var r=window._presGE.ruta[prod]||{grupo:'',sub:''};
+  var GE=window._presGE, r=GE.ruta[prod]||{grupo:'',sub:''};
+  var existentes={};
   var opts='<option value=""'+(!r.grupo?' selected':'')+'>(sin agrupar)</option>';
-  (window._presGE.grupos||[]).forEach(function(G){ var gEnc=encodeURIComponent(G.nombre);
+  (GE.grupos||[]).forEach(function(G){ var gEnc=encodeURIComponent(G.nombre); existentes[G.nombre]=1;
     opts+='<option value="'+gEnc+'|"'+((r.grupo===G.nombre&&!r.sub)?' selected':'')+'>'+_esc(G.nombre)+'</option>';
     (G.subs||[]).forEach(function(S){ opts+='<option value="'+gEnc+'|'+encodeURIComponent(S.nombre)+'"'+((r.grupo===G.nombre&&(r.sub||'')===S.nombre)?' selected':'')+'>&nbsp;&nbsp;'+_esc(G.nombre)+' › '+_esc(S.nombre)+'</option>'; });
   });
+  var sug=(_PRES_GRUPO_ORDEN||[]).filter(function(n){ return !existentes[n]; });
+  if(sug.length){ opts+='<optgroup label="Crear grupo sugerido">'+sug.map(function(n){ return '<option value="new:'+encodeURIComponent(n)+'">＋ '+_esc(n)+'</option>'; }).join('')+'</optgroup>'; }
+  opts+='<option value="__new__">＋ Nuevo grupo…</option>';
   return '<select onchange="_presGEAssign(\''+encodeURIComponent(prod)+'\',this.value)" style="font-size:10px;border:1px solid var(--color-divider,#e5e7eb);border-radius:5px;padding:2px 3px;max-width:118px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'+opts+'</select>';
 }
 function _presGECard(prod,inGroup){
@@ -13205,8 +13216,12 @@ function _presGERender(){
       +'<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:#6b7280;margin-bottom:7px;display:flex;justify-content:space-between">Sin agrupar · se omiten<span style="color:#9ca3af">'+poolCount+'</span></div>'
       +_presGEZone('','',poolCards)
     +'</div>'
-    +'<div><button onclick="_presGENewGrupo()" style="margin-bottom:10px;font-size:11.5px;font-weight:700;padding:7px 14px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;cursor:pointer">+ Nuevo grupo</button>'
-      +'<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start">'+(gruposHtml||'<div style="font-size:11.5px;color:#9ca3af;padding:10px">Crea un grupo y arrastra productos.</div>')+'</div></div>'
+    +'<div><div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px;align-items:center">'
+        +'<button onclick="_presGENewGrupo()" style="font-size:11.5px;font-weight:700;padding:7px 14px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;cursor:pointer">+ Nuevo grupo</button>'
+        +'<button onclick="_presGEAutofill()" title="Precarga los productos en grupos por categoría (luego quita lo que no quieras)" style="font-size:11px;padding:7px 12px;background:var(--card-bg,#fff);color:var(--text-primary,#374151);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;cursor:pointer">✨ Autollenar por categoría</button>'
+        +'<button onclick="_presGEClear()" title="Manda todo a Sin agrupar" style="font-size:11px;padding:7px 12px;background:var(--card-bg,#fff);color:var(--text-secondary,#6b7280);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;cursor:pointer">🧹 Vaciar</button>'
+      +'</div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start">'+(gruposHtml||'<div style="font-size:11.5px;color:#9ca3af;padding:14px;border:1px dashed var(--color-divider,#e5e7eb);border-radius:10px;width:100%">Aún no hay grupos. Crea uno con <b>+ Nuevo grupo</b>, elige un grupo en el menú de cada producto, o usa <b>✨ Autollenar</b>.</div>')+'</div></div>'
     +'</div>';
 }
 function _presGENewGrupo(){ var n=prompt('Nombre del nuevo grupo:'); if(!n) return; n=n.trim(); if(!n) return;
@@ -13523,7 +13538,7 @@ async function presApplyAllProj(){
    PRESUPUESTO NUEVO — ingresos cantidad×precio, % maestro, histórico
    ══════════════════════════════════════════════════════════════ */
 var _presProdMap={}, _presEgMap={}, _presGrupoMap=[];
-function _presGrouped(){ var c=window._presGruposCfg; return !!(c&&c.grupos&&c.grupos.length); }
+function _presGrouped(){ var c=window._presGruposCfg; return !!(c&&c.productoARuta&&Object.keys(c.productoARuta).length); }
 // ¿El trimestre 'YYYY-Qn' ya terminó? (para mostrar el botón abrir/cerrar sin depender del backend)
 function _presQTerminado(periodo){
   var m=String(periodo||'').match(/^(\d{4})-Q([1-4])$/); if(!m) return false;
@@ -13671,7 +13686,7 @@ function _presBuildIngresosGrouped(grupos, canEdit){
       +'<td id="pgi-'+gi+'-dl" style="font-weight:700;color:'+(dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b'))+'">'+(dl==null?'—':fM(dl))+'</td>'
       +'<td style="text-align:center">'+(incl?'<span style="color:#166534;font-weight:700" title="Se mueve con el % maestro">✓</span>':'<span style="color:#9ca3af" title="Fijo — no lo mueve el % maestro">—</span>')+'</td>'
       +'</tr>';
-    directos.forEach(function(p){ h+=_presProdDetailRow(p,fM,26); });
+    // Los productos NO se listan: quedan colapsados dentro del grupo/subgrupo (se contemplan, no se muestran).
     var subsModel=[];
     subOrder.forEach(function(s){
       var prods=subMap[s]||[]; if(!prods.length) return;
@@ -13679,14 +13694,13 @@ function _presBuildIngresosGrouped(grupos, canEdit){
       subsModel.push({nombre:s, si:si, prods:prods});
       var sdl=sProy>0?(sImp-sProy):null;
       h+='<tr style="background:rgba(0,0,0,.015)">'
-        +'<td style="padding-left:20px;font-weight:700;color:#9c4f5f;font-size:10.5px;text-transform:uppercase">'+_esc(s)+'</td>'
+        +'<td style="padding-left:20px;font-weight:700;color:#9c4f5f;font-size:10.5px;text-transform:uppercase">'+_esc(s)+' <span style="color:#c9c9c9;font-weight:400;text-transform:none">· '+prods.length+' item'+(prods.length!==1?'s':'')+'</span></td>'
         +'<td style="color:var(--text-secondary,#9ca3af)">'+prods.length+'</td>'
         +'<td style="text-align:right">'+(canEdit
             ? '<input id="pgs-'+gi+'-'+si+'-imp" type="number" step="500" min="0" value="'+Math.round(sImp)+'" onchange="presSubImp('+gi+','+si+',this.value)" style="width:104px;text-align:right;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;padding:5px 7px;font-size:11.5px">'
             : fM(sImp))+'</td>'
         +'<td style="color:var(--text-secondary,#9ca3af)">'+fM(sProy)+'</td>'
         +'<td id="pgs-'+gi+'-'+si+'-dl" style="color:'+(sdl==null?'#9ca3af':(sdl>=0?'#166534':'#991b1b'))+'">'+(sdl==null?'—':fM(sdl))+'</td><td></td></tr>';
-      prods.forEach(function(p){ h+=_presProdDetailRow(p,fM,38); });
     });
     _presGrupoMap.push({nombre:gn, incluirMaestro:incl, gi:gi, directos:directos, subs:subsModel, allProds:allProds});
   });
@@ -14947,8 +14961,19 @@ function _renderSummary(){
   h+='</div>';
   // Aviso: ingresos con fecha inválida que quedaron fuera de todo periodo
   if((rec.ingresosSinFecha||0)>0){
+    var _lst=rec.ingresosSinFechaLista||[];
+    var _det='';
+    if(_lst.length){
+      _det='<details style="margin-top:7px"><summary style="cursor:pointer;font-weight:700;font-size:11px">Ver cuáles ('+_lst.length+(rec.ingresosSinFecha>_lst.length?'+':'')+')</summary>'
+        +'<div style="max-height:180px;overflow:auto;margin-top:6px;border:1px solid rgba(138,97,0,.25);border-radius:7px"><table style="width:100%;border-collapse:collapse;font-size:10.5px">'
+        +'<thead><tr style="background:rgba(240,180,41,.14)"><th style="text-align:left;padding:4px 8px">OP / Folio</th><th style="text-align:left;padding:4px 8px">Valor en columna Fecha</th><th style="text-align:right;padding:4px 8px">Monto</th></tr></thead><tbody>'
+        +_lst.map(function(x){ return '<tr><td style="padding:3px 8px;border-top:1px solid rgba(138,97,0,.12)">'+_esc(x.op||'(sin OP)')+'</td><td style="padding:3px 8px;border-top:1px solid rgba(138,97,0,.12);font-family:monospace">'+(x.fechaRaw?_esc(x.fechaRaw):'<i>(vacía)</i>')+'</td><td style="padding:3px 8px;border-top:1px solid rgba(138,97,0,.12);text-align:right">'+_sumMoney(x.total)+'</td></tr>'; }).join('')
+        +'</tbody></table></div></details>';
+    }
     h+='<div class="sm-note" style="border-color:#f0b429;background:rgba(240,180,41,.09);color:#8a6100">'
-      +'⚠️ <b>'+rec.ingresosSinFecha+' ingreso(s) sin fecha válida</b> ('+_sumMoney(rec.ingresosSinFechaMonto)+') no entran a ningún periodo y pueden estar causando el descuadre. Revisa la columna Fecha de esas filas en BD_Ingresos.</div>';
+      +'⚠️ <b>'+rec.ingresosSinFecha+' ingreso(s) sin fecha válida</b> ('+_sumMoney(rec.ingresosSinFechaMonto)+') no entran a ningún periodo y pueden estar causando el descuadre. '
+      +'Significa que la <b>columna C (Fecha)</b> de esas filas en BD_Ingresos tiene un valor que el sistema no reconoce como fecha (texto raro, celda vacía, formato distinto o número). '
+      +'Corrígelas a formato fecha real (ej. 2026-06-15) y volverán a contar.'+_det+'</div>';
   }
 
   // Tabla P&L
@@ -20693,6 +20718,13 @@ function _amexRenderGaps(){
   if(snoozeCnt){ snoozeCnt.textContent=snoozed.length; }
 
   var html='';
+
+  // ── Aviso: cargos ya registrados en OTRO mes (no duplicar) ──────────
+  var otroMes=(_amexConciliados||[]).filter(function(c){ return c.otroMes; });
+  if(otroMes.length){
+    html+='<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:9px;padding:9px 12px;margin-bottom:12px;font-size:11.5px;color:#1e40af;line-height:1.5">ℹ <b>'+otroMes.length+' cargo(s)</b> ya estaban registrados en <b>otro mes</b> — el cruce los tomó como pagados, <b>no los vuelvas a capturar</b>. '
+      +'<span style="color:#3b6ea5">(el análisis ahora busca en todo el año y cada egreso se usa una sola vez, así no se duplican montos.)</span></div>';
+  }
 
   // ── Pendientes ─────────────────────────────────────────
   if(pending.length){

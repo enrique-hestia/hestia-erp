@@ -4354,46 +4354,59 @@ function conciliaAMEX(body) {
       });
     }
 
-    // ── 2. Leer Egresos con FormaPago=AMEX ─────────────────────
-    var year = periodo ? parseInt(periodo.substring(0,4)) : new Date().getFullYear();
-    var egSSId = EGRESOS_IDS[year] || EGRESOS_SS_2026;
-    var egTab  = EGRESOS_TABS[year] || 'Egresos2026';
-    var egSh   = SpreadsheetApp.openById(egSSId).getSheetByName(egTab);
+    // ── 2. Leer Egresos con FormaPago=AMEX de VARIOS años, SIN filtrar por mes ──
+    //     Un cargo del periodo puede haberse registrado en otro mes (posteo vs captura):
+    //     buscamos en todo el año y en los años vecinos para NO marcarlo como faltante.
+    var yBase = periodo ? parseInt(periodo.substring(0,4)) : new Date().getFullYear();
     var egresosAMEX = [];
-    if (egSh) {
+    [yBase-1, yBase, yBase+1].forEach(function(yy){
+      var egSSId = EGRESOS_IDS[yy], egTab = EGRESOS_TABS[yy];
+      if (!egSSId || !egTab) return;
+      var egSh; try { egSh = SpreadsheetApp.openById(egSSId).getSheetByName(egTab); } catch(e){ egSh = null; }
+      if (!egSh) return;
       var egRaw = egSh.getDataRange().getValues();
       for (var i = 1; i < egRaw.length; i++) {
         var r = egRaw[i];
         if (String(r[16]||'').trim().toUpperCase() !== 'AMEX') continue; // col Q = FormaPago
         var fecha = dt(r[1]); // col B = Fecha
         if (!fecha) continue;
-        if (periodo && fecha.substring(0,7) !== periodo) continue;
         egresosAMEX.push({
-          rowNum: i+1, fecha: fecha,
-          monto: Math.abs(num(r[9])), // col J = Egresos (puede ser negativo en el sheet)
+          anio: yy, rowNum: i+1, fecha: fecha,
+          monto: Math.abs(num(r[9])), // col J = Egresos
           proveedor: String(r[4]||'').trim(),
-          concepto:  String(r[8]||'').trim()
+          concepto:  String(r[8]||'').trim(),
+          used: false
         });
       }
-    }
+    });
 
-    // ── 3. Cruzar: detectar gaps ────────────────────────────────
-    var gaps = [], conciliados = [];
+    // ── 3. Cruce 1:1 — cada egreso se consume UNA sola vez (evita duplicar) ──
+    //     Un cargo es "gap" solo si NO existe ningún egreso AMEX libre con el mismo
+    //     importe en el rango de años. Si hay varios candidatos, gana el de fecha más
+    //     cercana. Los que casan en otro mes se marcan (otroMes) para no re-registrarlos.
+    var TOL = 0.5; // pesos — tolerancia por redondeo de centavos
+    amexMovs.sort(function(a,b){ return a.fecha < b.fecha ? -1 : (a.fecha > b.fecha ? 1 : 0); });
+    var gaps = [], conciliados = [], otroMesCount = 0;
     for (var ai = 0; ai < amexMovs.length; ai++) {
-      var amov = amexMovs[ai];
-      var amovDate = parseD(amov.fecha);
-      var matched = null;
+      var amov = amexMovs[ai], amovDate = parseD(amov.fecha);
+      var cand = [];
       for (var ei = 0; ei < egresosAMEX.length; ei++) {
         var egr = egresosAMEX[ei];
-        if (Math.abs(amov.monto - egr.monto) > 0.01) continue;
-        var daysDiff = Math.abs((amovDate - parseD(egr.fecha)) / 86400000);
-        if (daysDiff <= 2) { matched = egr; break; }
+        if (egr.used) continue;
+        if (Math.abs(amov.monto - egr.monto) > TOL) continue;
+        cand.push(egr);
       }
-      if (matched) {
+      if (cand.length) {
+        cand.sort(function(a,b){ return Math.abs(amovDate-parseD(a.fecha)) - Math.abs(amovDate-parseD(b.fecha)); });
+        var best = cand[0]; best.used = true;
+        var dd = Math.round(Math.abs((amovDate - parseD(best.fecha)) / 86400000));
+        var otroMes = best.fecha.substring(0,7) !== amov.fecha.substring(0,7);
+        if (otroMes) otroMesCount++;
         conciliados.push({
           fecha: amov.fecha, monto: amov.monto, referencia: amov.referencia,
           usd: amov.usd||0, tipoCambio: amov.tipoCambio||0,
-          egProveedor: matched.proveedor, egConcepto: matched.concepto, egFecha: matched.fecha
+          egProveedor: best.proveedor, egConcepto: best.concepto, egFecha: best.fecha,
+          difDias: dd, otroMes: otroMes
         });
       } else {
         gaps.push({
@@ -4404,7 +4417,8 @@ function conciliaAMEX(body) {
       }
     }
 
-    return {ok:true, gaps:gaps, conciliados:conciliados, totalAMEX:amexMovs.length, totalEgresos:egresosAMEX.length};
+    return {ok:true, gaps:gaps, conciliados:conciliados, conciliadosOtroMes:otroMesCount,
+            totalAMEX:amexMovs.length, totalEgresos:egresosAMEX.length};
   } catch(ex) {
     return {ok:false, error:ex.message};
   }
