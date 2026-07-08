@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.94 -->
+﻿<!-- app-build:2026.07.07.95 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12980,6 +12980,7 @@ function _renderPresupuesto(){
       +'<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Mostrar:</span>'
       +'<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="pr-ck-ing" checked onchange="presChartToggle()" style="width:14px;height:14px;accent-color:#c46a7a"> <span style="color:#c46a7a;font-weight:600">Income</span></label>'
       +'<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="pr-ck-eg" checked onchange="presChartToggle()" style="width:14px;height:14px;accent-color:#b45309"> <span style="color:#b45309;font-weight:600">Expenses</span></label>'
+      +'<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="pr-ck-margen" checked onchange="presChartToggle()" style="width:14px;height:14px;accent-color:#0f766e"> <span style="color:#0f766e;font-weight:600">Ganancia / pérdida</span></label>'
     +'</div>'
     +'<div style="position:relative;height:250px"><canvas id="presChart"></canvas></div></div>');
 
@@ -13036,12 +13037,14 @@ function _renderPresupuesto(){
     +'<div style="font-size:10.5px;color:var(--text-secondary,#9ca3af);margin-top:8px;line-height:1.6">Ingresos = <b>cantidad × precio promedio real</b> (importe = cant × precio). Capturas por <b>cantidad</b>; el importe sale del precio promedio. El checkbox <b>% maestro</b> por grupo/subgrupo decide si ese bucket <b>se mueve</b> (con % maestro / cuadrar) o queda <b>fijo</b> en tu número. Precio unitario = importe ÷ cantidad realizada.</div>'
   +'</div>');
 
-  // Egresos + margen
+  // Egresos + ganancia/pérdida proyectada
+  var _mrg = Number(eg.margenProyectado)||0; var _mrgPos = _mrg>=0;
+  var _mrgCol = _mrgPos ? '#166534' : '#991b1b'; var _mrgLbl = _mrgPos ? 'Ganancia proyectada' : 'Pérdida proyectada';
   h.push('<div class="pr-kstrip">'
     +'<div class="pr-ks"><div class="pr-ks-l">Ingresos proyectados '+sg.periodo+'</div><div class="pr-ks-v" style="color:#166534">'+fM(tt.proyeccion)+'</div></div>'
     +'<div class="pr-ks"><div class="pr-ks-l">Egresos proyectados</div><div class="pr-ks-v" style="color:#991b1b">'+fM(eg.proyeccion)+'</div></div>'
-    +'<div class="pr-ks"><div class="pr-ks-l">Margen proyectado</div><div class="pr-ks-v">'+fM(eg.margenProyectado)+'</div></div>'
-    +'<div class="pr-ks"><div class="pr-ks-l">% Margen</div><div class="pr-ks-v">'+(Number(eg.margenPct)||0).toFixed(1)+'%</div></div>'
+    +'<div class="pr-ks" style="background:'+(_mrgPos?'rgba(22,101,52,.06)':'rgba(153,27,27,.06)')+'"><div class="pr-ks-l">'+_mrgLbl+'</div><div class="pr-ks-v" style="color:'+_mrgCol+'">'+(_mrgPos?'':'−')+fM(Math.abs(_mrg))+'</div><div style="font-size:9.5px;color:var(--text-secondary,#9ca3af);margin-top:2px">ingresos − egresos</div></div>'
+    +'<div class="pr-ks" style="background:'+(_mrgPos?'rgba(22,101,52,.06)':'rgba(153,27,27,.06)')+'"><div class="pr-ks-l">% sobre ingresos</div><div class="pr-ks-v" style="color:'+_mrgCol+'">'+(Number(eg.margenPct)||0).toFixed(1)+'%</div></div>'
     +'</div>');
 
   if (!tt.meta || tt.meta<=0){
@@ -13057,6 +13060,9 @@ function _renderPresupuesto(){
   // Gráfica
   try {
     var t = d.tendencia||{meses:[],real:[],proyeccion:[],egresoReal:[],egresoProy:[]};
+    // Ganancia/pérdida por mes = ingreso − egreso (real donde hay real; proyectado a futuro)
+    var _mReal=(t.meses||[]).map(function(_,i){ var r=(t.real||[])[i], e=(t.egresoReal||[])[i]; return (r!=null&&e!=null)?(r-e):null; });
+    var _mProy=(t.meses||[]).map(function(_,i){ var r=(t.proyeccion||[])[i], e=(t.egresoProy||[])[i]; return (r!=null&&e!=null)?(r-e):null; });
     var ctx = document.getElementById('presChart');
     if (ctx && typeof Chart!=='undefined'){
       if (_presChart) { _presChart.destroy(); _presChart=null; }
@@ -13066,7 +13072,9 @@ function _renderPresupuesto(){
           { label:'Income real', data:t.real, borderColor:'#c46a7a', backgroundColor:'#c46a7a', borderWidth:2.5, tension:0.3, pointRadius:3, spanGaps:false },
           { label:'Income proy.', data:t.proyeccion, borderColor:'#c46a7a', borderDash:[6,4], borderWidth:2, tension:0.3, pointRadius:3, spanGaps:false },
           { label:'Expenses real', data:t.egresoReal, borderColor:'#b45309', backgroundColor:'#b45309', borderWidth:2.5, tension:0.3, pointRadius:3, spanGaps:false },
-          { label:'Expenses proy.', data:t.egresoProy, borderColor:'#b45309', borderDash:[6,4], borderWidth:2, tension:0.3, pointRadius:3, spanGaps:false }
+          { label:'Expenses proy.', data:t.egresoProy, borderColor:'#b45309', borderDash:[6,4], borderWidth:2, tension:0.3, pointRadius:3, spanGaps:false },
+          { label:'Ganancia/pérdida real', data:_mReal, borderColor:'#0f766e', backgroundColor:'rgba(15,118,110,.10)', borderWidth:2.5, tension:0.3, pointRadius:3, spanGaps:false, fill:'origin' },
+          { label:'Ganancia/pérdida proy.', data:_mProy, borderColor:'#0f766e', borderDash:[6,4], borderWidth:2, tension:0.3, pointRadius:3, spanGaps:false }
         ]},
         options:{ responsive:true, maintainAspectRatio:false,
           plugins:{ legend:{ display:true, labels:{ boxWidth:12, font:{size:11} } } },
@@ -13082,9 +13090,11 @@ function presChartToggle(){
   if(!_presChart) return;
   var ing=((document.getElementById('pr-ck-ing')||{}).checked)!==false;
   var eg=((document.getElementById('pr-ck-eg')||{}).checked)!==false;
+  var mg=((document.getElementById('pr-ck-margen')||{}).checked)!==false;
   var ds=_presChart.data.datasets;
   if(ds[0]) ds[0].hidden=!ing; if(ds[1]) ds[1].hidden=!ing;
   if(ds[2]) ds[2].hidden=!eg;  if(ds[3]) ds[3].hidden=!eg;
+  if(ds[4]) ds[4].hidden=!mg;  if(ds[5]) ds[5].hidden=!mg;
   _presChart.update();
 }
 
