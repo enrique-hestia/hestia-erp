@@ -593,3 +593,41 @@ function readEstadoResultadosMensual(fechaInicio, fechaFin){
       totalUtilidad:_erN(full.metricas.netProfit) };
   }catch(ex){ return {ok:false, error:ex.message+' (L:'+(ex.lineNumber||'?')+')'}; }
 }
+
+/* ══ RESUMEN GENERAL — alimenta el dashboard principal con datos EN VIVO
+   donde los hay (KPIs ingresos/margen/ciclos, serie mensual ing vs gastos,
+   mix de servicios por línea). El resto (CAC, embudo, rentabilidad por
+   servicio) NO se toca aquí (no hay fuente) — el front conserva su placeholder. */
+function _rgCiclos(lineas){
+  var n=0; (lineas||[]).forEach(function(l){ if(l.tipo==='dato'&&l.grupo==='REVENUE'){ (l.subitems||[]).forEach(function(s){ if(s.productos){ s.productos.forEach(function(p){ n+=_erN(p.cantidad); }); } else { n+=_erN(s.cantidad); } }); } }); return Math.round(n);
+}
+function readResumenGeneral(fechaInicio, fechaFin){
+  try{
+    var fi=String(fechaInicio||'').substring(0,10), ff=String(fechaFin||'').substring(0,10);
+    if(!fi||!ff){ var hoy=new Date(); ff=_sumFmtDate(hoy); fi=ff.substring(0,8)+'01'; }
+    var months=_erEnumMonths(fi, ff); if(months.length>18) months=months.slice(months.length-18);
+    var full=readSummary(fi, ff); if(!full.ok) return full;
+    var meses=[], ingresos=[], gastos=[], margen=[], ciclos=[], cac=[];
+    months.forEach(function(mo){
+      var s=readSummary(mo.ini, mo.fin), mm=(s&&s.ok)?s.metricas:{};
+      var rev=_erN(mm.revenue);
+      var eg=(s&&s.ok&&s.reconc)?_erN(s.reconc.egresosPL):(_erN(mm.cogs)+_erN(mm.opex)+_erN(mm.ga)+_erN(mm.taxes));
+      meses.push((mo.label||'').split(' ')[0]);
+      ingresos.push(Math.round(rev)); gastos.push(Math.round(eg));
+      margen.push(rev? Math.round(_erN(mm.grossProfit)/rev*100):0);
+      ciclos.push(_rgCiclos(s&&s.ok?s.lineas:[])); cac.push(0);   // CAC sin fuente aún
+    });
+    var totRev=_erN(full.metricas.revenue)||1;
+    var lineasRev=(full.lineas||[]).filter(function(l){ return l.tipo==='dato'&&l.grupo==='REVENUE'&&Math.abs(_erN(l.actual))>0.5; })
+      .map(function(l){ return {nombre:l.linea||l.label, monto:_erN(l.actual)}; }).sort(function(a,b){ return b.monto-a.monto; });
+    var pal=['#c46a7a','#3d8f8f','#c47a1e','#7a52b0','#3a72a8','#8f9a8f','#c8969c','#4d8c5a'];
+    var top=lineasRev.slice(0,6), otros=lineasRev.slice(6).reduce(function(s,x){return s+x.monto;},0);
+    var dLabels=top.map(function(x){return x.nombre;}), dData=top.map(function(x){return Math.round(x.monto/totRev*100);});
+    if(otros>0.5){ dLabels.push('Otros'); dData.push(Math.round(otros/totRev*100)); }
+    return { ok:true, periodo:{inicio:fi,fin:ff},
+      todos:{ meses:meses, ingresos:ingresos, gastos:gastos, margen:margen, ciclos:ciclos, cac:cac },
+      donut:{ labels:dLabels, data:dData, colors:dLabels.map(function(_,i){return pal[i%pal.length];}) },
+      totalIngresos:_erN(full.metricas.revenue), totalCiclos:ciclos.reduce(function(a,b){return a+b;},0),
+      margenBruto: totRev? Math.round(_erN(full.metricas.grossProfit)/totRev*100):0 };
+  }catch(ex){ return {ok:false, error:ex.message+' (L:'+(ex.lineNumber||'?')+')'}; }
+}

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.70 -->
+﻿<!-- app-build:2026.07.07.71 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -16536,7 +16536,7 @@ function egEnviarCorreoRow(jsonStr){
 function renderViewData(viewId, data) {
   // Vistas con layout propio
   var knownViews = {
-    resumen:      function(d) { renderResumen(d); },
+    resumen:      function(d) { loadResumenGeneral(); },
     ingresos:     function(d) { renderIngresos(d); },
     gastos:       function(d) { renderGastos(d); },
     costos:       function(d) { renderGastos(d); }, // mismo layout
@@ -17010,6 +17010,22 @@ async function _pacSyncAplicar() {
 }
 
 /* ── Render completo del Resumen (primera vista) ─── */
+/* Resumen General EN VIVO: jala ingresos/margen/ciclos/serie/mix reales y los
+   fusiona con el placeholder (deja CAC, embudo y rentabilidad-por-servicio como
+   están, porque aún no hay fuente para esos). */
+async function loadResumenGeneral(){
+  var base=getFallbackData();
+  try{
+    var tok=encodeURIComponent(getToken());
+    var r=await fetch(APPS_SCRIPT_URL+'?action=resumenGeneral&fechaInicio='+encodeURIComponent(currentFechaInicio)+'&fechaFin='+encodeURIComponent(currentFechaFin)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
+    var j=await r.json();
+    if(j&&j.ok&&j.todos&&(j.todos.ingresos||[]).length){
+      base.todos=j.todos; base.local=j.todos; base.internacional=j.todos;   // sin segmentar aún → mismo real
+      if(j.donut&&j.donut.labels&&j.donut.labels.length) base.donut=j.donut;
+    }
+  }catch(e){ /* si falla, queda el placeholder */ }
+  renderResumen(base);
+}
 function renderResumen(data) {
   if (!data || !data.todos) return;
   var d = data[currentSegment] || data.todos;

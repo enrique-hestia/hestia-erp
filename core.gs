@@ -435,6 +435,11 @@ function doGet(e) {
         return jsonResponse({ok:false, error:'Actualiza summary.gs en Apps Script y redespliega.'});
       return jsonResponse(readEstadoResultadosMensual((e && e.parameter.fechaInicio) || '', (e && e.parameter.fechaFin) || ''));
     }
+    if (action === 'resumenGeneral') {
+      if (typeof readResumenGeneral !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza summary.gs en Apps Script y redespliega.'});
+      return jsonResponse(readResumenGeneral((e && e.parameter.fechaInicio) || '', (e && e.parameter.fechaFin) || ''));
+    }
 
     if (action === 'summaryConfig') {
       if (typeof readSummaryConfig !== 'function')
