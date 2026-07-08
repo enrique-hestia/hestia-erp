@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.92 -->
+﻿<!-- app-build:2026.07.07.93 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -13901,15 +13901,18 @@ function _presApplyProjAllGrouped(){
 
     var target=step.el ? document.querySelector(step.el) : null;
     if(target){
-      target.scrollIntoView({behavior:'smooth',block:'center'});
-      setTimeout(function(){
-        var r=target.getBoundingClientRect();
-        var pad=10;
+      // Scroll INSTANTÁNEO (no 'smooth') para que la posición ya esté fija al medir;
+      // así el recuadro no se queda "atrás" en páginas largas.
+      try{ target.scrollIntoView({behavior:'auto',block:'center',inline:'nearest'}); }catch(e){ try{ target.scrollIntoView(); }catch(_){} }
+      var place=function(){
+        var r=target.getBoundingClientRect(); var pad=10;
         sp.style.left=(r.left-pad)+'px'; sp.style.top=(r.top-pad)+'px';
         sp.style.width=(r.width+pad*2)+'px'; sp.style.height=(r.height+pad*2)+'px';
-        _tPosCard(card,r);
-        card.style.visibility='';
-      },290);
+        _tPosCard(card,r); card.style.visibility='';
+      };
+      // Colocación directa (el scroll instantáneo ya dejó el rect fijo) + reajustes por si el layout se acomoda.
+      // No dependemos de requestAnimationFrame (no dispara en pestañas en segundo plano).
+      place(); setTimeout(place,60); setTimeout(place,200);
     } else {
       sp.style.left='50%'; sp.style.top='50%'; sp.style.width='0'; sp.style.height='0';
       card.style.cssText='position:fixed;z-index:9990;background:var(--card-bg,#fff);border-radius:14px;box-shadow:0 12px 48px rgba(0,0,0,.3);padding:20px 22px;width:310px;max-width:92vw;top:50%;left:50%;transform:translate(-50%,-50%);visibility:visible';
@@ -13934,34 +13937,34 @@ var _PRES_TOUR = [
    title:'Módulo de Presupuesto',
    body:'<b>Proyecta cuánto vas a facturar y gastar el próximo trimestre</b> con base en tu historial real, y le da seguimiento al trimestre en curso.<br><br><b>De dónde salen los números:</b> los <b>datos reales</b> vienen de tus <b>Ingresos</b> y <b>Egresos</b> (no se inventan); el <b>motor</b> calcula la proyección con esos datos; y la <b>meta y los %</b> los defines tú. Te muestro cada parte — reabre este tutorial con el botón <b>?</b> cuando quieras.'},
   {el:'.pr-hero',
-   title:'1· Semáforo de avance',
+   title:'Semáforo de avance',
    body:'Del trimestre EN CURSO: ¿vas a llegar a tu meta al ritmo actual? <span style="color:#166534;font-weight:700">Verde</span> = sí · <span style="color:#b45309;font-weight:700">Amarillo</span> = riesgo · <span style="color:#991b1b;font-weight:700">Rojo</span> = no. El % es tu <i>proyección de cierre ÷ meta</i>.<br><br><b>Ejemplo:</b> día 9 de 92 (9.8% del tiempo) con $442,886 registrados → proyección de cierre = 442,886 ÷ (9/92) = <b>$4,527,279</b>. Contra una meta de $7,973,522 = <b>57% → 🔴</b>.'},
   {el:'#pr-sim',
-   title:'2· Simulador (el slider)',
+   title:'Simulador (el slider)',
    body:'Arrástralo para jugar con distintas metas <b>sin guardar nada</b>. Te dice la brecha que falta, cuánto necesitas facturar por día en lo que resta y el cierre proyectado. Si te gusta una cifra, <b>"Guardar como meta"</b> la fija.'},
   {el:'.pr-kstrip',
-   title:'3· Métricas clave',
+   title:'Métricas clave',
    body:'<b>Meta</b>: lo que te propusiste. <b>Real acumulado</b>: lo que llevas registrado. <b>Proyección de cierre</b>: a este ritmo, cuánto cerrarás. <b>Brecha</b>: lo que falta.'},
   {el:'#presChart',
-   title:'4· Gráfica de tendencia',
+   title:'Gráfica de tendencia',
    body:'<b>Líneas sólidas</b> = tu historial real. <b>Punteadas</b> = la proyección del próximo trimestre. Rosa = ingresos, café = egresos. Los checkboxes de arriba ocultan/muestran cada una.'},
   {el:'.pr-scen',
-   title:'5· Escenarios del próximo trimestre',
+   title:'Escenarios del próximo trimestre',
    body:'<b>Base (esperado)</b> = la proyección del modelo con tu historial real (no editable). <b>Conservador</b> y <b>Optimista</b> se calculan como Base <b>∓ un % que TÚ defines</b> (edítalos en las tarjetas según cómo veas tu mercado — el 12% ya no está fijo). <b>Meta capturada</b> = la que fijas más abajo.<br><br><b>Ejemplo:</b> Base $8,051,108 con Conservador −10% y Optimista +5% → <b>$7,245,997</b> y <b>$8,453,663</b>.'},
   {el:'button[onclick="presGruposConfigOpen()"]',
-   title:'6· ⚙ Grupos — LO PRIMERO que debes hacer',
+   title:'⚙ Grupos — LO PRIMERO que debes hacer',
    body:'Aquí eliges <b>qué productos entran al presupuesto</b>. Se abre un tablero: arrastra (o usa el menú de cada tarjeta) para meter productos a un <b>grupo</b> (ej. "Tratamientos"). <b>Lo que dejes en «Sin agrupar» se omite</b> — no se cuenta. Dentro de cada grupo, los productos se separan solos por <b>Ciclo Alta/Baja</b> (eso es el subgrupo, automático). "✨ Autollenar" te lo precarga por categoría para que solo ajustes.'},
   {el:'.pr-tbl',
-   title:'7· La tabla de captura (por CANTIDAD)',
+   title:'La tabla de captura (por CANTIDAD)',
    body:'Solo aparecen <b>tus grupos y sus subgrupos (Alta/Baja)</b>, no los productos sueltos. Capturas por <b>cantidad</b> y el sistema pone el <b>importe automático</b> = cantidad × <i>precio promedio real</i>. La suma del grupo = suma de sus subgrupos. La columna <b>Δ vs proy.</b> compara tu número contra lo que estima el modelo.<br><br><b>Ejemplo:</b> IVF a precio promedio $75,000; si pones cantidad <b>20</b> → importe = 20 × 75,000 = <b>$1,500,000</b>. Tú solo mueves cuántos, no los pesos.'},
   {el:'#pr-master-ing',
-   title:'8· Mover en bloque + candado',
+   title:'Mover en bloque + candado',
    body:'<b>% maestro</b>: sube/baja todo un % de golpe. <b>Cuadrar a $</b>: reparte hasta llegar a un monto objetivo. <b>Usar proyección</b>: copia el estimado del modelo. El <b>checkbox de la columna «% maestro»</b> (por grupo o subgrupo) decide qué se mueve: <b>marcado</b> = se mueve con estas herramientas; <b>desmarcado</b> = queda <b>FIJO en tu número</b> (y así se respeta en próximos presupuestos).'},
   {el:'button[onclick="presOpenMeta()"]',
-   title:'9· Fijar / editar meta',
+   title:'Fijar / editar meta',
    body:'Define la <b>meta total del trimestre</b> (el actual o el siguiente). Acepta el estimado con un clic o escribe tu cifra. Esta meta es la que enciende el semáforo del paso 1.'},
   {el:'#pres-hist-card',
-   title:'10· Histórico de metas',
+   title:'Histórico de metas',
    body:'Tu racha: meta fijada vs lo realmente logrado por trimestre (pasados y el próximo proyectado), con el % de cumplimiento. Sirve para ver si tiendes a quedarte corto o a cumplir. ¡Listo, ya conoces todo el módulo!'}
 ];
 
