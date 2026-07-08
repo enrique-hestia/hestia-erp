@@ -132,25 +132,36 @@ function repararAbonosCruzados() {
     var cd = credSh.getDataRange().getValues(), ch = cd[0];
     var credProv = {}; var idC = _cxpColIdx(ch, 'ID'), pC = _cxpColIdx(ch, 'Proveedor');
     for (var i = 1; i < cd.length; i++) credProv[String(cd[i][idC])] = String(cd[i][pC] || '');
+    // Fallback: proveedor real de cada orden (por CxPId) desde Egresos, por si el
+    // abono o el crédito traen la casilla Proveedor vacía.
+    var ordProv = {};
+    try {
+      var egSh2 = ss.getSheetByName(EGRESOS_TABS[2026] || 'Egresos2026');
+      if (egSh2) { var ed = egSh2.getDataRange().getValues(); for (var e = 1; e < ed.length; e++) { var oid = String(ed[e][0] || ''); if (oid) ordProv[oid] = String(ed[e][4] || ''); } }
+    } catch (e) {}
     var iRev = _cxpColIdx(ah, 'Reversado'), iOrig = _cxpColIdx(ah, 'Origen'), iCred = _cxpColIdx(ah, 'CreditoId'),
         iProv = _cxpColIdx(ah, 'Proveedor'), iMonto = _cxpColIdx(ah, 'Monto'), iCxp = _cxpColIdx(ah, 'CxPId');
-    var corregidos = [];
+    var corregidos = [], omitidos = [], revisados = 0;
     for (var a = 1; a < ad.length; a++) {
       var rev = ad[a][iRev] === true || String(ad[a][iRev]).toUpperCase() === 'TRUE';
       if (rev) continue;
       if (String(ad[a][iOrig] || '') !== 'credito') continue;
-      var credId = String(ad[a][iCred] || ''); if (!credId) continue;
-      var provCred = credProv[credId] || '', provOrden = String(ad[a][iProv] || '');
-      if (!provCred || !provOrden) continue;
-      if (_cxpNormProv(provCred) === _cxpNormProv(provOrden)) continue;   // mismo proveedor: ok
+      revisados++;
+      var cxpId = String(ad[a][iCxp] || '');
+      var credId = String(ad[a][iCred] || '');
+      var provCred = credId ? (credProv[credId] || '') : '';
+      var provOrden = String(ad[a][iProv] || '') || ordProv[cxpId] || '';   // fallback a la orden real
       var monto = Number(ad[a][iMonto]) || 0;
+      if (!provCred) { omitidos.push({ cxpId: cxpId, monto: monto, motivo: 'no se encontró el proveedor del crédito ' + (credId || '(sin id)') }); continue; }
+      if (!provOrden) { omitidos.push({ cxpId: cxpId, monto: monto, motivo: 'no se pudo determinar el proveedor de la orden' }); continue; }
+      if (_cxpNormProv(provCred) === _cxpNormProv(provOrden)) continue;   // mismo proveedor: correcto, no se toca
       abSh.getRange(a + 1, iRev + 1).setValue(true);       // marca el abono reversado
       _restaurarCredito(credId, monto);                    // devuelve el saldo al crédito original
-      corregidos.push({ cxpId: String(ad[a][iCxp] || ''), ordenProveedor: provOrden, creditoDe: provCred, monto: monto });
+      corregidos.push({ cxpId: cxpId, ordenProveedor: provOrden, creditoDe: provCred, monto: monto });
     }
     try { CacheService.getScriptCache().remove('gas_egresos_v1_2026'); } catch (e) {}
-    try { logAudit('sistema', 'CxP', 'Reparar abonos cruzados', '', '', '', corregidos.length + ' reversados'); } catch (e) {}
-    return { ok: true, corregidos: corregidos.length, detalle: corregidos };
+    try { logAudit('sistema', 'CxP', 'Reparar abonos cruzados', '', '', '', corregidos.length + ' reversados, ' + omitidos.length + ' omitidos'); } catch (e) {}
+    return { ok: true, corregidos: corregidos.length, revisados: revisados, detalle: corregidos, omitidos: omitidos };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 

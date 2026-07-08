@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.74 -->
+﻿<!-- app-build:2026.07.07.75 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -21836,11 +21836,15 @@ window.cxpRepararCruzados = async function() {
     var res = await r.json();
     if (!res.ok) { alert('No se pudo: ' + (res.error||'sin detalle')); return; }
     var n = res.corregidos||0;
+    var om = res.omitidos||[];
     if (n>0) {
       var det = (res.detalle||[]).map(function(d){ return '• $'+(Number(d.monto)||0).toLocaleString('en-US',{minimumFractionDigits:2})+' — crédito de '+d.creditoDe+' que estaba en orden de '+d.ordenProveedor; }).join('\n');
       alert('Listo: se corrigieron '+n+' abono(s) cruzado(s).\n\n'+det+'\n\nEl crédito volvió a su proveedor original.');
+    } else if (om.length) {
+      var omd = om.map(function(o){ return '• $'+(Number(o.monto)||0).toLocaleString('en-US',{minimumFractionDigits:2})+' (CxP '+o.cxpId+') — '+o.motivo; }).join('\n');
+      alert('Revisé '+(res.revisados||0)+' abono(s) de crédito. Ninguno se pudo reversar automáticamente, pero '+om.length+' quedaron marcados para revisar:\n\n'+omd+'\n\nProbable causa: la casilla Proveedor del crédito o de la orden está vacía en la hoja Abonos_CxP / Creditos_Proveedor. Mándame captura de esas hojas y lo corrijo puntual.');
     } else {
-      alert('No se encontraron abonos cruzados por corregir. Todo está en orden.');
+      alert('Revisé '+(res.revisados||0)+' abono(s) de crédito y no hay cruzados. Todo en orden.\n\nSi CRISBEN aún muestra el abonado, es porque el abono NO es de crédito cruzado (quizá es un pago parcial real registrado a esa orden).');
     }
     loadCxPData();
   } catch(e) { alert('Error: ' + e.message); }
