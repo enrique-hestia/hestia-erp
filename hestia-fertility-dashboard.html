@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.85 -->
+﻿<!-- app-build:2026.07.07.86 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12833,6 +12833,11 @@ async function loadPresupuesto(periodo){
       var gc = await rg.json();
       window._presGruposCfg = (gc && gc.ok) ? gc : {grupos:[],productoAGrupo:{}};
     } catch(e){ window._presGruposCfg = {grupos:[],productoAGrupo:{}}; }
+    try {
+      var rl = await fetch(APPS_SCRIPT_URL+'?action=presLocks&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+      var lc = await rl.json();
+      window._presLocks = (lc && lc.locks) ? lc.locks : {};
+    } catch(e){ window._presLocks = {}; }
     await hfFinish();
     _renderPresupuesto();
   } catch(e){
@@ -13022,7 +13027,7 @@ function _renderPresupuesto(){
     })()
     +'<div id="pr-rep-ing" style="'+(window._presTab==='ing'?'':'display:none')+'">'+_presBuildIngresos(sg.ingresosGrupos||[],canEdit&&!_esHist)+'</div>'
     +'<div id="pr-rep-eg" style="'+(window._presTab==='eg'?'':'display:none')+'">'+_presBuildEgresos(eg.grupos||[],canEdit&&!_esHist)+'</div>'
-    +'<div style="font-size:10.5px;color:var(--text-secondary,#9ca3af);margin-top:8px;line-height:1.6">Ingresos = <b>cantidad × precio promedio real</b> (importe = cant × precio). El <b>% maestro</b> mueve todas las líneas proporcional; también editas cantidad/importe individual. Precio unitario = importe ÷ cantidad realizada.</div>'
+    +'<div style="font-size:10.5px;color:var(--text-secondary,#9ca3af);margin-top:8px;line-height:1.6">Ingresos = <b>cantidad × precio promedio real</b> (importe = cant × precio). Capturas por <b>cantidad</b>; el importe sale del precio promedio. El checkbox <b>% maestro</b> por grupo/subgrupo decide si ese bucket <b>se mueve</b> (con % maestro / cuadrar) o queda <b>fijo</b> en tu número. Precio unitario = importe ÷ cantidad realizada.</div>'
   +'</div>');
 
   // Egresos + margen
@@ -13672,7 +13677,8 @@ function _presBuildIngresosGrouped(grupos, canEdit){
     var allProds=[]; subOrder.forEach(function(s){ (subMap[s]||[]).forEach(function(p){ allProds.push(p); }); });
     if(!allProds.length) return; hayBucket=true;
     allProds.forEach(function(p){ var key='ip'+(kc++); _presProdMap[key]=p; p._gk=key; });
-    var gi=_presGrupoMap.length, incl=gc.incluirMaestro!==false;
+    var gi=_presGrupoMap.length, incl=gc.incluirMaestro!==false, locks=window._presLocks||{};
+    var gMov=(gn in locks)?(locks[gn]!==false):incl;
     var gCant=0,gImp=0,gProy=0; allProds.forEach(function(p){ gCant+=p._budCant; gImp+=p._budImp; gProy+=p.importeProy||0; });
     totCant+=gCant; totImp+=gImp; totProy+=gProy; var dl=gProy>0?(gImp-gProy):null;
     var multiSub=subOrder.length>1;
@@ -13685,27 +13691,32 @@ function _presBuildIngresosGrouped(grupos, canEdit){
       +'<td id="pgi-'+gi+'-imp-t" style="font-weight:800;color:'+primary+'">'+fM(gImp)+'</td>'
       +'<td style="color:var(--text-secondary,#9ca3af)">'+fM(gProy)+'</td>'
       +'<td id="pgi-'+gi+'-dl" style="font-weight:700;color:'+(dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b'))+'">'+(dl==null?'—':fM(dl))+'</td>'
-      +'<td style="text-align:center">'+(incl?'<span style="color:#166534;font-weight:700" title="Se mueve con el % maestro">✓</span>':'<span style="color:#9ca3af" title="Fijo — no lo mueve el % maestro">—</span>')+'</td>'
+      +'<td style="text-align:center">'+(canEdit
+          ? '<input type="checkbox" id="pgi-'+gi+'-mov" '+(gMov?'checked':'')+' onchange="presToggleMaestro(\'grupo\','+gi+',this.checked)" title="Marcado = se mueve con % maestro / cuadrar / recomendado. Desmarcado = respeta tu número (fijo)." style="width:15px;height:15px;accent-color:#c46a7a;cursor:pointer">'
+          : (gMov?'<span style="color:#166534;font-weight:700">✓</span>':'<span style="color:#9ca3af">—</span>'))+'</td>'
       +'</tr>';
-    // Subgrupos (Ciclo) — solo cuando hay más de uno; productos colapsados (no se listan).
+    // Subgrupos (Ciclo Alta/Baja) — SIEMPRE visibles. Productos colapsados (no se listan).
     var subsModel=[];
     subOrder.forEach(function(s){
       var prods=subMap[s]||[]; var si=subsModel.length;
-      subsModel.push({nombre:s, si:si, prods:prods});
-      if(!multiSub) return;
+      var sMovKey=gn+'|'+s, sMov=(sMovKey in locks)?(locks[sMovKey]!==false):true;
+      subsModel.push({nombre:s, si:si, prods:prods, movible:sMov});
       var sCant=0,sImp=0,sProy=0; prods.forEach(function(p){ sCant+=p._budCant; sImp+=p._budImp; sProy+=p.importeProy||0; });
       var sdl=sProy>0?(sImp-sProy):null;
       h+='<tr style="background:rgba(0,0,0,.015)">'
-        +'<td style="padding-left:20px;font-weight:700;color:#9c4f5f;font-size:10.5px;text-transform:uppercase">'+_esc(s)+' <span style="color:#c9c9c9;font-weight:400;text-transform:none">· '+prods.length+'</span></td>'
+        +'<td style="padding-left:22px;font-weight:700;color:#9c4f5f;font-size:10.5px;text-transform:uppercase">↳ '+_esc(s)+' <span style="color:#c9c9c9;font-weight:400;text-transform:none">· '+prods.length+'</span></td>'
         +'<td style="text-align:right">'+(canEdit
             ? '<input id="pgs-'+gi+'-'+si+'-c" type="number" step="1" min="0" value="'+sCant+'" onchange="presSubCant('+gi+','+si+',this.value)" style="width:66px;text-align:right;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;padding:5px 7px;font-size:11.5px">'
             : sCant)+'</td>'
         +'<td id="pgs-'+gi+'-'+si+'-pp" style="color:var(--text-secondary,#9ca3af)">'+pp(sImp,sCant)+'</td>'
         +'<td id="pgs-'+gi+'-'+si+'-imp" style="font-weight:600;color:'+primary+'">'+fM(sImp)+'</td>'
         +'<td style="color:var(--text-secondary,#9ca3af)">'+fM(sProy)+'</td>'
-        +'<td id="pgs-'+gi+'-'+si+'-dl" style="color:'+(sdl==null?'#9ca3af':(sdl>=0?'#166534':'#991b1b'))+'">'+(sdl==null?'—':fM(sdl))+'</td><td></td></tr>';
+        +'<td id="pgs-'+gi+'-'+si+'-dl" style="color:'+(sdl==null?'#9ca3af':(sdl>=0?'#166534':'#991b1b'))+'">'+(sdl==null?'—':fM(sdl))+'</td>'
+        +'<td style="text-align:center">'+(canEdit
+            ? '<input type="checkbox" id="pgs-'+gi+'-'+si+'-mov" '+(sMov?'checked':'')+' onchange="presToggleMaestro(\'sub\','+gi+',this.checked,'+si+')" title="Marcado = se mueve. Desmarcado = respeta tu número (fijo)." style="width:14px;height:14px;accent-color:#c46a7a;cursor:pointer">'
+            : (sMov?'<span style="color:#166534">✓</span>':'<span style="color:#9ca3af">—</span>'))+'</td></tr>';
     });
-    _presGrupoMap.push({nombre:gn, incluirMaestro:incl, gi:gi, multiSub:multiSub, subs:subsModel, allProds:allProds});
+    _presGrupoMap.push({nombre:gn, incluirMaestro:incl, movible:gMov, gi:gi, multiSub:multiSub, subs:subsModel, allProds:allProds});
   });
   var ocultos=0; Object.keys(allByName).forEach(function(pn){ if(!usados[pn]) ocultos++; });
   if(!hayBucket) h+='<tr><td colspan="7" style="text-align:center;padding:1.6rem;color:var(--text-secondary,#9ca3af)">No hay productos asignados a grupos todavía. Usa <b>⚙ Grupos</b> para configurarlos.</td></tr>';
@@ -13764,25 +13775,40 @@ function _presSubRowUI(gi,si){ var G=_presGrupoMap[gi]; if(!G) return; var S=G.s
   var dl=sProy>0?(sImp-sProy):null;
   var dc=document.getElementById('pgs-'+gi+'-'+si+'-dl'); if(dc){ dc.textContent=dl==null?'—':_presFM(dl); dc.style.color=dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b'); } }
 function _presRefreshGrupo(gi){ var G=_presGrupoMap[gi]; if(!G) return; G.subs.forEach(function(S){ _presSubRowUI(gi,S.si); }); _presGrupoRowUI(gi); }
-// % maestro y cuadrar en modo agrupado: solo mueven grupos con incluirMaestro
+// Candado "movible" por grupo / subgrupo(ciclo): persiste qué buckets se mueven
+function presToggleMaestro(nivel, gi, checked, si){
+  var G=_presGrupoMap[gi]; if(!G) return; var movible=!!checked, key;
+  if(nivel==='sub'){ var S=G.subs[si]; if(!S) return; S.movible=movible; key=G.nombre+'|'+S.nombre; }
+  else { G.movible=movible; key=G.nombre; }
+  window._presLocks=window._presLocks||{};
+  if(movible) delete window._presLocks[key]; else window._presLocks[key]=false;
+  var s=getSession()||{};
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'presSetLock',key:key,movible:movible,usuario:s.email||''})}).catch(function(){});
+}
+// % maestro / cuadrar / proyección: solo mueven grupos Y subgrupos con el checkbox marcado (movible)
 function _presMasterApplyGrouped(f){
   var metas=[];
-  _presGrupoMap.forEach(function(G,gi){ if(G.incluirMaestro===false) return;
-    G.allProds.forEach(function(p){ p._budCant=Math.max(0,Math.round(p._budCant*f)); p._budImp=p._budCant*(p.precio||0); _presProdCellUI(p); metas.push({linea:p.producto,metaIngreso:p._budImp}); });
+  _presGrupoMap.forEach(function(G,gi){ if(G.movible===false) return;
+    G.subs.forEach(function(S){ if(S.movible===false) return;
+      S.prods.forEach(function(p){ p._budCant=Math.max(0,Math.round(p._budCant*f)); p._budImp=p._budCant*(p.precio||0); metas.push({linea:p.producto,metaIngreso:p._budImp}); });
+    });
     _presRefreshGrupo(gi);
   });
   _presIngTotUI(); _presBatchSave(metas);
 }
 function _presMasterTargetGrouped(tgt){
   var fijo=0, movible=0;
-  _presGrupoMap.forEach(function(G){ var s=0; G.allProds.forEach(function(p){s+=p._budImp;}); if(G.incluirMaestro===false) fijo+=s; else movible+=s; });
-  if(movible<=0){ alert('No hay grupos móviles (marca "incluir en % maestro" en ⚙ Grupos).'); return; }
+  _presGrupoMap.forEach(function(G){ G.subs.forEach(function(S){ var s=0; S.prods.forEach(function(p){s+=p._budImp;}); if(G.movible===false||S.movible===false) fijo+=s; else movible+=s; }); });
+  if(movible<=0){ alert('No hay grupos/subgrupos móviles (marca el checkbox de la columna % maestro).'); return; }
   var need=tgt-fijo; if(need<0) need=0;
   _presMasterApplyGrouped(need/movible);
 }
 function _presApplyProjAllGrouped(){
   var metas=[];
-  _presGrupoMap.forEach(function(G,gi){ G.allProds.forEach(function(p){ p._budCant=p.cantProy||0; p._budImp=p.importeProy||0; _presProdCellUI(p); metas.push({linea:p.producto,metaIngreso:p._budImp}); }); _presRefreshGrupo(gi); });
+  _presGrupoMap.forEach(function(G,gi){ if(G.movible===false) return;
+    G.subs.forEach(function(S){ if(S.movible===false) return; S.prods.forEach(function(p){ p._budCant=p.cantProy||0; p._budImp=p.importeProy||0; metas.push({linea:p.producto,metaIngreso:p._budImp}); }); });
+    _presRefreshGrupo(gi);
+  });
   _presIngTotUI(); _presBatchSave(metas);
 }
 

@@ -226,6 +226,25 @@ function saveGruposPresupuesto(body) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
+/* ══ Candados "movible" por grupo / subgrupo(ciclo) ═══════════════════════
+   Persisten qué buckets se mueven con % maestro / cuadrar / recomendado y
+   cuáles quedan FIJOS al número capturado. Script Property PRES_MAESTRO_LOCKS
+   = { "Grupo": false, "Grupo|Ciclo": false }. Ausente = movible (default). */
+function readPresLocks() {
+  try { var raw = PropertiesService.getScriptProperties().getProperty('PRES_MAESTRO_LOCKS'); return { ok: true, locks: raw ? JSON.parse(raw) : {} }; }
+  catch (e) { return { ok: true, locks: {} }; }
+}
+function presSetLock(body) {
+  try {
+    var k = String(body.key || '').trim(); if (!k) return { ok: false, error: 'sin key' };
+    var p = PropertiesService.getScriptProperties();
+    var raw = p.getProperty('PRES_MAESTRO_LOCKS'); var m = raw ? JSON.parse(raw) : {};
+    if (body.movible === false) m[k] = false; else delete m[k]; // movible=true → quitar candado
+    p.setProperty('PRES_MAESTRO_LOCKS', JSON.stringify(m));
+    return { ok: true, locks: m };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 /* ── Histórico de metas por trimestre (últimos ~7 Q + el siguiente proyectado):
    meta fijada vs real logrado + cumplimiento, para ver la racha. Solo 2 lecturas. */
 function readHistoricoMetas() {

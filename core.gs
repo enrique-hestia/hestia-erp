@@ -347,6 +347,11 @@ function doGet(e) {
         return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});
       return jsonResponse(readGruposPresupuesto());
     }
+    if (action === 'presLocks') {
+      if (typeof readPresLocks !== 'function')
+        return jsonResponse({ok:true, locks:{}});
+      return jsonResponse(readPresLocks());
+    }
 
     // Análisis de Egresos: histórico, ranking, recomendaciones
     if (action === 'analisisEgresos') {
