@@ -531,8 +531,11 @@ function readPresupuesto(periodo) {
       delete S.subs; return S;
     }).sort(function (a, b) { return a.orden - b.orden; });
     var egProy = egTotProy;
-    var margenProy = totProy - egProy;
-    var margenPct = totProy > 0 ? (margenProy / totProy) * 100 : 0;
+    // Ingresos proyectados = la MISMA cifra que muestra la tarjeta (por producto: cantidad × precio),
+    // no la proyección vieja por línea. Antes el margen usaba totProy y salía inconsistente (negativo).
+    var _ingProyTot = ingProd.totalImporte || totProy;
+    var margenProy = _ingProyTot - egProy;
+    var margenPct = _ingProyTot > 0 ? (margenProy / _ingProyTot) * 100 : 0;
 
     // Adjuntar budget guardado (meta por producto) a la estructura nueva de ingresos
     (ingProd.grupos || []).forEach(function (G) { (G.subgrupos || []).forEach(function (S) { (S.productos || []).forEach(function (p) {
@@ -540,7 +543,7 @@ function readPresupuesto(periodo) {
     }); }); });
 
     // ── Tendencia mensual (income + egresos) para la gráfica ──
-    var tendencia = _presTendencia(histM, egQ.m || {}, tgtY, tgtQ, totProy, egProy);
+    var tendencia = _presTendencia(histM, egQ.m || {}, tgtY, tgtQ, _ingProyTot, egProy);
 
     return {
       ok: true,
