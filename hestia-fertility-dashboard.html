@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.79 -->
+﻿<!-- app-build:2026.07.07.80 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12827,6 +12827,12 @@ async function loadPresupuesto(periodo){
     var resp = await fetch(APPS_SCRIPT_URL+'?action=presupuesto&token='+tok+perParam+'&_t='+Date.now(), {redirect:'follow'});
     _presData = await resp.json();
     if (!_presData.ok) throw new Error(_presData.error||'No se pudo calcular el presupuesto.');
+    // Config de agrupación (D2): buckets personalizados para captura de meta
+    try {
+      var rg = await fetch(APPS_SCRIPT_URL+'?action=gruposPresupuesto&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+      var gc = await rg.json();
+      window._presGruposCfg = (gc && gc.ok) ? gc : {grupos:[],productoAGrupo:{}};
+    } catch(e){ window._presGruposCfg = {grupos:[],productoAGrupo:{}}; }
     await hfFinish();
     _renderPresupuesto();
   } catch(e){
@@ -13163,6 +13169,7 @@ async function presGruposConfigSave(){
     if(!res.ok){ alert('No se pudo guardar: '+(res.error||'')); return; }
     var ovl=document.getElementById('pres-grp-ovl'); if(ovl) ovl.remove();
     setStatus('Grupos guardados ('+(res.guardados||0)+' asignaciones).','ok');
+    if(typeof loadPresupuesto==='function' && _presData) loadPresupuesto(_presData.periodoConsultado||(_presData.siguiente&&_presData.siguiente.periodo));
   }catch(e){ alert('Error: '+(e.message||e)); }
 }
 
@@ -13442,7 +13449,8 @@ async function presApplyAllProj(){
 /* ══════════════════════════════════════════════════════════════
    PRESUPUESTO NUEVO — ingresos cantidad×precio, % maestro, histórico
    ══════════════════════════════════════════════════════════════ */
-var _presProdMap={}, _presEgMap={};
+var _presProdMap={}, _presEgMap={}, _presGrupoMap=[];
+function _presGrouped(){ var c=window._presGruposCfg; return !!(c&&c.grupos&&c.grupos.length); }
 // ¿El trimestre 'YYYY-Qn' ya terminó? (para mostrar el botón abrir/cerrar sin depender del backend)
 function _presQTerminado(periodo){
   var m=String(periodo||'').match(/^(\d{4})-Q([1-4])$/); if(!m) return false;
@@ -13473,6 +13481,7 @@ function _presMasterBar(tipo){
     +'</div>';
 }
 function _presBuildIngresos(grupos, canEdit){
+  if (_presGrouped()) return _presBuildIngresosGrouped(grupos, canEdit);
   _presProdMap={}; var fM=_presFM, primary='var(--color-primary,#c46a7a)', kc=0, totImp=0, totProy=0;
   var h='<div style="overflow-x:auto"><table class="pr-tbl"><thead><tr><th>Línea</th><th>Cant. rec.</th><th>Precio u.</th><th>Cant. budget</th><th>Importe budget</th><th>Proyección</th><th>Δ vs proy.</th></tr></thead><tbody>';
   if(!grupos.length) h+='<tr><td colspan="7" style="text-align:center;padding:1.6rem;color:var(--text-secondary,#9ca3af)">Sin datos.</td></tr>';
@@ -13535,14 +13544,121 @@ function _presEgRowUI(key){ var l=_presEgMap[key]; if(!l)return; var dl=l.proyec
 function _presEgTotUI(){ var tot=0; Object.keys(_presEgMap).forEach(function(k){tot+=_presEgMap[k].meta||0;}); var el=document.getElementById('pr-eg-tot'); if(el)el.textContent=tot>0?_presFM(tot):'—'; if(_presData&&_presData.egresos&&_presData.egresos.totales)_presData.egresos.totales.meta=tot; }
 function _presBatchSave(metas){ var s=getSession()||{}; fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMetasBatch',periodo:_presData.siguiente.periodo,metas:metas,usuario:s.email||''})}).catch(function(){}); }
 function presMasterApply(tipo){ var pct=parseFloat((document.getElementById('pr-master-'+tipo)||{}).value)||0; var f=1+pct/100;
+  if(tipo==='ing'&&_presGrouped()){ _presMasterApplyGrouped(f); return; }
   if(tipo==='ing'){ var metas=[]; Object.keys(_presProdMap).forEach(function(k){var p=_presProdMap[k]; p._budCant=Math.max(0,Math.round(p._budCant*f)); p._budImp=p._budCant*(p.precio||0); var ci=document.getElementById(k+'-c');if(ci)ci.value=p._budCant; var im=document.getElementById(k+'-imp');if(im)im.textContent=_presFM(p._budImp); _presProdDlUI(k); metas.push({linea:p.producto,metaIngreso:p._budImp});}); _presIngTotUI(); _presBatchSave(metas); }
   else { var metasE=[]; Object.keys(_presEgMap).forEach(function(k){var l=_presEgMap[k]; l.meta=Math.round((l.meta>0?l.meta:l.proyeccion||0)*f); var ei=document.getElementById(k+'-b');if(ei)ei.value=l.meta; _presEgRowUI(k); metasE.push({linea:'EG:'+l.linea,metaIngreso:l.meta});}); _presEgTotUI(); _presBatchSave(metasE); } }
 function presMasterTarget(tipo){ var tgt=parseFloat((document.getElementById('pr-target-'+tipo)||{}).value)||0; if(tgt<=0)return;
+  if(tipo==='ing'&&_presGrouped()){ _presMasterTargetGrouped(tgt); return; }
   if(tipo==='ing'){ var cur=0; Object.keys(_presProdMap).forEach(function(k){cur+=_presProdMap[k]._budImp;}); if(cur<=0)return; var f=tgt/cur; var metas=[]; Object.keys(_presProdMap).forEach(function(k){var p=_presProdMap[k]; p._budCant=Math.max(0,Math.round(p._budCant*f)); p._budImp=p._budCant*(p.precio||0); var ci=document.getElementById(k+'-c');if(ci)ci.value=p._budCant; var im=document.getElementById(k+'-imp');if(im)im.textContent=_presFM(p._budImp); _presProdDlUI(k); metas.push({linea:p.producto,metaIngreso:p._budImp});}); _presIngTotUI(); _presBatchSave(metas); }
   else { var cur2=0; Object.keys(_presEgMap).forEach(function(k){var l=_presEgMap[k];cur2+=(l.meta>0?l.meta:l.proyeccion||0);}); if(cur2<=0)return; var f2=tgt/cur2; var metasE=[]; Object.keys(_presEgMap).forEach(function(k){var l=_presEgMap[k]; l.meta=Math.round((l.meta>0?l.meta:l.proyeccion||0)*f2); var ei=document.getElementById(k+'-b');if(ei)ei.value=l.meta; _presEgRowUI(k); metasE.push({linea:'EG:'+l.linea,metaIngreso:l.meta});}); _presEgTotUI(); _presBatchSave(metasE); } }
 function presApplyProjAll(tipo){
+  if(tipo==='ing'&&_presGrouped()){ _presApplyProjAllGrouped(); return; }
   if(tipo==='ing'){ var metas=[]; Object.keys(_presProdMap).forEach(function(k){var p=_presProdMap[k]; p._budCant=p.cantProy||0; p._budImp=p.importeProy||0; var ci=document.getElementById(k+'-c');if(ci)ci.value=p._budCant; var im=document.getElementById(k+'-imp');if(im)im.textContent=_presFM(p._budImp); _presProdDlUI(k); metas.push({linea:p.producto,metaIngreso:p._budImp});}); _presIngTotUI(); _presBatchSave(metas); }
   else { var metasE=[]; Object.keys(_presEgMap).forEach(function(k){var l=_presEgMap[k]; l.meta=l.proyeccion||0; var ei=document.getElementById(k+'-b');if(ei)ei.value=Math.round(l.meta); _presEgRowUI(k); metasE.push({linea:'EG:'+l.linea,metaIngreso:l.meta});}); _presEgTotUI(); _presBatchSave(metasE); } }
+
+/* ══ Vista AGRUPADA de captura de ingresos (D2) ═══════════════════════
+   Colapsa los productos en los buckets definidos en ⚙ Grupos. Solo se
+   muestran los buckets; los productos sin grupo se ocultan. Se captura la
+   meta por IMPORTE del bucket y se reparte proporcional a sus productos.
+   El % maestro / cuadrar solo mueve los buckets con "incluir en % maestro". */
+function _presBuildIngresosGrouped(grupos, canEdit){
+  _presProdMap={}; _presGrupoMap=[];
+  var fM=_presFM, primary='var(--color-primary,#c46a7a)', kc=0;
+  var cfg=window._presGruposCfg||{grupos:[],productoAGrupo:{}};
+  var pag=cfg.productoAGrupo||{};
+  var maestroDe={}; (cfg.grupos||[]).forEach(function(g){ maestroDe[g.nombre]=g.incluirMaestro!==false; });
+  // Reunir productos por bucket (respetando el orden de config)
+  var byG={}, ocultos=0, orden=(cfg.grupos||[]).map(function(g){return g.nombre;});
+  (grupos||[]).forEach(function(G){ (G.subgrupos||[]).forEach(function(S){ (S.productos||[]).forEach(function(p){
+    p._budCant=(p.budget>0&&p.precio>0)?Math.round(p.budget/p.precio):(p.cantProy||0); p._budImp=p._budCant*(p.precio||0);
+    var gn=pag[p.producto];
+    if(gn){ (byG[gn]=byG[gn]||[]).push(p); var key='ip'+(kc++); _presProdMap[key]=p; p._gk=key; }
+    else ocultos++;
+  }); }); });
+  var totImp=0, totProy=0;
+  var h='<div style="overflow-x:auto"><table class="pr-tbl"><thead><tr><th>Grupo</th><th>Productos</th><th>Importe budget</th><th>Proyección</th><th>Δ vs proy.</th><th style="text-align:center">% maestro</th></tr></thead><tbody>';
+  var hayBucket=false;
+  orden.forEach(function(gn){
+    var prods=byG[gn]; if(!prods||!prods.length) return; hayBucket=true;
+    var gi=_presGrupoMap.length;
+    var gImp=0,gProy=0; prods.forEach(function(p){ gImp+=p._budImp; gProy+=p.importeProy||0; });
+    _presGrupoMap.push({nombre:gn, incluirMaestro:maestroDe[gn]!==false, prods:prods});
+    totImp+=gImp; totProy+=gProy; var dl=gProy>0?(gImp-gProy):null;
+    h+='<tr style="background:var(--color-primary-hl,rgba(196,106,122,.06))">'
+      +'<td style="font-weight:800">'+_esc(gn)+'</td>'
+      +'<td style="color:var(--text-secondary,#9ca3af)">'+prods.length+'</td>'
+      +'<td style="text-align:right">'+(canEdit
+          ? '<input id="pgi-'+gi+'-imp" type="number" step="1000" min="0" value="'+Math.round(gImp)+'" onchange="presGrupoImp('+gi+',this.value)" style="width:118px;text-align:right;border:1.5px solid var(--color-primary,#c46a7a);border-radius:7px;padding:6px 8px;font-size:12px;font-weight:700;color:'+primary+';background:var(--color-surface,#fafafa)">'
+          : '<span id="pgi-'+gi+'-imp-t" style="font-weight:800;color:'+primary+'">'+fM(gImp)+'</span>')+'</td>'
+      +'<td style="color:var(--text-secondary,#9ca3af)">'+fM(gProy)+'</td>'
+      +'<td id="pgi-'+gi+'-dl" style="font-weight:700;color:'+(dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b'))+'">'+(dl==null?'—':fM(dl))+'</td>'
+      +'<td style="text-align:center">'+(maestroDe[gn]!==false?'<span style="color:#166534;font-weight:700" title="Se mueve con el % maestro">✓</span>':'<span style="color:#9ca3af" title="Fijo — no lo mueve el % maestro">—</span>')+'</td>'
+      +'</tr>';
+    // detalle de productos (solo lectura, para ver qué contiene el bucket)
+    prods.forEach(function(p){
+      h+='<tr><td style="padding-left:26px;color:var(--text-secondary,#6b7280);max-width:220px;overflow:hidden;text-overflow:ellipsis" title="'+_esc(p.producto)+'">'+_esc(p.producto)+'</td>'
+        +'<td></td><td id="'+p._gk+'-imp" style="color:var(--text-secondary,#9ca3af)">'+fM(p._budImp)+'</td>'
+        +'<td style="color:var(--text-secondary,#c9c9c9)">'+fM(p.importeProy)+'</td><td></td><td></td></tr>';
+    });
+  });
+  if(!hayBucket) h+='<tr><td colspan="6" style="text-align:center;padding:1.6rem;color:var(--text-secondary,#9ca3af)">No hay productos asignados a grupos todavía. Usa <b>⚙ Grupos</b> para configurarlos.</td></tr>';
+  h+='<tr style="border-top:2px solid var(--color-divider,#d1d5db)"><td style="font-weight:800">TOTAL</td><td></td><td id="pr-ing-tot" style="font-weight:800;color:'+primary+'">'+fM(totImp)+'</td><td style="font-weight:800;color:var(--text-secondary,#9ca3af)">'+fM(totProy)+'</td><td></td><td></td></tr></tbody></table></div>';
+  if(ocultos>0) h+='<div style="font-size:11px;color:var(--text-secondary,#9ca3af);margin-top:8px">Vista agrupada activa · '+ocultos+' producto(s) sin grupo están ocultos. Cambia la configuración en <b>⚙ Grupos</b>.</div>';
+  return h;
+}
+// Distribuye el importe de un bucket proporcional a sus productos y guarda
+function presGrupoImp(gi, val){
+  var G=_presGrupoMap[gi]; if(!G) return;
+  var tgt=Math.max(0,parseFloat(val)||0);
+  var prods=G.prods;
+  var wsum=0; prods.forEach(function(p){ wsum+=p._budImp; });
+  if(wsum<=0){ prods.forEach(function(p){ wsum+=(p.importeProy||0); }); if(wsum>0) prods.forEach(function(p){ p._budImp=p.importeProy||0; }); }
+  if(wsum<=0){ // sin peso: reparte parejo por precio
+    var precioSum=0; prods.forEach(function(p){ precioSum+=(p.precio||0); });
+    prods.forEach(function(p){ p._budImp=precioSum>0?tgt*((p.precio||0)/precioSum):(tgt/prods.length); });
+  } else {
+    var f=tgt/wsum; prods.forEach(function(p){ p._budImp=p._budImp*f; });
+  }
+  var metas=[];
+  prods.forEach(function(p){ p._budCant=(p.precio||0)>0?Math.max(0,Math.round(p._budImp/(p.precio||1))):0; p._budImp=p._budCant*(p.precio||0);
+    var pc=document.getElementById(p._gk+'-imp'); if(pc) pc.textContent=_presFM(p._budImp);
+    metas.push({linea:p.producto,metaIngreso:p._budImp});
+  });
+  _presGrupoRowUI(gi); _presIngTotUI(); _presBatchSave(metas);
+}
+function _presGrupoRowUI(gi){
+  var G=_presGrupoMap[gi]; if(!G) return;
+  var gImp=0,gProy=0; G.prods.forEach(function(p){ gImp+=p._budImp; gProy+=p.importeProy||0; });
+  var inp=document.getElementById('pgi-'+gi+'-imp'); if(inp && document.activeElement!==inp) inp.value=Math.round(gImp);
+  var t=document.getElementById('pgi-'+gi+'-imp-t'); if(t) t.textContent=_presFM(gImp);
+  var dl=gProy>0?(gImp-gProy):null;
+  var dc=document.getElementById('pgi-'+gi+'-dl'); if(dc){ dc.textContent=dl==null?'—':_presFM(dl); dc.style.color=dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b'); }
+}
+// % maestro y cuadrar en modo agrupado: solo mueven buckets con incluirMaestro
+function _presMasterApplyGrouped(f){
+  var metas=[];
+  _presGrupoMap.forEach(function(G,gi){ if(G.incluirMaestro===false) return;
+    G.prods.forEach(function(p){ p._budCant=Math.max(0,Math.round(p._budCant*f)); p._budImp=p._budCant*(p.precio||0);
+      var pc=document.getElementById(p._gk+'-imp'); if(pc)pc.textContent=_presFM(p._budImp);
+      metas.push({linea:p.producto,metaIngreso:p._budImp}); });
+    _presGrupoRowUI(gi);
+  });
+  _presIngTotUI(); _presBatchSave(metas);
+}
+function _presMasterTargetGrouped(tgt){
+  var fijo=0, movible=0;
+  _presGrupoMap.forEach(function(G){ var s=0; G.prods.forEach(function(p){s+=p._budImp;}); if(G.incluirMaestro===false) fijo+=s; else movible+=s; });
+  var need=tgt-fijo; if(movible<=0){ alert('No hay grupos móviles (marca "incluir en % maestro" en ⚙ Grupos).'); return; }
+  if(need<0) need=0;
+  _presMasterApplyGrouped(need/movible);
+}
+function _presApplyProjAllGrouped(){
+  var metas=[];
+  _presGrupoMap.forEach(function(G,gi){ G.prods.forEach(function(p){ p._budCant=p.cantProy||0; p._budImp=p.importeProy||0;
+    var pc=document.getElementById(p._gk+'-imp'); if(pc)pc.textContent=_presFM(p._budImp);
+    metas.push({linea:p.producto,metaIngreso:p._budImp}); }); _presGrupoRowUI(gi); });
+  _presIngTotUI(); _presBatchSave(metas);
+}
 
 /* ══════════════════════════════════════════════════════════════
    MOTOR DE TOUR / ONBOARDING — reutilizable en cualquier vista
