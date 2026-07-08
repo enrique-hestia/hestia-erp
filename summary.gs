@@ -287,9 +287,27 @@ function _summaryReadIngresos(anio) {
     out.push({ op:String(r[0]||''), fecha:_sumParseDate(r[2]), fechaRaw:(r[2] instanceof Date ? r[2].toISOString().substring(0,10) : String(r[2]||'')), paciente:String(r[3]||''),
       categoria:String(r[4]||''), producto:String(r[5]||''), cantidad:num(r[8]),
       total:num(r[9]), formaPago:String(r[12]||''),
-      grupoU:String(r[20]||'').trim() });   // columna U (índice 20) = grupo/categoría del reporte
+      grupoU:String(r[20]||'').trim(),   // columna U (índice 20) = grupo/categoría del reporte
+      _anio:anio, _fila:(i+1), _fechaAlt:_sumBuscaFechaEnFila(r, 2) });
   }
   return out;
+}
+
+// Índice de columna (0-based) a letra estilo Excel: 0->A, 26->AA
+function _colLetra(n){ var s=''; n=n+1; while(n>0){ var m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26); } return s; }
+
+// Busca en una fila alguna celda (distinta de la columna que ya falló) que SÍ parezca fecha real.
+// Sirve para diagnosticar filas con los datos recorridos una columna. Devuelve '' si no hay.
+function _sumBuscaFechaEnFila(r, skipIdx){
+  for (var c=0;c<r.length;c++){
+    if (c===skipIdx) continue;
+    var v=r[c];
+    var pareceFecha = (v instanceof Date) || (typeof v==='string' && /\b\d{1,4}[\/\-.]\d{1,2}[\/\-.]\d{1,4}\b/.test(v));
+    if (!pareceFecha) continue;
+    var pd=_sumParseDate(v);
+    if (pd){ return { col:_colLetra(c), valor:(v instanceof Date ? v.toISOString().substring(0,10) : String(v)), fecha:pd.substring(0,10) }; }
+  }
+  return '';
 }
 
 /* Parseo robusto de fecha → 'YYYY-MM-DD' (Date, ISO, dd/mm/yyyy, dd-mm-yyyy).
@@ -434,7 +452,8 @@ function readSummary(fechaInicio, fechaFin) {
       ins.forEach(function(r){
         var f=(r.fecha||'').substring(0,10);
         if (!f && Number(r.total)){ recon.ingresosSinFecha++; recon.ingresosSinFechaMonto += Number(r.total)||0;
-          if (recon.ingresosSinFechaLista.length < 60) recon.ingresosSinFechaLista.push({ op:r.op, fechaRaw:r.fechaRaw, total:Number(r.total)||0 }); }
+          if (recon.ingresosSinFechaLista.length < 60) recon.ingresosSinFechaLista.push({ op:r.op, fechaRaw:r.fechaRaw, total:Number(r.total)||0,
+            anio:r._anio, fila:r._fila, paciente:r.paciente, producto:r.producto, fechaAlt:r._fechaAlt }); }
         var enActual=_sumInRange(f, fi, ff), enPrev=_sumInRange(f, pi, pf);
         if (!enActual && !enPrev) return;
         // 3 niveles: Grupo (col U) → Subgrupo (categoría) → Producto

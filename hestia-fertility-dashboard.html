@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.101 -->
+﻿<!-- app-build:2026.07.08.102 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -15349,17 +15349,38 @@ function _renderSummary(){
   if((rec.ingresosSinFecha||0)>0){
     var _lst=rec.ingresosSinFechaLista||[];
     var _det='';
+    var _hayAlt=_lst.some(function(x){ return x.fechaAlt && x.fechaAlt.col; });
     if(_lst.length){
+      var _tdb='padding:3px 8px;border-top:1px solid rgba(138,97,0,.12)';
       _det='<details style="margin-top:7px"><summary style="cursor:pointer;font-weight:700;font-size:11px">Ver cuáles ('+_lst.length+(rec.ingresosSinFecha>_lst.length?'+':'')+')</summary>'
-        +'<div style="max-height:180px;overflow:auto;margin-top:6px;border:1px solid rgba(138,97,0,.25);border-radius:7px"><table style="width:100%;border-collapse:collapse;font-size:10.5px">'
-        +'<thead><tr style="background:rgba(240,180,41,.14)"><th style="text-align:left;padding:4px 8px">OP / Folio</th><th style="text-align:left;padding:4px 8px">Valor en columna Fecha</th><th style="text-align:right;padding:4px 8px">Monto</th></tr></thead><tbody>'
-        +_lst.map(function(x){ return '<tr><td style="padding:3px 8px;border-top:1px solid rgba(138,97,0,.12)">'+_esc(x.op||'(sin OP)')+'</td><td style="padding:3px 8px;border-top:1px solid rgba(138,97,0,.12);font-family:monospace">'+(x.fechaRaw?_esc(x.fechaRaw):'<i>(vacía)</i>')+'</td><td style="padding:3px 8px;border-top:1px solid rgba(138,97,0,.12);text-align:right">'+_sumMoney(x.total)+'</td></tr>'; }).join('')
+        +'<div style="max-height:220px;overflow:auto;margin-top:6px;border:1px solid rgba(138,97,0,.25);border-radius:7px"><table style="width:100%;border-collapse:collapse;font-size:10.5px">'
+        +'<thead><tr style="background:rgba(240,180,41,.14)">'
+          +'<th style="text-align:left;padding:4px 8px">Hoja · Fila</th>'
+          +'<th style="text-align:left;padding:4px 8px">OP</th>'
+          +'<th style="text-align:left;padding:4px 8px">Paciente</th>'
+          +'<th style="text-align:left;padding:4px 8px">Valor en columna Fecha (C)</th>'
+          +(_hayAlt?'<th style="text-align:left;padding:4px 8px">¿Fecha en otra columna?</th>':'')
+          +'<th style="text-align:right;padding:4px 8px">Monto</th></tr></thead><tbody>'
+        +_lst.map(function(x){
+            var alt = (x.fechaAlt && x.fechaAlt.col)
+              ? '<b>col '+_esc(x.fechaAlt.col)+'</b>: '+_esc(x.fechaAlt.valor)+' <span style="opacity:.7">('+_esc(x.fechaAlt.fecha)+')</span>'
+              : '<span style="opacity:.55">—</span>';
+            return '<tr>'
+              +'<td style="'+_tdb+';white-space:nowrap"><b>'+_esc(x.anio||'?')+'</b> · fila '+_esc(x.fila||'?')+'</td>'
+              +'<td style="'+_tdb+'">'+_esc(x.op||'(sin OP)')+'</td>'
+              +'<td style="'+_tdb+'">'+_esc(x.paciente||'')+'</td>'
+              +'<td style="'+_tdb+';font-family:monospace">'+(x.fechaRaw?_esc(x.fechaRaw):'<i>(vacía)</i>')+'</td>'
+              +(_hayAlt?'<td style="'+_tdb+';font-family:monospace;font-size:10px">'+alt+'</td>':'')
+              +'<td style="'+_tdb+';text-align:right">'+_sumMoney(x.total)+'</td></tr>';
+          }).join('')
         +'</tbody></table></div></details>';
     }
     h+='<div class="sm-note" style="border-color:#f0b429;background:rgba(240,180,41,.09);color:#8a6100">'
       +'⚠️ <b>'+rec.ingresosSinFecha+' ingreso(s) sin fecha válida</b> ('+_sumMoney(rec.ingresosSinFechaMonto)+') no entran a ningún periodo y pueden estar causando el descuadre. '
-      +'Significa que la <b>columna C (Fecha)</b> de esas filas en BD_Ingresos tiene un valor que el sistema no reconoce como fecha (texto raro, celda vacía, formato distinto o número). '
-      +'Corrígelas a formato fecha real (ej. 2026-06-15) y volverán a contar.'+_det+'</div>';
+      +'Significa que la <b>columna C (Fecha)</b> de esas filas en BD_Ingresos no tiene una fecha que el sistema reconozca (texto, celda vacía, o los datos están recorridos una columna). '
+      +'Busca cada fila por su <b>Hoja (año) y número de fila</b> — no por el OP —, y corrige la columna C a fecha real (ej. 2026-06-15). '
+      +(_hayAlt?'<b>Ojo:</b> en las filas donde abajo dice “Fecha en otra columna”, la fecha quedó recorrida; ahí los datos están desalineados y hay que cuadrar toda la fila, no solo la columna C. ':'')
+      +'Vuelven a contar en cuanto tengan fecha válida.'+_det+'</div>';
   }
 
   // Tabla P&L
