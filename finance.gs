@@ -561,6 +561,11 @@ function doPost(e) {
     if (body.action === 'setupRecordatorios')      return jsonResponse(setupRecordatorios());
     if (body.action === 'saveRecordatorio')        return jsonResponse(saveRecordatorio(body));
     if (body.action === 'updateRecordatorioEstado') return jsonResponse(updateRecordatorioEstado(body));
+    if (body.action === 'updateRecordatorio') {
+      if (typeof updateRecordatorio !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza recordatorios.gs en Apps Script y redespliega.'});
+      return jsonResponse(updateRecordatorio(body));
+    }
     if (body.action === 'deleteRecordatorio')      return jsonResponse(deleteRecordatorio(body));
     if (body.action === 'updateProducto') {
       return jsonResponse(updateProducto(body));

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.07.69 -->
+﻿<!-- app-build:2026.07.07.70 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -11680,7 +11680,7 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     return;
   }
   // Estado de Resultados — nuevo diseño (meses en columnas / detalle) en vivo
-  if (/estado.?de.?resultados|estado-resultados/i.test(viewId) || (_foundViewItem && /estado.?result/i.test(_foundViewItem.fuente||''))) {
+  if (/estado.?de.?resultados|estado-resultados/i.test(viewId) || (_foundViewItem && /estado.?de.?resultados|estado.?result/i.test((_foundViewItem.fuente||'')+' '+(_foundViewItem.label||'')))) {
     document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
     var _erEl2 = document.getElementById('view-estado-resultados');
     if (_erEl2) _erEl2.style.display = '';
@@ -16583,7 +16583,7 @@ function renderViewData(viewId, data) {
     document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
     var _erEl = document.getElementById('view-estado-resultados');
     if (_erEl) _erEl.style.display = '';
-    renderEstadoResultados(data);
+    loadEstadoResultados();   // nuevo diseño en vivo (meses en columnas / detalle)
     return;
   }
   if (data && data.fuente === 'OperatingPL') {
@@ -21573,6 +21573,7 @@ function _recCard(r, hoy){
     ? '<button onclick="recDone('+r.rowNum+')" style="padding:5px 11px;background:#166534;color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">✓ Hecho</button>'
       +'<button onclick="recEstado('+r.rowNum+',\'descartado\')" style="padding:5px 10px;background:var(--color-surface,#f3f4f6);color:var(--text-secondary,#6b7280);border:1px solid var(--color-divider);border-radius:7px;font-size:11px;cursor:pointer">Descartar</button>'
     : '<button onclick="recEstado('+r.rowNum+',\'pendiente\')" style="padding:5px 10px;background:var(--color-surface,#f3f4f6);color:#2563eb;border:1px solid var(--color-divider);border-radius:7px;font-size:11px;cursor:pointer">Reabrir</button>';
+  acc+='<button onclick="recOpenForm(JSON.parse(decodeURIComponent(\''+encodeURIComponent(JSON.stringify({rowNum:r.rowNum,titulo:r.titulo||'',fecha:r.fecha||'',detalle:r.detalle||''}))+'\')))" style="padding:5px 9px;background:rgba(37,99,235,.08);color:#2563eb;border:none;border-radius:7px;font-size:12px;cursor:pointer" title="Editar / reprogramar fecha">📅</button>';
   acc+='<button onclick="recDelete('+r.rowNum+')" style="padding:5px 9px;background:rgba(220,38,38,.07);color:#dc2626;border:none;border-radius:7px;font-size:12px;cursor:pointer" title="Eliminar">🗑</button>';
   return '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:12px 15px;margin-bottom:10px;'+(pend?'':'opacity:.7')+'">'
     +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">'
@@ -21610,22 +21611,35 @@ function _recModalHTML(){
   var L='style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px"';
   return '<div id="rec-ovl" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;backdrop-filter:blur(3px)" onclick="recCloseForm()"></div>'
     +'<div id="rec-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(460px,94vw);padding:20px">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div style="font-size:15px;font-weight:800">Nuevo recordatorio</div><button onclick="recCloseForm()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary,#6b7280)">×</button></div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div id="rec-modal-title" style="font-size:15px;font-weight:800">Nuevo recordatorio</div><button onclick="recCloseForm()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary,#6b7280)">×</button></div>'
     +'<div style="margin-bottom:12px"><label '+L+'>Título *</label><input id="rec-f-titulo" '+S+' placeholder="Ej. Recibir orden 1234"></div>'
     +'<div style="margin-bottom:12px"><label '+L+'>Fecha *</label><input id="rec-f-fecha" type="date" '+S+' value="'+_recToday()+'"></div>'
     +'<div style="margin-bottom:14px"><label '+L+'>Detalle</label><textarea id="rec-f-detalle" '+S+' rows="2" style="resize:vertical"></textarea></div>'
     +'<div style="display:flex;gap:10px"><button id="rec-save-btn" onclick="recSaveForm()" style="flex:1;padding:12px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">Guardar</button>'
     +'<button onclick="recCloseForm()" style="padding:12px 20px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider);border-radius:10px;font-size:13px;cursor:pointer">Cancelar</button></div></div>';
 }
-function recOpenForm(){ var t=document.getElementById('rec-f-titulo'); if(t)t.value=''; var de=document.getElementById('rec-f-detalle'); if(de)de.value=''; var f=document.getElementById('rec-f-fecha'); if(f)f.value=_recToday(); document.getElementById('rec-ovl').style.display='block'; document.getElementById('rec-modal').style.display='block'; }
-function recCloseForm(){ var m=document.getElementById('rec-modal'),o=document.getElementById('rec-ovl'); if(m)m.style.display='none'; if(o)o.style.display='none'; }
+var _recEditRow=null;
+function recOpenForm(r){
+  _recEditRow = (r&&r.rowNum) ? r.rowNum : null;
+  var t=document.getElementById('rec-f-titulo'); if(t)t.value=(r&&r.titulo)||'';
+  var de=document.getElementById('rec-f-detalle'); if(de)de.value=(r&&r.detalle)||'';
+  var f=document.getElementById('rec-f-fecha'); if(f)f.value=(r&&r.fecha)||_recToday();
+  var ttl=document.getElementById('rec-modal-title'); if(ttl) ttl.textContent=_recEditRow?'Editar / reprogramar':'Nuevo recordatorio';
+  document.getElementById('rec-ovl').style.display='block'; document.getElementById('rec-modal').style.display='block';
+}
+function recCloseForm(){ _recEditRow=null; var m=document.getElementById('rec-modal'),o=document.getElementById('rec-ovl'); if(m)m.style.display='none'; if(o)o.style.display='none'; }
 async function recSaveForm(){
   var titulo=(document.getElementById('rec-f-titulo')||{}).value||'';
   var fecha=(document.getElementById('rec-f-fecha')||{}).value||'';
   var detalle=(document.getElementById('rec-f-detalle')||{}).value||'';
   if(!titulo||!fecha){ alert('Título y fecha son obligatorios'); return; }
   var btn=document.getElementById('rec-save-btn'); if(btn){btn.disabled=true;btn.textContent='Guardando…';}
-  var res=await crearRecordatorio({titulo:titulo, fecha:fecha, detalle:detalle, origen:'manual'});
+  var res, s=getSession()||{};
+  if(_recEditRow){
+    try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'updateRecordatorio', rowNum:_recEditRow, titulo:titulo, fecha:fecha, detalle:detalle, reabrir:true, usuario:s.email||''})}); res=await r.json(); }catch(e){ res={ok:false,error:e.message}; }
+  } else {
+    res=await crearRecordatorio({titulo:titulo, fecha:fecha, detalle:detalle, origen:'manual'});
+  }
   if(res&&res.ok){ recCloseForm(); loadRecordatorios(); } else { alert('Error: '+((res&&res.error)||'')); if(btn){btn.disabled=false;btn.textContent='Guardar';} }
 }
 async function recEstado(rowNum, estado){

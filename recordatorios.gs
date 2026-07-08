@@ -112,6 +112,19 @@ function deleteRecordatorio(b) {
   catch(ex){ return {ok:false, error:ex.message}; }
 }
 
+// Editar / reprogramar: cambia título, detalle y/o fecha (col 3, 4, 5).
+// Si b.reabrir, lo vuelve a poner pendiente (útil para reprogramar uno ya hecho).
+function updateRecordatorio(b) {
+  try {
+    var sh=_recSheet(); var rn=b.rowNum; if(!rn||rn<2) return {ok:false, error:'Fila inválida'};
+    if(b.titulo!==undefined)  sh.getRange(rn,3).setValue(b.titulo||'Recordatorio');
+    if(b.detalle!==undefined) sh.getRange(rn,4).setValue(b.detalle||'');
+    if(b.fecha)               sh.getRange(rn,5).setValue(_recFmtDate(b.fecha));
+    if(b.reabrir){ sh.getRange(rn,8).setValue('pendiente'); sh.getRange(rn,10).setValue(''); }
+    return {ok:true};
+  } catch(ex){ return {ok:false, error:ex.message}; }
+}
+
 // Tarea programada (aparece sola en Panel de Control → Programación):
 // cada mañana manda a cada usuario un correo con sus pendientes del día.
 function recordatoriosDelDia() {
