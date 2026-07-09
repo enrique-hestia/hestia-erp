@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.09.111 -->
+﻿<!-- app-build:2026.07.09.112 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -8229,10 +8229,19 @@ async function loadMenu() {
     var gastosItem = rawMenu.filter(_isGastos)[0];
     var costosItem = rawMenu.filter(_isCostos)[0];
     var egresosRef = gastosItem || costosItem;
+    // El ítem "Egresos" se SINTETIZA (id 'egresos') juntando Gastos Operativos + Costos.
+    // Si el rol lo bloquea, no insertarlo ni mostrar sus hijos (antes se colaba porque el
+    // filtro de bloqueadas corre sobre rawMenu, sin el ítem sintetizado).
+    var _egBloqueado = bloqueadas.indexOf('egresos') !== -1;
+    var _fusId = [];
+    if (gastosItem) _fusId.push(gastosItem.id);
+    if (costosItem) _fusId.push(costosItem.id);
+    if (_egBloqueado) egresosRef = null;
     var egresosInserted = false;
     menuItems = rawMenu.filter(function(item) {
       if (bloqueadas.indexOf(item.id) !== -1) return false;
       if (_isToReplace(item)) return false;
+      if (_egBloqueado && _fusId.indexOf(item.padre) !== -1) return false;
       return true;
     }).reduce(function(acc, item) {
       if (!egresosInserted && egresosRef && item.orden > (egresosRef.orden||0)) {
@@ -8416,6 +8425,21 @@ async function loadMenu() {
     currentPeriodo     = currentFechaInicio.slice(0,7);
     if (json.version) _apiVersion = json.version;
     setDateInputs(currentFechaInicio, currentFechaFin);
+    // ── Filtro FINAL de bloqueos por rol ──
+    // Quita del menú CUALQUIER id bloqueado, incluidos los ítems SINTETIZADOS que se
+    // inyectan después del filtro inicial (egresos, summary, board, semanal, analisis-*,
+    // gastos-fijos, recordatorios, cfo, catalogo-general, prod-grupomedico…). Antes estos
+    // se colaban aunque el rol los bloqueara. Luego limpia grupos que queden vacíos.
+    if (bloqueadas && bloqueadas.length) {
+      var _bset = {}; bloqueadas.forEach(function(id){ _bset[String(id)] = 1; });
+      menuItems = menuItems.filter(function(it){ return !_bset[String(it.id)]; });
+      for (var _pass = 0; _pass < 6; _pass++) {
+        var _cnt = {}; menuItems.forEach(function(it){ if (it.padre) _cnt[it.padre] = (_cnt[it.padre]||0) + 1; });
+        var _before = menuItems.length;
+        menuItems = menuItems.filter(function(it){ return !(it.tipo === 'grupo' && !_cnt[it.id]); });
+        if (menuItems.length === _before) break;
+      }
+    }
     buildSidebar(menuItems);
     populateSucursales(json.sucursales || []);
     lucide.createIcons();
