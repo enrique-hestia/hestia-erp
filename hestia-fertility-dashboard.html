@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.08.104 -->
+﻿<!-- app-build:2026.07.08.105 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6608,7 +6608,8 @@ function _renderEgresosERP() {
     return '<th'+(extra||'')+' onclick="egSetSort(\''+col+'\')" style="cursor:pointer;user-select:none'+(extra&&extra.indexOf('text-align')>-1?'':'')+(active?';color:var(--color-primary,#c46a7a)':'')+'" title="Ordenar por '+label+'">'+label+arrow+'</th>';
   }
   h.push('<div class="eg-panel">'
-    +'<div class="eg-ph"><div class="eg-pt">Detalle de egresos</div><div style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Clic en un encabezado para ordenar · Pág. '+_egPage+' de '+totalPages+'</div></div>'
+    +'<div class="eg-ph"><div class="eg-pt">Detalle de egresos</div><div style="display:flex;align-items:center;gap:10px"><div style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Clic en un encabezado para ordenar · Pág. '+_egPage+' de '+totalPages+'</div>'
+    +(hasPermission('editar_egresos')?'<button onclick="egRepararFechas()" title="Rellena la fecha de los egresos pagados que quedaron sin fecha (usa vencimiento o el mes registrado)" style="font-size:11px;padding:4px 10px;border:1px solid var(--color-border,#e5e7eb);background:none;border-radius:7px;cursor:pointer;color:var(--color-text,#1a252f)">🗓️ Reparar fechas</button>':'')+'</div></div>'
     +'<div style="overflow-x:auto;max-height:65vh;overflow-y:auto">'
     +'<table class="eg-tbl"><thead><tr>'
     +'<th style="width:26px"></th>'+_egTh('fecha','Fecha')+_egTh('proveedor','Proveedor')+_egTh('concepto','Concepto')+_egTh('subtipo','Subtipo')+_egTh('monto','Monto',' style="text-align:right"')+'<th>F. Pago</th><th style="text-align:center">Fact</th><th style="text-align:center">Pag</th><th style="text-align:center">Cont</th><th style="text-align:center">Docs</th>'
@@ -7246,6 +7247,20 @@ async function egToggleField(rowNum, field, value) {
       action:'updateEgresoField', rowNum:rowNum, usuario:s.email||'', fields:{}
     }).replace('{}', '{"'+field+'":'+value+'}')});
   } catch(e) { console.warn('Error actualizando campo:', e); }
+}
+
+async function egRepararFechas(){
+  if(!confirm('Rellenar la fecha de los egresos PAGADOS que quedaron sin fecha (año '+_egAnio+').\n\nUsa el vencimiento, o el mes registrado (día 15), o la fecha de hoy como último recurso. Podrás ajustar cualquiera después. ¿Continuar?')) return;
+  try{
+    var s=getSession()||{};
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'repararEgresosSinFecha',anio:_egAnio,usuario:s.email||''})});
+    var j=await r.json();
+    if(!j.ok) throw new Error(j.error||'Error');
+    if(!j.reparados){ alert('No había egresos pagados sin fecha en '+_egAnio+'. Todo en orden.'); return; }
+    var det=(j.filas||[]).slice(0,15).map(function(x){ return '• '+x.proveedor+' — $'+(Number(x.monto)||0).toLocaleString('es-MX')+' → '+x.fecha+' ('+x.fuente+')'; }).join('\n');
+    alert('Listo: '+j.reparados+' egreso(s) reparado(s).\n\n'+det+((j.filas||[]).length>15?'\n…':''));
+    if(typeof loadEgresosERP==='function') loadEgresosERP(); else if(typeof _renderEgresosERP==='function') _renderEgresosERP();
+  }catch(e){ alert('No se pudo reparar: '+(e.message||e)); }
 }
 
 var _egEditRowNum = null;
@@ -10298,6 +10313,13 @@ function renderOperatingPL(data) {
   html.push('<div class="pl-header-sub">Cifras expresadas en pesos mexicanos (MXN) · Comparativo por período</div>');
   if(data && data.budgetFuente && data.budgetFuente.origen==='presupuesto'){
     html.push('<div class="pl-header-sub" style="color:#0f766e;font-weight:600">📊 Columna <b>Budget</b> tomada del módulo <b>Presupuesto</b> ('+_esc(data.budgetFuente.periodo)+') — '+_esc(data.budgetFuente.nota||'')+'</div>');
+    var _cats=(data.budgetFuente.categorias||[]);
+    if(_cats.length){
+      html.push('<details style="margin-top:2px"><summary style="cursor:pointer;font-size:11px;color:#0f766e">Ver categorías de ingreso del Presupuesto ('+_cats.length+') — para revisar el mapeo</summary>'
+        +'<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-top:4px;max-width:520px">'
+        +_cats.map(function(c){ return '<div style="display:flex;justify-content:space-between;border-bottom:1px dotted #ddd;padding:1px 0"><span>'+_esc(c.n)+'</span><span>$'+(Number(c.m)||0).toLocaleString('es-MX')+'</span></div>'; }).join('')
+        +'<div style="margin-top:5px;font-style:italic">Si el nombre aquí no coincide con la línea del P&amp;L (ej. «Alta»), por eso no jala; avísame el nombre y lo mapeo.</div></div></details>');
+    }
   }
   html.push('</div>');
   html.push('<div style="text-align:right">');

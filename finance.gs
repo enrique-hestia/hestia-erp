@@ -807,6 +807,9 @@ function doPost(e) {
     if (body.action === 'updateEgresoField') {
       return jsonResponse(updateEgresoField(body));
     }
+    if (body.action === 'repararEgresosSinFecha') {
+      return jsonResponse(repararEgresosSinFecha(body));
+    }
     if (body.action === 'guardarReferenciaEgreso') {
       return jsonResponse(guardarReferenciaEgreso(body));
     }
@@ -2225,6 +2228,67 @@ function updateEgresoField(payload) {
   } catch(ex) {
     return {ok:false, error:ex.message};
   }
+}
+
+/* Repara egresos ya PAGADOS que quedaron SIN fecha (ej. se marcó la casilla PAG
+   antes del arreglo, o el pago no pasó por pagarCxP). Rellena col Fecha con la
+   fecha más sensata SIN adivinar mal el periodo:
+     1) Vencimiento (si existe)
+     2) el Mes registrado (col Mes, ej. "Jul-26") → día 15 de ese mes
+     3) hoy (último recurso)
+   No toca filas canceladas ni no pagadas. Devuelve cuántas reparó. */
+function repararEgresosSinFecha(body) {
+  try {
+    var anio = (body && body.anio) || new Date().getFullYear();
+    var ssId = EGRESOS_IDS[anio] || EGRESOS_SS_2026;
+    var tabName = EGRESOS_TABS[anio] || 'Egresos' + anio;
+    var ss = SpreadsheetApp.openById(ssId);
+    var sheet = ss.getSheetByName(tabName) || ss.getSheets()[0];
+    if (!sheet) return { ok:false, error:'Pestaña no encontrada' };
+    var data = sheet.getDataRange().getValues();
+    if (data.length < 2) return { ok:true, reparados:0, filas:[] };
+    var headers = data[0].map(function(h){ return String(h).trim().toLowerCase(); });
+    function col(sub){ for (var c=0;c<headers.length;c++){ if (headers[c].indexOf(sub)>-1) return c; } return -1; }
+    var iFecha=col('fecha'), iMes=col('mes'), iVenc=col('vencimiento'), iPag=col('pagado'),
+        iEstatus=col('estatus'), iProv=col('proveedor'), iMonto=col('egresos');
+    if (iFecha < 0) return { ok:false, error:'No hay columna Fecha' };
+    var MES3 = { ene:0,jan:0,feb:1,mar:2,abr:3,apr:3,may:4,jun:5,jul:6,ago:7,aug:7,sep:8,oct:9,nov:10,dic:11,dec:11 };
+    var mesesOut = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var hoy = new Date();
+    function parseMesTag(s){
+      var m = String(s||'').trim().toLowerCase().match(/^([a-záéíóú]{3})[\s\-\/]*(\d{2,4})$/);
+      if (!m) return null;
+      var mo = MES3[m[1].replace(/á/g,'a').replace(/é/g,'e').replace(/í/g,'i').replace(/ó/g,'o').replace(/ú/g,'u')];
+      if (mo == null) return null;
+      var y = m[2].length === 2 ? 2000 + parseInt(m[2],10) : parseInt(m[2],10);
+      return new Date(y, mo, 15);
+    }
+    var reparados = 0, filas = [];
+    for (var r=1; r<data.length; r++) {
+      var row = data[r];
+      var estat = iEstatus>-1 ? String(row[iEstatus]||'').trim().toLowerCase() : '';
+      if (estat === 'cancelada') continue;
+      var pagado = iPag>-1 ? (row[iPag]===true || String(row[iPag]).toUpperCase()==='TRUE') : false;
+      if (!pagado) continue;                                  // solo egresos pagados
+      var f = row[iFecha];
+      if (f instanceof Date) continue;
+      if (String(f||'').trim() !== '') continue;              // ya tiene algo en Fecha
+      // Elegir fecha
+      var nueva = null, fuente = '';
+      if (iVenc>-1 && row[iVenc] instanceof Date) { nueva = row[iVenc]; fuente='vencimiento'; }
+      else if (iVenc>-1 && String(row[iVenc]||'').trim() && !isNaN(new Date(row[iVenc]))) { nueva = new Date(row[iVenc]); fuente='vencimiento'; }
+      if (!nueva && iMes>-1) { var pm = parseMesTag(row[iMes]); if (pm) { nueva = pm; fuente='mes'; } }
+      if (!nueva) { nueva = hoy; fuente='hoy'; }
+      sheet.getRange(r+1, iFecha+1).setValue(nueva);
+      if (iMes>-1) sheet.getRange(r+1, iMes+1).setValue(mesesOut[nueva.getMonth()] + '-' + String(nueva.getFullYear()).slice(-2));
+      reparados++;
+      if (filas.length < 60) filas.push({ fila:r+1, proveedor:(iProv>-1?String(row[iProv]||''):''),
+        monto:(iMonto>-1?(parseFloat(String(row[iMonto]||'').replace(/[$,]/g,''))||0):0),
+        fecha:nueva.getFullYear()+'-'+String(nueva.getMonth()+1).padStart(2,'0')+'-'+String(nueva.getDate()).padStart(2,'0'), fuente:fuente });
+    }
+    SpreadsheetApp.flush();
+    return { ok:true, reparados:reparados, filas:filas, anio:anio };
+  } catch(ex) { return { ok:false, error:ex.message }; }
 }
 
 /* Guardar una REFERENCIA de texto en Link Factura / Link Pago (sin archivo) —

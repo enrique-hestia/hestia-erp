@@ -700,8 +700,13 @@ function _presInyectaBudgetEnPL(plData, viewType, plMonth, plYear) {
 
     // Marcar la fuente en el encabezado y en un flag para el frontend
     if (plData.colHeaders && plData.colHeaders[2]) plData.colHeaders[2].label += ' · Presupuesto';
+    // Diagnóstico: categorías de ingreso que trae el Presupuesto (para mapear las que no calzan por nombre)
+    var cats = (pp.siguiente && pp.siguiente.lineas || []).map(function(l){
+      return { n:String(l.linea||''), m: Math.round(((Number(l.meta)>0?Number(l.meta):Number(l.proyeccion))||0) * factor) };
+    }).filter(function(x){ return x.m>0; }).sort(function(a,b){ return b.m-a.m; });
     plData.budgetFuente = { origen:'presupuesto', periodo:per, factor:factor,
-      mensual:(targetMonths.length===1), nota:(targetMonths.length===1?'Budget mensual = presupuesto trimestral ÷ 3':'Budget del trimestre') };
+      mensual:(targetMonths.length===1), nota:(targetMonths.length===1?'Budget mensual = presupuesto trimestral ÷ 3':'Budget del trimestre'),
+      categorias: cats };
     return plData;
   } catch (ex) { return plData; }   // nunca romper el P&L
 }
