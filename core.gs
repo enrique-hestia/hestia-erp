@@ -280,6 +280,7 @@ function doGet(e) {
       var menuResult = {
         menu:        readMenu(ss),
         sucursales:  readSucursales(ss),
+        agencias:    (typeof _summaryAgencias === 'function' ? _summaryAgencias() : ['reprovida']),
         fechaInicio: fechaInicio,
         fechaFin:    fechaFin,
         version:     API_VERSION

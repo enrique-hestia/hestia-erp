@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.09.112 -->
+﻿<!-- app-build:2026.07.09.113 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -8291,6 +8291,26 @@ async function loadMenu() {
         });
       }
     }
+    // ── Agrupar AGENCIAS bajo un grupo "Agencias" en Productos (REPROVIDA + futuras) ──
+    // La lista viene de la Script Property AGENCIAS (json.agencias) → sumar agencias
+    // es un solo lugar. Mueve los ítems de catálogo que sean agencia bajo el grupo.
+    (function(){
+      var _agList = ((json.agencias && json.agencias.length) ? json.agencias : ['reprovida'])
+        .map(function(a){ return String(a||'').toLowerCase(); }).filter(Boolean);
+      var _prodGrp = menuItems.filter(function(i){ return (i.tipo==='grupo'||i.id==='productos') && /producto/i.test(i.label||i.id); })[0];
+      if (!_prodGrp || !_agList.length) return;
+      var _agItems = menuItems.filter(function(i){
+        if (i.id==='agencias') return false;
+        var blob = (String(i.id||'')+' '+String(i.label||'')).toLowerCase();
+        return _agList.some(function(a){ return blob.indexOf(a) > -1; });
+      });
+      if (!_agItems.length) return;
+      var _ordAg = Math.min.apply(null, _agItems.map(function(m){ return Number(m.orden)||99; }));
+      if (!menuItems.some(function(i){ return i.id==='agencias'; })){
+        menuItems.push({ id:'agencias', label:'Agencias', padre:_prodGrp.id, icono:'briefcase', tipo:'grupo', orden:_ordAg, seccion:_prodGrp.seccion });
+      }
+      _agItems.forEach(function(m, idx){ m.padre='agencias'; m.orden=idx+1; });
+    })();
     // Inyectar "Egresos" (análisis) en el grupo Análisis, debajo de Ingresos
     if (!menuItems.some(function(i){ return i.id==='analisis-egresos'; })) {
       // Apuntar al GRUPO de análisis por su id/label (no por un hijo, para no
