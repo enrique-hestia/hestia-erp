@@ -153,7 +153,9 @@ function readBoardReport(fechaInicio, fechaFin){
       if(l.tipo==='seccion' && egSecs[l.grupo] && Math.abs(l.actual)>0.005) egresosDetalle.push({nivel:'seccion',label:l.label,valor:l.actual});
       else if(l.tipo==='dato' && egSecs[l.grupo] && Math.abs(l.actual)>0.005){
         egresosDetalle.push({nivel:'sub',label:l.linea,valor:l.actual,
-          proveedores:(l.subitems||[]).filter(function(s){return Math.abs(s.actual)>0.005;}).slice(0,6).map(function(s){return {label:s.label,valor:s.actual};})});
+          // Mostrar TODO el desglose (antes truncaba a 6 y ocultaba conceptos, ej. personas de nómina).
+          // Tope alto de seguridad para no inflar el payload en subgrupos con muchísimos proveedores chicos.
+          proveedores:(l.subitems||[]).filter(function(s){return Math.abs(s.actual)>0.005;}).slice(0,80).map(function(s){return {label:s.label,valor:s.actual};})});
       }
     });
 
