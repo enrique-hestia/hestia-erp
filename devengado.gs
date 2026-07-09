@@ -117,7 +117,15 @@ function readGastoDevengado(fi, ff){
     var entran=0, salen=0, detalle=[], porMes={};
     function bucket(m){ if(!porMes[m]) porMes[m]={ mes:m, entran:0, salen:0 }; return porMes[m]; }
 
+    // Dedupe de spreadsheets: un año SIN hoja propia (ej. 2027) cae de vuelta al de 2026
+    // (readEgresosData: EGRESOS_IDS[anio] || EGRESOS_SS_2026). Sin esto, el egreso de Vianto
+    // se leería dos veces (2026 y 2027→2026) y saldría DUPLICADO.
+    var _seenSS = {};
     for (var y=yFrom-1; y<=yTo+1; y++){
+      var _ssId = (typeof EGRESOS_IDS !== 'undefined' && EGRESOS_IDS[y]) ? EGRESOS_IDS[y]
+                : (typeof EGRESOS_SS_2026 !== 'undefined' ? EGRESOS_SS_2026 : ('year-'+y));
+      if (_seenSS[_ssId]) continue;   // ya leímos ese spreadsheet
+      _seenSS[_ssId] = 1;
       var eg; try { eg = readEgresosData(y); } catch(e){ continue; }
       (eg.rows||[]).forEach(function(r){
         if (r.estatus === 'Cancelada') return;
