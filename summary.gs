@@ -37,13 +37,30 @@ var SUMMARY_GRUPOS = {
 
 function _sumNorm(s){ return String(s||'').trim().toLowerCase(); }
 
+/* AGENCIAS — categorías/listas de ingresos que son agencias (arranca con REPROVIDA).
+   Editable sin código en la Script Property `AGENCIAS` (JSON array de nombres).
+   Para sumar una agencia nueva: agrega su nombre ahí. */
+function _summaryAgencias(){
+  var raw; try { raw = PropertiesService.getScriptProperties().getProperty('AGENCIAS'); } catch(e){ raw = null; }
+  var arr = null; if (raw){ try { arr = JSON.parse(raw); } catch(e){ arr = null; } }
+  if (!arr || !arr.length) arr = ['reprovida'];
+  return arr.map(function(x){ return _sumNorm(x); }).filter(Boolean);
+}
+function _summaryEsAgencia(clave){
+  var n = _sumNorm(clave), ags = _summaryAgencias();
+  for (var i=0;i<ags.length;i++){ if (ags[i] && n.indexOf(ags[i]) > -1) return true; }
+  return false;
+}
+
 /* Clasificación por DEFECTO (cuando aún no está en Summary_Config).
    fuente: 'ingreso' | 'egreso'. Para egreso, clave = 'Contable|Subtipo'. */
 function _summaryDefaultClass(fuente, clave) {
   if (fuente === 'ingreso') {
     var c = _sumNorm(clave);
     if (c.indexOf('surrogacy') > -1) return { grupo: 'REVENUE', linea: 'Surrogacy', orden: 2 };
-    if (c.indexOf('reprovida') > -1 || c.indexOf('extern') > -1 || c.indexOf('grupo') > -1) return { grupo: 'REVENUE', linea: 'Externos', orden: 3 };
+    // AGENCIAS: REPROVIDA (y futuras agencias) van a su propia línea, ya no a "Externos".
+    if (_summaryEsAgencia(c)) return { grupo: 'REVENUE', linea: 'Agencias', orden: 3 };
+    if (c.indexOf('extern') > -1 || c.indexOf('grupo') > -1) return { grupo: 'REVENUE', linea: 'Externos', orden: 4 };
     return { grupo: 'REVENUE', linea: 'Alta', orden: 1 };
   }
   var parts = String(clave || '').split('|');
@@ -280,16 +297,48 @@ function _summaryReadIngresos(anio) {
   var sh = ss.getSheetByName('BD_Ingresos') || ss.getSheets()[0];
   if (!sh) return out;
   var data = sh.getDataRange().getValues();
+  if (data.length < 2) return out;
   function num(v){ if(typeof v==='number') return v; var n=parseFloat(String(v||'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
+
+  // ── Detección de columnas por ENCABEZADO (cada hoja anual puede tener un layout
+  //    distinto; ej. la de 2025 no trae "Línea" y todo está recorrido una columna).
+  //    Fallback a las posiciones de la hoja 2026 si no se encuentra el encabezado.
+  var hdr = data[0].map(function(c){ return String(c).trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''); });
+  function col(keys, fb){
+    for (var n=0;n<keys.length;n++){ for (var c=0;c<hdr.length;c++){ if (hdr[c]===keys[n]) return c; } }
+    for (var n2=0;n2<keys.length;n2++){ for (var c2=0;c2<hdr.length;c2++){ if (hdr[c2].indexOf(keys[n2])>-1) return c2; } }
+    return fb;
+  }
+  var iOp=col(['op'],0), iFecha=col(['fecha'],2), iPac=col(['paciente'],3),
+      iCat=col(['categoria'],4), iProd=col(['producto'],5), iCant=col(['cantidad'],8),
+      iTot=col(['totalpagar','total a pagar','total'],9), iFP=col(['forma de pago','formapago'],12),
+      iCiclo=col(['ciclo'],20);
+
+  // ── Red de seguridad: si la columna Fecha detectada NO trae fechas de verdad
+  //    (encabezado engañoso u hoja recorrida), buscar la columna con más fechas y
+  //    recorrer el resto el mismo número de columnas. Todo en LECTURA, sin tocar datos.
+  function _cntFechas(idx){ if(idx<0) return 0; var n=0, m=Math.min(data.length,30); for(var k=1;k<m;k++){ if(_sumParseDate(data[k][idx])) n++; } return n; }
+  if (_cntFechas(iFecha) < 2) {
+    var bestC=-1, bestN=1;
+    for (var cc=0; cc<Math.min(hdr.length,10); cc++){ var nn=_cntFechas(cc); if(nn>bestN){ bestN=nn; bestC=cc; } }
+    if (bestC>-1){
+      var _shift = iFecha - bestC;
+      iFecha = bestC;
+      if (_shift !== 0){ function _adj(x){ return x<0?x:Math.max(0, x-_shift); }
+        iPac=_adj(iPac); iCat=_adj(iCat); iProd=_adj(iProd); iCant=_adj(iCant); iTot=_adj(iTot); iFP=_adj(iFP); iCiclo=_adj(iCiclo); }
+    }
+  }
+
   for (var i=1;i<data.length;i++){
     var r=data[i];
-    if (!String(r[0]||'').trim()) continue;
-    var _pac = (typeof _privVer==='function' && !_privVer()) ? _privPaciente(r[0]) : String(r[3]||'');
-    out.push({ op:String(r[0]||''), fecha:_sumParseDate(r[2]), fechaRaw:(r[2] instanceof Date ? r[2].toISOString().substring(0,10) : String(r[2]||'')), paciente:_pac,
-      categoria:String(r[4]||''), producto:String(r[5]||''), cantidad:num(r[8]),
-      total:num(r[9]), formaPago:String(r[12]||''),
-      grupoU:String(r[20]||'').trim(),   // columna U (índice 20) = grupo/categoría del reporte
-      _anio:anio, _fila:(i+1), _fechaAlt:_sumBuscaFechaEnFila(r, 2) });
+    if (!String(r[iOp]||'').trim()) continue;
+    var _pac = (typeof _privVer==='function' && !_privVer()) ? _privPaciente(r[iOp]) : String(r[iPac]||'');
+    out.push({ op:String(r[iOp]||''), fecha:_sumParseDate(r[iFecha]),
+      fechaRaw:(r[iFecha] instanceof Date ? r[iFecha].toISOString().substring(0,10) : String(r[iFecha]||'')), paciente:_pac,
+      categoria:String(r[iCat]||''), producto:String(r[iProd]||''), cantidad:num(r[iCant]),
+      total:num(r[iTot]), formaPago:(iFP>-1?String(r[iFP]||''):''),
+      grupoU:(iCiclo>-1?String(r[iCiclo]||'').trim():''),
+      _anio:anio, _fila:(i+1), _fechaAlt:_sumBuscaFechaEnFila(r, iFecha) });
   }
   return out;
 }
