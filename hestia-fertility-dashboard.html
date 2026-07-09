@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.09.110 -->
+﻿<!-- app-build:2026.07.09.111 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -11105,6 +11105,26 @@ function grRenderCheckboxes(role) {
   var opEl = document.getElementById('gr-op-perms');
   if (opEl && !opEl.querySelector('input[data-op]')) grBuildOpPerms();
   grApplyOpPerms(role ? (role.permisosOperativos || []) : []);
+  // Letrero: muestra EXACTAMENTE lo que está guardado (aunque los checkboxes no calcen),
+  // y avisa de bloqueos huérfanos (IDs guardados que ya no existen en el menú actual → por
+  // eso "palomea todo": el rol sí tenía restricciones, pero apuntan a menús renombrados/movidos).
+  var info = document.getElementById('gr-saved-info');
+  if (!info && el.parentNode) { info = document.createElement('div'); info.id = 'gr-saved-info';
+    info.style.cssText = 'font-size:11px;line-height:1.5;color:var(--color-text-muted);margin:0 0 10px;padding:8px 10px;border:1px solid var(--color-divider);border-radius:8px;background:var(--color-surface-2,rgba(0,0,0,.02))';
+    el.parentNode.insertBefore(info, el); }
+  if (info) {
+    if (!role) { info.innerHTML = '🆕 Rol nuevo — por defecto tiene acceso a todo; desmarca lo que quieras bloquear.'; }
+    else {
+      var vb = role.vistasBloqueadas || [];
+      var idset = {}; (menuItems || []).forEach(function(it){ idset[it.id] = 1; });
+      var orphan = vb.filter(function(id){ return !idset[id]; });
+      var txt = '💾 Guardado para <b>' + _esc(role.rol) + '</b>: '
+        + (vb.length ? '<b>' + vb.length + '</b> vista(s) bloqueada(s)' : '<b>sin restricciones</b> (acceso total)');
+      if (role.permisosOperativos && role.permisosOperativos.length) txt += ' · permisos operativos: <b>' + role.permisosOperativos.length + '</b>';
+      if (orphan.length) txt += '<br><span style="color:#c0505c">⚠ ' + orphan.length + ' bloqueo(s) guardados que ya NO existen en el menú actual (menú renombrado/movido): <b>' + orphan.map(_esc).join(', ') + '</b>. Por eso salen todas palomeadas. <u>Si guardas así, se pierden.</u></span>';
+      info.innerHTML = txt;
+    }
+  }
 }
 
 function grSelectAll(val) {
@@ -11171,6 +11191,21 @@ async function grSaveRole() {
   var existingRole = null;
   for (var ei = 0; ei < _grRoles.length; ei++) {
     if (_grRoles[ei].rol.toLowerCase() === rolName.toLowerCase()) { existingRole = _grRoles[ei]; break; }
+  }
+
+  // BLINDAJE: no borrar accidentalmente todas las restricciones de un rol que ya las tenía.
+  // (Pasa cuando los bloqueos guardados apuntan a menús renombrados → salen palomeados → al
+  //  guardar se perderían.) Preservamos los bloqueos "huérfanos" que no tienen casilla.
+  if (existingRole && (existingRole.vistasBloqueadas || []).length) {
+    var _idset = {}; (menuItems || []).forEach(function(it){ _idset[it.id] = 1; });
+    var _huerfanos = (existingRole.vistasBloqueadas || []).filter(function(id){ return !_idset[id]; });
+    if (bloqueadas.length === 0 && _huerfanos.length === 0) {
+      if (!confirm('⚠️ Vas a dar ACCESO TOTAL a "' + rolName + '" (sin ninguna vista bloqueada).\n\nAntes tenía ' + existingRole.vistasBloqueadas.length + ' vista(s) bloqueada(s):\n' + existingRole.vistasBloqueadas.join(', ') + '\n\n¿Seguro que quieres quitarle TODAS las restricciones?')) {
+        if (statusEl) statusEl.textContent = ''; return;
+      }
+    }
+    // Conservar los bloqueos huérfanos (menús renombrados) para no perderlos al guardar.
+    _huerfanos.forEach(function(id){ if (bloqueadas.indexOf(id) === -1) bloqueadas.push(id); });
   }
 
   var tk      = getToken() || '';

@@ -221,6 +221,7 @@ function doGet(e) {
       var bloqueadas = (e && e.parameter.vistasBloqueadas) || '';
       var soloLec    = (e && e.parameter.soloLectura)      === 'true';
       var desc       = (e && e.parameter.descripcion)      || '';
+      var opPerms    = (e && e.parameter.permisosOperativos);   // puede venir undefined
       if (!rolName) return jsonResponse({ error: 'Nombre de rol requerido.' });
       var shR  = ss.getSheetByName('Roles');
       if (!shR) return jsonResponse({ error: 'Hoja Roles no encontrada.' });
@@ -230,6 +231,9 @@ function doGet(e) {
       var bI  = rH.indexOf('vistas_bloqueadas');
       var lI  = rH.indexOf('solo_lectura');
       var dI  = rH.indexOf('descripcion');
+      var oI  = rH.indexOf('permisos_operativos');
+      // Si la columna de permisos operativos no existe, la creamos (para no perder el dato)
+      if (oI < 0 && opPerms !== undefined && opPerms !== null) { oI = rData[0].length; shR.getRange(1, oI+1).setValue('permisos_operativos'); }
       var rowIdx = -1;
       for (var ri = 1; ri < rData.length; ri++) {
         if (String(rData[ri][rI]).trim().toLowerCase() === rolName.toLowerCase()) { rowIdx = ri + 1; break; }
@@ -238,12 +242,14 @@ function doGet(e) {
         if (bI > -1) shR.getRange(rowIdx, bI+1).setValue(bloqueadas);
         if (lI > -1) shR.getRange(rowIdx, lI+1).setValue(soloLec);
         if (dI > -1) shR.getRange(rowIdx, dI+1).setValue(desc);
+        if (oI > -1 && opPerms !== undefined && opPerms !== null) shR.getRange(rowIdx, oI+1).setValue(opPerms);
       } else {
-        var newRow = Array(rData[0].length).fill('');
+        var newRow = Array(Math.max(rData[0].length, oI+1)).fill('');
         if (rI > -1) newRow[rI] = rolName;
         if (bI > -1) newRow[bI] = bloqueadas;
         if (lI > -1) newRow[lI] = soloLec;
         if (dI > -1) newRow[dI] = desc;
+        if (oI > -1 && opPerms !== undefined && opPerms !== null) newRow[oI] = opPerms;
         shR.appendRow(newRow);
       }
       return jsonResponse({ success: true });
