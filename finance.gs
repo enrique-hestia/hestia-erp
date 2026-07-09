@@ -1516,7 +1516,15 @@ function pagarCxP(body) {
     // Fallback a las posiciones históricas si no se encuentra el header. 0-based.
     var _hdrs = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function(h){ return String(h).trim().toLowerCase(); });
     var _col = function(sub, fb){ var lc = String(sub).toLowerCase(); for (var c = 0; c < _hdrs.length; c++) { if (_hdrs[c].indexOf(lc) > -1) return c; } return fb; };
-    var iFecha=_col('fecha',1), iPagado=_col('pagado',13), iForma=_col('forma',16),
+    // FECHA DE PAGO: la hoja puede tener varias columnas con "fecha" (ej. Vencimiento).
+    // 1) columna explícita de pago ('fecha' + 'pago'); 2) 'fecha' que NO sea vencimiento
+    //    ni factura; 3) fallback col B. NUNCA escribe en la de vencimiento.
+    var iFecha = (function(){
+      for (var c=0;c<_hdrs.length;c++){ if (_hdrs[c].indexOf('fecha')>-1 && _hdrs[c].indexOf('pago')>-1) return c; }
+      for (var c2=0;c2<_hdrs.length;c2++){ if (_hdrs[c2].indexOf('fecha')>-1 && _hdrs[c2].indexOf('venc')<0 && _hdrs[c2].indexOf('factur')<0) return c2; }
+      return 1;
+    })();
+    var iPagado=_col('pagado',13), iForma=_col('forma',16),
         iEgresos=_col('egresos',9), iNotas=_col('notas',10), iMes=_col('mes',2),
         iProv=_col('proveedor',4), iConc=_col('concepto',8);
 
@@ -1603,7 +1611,8 @@ function pagarCxP(body) {
     }
 
     logAudit(body.usuario || 'sistema', 'CxP', 'Pagar', egId, 'Pagado', 'Pendiente', formaPago + ' | ' + fechaPago);
-    return {ok: true, egresoId: egId, rowNum: rowNum};
+    return {ok: true, egresoId: egId, rowNum: rowNum,
+      _debug: { colFecha: (iFecha+1), headerFecha: (_hdrs[iFecha]||''), fechaPagoEscrita: fechaPago } };
   } catch (ex) { return {ok: false, error: ex.message}; }
 }
 

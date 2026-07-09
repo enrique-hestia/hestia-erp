@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.08.106 -->
+﻿<!-- app-build:2026.07.08.107 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -23180,7 +23180,10 @@ window.cxpSubmitPay = async function(rowNum) {
     }
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(body)});
     var res = await r.json();
-    if (res.ok) { cxpClosePay(); loadCxPData(); }
+    if (res.ok) {
+      if(res._debug){ console.log('[pagarCxP] fecha de pago '+res._debug.fechaPagoEscrita+' escrita en columna '+res._debug.colFecha+' ("'+res._debug.headerFecha+'")'); }
+      cxpClosePay(); loadCxPData();
+    }
     else { alert('Error: '+(res.error||'No se pudo procesar')); if(btn){btn.disabled=false;btn.textContent='Confirmar pago';} }
   } catch(e) { alert('Error: '+e.message); if(btn){btn.disabled=false;btn.textContent='Confirmar pago';} }
 };
