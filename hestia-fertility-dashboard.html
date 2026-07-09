@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.09.109 -->
+﻿<!-- app-build:2026.07.09.110 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -662,6 +662,9 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
     <!-- Botón de filtros móvil -->
     <button id="filter-toggle-btn" class="icon-btn mobile-only" aria-label="Filtros" onclick="toggleMobileFilters()" style="display:none">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+    </button>
+    <button class="icon-btn" aria-label="Actualizar" onclick="refrescarVistaActual(this)" title="Actualizar los datos de esta vista">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
     </button>
     <button class="icon-btn" aria-label="Exportar CSV" onclick="exportCSV()" title="Exportar">
       <i data-lucide="download"></i>
@@ -8155,6 +8158,29 @@ function _swrSet(key, data, fi, ff) {
   _swrCache[key] = { data: data, ts: Date.now(), fi: fi||'', ff: ff||'' };
 }
 function _swrDel(key) { delete _swrCache[key]; }
+
+/* Botón global "Actualizar": invalida las cachés en memoria (incluidas las listas
+   que se cargan una sola vez, como la de pacientes del Estado de Cuenta) y vuelve
+   a ejecutar la vista actual, forzando datos frescos del servidor. Sirve para
+   TODAS las páginas con datos sincronizados sin recargar toda la app. */
+function refrescarVistaActual(btn) {
+  try { _swrCache = {}; } catch(e){}
+  try { viewCache = {}; } catch(e){}
+  // Cachés que se cargan una sola vez o guardan el último payload de la vista
+  try { _ecPacientesList = []; } catch(e){}   // Estado de Cuenta: lista de pacientes
+  try { _egData = null; } catch(e){}           // Egresos
+  try { _summaryData = null; } catch(e){}       // Summary
+  try { _summaryDevengado = null; } catch(e){}
+  try { _boardData = null; } catch(e){}         // Board Deck
+  try { _semData = null; } catch(e){}           // Resumen Semanal
+  try { _ecData = null; _ecMovAll = []; } catch(e){}
+  // Animación del ícono (giro)
+  if (btn) { var svg = btn.querySelector('svg'); if (svg) { svg.style.transition='transform .6s ease'; svg.style.transform='rotate(360deg)'; setTimeout(function(){ svg.style.transition=''; svg.style.transform=''; }, 650); } }
+  // Re-ejecutar la vista actual (navigateTo re-inicializa el loader correcto)
+  var v = (typeof currentView !== 'undefined' && currentView) ? currentView : (window.currentView || 'resumen');
+  try { navigateTo(v); } catch(e){ try { location.reload(); } catch(_){} }
+  try { var lbl = document.getElementById('sync-status'); if (lbl) lbl.textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'}); } catch(e){}
+}
 
 /* ── localStorage cache helpers ─────────────────────────── */
 function lsSet(key, data, ttlMs) {
