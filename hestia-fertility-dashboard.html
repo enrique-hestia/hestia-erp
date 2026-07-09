@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.08.105 -->
+﻿<!-- app-build:2026.07.08.106 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6328,13 +6328,14 @@ var _egAnio = new Date().getFullYear();
 var _egFilters = {mes:'',contable:'',subtipo:'',proveedor:'',formaPago:'',buscar:'',pagado:''};
 var _egPage = 1, _egPerPage = 30;
 
-async function loadEgresosERP() {
+async function loadEgresosERP(force) {
   var targetAnio = currentFechaInicio ? parseInt(currentFechaInicio.substring(0,4)) : new Date().getFullYear();
   if (targetAnio !== _egAnio) { _egAnio = targetAnio; _egPage = 1; _egFilters = {mes:'',contable:'',subtipo:'',proveedor:'',formaPago:'',buscar:'',pagado:''}; }
   var root = document.getElementById('eg-root');
   if (!root) return;
   var swrKey = 'egresos_'+_egAnio;
-  var swrHit = _swrGet(swrKey, '', '');
+  // force = true (botón Actualizar) ignora la caché; el fetch fresco de abajo la reescribe con _swrSet
+  var swrHit = force ? null : _swrGet(swrKey, '', '');
   if (swrHit) {
     _egData = swrHit.data; _egPage = 1;
     await hfFinish(); _renderEgresosERP();
@@ -6542,7 +6543,9 @@ function _renderEgresosERP() {
     +'<div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility</div>'
     +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Egresos</h1>'
     +'<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">Egresos pagados (validados en PAG) · Lo pendiente está en Cuentas por Pagar · MXN</div>'
-    +'</div><div style="display:flex;align-items:center;gap:12px">'
+    +'</div><div style="display:flex;align-items:center;gap:10px">'
+    +'<button onclick="loadEgresosERP(true)" title="Actualizar solo esta vista (sin recargar toda la página)" style="display:inline-flex;align-items:center;gap:6px;padding:9px 14px;background:none;color:var(--text-primary,#111);border:1px solid var(--color-border,#e5e7eb);border-radius:10px;font-size:12px;font-weight:700;cursor:pointer"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>Actualizar</button>'
+    +'<button onclick="devConfigOpen()" title="Configurar el gasto devengado: proveedores que facturan vencido (ej. Vianto)" style="display:inline-flex;align-items:center;gap:6px;padding:9px 14px;background:none;color:var(--text-primary,#111);border:1px solid var(--color-border,#e5e7eb);border-radius:10px;font-size:12px;font-weight:700;cursor:pointer">🗓️ Facturación vencida</button>'
     +(hasPermission('bank_capture')?'<button onclick="egOpenForm()" style="display:inline-flex;align-items:center;gap:6px;padding:10px 18px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(196,106,122,.25)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Registrar egreso</button>':'')
     +'</div></div>');
 
