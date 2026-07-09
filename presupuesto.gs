@@ -597,6 +597,115 @@ function readPresupuesto(periodo) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
+/* ════════════════════════════════════════════════════════════════════════
+   CONEXIÓN Presupuesto → Operating P&L
+   Inyecta el Budget del módulo Presupuesto en el reporte P&L (readOperatingPL),
+   reemplazando la pestaña "Budget" manual. Se llama desde core.gs después de
+   readOperatingPL. Es DEFENSIVO: ante cualquier problema deja el P&L igual, y
+   solo sobrescribe la línea cuando tiene un valor confiable del Presupuesto
+   (las líneas sin match conservan su valor previo, no se borran).
+
+   El P&L muestra un MES (targetMonths=[m]) o un TRIMESTRE completo (Q1..Q4),
+   siempre dentro de un solo trimestre → budget = presupuesto del Q × (meses/3).
+   ════════════════════════════════════════════════════════════════════════ */
+function _presInyectaBudgetEnPL(plData, viewType, plMonth, plYear) {
+  try {
+    if (!plData || !plData.rows || !plData.rows.length) return plData;
+    if (typeof readPresupuesto !== 'function') return plData;
+
+    var MES_NUM = { Enero:1,Febrero:2,Marzo:3,Abril:4,Mayo:5,Junio:6,
+                    Julio:7,Agosto:8,Septiembre:9,Octubre:10,Noviembre:11,Diciembre:12 };
+    var QTR = { Q1:[1,2,3], Q2:[4,5,6], Q3:[7,8,9], Q4:[10,11,12] };
+    viewType = String(viewType || 'Q1').trim();
+    plMonth  = String(plMonth  || '').trim();
+    var yr = parseInt(plYear || new Date().getFullYear(), 10) || new Date().getFullYear();
+    var targetMonths = (plMonth && MES_NUM[plMonth]) ? [MES_NUM[plMonth]] : (QTR[viewType] || QTR.Q1);
+    var qNum = _presQ(targetMonths[0]);            // 1..4
+    var factor = targetMonths.length / 3;          // mes = 1/3 del trimestre
+    var per = yr + '-Q' + qNum;
+
+    var pp = readPresupuesto(per);
+    if (!pp || !pp.ok) return plData;
+
+    function norm(s){ return String(s||'').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/&/g,'and').replace(/\s+/g,' '); }
+
+    // Budget trimestral por clave normalizada (meta si está fijada, si no la proyección).
+    // OJO: subtipo (bud) y subgrupo (budSub) en mapas SEPARADOS para no duplicar cuando
+    // el subtipo y su subgrupo se llaman igual (ej. "Medicamentos").
+    var bud = {}, budSub = {}, revTot = 0, secTot = { COGS:0, OPEX:0, GA:0, TAXES:0 };
+    (pp.siguiente && pp.siguiente.lineas || []).forEach(function(l){
+      var v = (Number(l.meta) > 0 ? Number(l.meta) : Number(l.proyeccion)) || 0;
+      if (l.linea) bud[norm(l.linea)] = (bud[norm(l.linea)] || 0) + v;   // categoría de ingreso
+      revTot += v;
+    });
+    (pp.egresos && pp.egresos.lineas || []).forEach(function(l){
+      var v = (Number(l.meta) > 0 ? Number(l.meta) : Number(l.proyeccion)) || 0;
+      if (l.linea)    bud[norm(l.linea)]       = (bud[norm(l.linea)]       || 0) + v;   // subtipo
+      if (l.subgrupo) budSub[norm(l.subgrupo)] = (budSub[norm(l.subgrupo)] || 0) + v;   // subgrupo (Payroll…)
+      var sec = String(l.seccion || '').toUpperCase();
+      if (secTot[sec] != null) secTot[sec] += v;
+    });
+    if (revTot <= 0 && secTot.COGS <= 0 && secTot.OPEX <= 0 && secTot.GA <= 0) return plData; // sin datos → no tocar
+
+    // Métricas derivadas (base devengado del P&L)
+    var mGross = revTot - secTot.COGS;
+    var mClinic = mGross - secTot.OPEX;
+    var mEbitda = mClinic - secTot.GA;
+    var mNet = mEbitda - secTot.TAXES;
+
+    // Alias P&L (español) → subgrupo del Presupuesto (inglés). Si el subgrupo no existe,
+    // simplemente no matchea y la línea conserva su valor previo (inofensivo).
+    var ALIAS = { 'nomina':'payroll', 'renta':'rent and facilities', 'mto renta':'rent and facilities',
+      'servicios':'software and services', 'marketing':'marketing and advertising', 'gastos varios':'other ganda' };
+
+    // Resolver el budget de una fila del P&L por su etiqueta (devuelve número o null)
+    function resolveLinea(label){
+      var k = norm(label);
+      switch (k) {
+        case 'revenue': case 'total income': return revTot;
+        case 'cogs': case 'total cogs': return secTot.COGS;
+        case 'opex': case 'total opex': return secTot.OPEX;
+        case 'ganda': case 'total ganda': case 'ga': return secTot.GA;   // "g&a" → "ganda"
+        case 'taxes': return secTot.TAXES;
+        case 'gross profit': return mGross;
+        case 'clinic contribution': return mClinic;
+        case 'ebitda': return mEbitda;
+        case 'net profit': return mNet;
+      }
+      if (bud[k] != null) return bud[k];                 // subtipo / categoría exacta
+      if (budSub[k] != null) return budSub[k];           // subgrupo exacto
+      if (ALIAS[k]) { if (bud[ALIAS[k]] != null) return bud[ALIAS[k]]; if (budSub[ALIAS[k]] != null) return budSub[ALIAS[k]]; }
+      // ingresos: match laxo por substring (set chico, seguro)
+      var revKeys = (pp.siguiente && pp.siguiente.lineas || []).map(function(l){ return norm(l.linea); });
+      for (var i=0;i<revKeys.length;i++){ var rk=revKeys[i]; if(rk && (rk===k || rk.indexOf(k)>=0 || k.indexOf(rk)>=0)) return bud[rk]; }
+      return null;   // sin match → conservar valor previo
+    }
+
+    var totBudget = revTot * factor;   // denominador para %Budget
+    plData.rows.forEach(function(row){
+      if (!row.values || row.values.length < 5) return;
+      var b = resolveLinea(row.label);
+      // Tratar 0/null como "sin dato del Presupuesto" → NO pisar el valor previo con 0
+      if (b === null || b === undefined || b === 0) {
+        var bgOld = Number(row.values[2]) || 0;
+        row.values[3] = totBudget ? bgOld / totBudget : null;
+        row.values[4] = bgOld ? (Number(row.values[0]) - bgOld) / Math.abs(bgOld) : null;
+        return;
+      }
+      var bg = b * factor;
+      row.values[2] = bg;
+      row.values[3] = totBudget ? bg / totBudget : null;
+      row.values[4] = bg ? (Number(row.values[0]) - bg) / Math.abs(bg) : null;
+    });
+
+    // Marcar la fuente en el encabezado y en un flag para el frontend
+    if (plData.colHeaders && plData.colHeaders[2]) plData.colHeaders[2].label += ' · Presupuesto';
+    plData.budgetFuente = { origen:'presupuesto', periodo:per, factor:factor,
+      mensual:(targetMonths.length===1), nota:(targetMonths.length===1?'Budget mensual = presupuesto trimestral ÷ 3':'Budget del trimestre') };
+    return plData;
+  } catch (ex) { return plData; }   // nunca romper el P&L
+}
+
 function _presCrecimientoLinea(histQ, cat, refY, refQ) {
   var ult = 0, prev = 0, yy = refY, qq = refQ;
   for (var i = 0; i < 4; i++) { var p = _presPrevQ(yy, qq); var k = _presQKey(p.y, p.q); ult += (histQ[k] && histQ[k][cat]) || 0; yy = p.y; qq = p.q; }
