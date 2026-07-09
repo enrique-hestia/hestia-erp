@@ -1512,10 +1512,23 @@ function pagarCxP(body) {
     var fechaPago = body.fechaPago || new Date().toISOString().substring(0,10);
     var formaPago = body.formaPago || '';
 
-    // Col B = Fecha (2), Col N = PAGADO (14), Col Q = FormaPago (17)
-    sh.getRange(rowNum, 2).setValue(new Date(fechaPago)); // Fecha de pago
-    sh.getRange(rowNum, 14).setValue(true); // PAGADO = TRUE
-    if (formaPago) sh.getRange(rowNum, 17).setValue(formaPago);
+    // Detectar columnas por ENCABEZADO (robusto ante cambios de orden en la hoja).
+    // Fallback a las posiciones históricas si no se encuentra el header. 0-based.
+    var _hdrs = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function(h){ return String(h).trim().toLowerCase(); });
+    var _col = function(sub, fb){ var lc = String(sub).toLowerCase(); for (var c = 0; c < _hdrs.length; c++) { if (_hdrs[c].indexOf(lc) > -1) return c; } return fb; };
+    var iFecha=_col('fecha',1), iPagado=_col('pagado',13), iForma=_col('forma',16),
+        iEgresos=_col('egresos',9), iNotas=_col('notas',10), iMes=_col('mes',2),
+        iProv=_col('proveedor',4), iConc=_col('concepto',8);
+
+    var _fd = new Date(fechaPago);
+    sh.getRange(rowNum, iFecha+1).setValue(_fd);          // Fecha de pago (por header)
+    sh.getRange(rowNum, iPagado+1).setValue(true);        // PAGADO = TRUE
+    if (formaPago) sh.getRange(rowNum, iForma+1).setValue(formaPago);
+    // Mes tag consistente con la fecha (evita que quede desalineado con el filtro Mes)
+    if (iMes > -1 && !isNaN(_fd)) {
+      var _M3 = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      sh.getRange(rowNum, iMes+1).setValue(_M3[_fd.getMonth()] + '-' + String(_fd.getFullYear()).slice(-2));
+    }
     // NOTA: el comprobante/factura y su hipervínculo los escribe uploadFile al subir el
     // archivo (único escritor del link). pagarCxP ya NO toca esas columnas, para no
     // sobrescribir con un link viejo (que el anti-duplicados pudo mandar a papelera).
@@ -1525,26 +1538,26 @@ function pagarCxP(body) {
     var tipoCambio = parseFloat(body.tipoCambio) || 0;
     var montoUSD = parseFloat(body.montoUSD) || 0;
 
-    // Leer datos de la fila para banco routing
-    var rowData = sh.getRange(rowNum, 1, 1, 20).getValues()[0];
-    var monto = parseFloat(rowData[9]) || 0;
+    // Leer datos de la fila para banco routing (por header)
+    var rowData = sh.getRange(rowNum, 1, 1, sh.getLastColumn()).getValues()[0];
+    var monto = parseFloat(String(rowData[iEgresos]||'').replace(/[$,\s]/g,'')) || 0;
     // Saldo parcial (créditos/abonos ya aplicados) — si viene, ese es el
-    // importe real que se rutea a banco/caja; el Monto (col J) del egreso no se toca.
+    // importe real que se rutea a banco/caja; el Monto del egreso no se toca.
     if (body.montoOverride !== undefined && body.montoOverride !== null && parseFloat(body.montoOverride) > 0) {
       monto = parseFloat(body.montoOverride);
     }
-    var proveedor = String(rowData[4] || '');
-    var concepto = String(rowData[8] || '');
+    var proveedor = String(rowData[iProv] || '');
+    var concepto = String(rowData[iConc] || '');
     var egId = String(rowData[0] || '');
 
     // Pago en USD: convertir a MXN, actualizar el monto del egreso y dejar nota
     var esUSD = (formaPago === 'Santander' || formaPago === 'AMEX') && divisa === 'USD' && tipoCambio > 0 && montoUSD > 0;
     if (esUSD) {
       monto = Math.round(montoUSD * tipoCambio * 100) / 100;
-      sh.getRange(rowNum, 10).setValue(monto); // Monto del egreso en MXN (col J)
-      var notaPrev = String(rowData[10] || '');
+      sh.getRange(rowNum, iEgresos+1).setValue(monto);   // Monto del egreso en MXN
+      var notaPrev = String(rowData[iNotas] || '');
       var notaUSD = 'USD ' + montoUSD.toFixed(2) + ' @ TC ' + tipoCambio;
-      sh.getRange(rowNum, 11).setValue(notaPrev ? (notaPrev + ' · ' + notaUSD) : notaUSD); // Notas (col K)
+      sh.getRange(rowNum, iNotas+1).setValue(notaPrev ? (notaPrev + ' · ' + notaUSD) : notaUSD);
     }
 
     // Rutear a banco según forma de pago
