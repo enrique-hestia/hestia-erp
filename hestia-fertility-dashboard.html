@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.08.102 -->
+﻿<!-- app-build:2026.07.08.103 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -15178,6 +15178,7 @@ var _compData = null;
    ══════════════════════════════════════════════════════════════ */
 var _summaryData = null;
 var _summaryCfg  = null;
+var _summaryDevengado = null; // memo informativo de gasto devengado (facturación vencida)
 var _summaryOpen = {}; // línea drill-down abierta
 var _summarySubOpen = {}; // sub-item (subgrupo/producto/subtipo) abierto
 var _summaryProdOpen = {}; // producto (nivel 3) abierto
@@ -15298,8 +15299,11 @@ async function loadSummary(){
   var fi=currentFechaInicio, ff=currentFechaFin;
   try {
     var url=APPS_SCRIPT_URL+'?action=summary&fechaInicio='+encodeURIComponent(fi)+'&fechaFin='+encodeURIComponent(ff)+'&token='+encodeURIComponent(getToken());
-    var r=await fetch(url); var j=await r.json();
+    var urlDv=APPS_SCRIPT_URL+'?action=gastoDevengado&fechaInicio='+encodeURIComponent(fi)+'&fechaFin='+encodeURIComponent(ff)+'&token='+encodeURIComponent(getToken());
+    var pair=await Promise.all([ fetch(url), fetch(urlDv).catch(function(){return null;}) ]);
+    var j=await pair[0].json();
     if(!j.ok) throw new Error(j.error||'Error desconocido');
+    _summaryDevengado = pair[1] ? await pair[1].json().catch(function(){return null;}) : null;
     _summaryData=j; _summaryOpen={};
     _renderSummary();
   } catch(e){
@@ -15321,6 +15325,7 @@ function _renderSummary(){
   h+='<button class="sm-btn" onclick="summaryToggleAll(true)">Expandir</button>';
   h+='<button class="sm-btn" onclick="summaryToggleAll(false)">Colapsar</button>';
   h+='<button class="sm-btn" onclick="summaryConfigOpen()"><i data-lucide="sliders-horizontal" style="width:14px;height:14px"></i>Configurar mapeo</button>';
+  h+='<button class="sm-btn" onclick="devConfigOpen()" title="Proveedores que facturan vencido (ej. Vianto): el gasto se recorre, informativo, al mes que corresponde"><i data-lucide="calendar-clock" style="width:14px;height:14px"></i>Facturación vencida</button>';
   h+='<button class="sm-btn" onclick="summaryExport()"><i data-lucide="file-spreadsheet" style="width:14px;height:14px"></i>Excel</button>';
   h+='<button class="sm-btn" onclick="summaryPrint()"><i data-lucide="printer" style="width:14px;height:14px"></i>Imprimir</button>';
   h+='<button class="sm-btn primary" onclick="loadSummary()"><i data-lucide="refresh-cw" style="width:14px;height:14px"></i></button>';
@@ -15462,6 +15467,9 @@ function _renderSummary(){
       +'Es la liquidación de la tarjeta del periodo anterior (apalancamiento), no un gasto nuevo del periodo, por eso no afecta la utilidad. Sí es una salida de caja.</div>';
   }
 
+  // Memo informativo: gasto que CORRESPONDE al periodo (facturación vencida)
+  h+=_devengadoMemoHtml(_summaryDevengado, rec.egresosPL);
+
   // % Participación por Línea (de Revenue)
   var revLines=(d.lineas||[]).filter(function(x){ return x.tipo==='dato'&&x.grupo==='REVENUE'; });
   if(revLines.length){
@@ -15490,6 +15498,132 @@ function _renderSummary(){
 
   root.innerHTML=h;
   try{ lucide.createIcons(); }catch(e){}
+}
+
+// ── Memo informativo: gasto DEVENGADO (facturación vencida, ej. Vianto) ─────
+// NO toca flujo ni P&L: solo recorre pagos al mes en que se consumió el servicio.
+function _devMesLbl(ym){
+  if(!/^\d{4}-\d{2}$/.test(String(ym||''))) return String(ym||'');
+  var M=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  return M[parseInt(ym.substring(5,7),10)-1]+' '+ym.substring(0,4);
+}
+function _devengadoMemoHtml(dv, egresosPagados){
+  if(!dv || !dv.ok || !dv.aplica) return '';
+  var ajuste=Number(dv.ajuste)||0, entran=Number(dv.entran)||0, salen=Number(dv.salen)||0;
+  var det=dv.detalle||[];
+  if(!det.length && ajuste===0) return '';
+  var pagado=Number(egresosPagados)||0, corresponde=pagado+ajuste;
+  var provs=(dv.proveedores||[]).join(', ');
+  var detHtml='';
+  if(det.length){
+    var tdb='padding:3px 8px;border-top:1px solid rgba(15,118,110,.14)';
+    detHtml='<details style="margin-top:9px"><summary style="cursor:pointer;font-weight:700;font-size:11px">Ver movimientos ('+det.length+')</summary>'
+      +'<div style="max-height:200px;overflow:auto;margin-top:6px;border:1px solid rgba(15,118,110,.22);border-radius:7px"><table style="width:100%;border-collapse:collapse;font-size:10.5px">'
+      +'<thead><tr style="background:rgba(15,118,110,.10)">'
+        +'<th style="text-align:left;padding:4px 8px">Proveedor</th>'
+        +'<th style="text-align:left;padding:4px 8px">Pagado</th>'
+        +'<th style="text-align:left;padding:4px 8px">Corresponde a</th>'
+        +'<th style="text-align:center;padding:4px 8px"></th>'
+        +'<th style="text-align:right;padding:4px 8px">Monto</th></tr></thead><tbody>'
+      +det.map(function(x){
+          var flecha = x.tipo==='sale' ? '<span style="color:#b45309">↦ sale</span>'
+                     : x.tipo==='entra'? '<span style="color:#0f766e">↤ entra</span>'
+                     : '<span style="opacity:.6">↔ movido</span>';
+          return '<tr>'
+            +'<td style="'+tdb+'">'+_esc(x.proveedor||'')+'</td>'
+            +'<td style="'+tdb+'">'+_esc((x.fecha||'').substring(0,10))+' <span style="opacity:.6">('+_devMesLbl(x.mesPago)+')</span></td>'
+            +'<td style="'+tdb+'"><b>'+_devMesLbl(x.mesServicio)+'</b></td>'
+            +'<td style="'+tdb+';text-align:center">'+flecha+'</td>'
+            +'<td style="'+tdb+';text-align:right">'+_sumMoney(x.monto)+'</td></tr>';
+        }).join('')
+      +'</tbody></table></div></details>';
+  }
+  var parcialTxt = dv.parcial ? ' <b>(parcial)</b> — el periodo incluye el mes en curso; el pago del proveedor que llega el mes siguiente aún no existe, así que el dato se completará cuando se registre.' : '';
+  return '<div class="sm-note" style="margin-top:16px;padding:14px 16px;border-radius:10px;border:1px solid #0f766e;background:rgba(15,118,110,.08);color:#0f766e;font-size:12.5px">'
+    +'<div style="font-weight:800;font-size:13px;margin-bottom:2px">🧾 Gasto que corresponde al periodo (informativo · base devengado)</div>'
+    +'<div style="font-size:11.5px;opacity:.9;margin-bottom:8px">No afecta el flujo de efectivo ni el estado de resultados. Solo recorre los pagos de proveedores de <b>facturación vencida</b> ('+_esc(provs||'—')+') al mes en que se consumió el servicio, para que veas el gasto real del periodo.</div>'
+    +'<div style="display:grid;grid-template-columns:1fr auto;gap:2px 14px;max-width:520px;font-size:12.5px">'
+      +'<span>Egresos del periodo (pagado, como en el P&amp;L)</span><b style="text-align:right">'+_sumMoney(pagado)+'</b>'
+      +'<span style="opacity:.85">− Pagados en el periodo pero corresponden a otros meses</span><b style="text-align:right;opacity:.85">'+_sumMoney(salen)+'</b>'
+      +'<span style="opacity:.85">+ Pagados en otros meses pero corresponden a este periodo</span><b style="text-align:right;opacity:.85">'+_sumMoney(entran)+'</b>'
+      +'<span style="font-weight:800;border-top:1.5px solid rgba(15,118,110,.35);padding-top:3px">= Gasto que corresponde al periodo</span>'
+      +'<b style="text-align:right;font-weight:800;border-top:1.5px solid rgba(15,118,110,.35);padding-top:3px">'+_sumMoney(corresponde)+'</b>'
+    +'</div>'
+    +'<div style="font-size:11px;opacity:.8;margin-top:7px">Ajuste informativo: <b>'+(ajuste>=0?'+':'')+_sumMoney(ajuste)+'</b> vs lo pagado.'+parcialTxt+'</div>'
+    +detHtml+'</div>';
+}
+
+// ── Editor: proveedores de facturación vencida (regla del gasto devengado) ──
+var _devCfgState={config:[], proveedores:[]};
+async function devConfigOpen(){
+  var ov=document.getElementById('dev-cfg-ov');
+  if(!ov){ ov=document.createElement('div'); ov.id='dev-cfg-ov'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9600;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.innerHTML='<div style="background:var(--color-surface,#fff);border-radius:14px;padding:26px;font-size:13px;color:var(--color-text,#1a252f)">Cargando configuración…</div>';
+  try{
+    var r=await fetch(APPS_SCRIPT_URL+'?action=factVencida&token='+encodeURIComponent(getToken()));
+    var j=await r.json();
+    _devCfgState.config=(j&&j.ok&&j.config)?j.config.slice():[];
+    _devCfgState.proveedores=(j&&j.proveedores)||[];
+  }catch(e){ _devCfgState.config=[]; _devCfgState.proveedores=[]; }
+  if(!_devCfgState.config.length) _devCfgState.config=[{proveedor:'Vianto',offset:-1,diaTope:12}];
+  _devConfigRender();
+}
+function _devConfigCollect(){
+  var rows=document.querySelectorAll('#dev-cfg-ov .dev-row');
+  var out=[];
+  rows.forEach(function(row){
+    var p=row.querySelector('.dev-p').value.trim();
+    var o=parseInt(row.querySelector('.dev-o').value,10); if(isNaN(o))o=-1;
+    var d=parseInt(row.querySelector('.dev-d').value,10); if(isNaN(d))d=12;
+    if(p) out.push({proveedor:p, offset:o, diaTope:d});
+  });
+  _devCfgState.config=out;
+}
+function _devConfigRender(){
+  var ov=document.getElementById('dev-cfg-ov'); if(!ov) return;
+  var dl=_devCfgState.proveedores.map(function(p){ return '<option value="'+_esc(p)+'"></option>'; }).join('');
+  var rows=_devCfgState.config.map(function(c,i){
+    return '<div class="dev-row" style="display:grid;grid-template-columns:1fr 90px 90px 34px;gap:8px;align-items:center;margin-bottom:8px">'
+      +'<input class="dev-p" list="dev-provs" value="'+_esc(c.proveedor||'')+'" placeholder="Proveedor (ej. Vianto)" style="padding:7px 9px;border:1px solid var(--color-border,#e5e7eb);border-radius:8px;font-size:13px">'
+      +'<input class="dev-o" type="number" value="'+(c.offset==null?-1:c.offset)+'" title="Meses a recorrer (−1 = mes anterior)" style="padding:7px 9px;border:1px solid var(--color-border,#e5e7eb);border-radius:8px;font-size:13px;text-align:center">'
+      +'<input class="dev-d" type="number" min="1" max="31" value="'+(c.diaTope==null?12:c.diaTope)+'" title="Día tope: si el pago cae hasta este día, corresponde al mes anterior" style="padding:7px 9px;border:1px solid var(--color-border,#e5e7eb);border-radius:8px;font-size:13px;text-align:center">'
+      +'<button onclick="devConfigDelRow('+i+')" title="Quitar" style="background:none;border:none;cursor:pointer;color:#c0505c;font-size:17px">✕</button>'
+      +'</div>';
+  }).join('');
+  ov.innerHTML='<div style="background:var(--color-surface,#fff);color:var(--color-text,#1a252f);border-radius:14px;padding:24px 26px;max-width:640px;width:100%;max-height:88vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35)">'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:6px">'
+      +'<div style="font-weight:800;font-size:16px">🧾 Proveedores de facturación vencida</div>'
+      +'<button onclick="devConfigClose()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--color-text-muted,#9ca3af)">✕</button></div>'
+    +'<p style="font-size:12.5px;color:var(--color-text-muted,#4b5563);line-height:1.6;margin:0 0 16px">Estos proveedores te cobran <b>vencido</b> (consumes el servicio un mes y te lo pagan el siguiente). El sistema recorre ese gasto, <b>de forma informativa</b>, al mes que corresponde — <b>sin tocar</b> el flujo de efectivo ni el estado de resultados. '
+      +'<br><b>Meses</b>: −1 = el pago corresponde al mes anterior. <b>Día tope</b>: si el pago cae hasta ese día del mes, se toma como del mes anterior; si cae después, se queda en su propio mes.</p>'
+    +'<datalist id="dev-provs">'+dl+'</datalist>'
+    +'<div style="display:grid;grid-template-columns:1fr 90px 90px 34px;gap:8px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--color-text-muted,#9ca3af);margin-bottom:6px">'
+      +'<span>Proveedor</span><span style="text-align:center">Meses</span><span style="text-align:center">Día tope</span><span></span></div>'
+    +rows
+    +'<button onclick="devConfigAddRow()" style="margin-top:4px;background:none;border:1px dashed var(--color-border,#cbd5e1);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12.5px;color:var(--color-text,#1a252f)">+ Agregar proveedor</button>'
+    +'<div style="font-size:11.5px;color:var(--color-text-muted,#6b7280);margin-top:14px;padding-top:12px;border-top:1px solid var(--color-border,#eee)"><b>Override manual:</b> si un mes cambia el patrón, escribe el mes correcto (formato <code>AAAA-MM</code>, ej. <code>2026-06</code>) en una columna llamada <b>«Mes Devengado»</b> en la hoja de Egresos de ese pago; ese valor manda sobre la regla.</div>'
+    +'<div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px">'
+      +'<button onclick="devConfigClose()" style="padding:9px 16px;border:1px solid var(--color-border,#e5e7eb);background:none;border-radius:9px;cursor:pointer;font-size:13px;color:var(--color-text,#1a252f)">Cancelar</button>'
+      +'<button onclick="devConfigSave()" style="padding:9px 18px;border:none;background:#0f766e;color:#fff;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700">Guardar</button></div>'
+    +'</div>';
+}
+function devConfigAddRow(){ _devConfigCollect(); _devCfgState.config.push({proveedor:'',offset:-1,diaTope:12}); _devConfigRender(); }
+function devConfigDelRow(i){ _devConfigCollect(); _devCfgState.config.splice(i,1); _devConfigRender(); }
+function devConfigClose(){ var ov=document.getElementById('dev-cfg-ov'); if(ov) ov.remove(); }
+async function devConfigSave(){
+  _devConfigCollect();
+  var s=getSession()||{};
+  var btn=event&&event.target; if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'factVencidaGuardar',config:_devCfgState.config,usuario:s.email||''})});
+    var j=await r.json();
+    if(!j.ok) throw new Error(j.error||'Error al guardar');
+    devConfigClose();
+    if(typeof loadSummary==='function' && document.getElementById('summary-root')) loadSummary();
+    if(typeof loadBoard==='function' && document.getElementById('board-root')) loadBoard();
+    if(typeof toast==='function') toast('Facturación vencida actualizada');
+  }catch(e){ alert('No se pudo guardar: '+(e.message||e)); if(btn){ btn.disabled=false; btn.textContent='Guardar'; } }
 }
 
 function summaryToggle(idx){ _summaryOpen[idx]=!_summaryOpen[idx]; _renderSummary(); }
@@ -15711,7 +15845,7 @@ async function summaryConfigSave(){
 /* ══════════════════════════════════════════════════════════════
    BOARD DECK — Informe Ejecutivo de Resultados (presentación a socios)
    ══════════════════════════════════════════════════════════════ */
-var _boardData=null, _boardCfg=null, _boardCharts=[], _boardSlide=0;
+var _boardData=null, _boardCfg=null, _boardCharts=[], _boardSlide=0, _boardDevengado=null;
 var _boardQuarter=null; // trimestre a presentar (null = usa el rango de fechas global)
 var _BOARD_MESES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 // Fechas de un trimestre "YYYY-Qn"
@@ -15818,8 +15952,9 @@ async function loadBoard(){
     if(_boardQuarter){ var _qd=_boardQuarterDates(_boardQuarter); if(_qd){ _bfi=_qd.fi; _bff=_qd.ff; } }
     var u1=APPS_SCRIPT_URL+'?action=boardReport&fechaInicio='+encodeURIComponent(_bfi)+'&fechaFin='+encodeURIComponent(_bff)+'&token='+tok;
     var u2=APPS_SCRIPT_URL+'?action=boardConfig&token='+tok;
-    var res=await Promise.all([fetch(u1).then(function(r){return r.json();}), fetch(u2).then(function(r){return r.json();}).catch(function(){return null;})]);
-    var j=res[0]; _boardCfg=res[1]||{config:{}};
+    var u3=APPS_SCRIPT_URL+'?action=gastoDevengado&fechaInicio='+encodeURIComponent(_bfi)+'&fechaFin='+encodeURIComponent(_bff)+'&token='+tok;
+    var res=await Promise.all([fetch(u1).then(function(r){return r.json();}), fetch(u2).then(function(r){return r.json();}).catch(function(){return null;}), fetch(u3).then(function(r){return r.json();}).catch(function(){return null;})]);
+    var j=res[0]; _boardCfg=res[1]||{config:{}}; _boardDevengado=res[2]||null;
     if(!_boardCfg.config || !Object.keys(_boardCfg.config).length){ try{ var lc=JSON.parse(localStorage.getItem('hestia_board_cfg')); if(lc) _boardCfg={config:lc}; }catch(e){} }
     if(!j.ok) throw new Error(j.error||'Error');
     _boardData=j;
@@ -16044,6 +16179,8 @@ function _renderBoard(){
   h+='</div>';
   // Presupuesto: proyectado vs real + próximo Q
   h+=_boardPresupuestoSection();
+  // Memo informativo: gasto que corresponde al periodo (facturación vencida)
+  h+=_devengadoMemoHtml(_boardDevengado, k.egresos);
   // Charts
   h+='<div class="bd-charts">';
   h+='<div class="bd-card"><h4>Ingresos vs Egresos · '+d.periodo.inicio.substring(0,4)+'</h4><canvas id="bd-c-serie"></canvas></div>';
@@ -16385,6 +16522,10 @@ function _boardSlideDefs(){
   }
   // 7e Ganancia / pérdida mensual (últimos 12 meses)
   if((d.serie||[]).some(function(m){return (m.ingresos||m.egresos);})) slides.push({t:'Ganancia / pérdida', html:frame('', _bGLBody(d.serie))});
+  // 7f Gasto devengado (facturación vencida) — informativo
+  var _dv=_boardDevengado;
+  if(_dv && _dv.ok && _dv.aplica && ((_dv.detalle||[]).length || (_dv.ajuste||0)!==0))
+    slides.push({t:'Gasto que corresponde al periodo', html:frame('', _bDevengadoBody(_dv, k.egresos))});
   // 8 Comparativo anual
   slides.push({t:'Comparativo Anual', chart:'serieBig', html:frame('','<h2>Comparativo Anual</h2><h1>Últimos 12 meses</h1>'
     +'<div style="position:relative;height:260px"><canvas id="bd-s-serieBig"></canvas></div>'
@@ -16440,6 +16581,33 @@ function _bGLBody(serie){
   return '<h2>Rentabilidad</h2><h1>Ganancia / pérdida por mes</h1>'
     +'<svg viewBox="0 0 '+W+' '+H+'" width="100%"><line x1="55" y1="'+zeroY+'" x2="'+(W-10)+'" y2="'+zeroY+'" stroke="#bbb" stroke-width="1"/><text x="50" y="'+(zeroY+3)+'" text-anchor="end" font-size="9" fill="#999">$0</text>'+bars+'</svg>'
     +'<p class="narr">Utilidad mensual (ingresos − egresos) de los últimos 12 meses. Las barras <span style="color:#c0505c">rojas</span> son meses en <b>pérdida</b> y las <span style="color:#1D9E75">verdes</span> en <b>ganancia</b>. Acumulado del periodo mostrado: <b>'+_bMoney(totNeto)+'</b>.</p>';
+}
+// Slide de GASTO DEVENGADO (facturación vencida, ej. Vianto) — informativo, no financiero
+function _bDevengadoBody(dv, egresosPagados){
+  var entran=Number(dv.entran)||0, salen=Number(dv.salen)||0, ajuste=Number(dv.ajuste)||0;
+  var pagado=Number(egresosPagados)||0, corresponde=pagado+ajuste;
+  var provs=(dv.proveedores||[]).join(', ');
+  var det=(dv.detalle||[]);
+  var row=function(l,v,strong,col){ return '<tr'+(strong?' style="border-top:2px solid #333"':'')+'><td style="padding:6px 4px;'+(strong?'font-weight:800':'')+'">'+l+'</td>'
+    +'<td style="padding:6px 4px;text-align:right;font-weight:'+(strong?'800':'600')+(col?';color:'+col:'')+'">'+_bMoney(v)+'</td></tr>'; };
+  var detTbl='';
+  if(det.length){
+    detTbl='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#8a8a8a;margin:6px 0 4px">Movimientos recorridos</div>'
+      +'<table class="bd-tbl" style="font-size:12px"><tr style="font-weight:800;color:#8a8a8a"><td>Proveedor</td><td>Pagado</td><td>Corresponde a</td><td style="text-align:right">Monto</td></tr>'
+      +det.slice(0,12).map(function(x){ return '<tr><td>'+_esc(x.proveedor||'')+'</td><td>'+_devMesLbl(x.mesPago)+'</td><td><b>'+_devMesLbl(x.mesServicio)+'</b></td><td style="text-align:right;font-weight:700">'+_bMoney(x.monto)+'</td></tr>'; }).join('')
+      +'</table>';
+  }
+  return '<h2>Gasto devengado · informativo</h2><h1>Gasto que corresponde al periodo</h1>'
+    +'<p class="narr" style="margin:0 0 14px">Ajuste <b>informativo</b> — no afecta el flujo de efectivo ni el estado de resultados. Recorre los pagos de proveedores de <b>facturación vencida</b> ('+_esc(provs||'—')+') al mes en que se consumió el servicio, para ver el gasto real del periodo.'+(dv.parcial?' <b>(Parcial:</b> el periodo incluye el mes en curso; el pago que llega el mes siguiente aún no se registra.)':'')+'</p>'
+    +'<div style="display:grid;grid-template-columns:1.1fr 1fr;gap:26px;align-items:start">'
+      +'<table class="bd-tbl" style="font-size:13.5px">'
+        +row('Egresos del periodo (pagado, P&amp;L)',pagado)
+        +row('− Pagados aquí, corresponden a otros meses',salen)
+        +row('+ Pagados en otros meses, corresponden a éste',entran)
+        +row('= Gasto que corresponde al periodo',corresponde,true,'#0f766e')
+      +'</table>'
+      +'<div>'+detTbl+'</div>'
+    +'</div>';
 }
 function _boardRenderStage(){
   var stage=document.getElementById('bd-stage'); if(!stage) return;

@@ -470,6 +470,17 @@ function doGet(e) {
       return jsonResponse(readSummaryConfig());
     }
 
+    if (action === 'gastoDevengado') {
+      if (typeof readGastoDevengado !== 'function')
+        return jsonResponse({ok:false, error:'Agrega devengado.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readGastoDevengado((e && e.parameter.fechaInicio) || '', (e && e.parameter.fechaFin) || ''));
+    }
+    if (action === 'factVencida') {
+      if (typeof factVencidaLeer !== 'function')
+        return jsonResponse({ok:false, error:'Agrega devengado.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(factVencidaLeer());
+    }
+
     if (action === 'boardReport') {
       if (typeof readBoardReport !== 'function')
         return jsonResponse({ok:false, error:'Agrega board.gs al proyecto de Apps Script y redespliega.'});

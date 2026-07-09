@@ -762,6 +762,11 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});
       return jsonResponse(presSetEscenarios(body));
     }
+    if (body.action === 'factVencidaGuardar') {
+      if (typeof factVencidaGuardar !== 'function')
+        return jsonResponse({ok:false, error:'Agrega devengado.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(factVencidaGuardar(body));
+    }
     if (body.action === 'chatSend') {
       if (typeof chatSend !== 'function')
         return jsonResponse({ok:false, error:'Agrega chat.gs en Apps Script y redespliega.'});
@@ -1796,7 +1801,7 @@ function readEgresosData(anio) {
         iFPago=col('forma de pago'), iObs=col('observaciones'), iLinkFact=col('link factura'),
         iLinkPago=col('link pago'), iLinkCotiz=col('cotiz'),
         iUSD=col('usd'), iTC=col('tipo de cambio'), iEstatus=col('estatus'),
-        iRec=col('recurrente');
+        iRec=col('recurrente'), iDeveng=col('devengado');
 
     function num(v) { if (typeof v==='number') return v; var n=parseFloat(String(v||'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
     function dt(v) { if(!v)return''; if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0'); return String(v); }
@@ -1851,7 +1856,8 @@ function readEgresosData(anio) {
         montoUSD: iUSD>-1 ? num(row[iUSD]) : 0,
         tipoCambio: iTC>-1 ? num(row[iTC]) : 0,
         estatus: iEstatus>-1 ? String(row[iEstatus]||'').trim() : '',
-        recurrenteId: iRec>-1 ? String(row[iRec]||'').trim() : ''
+        recurrenteId: iRec>-1 ? String(row[iRec]||'').trim() : '',
+        mesDevengado: iDeveng>-1 ? (function(v){ if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0'); return String(v||'').trim(); })(row[iDeveng]) : ''
       });
     }
 
