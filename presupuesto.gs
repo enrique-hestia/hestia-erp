@@ -632,12 +632,19 @@ function _presInyectaBudgetEnPL(plData, viewType, plMonth, plYear) {
     // Budget trimestral por clave normalizada (meta si está fijada, si no la proyección).
     // OJO: subtipo (bud) y subgrupo (budSub) en mapas SEPARADOS para no duplicar cuando
     // el subtipo y su subgrupo se llaman igual (ej. "Medicamentos").
-    var bud = {}, budSub = {}, revTot = 0, secTot = { COGS:0, OPEX:0, GA:0, TAXES:0 };
+    var bud = {}, budG = {}, budSub = {}, revTot = 0, secTot = { COGS:0, OPEX:0, GA:0, TAXES:0 };
+    // INGRESOS POR GRUPO (columna U: Alta/Surrogacy/Externos/Other Income) — es la dimensión
+    // que usa el P&L. Antes comparaba contra categorías (nivel fino) y por eso Alta/Surrogacy
+    // no calzaban (su categoría interna tiene otro nombre). revTot = total de la proyección.
+    var _grps = (pp.siguiente && pp.siguiente.ingresosGrupos) || [];
+    _grps.forEach(function(g){ if (g && g.grupo) budG[norm(g.grupo)] = (budG[norm(g.grupo)] || 0) + (Number(g.importeProy)||0); });
+    revTot = _grps.reduce(function(s,g){ return s + (Number(g.importeProy)||0); }, 0);
+    // También por CATEGORÍA (nivel fino) por si alguna línea calza mejor ahí o hay meta por línea
     (pp.siguiente && pp.siguiente.lineas || []).forEach(function(l){
       var v = (Number(l.meta) > 0 ? Number(l.meta) : Number(l.proyeccion)) || 0;
-      if (l.linea) bud[norm(l.linea)] = (bud[norm(l.linea)] || 0) + v;   // categoría de ingreso
-      revTot += v;
+      if (l.linea) bud[norm(l.linea)] = (bud[norm(l.linea)] || 0) + v;
     });
+    if (revTot <= 0) { (pp.siguiente && pp.siguiente.lineas || []).forEach(function(l){ revTot += (Number(l.meta)>0?Number(l.meta):Number(l.proyeccion))||0; }); }
     (pp.egresos && pp.egresos.lineas || []).forEach(function(l){
       var v = (Number(l.meta) > 0 ? Number(l.meta) : Number(l.proyeccion)) || 0;
       if (l.linea)    bud[norm(l.linea)]       = (bud[norm(l.linea)]       || 0) + v;   // subtipo
@@ -672,12 +679,15 @@ function _presInyectaBudgetEnPL(plData, viewType, plMonth, plYear) {
         case 'ebitda': return mEbitda;
         case 'net profit': return mNet;
       }
+      if (budG[k] != null) return budG[k];               // GRUPO de ingreso (Alta/Surrogacy/Externos/Other Income)
       if (bud[k] != null) return bud[k];                 // subtipo / categoría exacta
       if (budSub[k] != null) return budSub[k];           // subgrupo exacto
       if (ALIAS[k]) { if (bud[ALIAS[k]] != null) return bud[ALIAS[k]]; if (budSub[ALIAS[k]] != null) return budSub[ALIAS[k]]; }
-      // ingresos: match laxo por substring (set chico, seguro)
-      var revKeys = (pp.siguiente && pp.siguiente.lineas || []).map(function(l){ return norm(l.linea); });
-      for (var i=0;i<revKeys.length;i++){ var rk=revKeys[i]; if(rk && (rk===k || rk.indexOf(k)>=0 || k.indexOf(rk)>=0)) return bud[rk]; }
+      // ingresos: match laxo por substring, primero sobre GRUPOS, luego categorías
+      var gKeys = Object.keys(budG);
+      for (var i=0;i<gKeys.length;i++){ var gk=gKeys[i]; if(gk && (gk===k || gk.indexOf(k)>=0 || k.indexOf(gk)>=0)) return budG[gk]; }
+      var cKeys = (pp.siguiente && pp.siguiente.lineas || []).map(function(l){ return norm(l.linea); });
+      for (var j=0;j<cKeys.length;j++){ var ck=cKeys[j]; if(ck && (ck===k || ck.indexOf(k)>=0 || k.indexOf(ck)>=0)) return bud[ck]; }
       return null;   // sin match → conservar valor previo
     }
 
@@ -700,9 +710,9 @@ function _presInyectaBudgetEnPL(plData, viewType, plMonth, plYear) {
 
     // Marcar la fuente en el encabezado y en un flag para el frontend
     if (plData.colHeaders && plData.colHeaders[2]) plData.colHeaders[2].label += ' · Presupuesto';
-    // Diagnóstico: categorías de ingreso que trae el Presupuesto (para mapear las que no calzan por nombre)
-    var cats = (pp.siguiente && pp.siguiente.lineas || []).map(function(l){
-      return { n:String(l.linea||''), m: Math.round(((Number(l.meta)>0?Number(l.meta):Number(l.proyeccion))||0) * factor) };
+    // Diagnóstico: GRUPOS de ingreso del Presupuesto (dimensión del P&L) para revisar el mapeo
+    var cats = _grps.map(function(g){
+      return { n:String(g.grupo||''), m: Math.round((Number(g.importeProy)||0) * factor) };
     }).filter(function(x){ return x.m>0; }).sort(function(a,b){ return b.m-a.m; });
     plData.budgetFuente = { origen:'presupuesto', periodo:per, factor:factor,
       mensual:(targetMonths.length===1), nota:(targetMonths.length===1?'Budget mensual = presupuesto trimestral ÷ 3':'Budget del trimestre'),
