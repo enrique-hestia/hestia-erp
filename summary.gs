@@ -97,6 +97,7 @@ var SUMMARY_REV_RULES = [
   { re: /estudio/,                      ord: 6,  label:'Estudios' },
   { re: /laboratorio/,                  ord: 7,  label:'Laboratorios' },
   { re: /consulta/,                     ord: 8,  label:'Consulta' },
+  { re: /agencia/,                      ord: 9,  label:'Agencias' },
   { re: /reprovi/,                      ord: 9,  label:'Reprovida' }
 ];
 function _summaryRevOrden(label){
@@ -508,6 +509,8 @@ function readSummary(fechaInicio, fechaFin) {
         if (!enActual && !enPrev) return;
         // 3 niveles: Grupo (col U) → Subgrupo (categoría) → Producto
         var l1 = String(r.grupoU||'').trim() || String(r.categoria||'').trim() || '(Sin grupo)';
+        // AGENCIAS: REPROVIDA (y futuras) se agrupan bajo "Agencias" en el reporte.
+        if (_summaryEsAgencia(l1) || _summaryEsAgencia(r.categoria)) l1 = 'Agencias';
         var l2 = String(r.categoria||'').trim();
         var prod = String(r.producto||'').trim() || l2 || '(sin producto)';
         var cant = Number(r.cantidad)||0; if(!cant) cant=1;
