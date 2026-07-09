@@ -39,12 +39,20 @@ function handleLogin(email, password) {
   if (user.password && user.password !== password)
                     return { error: 'Contraseña incorrecta.' };
   var rolCfg = getRolConfig(ss, user.rol);
-  return {
+  // Permisos operativos efectivos: admin/director = todo.
+  var rl = String(user.rol||'').toLowerCase();
+  var opPerms = rolCfg.permisosOperativos || [];
+  if ((rl === 'admin' || rl === 'director') && opPerms.indexOf('*') === -1) opPerms = ['*'];
+  var out = {
     success: true, token: generateToken(user.email),
     email: user.email, nombre: user.nombre, rol: user.rol,
     vistasBloqueadas: rolCfg.vistasBloqueadas,
     soloLectura:      rolCfg.soloLectura
   };
+  // Solo mandar permisosOperativos si el rol YA está configurado; si no, el
+  // frontend cae a su mapa por rol (no rompe a los usuarios existentes).
+  if (opPerms.length) out.permisosOperativos = opPerms;
+  return out;
 }
 function getUserRow(ss, email) {
   var sh = ss.getSheetByName('Usuarios');
@@ -65,15 +73,17 @@ function getUserRow(ss, email) {
 }
 function getRolConfig(ss, rol) {
   var sh  = ss.getSheetByName('Roles');
-  var def = { vistasBloqueadas:[], soloLectura:false };
+  var def = { vistasBloqueadas:[], soloLectura:false, permisosOperativos:[] };
   if (!sh) return def;
   var data = sh.getDataRange().getValues();
   var h    = data[0].map(function(c){ return String(c).trim().toLowerCase(); });
   var rI=h.indexOf('rol'), bI=h.indexOf('vistas_bloqueadas'), lI=h.indexOf('solo_lectura');
+  var pI=h.indexOf('permisos_operativos'); if (pI<0) pI=h.indexOf('permisos');
   for (var i=1; i<data.length; i++) {
     if (String(data[i][rI]).trim().toLowerCase() === rol.toLowerCase()) {
       var bloq = bI>-1 ? String(data[i][bI]).split(',').map(function(v){return v.trim();}).filter(Boolean) : [];
-      return { vistasBloqueadas: bloq, soloLectura: lI>-1 ? !!data[i][lI] : false };
+      var ops  = pI>-1 ? String(data[i][pI]).split(',').map(function(v){return v.trim();}).filter(Boolean) : [];
+      return { vistasBloqueadas: bloq, soloLectura: lI>-1 ? !!data[i][lI] : false, permisosOperativos: ops };
     }
   }
   return def;
@@ -173,6 +183,8 @@ function doGet(e) {
       currentUser = getUserRow(ss, tkEmail);
       if (!currentUser || !currentUser.activo) return jsonResponse({ error: 'Usuario no autorizado.', code: 403 });
     }
+    // Privacidad: fija si esta petición puede ver nombres sensibles (pacientes/empleados/proveedores).
+    if (typeof _privSet === 'function') _privSet(ss, currentUser);
 
     // ── USUARIOS: listado para admin ──
     if (action === 'usuarios') {

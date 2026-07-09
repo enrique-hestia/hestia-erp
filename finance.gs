@@ -889,8 +889,8 @@ function readBanksData(fechaInicio, fechaFin) {
       B.movimientos=r.slice(1).map(function(x,idx){
         var d=num(x[1]),t=num(x[2]);
         return{rowNum:idx+2,fecha:dt(x[0]),deposito:d,retiro:t,monto:d>0?d:-t,saldo:num(x[3]),
-               referencia:String(x[4]||''),depositoUSD:num(x[5]),tipoCambio:num(x[6]),
-               poliza:String(x[7]||''),observaciones:String(x[8]||''),tipo:d>0?'deposito':'retiro'};
+               referencia:_privRef(x[4]),depositoUSD:num(x[5]),tipoCambio:num(x[6]),
+               poliza:String(x[7]||''),observaciones:_privRef(x[8]),tipo:d>0?'deposito':'retiro'};
       }).filter(function(m){ return inRange(m.fecha); }).reverse();
       return B;
     }
@@ -906,8 +906,8 @@ function readBanksData(fechaInicio, fechaFin) {
         var f=dt(r[i][0]);
         if(!f&&m===0) continue; // saltar filas completamente vacías
         if(!inRange(f)) continue; // respetar filtro de fechas
-        amexRows.push({rowNum:i+1,fecha:f,monto:m,saldo:num(r[i][2]),referencia:String(r[i][3]||''),
-                       usd:num(r[i][4]),tipoCambio:num(r[i][5]),notas:String(r[i][6]||''),
+        amexRows.push({rowNum:i+1,fecha:f,monto:m,saldo:num(r[i][2]),referencia:_privRef(r[i][3]),
+                       usd:num(r[i][4]),tipoCambio:num(r[i][5]),notas:_privRef(r[i][6]),
                        poliza:String(r[i][7]||''),mes:String(r[i][8]||''),tipo:m>=0?'cargo':'pago'});
       }
       B.movimientos=amexRows.reverse(); // más recientes primero
@@ -948,7 +948,7 @@ function readBanksData(fechaInicio, fechaFin) {
         return{rowNum:entry.sheetRow,mes:fmtMes(x[0]),fecha:dt(x[1]),cobro:num(x[2]),comisiones:num(x[3]),
                pctComision:num(x[4]),totalVenta:num(x[5]),saldo:num(x[6]),
                liberado:x[7]===true||String(x[7]).toUpperCase()==='TRUE',
-               observaciones:String(x[8]||''),tipo:String(x[9]||'CARGO').toUpperCase(),monto:num(x[5])};
+               observaciones:_privRef(x[8]),tipo:String(x[9]||'CARGO').toUpperCase(),monto:num(x[5])};
       });
       // Resumen de comisiones por mes (todas las filas, no solo últimas 30)
       var comByMes = {};
@@ -996,7 +996,7 @@ function readBanksData(fechaInicio, fechaFin) {
         EB.movimientos = rExtra.slice(1).map(function(x,idx){
           var d=num(x[1]),t=num(x[2]);
           return{rowNum:idx+2,fecha:dt(x[0]),deposito:d,retiro:t,monto:d>0?d:-t,
-                 saldo:num(x[3]),referencia:String(x[4]||''),tipo:d>0?'deposito':'retiro'};
+                 saldo:num(x[3]),referencia:_privRef(x[4]),tipo:d>0?'deposito':'retiro'};
         }).filter(function(m){ return inRange(m.fecha); }).reverse();
       }
       bancos[key]=EB;
@@ -1838,6 +1838,10 @@ function readEgresosData(anio) {
 
     var allRows = [];
     var provSet = {}, subtipoSet = {}, contableSet = {}, fpSet = {};
+    // Privacidad: si el usuario no puede ver datos sensibles, se ocultan nombres de
+    // proveedor/empleado y el concepto libre (los reportes caen al subtipo → colapsan
+    // nómina y proveedores a su total, sin exponer nombres). Los montos NO cambian.
+    var _egMask = (typeof _privVer === 'function' && !_privVer());
 
     for (var r = 1; r < raw.length; r++) {
       var row = raw[r];
@@ -1862,13 +1866,13 @@ function readEgresosData(anio) {
         id: String(row[0]||'').trim(),
         fecha: fecha,
         mes: iMes>-1 ? String(row[iMes]||'').trim() : '',
-        proveedor: proveedor,
+        proveedor: _egMask ? '' : proveedor,
         contable: contable,
         tipo: tipo,
         subtipo: subtipo,
-        concepto: concepto,
+        concepto: _egMask ? '' : concepto,
         monto: monto,
-        notas: iNotas>-1 ? String(row[iNotas]||'').trim() : '',
+        notas: _egMask ? '' : (iNotas>-1 ? String(row[iNotas]||'').trim() : ''),
         vencimiento: iVenc>-1 ? dt(row[iVenc]) : '',
         facturacion: iFact>-1 ? bool(row[iFact]) : false,
         pagado: iPagado>-1 ? bool(row[iPagado]) : false,
@@ -2441,7 +2445,7 @@ function _readFromBDIngresos(sheet) {
       id: op,
       linea: num(r[1]),
       fecha: fecha,
-      paciente: String(r[3]||''),
+      paciente: (typeof _privVer==='function' && !_privVer()) ? _privPaciente(op) : String(r[3]||''),
       categoria: String(r[4]||''),
       producto: String(r[5]||''),
       pvp: num(r[6]),
@@ -2580,7 +2584,7 @@ function readIngresosData() {
         tabRows.push({
           id: idVal,
           fecha: dt(r[1]),
-          paciente: String(r[2] || ''),
+          paciente: (typeof _privVer==='function' && !_privVer()) ? _privPaciente(idVal) : String(r[2] || ''),
           categoria: String(r[3] || ''),
           producto: String(r[4] || ''),
           pvp: num(r[5]),

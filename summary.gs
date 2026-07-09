@@ -284,7 +284,8 @@ function _summaryReadIngresos(anio) {
   for (var i=1;i<data.length;i++){
     var r=data[i];
     if (!String(r[0]||'').trim()) continue;
-    out.push({ op:String(r[0]||''), fecha:_sumParseDate(r[2]), fechaRaw:(r[2] instanceof Date ? r[2].toISOString().substring(0,10) : String(r[2]||'')), paciente:String(r[3]||''),
+    var _pac = (typeof _privVer==='function' && !_privVer()) ? _privPaciente(r[0]) : String(r[3]||'');
+    out.push({ op:String(r[0]||''), fecha:_sumParseDate(r[2]), fechaRaw:(r[2] instanceof Date ? r[2].toISOString().substring(0,10) : String(r[2]||'')), paciente:_pac,
       categoria:String(r[4]||''), producto:String(r[5]||''), cantidad:num(r[8]),
       total:num(r[9]), formaPago:String(r[12]||''),
       grupoU:String(r[20]||'').trim(),   // columna U (índice 20) = grupo/categoría del reporte
