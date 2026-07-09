@@ -1603,7 +1603,11 @@ function pagarCxP(body) {
         banco = 'mercadopago';
         // Egreso por MP = RETIRO. Cobro y Neto negativos para que la conciliación
         // lo muestre COMPLETO (badge Retiro + importe visible), no solo en Neto.
-        bankRow = [mesStr, fechaPago, -monto, 0, 0, -monto, 0, false, ref, 'PAGO'];
+        // LIBERADO = true de inmediato: el dinero SALE de la cuenta al momento (a
+        // diferencia de los ingresos, que MP retiene y se liberan cuando el banco
+        // los suelta). Si quedara en false no restaría del saldo ni contaría en
+        // "por liberar" (queda invisible hasta liberarlo a mano).
+        bankRow = [mesStr, fechaPago, -monto, 0, 0, -monto, 0, true, ref, 'PAGO'];
       }
       if (banco && bankRow) {
         try { saveBankRow(banco, bankRow); } catch(bErr) { Logger.log('pagarCxP banco error: ' + bErr.message); }
