@@ -558,6 +558,22 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega analisis.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(readEstadoCuentaPaciente(body.paciente||''));
     }
+    // ── COBRANZA: registrar abono / cargar saldo inicial (escritura) ──
+    if (body.action === 'registrarAbono') {
+      if (typeof registrarAbono !== 'function')
+        return jsonResponse({ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(registrarAbono(body));
+    }
+    if (body.action === 'cargarSaldoInicial') {
+      if (typeof cargarSaldoInicial !== 'function')
+        return jsonResponse({ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(cargarSaldoInicial(body));
+    }
+    if (body.action === 'cobranzaSetup') {
+      if (typeof setupCobranzaConfig !== 'function')
+        return jsonResponse({ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(setupCobranzaConfig());
+    }
     // Tareas programadas (scheduler)
     if (body.action === 'updateScheduledTask')     return jsonResponse(updateScheduledTask(body));
     if (body.action === 'setupScheduledTriggers')  return jsonResponse(setupScheduledTriggers());

@@ -578,6 +578,29 @@ function doGet(e) {
       return jsonResponse(readEstadoCuentaPaciente(ec));
     }
 
+    // ── COBRANZA (Cuentas por Cobrar) — Motor A (saldos) + Motor B (suscripciones crío) ──
+    if (action === 'cuentasCobrar') {
+      if (typeof readCuentasPorCobrar !== 'function')
+        return jsonResponse({ ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.' });
+      return jsonResponse(readCuentasPorCobrar({}));
+    }
+    if (action === 'suscripcionesCrio') {
+      if (typeof readSuscripcionesCrio !== 'function')
+        return jsonResponse({ ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.' });
+      return jsonResponse(readSuscripcionesCrio({}));
+    }
+    if (action === 'estadoCobranza') {
+      if (typeof readEstadoCobranza !== 'function')
+        return jsonResponse({ ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.' });
+      var pCob = e && e.parameter.paciente ? decodeURIComponent(e.parameter.paciente) : '';
+      return jsonResponse(readEstadoCobranza(pCob));
+    }
+    if (action === 'cobranzaSetup') {
+      if (typeof setupCobranzaConfig !== 'function')
+        return jsonResponse({ ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.' });
+      return jsonResponse(setupCobranzaConfig());
+    }
+
     if (action === 'pacienteLista') {
       var pacNombre = (e && e.parameter.paciente) || '';
       return jsonResponse(readPacienteLista(decodeURIComponent(pacNombre)));

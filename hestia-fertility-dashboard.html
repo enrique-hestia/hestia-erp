@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.09.117 -->
+﻿<!-- app-build:2026.07.09.118 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1016,6 +1016,11 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 <!-- ══ VISTA: BOARD DECK (Informe Ejecutivo de Resultados) ══ -->
 <div id="view-board" class="view" style="display:none"><div id="board-root"></div></div>
 <div id="view-semanal" class="view" style="display:none"><div id="semanal-root"></div></div>
+
+<!-- Cobranza: Cuentas por Cobrar (Motor A saldos + Motor B suscripciones crío) -->
+<div id="view-cuentas-cobrar" class="view" style="display:none"><div id="cc-root"></div></div>
+<!-- Cobranza: estado de cuenta de cobranza por paciente (reporte) -->
+<div id="view-cobranza" class="view" style="display:none"><div id="cob-root"></div></div>
 
 <!-- ══ VISTA: PRESUPUESTO ══ -->
 <div id="view-presupuesto" class="view" style="display:none">
@@ -8482,6 +8487,18 @@ async function loadMenu() {
         seccion:(_refSem&&_refSem.seccion)||_secSem, fuente:'semanal'
       });
     }
+    // Inyectar "Cobranza" (estado de cuenta de cobranza por paciente) junto a Estado de Cuenta
+    if (!menuItems.some(function(i){ return i.id==='cobranza'; })) {
+      var _ecRef = menuItems.filter(function(i){ return i.id==='estado-cuenta'; })[0]
+                 || menuItems.filter(function(i){ return /estado.?de.?cuenta/i.test(String(i.label||'')); })[0];
+      if (_ecRef) {
+        menuItems.push({
+          id:'cobranza', label:'Cobranza', padre:_ecRef.padre||'',
+          icono:'wallet', tipo:'vista', orden:(Number(_ecRef.orden)||5)+0.01,
+          seccion:_ecRef.seccion, fuente:'cobranza'
+        });
+      }
+    }
     // ── Reorganizar Finanzas: agrupar las vistas del CFO en un submenú "CFO" ──
     // Finanzas (sección) → CFO (grupo colapsable) → Summary · Board Deck ·
     // Resumen Semanal · Estado de Resultados · Flujo de Efectivo.
@@ -11828,6 +11845,22 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     var _cxpEl = document.getElementById('view-cxp');
     if (_cxpEl) _cxpEl.style.display = '';
     loadCxPData();
+    return;
+  }
+  // Cobranza — estado de cuenta de cobranza por paciente (reporte, va antes que CxCobrar)
+  if (viewId === 'cobranza' || (_foundViewItem && /^cobranza$/i.test(String(_foundViewItem.fuente||'')))) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _cobEl = document.getElementById('view-cobranza');
+    if (_cobEl) _cobEl.style.display = '';
+    cobInit();
+    return;
+  }
+  // Cuentas por Cobrar — cobranza (Motor A saldos + Motor B suscripciones crío)
+  if (/cuentas?.?por.?cobrar/i.test(viewId) || (_foundViewItem && /por.?cobrar|cuentas.?cobrar/i.test(String(_foundViewItem.fuente||'')+' '+String(_foundViewItem.label||'')))) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _ccEl = document.getElementById('view-cuentas-cobrar');
+    if (_ccEl) _ccEl.style.display = '';
+    ccInit(force);
     return;
   }
   // Ingresos ERP (excluye 'analisis-ingresos', que tiene su propia página)
@@ -17837,6 +17870,8 @@ function navigateTo(viewId) {
   }
   if (viewId === 'egresos') { displayId = 'gastos'; }
   if (viewId === 'estado-cuenta') { displayId = 'estado-cuenta'; ecInit(); }
+  if (viewId === 'cobranza' || (_foundItem && /^cobranza$/i.test(String(_foundItem.fuente||'')))) { displayId = 'cobranza'; }
+  else if (/cuentas?.?por.?cobrar/i.test(viewId) || (_foundItem && /por.?cobrar|cuentas.?cobrar/i.test(String(_foundItem.fuente||'')+' '+String(_foundItem.label||'')))) { displayId = 'cuentas-cobrar'; }
   if (/concilia/i.test(viewId)) { displayId = 'conciliacion'; }
   // Productos: todas las sub-categorías usan view-productos-catalogo
   var _navProdKeys = ['producto','catalogo','tratamiento','medicamento','prod-med','estudio','consulta','surrogacy','reprovida','externo','grupomedico','grupo-medico'];
@@ -25383,6 +25418,401 @@ function ecImprimir() {
   });
 }
 
+</script>
+
+<script>
+/* ═══════════════════════ COBRANZA — Cuentas por Cobrar ═══════════════════════
+ * Motor A: saldos por cobrar (adeudos)   ·  Motor B: suscripciones de crío
+ * Fuente: cobranza.gs (GET cuentasCobrar/suscripcionesCrio, POST registrarAbono/…)
+ */
+var _ccData = null, _ccSus = null, _ccTab = 'saldos', _ccSeg = 'Todos', _ccSusF = 'Todos', _ccLoading = false;
+
+function ccFmt(n){ return '$' + (parseFloat(n)||0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function ccFmt0(n){ return '$' + (parseFloat(n)||0).toLocaleString('es-MX',{maximumFractionDigits:0}); }
+function ccEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+function ccFch(s){ if(!s) return '—'; try{ return ecFmtFecha(String(s).substring(0,10)); }catch(e){ return s; } }
+function _ccApiBase(){ return APPS_SCRIPT_URL + (APPS_SCRIPT_URL.indexOf('?')>=0?'&':'?'); }
+
+var CC_ESTATUS_COLOR = {
+  'Vencida':          {bg:'rgba(200,60,60,.12)', fg:'#c83c3c'},
+  'Falta suscripción':{bg:'rgba(217,119,6,.14)', fg:'#b45309'},
+  'Por vencer':       {bg:'rgba(202,138,4,.14)', fg:'#a16207'},
+  'Vigente':          {bg:'rgba(22,163,74,.12)', fg:'#16a34a'},
+  'Cortesía':         {bg:'rgba(99,102,241,.12)',fg:'#6366f1'}
+};
+
+function ccInit(force){
+  var root = document.getElementById('cc-root'); if(!root) return;
+  if(!root.innerHTML || force){ root.innerHTML = ccShell(); }
+  ccLoad(force);
+}
+function ccShell(){
+  return '<div style="max-width:1200px;margin:0 auto;padding:20px 16px">'
+    + '<div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:18px">'
+      + '<div><h1 style="font-size:22px;font-weight:800;color:var(--color-text);margin:0">Cuentas por Cobrar</h1>'
+      + '<p style="font-size:13px;color:var(--color-text-muted);margin:4px 0 0" id="cc-sub">Saldos de pacientes, médicos y agencias · suscripciones de criopreservación</p></div>'
+      + '<div style="display:flex;gap:8px">'
+        + '<button onclick="ccAbrirSaldoInicial()" style="padding:8px 14px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">+ Saldo inicial</button>'
+        + '<button onclick="ccLoad(true)" id="cc-refresh" style="padding:8px 16px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">↻ Actualizar</button>'
+      + '</div>'
+    + '</div>'
+    + '<div id="cc-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px"></div>'
+    + '<div style="display:flex;gap:4px;border-bottom:2px solid var(--color-divider);margin-bottom:14px">'
+      + '<button id="cc-tab-saldos" onclick="ccSetTab(\'saldos\')" class="cc-tab" style="padding:10px 18px;background:none;border:none;border-bottom:2px solid var(--color-primary);margin-bottom:-2px;font-size:13px;font-weight:700;cursor:pointer;color:var(--color-text)">Saldos por cobrar</button>'
+      + '<button id="cc-tab-sus" onclick="ccSetTab(\'sus\')" class="cc-tab" style="padding:10px 18px;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;font-size:13px;font-weight:700;cursor:pointer;color:var(--color-text-muted)">Suscripciones Crío</button>'
+    + '</div>'
+    + '<div id="cc-body"><div style="padding:50px;text-align:center;color:var(--color-text-muted);font-size:13px">Cargando…</div></div>'
+    + '</div>';
+}
+
+function ccLoad(force){
+  if(_ccLoading) return; _ccLoading = true;
+  var btn=document.getElementById('cc-refresh'); if(btn){ btn.textContent='…'; }
+  var tok = encodeURIComponent(getToken());
+  var p1 = fetch(_ccApiBase()+'action=cuentasCobrar&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();}).catch(function(e){return {ok:false,error:String(e)};});
+  var p2 = fetch(_ccApiBase()+'action=suscripcionesCrio&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();}).catch(function(e){return {ok:false,error:String(e)};});
+  Promise.all([p1,p2]).then(function(res){
+    _ccData=res[0]; _ccSus=res[1]; _ccLoading=false;
+    var b=document.getElementById('cc-refresh'); if(b){ b.textContent='↻ Actualizar'; }
+    ccRenderKpis(); ccRenderBody();
+  });
+}
+
+function ccRenderKpis(){
+  var el=document.getElementById('cc-kpis'); if(!el) return;
+  var d=_ccData||{}, s=_ccSus||{};
+  function card(label,val,color,sub){
+    return '<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px;padding:14px 16px">'
+      +'<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);margin-bottom:6px">'+label+'</div>'
+      +'<div style="font-size:20px;font-weight:800;color:'+(color||'var(--color-text)')+'">'+val+'</div>'
+      +(sub?'<div style="font-size:11px;color:var(--color-text-muted);margin-top:3px">'+sub+'</div>':'')+'</div>';
+  }
+  var venc = (s.montoPorEstatus&&(s.montoPorEstatus['Vencida']||0)) + (s.montoPorEstatus&&(s.montoPorEstatus['Falta suscripción']||0));
+  var totalGlobal = (d.totalSaldo||0) + (s.totalDebe||0);
+  el.innerHTML =
+      card('Total por cobrar', ccFmt0(totalGlobal), 'var(--color-primary)', 'saldos + suscripciones')
+    + card('Saldos (adeudos)', ccFmt0(d.totalSaldo||0), '#c83c3c', (d.numDeudores||0)+' deudores')
+    + card('Suscripciones vencidas', ccFmt0(venc||0), '#b45309', ((s.porEstatus&&(s.porEstatus['Vencida']||0))||0)+((s.porEstatus&&(s.porEstatus['Falta suscripción']||0))||0)+' pacientes')
+    + card('Pacientes con crío', (s.numConCrio||0), 'var(--color-text)', 'universo suscripción')
+    + card('Recurrente en riesgo', ccFmt0(s.totalDebe||0), '#a16207', 'crío por cobrar');
+}
+
+function ccSetTab(t){
+  _ccTab=t;
+  var a=document.getElementById('cc-tab-saldos'), b=document.getElementById('cc-tab-sus');
+  if(a){ a.style.color=(t==='saldos'?'var(--color-text)':'var(--color-text-muted)'); a.style.borderBottomColor=(t==='saldos'?'var(--color-primary)':'transparent'); }
+  if(b){ b.style.color=(t==='sus'?'var(--color-text)':'var(--color-text-muted)'); b.style.borderBottomColor=(t==='sus'?'var(--color-primary)':'transparent'); }
+  ccRenderBody();
+}
+
+function ccRenderBody(){
+  var el=document.getElementById('cc-body'); if(!el) return;
+  el.innerHTML = _ccTab==='saldos' ? ccRenderSaldos() : ccRenderSus();
+}
+
+/* ── Tab A: Saldos ── */
+function ccRenderSaldos(){
+  var d=_ccData;
+  if(!d) return '<div style="padding:40px;text-align:center;color:var(--color-text-muted)">Cargando…</div>';
+  if(!d.ok) return '<div style="padding:30px;text-align:center;color:#c83c3c;font-size:13px">'+ccEsc(d.error||'No disponible')+'<br><br><button onclick="ccLoad(true)" style="padding:8px 16px;border:1px solid var(--color-divider);border-radius:8px;background:none;cursor:pointer">Reintentar</button></div>';
+  var ops=(d.ops||[]).filter(function(o){ return _ccSeg==='Todos' || o.segmento===_ccSeg; });
+  var ag=d.aging||{};
+  var h='';
+  // aging chips
+  h+='<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center">';
+  [['0-30','#16a34a'],['31-60','#a16207'],['61-90','#b45309'],['+90','#c83c3c']].forEach(function(x){
+    h+='<div style="background:'+x[1]+'14;border:1px solid '+x[1]+'44;border-radius:8px;padding:6px 12px;font-size:11px"><b style="color:'+x[1]+'">'+x[0]+' días</b> · '+ccFmt0(ag[x[0]]||0)+'</div>';
+  });
+  h+='<div style="flex:1"></div>';
+  // segment filter
+  h+='<div style="display:flex;gap:4px">';
+  ['Todos','Pacientes','Médicos','Agencias'].forEach(function(sg){
+    var on=_ccSeg===sg;
+    h+='<button onclick="_ccSeg=\''+sg+'\';ccRenderBody()" style="padding:6px 12px;border:1px solid '+(on?'var(--color-primary)':'var(--color-divider)')+';background:'+(on?'var(--color-primary)':'transparent')+';color:'+(on?'#fff':'var(--color-text-muted)')+';border-radius:20px;font-size:11px;font-weight:600;cursor:pointer">'+sg+((d.porSegmento&&sg!=='Todos')?' ('+ccFmt0(d.porSegmento[sg]||0)+')':'')+'</button>';
+  });
+  h+='</div></div>';
+  if(!ops.length){
+    h+='<div style="padding:44px;text-align:center;color:var(--color-text-muted);font-size:13px;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px">✓ Sin saldos por cobrar'+(_ccSeg!=='Todos'?' en «'+_ccSeg+'»':'')+'.<br><span style="font-size:11px">Los adeudos aparecen al capturar un pago parcial o cargar un saldo inicial.</span></div>';
+    return h;
+  }
+  h+='<div style="overflow-x:auto;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px">';
+  h+='<table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:820px">';
+  h+='<thead><tr style="border-bottom:2px solid var(--color-divider)">'
+    +ccTh('Paciente / OP','left')+ccTh('Segmento','left')+ccTh('Concepto','left')+ccTh('Facturado','right')+ccTh('Abonado','right')+ccTh('Saldo','right')+ccTh('Antig.','right')+ccTh('','right')+'</tr></thead><tbody>';
+  ops.forEach(function(o,i){
+    var bg=i%2?'background:var(--color-surface-2)':'';
+    h+='<tr style="border-bottom:1px solid var(--color-divider);'+bg+'">'
+      +'<td style="padding:9px 12px"><b>'+ccEsc(o.paciente)+'</b><div style="font-size:10px;color:var(--color-text-muted)">'+ccEsc(o.op)+' · '+ccFch(o.fecha)+'</div></td>'
+      +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccEsc(o.segmento)+'</td>'
+      +'<td style="padding:9px 12px;color:var(--color-text-muted);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+ccEsc(o.concepto)+'</td>'
+      +'<td style="padding:9px 12px;text-align:right;color:var(--color-text-muted)">'+ccFmt(o.total)+'</td>'
+      +'<td style="padding:9px 12px;text-align:right;color:#16a34a">'+ccFmt(o.abonado)+'</td>'
+      +'<td style="padding:9px 12px;text-align:right;font-weight:800;color:#c83c3c">'+ccFmt(o.saldo)+'</td>'
+      +'<td style="padding:9px 12px;text-align:right;color:var(--color-text-muted)">'+o.dias+'d</td>'
+      +'<td style="padding:9px 12px;text-align:right"><button onclick="ccAbrirAbono('+ccQ(o.op)+','+ccQ(o.paciente)+','+(o.saldo||0)+')" style="padding:5px 11px;background:var(--color-primary);color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Abono</button></td>'
+      +'</tr>';
+  });
+  h+='</tbody></table></div>';
+  return h;
+}
+
+/* ── Tab B: Suscripciones ── */
+function ccRenderSus(){
+  var s=_ccSus;
+  if(!s) return '<div style="padding:40px;text-align:center;color:var(--color-text-muted)">Cargando…</div>';
+  if(!s.ok) return '<div style="padding:30px;text-align:center;color:#c83c3c;font-size:13px">'+ccEsc(s.error||'No disponible')+'<br><br><button onclick="ccLoad(true)" style="padding:8px 16px;border:1px solid var(--color-divider);border-radius:8px;background:none;cursor:pointer">Reintentar</button></div>';
+  var list=(s.pacientes||[]).filter(function(p){ return _ccSusF==='Todos' || p.estatus===_ccSusF; });
+  var h='';
+  h+='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">';
+  ['Todos','Vencida','Falta suscripción','Por vencer','Vigente','Cortesía'].forEach(function(st){
+    var on=_ccSusF===st;
+    var c=CC_ESTATUS_COLOR[st]||{fg:'var(--color-primary)'};
+    var cnt = st==='Todos' ? (s.pacientes||[]).length : ((s.porEstatus&&s.porEstatus[st])||0);
+    h+='<button onclick="_ccSusF=\''+st+'\';ccRenderBody()" style="padding:6px 12px;border:1px solid '+(on?c.fg:'var(--color-divider)')+';background:'+(on?c.fg:'transparent')+';color:'+(on?'#fff':'var(--color-text-muted)')+';border-radius:20px;font-size:11px;font-weight:600;cursor:pointer">'+st+' ('+cnt+')</button>';
+  });
+  h+='</div>';
+  if(!list.length){ h+='<div style="padding:44px;text-align:center;color:var(--color-text-muted);font-size:13px;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px">Sin pacientes en «'+_ccSusF+'».</div>'; return h; }
+  h+='<div style="overflow-x:auto;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px">';
+  h+='<table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:920px">';
+  h+='<thead><tr style="border-bottom:2px solid var(--color-divider)">'
+    +ccTh('Paciente','left')+ccTh('Tipo','left')+ccTh('Plan','left')+ccTh('Inicio crío','left')+ccTh('Último pago','left')+ccTh('Vence / cobra','left')+ccTh('Estatus','center')+ccTh('Debe','right')+ccTh('','right')+'</tr></thead><tbody>';
+  list.forEach(function(p,i){
+    var bg=i%2?'background:var(--color-surface-2)':'';
+    var c=CC_ESTATUS_COLOR[p.estatus]||{bg:'var(--color-surface-2)',fg:'var(--color-text)'};
+    var debe = p.montoDebe>0;
+    h+='<tr style="border-bottom:1px solid var(--color-divider);'+bg+'">'
+      +'<td style="padding:9px 12px"><b>'+ccEsc(p.nombre)+'</b><div style="font-size:10px;color:var(--color-text-muted)">'+(p.oov||0)+' ov · '+(p.emb||0)+' emb</div></td>'
+      +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccEsc(p.tipoPaciente)+'</td>'
+      +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccEsc(p.plan)+(!p.tienePlan?' <span style="font-size:9px;color:#b45309">(s/def)</span>':'')+'</td>'
+      +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccFch(p.crioInicio)+'</td>'
+      +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccFch(p.ultimoPago)+'</td>'
+      +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccFch(p.proximoCobro)+'</td>'
+      +'<td style="padding:9px 12px;text-align:center"><span style="background:'+c.bg+';color:'+c.fg+';padding:3px 9px;border-radius:20px;font-size:10.5px;font-weight:700;white-space:nowrap">'+ccEsc(p.estatus)+'</span></td>'
+      +'<td style="padding:9px 12px;text-align:right;font-weight:800;color:'+(debe?'#c83c3c':'var(--color-text-muted)')+'">'+(debe?ccFmt(p.montoDebe):'—')+'</td>'
+      +'<td style="padding:9px 12px;text-align:right">'+(debe?'<button onclick="ccCobrarSus('+ccQ(p.nombre)+','+(p.montoDebe||0)+','+ccQ(p.plan)+')" style="padding:5px 11px;background:var(--color-primary);color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Cobrar</button>':'')+'</td>'
+      +'</tr>';
+  });
+  h+='</tbody></table></div>';
+  h+='<div style="font-size:11px;color:var(--color-text-muted);margin-top:10px;line-height:1.6">Año 1 gratis para pacientes Hestia (no externos). Anual: cubre 1 año desde el pago. Mensual: se debe el día 1 de cada mes. Tarifas y regla configurables en cobranza.gs.</div>';
+  return h;
+}
+
+function ccTh(t,al){ return '<th style="padding:9px 12px;text-align:'+(al||'left')+';font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted)">'+t+'</th>'; }
+function ccQ(s){ return "'"+String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")+"'"; }
+
+/* ── Modal genérico ── */
+function ccModal(title, bodyHtml, onSaveJs, saveLabel){
+  var old=document.getElementById('cc-modal'); if(old) old.remove();
+  var wrap=document.createElement('div');
+  wrap.id='cc-modal';
+  wrap.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:4000;display:flex;align-items:center;justify-content:center;padding:16px';
+  wrap.innerHTML='<div style="background:var(--color-surface);border-radius:14px;max-width:440px;width:100%;box-shadow:var(--shadow-dropdown);overflow:hidden">'
+    +'<div style="padding:16px 20px;border-bottom:1px solid var(--color-divider);font-size:15px;font-weight:700;color:var(--color-text)">'+title+'</div>'
+    +'<div style="padding:18px 20px">'+bodyHtml+'</div>'
+    +'<div style="padding:14px 20px;border-top:1px solid var(--color-divider);display:flex;gap:10px;justify-content:flex-end">'
+      +'<button onclick="document.getElementById(\'cc-modal\').remove()" style="padding:8px 16px;background:none;border:1px solid var(--color-divider);border-radius:8px;font-size:13px;cursor:pointer;color:var(--color-text)">Cancelar</button>'
+      +'<button id="cc-modal-save" style="padding:8px 18px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">'+(saveLabel||'Guardar')+'</button>'
+    +'</div></div>';
+  document.body.appendChild(wrap);
+  wrap.addEventListener('click',function(e){ if(e.target===wrap) wrap.remove(); });
+  document.getElementById('cc-modal-save').addEventListener('click', onSaveJs);
+}
+function _ccField(label,inner){ return '<div style="margin-bottom:12px"><label style="display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);margin-bottom:5px">'+label+'</label>'+inner+'</div>'; }
+function _ccInputStyle(){ return 'width:100%;padding:9px 12px;border:1.5px solid var(--color-divider);border-radius:8px;background:var(--color-surface-2);color:var(--color-text);font-size:13px'; }
+function _ccFormaPagoSel(id){ return '<select id="'+id+'" style="'+_ccInputStyle()+'"><option>Transferencia</option><option>Efectivo</option><option>Tarjeta</option><option>Mercado Pago</option><option>Depósito</option><option>Otro</option></select>'; }
+function _ccBancoSel(id){ return '<select id="'+id+'" style="'+_ccInputStyle()+'"><option>Santander</option><option>AMEX</option><option>Mercado Pago</option><option>Efectivo / Caja</option><option>Otro</option></select>'; }
+
+/* ── Registrar abono a un saldo ── */
+function ccAbrirAbono(op, paciente, saldo){
+  var body=''
+    +'<div style="background:var(--color-surface-2);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--color-text-muted)">'
+      +'<b style="color:var(--color-text)">'+ccEsc(paciente)+'</b> · OP '+ccEsc(op)+'<br>Saldo actual: <b style="color:#c83c3c">'+ccFmt(saldo)+'</b></div>'
+    +_ccField('Monto del abono','<input id="cc-ab-monto" type="number" step="0.01" value="'+(saldo||0)+'" style="'+_ccInputStyle()+'">')
+    +_ccField('Fecha','<input id="cc-ab-fecha" type="date" value="'+new Date().toISOString().substring(0,10)+'" style="'+_ccInputStyle()+'">')
+    +'<div style="display:flex;gap:10px">'
+      +'<div style="flex:1">'+_ccField('Forma de pago',_ccFormaPagoSel('cc-ab-fp'))+'</div>'
+      +'<div style="flex:1">'+_ccField('Banco',_ccBancoSel('cc-ab-bco'))+'</div>'
+    +'</div>'
+    +_ccField('Nota (opcional)','<input id="cc-ab-nota" type="text" style="'+_ccInputStyle()+'">');
+  ccModal('Registrar abono', body, function(){ ccGuardarAbono(op, paciente, 'saldo'); }, 'Registrar abono');
+}
+/* ── Cobrar suscripción (registra pago que extiende cobertura) ── */
+function ccCobrarSus(nombre, monto, plan){
+  var body=''
+    +'<div style="background:var(--color-surface-2);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--color-text-muted)">'
+      +'<b style="color:var(--color-text)">'+ccEsc(nombre)+'</b> · Suscripción '+ccEsc(plan)+'<br>Debe: <b style="color:#c83c3c">'+ccFmt(monto)+'</b></div>'
+    +_ccField('Monto cobrado','<input id="cc-ab-monto" type="number" step="0.01" value="'+(monto||0)+'" style="'+_ccInputStyle()+'">')
+    +_ccField('Fecha de pago','<input id="cc-ab-fecha" type="date" value="'+new Date().toISOString().substring(0,10)+'" style="'+_ccInputStyle()+'">')
+    +'<div style="display:flex;gap:10px">'
+      +'<div style="flex:1">'+_ccField('Forma de pago',_ccFormaPagoSel('cc-ab-fp'))+'</div>'
+      +'<div style="flex:1">'+_ccField('Banco',_ccBancoSel('cc-ab-bco'))+'</div>'
+    +'</div>'
+    +_ccField('Nota (opcional)','<input id="cc-ab-nota" type="text" value="Suscripción crío" style="'+_ccInputStyle()+'">');
+  ccModal('Cobrar suscripción', body, function(){ ccGuardarAbono('', nombre, 'suscripcion'); }, 'Registrar cobro');
+}
+function ccGuardarAbono(op, paciente, tipo){
+  var monto=parseFloat((document.getElementById('cc-ab-monto')||{}).value||'0')||0;
+  if(monto<=0){ alert('Monto inválido'); return; }
+  var btn=document.getElementById('cc-modal-save'); if(btn){ btn.textContent='Guardando…'; btn.disabled=true; }
+  var s=getSession()||{};
+  var payload={ action:'registrarAbono', op:op, paciente:paciente, monto:monto, tipo:tipo,
+    fecha:(document.getElementById('cc-ab-fecha')||{}).value||'',
+    formaPago:(document.getElementById('cc-ab-fp')||{}).value||'',
+    banco:(document.getElementById('cc-ab-bco')||{}).value||'',
+    nota:(document.getElementById('cc-ab-nota')||{}).value||'',
+    token:s.token||getToken(), usuario:s.email||'' };
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(payload)})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d&&d.ok){ var m=document.getElementById('cc-modal'); if(m) m.remove(); ccLoad(true); }
+      else { alert('No se pudo registrar: '+((d&&d.error)||'error')); if(btn){ btn.textContent='Reintentar'; btn.disabled=false; } }
+    }).catch(function(e){ alert('Error de red: '+e.message); if(btn){ btn.textContent='Reintentar'; btn.disabled=false; } });
+}
+/* ── Cargar saldo inicial (cargo a crédito) ── */
+function ccAbrirSaldoInicial(){
+  var body=''
+    +'<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:14px">Registra un adeudo existente (saldo inicial) o un cargo a crédito para que aparezca en Cuentas por Cobrar.</div>'
+    +_ccField('Paciente','<input id="cc-si-pac" type="text" style="'+_ccInputStyle()+'">')
+    +'<div style="display:flex;gap:10px">'
+      +'<div style="flex:1">'+_ccField('OP (opcional)','<input id="cc-si-op" type="text" style="'+_ccInputStyle()+'">')+'</div>'
+      +'<div style="flex:1">'+_ccField('Segmento','<select id="cc-si-cat" style="'+_ccInputStyle()+'"><option value="">Pacientes</option><option value="GrupoMedico">Médicos</option><option value="REPROVIDA">Agencias</option></select>')+'</div>'
+    +'</div>'
+    +_ccField('Concepto','<input id="cc-si-con" type="text" value="Saldo inicial" style="'+_ccInputStyle()+'">')
+    +'<div style="display:flex;gap:10px">'
+      +'<div style="flex:1">'+_ccField('Monto adeudado','<input id="cc-si-monto" type="number" step="0.01" style="'+_ccInputStyle()+'">')+'</div>'
+      +'<div style="flex:1">'+_ccField('Fecha del cargo','<input id="cc-si-fecha" type="date" value="'+new Date().toISOString().substring(0,10)+'" style="'+_ccInputStyle()+'">')+'</div>'
+    +'</div>';
+  ccModal('Cargar saldo inicial', body, ccGuardarSaldoInicial, 'Cargar saldo');
+}
+function ccGuardarSaldoInicial(){
+  var monto=parseFloat((document.getElementById('cc-si-monto')||{}).value||'0')||0;
+  var pac=(document.getElementById('cc-si-pac')||{}).value||'';
+  if(monto<=0){ alert('Monto inválido'); return; }
+  if(!pac.trim()){ alert('Falta el paciente'); return; }
+  var btn=document.getElementById('cc-modal-save'); if(btn){ btn.textContent='Guardando…'; btn.disabled=true; }
+  var s=getSession()||{};
+  var payload={ action:'cargarSaldoInicial', paciente:pac, op:(document.getElementById('cc-si-op')||{}).value||'',
+    categoria:(document.getElementById('cc-si-cat')||{}).value||'', concepto:(document.getElementById('cc-si-con')||{}).value||'Saldo inicial',
+    monto:monto, fecha:(document.getElementById('cc-si-fecha')||{}).value||'',
+    token:s.token||getToken(), usuario:s.email||'' };
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(payload)})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d&&d.ok){ var m=document.getElementById('cc-modal'); if(m) m.remove(); ccLoad(true); }
+      else { alert('No se pudo cargar: '+((d&&d.error)||'error')); if(btn){ btn.textContent='Reintentar'; btn.disabled=false; } }
+    }).catch(function(e){ alert('Error de red: '+e.message); if(btn){ btn.textContent='Reintentar'; btn.disabled=false; } });
+}
+
+/* ═══════════════════════ COBRANZA — Estado de cuenta por paciente ═══════════════════════ */
+var _cobData=null;
+function cobInit(){
+  var root=document.getElementById('cob-root'); if(!root) return;
+  root.innerHTML=cobShell();
+  // reutiliza la lista de pacientes de Estado de Cuenta
+  if(!_ecPacientesList||!_ecPacientesList.length){
+    var tok=encodeURIComponent(getToken());
+    fetch(APPS_SCRIPT_URL+'?action=listaPacientes&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
+      .then(function(r){return r.json();}).then(function(d){ if(d&&d.pacientes) _ecPacientesList=d.pacientes.map(function(p){return typeof p==='string'?p:p.nombre;}); });
+  }
+}
+function cobShell(){
+  return '<div style="max-width:960px;margin:0 auto;padding:24px 16px">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:12px">'
+      +'<div><h1 style="font-size:22px;font-weight:800;color:var(--color-text);margin:0">Cobranza</h1>'
+      +'<p style="font-size:13px;color:var(--color-text-muted);margin:4px 0 0">Estado de cuenta de cobranza por paciente · saldos, abonos y suscripción</p></div>'
+      +'<button onclick="cobImprimir()" id="cob-print" style="display:none;padding:9px 18px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Imprimir / PDF</button>'
+    +'</div>'
+    +'<div style="background:var(--color-surface);border-radius:12px;padding:18px;margin-bottom:18px;box-shadow:var(--shadow-card)">'
+      +'<label style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);display:block;margin-bottom:8px">Buscar paciente</label>'
+      +'<div style="display:flex;gap:10px;position:relative">'
+        +'<div style="flex:1;position:relative"><input id="cob-search" type="text" placeholder="Escriba el nombre de la paciente…" oninput="cobOnInput(this.value)" autocomplete="off" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--color-surface-2);border:1.5px solid var(--color-divider);color:var(--color-text);font-size:14px">'
+        +'<div id="cob-sug" style="display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:8px;box-shadow:var(--shadow-dropdown);z-index:200;max-height:220px;overflow-y:auto"></div></div>'
+        +'<button onclick="cobBuscar()" style="padding:10px 20px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Ver cobranza</button>'
+      +'</div>'
+    +'</div>'
+    +'<div id="cob-result"></div>'
+    +'</div>';
+}
+function cobOnInput(val){
+  var box=document.getElementById('cob-sug'); if(!box) return;
+  if(!val||val.length<2){ box.style.display='none'; return; }
+  var q=val.toLowerCase();
+  var matches=(_ecPacientesList||[]).filter(function(n){return n.toLowerCase().indexOf(q)>=0;}).slice(0,10);
+  if(!matches.length){ box.style.display='none'; return; }
+  box.innerHTML=matches.map(function(n){ return '<div class="cob-sug-item" data-n="'+ccEsc(n).replace(/"/g,'&quot;')+'" style="padding:9px 14px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--color-divider)">'+ccEsc(n)+'</div>'; }).join('');
+  box.style.display='block';
+  Array.prototype.forEach.call(box.querySelectorAll('.cob-sug-item'),function(it){
+    it.addEventListener('mousedown',function(){ document.getElementById('cob-search').value=it.getAttribute('data-n'); box.style.display='none'; cobBuscar(); });
+    it.addEventListener('mouseover',function(){ it.style.background='var(--color-surface-2)'; });
+    it.addEventListener('mouseout',function(){ it.style.background=''; });
+  });
+}
+function cobBuscar(){
+  var nombre=((document.getElementById('cob-search')||{}).value||'').trim();
+  if(!nombre) return;
+  var box=document.getElementById('cob-sug'); if(box) box.style.display='none';
+  var res=document.getElementById('cob-result');
+  res.innerHTML='<div style="padding:40px;text-align:center;color:var(--color-text-muted);font-size:13px">Calculando cobranza…</div>';
+  var tok=encodeURIComponent(getToken());
+  fetch(APPS_SCRIPT_URL+'?action=estadoCobranza&paciente='+encodeURIComponent(nombre)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){ res.innerHTML='<div style="padding:30px;text-align:center;color:#c83c3c;font-size:13px">'+ccEsc((d&&d.error)||'No disponible. ¿Agregaste cobranza.gs y redeployaste?')+'</div>'; return; }
+      _cobData=d; cobRender(d);
+    }).catch(function(e){ res.innerHTML='<div style="padding:30px;text-align:center;color:#c83c3c">Error de red: '+e.message+'</div>'; });
+}
+function cobRender(d){
+  var res=document.getElementById('cob-result');
+  var sus=d.suscripcion;
+  var h='';
+  // resumen
+  var susDebe=(sus&&sus.montoDebe)||0;
+  var totalDebe=(d.totalSaldo||0)+susDebe;
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px">';
+  h+='<div style="background:var(--color-primary);border-radius:10px;padding:14px 18px;color:#fff"><div style="font-size:10px;font-weight:700;opacity:.85;text-transform:uppercase;margin-bottom:4px">Total por cobrar</div><div style="font-size:22px;font-weight:800">'+ccFmt(totalDebe)+'</div></div>';
+  h+='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:10px;padding:14px 18px"><div style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;margin-bottom:4px">Saldos (adeudos)</div><div style="font-size:18px;font-weight:800;color:#c83c3c">'+ccFmt(d.totalSaldo||0)+'</div></div>';
+  h+='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:10px;padding:14px 18px"><div style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;margin-bottom:4px">Suscripción crío</div><div style="font-size:18px;font-weight:800;color:'+(susDebe>0?'#b45309':'#16a34a')+'">'+(susDebe>0?ccFmt(susDebe):'Al día')+'</div></div>';
+  h+='</div>';
+  // suscripción card
+  if(sus){
+    var c=CC_ESTATUS_COLOR[sus.estatus]||{bg:'var(--color-surface-2)',fg:'var(--color-text)'};
+    h+='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px;padding:16px 18px;margin-bottom:18px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><b style="font-size:13px">Suscripción de criopreservación</b><span style="background:'+c.bg+';color:'+c.fg+';padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700">'+ccEsc(sus.estatus)+'</span></div>'
+      +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;font-size:12px;color:var(--color-text-muted)">'
+        +'<div>Plan<br><b style="color:var(--color-text)">'+ccEsc(sus.plan)+'</b> ('+ccEsc(sus.tipoPaciente)+')</div>'
+        +'<div>Inicio crío<br><b style="color:var(--color-text)">'+ccFch(sus.crioInicio)+'</b></div>'
+        +'<div>Último pago<br><b style="color:var(--color-text)">'+ccFch(sus.ultimoPago)+'</b></div>'
+        +'<div>Próximo cobro<br><b style="color:var(--color-text)">'+ccFch(sus.proximoCobro)+'</b></div>'
+      +'</div></div>';
+  }
+  // saldos
+  h+='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px;overflow:hidden;margin-bottom:18px">';
+  h+='<div style="padding:12px 16px;border-bottom:1px solid var(--color-divider);font-size:13px;font-weight:700">Saldos por cobrar</div>';
+  if(!(d.saldos&&d.saldos.length)){ h+='<div style="padding:24px;text-align:center;color:var(--color-text-muted);font-size:12px">✓ Sin saldos pendientes</div>'; }
+  else { h+='<table style="width:100%;border-collapse:collapse;font-size:12.5px"><tbody>';
+    d.saldos.forEach(function(o,i){ h+='<tr style="border-bottom:1px solid var(--color-divider);'+(i%2?'background:var(--color-surface-2)':'')+'"><td style="padding:9px 14px">'+ccFch(o.fecha)+' · '+ccEsc(o.concepto)+'<div style="font-size:10px;color:var(--color-text-muted)">OP '+ccEsc(o.op)+' · '+ccEsc(o.segmento)+'</div></td><td style="padding:9px 14px;text-align:right;font-weight:800;color:#c83c3c">'+ccFmt(o.saldo)+'</td></tr>'; });
+    h+='</tbody></table>'; }
+  h+='</div>';
+  // abonos
+  if(d.abonos&&d.abonos.length){
+    h+='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px;overflow:hidden">';
+    h+='<div style="padding:12px 16px;border-bottom:1px solid var(--color-divider);font-size:13px;font-weight:700">Abonos registrados</div>';
+    h+='<table style="width:100%;border-collapse:collapse;font-size:12.5px"><tbody>';
+    d.abonos.forEach(function(a,i){ h+='<tr style="border-bottom:1px solid var(--color-divider);'+(i%2?'background:var(--color-surface-2)':'')+'"><td style="padding:9px 14px">'+ccFch(a.fecha)+' · '+ccEsc(a.formaPago||a.tipo||'')+(a.nota?' · '+ccEsc(a.nota):'')+'</td><td style="padding:9px 14px;text-align:right;font-weight:700;color:#16a34a">'+ccFmt(a.monto)+'</td></tr>'; });
+    h+='</tbody></table></div>';
+  }
+  res.innerHTML=h;
+  var pb=document.getElementById('cob-print'); if(pb) pb.style.display='flex';
+}
+function cobImprimir(){
+  if(!_cobData) return;
+  var d=_cobData, sus=d.suscripcion, hoy=ccFch(new Date().toISOString().substring(0,10));
+  var rows=(d.saldos||[]).map(function(o){ return [ccFch(o.fecha), o.concepto||'—', 'OP '+o.op, ccFmt(o.saldo)]; });
+  if(sus&&sus.montoDebe>0) rows.push([ccFch(sus.proximoCobro),'Suscripción crío ('+sus.plan+')', sus.estatus, ccFmt(sus.montoDebe)]);
+  var susDebe=(sus&&sus.montoDebe)||0, totalDebe=(d.totalSaldo||0)+susDebe;
+  var kpis=[{value:ccFmt(totalDebe),label:'Total por cobrar'},{value:ccFmt(d.totalSaldo||0),label:'Saldos'},{value:susDebe>0?ccFmt(susDebe):'Al día',label:'Suscripción'}];
+  if(typeof hfReportPrint==='function'){
+    hfReportPrint('estado-cuenta',{ title:'Estado de cobranza', subject:d.paciente, period:'Emitido el '+hoy, generado:'Hestia ERP · '+hoy,
+      kpis:kpis, cols:['Fecha','Concepto','Referencia','Saldo'], rows:rows, totalLabel:'Total por cobrar', totalValue:ccFmt(totalDebe) });
+  } else { window.print(); }
+}
 </script>
 
 <!-- Modal: confirmar borrar ingreso -->
