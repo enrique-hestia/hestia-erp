@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.10.137 -->
+﻿<!-- app-build:2026.07.10.138 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -25991,6 +25991,7 @@ function _ccItemsBody(){
     h+='<button type="button" onclick="ccBlockAdd()" style="width:100%;padding:9px;background:none;border:1.5px dashed var(--color-primary);border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;color:var(--color-primary)">+ Otro paciente / fecha (cierre parcial)</button>';
   } else {
     var b0=_ccBlocks[0]||{items:[]};
+    if(document.getElementById('cc-si-cat')){ h+='<div style="font-size:10px;color:var(--color-text-muted);background:var(--color-surface-2);border-radius:6px;padding:6px 9px;margin-bottom:7px;line-height:1.4">¿Es <b>agencia o externo</b> con varios pacientes? Cambia <b>«Segmento»</b> arriba a <b>Agencias</b> (o Médicos) y podrás capturar el <b>paciente</b> y la <b>fecha del tratamiento</b> de cada partida.</div>'; }
     if(!b0.items.length){ h+='<div style="font-size:11.5px;color:var(--color-text-muted);padding:5px 0">Sin partidas — agrega productos, o deja el monto manual abajo.</div>'; }
     else b0.items.forEach(function(it,ii){ h+=_ccItemRowHtml(0,ii,it); });
     h+='<button type="button" onclick="ccItemAdd(0)" style="padding:4px 10px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;color:var(--color-text)">+ Agregar producto</button>';
@@ -26161,6 +26162,9 @@ function ccAbrirSaldoInicial(){
 function ccSiOnInput(val){
   var box=document.getElementById('cc-si-sug'); if(!box) return;
   if(!val||val.length<2){ box.style.display='none'; return; }
+  // Si el cliente es claramente una agencia/externo, activa el modo por-paciente automáticamente
+  var _catSel=document.getElementById('cc-si-cat');
+  if(_catSel && !_catSel.value && /reprovida|agencia|externo/i.test(val)){ _catSel.value='REPROVIDA'; if(typeof ccSiSegChange==='function') ccSiSegChange(); }
   if(!_ecPacientesList||!_ecPacientesList.length){ if(typeof _ensurePacList==='function'){ _ensurePacList(function(){ ccSiOnInput(val); }); } return; }
   var matches=(typeof _pacFuzzy==='function')?_pacFuzzy(_ecPacientesList,val,8):(_ecPacientesList||[]).filter(function(n){return n.toLowerCase().indexOf(val.toLowerCase())>=0;}).slice(0,8);
   if(!matches.length){ box.style.display='none'; return; }
