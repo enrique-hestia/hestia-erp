@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.09.133 -->
+﻿<!-- app-build:2026.07.09.135 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1023,6 +1023,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 <div id="view-cobranza" class="view" style="display:none"><div id="cob-root"></div></div>
 <!-- Seguro: carta de reembolso para pacientes extranjeros (por operación, con tipo de cambio) -->
 <div id="view-seguro" class="view" style="display:none"><div id="seg-root"></div></div>
+<div id="view-nota" class="view" style="display:none"><div id="nota-root"></div></div>
 
 <!-- ══ VISTA: PRESUPUESTO ══ -->
 <div id="view-presupuesto" class="view" style="display:none">
@@ -8553,6 +8554,11 @@ async function loadMenu() {
           icono:'shield-check', tipo:'vista', orden:(Number(_ecRef.orden)||5)+0.02,
           seccion:_ecRef.seccion, fuente:'seguro'
         });
+        menuItems.push({
+          id:'nota', label:'Nota / Recibo', padre:_ecRef.padre||'',
+          icono:'receipt', tipo:'vista', orden:(Number(_ecRef.orden)||5)+0.03,
+          seccion:_ecRef.seccion, fuente:'nota'
+        });
       }
     }
     // ── Reorganizar Finanzas: agrupar las vistas del CFO en un submenú "CFO" ──
@@ -11966,6 +11972,14 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     var _segEl = document.getElementById('view-seguro');
     if (_segEl) _segEl.style.display = '';
     segInit();
+    return;
+  }
+  // Nota / Recibo (comprobante NO fiscal para pacientes sin factura)
+  if (viewId === 'nota' || (_foundViewItem && /^nota$/i.test(String(_foundViewItem.fuente||'')))) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _notaEl = document.getElementById('view-nota');
+    if (_notaEl) _notaEl.style.display = '';
+    notaInit();
     return;
   }
   // Cuentas por Cobrar — cobranza (Motor A saldos + Motor B suscripciones crío)
@@ -18014,6 +18028,7 @@ function navigateTo(viewId) {
   if (viewId === 'estado-cuenta') { displayId = 'estado-cuenta'; ecInit(); }
   if (viewId === 'cobranza' || (_foundItem && /^cobranza$/i.test(String(_foundItem.fuente||'')))) { displayId = 'cobranza'; }
   else if (viewId === 'seguro' || (_foundItem && /^seguro$/i.test(String(_foundItem.fuente||'')))) { displayId = 'seguro'; }
+  else if (viewId === 'nota' || (_foundItem && /^nota$/i.test(String(_foundItem.fuente||'')))) { displayId = 'nota'; }
   else if (/cuentas?.?por.?cobrar/i.test(viewId) || (_foundItem && /por.?cobrar|cuentas.?cobrar/i.test(String(_foundItem.fuente||'')+' '+String(_foundItem.label||'')))) { displayId = 'cuentas-cobrar'; }
   if (/concilia/i.test(viewId)) { displayId = 'conciliacion'; }
   // Productos: todas las sub-categorías usan view-productos-catalogo
@@ -18947,6 +18962,7 @@ var _REPORT_TYPES=[
   {id:'estado-cuenta', label:'Estado de cuenta',           defaultTpl:'celula'},
   {id:'cobranza',      label:'Cobranza (estado por paciente)', defaultTpl:'celula'},
   {id:'seguro',        label:'Carta de Seguro (formato fijo)', defaultTpl:'celula', fijo:true},
+  {id:'nota',          label:'Nota / Recibo (no fiscal, formato fijo)', defaultTpl:'celula', fijo:true},
   {id:'orden-compra',  label:'Orden de compra',            defaultTpl:'editorial'},
   {id:'inventario-mov',label:'Movimientos de inventario',  defaultTpl:'vida'},
   {id:'ingresos-res',  label:'Resumen de ingresos',        defaultTpl:'ejecutivo'},
@@ -26365,9 +26381,11 @@ function segRenderResult(d){
     +'<div style="flex:2;min-width:220px"><label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);display:block;margin-bottom:3px">Nombre del paciente (para la carta)</label><input id="seg-pacnom" type="text" value="'+_esc(d.paciente||'').replace(/"/g,'&quot;')+'" style="width:100%;padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:13px;background:var(--color-surface-2);color:var(--color-text)"><div style="font-size:9.5px;color:var(--color-text-muted);margin-top:2px">Si el registro es de una agencia/doctor (ej. REPROVIDA), escribe aquí el nombre real del paciente.</div></div>'
     +'<div><label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);display:block;margin-bottom:3px">Idioma</label><select id="seg-idioma" style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)"><option value="en">English</option><option value="es">Español</option><option value="fr">Français</option><option value="pt">Português</option></select></div>'
     +'<div><label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);display:block;margin-bottom:3px">Moneda</label><select id="seg-moneda" style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)"><option>USD</option><option>EUR</option><option>CAD</option><option>GBP</option><option>MXN</option></select></div>'
+    +'<button onclick="segAbrirDesign()" title="Diseña el formato: colores, fuente, logo, orden de secciones y textos" style="padding:9px 14px;background:var(--color-surface-2);color:var(--color-text);border:1.5px solid var(--color-divider);border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">🎨 Personalizar formato</button>'
     +'<button onclick="segGenerar()" style="padding:9px 18px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Generar carta / PDF</button>'
   +'</div>';
-  h+='<div style="font-size:11.5px;color:var(--color-text-muted);margin-bottom:10px;line-height:1.5">Selecciona la(s) operación(es) del reclamo y captura el <b>monto en la moneda extranjera</b> (lo que se reclama al seguro) y el código <b>CPT/ICD</b> si aplica.</div>';
+  h+='<div style="font-size:11.5px;color:var(--color-text-muted);margin-bottom:6px;line-height:1.5">Selecciona la(s) operación(es) del reclamo y captura el <b>monto en la moneda extranjera</b> (lo que se reclama al seguro) y el código <b>CPT/ICD</b> si aplica.</div>';
+  h+='<div style="font-size:10.5px;color:var(--color-text-muted);background:var(--color-surface-2);border-radius:7px;padding:7px 10px;margin-bottom:12px;line-height:1.45"><b>¿Qué es CPT/ICD?</b> <b>CPT</b> (Current Procedural Terminology) = código del <i>procedimiento</i>; <b>ICD</b> (International Classification of Diseases) = código del <i>diagnóstico</i>. Son los códigos que la aseguradora usa para identificar qué se hizo. Es opcional — déjalo vacío si no lo tienes. <i>(Esta nota es solo para ti; no aparece en la carta.)</i></div>';
   h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:660px"><thead><tr style="border-bottom:2px solid var(--color-divider)">'
     +'<th style="padding:8px;width:32px"></th><th style="padding:8px;text-align:left;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Fecha</th><th style="padding:8px;text-align:left;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Servicio (OP)</th><th style="padding:8px;text-align:right;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">MXN</th><th style="padding:8px;text-align:center;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">CPT/ICD</th><th style="padding:8px;text-align:right;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Monto extranjero</th></tr></thead><tbody>';
   ventas.forEach(function(v,i){
@@ -26389,22 +26407,171 @@ var SEG_L={
   fr:{loc:'fr-FR',toWhom:'À qui de droit :',dept:"Compagnie d'assurance / Service des sinistres",re:"Objet : Demande de remboursement d'assurance",intro:"La présente lettre constitue une confirmation officielle que la patiente suivante a reçu des services médicaux à la Hestia Fertility Clinic et a réglé la totalité des services rendus. Ce document est délivré à des fins de remboursement d'assurance.",pInfo:'Informations du patient',pName:'Nom complet du patient',services:'Services médicaux rendus',cDesc:'Description du service',cCode:'Code CPT / ICD',cDate:'Date du service',cCur:'Devise',cAmt:'Montant facturé',total:'MONTANT TOTAL PAYÉ',payConf:'Confirmation de paiement',payP1:'Nous certifions par la présente que la patiente susmentionnée a payé en totalité le montant des services médicaux listés ci-dessus. Le paiement a été reçu par la Hestia Fertility Clinic. Aucun solde ne reste dû.',payP2:"Ce document est délivré à la demande de la patiente dans le seul but de soumettre une demande de remboursement à son assureur. La Hestia Fertility Clinic n'est pas partie à, et ne fait aucune déclaration concernant, toute couverture ou obligation de remboursement d'assurance.",provInfo:'Informations du prestataire',clinic:'Nom de la clinique',addr:'Adresse',email:'Courriel',web:'Site web',sincerely:'Cordialement,',dateLbl:'Date',cptNote:'CPT (Current Procedural Terminology) et ICD (International Classification of Diseases) sont des codes médicaux normalisés utilisés par les assureurs pour identifier les procédures et diagnostics.'},
   pt:{loc:'pt-BR',toWhom:'A quem possa interessar:',dept:'Companhia de Seguros / Departamento de Sinistros',re:'Assunto: Solicitação de Reembolso de Seguro',intro:'A presente carta serve como confirmação oficial de que a seguinte paciente recebeu serviços médicos na Hestia Fertility Clinic e efetuou o pagamento integral dos serviços prestados. Este documento é emitido para fins de reembolso de seguro.',pInfo:'Informações do Paciente',pName:'Nome completo do paciente',services:'Serviços Médicos Prestados',cDesc:'Descrição do serviço',cCode:'Código CPT / ICD',cDate:'Data do serviço',cCur:'Moeda',cAmt:'Valor cobrado',total:'VALOR TOTAL PAGO',payConf:'Confirmação de Pagamento',payP1:'Pela presente certificamos que a paciente acima mencionada pagou integralmente o valor dos serviços médicos listados acima. O pagamento foi recebido pela Hestia Fertility Clinic. Não resta saldo pendente.',payP2:'Este documento é emitido a pedido da paciente com o único propósito de apresentar um pedido de reembolso à sua seguradora. A Hestia Fertility Clinic não é parte de, nem faz qualquer declaração sobre, qualquer cobertura ou obrigação de reembolso de seguro.',provInfo:'Informações do Prestador',clinic:'Nome da clínica',addr:'Endereço',email:'E-mail',web:'Site',sincerely:'Atenciosamente,',dateLbl:'Data',cptNote:'CPT (Current Procedural Terminology) e ICD (International Classification of Diseases) são códigos médicos padronizados usados pelas seguradoras para identificar procedimentos e diagnósticos.'}
 };
-function segGenerar(){
-  if(!_segData) return;
-  var chks=document.querySelectorAll('.seg-chk:checked');
-  if(!chks.length){ alert('Selecciona al menos una operación/servicio para la carta.'); return; }
+/* ── Formato 100% personalizable de la carta (localStorage hf_seg_design) ──
+ * El usuario diseña: color, tinta, fuente, tamaño de logo, márgenes, nombre de
+ * la clínica, datos del prestador, textos y el ORDEN / visibilidad de cada
+ * bloque. Las plantillas fijas quedan intactas; esto es la opción "libre". */
+var SEG_BLOCKS_DEF=[
+  {id:'header',   label:'Encabezado (logo + nombre)'},
+  {id:'date',     label:'Fecha'},
+  {id:'recipient',label:'Destinatario (To Whom…)'},
+  {id:'re',       label:'Asunto (Re:)'},
+  {id:'intro',    label:'Párrafo de introducción'},
+  {id:'patient',  label:'Información del paciente'},
+  {id:'services', label:'Tabla de servicios'},
+  {id:'total',    label:'Total pagado'},
+  {id:'payment',  label:'Confirmación de pago'},
+  {id:'provider', label:'Información del prestador'},
+  {id:'signature',label:'Firma'}
+];
+function segDesignDefault(){
+  return { accent:'#c46a7a', ink:'#1a1a1a', font:'Georgia', logoSize:52, margin:18,
+    showLogo:true, clinicName:'HESTIA FERTILITY CLINIC', headStyle:'underline',
+    provClinic:'Hestia Clinic', provAddr:'Lomas de Chapultepec, Mexico City, Mexico',
+    provEmail:'facturas@hestiafertility.com', provWeb:'www.hestiafertility.com',
+    overrides:{intro:'',re:'',payP1:'',payP2:''},
+    order:SEG_BLOCKS_DEF.map(function(b){return b.id;}),
+    off:{} };
+}
+function segDesignGet(){
+  var d=segDesignDefault();
+  try{ var s=JSON.parse(localStorage.getItem('hf_seg_design')||'{}');
+    Object.keys(s||{}).forEach(function(k){ d[k]=s[k]; });
+    if(!d.overrides) d.overrides=segDesignDefault().overrides;
+    // asegurar que todos los bloques existan en el orden (por si se agregó uno nuevo)
+    var have={}; (d.order||[]).forEach(function(id){have[id]=1;});
+    SEG_BLOCKS_DEF.forEach(function(b){ if(!have[b.id]) d.order.push(b.id); });
+  }catch(e){}
+  return d;
+}
+function segDesignSet(cfg){ try{ localStorage.setItem('hf_seg_design', JSON.stringify(cfg)); }catch(e){} }
+var _segDesignWork=null;
+function segAbrirDesign(){
+  _segDesignWork=segDesignGet();
+  var m=document.getElementById('seg-design-modal');
+  if(!m){ m=document.createElement('div'); m.id='seg-design-modal';
+    m.style.cssText='display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:4000;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px 12px';
+    document.body.appendChild(m); }
+  m.style.display='flex'; segDesignRender();
+}
+function segCerrarDesign(){ var m=document.getElementById('seg-design-modal'); if(m) m.style.display='none'; }
+function _segDW(){ if(!_segDesignWork) _segDesignWork=segDesignGet(); return _segDesignWork; }
+function segDesignRender(){
+  var m=document.getElementById('seg-design-modal'); if(!m) return;
+  var c=_segDW(); var L=SEG_L.es;
+  var inp='padding:7px 9px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text);width:100%';
+  var lab='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);display:block;margin-bottom:3px';
+  function fld(labtxt,ctrl){ return '<div><label style="'+lab+'">'+labtxt+'</label>'+ctrl+'</div>'; }
+  var h='<div style="background:var(--color-surface);border-radius:14px;max-width:720px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);margin:auto">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--color-divider)">'
+      +'<div><h3 style="margin:0;font-size:17px;color:var(--color-text)">🎨 Personalizar carta</h3><p style="margin:3px 0 0;font-size:11.5px;color:var(--color-text-muted)">Diseña el formato libre. Las plantillas fijas no se tocan.</p></div>'
+      +'<button onclick="segCerrarDesign()" style="background:none;border:none;font-size:22px;color:var(--color-text-muted);cursor:pointer;line-height:1">×</button>'
+    +'</div>'
+    +'<div style="padding:18px 22px;max-height:66vh;overflow-y:auto">';
+  // Estilo
+  h+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--color-primary);margin:0 0 10px">Estilo</div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:18px">'
+    +fld('Color de acento','<input type="color" value="'+c.accent+'" onchange="segDField(\'accent\',this.value)" style="width:100%;height:34px;border:1px solid var(--color-divider);border-radius:7px;background:var(--color-surface-2);cursor:pointer">')
+    +fld('Color de texto','<input type="color" value="'+c.ink+'" onchange="segDField(\'ink\',this.value)" style="width:100%;height:34px;border:1px solid var(--color-divider);border-radius:7px;background:var(--color-surface-2);cursor:pointer">')
+    +fld('Fuente','<select onchange="segDField(\'font\',this.value)" style="'+inp+'">'+['Georgia','Times New Roman','Garamond','Arial','Helvetica','Calibri','Verdana'].map(function(f){return '<option'+(c.font===f?' selected':'')+'>'+f+'</option>';}).join('')+'</select>')
+    +fld('Estilo de título','<select onchange="segDField(\'headStyle\',this.value)" style="'+inp+'">'+[['underline','Subrayado'],['bold','Negrita'],['plain','Simple']].map(function(o){return '<option value="'+o[0]+'"'+(c.headStyle===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>')
+    +fld('Tamaño de logo ('+c.logoSize+'px)','<input type="range" min="0" max="110" value="'+c.logoSize+'" oninput="segDField(\'logoSize\',+this.value);document.getElementById(\'segd-ls\').textContent=this.value" style="width:100%"><span id="segd-ls" style="display:none">'+c.logoSize+'</span>')
+    +fld('Margen de página ('+c.margin+'mm)','<input type="range" min="8" max="30" value="'+c.margin+'" oninput="segDField(\'margin\',+this.value)" style="width:100%">')
+    +fld('Nombre de la clínica','<input type="text" value="'+_esc(c.clinicName).replace(/"/g,'&quot;')+'" oninput="segDField(\'clinicName\',this.value)" style="'+inp+'">')
+    +fld('Mostrar logo','<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--color-text);padding-top:7px"><input type="checkbox" '+(c.showLogo?'checked':'')+' onchange="segDField(\'showLogo\',this.checked)"> Incluir logo</label>')
+  +'</div>';
+  // Datos del prestador
+  h+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--color-primary);margin:0 0 10px">Datos del prestador (pie)</div>';
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:18px">'
+    +fld('Nombre','<input type="text" value="'+_esc(c.provClinic).replace(/"/g,'&quot;')+'" oninput="segDField(\'provClinic\',this.value)" style="'+inp+'">')
+    +fld('Dirección','<input type="text" value="'+_esc(c.provAddr).replace(/"/g,'&quot;')+'" oninput="segDField(\'provAddr\',this.value)" style="'+inp+'">')
+    +fld('Correo','<input type="text" value="'+_esc(c.provEmail).replace(/"/g,'&quot;')+'" oninput="segDField(\'provEmail\',this.value)" style="'+inp+'">')
+    +fld('Sitio web','<input type="text" value="'+_esc(c.provWeb).replace(/"/g,'&quot;')+'" oninput="segDField(\'provWeb\',this.value)" style="'+inp+'">')
+  +'</div>';
+  // Textos opcionales
+  h+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--color-primary);margin:0 0 4px">Textos (opcional)</div>';
+  h+='<div style="font-size:10.5px;color:var(--color-text-muted);margin-bottom:10px">Déjalos vacíos para usar la traducción automática del idioma elegido. Si escribes algo, reemplaza ese texto en cualquier idioma.</div>';
+  h+='<div style="display:grid;gap:10px;margin-bottom:18px">'
+    +fld('Asunto (Re:)','<input type="text" placeholder="'+_esc(L.re)+'" value="'+_esc(c.overrides.re||'').replace(/"/g,'&quot;')+'" oninput="segDOv(\'re\',this.value)" style="'+inp+'">')
+    +fld('Introducción','<textarea rows="2" placeholder="'+_esc(L.intro)+'" oninput="segDOv(\'intro\',this.value)" style="'+inp+';resize:vertical">'+_esc(c.overrides.intro||'')+'</textarea>')
+    +fld('Confirmación de pago — párrafo 1','<textarea rows="2" placeholder="'+_esc(L.payP1)+'" oninput="segDOv(\'payP1\',this.value)" style="'+inp+';resize:vertical">'+_esc(c.overrides.payP1||'')+'</textarea>')
+    +fld('Confirmación de pago — párrafo 2','<textarea rows="2" placeholder="'+_esc(L.payP2)+'" oninput="segDOv(\'payP2\',this.value)" style="'+inp+';resize:vertical">'+_esc(c.overrides.payP2||'')+'</textarea>')
+  +'</div>';
+  // Bloques (arrastrar para ordenar + mostrar/ocultar)
+  h+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--color-primary);margin:0 0 4px">Secciones · arrastra para ordenar</div>';
+  h+='<div style="font-size:10.5px;color:var(--color-text-muted);margin-bottom:10px">Arrastra ⠿ para mover · desmarca para ocultar una sección.</div>';
+  h+='<div id="segd-blocks">';
+  var labById={}; SEG_BLOCKS_DEF.forEach(function(b){labById[b.id]=b.label;});
+  c.order.forEach(function(id,idx){
+    var on=!c.off[id];
+    h+='<div class="segd-blk" draggable="true" data-id="'+id+'" data-idx="'+idx+'" style="display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--color-divider);border-radius:8px;margin-bottom:6px;background:var(--color-surface-2);cursor:grab">'
+      +'<span style="color:var(--color-text-muted);font-size:15px;cursor:grab">⠿</span>'
+      +'<label style="display:flex;align-items:center;gap:8px;flex:1;font-size:12.5px;color:var(--color-text)'+(on?'':';opacity:.5')+'"><input type="checkbox" '+(on?'checked':'')+' onchange="segDToggle(\''+id+'\',this.checked)"> '+_esc(labById[id]||id)+'</label>'
+    +'</div>';
+  });
+  h+='</div>';
+  h+='</div>'; // fin body
+  h+='<div style="display:flex;gap:10px;justify-content:space-between;align-items:center;padding:16px 22px;border-top:1px solid var(--color-divider)">'
+    +'<button onclick="segDReset()" style="padding:8px 16px;border:1px solid var(--color-divider);border-radius:8px;background:var(--color-surface);color:var(--color-text-muted);font-size:12.5px;font-weight:600;cursor:pointer">↺ Restablecer</button>'
+    +'<div style="display:flex;gap:10px">'
+      +'<button onclick="segDPreview()" style="padding:9px 18px;border:1.5px solid var(--color-primary);border-radius:8px;background:var(--color-surface);color:var(--color-primary);font-size:13px;font-weight:700;cursor:pointer">👁 Vista previa</button>'
+      +'<button onclick="segDGuardar()" style="padding:9px 20px;border:none;border-radius:8px;background:var(--color-primary);color:#fff;font-size:13px;font-weight:700;cursor:pointer">Guardar formato</button>'
+    +'</div>'
+  +'</div>'
+  +'</div>';
+  m.innerHTML=h;
+  _segDesignDnD();
+}
+function segDField(k,v){ _segDW()[k]=v; }
+function segDOv(k,v){ var c=_segDW(); if(!c.overrides) c.overrides={}; c.overrides[k]=v; }
+function segDToggle(id,on){ var c=_segDW(); if(!c.off) c.off={}; if(on) delete c.off[id]; else c.off[id]=1; }
+function segDReset(){ if(!confirm('¿Restablecer el formato al diseño original?')) return; _segDesignWork=segDesignDefault(); segDesignRender(); }
+function segDGuardar(){ segDesignSet(_segDW()); segCerrarDesign(); if(typeof hfToast==='function') hfToast('Formato guardado'); else alert('Formato guardado.'); }
+function segDPreview(){ segGenerar(_segDW(), true); }
+var _segDragId=null;
+function _segDesignDnD(){
+  var cont=document.getElementById('segd-blocks'); if(!cont) return;
+  Array.prototype.forEach.call(cont.querySelectorAll('.segd-blk'),function(el){
+    el.addEventListener('dragstart',function(e){ _segDragId=el.getAttribute('data-id'); el.style.opacity='.4'; try{e.dataTransfer.effectAllowed='move';}catch(x){} });
+    el.addEventListener('dragend',function(){ el.style.opacity=''; });
+    el.addEventListener('dragover',function(e){ e.preventDefault(); el.style.borderColor='var(--color-primary)'; });
+    el.addEventListener('dragleave',function(){ el.style.borderColor='var(--color-divider)'; });
+    el.addEventListener('drop',function(e){ e.preventDefault(); el.style.borderColor='var(--color-divider)';
+      var target=el.getAttribute('data-id'); if(!_segDragId||_segDragId===target) return;
+      var c=_segDW(); var ord=c.order.slice();
+      var from=ord.indexOf(_segDragId), to=ord.indexOf(target);
+      if(from<0||to<0) return; ord.splice(from,1); ord.splice(to,0,_segDragId); c.order=ord;
+      segDesignRender();
+    });
+  });
+}
+function segGenerar(cfgOverride, isPreview){
+  var cfg=cfgOverride||segDesignGet();
   var currency=(document.getElementById('seg-moneda')||{}).value||'USD';
   var L=SEG_L[(document.getElementById('seg-idioma')||{}).value||'en']||SEG_L.en;
-  var pac=((document.getElementById('seg-pacnom')||{}).value||'').trim()||_segData.paciente||'';
-  var rows=[], total=0, faltaMonto=false;
-  Array.prototype.forEach.call(chks,function(chk){
-    var i=chk.getAttribute('data-i'); var v=_segData.ventas[i];
-    var cpt=((document.getElementById('seg-cpt-'+i)||{}).value||'').trim();
-    var amt=parseFloat((document.getElementById('seg-usd-'+i)||{}).value||'0')||0;
-    if(amt<=0) faltaMonto=true;
-    total+=amt; rows.push({desc:v.producto||'—', cpt:cpt, fecha:v.fecha, cur:currency, amt:amt});
-  });
-  if(faltaMonto){ if(!confirm('Alguna operación no tiene monto en '+currency+'. ¿Generar de todas formas?')) return; }
+  var pac, rows=[], total=0;
+  if(isPreview && (!_segData || !document.querySelectorAll('.seg-chk:checked').length)){
+    // vista previa con datos de muestra
+    pac=((document.getElementById('seg-pacnom')||{}).value||'').trim()||'Jane Doe';
+    rows=[{desc:'In Vitro Fertilization (IVF)',cpt:'58970',fecha:'2026-03-14',cur:currency,amt:4520.61},
+          {desc:'Embryo Cryopreservation',cpt:'89258',fecha:'2026-03-20',cur:currency,amt:850.00}];
+    total=5370.61;
+  } else {
+    if(!_segData) return;
+    var chks=document.querySelectorAll('.seg-chk:checked');
+    if(!chks.length){ alert('Selecciona al menos una operación/servicio para la carta.'); return; }
+    pac=((document.getElementById('seg-pacnom')||{}).value||'').trim()||_segData.paciente||'';
+    var faltaMonto=false;
+    Array.prototype.forEach.call(chks,function(chk){
+      var i=chk.getAttribute('data-i'); var v=_segData.ventas[i];
+      var cpt=((document.getElementById('seg-cpt-'+i)||{}).value||'').trim();
+      var amt=parseFloat((document.getElementById('seg-usd-'+i)||{}).value||'0')||0;
+      if(amt<=0) faltaMonto=true;
+      total+=amt; rows.push({desc:v.producto||'—', cpt:cpt, fecha:v.fecha, cur:currency, amt:amt});
+    });
+    if(faltaMonto){ if(!confirm('Alguna operación no tiene monto en '+currency+'. ¿Generar de todas formas?')) return; }
+  }
+  var ov=cfg.overrides||{};
   var sym=({USD:'$',CAD:'$',MXN:'$',EUR:'€',GBP:'£'})[currency]||'$';
   function money(n){ return sym+' '+(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
   function dLarga(s){ try{ return new Date(String(s).substring(0,10)+'T12:00:00').toLocaleDateString(L.loc,{year:'numeric',month:'long',day:'numeric'}); }catch(e){ return s||'—'; } }
@@ -26414,34 +26581,180 @@ function segGenerar(){
   var trs=rows.map(function(r){ return '<tr><td>'+_esc(r.desc)+'</td><td style="text-align:center">'+_esc(r.cpt||'—')+'</td><td style="text-align:center">'+dLarga(r.fecha)+'</td><td style="text-align:center">'+_esc(r.cur)+'</td><td style="text-align:right">'+money(r.amt)+'</td></tr>'; }).join('');
   var logo=(typeof _HF_LOGO_DEFAULT!=='undefined'?_HF_LOGO_DEFAULT:'');
   var firma=(typeof hfFirmaBloque==='function')?hfFirmaBloque('seguro','Clinic Administrator'):'';
-  var sig= firma
-    ? '<div style="margin-top:30px;page-break-inside:avoid">'+_esc(L.sincerely)+firma+'</div>'
-    : '<div style="margin-top:30px;page-break-inside:avoid">'+_esc(L.sincerely)+'<div style="border-top:1px solid #333;width:250px;margin-top:44px;padding-top:5px;font-size:11px">'+_esc(hfSigName?hfSigName():'Clinic Administrator')+'</div></div>';
+  var sigInner= firma
+    ? _esc(L.sincerely)+firma
+    : _esc(L.sincerely)+'<div style="border-top:1px solid #333;width:250px;margin-top:44px;padding-top:5px;font-size:11px">'+_esc(hfSigName?hfSigName():'Clinic Administrator')+'</div>';
+  // constructor por bloque
+  function blk(id){
+    switch(id){
+      case 'header': return '<div class="hd">'+(cfg.showLogo&&logo?'<img src="'+logo+'" onerror="this.style.display=\'none\'">':'')+(cfg.clinicName?'<div class="cn">'+_esc(cfg.clinicName)+'</div>':'')+'</div>';
+      case 'date': return '<div>'+_esc(L.dateLbl)+': '+fechaLarga+'</div>';
+      case 'recipient': return '<div style="margin-top:12px">'+_esc(L.toWhom)+'<br>'+_esc(L.dept)+'</div>';
+      case 're': return '<div style="margin-top:7px"><b>'+_esc(ov.re||L.re)+'</b></div>';
+      case 'intro': return '<p>'+_esc(ov.intro||L.intro)+'</p>';
+      case 'patient': return '<h2>'+_esc(L.pInfo)+'</h2><div><b>'+_esc(L.pName)+':</b> '+_esc(pac)+'</div>';
+      case 'services': return '<h2>'+_esc(L.services)+'</h2><table><thead><tr><th>'+_esc(L.cDesc)+'</th><th style="text-align:center">'+_esc(L.cCode)+'</th><th style="text-align:center">'+_esc(L.cDate)+'</th><th style="text-align:center">'+_esc(L.cCur)+'</th><th style="text-align:right">'+_esc(L.cAmt)+'</th></tr></thead><tbody>'+trs+'</tbody></table>';
+      case 'total': return '<div class="tot">'+_esc(L.total)+': '+money(total)+' '+_esc(currency)+'</div>';
+      case 'payment': return '<h2>'+_esc(L.payConf)+'</h2><p>'+_esc(ov.payP1||L.payP1)+'</p><p>'+_esc(ov.payP2||L.payP2)+'</p>';
+      case 'provider': return '<h2>'+_esc(L.provInfo)+'</h2><div><b>'+_esc(L.clinic)+':</b> '+_esc(cfg.provClinic)+'</div><div><b>'+_esc(L.addr)+':</b> '+_esc(cfg.provAddr)+'</div><div><b>'+_esc(L.email)+':</b> '+_esc(cfg.provEmail)+'</div><div><b>'+_esc(L.web)+':</b> '+_esc(cfg.provWeb)+'</div>';
+      case 'signature': return '<div style="margin-top:30px;page-break-inside:avoid">'+sigInner+'</div>';
+    }
+    return '';
+  }
+  var body=(cfg.order||SEG_BLOCKS_DEF.map(function(b){return b.id;})).map(function(id){ return (cfg.off&&cfg.off[id])?'':blk(id); }).join('');
+  var hs=({underline:'border-bottom:1px solid '+cfg.accent+'55;padding-bottom:2px', bold:'', plain:''})[cfg.headStyle||'underline'];
+  var fontStack=cfg.font+', Georgia, "Times New Roman", serif';
   // <title> vacío para minimizar el encabezado del navegador al imprimir.
   w.document.write('<html><head><meta charset="utf-8"><title> </title><style>'
-    +'@page{margin:18mm}body{font-family:Georgia,"Times New Roman",serif;color:#1a1a1a;font-size:12px;line-height:1.55;margin:0}'
-    +'.hd{text-align:center;border-bottom:2px solid #c46a7a;padding-bottom:9px;margin-bottom:16px}.hd img{height:52px}.hd .cn{font-size:14px;font-weight:700;letter-spacing:1px;color:#c46a7a;margin-top:5px}'
-    +'h2{font-size:10.5px;letter-spacing:1px;text-transform:uppercase;color:#c46a7a;border-bottom:1px solid #e5cdd4;padding-bottom:2px;margin:15px 0 6px}'
+    +'@page{margin:'+(cfg.margin||18)+'mm}body{font-family:'+fontStack+';color:'+cfg.ink+';font-size:12px;line-height:1.55;margin:0}'
+    +'.hd{text-align:center;border-bottom:2px solid '+cfg.accent+';padding-bottom:9px;margin-bottom:16px}.hd img{height:'+(cfg.logoSize||52)+'px;max-height:'+(cfg.logoSize||52)+'px}.hd .cn{font-size:14px;font-weight:700;letter-spacing:1px;color:'+cfg.accent+';margin-top:5px}'
+    +'h2{font-size:10.5px;letter-spacing:1px;text-transform:uppercase;color:'+cfg.accent+';'+hs+';margin:15px 0 6px}'
     +'p{margin:7px 0}'
-    +'table{width:100%;border-collapse:collapse;margin:6px 0}th{background:#f6eef0;font-size:9px;text-transform:uppercase;letter-spacing:.4px;color:#6b4a52;padding:6px 8px;border-bottom:1.5px solid #d9b8c1;text-align:left}td{padding:6px 8px;border-bottom:1px solid #eee;font-size:11px}'
-    +'.tot{text-align:right;font-size:13px;font-weight:700;margin-top:6px;color:#111}'
-    +'.note{font-size:9px;color:#888;margin-top:4px;font-style:italic}'
+    +'table{width:100%;border-collapse:collapse;margin:6px 0}th{background:'+cfg.accent+'18;font-size:9px;text-transform:uppercase;letter-spacing:.4px;color:'+cfg.ink+';padding:6px 8px;border-bottom:1.5px solid '+cfg.accent+'66;text-align:left}td{padding:6px 8px;border-bottom:1px solid #eee;font-size:11px}'
+    +'.tot{text-align:right;font-size:13px;font-weight:700;margin-top:6px;color:'+cfg.ink+'}'
+    +'</style></head><body>'
+    +body
+    +'</body></html>');
+  w.document.close(); setTimeout(function(){ try{ w.print(); }catch(e){} },400);
+}
+
+/* ═══════════ NOTA / RECIBO (comprobante NO fiscal, pacientes sin factura) ═══════════
+ * Recibo de pago en español para pacientes que NO quieren factura pero sí quieren
+ * llevar sus cuentas. Reutiliza estadoCobranza (mismas ventas que la carta de seguro).
+ * NO es un CFDI — lleva leyenda de documento informativo. */
+var _notaData=null;
+function _notaNumLetras(num){
+  num=Math.floor(Math.abs(num)); if(num===0) return 'cero';
+  var UNI=['','uno','dos','tres','cuatro','cinco','seis','siete','ocho','nueve','diez','once','doce','trece','catorce','quince','dieciséis','diecisiete','dieciocho','diecinueve','veinte','veintiuno','veintidós','veintitrés','veinticuatro','veinticinco','veintiséis','veintisiete','veintiocho','veintinueve'];
+  var DEC=['','','','treinta','cuarenta','cincuenta','sesenta','setenta','ochenta','noventa'];
+  var CEN=['','ciento','doscientos','trescientos','cuatrocientos','quinientos','seiscientos','setecientos','ochocientos','novecientos'];
+  function sec(n){ if(n===100) return 'cien'; var t='',c=Math.floor(n/100),r=n%100; if(c) t+=CEN[c]+' '; if(r<30) t+=UNI[r]; else{ var d=Math.floor(r/10),u=r%10; t+=DEC[d]; if(u) t+=' y '+UNI[u]; } return t.trim(); }
+  function miles(n){ if(n<1000) return sec(n); var m=Math.floor(n/1000),r=n%1000,pre=(m===1)?'mil':(sec(m)+' mil'); return (pre+(r?(' '+sec(r)):'')).trim(); }
+  var mill=Math.floor(num/1000000),resto=num%1000000,out='';
+  if(mill){ out+=(mill===1?'un millón':(miles(mill)+' millones')); if(resto) out+=' '+miles(resto); } else out=miles(resto);
+  return out.trim();
+}
+function _notaImporteLetra(n){ var ent=Math.floor(n),cent=Math.round((n-ent)*100),cc=(cent<10?'0':'')+cent; var pal=_notaNumLetras(ent).replace(/uno$/,'un').replace(/veintiun$/,'veintiún'); return '('+(pal+' peso'+(ent===1?'':'s')).toUpperCase()+' '+cc+'/100 M.N.)'; }
+function notaInit(){
+  var root=document.getElementById('nota-root'); if(!root) return;
+  root.innerHTML=notaShell();
+  if(!_ecPacientesList||!_ecPacientesList.length){
+    var tok=encodeURIComponent(getToken());
+    fetch(APPS_SCRIPT_URL+'?action=listaPacientes&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
+      .then(function(r){return r.json();}).then(function(d){ if(d&&d.pacientes) _ecPacientesList=d.pacientes.map(function(p){return typeof p==='string'?p:p.nombre;}); }).catch(function(){});
+  }
+}
+function notaShell(){
+  return '<div style="max-width:960px;margin:0 auto;padding:24px 16px">'
+    +'<div style="margin-bottom:22px"><h1 style="font-size:22px;font-weight:800;color:var(--color-text);margin:0">Nota / Recibo</h1>'
+    +'<p style="font-size:13px;color:var(--color-text-muted);margin:4px 0 0">Comprobante <b>NO fiscal</b> de pago para pacientes sin factura · por operación · en pesos (MXN)</p></div>'
+    +'<div style="background:var(--color-surface);border-radius:12px;padding:18px;margin-bottom:18px;box-shadow:var(--shadow-card)">'
+      +'<label style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);display:block;margin-bottom:8px">Buscar paciente</label>'
+      +'<div style="display:flex;gap:10px">'
+        +'<div style="flex:1;position:relative"><input id="nota-search" type="text" placeholder="Escriba el nombre de la paciente…" oninput="notaOnInput(this.value)" autocomplete="off" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--color-surface-2);border:1.5px solid var(--color-divider);color:var(--color-text);font-size:14px">'
+        +'<div id="nota-sug" style="display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:8px;box-shadow:var(--shadow-dropdown);z-index:200;max-height:220px;overflow-y:auto"></div></div>'
+        +'<button onclick="notaBuscar()" style="padding:10px 20px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Ver operaciones</button>'
+      +'</div>'
+    +'</div>'
+    +'<div id="nota-result"></div>'
+  +'</div>';
+}
+function notaOnInput(val){
+  var box=document.getElementById('nota-sug'); if(!box) return;
+  if(!val||val.length<2){ box.style.display='none'; return; }
+  if(!_ecPacientesList||!_ecPacientesList.length){ _ensurePacList(function(){ notaOnInput(val); }); return; }
+  var matches=_pacFuzzy(_ecPacientesList, val, 10);
+  if(!matches.length){ box.innerHTML='<div style="padding:9px 14px;font-size:12px;color:var(--color-text-muted)">Sin coincidencias parecidas…</div>'; box.style.display='block'; return; }
+  box.innerHTML=matches.map(function(n){ return '<div class="nota-sug-item" data-n="'+_esc(n).replace(/"/g,'&quot;')+'" style="padding:9px 14px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--color-divider)">'+_esc(n)+'</div>'; }).join('');
+  box.style.display='block';
+  Array.prototype.forEach.call(box.querySelectorAll('.nota-sug-item'),function(it){ it.addEventListener('mousedown',function(){ document.getElementById('nota-search').value=it.getAttribute('data-n'); box.style.display='none'; notaBuscar(); }); });
+}
+function notaBuscar(){
+  var nombre=((document.getElementById('nota-search')||{}).value||'').trim(); if(!nombre) return;
+  var box=document.getElementById('nota-sug'); if(box) box.style.display='none';
+  var res=document.getElementById('nota-result'); res.innerHTML='<div style="padding:30px;text-align:center;color:var(--color-text-muted)">Cargando operaciones…</div>';
+  var tok=encodeURIComponent(getToken());
+  fetch(APPS_SCRIPT_URL+'?action=estadoCobranza&paciente='+encodeURIComponent(nombre)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
+    .then(function(r){return r.json();}).then(function(d){ _notaData=d; notaRenderResult(d); })
+    .catch(function(e){ res.innerHTML='<div style="padding:24px;color:#c83c3c">Error de red: '+e.message+'</div>'; });
+}
+function notaRenderResult(d){
+  var res=document.getElementById('nota-result');
+  if(!d||!d.ok){ res.innerHTML='<div style="padding:24px;text-align:center;color:#c83c3c;font-size:13px">'+_esc((d&&d.error)||'No disponible. ¿Agregaste cobranza.gs y redeployaste?')+'</div>'; return; }
+  var ventas=d.ventas||[];
+  if(!ventas.length){ res.innerHTML='<div style="padding:24px;text-align:center;color:var(--color-text-muted);font-size:13px">Sin operaciones registradas para este paciente.</div>'; return; }
+  var hoy=new Date(); var fechaISO=hoy.getFullYear()+'-'+('0'+(hoy.getMonth()+1)).slice(-2)+'-'+('0'+hoy.getDate()).slice(-2);
+  var folioAuto='N-'+hoy.getFullYear()+('0'+(hoy.getMonth()+1)).slice(-2)+('0'+hoy.getDate()).slice(-2)+'-'+('000'+Math.floor(Math.random()*1000)).slice(-3);
+  var h='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px;padding:16px 18px">';
+  h+='<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">'
+    +'<div style="flex:2;min-width:200px"><label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);display:block;margin-bottom:3px">Recibí de (paciente)</label><input id="nota-receptor" type="text" value="'+_esc(d.paciente||'').replace(/"/g,'&quot;')+'" style="width:100%;padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:13px;background:var(--color-surface-2);color:var(--color-text)"></div>'
+    +'<div><label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);display:block;margin-bottom:3px">Folio</label><input id="nota-folio" type="text" value="'+folioAuto+'" style="width:150px;padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)"></div>'
+    +'<div><label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);display:block;margin-bottom:3px">Fecha</label><input id="nota-fecha" type="date" value="'+fechaISO+'" style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)"></div>'
+    +'<div><label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);display:block;margin-bottom:3px">Forma de pago</label><select id="nota-formapago" style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)"><option>Efectivo</option><option>Transferencia</option><option>Tarjeta de crédito</option><option>Tarjeta de débito</option><option>Depósito</option><option>Cheque</option></select></div>'
+    +'<button onclick="notaGenerar()" style="padding:9px 18px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Generar nota / recibo</button>'
+  +'</div>';
+  h+='<div style="font-size:11.5px;color:var(--color-text-muted);margin-bottom:6px;line-height:1.5">Selecciona la(s) operación(es) del recibo. El <b>importe</b> se puede ajustar (por defecto es el total de la operación en MXN).</div>';
+  h+='<div style="font-size:10.5px;color:#9a6a12;background:#fdf6e3;border:1px solid #f0e0b0;border-radius:7px;padding:7px 10px;margin-bottom:12px;line-height:1.45"><b>Documento NO fiscal.</b> Este recibo es un comprobante informativo de pago; <b>no</b> sustituye a una factura (CFDI).</div>';
+  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:560px"><thead><tr style="border-bottom:2px solid var(--color-divider)">'
+    +'<th style="padding:8px;width:32px"></th><th style="padding:8px;text-align:left;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Fecha</th><th style="padding:8px;text-align:left;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Concepto (OP)</th><th style="padding:8px;text-align:right;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Importe (MXN)</th></tr></thead><tbody>';
+  ventas.forEach(function(v,i){
+    h+='<tr style="border-bottom:1px solid var(--color-divider)">'
+      +'<td style="padding:6px;text-align:center"><input type="checkbox" class="nota-chk" data-i="'+i+'"></td>'
+      +'<td style="padding:6px;color:var(--color-text-muted);white-space:nowrap">'+ccFch(v.fecha)+'</td>'
+      +'<td style="padding:6px">'+_esc(v.producto||'—')+'<div style="font-size:9.5px;color:var(--color-text-muted)">'+(v.op?'OP '+_esc(v.op):'')+'</div></td>'
+      +'<td style="padding:6px;text-align:right"><input id="nota-monto-'+i+'" type="number" step="0.01" value="'+(Number(v.total)||0)+'" style="width:118px;padding:4px 6px;border:1px solid var(--color-divider);border-radius:6px;font-size:12px;text-align:right;background:var(--color-surface-2);color:var(--color-text)"></td>'
+      +'</tr>';
+  });
+  h+='</tbody></table></div></div>';
+  res.innerHTML=h;
+}
+function notaGenerar(){
+  if(!_notaData) return;
+  var chks=document.querySelectorAll('.nota-chk:checked');
+  if(!chks.length){ alert('Selecciona al menos una operación para la nota.'); return; }
+  var receptor=((document.getElementById('nota-receptor')||{}).value||'').trim()||_notaData.paciente||'';
+  var folio=((document.getElementById('nota-folio')||{}).value||'').trim();
+  var formaPago=((document.getElementById('nota-formapago')||{}).value||'Efectivo');
+  var fechaSel=((document.getElementById('nota-fecha')||{}).value||'');
+  var rows=[], total=0;
+  Array.prototype.forEach.call(chks,function(chk){
+    var i=chk.getAttribute('data-i'); var v=_notaData.ventas[i];
+    var monto=parseFloat((document.getElementById('nota-monto-'+i)||{}).value||v.total||0)||0;
+    total+=monto; rows.push({desc:v.producto||'—', op:v.op, fecha:v.fecha, monto:monto});
+  });
+  function money(n){ return '$'+(n||0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function dLarga(s){ try{ return new Date(String(s).substring(0,10)+'T12:00:00').toLocaleDateString('es-MX',{year:'numeric',month:'long',day:'numeric'}); }catch(e){ return s||'—'; } }
+  var fechaDoc = fechaSel ? dLarga(fechaSel) : new Date().toLocaleDateString('es-MX',{year:'numeric',month:'long',day:'numeric'});
+  var w=window.open('','_blank');
+  if(!w){ alert('Habilita las ventanas emergentes para este sitio e intenta de nuevo.'); return; }
+  var trs=rows.map(function(r){ return '<tr><td style="text-align:center;white-space:nowrap">'+dLarga(r.fecha)+'</td><td>'+_esc(r.desc)+(r.op?' <span style="color:#999">· OP '+_esc(r.op)+'</span>':'')+'</td><td style="text-align:right;white-space:nowrap">'+money(r.monto)+'</td></tr>'; }).join('');
+  var logo=(typeof _HF_LOGO_DEFAULT!=='undefined'?_HF_LOGO_DEFAULT:'');
+  var firma=(typeof hfFirmaBloque==='function')?hfFirmaBloque('nota','Recibí'):'';
+  var sig= firma
+    ? '<div style="margin-top:34px;page-break-inside:avoid;text-align:center;width:280px;margin-left:auto;margin-right:auto">'+firma+'</div>'
+    : '<div style="margin-top:52px;page-break-inside:avoid;text-align:center"><div style="border-top:1px solid #333;width:260px;margin:0 auto;padding-top:5px;font-size:11px">Recibí conforme</div></div>';
+  w.document.write('<html><head><meta charset="utf-8"><title> </title><style>'
+    +'@page{margin:18mm}body{font-family:Georgia,"Times New Roman",serif;color:#1a1a1a;font-size:12.5px;line-height:1.55;margin:0}'
+    +'.hd{text-align:center;border-bottom:2px solid #c46a7a;padding-bottom:9px;margin-bottom:14px}.hd img{height:52px}.hd .cn{font-size:14px;font-weight:700;letter-spacing:1px;color:#c46a7a;margin-top:5px}'
+    +'.title{text-align:center;font-size:19px;font-weight:800;letter-spacing:2px;color:#c46a7a;margin:6px 0 2px}'
+    +'.nf{text-align:center;font-size:9px;text-transform:uppercase;letter-spacing:1px;color:#b0392f;border:1px solid #e7b7b1;background:#fbeeec;border-radius:5px;padding:4px 8px;margin:6px auto 16px;max-width:520px}'
+    +'.meta{display:flex;justify-content:space-between;font-size:12px;margin:10px 0}'
+    +'table{width:100%;border-collapse:collapse;margin:10px 0}th{background:#f6eef0;font-size:9.5px;text-transform:uppercase;letter-spacing:.4px;color:#6b4a52;padding:7px 9px;border-bottom:1.5px solid #d9b8c1;text-align:left}td{padding:7px 9px;border-bottom:1px solid #eee}'
+    +'.tot{text-align:right;font-size:15px;font-weight:700;margin-top:6px;color:#111}.letra{text-align:right;font-size:10.5px;color:#555;font-style:italic;margin-top:2px}'
+    +'.fp{font-size:12px;margin-top:14px}.leg{font-size:9px;color:#999;margin-top:26px;border-top:1px solid #eee;padding-top:8px;text-align:center}'
     +'</style></head><body>'
     +'<div class="hd">'+(logo?'<img src="'+logo+'" onerror="this.style.display=\'none\'">':'')+'<div class="cn">HESTIA FERTILITY CLINIC</div></div>'
-    +'<div>'+_esc(L.dateLbl)+': '+fechaLarga+'</div>'
-    +'<div style="margin-top:12px">'+_esc(L.toWhom)+'<br>'+_esc(L.dept)+'</div>'
-    +'<div style="margin-top:7px"><b>'+_esc(L.re)+'</b></div>'
-    +'<p>'+_esc(L.intro)+'</p>'
-    +'<h2>'+_esc(L.pInfo)+'</h2><div><b>'+_esc(L.pName)+':</b> '+_esc(pac)+'</div>'
-    +'<h2>'+_esc(L.services)+'</h2>'
-    +'<table><thead><tr><th>'+_esc(L.cDesc)+'</th><th style="text-align:center">'+_esc(L.cCode)+'</th><th style="text-align:center">'+_esc(L.cDate)+'</th><th style="text-align:center">'+_esc(L.cCur)+'</th><th style="text-align:right">'+_esc(L.cAmt)+'</th></tr></thead><tbody>'+trs+'</tbody></table>'
-    +'<div class="tot">'+_esc(L.total)+': '+money(total)+' '+_esc(currency)+'</div>'
-    +'<div class="note">'+_esc(L.cptNote)+'</div>'
-    +'<h2>'+_esc(L.payConf)+'</h2>'
-    +'<p>'+_esc(L.payP1)+'</p><p>'+_esc(L.payP2)+'</p>'
-    +'<h2>'+_esc(L.provInfo)+'</h2>'
-    +'<div><b>'+_esc(L.clinic)+':</b> Hestia Clinic</div><div><b>'+_esc(L.addr)+':</b> Lomas de Chapultepec, Mexico City, Mexico</div><div><b>'+_esc(L.email)+':</b> facturas@hestiafertility.com</div><div><b>'+_esc(L.web)+':</b> www.hestiafertility.com</div>'
+    +'<div class="title">RECIBO DE PAGO</div>'
+    +'<div class="nf">Documento informativo · NO es un comprobante fiscal (CFDI)</div>'
+    +'<div class="meta"><div><b>Folio:</b> '+_esc(folio||'—')+'</div><div><b>Fecha:</b> '+fechaDoc+'</div></div>'
+    +'<div style="font-size:13px;margin:6px 0 2px">Recibí de: <b>'+_esc(receptor)+'</b></div>'
+    +'<div style="font-size:12px;color:#555;margin-bottom:6px">La cantidad de <b>'+money(total)+'</b> por concepto de los servicios que se detallan:</div>'
+    +'<table><thead><tr><th style="text-align:center;width:120px">Fecha</th><th>Concepto</th><th style="text-align:right;width:130px">Importe</th></tr></thead><tbody>'+trs+'</tbody></table>'
+    +'<div class="tot">TOTAL: '+money(total)+' MXN</div>'
+    +'<div class="letra">'+_esc(_notaImporteLetra(total))+'</div>'
+    +'<div class="fp"><b>Forma de pago:</b> '+_esc(formaPago)+'</div>'
     +sig
+    +'<div class="leg">Este recibo ampara únicamente el pago recibido y no sustituye a la factura (CFDI). Si requiere factura, solicítela a facturas@hestiafertility.com.</div>'
     +'</body></html>');
   w.document.close(); setTimeout(function(){ try{ w.print(); }catch(e){} },400);
 }
