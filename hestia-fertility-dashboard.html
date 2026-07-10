@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.10.136 -->
+﻿<!-- app-build:2026.07.10.137 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -25780,7 +25780,7 @@ function ccRenderSaldos(){
       +'</tr>';
     if(o.items&&o.items.length){
       var det='';
-      o.items.forEach(function(x){ det+='<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dotted var(--color-divider)"><span>'+(x.pac?'<b style="color:var(--color-primary)">'+ccEsc(x.pac)+'</b> · ':'')+ccEsc(x.producto)+(x.cantidad>1?' <span style="color:var(--color-text-muted)">×'+x.cantidad+'</span>':'')+'</span><span style="white-space:nowrap">'+ccFmt(x.total)+(x.saldo>0.01?' · <span style="color:#c83c3c">debe '+ccFmt(x.saldo)+'</span>':' <span style="color:#16a34a">✓</span>')+'</span></div>'; });
+      o.items.forEach(function(x){ det+='<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dotted var(--color-divider)"><span>'+(x.pac?'<b style="color:var(--color-primary)">'+ccEsc(x.pac)+'</b> · ':'')+(x.fecha?'<span style="color:var(--color-text-muted)">'+ccFch(x.fecha)+' · </span>':'')+ccEsc(x.producto)+(x.cantidad>1?' <span style="color:var(--color-text-muted)">×'+x.cantidad+'</span>':'')+'</span><span style="white-space:nowrap">'+ccFmt(x.total)+(x.saldo>0.01?' · <span style="color:#c83c3c">debe '+ccFmt(x.saldo)+'</span>':' <span style="color:#16a34a">✓</span>')+'</span></div>'; });
       h+='<tr id="'+rid+'" style="display:none;'+bg+'"><td colspan="8" style="padding:6px 16px 12px 40px;font-size:12px"><div style="font-weight:700;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);margin-bottom:5px">Desglose de '+ccEsc(o.op)+' — qué se cobró</div>'+det+'</td></tr>';
     }
   });
@@ -25911,14 +25911,15 @@ function _ccPacFlag(nombre, flag, value){
 }
 function ccTogglePlan(nombre, mensual){ _ccPacFlag(nombre,'mensual',mensual); }
 function ccToggleAutopay(nombre, autopay){ _ccPacFlag(nombre,'autopay',autopay); }
-/* ── Editor de PARTIDAS (productos con dropdown + precio automático) ── */
-var _ccItems=[];
-var _ccItemsPacMode=false; // true = cliente es agencia/externo → capturar el paciente real de cada partida
+/* ── Editor de PARTIDAS por BLOQUES (paciente + fecha de tratamiento + productos)
+ * Normal (pacientes): un solo bloque sin cabecera. Agencia/externo: un bloque por
+ * paciente/fecha, con "cierre parcial" (+ Otro paciente/fecha) para seguir capturando. */
+var _ccBlocks=[{pac:'',fecha:'',items:[]}];
+var _ccItemsPacMode=false;
 function _ccItemsEditorHtml(){
   return '<div style="margin-bottom:12px">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><label style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted)">Partidas (productos)</label>'
-    +'<button type="button" onclick="ccItemAdd()" style="padding:4px 10px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;color:var(--color-text)">+ Agregar producto</button></div>'
-    +'<div id="cc-items-pacnote" style="display:none;font-size:10.5px;color:#b45309;background:#fff8ed;border:1px solid #f0dcae;border-radius:7px;padding:6px 9px;margin-bottom:8px;line-height:1.4">Cliente <b>agencia/externo</b>: captura el <b>nombre del paciente real</b> de cada partida — así aparece en el detalle del reporte de cobranza.</div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><label style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted)">Partidas (productos)</label></div>'
+    +'<div id="cc-items-pacnote" style="display:none;font-size:10.5px;color:#b45309;background:#fff8ed;border:1px solid #f0dcae;border-radius:7px;padding:6px 9px;margin-bottom:8px;line-height:1.4">Cliente <b>agencia/externo</b>: captura el <b>paciente real</b> y la <b>fecha del tratamiento</b> de cada bloque. Usa <b>«+ Otro paciente / fecha»</b> para cerrar un bloque y seguir con el siguiente. Cada paciente sale en el detalle del reporte de cobranza.</div>'
     +'<div id="cc-items-body"></div>'
     +'<div style="display:flex;justify-content:flex-end;gap:8px;align-items:center;margin-top:4px;font-size:12px"><span style="color:var(--color-text-muted)">Total partidas:</span> <b id="cc-items-total" style="font-size:15px;color:#c83c3c">$0.00</b></div>'
     +'<span id="cc-prod-dl-holder"></span><span id="cc-pac-dl-holder"></span>'
@@ -25942,46 +25943,86 @@ function _ccEnsurePacDatalist(){
 function _ccItemsProductsReady(cb){ if(typeof _ingProductos!=='undefined' && _ingProductos && _ingProductos.length){ cb&&cb(); } else if(typeof ingLoadProductos==='function'){ try{ var p=ingLoadProductos(); if(p&&p.then){ p.then(function(){cb&&cb();}).catch(function(){cb&&cb();}); } else { cb&&cb(); } }catch(e){ cb&&cb(); } } else { cb&&cb(); } }
 function _ccItemsInit(preItems, pacMode){
   _ccItemsPacMode=!!pacMode;
-  _ccItems=(preItems||[]).map(function(it){ var c=parseFloat(it.cantidad)||1; var pr=(it.precio!=null&&it.precio!=='')?parseFloat(it.precio):(c?((parseFloat(it.total)||0)/c):(parseFloat(it.total)||0)); return {producto:it.producto||'',cantidad:c,precio:pr||0,pac:it.pac||it.paciente||''}; });
-  if(!_ccItemsPacMode && _ccItems.some(function(x){return x.pac;})) _ccItemsPacMode=true; // si ya trae pacientes, permitir editarlos
+  // Agrupar las partidas en bloques por (paciente|fecha)
+  var byKey={}, order=[];
+  (preItems||[]).forEach(function(it){
+    var c=parseFloat(it.cantidad)||1; var pr=(it.precio!=null&&it.precio!=='')?parseFloat(it.precio):(c?((parseFloat(it.total)||0)/c):(parseFloat(it.total)||0));
+    var pac=String(it.pac||it.paciente||''); var fecha=String(it.fecha||'');
+    var k=pac+'|'+fecha; if(!byKey[k]){ byKey[k]={pac:pac,fecha:fecha,items:[]}; order.push(k); }
+    byKey[k].items.push({producto:it.producto||'',cantidad:c,precio:pr||0});
+  });
+  if(_ccItemsPacMode){
+    _ccBlocks = order.length ? order.map(function(k){ return byKey[k]; }) : [{pac:'',fecha:'',items:[]}];
+  } else {
+    // modo normal: colapsar a un solo bloque sin paciente/fecha
+    var all=[]; order.forEach(function(k){ all=all.concat(byKey[k].items); });
+    _ccBlocks=[{pac:'',fecha:'',items:all}];
+  }
   _ccItemsProductsReady(function(){ var dh=document.getElementById('cc-prod-dl-holder'); if(dh) dh.innerHTML=_ccProdDatalist(); });
   if(_ccItemsPacMode) _ccEnsurePacDatalist();
   _ccItemsBody();
 }
+function _ccItemRowHtml(bi,ii,it){
+  return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">'
+    +'<input list="cc-prod-dl" value="'+ccEsc(it.producto).replace(/"/g,'&quot;')+'" oninput="ccItemSet('+bi+','+ii+',\'producto\',this.value)" placeholder="Producto…" style="flex:2;min-width:0;padding:7px 9px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)">'
+    +'<input type="number" min="1" step="1" value="'+(it.cantidad||1)+'" oninput="ccItemSet('+bi+','+ii+',\'cantidad\',this.value)" title="Cantidad" style="width:48px;padding:7px 4px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;text-align:center;background:var(--color-surface-2);color:var(--color-text)">'
+    +'<input id="cc-item-p-'+bi+'-'+ii+'" type="number" step="0.01" value="'+(it.precio||0)+'" oninput="ccItemSet('+bi+','+ii+',\'precio\',this.value)" title="Precio unitario" style="width:84px;padding:7px 5px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;text-align:right;background:var(--color-surface-2);color:var(--color-text)">'
+    +'<span id="cc-item-t-'+bi+'-'+ii+'" style="width:84px;text-align:right;font-size:12px;font-weight:700">'+ccFmt((it.precio||0)*(it.cantidad||1))+'</span>'
+    +'<button type="button" onclick="ccItemDel('+bi+','+ii+')" title="Quitar" style="padding:5px 8px;border:1px solid #e3b3b3;background:none;border-radius:7px;color:#c83c3c;cursor:pointer;font-size:11px">✕</button>'
+  +'</div>';
+}
 function _ccItemsBody(){
   var el=document.getElementById('cc-items-body'); if(!el) return;
   var pn=document.getElementById('cc-items-pacnote'); if(pn) pn.style.display=_ccItemsPacMode?'block':'none';
-  if(!_ccItems.length){ el.innerHTML='<div style="font-size:11.5px;color:var(--color-text-muted);padding:5px 0">Sin partidas — agrega productos, o deja el monto manual abajo.</div>'; _ccUpdTotal(); return; }
   var h='';
-  _ccItems.forEach(function(it,i){
-    var pacRow=_ccItemsPacMode ? ('<input list="cc-pac-dl" value="'+ccEsc(it.pac||'').replace(/"/g,'&quot;')+'" oninput="ccItemSet('+i+',\'pac\',this.value)" placeholder="👤 Paciente de esta partida…" style="width:100%;margin-bottom:5px;padding:6px 9px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)">') : '';
-    h+='<div style="margin-bottom:6px'+(_ccItemsPacMode?';padding:8px 9px;border:1px solid var(--color-divider);border-radius:9px;background:var(--color-surface)':'')+'">'
-      +pacRow
-      +'<div style="display:flex;gap:6px;align-items:center">'
-      +'<input list="cc-prod-dl" value="'+ccEsc(it.producto).replace(/"/g,'&quot;')+'" oninput="ccItemSet('+i+',\'producto\',this.value)" placeholder="Producto…" style="flex:2;min-width:0;padding:7px 9px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)">'
-      +'<input type="number" min="1" step="1" value="'+(it.cantidad||1)+'" oninput="ccItemSet('+i+',\'cantidad\',this.value)" title="Cantidad" style="width:48px;padding:7px 4px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;text-align:center;background:var(--color-surface-2);color:var(--color-text)">'
-      +'<input id="cc-item-p-'+i+'" type="number" step="0.01" value="'+(it.precio||0)+'" oninput="ccItemSet('+i+',\'precio\',this.value)" title="Precio unitario" style="width:84px;padding:7px 5px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;text-align:right;background:var(--color-surface-2);color:var(--color-text)">'
-      +'<span id="cc-item-t-'+i+'" style="width:84px;text-align:right;font-size:12px;font-weight:700">'+ccFmt((it.precio||0)*(it.cantidad||1))+'</span>'
-      +'<button type="button" onclick="ccItemDel('+i+')" title="Quitar" style="padding:5px 8px;border:1px solid #e3b3b3;background:none;border-radius:7px;color:#c83c3c;cursor:pointer;font-size:11px">✕</button>'
-      +'</div>'
-    +'</div>';
-  });
+  if(_ccItemsPacMode){
+    _ccBlocks.forEach(function(b,bi){
+      h+='<div style="border:1px solid var(--color-divider);border-radius:10px;padding:10px 11px;margin-bottom:10px;background:var(--color-surface)">';
+      h+='<div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">'
+        +'<span style="font-size:10px;font-weight:700;color:var(--color-primary);white-space:nowrap">#'+(bi+1)+'</span>'
+        +'<input list="cc-pac-dl" value="'+ccEsc(b.pac||'').replace(/"/g,'&quot;')+'" oninput="ccBlockSet('+bi+',\'pac\',this.value)" placeholder="👤 Paciente…" style="flex:2;min-width:0;padding:6px 9px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)">'
+        +'<input type="date" value="'+ccEsc(b.fecha||'')+'" onchange="ccBlockSet('+bi+',\'fecha\',this.value)" title="Fecha del tratamiento" style="width:140px;padding:6px 7px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)">'
+        +(_ccBlocks.length>1?'<button type="button" onclick="ccBlockDel('+bi+')" title="Quitar este paciente/bloque" style="padding:5px 8px;border:1px solid #e3b3b3;background:none;border-radius:7px;color:#c83c3c;cursor:pointer;font-size:11px">✕</button>':'')
+      +'</div>';
+      b.items.forEach(function(it,ii){ h+=_ccItemRowHtml(bi,ii,it); });
+      h+='<button type="button" onclick="ccItemAdd('+bi+')" style="padding:4px 10px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;color:var(--color-text)">+ producto</button>';
+      h+='</div>';
+    });
+    h+='<button type="button" onclick="ccBlockAdd()" style="width:100%;padding:9px;background:none;border:1.5px dashed var(--color-primary);border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;color:var(--color-primary)">+ Otro paciente / fecha (cierre parcial)</button>';
+  } else {
+    var b0=_ccBlocks[0]||{items:[]};
+    if(!b0.items.length){ h+='<div style="font-size:11.5px;color:var(--color-text-muted);padding:5px 0">Sin partidas — agrega productos, o deja el monto manual abajo.</div>'; }
+    else b0.items.forEach(function(it,ii){ h+=_ccItemRowHtml(0,ii,it); });
+    h+='<button type="button" onclick="ccItemAdd(0)" style="padding:4px 10px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;color:var(--color-text)">+ Agregar producto</button>';
+  }
   el.innerHTML=h; _ccUpdTotal();
 }
-function ccItemAdd(){ _ccItems.push({producto:'',cantidad:1,precio:0,pac:''}); _ccItemsBody(); }
-function ccItemDel(i){ _ccItems.splice(i,1); _ccItemsBody(); }
-function ccItemSet(i,field,val){
-  if(!_ccItems[i]) return;
-  if(field==='cantidad'){ _ccItems[i].cantidad=parseFloat(val)||0; }
-  else if(field==='precio'){ _ccItems[i].precio=parseFloat(val)||0; }
-  else if(field==='pac'){ _ccItems[i].pac=val; return; }
-  else { _ccItems[i].producto=val; var p=((typeof _ingProductos!=='undefined'?_ingProductos:[])||[]).filter(function(x){return x.descripcion===val;})[0]; if(p){ var pr=(p.precios&&p.precios['General'])?p.precios['General']:(p.precio||0); if(pr>0){ _ccItems[i].precio=pr; var pe=document.getElementById('cc-item-p-'+i); if(pe) pe.value=pr; } } }
-  var ts=document.getElementById('cc-item-t-'+i); if(ts) ts.textContent=ccFmt((_ccItems[i].precio||0)*(_ccItems[i].cantidad||1));
+function ccItemAdd(bi){ bi=bi||0; if(!_ccBlocks[bi]) return; _ccBlocks[bi].items.push({producto:'',cantidad:1,precio:0}); _ccItemsBody(); }
+function ccItemDel(bi,ii){ if(_ccBlocks[bi]&&_ccBlocks[bi].items){ _ccBlocks[bi].items.splice(ii,1); _ccItemsBody(); } }
+function ccItemSet(bi,ii,field,val){
+  var it=_ccBlocks[bi]&&_ccBlocks[bi].items[ii]; if(!it) return;
+  if(field==='cantidad'){ it.cantidad=parseFloat(val)||0; }
+  else if(field==='precio'){ it.precio=parseFloat(val)||0; }
+  else { it.producto=val; var p=((typeof _ingProductos!=='undefined'?_ingProductos:[])||[]).filter(function(x){return x.descripcion===val;})[0]; if(p){ var pr=(p.precios&&p.precios['General'])?p.precios['General']:(p.precio||0); if(pr>0){ it.precio=pr; var pe=document.getElementById('cc-item-p-'+bi+'-'+ii); if(pe) pe.value=pr; } } }
+  var ts=document.getElementById('cc-item-t-'+bi+'-'+ii); if(ts) ts.textContent=ccFmt((it.precio||0)*(it.cantidad||1));
   _ccUpdTotal();
 }
-function _ccItemsTotal(){ var s=0; _ccItems.forEach(function(it){ s+=(parseFloat(it.precio)||0)*(parseFloat(it.cantidad)||1); }); return s; }
-function _ccUpdTotal(){ var t=document.getElementById('cc-items-total'); if(t) t.textContent=ccFmt(_ccItemsTotal()); var m=document.getElementById('cc-si-monto')||document.getElementById('cc-ed-monto'); if(m){ if(_ccItems.length){ m.value=_ccItemsTotal().toFixed(2); m.readOnly=true; m.style.opacity='.6'; } else { m.readOnly=false; m.style.opacity='1'; } } }
-function _ccItemsPayload(){ return _ccItems.filter(function(it){ return (it.producto&&it.producto.trim())||((parseFloat(it.precio)||0)*(parseFloat(it.cantidad)||1))>0; }).map(function(it){ return {producto:it.producto,cantidad:parseFloat(it.cantidad)||1,precio:parseFloat(it.precio)||0,total:(parseFloat(it.precio)||0)*(parseFloat(it.cantidad)||1),pac:(it.pac||'').trim()}; }); }
+function ccBlockAdd(){ _ccBlocks.push({pac:'',fecha:(document.getElementById('cc-si-fecha')||{}).value||'',items:[{producto:'',cantidad:1,precio:0}]}); _ccEnsurePacDatalist(); _ccItemsBody(); }
+function ccBlockDel(bi){ _ccBlocks.splice(bi,1); if(!_ccBlocks.length) _ccBlocks=[{pac:'',fecha:'',items:[]}]; _ccItemsBody(); }
+function ccBlockSet(bi,field,val){ if(_ccBlocks[bi]) _ccBlocks[bi][field]=val; }
+function _ccItemsTotal(){ var s=0; _ccBlocks.forEach(function(b){ (b.items||[]).forEach(function(it){ s+=(parseFloat(it.precio)||0)*(parseFloat(it.cantidad)||1); }); }); return s; }
+function _ccHasItems(){ for(var i=0;i<_ccBlocks.length;i++){ if(_ccBlocks[i].items&&_ccBlocks[i].items.length) return true; } return false; }
+function _ccUpdTotal(){ var t=document.getElementById('cc-items-total'); if(t) t.textContent=ccFmt(_ccItemsTotal()); var m=document.getElementById('cc-si-monto')||document.getElementById('cc-ed-monto'); if(m){ if(_ccHasItems()){ m.value=_ccItemsTotal().toFixed(2); m.readOnly=true; m.style.opacity='.6'; } else { m.readOnly=false; m.style.opacity='1'; } } }
+function _ccItemsPayload(){
+  var out=[];
+  _ccBlocks.forEach(function(b){
+    (b.items||[]).forEach(function(it){
+      var tot=(parseFloat(it.precio)||0)*(parseFloat(it.cantidad)||1);
+      if((it.producto&&it.producto.trim())||tot>0){ out.push({producto:it.producto,cantidad:parseFloat(it.cantidad)||1,precio:parseFloat(it.precio)||0,total:tot,pac:(b.pac||'').trim(),fecha:(b.fecha||'').trim()}); }
+    });
+  });
+  return out;
+}
 
 function ccEditarSaldo(rowNum, paciente, saldo, concepto){
   var o=(((typeof _ccData!=='undefined'&&_ccData)?_ccData.ops:[])||[]).filter(function(x){return x.rowNum===rowNum;})[0];
@@ -26136,7 +26177,7 @@ function ccSiSegChange(){
   var seg=(document.getElementById('cc-si-cat')||{}).value||'';
   var mode=/reprovida|agencia|grupo|medico|externo/i.test(seg);
   if(mode) _ccEnsurePacDatalist();
-  _ccItemsInit(_ccItems, mode); // conserva las partidas ya capturadas
+  _ccItemsInit(_ccItemsPayload(), mode); // conserva las partidas ya capturadas
 }
 function ccSiPacientePick(nombre){
   var hint=document.getElementById('cc-si-ophint'); if(hint) hint.style.display='none';
@@ -26241,8 +26282,9 @@ function _cobVentasVista(d){
 function _cobSaldoPartidas(d){
   var out=[];
   (d.saldos||[]).forEach(function(o){
-    (o.items||[]).forEach(function(x){ if(x.pac){ out.push({fecha:o.fecha, pac:x.pac, producto:x.producto, cantidad:x.cantidad||1, total:x.total, op:o.op}); } });
+    (o.items||[]).forEach(function(x){ if(x.pac){ out.push({fecha:(x.fecha||o.fecha), pac:x.pac, producto:x.producto, cantidad:x.cantidad||1, total:x.total, op:o.op}); } });
   });
+  out.sort(function(a,b){ return (a.pac||'')<(b.pac||'')?-1:(a.pac||'')>(b.pac||'')?1:(String(a.fecha)<String(b.fecha)?-1:1); });
   return out;
 }
 function cobRender(d){
@@ -26364,7 +26406,7 @@ function cobImprimir(){
   (d.saldos||[]).forEach(function(o){
     if(o.origen!=='registro') return;
     var partes=(o.items||[]).filter(function(x){return x.pac;});
-    if(partes.length){ partes.forEach(function(x){ rows.push([ccFch(o.fecha), x.pac+' · '+(x.producto||'—'), String(x.cantidad||1), ccFmt(x.total), '', ccFmt(x.total)]); }); }
+    if(partes.length){ partes.forEach(function(x){ rows.push([ccFch(x.fecha||o.fecha), x.pac+' · '+(x.producto||'—'), String(x.cantidad||1), ccFmt(x.total), '', ccFmt(x.total)]); }); }
     else rows.push([ccFch(o.fecha), o.concepto||'Saldo', '—', ccFmt(o.total), ccFmt((o.total||0)-(o.saldo||0)), ccFmt(o.saldo)]);
   });
   if(sus&&sus.montoDebe>0) rows.push([ccFch(sus.proximoCobro),'Suscripción crío ('+sus.plan+')', '—', ccFmt(sus.montoDebe), '$0.00', ccFmt(sus.montoDebe)]);
@@ -26848,9 +26890,9 @@ function notaGenerar(){
  * Cada entrada puede llevar `perm`: si el usuario no lo tiene, se oculta. */
 var NOVEDADES=[
   { build:'2026.07.10', fecha:'10 jul 2026', area:'Cobranza', icon:'👥',
-    titulo:'Nombre del paciente por partida (agencias y externos)',
-    puntos:['En agencias/externos (ej. REPROVIDA) NUESTRO cliente es la agencia, pero ahora puedes capturar el nombre del paciente real de CADA partida.','En el reporte de Cobranza sale un detalle «por paciente» con su procedimiento e importe.','En pacientes normales no cambia nada — su nombre ya está en el filtro.'],
-    comoUsar:['Cuentas por Cobrar → «+ Cuenta por cobrar».','En «Segmento» elige Agencias o Médicos → aparece el campo de paciente por partida.','Agrega los productos y escribe el paciente de cada uno (autocompleta).','Imprime desde Reportes → Cobranza: cada paciente con su procedimiento.'] },
+    titulo:'Paciente + fecha por partida y cierre parcial (agencias/externos)',
+    puntos:['En agencias/externos (ej. REPROVIDA) NUESTRO cliente es la agencia, pero ahora capturas el paciente real y la FECHA DEL TRATAMIENTO de cada bloque.','Con «+ Otro paciente / fecha» cierras un bloque y sigues capturando otro paciente con otra fecha, todo en la misma nota.','En el reporte de Cobranza sale un detalle «por paciente» (fecha · paciente · servicio · importe).','En pacientes normales no cambia nada — su nombre ya está en el filtro.'],
+    comoUsar:['Cuentas por Cobrar → «+ Cuenta por cobrar».','En «Segmento» elige Agencias o Médicos → aparecen los bloques por paciente.','Escribe el paciente y la fecha, agrega sus productos con «+ producto».','Para otro paciente: «+ Otro paciente / fecha» (cierre parcial) y repite.','Imprime desde Reportes → Cobranza.'] },
   { build:'2026.07.10', fecha:'10 jul 2026', area:'Reportes', icon:'🛡️',
     titulo:'Carta de Seguro: idiomas + formato a tu gusto',
     puntos:['Elige el idioma de la carta (inglés, español, francés, portugués) — sirve para cualquier paciente.','Nombre del paciente editable (para agencias donde el cliente es la agencia/doctor).','Botón «Personalizar formato»: color, fuente, logo, márgenes, textos y el ORDEN de las secciones (se arrastran).','La leyenda CPT/ICD ahora solo se explica en pantalla; la carta sale idéntica al formato original.'],
