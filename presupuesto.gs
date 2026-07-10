@@ -832,3 +832,122 @@ function savePresupuestoMetasBatch(body) {
     return { ok: true, message: body.metas.length + ' metas guardadas.' };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   ETAPA 1 — MOTOR DE COSTOS FIJO/VARIABLE + P&L (utilidad pronosticada)
+   Hoja Presupuesto_Costos: Línea | Sección | Tipo | Modo | Valor | Notas
+     Sección ∈ COGS/OPEX/GA/TAXES  (dónde cae el gasto en el P&L)
+     Tipo    ∈ FIJO | VARIABLE
+     Modo    ∈ monto (mensual, para FIJO) | pctIngreso (% de ingreso) | porTratamiento ($/tratamiento)
+   Al mover ingresos/tratamientos, los VARIABLES se recalculan → utilidad real.
+   ════════════════════════════════════════════════════════════════════════ */
+var PRES_COSTOS_TAB = 'Presupuesto_Costos';
+var PRES_COSTOS_HEADERS = ['Línea (subtipo)', 'Sección', 'Tipo', 'Modo', 'Valor', 'Notas'];
+function _presCostosSeed(sh) {
+  // Semilla desde los subtipos reales de egresos: FIJO monto = promedio MENSUAL del último trimestre.
+  try {
+    var eg = _presHistoricoEgresos();
+    var hoy = new Date(), cy = hoy.getFullYear(), cq = _presQ(hoy.getMonth() + 1);
+    var lc = _presPrevQ(cy, cq), kRec = _presQKey(lc.y, lc.q);
+    var rows = [];
+    (eg.subtipos || []).forEach(function (sub) {
+      var qTot = (eg.q[kRec] && eg.q[kRec][sub]) || 0;
+      var mensual = Math.round(qTot / 3);
+      var cont = eg.contableBySub[sub] || 'Gasto';
+      var seccion = 'OPEX';
+      try {
+        var c = _summaryDefaultClass('egreso', cont + '|' + sub);
+        var subg = _summaryEgSubgroup(sub, c.grupo);
+        seccion = SUMMARY_EG_SUBGROUP_SECTION[_sumNorm(subg)] || c.grupo || 'OPEX';
+      } catch (e) {}
+      rows.push([sub, seccion, 'FIJO', 'monto', mensual, '']);
+    });
+    if (rows.length) sh.getRange(2, 1, rows.length, PRES_COSTOS_HEADERS.length).setValues(rows);
+  } catch (e) {}
+}
+function _presEnsureCostos() {
+  var ss = SpreadsheetApp.openById(ER_SS_ID);
+  var sh = ss.getSheetByName(PRES_COSTOS_TAB);
+  if (!sh) {
+    sh = ss.insertSheet(PRES_COSTOS_TAB);
+    sh.getRange(1, 1, 1, PRES_COSTOS_HEADERS.length).setValues([PRES_COSTOS_HEADERS])
+      .setFontWeight('bold').setFontColor('#ffffff').setBackground('#c46a7a');
+    sh.setFrozenRows(1);
+    var w = [220, 90, 100, 130, 110, 200]; for (var i = 0; i < w.length; i++) sh.setColumnWidth(i + 1, w[i]);
+    _presCostosSeed(sh);
+  }
+  return sh;
+}
+function readPresupuestoCostos() {
+  try {
+    var sh = _presEnsureCostos();
+    var raw = sh.getDataRange().getValues(); var out = [];
+    for (var i = 1; i < raw.length; i++) {
+      var r = raw[i]; var lin = String(r[0] || '').trim(); if (!lin) continue;
+      out.push({ linea: lin, seccion: String(r[1] || 'OPEX').trim().toUpperCase(), tipo: String(r[2] || 'FIJO').trim().toUpperCase(),
+        modo: String(r[3] || 'monto').trim(), valor: _presNum(r[4]), notas: String(r[5] || '') });
+    }
+    return { ok: true, costos: out, _setup: true };
+  } catch (ex) { return { ok: false, error: ex.message, costos: [] }; }
+}
+function savePresupuestoCostos(body) {
+  try {
+    if (!body || !body.costos || !body.costos.length) return { ok: false, error: 'Datos incompletos.' };
+    var sh = _presEnsureCostos(); sh.clear();
+    sh.getRange(1, 1, 1, PRES_COSTOS_HEADERS.length).setValues([PRES_COSTOS_HEADERS])
+      .setFontWeight('bold').setFontColor('#ffffff').setBackground('#c46a7a');
+    var rows = [];
+    body.costos.forEach(function (c) {
+      var lin = String(c.linea || '').trim(); if (!lin) return;
+      rows.push([lin, String(c.seccion || 'OPEX').toUpperCase(), String(c.tipo || 'FIJO').toUpperCase(), String(c.modo || 'monto'), _presNum(c.valor), String(c.notas || '')]);
+    });
+    if (rows.length) sh.getRange(2, 1, rows.length, PRES_COSTOS_HEADERS.length).setValues(rows);
+    try { logAudit(body.usuario || '', 'Presupuesto', 'Guardar costos', '', '', '', rows.length + ' líneas'); } catch (e) {}
+    return { ok: true, guardados: rows.length };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+// Proyecta los egresos por sección desde la estructura fijo/variable.
+// ingresoQ = ingreso del trimestre; tratQ = nº de tratamientos del trimestre.
+function _presCostosProy(costos, ingresoQ, tratQ) {
+  var sec = { COGS: 0, OPEX: 0, GA: 0, TAXES: 0 }, lineas = [];
+  (costos || []).forEach(function (c) {
+    var m = 0;
+    if (c.tipo === 'VARIABLE') {
+      if (c.modo === 'pctIngreso') m = ingresoQ * (_presNum(c.valor) / 100);
+      else if (c.modo === 'porTratamiento') m = _presNum(c.valor) * (tratQ || 0);
+      else m = _presNum(c.valor) * 3;
+    } else { m = _presNum(c.valor) * 3; }   // FIJO monto mensual → trimestre = ×3
+    var s = (c.seccion || 'OPEX').toUpperCase(); if (sec[s] == null) s = 'OPEX';
+    sec[s] += m;
+    lineas.push({ linea: c.linea, seccion: s, tipo: c.tipo, modo: c.modo, montoQ: m });
+  });
+  return { secciones: sec, total: sec.COGS + sec.OPEX + sec.GA + sec.TAXES, lineas: lineas };
+}
+// P&L en vivo desde la estructura de costos (motor etapa 1).
+function readPresupuestoModelo(periodo) {
+  try {
+    var hoy = new Date(), cy = hoy.getFullYear(), cq = _presQ(hoy.getMonth() + 1);
+    var nx = _presNextQ(cy, cq); var tY = nx.y, tQ = nx.q;
+    if (periodo && /^\d{4}-Q[1-4]$/.test(String(periodo).trim())) {
+      var pm = String(periodo).trim().match(/^(\d{4})-Q([1-4])$/); tY = parseInt(pm[1], 10); tQ = parseInt(pm[2], 10);
+    }
+    var ing = _presIngresosProy(tY, tQ);
+    var ingresoQ = ing.totalImporte || 0;
+    var tratQ = 0; (ing.grupos || []).forEach(function (g) { tratQ += g.cantProy || 0; });
+    var costos = (readPresupuestoCostos().costos) || [];
+    var proy = _presCostosProy(costos, ingresoQ, tratQ);
+    var s = proy.secciones;
+    var utilBruta = ingresoQ - s.COGS;
+    var utilClinica = utilBruta - s.OPEX;
+    var ebitda = utilClinica - s.GA;
+    var utilNeta = ebitda - s.TAXES;
+    function pct(n) { return ingresoQ > 0 ? n / ingresoQ * 100 : 0; }
+    return {
+      ok: true, periodo: _presQKey(tY, tQ), ingresos: ingresoQ, tratamientos: tratQ,
+      cogs: s.COGS, opex: s.OPEX, ga: s.GA, taxes: s.TAXES, costoTotal: proy.total,
+      utilidadBruta: utilBruta, utilidadClinica: utilClinica, ebitda: ebitda, utilidadNeta: utilNeta,
+      margenBruto: pct(utilBruta), margenClinica: pct(utilClinica), margenEbitda: pct(ebitda), margenNeto: pct(utilNeta),
+      lineas: proy.lineas
+    };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}

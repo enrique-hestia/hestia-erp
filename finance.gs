@@ -812,6 +812,11 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});
       return jsonResponse(presSetEscenarios(body));
     }
+    if (body.action === 'savePresupuestoCostos') {
+      if (typeof savePresupuestoCostos !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});
+      return jsonResponse(savePresupuestoCostos(body));
+    }
     if (body.action === 'factVencidaGuardar') {
       if (typeof factVencidaGuardar !== 'function')
         return jsonResponse({ok:false, error:'Agrega devengado.gs al proyecto de Apps Script y redespliega.'});

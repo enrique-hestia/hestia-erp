@@ -371,6 +371,17 @@ function doGet(e) {
         return jsonResponse({ok:true, locks:{}});
       return jsonResponse(readPresLocks());
     }
+    // Presupuesto FP&A etapa 1: estructura de costos fijo/variable + P&L (utilidad)
+    if (action === 'presupuestoCostos') {
+      if (typeof readPresupuestoCostos !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});
+      return jsonResponse(readPresupuestoCostos());
+    }
+    if (action === 'presupuestoModelo') {
+      if (typeof readPresupuestoModelo !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});
+      return jsonResponse(readPresupuestoModelo((e && e.parameter.periodo) || ''));
+    }
 
     // Análisis de Egresos: histórico, ranking, recomendaciones
     if (action === 'analisisEgresos') {
