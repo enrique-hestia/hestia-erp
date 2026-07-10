@@ -33,7 +33,7 @@ var COBRANZA_CFG_KEY  = 'COBRANZA_CONFIG';
 var COBRANZA_ABONOS   = 'Abonos_Cobrar';
 var COBRANZA_CARGOS   = 'Cuentas_Cobrar';
 var COBRANZA_SUS      = 'Suscripciones_Crio';
-var COBRANZA_VER      = 'cobranza-2026.07.09d';
+var COBRANZA_VER      = 'cobranza-2026.07.09e';
 
 /* ───────────────────────── Config ───────────────────────── */
 function _cobCfg() {
@@ -298,84 +298,63 @@ function ajustarPagadoIngreso(body) {
 }
 
 /* ═════════════════ MOTOR A — Saldos por cobrar ═════════════════
- * Un adeudo se reconoce SOLO cuando hay un PAGO PARCIAL REAL: en BD_Ingresos la
- * columna Pagado está entre 0 y el Total (0 < Pagado < Total). Si Pagado es 0 o
- * está en blanco NO se considera adeudo (histórico = pagado) — así se evitan los
- * falsos positivos. Además suma el registro explícito Cuentas_Cobrar (saldos
- * iniciales / cargos a crédito). Cada partida trae su desglose (items) para poder
- * ver qué es cada OP sin ir a la venta.
+ * Cuentas por Cobrar lee SOLO el registro explícito (hoja Cuentas_Cobrar). NO se
+ * deriva de la columna Pagado de BD_Ingresos: ese Pagado es de años pasados con
+ * precios más bajos, mientras el TotalPagar trae el precio actual (subió), así que
+ * la resta daba "saldos" que NO son deuda. Un adeudo nace solo cuando: (a) se
+ * captura un ingreso con pago parcial (saveIngreso lo registra), (b) se carga un
+ * saldo inicial, o (c) se registra un cargo a crédito. Cada OP trae su desglose.
  */
 function _cobBuildSaldos() {
+  var cargos = _cobReadCargos();
   var abonos = _cobReadAbonos();
   var today = _cobToday();
+  // Desglose (items) SOLO para las OPs que están en el registro — para ver qué es
+  // cada OP sin ir a la venta. No se derivan saldos de BD_Ingresos.
+  var opsNeeded = {};
+  for (var q = 0; q < cargos.rows.length; q++) { if (cargos.rows[q].op) opsNeeded[cargos.rows[q].op] = true; }
+  var itemsByOp = _cobItemsForOps(opsNeeded);
   var out = [];
-  var ops = {};
-
-  // 1) Pagos parciales reales en BD_Ingresos
-  var sh = SpreadsheetApp.openById(INGRESOS_SS_ID).getSheetByName(BD_INGRESOS_TAB);
-  if (sh) {
-    var data = sh.getDataRange().getValues();
-    if (data.length >= 2) {
-      var H = data[0].map(function (x) { return _cobLower(x); });
-      var hc = function () { for (var a = 0; a < arguments.length; a++) { var k = H.indexOf(arguments[a]); if (k > -1) return k; } return -1; };
-      var iOp = hc('op'); if (iOp < 0) iOp = 0;
-      var iFecha = hc('fecha'), iPac = hc('paciente'), iCat = hc('categoria', 'categoría'),
-          iProd = hc('producto'), iCant = hc('cantidad'),
-          iTotal = hc('totalpagar', 'total a pagar', 'total'), iPag = hc('pagado');
-      for (var r = 1; r < data.length; r++) {
-        var row = data[r]; var op = String(row[iOp] || '').trim(); if (!op) continue;
-        var total = _cobNum(row[iTotal]);
-        var pag = iPag > -1 ? _cobNum(row[iPag]) : 0;
-        if (!ops[op]) ops[op] = { op: op, paciente: String(row[iPac] || '').trim(), categoria: String(row[iCat] || '').trim(), fecha: _cobStr(_cobD(row[iFecha])), total: 0, pagado: 0, items: [] };
-        var o = ops[op];
-        o.total += total; o.pagado += pag;
-        if (o.items.length < 30 && String(row[iProd] || '').trim()) o.items.push({ producto: String(row[iProd] || '').trim(), cantidad: iCant > -1 ? _cobNum(row[iCant]) : 1, total: total, pagado: pag });
-        if (!o.fecha) o.fecha = _cobStr(_cobD(row[iFecha]));
-      }
-    }
-  }
-  for (var k in ops) {
-    var it = ops[k];
-    // pago parcial real: pagó algo (>0) pero menos del total
-    if (!(it.pagado > 0.01 && it.pagado < it.total - 0.01)) continue;
-    var abo = abonos.byOp[it.op] || 0;
-    var saldo = it.total - it.pagado - abo;
-    if (saldo <= 0.01) continue;
-    var fd = _cobD(it.fecha) || today; var dias = _cobDaysDiff(fd, today); if (dias < 0) dias = 0;
-    var prods = it.items.map(function (x) { return x.producto; });
-    out.push({
-      origen: 'ingreso', op: it.op,
-      paciente: _cobMasked() ? _privPaciente(it.op) : it.paciente,
-      segmento: _cobSegmento(it.categoria, prods.join(' ')),
-      categoria: it.categoria, concepto: prods.slice(0, 3).join(', '),
-      fecha: it.fecha, total: it.total, abonado: it.pagado + abo, saldo: saldo,
-      dias: dias, bucket: _cobBucket(dias),
-      items: _cobMasked() ? [] : it.items.map(function (x) { return { producto: x.producto, cantidad: x.cantidad, total: x.total, saldo: Math.max(0, x.total - x.pagado) }; })
-    });
-  }
-
-  // 2) Registro explícito (Cuentas_Cobrar): saldos iniciales / cargos a crédito
-  var cargos = _cobReadCargos();
   for (var ci = 0; ci < cargos.rows.length; ci++) {
     var cg = cargos.rows[ci];
     var st = _cobLower(cg.estatus);
     if (st === 'cancelado' || st === 'pagado') continue;
-    if (cg.op && ops[cg.op]) continue; // ya contado por ingresos
-    var abo2 = cg.op ? (abonos.byOp[cg.op] || 0) : 0;
-    var saldo2 = cg.monto - abo2;
-    if (saldo2 <= 0.01) continue;
-    var fd2 = _cobD(cg.fecha) || today; var dias2 = _cobDaysDiff(fd2, today); if (dias2 < 0) dias2 = 0;
+    var abo = cg.op ? (abonos.byOp[cg.op] || 0) : 0;
+    var saldo = cg.monto - abo;
+    if (saldo <= 0.01) continue;
+    var fd = _cobD(cg.fecha) || today;
+    var dias = _cobDaysDiff(fd, today); if (dias < 0) dias = 0;
     out.push({
       origen: 'registro', rowNum: cg.rowNum, op: cg.op || '—',
       paciente: _cobMasked() ? (cg.op ? _privPaciente(cg.op) : 'Paciente') : cg.paciente,
       segmento: _cobSegmento(cg.categoria, cg.concepto),
       categoria: cg.categoria, concepto: cg.concepto || cg.estatus || 'Saldo',
-      fecha: cg.fecha, total: cg.monto, abonado: abo2, saldo: saldo2,
-      dias: dias2, bucket: _cobBucket(dias2), items: []
+      fecha: cg.fecha, total: cg.monto, abonado: abo, saldo: saldo,
+      dias: dias, bucket: _cobBucket(dias),
+      items: (cg.op && !_cobMasked() && itemsByOp[cg.op]) ? itemsByOp[cg.op] : []
     });
   }
   out.sort(function (a, b) { return b.saldo - a.saldo; });
   return { ops: out };
+}
+// Trae las líneas de una lista de OPs desde BD_Ingresos (solo para el desglose).
+function _cobItemsForOps(opsNeeded) {
+  var res = {};
+  if (!opsNeeded || !Object.keys(opsNeeded).length) return res;
+  var sh = SpreadsheetApp.openById(INGRESOS_SS_ID).getSheetByName(BD_INGRESOS_TAB);
+  if (!sh) return res;
+  var data = sh.getDataRange().getValues();
+  if (data.length < 2) return res;
+  var H = data[0].map(function (x) { return _cobLower(x); });
+  var hc = function () { for (var a = 0; a < arguments.length; a++) { var k = H.indexOf(arguments[a]); if (k > -1) return k; } return -1; };
+  var iOp = hc('op'); if (iOp < 0) iOp = 0;
+  var iProd = hc('producto'), iCant = hc('cantidad'), iTotal = hc('totalpagar', 'total a pagar', 'total');
+  for (var r = 1; r < data.length; r++) {
+    var op = String(data[r][iOp] || '').trim(); if (!opsNeeded[op]) continue;
+    if (!res[op]) res[op] = [];
+    if (res[op].length < 30 && String(data[r][iProd] || '').trim()) res[op].push({ producto: String(data[r][iProd] || '').trim(), cantidad: iCant > -1 ? _cobNum(data[r][iCant]) : 1, total: _cobNum(data[r][iTotal]), saldo: 0 });
+  }
+  return res;
 }
 function _cobBucket(dias) {
   if (dias <= 30) return '0-30';

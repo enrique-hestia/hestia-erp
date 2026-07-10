@@ -3982,10 +3982,12 @@ function saveIngreso(payload) {
     // configurado — nunca debe tumbar la venta si el inventario falla.
     try { _descontarInventarioPorVenta(opId, lineas, payload.usuario); } catch (eInv) {}
 
-    // Pago parcial: las líneas ya quedaron con Pagado < TotalPagar, así que Cuentas
-    // por Cobrar (Motor A) lo detecta solo — no se escribe registro extra (evita
-    // doble conteo). saldoGenerado se devuelve para el aviso en pantalla.
+    // Pago parcial → registra EXPLÍCITAMENTE la cuenta por cobrar (Cobranza lee solo
+    // el registro, no la columna Pagado). Nunca debe tumbar la venta.
     var saldoGenerado = Math.max(0, totalOP - pagadoOp);
+    if (saldoGenerado > 0.01 && typeof _cobRegistrarSaldoIngreso === 'function') {
+      try { _cobRegistrarSaldoIngreso(opId, paciente, (lineas[0] && lineas[0].categoria) || '', saldoGenerado, fecha); } catch (eAR) {}
+    }
     return {ok:true, op:opId, lineas:rows.length, total:totalOP,
             pagado:pagadoOp, saldoGenerado:saldoGenerado, paciente:paciente};
   } catch(ex) {
