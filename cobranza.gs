@@ -33,7 +33,11 @@ var COBRANZA_CFG_KEY  = 'COBRANZA_CONFIG';
 var COBRANZA_ABONOS   = 'Abonos_Cobrar';
 var COBRANZA_CARGOS   = 'Cuentas_Cobrar';
 var COBRANZA_SUS      = 'Suscripciones_Crio';
-var COBRANZA_VER      = 'cobranza-2026.07.10n';
+var COBRANZA_DESCUENTOS = 'Descuentos_Agencia'; // escala de descuento por volumen, por agencia
+var COBRANZA_DEPOSITO_KEY = 'COBRANZA_DEPOSITO';
+var COBRANZA_VER      = 'cobranza-2026.07.10o';
+// Cuenta de depósito por defecto (Hestia recibe aquí). Editable en Script Property COBRANZA_DEPOSITO.
+var COBRANZA_DEPOSITO_DEF = { banco:'Santander', beneficiario:'Hestia Clinic', cuenta:'65-51043096-7', clabe:'014180655104309670' };
 
 /* ───────────────────────── Config ───────────────────────── */
 function _cobCfg() {
@@ -776,6 +780,89 @@ function _cobVentasPaciente(keyBuscar) {
   out.sort(function (a, b) { return a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0; });
   return out;
 }
+/* ═══════════ DESCUENTO POR VOLUMEN (escala por agencia) ═══════════
+ * Hoja Descuentos_Agencia: Agencia | Producto | Desde | Hasta | Descuento(%)
+ * Varias filas por (agencia, producto) = los escalones. El escalón se elige por la
+ * cantidad ACUMULADA DEL MES de ese producto para la agencia. Solo aplica a los
+ * productos listados. */
+function _cobKeyProd(s) { return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+function _cobEnsureDescuentos() {
+  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+  var sh = ss.getSheetByName(COBRANZA_DESCUENTOS);
+  if (!sh) {
+    sh = ss.insertSheet(COBRANZA_DESCUENTOS);
+    sh.getRange(1, 1, 1, 5).setValues([['Agencia', 'Producto', 'Desde', 'Hasta', 'Descuento(%)']]);
+    sh.getRange(1, 1, 1, 5).setFontWeight('bold');
+    // Semilla REPROVIDA: 3 productos, escala 1-3=0 / 4-8=7 / 9+=12
+    var prods = ['Valoración inicial RV', 'Preparación endometrial RV', 'Transferencia de embriones congelados (FET) RV'];
+    var rows = [];
+    prods.forEach(function (p) {
+      rows.push(['REPROVIDA', p, 1, 3, 0]);
+      rows.push(['REPROVIDA', p, 4, 8, 7]);
+      rows.push(['REPROVIDA', p, 9, '', 12]);
+    });
+    sh.getRange(2, 1, rows.length, 5).setValues(rows);
+    sh.setColumnWidth(2, 320);
+  }
+  return sh;
+}
+function _cobLoadDescuentos() {
+  var out = {}; // agenciaKey -> { productoKey: [{desde,hasta,pct}] }
+  var sh = _cobEnsureDescuentos();
+  var raw = sh.getDataRange().getValues();
+  for (var i = 1; i < raw.length; i++) {
+    var r = raw[i];
+    var ag = _cobKeyNom(r[0]), prod = _cobKeyProd(r[1]);
+    if (!ag || !prod) continue;
+    var desde = _cobNum(r[2]) || 1;
+    var hastaRaw = String(r[3] == null ? '' : r[3]).trim();
+    var hasta = hastaRaw === '' ? 1e9 : (_cobNum(r[3]) || 1e9);
+    var pct = _cobNum(r[4]);
+    if (!out[ag]) out[ag] = {};
+    if (!out[ag][prod]) out[ag][prod] = [];
+    out[ag][prod].push({ desde: desde, hasta: hasta, pct: pct });
+  }
+  return out;
+}
+function _cobTierPct(tiers, qty) {
+  for (var i = 0; i < tiers.length; i++) { if (qty >= tiers[i].desde && qty <= tiers[i].hasta) return tiers[i].pct; }
+  return 0;
+}
+function _cobDescuentosAgencia(agenciaNombre) {
+  var conf = _cobLoadDescuentos();
+  var agK = _cobKeyNom(agenciaNombre);
+  var reglas = conf[agK];
+  if (!reglas) return { aplica: false, lineas: [], total: 0 };
+  // Reunir partidas de las cuentas de la agencia cuyo producto tenga escala; acumular por (producto, mes).
+  var cargos = _cobReadCargos().rows.filter(function (c) { return _cobKeyNom(c.paciente) === agK; });
+  var agg = {}; // prodKey|mes -> {prodLabel, mes, cantidad, base}
+  cargos.forEach(function (c) {
+    (c.items || []).forEach(function (it) {
+      var pk = _cobKeyProd(it.producto);
+      if (!reglas[pk]) return;
+      var f = String(it.fecha || c.fecha || '');
+      var mes = f.length >= 7 ? f.substring(0, 7) : '—';
+      var key = pk + '|' + mes;
+      if (!agg[key]) agg[key] = { prodKey: pk, prodLabel: it.producto, mes: mes, cantidad: 0, base: 0 };
+      agg[key].cantidad += _cobNum(it.cantidad) || 1;
+      agg[key].base += _cobNum(it.total);
+    });
+  });
+  var lineas = [], total = 0;
+  Object.keys(agg).forEach(function (k) {
+    var a = agg[k]; var pct = _cobTierPct(reglas[a.prodKey], a.cantidad);
+    if (pct > 0) { var desc = a.base * pct / 100; total += desc; lineas.push({ producto: a.prodLabel, mes: a.mes, cantidad: a.cantidad, pct: pct, base: a.base, descuento: desc }); }
+  });
+  lineas.sort(function (x, y) { return x.mes < y.mes ? -1 : x.mes > y.mes ? 1 : (x.producto < y.producto ? -1 : 1); });
+  return { aplica: lineas.length > 0, agencia: String(agenciaNombre).trim(), lineas: lineas, total: total };
+}
+function _cobDeposito() {
+  try {
+    var raw = PropertiesService.getScriptProperties().getProperty(COBRANZA_DEPOSITO_KEY);
+    if (raw) { var o = JSON.parse(raw); return { banco: o.banco || '', beneficiario: o.beneficiario || '', cuenta: o.cuenta || '', clabe: o.clabe || '' }; }
+  } catch (e) {}
+  return COBRANZA_DEPOSITO_DEF;
+}
 function readEstadoCobranza(pacienteNombre) {
   try {
     if (!pacienteNombre) return { ok: false, error: 'Nombre de paciente requerido' };
@@ -821,7 +908,9 @@ function readEstadoCobranza(pacienteNombre) {
       saldos: saldos, totalSaldo: totalSaldo,
       abonos: misAbonos, suscripcion: miSus,
       suscripcionCargos: susCargos, suscripcionCargosTotal: susCargosTotal,
-      ventas: ventas, totalVendido: totalVendido, totalPagadoVentas: totalPagadoVentas
+      ventas: ventas, totalVendido: totalVendido, totalPagadoVentas: totalPagadoVentas,
+      descuentos: _cobMasked() ? { aplica: false, lineas: [], total: 0 } : _cobDescuentosAgencia(pacienteNombre),
+      deposito: _cobDeposito()
     };
   } catch (ex) {
     return { ok: false, error: ex.message, version: COBRANZA_VER };

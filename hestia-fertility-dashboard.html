@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.10.139 -->
+﻿<!-- app-build:2026.07.10.140 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -19399,6 +19399,8 @@ function hfReportPrint(reportId,data){
   var tplId=hfTplGet(reportId);
   var fn=_REPORT_TEMPLATES[tplId]||_REPORT_TEMPLATES['ejecutivo'];
   var html=fn(data);
+  // Nota al pie opcional (ej. datos de depósito), inyectada antes de cerrar el body → sirve en cualquier plantilla.
+  if(data && data.notaHtml){ html = (html.indexOf('</body>')>=0) ? html.replace('</body>', data.notaHtml+'</body>') : (html+data.notaHtml); }
   var w=window.open('','_blank');
   if(!w){ alert('Habilita las ventanas emergentes para este sitio e intenta de nuevo.'); return; }
   w.document.write(html);
@@ -26298,11 +26300,37 @@ function cobRender(d){
   // resumen
   var susDebe=(sus&&sus.montoDebe)||0;
   var totalDebe=(d.totalSaldo||0)+susDebe;
-  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px">';
-  h+='<div style="background:var(--color-primary);border-radius:10px;padding:14px 18px;color:#fff"><div style="font-size:10px;font-weight:700;opacity:.85;text-transform:uppercase;margin-bottom:4px">Total por cobrar</div><div style="font-size:22px;font-weight:800">'+ccFmt(totalDebe)+'</div></div>';
+  var _desc=(d.descuentos&&d.descuentos.aplica)?d.descuentos:null;
+  var _descTot=_desc?(_desc.total||0):0;
+  var _neto=totalDebe-_descTot; if(_neto<0) _neto=0;
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:'+(_desc?'12px':'18px')+'">';
+  h+='<div style="background:var(--color-primary);border-radius:10px;padding:14px 18px;color:#fff"><div style="font-size:10px;font-weight:700;opacity:.85;text-transform:uppercase;margin-bottom:4px">'+(_desc?'Neto a cobrar':'Total por cobrar')+'</div><div style="font-size:22px;font-weight:800">'+ccFmt(_desc?_neto:totalDebe)+'</div>'+(_desc?'<div style="font-size:10px;opacity:.85;margin-top:2px">Bruto '+ccFmt(totalDebe)+' − desc. '+ccFmt(_descTot)+'</div>':'')+'</div>';
   h+='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:10px;padding:14px 18px"><div style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;margin-bottom:4px">Saldos (adeudos)</div><div style="font-size:18px;font-weight:800;color:#c83c3c">'+ccFmt(d.totalSaldo||0)+'</div></div>';
+  if(_desc){ h+='<div style="background:var(--color-surface);border:1px solid #cde0cf;border-radius:10px;padding:14px 18px"><div style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;margin-bottom:4px">Descuento volumen</div><div style="font-size:18px;font-weight:800;color:#16a34a">−'+ccFmt(_descTot)+'</div></div>'; }
   h+='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:10px;padding:14px 18px"><div style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;margin-bottom:4px">Suscripción crío</div><div style="font-size:18px;font-weight:800;color:'+(susDebe>0?'#b45309':'#16a34a')+'">'+(susDebe>0?ccFmt(susDebe):'Al día')+'</div></div>';
   h+='</div>';
+  // Detalle del descuento por volumen (escala por agencia, acumulado del mes)
+  if(_desc){
+    h+='<div style="background:var(--color-surface);border:1px solid #cde0cf;border-radius:12px;overflow:hidden;margin-bottom:18px">';
+    h+='<div style="padding:12px 16px;border-bottom:1px solid var(--color-divider);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span style="font-size:13px;font-weight:700">🏷️ Descuento por volumen <span style="font-weight:400;color:var(--color-text-muted);font-size:11px">· por producto, acumulado del mes</span></span><span style="font-size:11px;color:#16a34a;font-weight:700">−'+ccFmt(_descTot)+'</span></div>';
+    h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:520px"><thead><tr style="border-bottom:2px solid var(--color-divider)">'
+      +'<th style="padding:8px 12px;text-align:left;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Mes</th>'
+      +'<th style="padding:8px 12px;text-align:left;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Producto</th>'
+      +'<th style="padding:8px 12px;text-align:center;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Cant</th>'
+      +'<th style="padding:8px 12px;text-align:center;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Desc.</th>'
+      +'<th style="padding:8px 12px;text-align:right;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Base</th>'
+      +'<th style="padding:8px 12px;text-align:right;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Descuento</th>'
+      +'</tr></thead><tbody>';
+    _desc.lineas.forEach(function(l,i){ h+='<tr style="border-bottom:1px solid var(--color-divider);'+(i%2?'background:var(--color-surface-2)':'')+'">'
+      +'<td style="padding:7px 12px;white-space:nowrap;color:var(--color-text-muted)">'+ccEsc(l.mes)+'</td>'
+      +'<td style="padding:7px 12px">'+ccEsc(l.producto)+'</td>'
+      +'<td style="padding:7px 12px;text-align:center">'+l.cantidad+'</td>'
+      +'<td style="padding:7px 12px;text-align:center;font-weight:700;color:#16a34a">'+l.pct+'%</td>'
+      +'<td style="padding:7px 12px;text-align:right;color:var(--color-text-muted)">'+ccFmt(l.base)+'</td>'
+      +'<td style="padding:7px 12px;text-align:right;font-weight:700;color:#16a34a">−'+ccFmt(l.descuento)+'</td>'
+      +'</tr>'; });
+    h+='</tbody></table></div></div>';
+  }
   // toggle Histórico completo / Solo por cobrar (filtra el detalle)
   h+='<div style="display:flex;gap:6px;margin-bottom:16px;align-items:center;flex-wrap:wrap">'
     +'<span style="font-size:11px;color:var(--color-text-muted);margin-right:4px">Ver detalle:</span>'
@@ -26395,6 +26423,18 @@ function cobRender(d){
     }
     h+='</div>';
   }
+  // Datos para depósito (a dónde deben pagar)
+  var _dep=d.deposito;
+  if(_dep && (_dep.clabe||_dep.cuenta)){
+    h+='<div style="background:var(--color-surface-2);border:1px dashed var(--color-divider);border-radius:12px;padding:14px 18px;margin-top:18px">'
+      +'<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);margin-bottom:8px">Datos para depósito</div>'
+      +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px 18px;font-size:12.5px">'
+      +(_dep.banco?'<div><span style="color:var(--color-text-muted)">Banco:</span> <b>'+ccEsc(_dep.banco)+'</b></div>':'')
+      +(_dep.beneficiario?'<div><span style="color:var(--color-text-muted)">Beneficiario:</span> <b>'+ccEsc(_dep.beneficiario)+'</b></div>':'')
+      +(_dep.cuenta?'<div><span style="color:var(--color-text-muted)">Cuenta:</span> <b>'+ccEsc(_dep.cuenta)+'</b></div>':'')
+      +(_dep.clabe?'<div><span style="color:var(--color-text-muted)">CLABE:</span> <b>'+ccEsc(_dep.clabe)+'</b></div>':'')
+      +'</div></div>';
+  }
   res.innerHTML=h;
   var pb=document.getElementById('cob-print'); if(pb) pb.style.display='flex';
 }
@@ -26415,11 +26455,24 @@ function cobImprimir(){
   });
   if(sus&&sus.montoDebe>0) rows.push([ccFch(sus.proximoCobro),'Suscripción crío ('+sus.plan+')', '—', ccFmt(sus.montoDebe), '$0.00', ccFmt(sus.montoDebe)]);
   var susDebe=(sus&&sus.montoDebe)||0, totalDebe=(d.totalSaldo||0)+susDebe;
-  var kpis=[{value:ccFmt(totalDebe),label:'Total por cobrar'},{value:ccFmt(d.totalSaldo||0),label:'Saldos'},{value:susDebe>0?ccFmt(susDebe):'Al día',label:'Suscripción'},{value:ccFmt(_vvTot),label:(_cobVista==='pendiente'?'Por cobrar (detalle)':'Total vendido')}];
+  var _desc=(d.descuentos&&d.descuentos.aplica)?d.descuentos:null;
+  var _descTot=_desc?(_desc.total||0):0;
+  var _neto=totalDebe-_descTot; if(_neto<0) _neto=0;
+  if(_desc){ _desc.lineas.forEach(function(l){ rows.push([ccEsc(l.mes), 'Descuento '+l.pct+'% · '+ccEsc(l.producto), String(l.cantidad||1), '', '', '−'+ccFmt(l.descuento)]); }); }
+  var kpis = _desc
+    ? [{value:ccFmt(_neto),label:'Neto a cobrar'},{value:ccFmt(totalDebe),label:'Bruto'},{value:'−'+ccFmt(_descTot),label:'Descuento vol.'},{value:susDebe>0?ccFmt(susDebe):'Al día',label:'Suscripción'}]
+    : [{value:ccFmt(totalDebe),label:'Total por cobrar'},{value:ccFmt(d.totalSaldo||0),label:'Saldos'},{value:susDebe>0?ccFmt(susDebe):'Al día',label:'Suscripción'},{value:ccFmt(_vvTot),label:(_cobVista==='pendiente'?'Por cobrar (detalle)':'Total vendido')}];
   var periodTxt = (_cobVista==='pendiente') ? ('Solo lo pendiente por cobrar · Emitido el '+hoy) : ('Histórico completo · Emitido el '+hoy);
+  // Nota al pie: datos para depósito
+  var _dep=d.deposito, notaHtml='';
+  if(_dep && (_dep.clabe||_dep.cuenta)){
+    var _parts=[]; if(_dep.banco)_parts.push('Banco: <b>'+ccEsc(_dep.banco)+'</b>'); if(_dep.beneficiario)_parts.push('Beneficiario: <b>'+ccEsc(_dep.beneficiario)+'</b>'); if(_dep.cuenta)_parts.push('Cuenta: <b>'+ccEsc(_dep.cuenta)+'</b>'); if(_dep.clabe)_parts.push('CLABE: <b>'+ccEsc(_dep.clabe)+'</b>');
+    notaHtml='<div style="margin:16px 22px;padding:10px 14px;border:1px dashed #bbb;border-radius:8px;font-size:11px;color:#333;page-break-inside:avoid"><span style="text-transform:uppercase;letter-spacing:.05em;font-weight:700;color:#777;font-size:9px">Datos para depósito</span><br>'+_parts.join(' &nbsp;·&nbsp; ')+'</div>';
+  }
   if(typeof hfReportPrint==='function'){
     hfReportPrint('cobranza',{ title:'Estado de cobranza', subject:d.paciente, period:periodTxt, generado:'Hestia ERP · '+hoy,
-      kpis:kpis, cols:['Fecha','Concepto','Cant','Total','Pagado','Saldo'], rows:rows, totalLabel:'Total por cobrar', totalValue:ccFmt(totalDebe) });
+      kpis:kpis, cols:['Fecha','Concepto','Cant','Total','Pagado','Saldo'], rows:rows,
+      totalLabel:_desc?'Neto a cobrar':'Total por cobrar', totalValue:ccFmt(_desc?_neto:totalDebe), notaHtml:notaHtml });
   } else { window.print(); }
 }
 /* ── Búsqueda de pacientes TOLERANTE a errores de dedo (fuzzy) ── */
@@ -26893,6 +26946,10 @@ function notaGenerar(){
  * aviso emergente (1 vez por versión) para quien tenga acceso a esas áreas.
  * Cada entrada puede llevar `perm`: si el usuario no lo tiene, se oculta. */
 var NOVEDADES=[
+  { build:'2026.07.10', fecha:'10 jul 2026', area:'Cobranza', icon:'🏷️',
+    titulo:'Descuento por volumen para agencias (REPROVIDA)',
+    puntos:['Los 3 productos con escala (Valoración inicial, Preparación endometrial, FET) aplican descuento según la cantidad ACUMULADA DEL MES: 1-3 = 0%, 4-8 = 7%, 9+ = 12%.','En el estado de cuenta de la agencia sale el descuento por producto/mes y el «Neto a cobrar» (Bruto − Descuento).','El reporte incluye los datos para depósito (banco / cuenta / CLABE).'],
+    comoUsar:['Reportes → Cobranza → busca la agencia (REPROVIDA).','Verás Bruto − Descuento = Neto a cobrar y el detalle por producto/mes.','Para cambiar la escala o agregar otra agencia, edita la hoja «Descuentos_Agencia» (Agencia · Producto · Desde · Hasta · %).'] },
   { build:'2026.07.10', fecha:'10 jul 2026', area:'Cobranza', icon:'👥',
     titulo:'Paciente + fecha por partida y cierre parcial (agencias/externos)',
     puntos:['En agencias/externos (ej. REPROVIDA) NUESTRO cliente es la agencia, pero ahora capturas el paciente real y la FECHA DEL TRATAMIENTO de cada bloque.','Con «+ Otro paciente / fecha» cierras un bloque y sigues capturando otro paciente con otra fecha, todo en la misma nota.','En el reporte de Cobranza sale un detalle «por paciente» (fecha · paciente · servicio · importe).','En pacientes normales no cambia nada — su nombre ya está en el filtro.'],
