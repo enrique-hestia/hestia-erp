@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.10.142 -->
+﻿<!-- app-build:2026.07.10.143 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -13387,6 +13387,7 @@ function _renderPresupuesto(){
     +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
     +(canEdit?'<button class="pr-btn" onclick="presOpenMeta()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Fijar / editar meta</button>':'')
     +(canEdit?'<button onclick="presGruposConfigOpen()" title="Agrupar productos para capturar la meta por bucket, no producto por producto" style="display:inline-flex;align-items:center;gap:6px;padding:9px 14px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;margin-left:6px">⚙ Grupos</button>':'')
+    +'<button onclick="presCostosOpen()" title="Estructura de costos fijo/variable y utilidad pronosticada (P&amp;L en vivo)" style="display:inline-flex;align-items:center;gap:6px;padding:9px 14px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">🧮 Costos y Utilidad</button>'
     +'<button onclick="presShowManual()" title="Manual completo de Presupuesto" style="display:inline-flex;align-items:center;gap:5px;padding:8px 12px;background:var(--color-surface,#f1f1f1);color:var(--text-secondary,#374151);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:9px;font-size:11px;font-weight:600;cursor:pointer">📖 Manual</button>'
     +'<button onclick="_tourStart(_PRES_TOUR)" title="Tutorial interactivo" style="width:34px;height:34px;border-radius:50%;background:transparent;color:var(--color-primary,#c46a7a);border:2px solid var(--color-primary,#c46a7a);font-size:17px;font-weight:900;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1">?</button>'
     +'</div>'
@@ -13755,6 +13756,136 @@ async function presGruposConfigSave(){
     setStatus('Grupos guardados.','ok');
     if(typeof loadPresupuesto==='function' && _presData) loadPresupuesto(_presData.periodoConsultado||(_presData.siguiente&&_presData.siguiente.periodo));
   }catch(e){ alert('Error: '+(e.message||e)); }
+}
+
+/* ═══════════ PRESUPUESTO ETAPA 2/3 — Costos fijo/variable + P&L (utilidad en vivo) ═══════════
+ * Panel editable: cada gasto es FIJO ($/mes) o VARIABLE (% ingreso o $/tratamiento).
+ * El P&L (Ingresos − COGS − OpEx − G&A − Impuestos = Utilidad) se recalcula al mover. */
+var _presCostosData=null;
+async function presCostosOpen(){
+  var ovl=document.getElementById('pres-cost-ovl');
+  if(ovl) ovl.remove();
+  ovl=document.createElement('div'); ovl.id='pres-cost-ovl';
+  ovl.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:4200;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px 12px';
+  ovl.innerHTML='<div style="background:var(--color-surface,#fff);border-radius:14px;max-width:860px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);margin:auto;padding:40px;text-align:center;color:var(--text-secondary,#9ca3af)">Cargando modelo…</div>';
+  ovl.addEventListener('click',function(e){ if(e.target===ovl) ovl.remove(); });
+  document.body.appendChild(ovl);
+  try{
+    var tok=encodeURIComponent(getToken());
+    var per=(_presData&&(_presData.periodoConsultado||(_presData.siguiente&&_presData.siguiente.periodo)))||'';
+    var rM=await fetch(APPS_SCRIPT_URL+'?action=presupuestoModelo&periodo='+encodeURIComponent(per)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
+    var mod=await rM.json();
+    var rC=await fetch(APPS_SCRIPT_URL+'?action=presupuestoCostos&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
+    var cst=await rC.json();
+    if(!mod||!mod.ok){ ovl.querySelector('div').innerHTML='<div style="color:#c83c3c">'+((mod&&mod.error)||'No disponible. ¿Redeployaste presupuesto.gs + core.gs?')+'</div>'; return; }
+    _presCostosData={ periodo:mod.periodo, ingresos:mod.ingresos||0, tratamientos:mod.tratamientos||0, costos:((cst&&cst.costos)||[]).map(function(c){return {linea:c.linea,seccion:c.seccion,tipo:c.tipo,modo:c.modo,valor:c.valor};}) };
+    _presCostosRender();
+  }catch(e){ ovl.querySelector('div').innerHTML='<div style="color:#c83c3c">Error de red: '+e.message+'</div>'; }
+}
+function presCostosCerrar(){ var o=document.getElementById('pres-cost-ovl'); if(o) o.remove(); }
+function _presCostosCompute(){
+  var d=_presCostosData||{costos:[]}; var ing=d.ingresos||0, trat=d.tratamientos||0;
+  var sec={COGS:0,OPEX:0,GA:0,TAXES:0};
+  (d.costos||[]).forEach(function(c){
+    var v=parseFloat(c.valor)||0, m=0, tp=String(c.tipo||'').toUpperCase();
+    if(tp==='VARIABLE'){ if(c.modo==='pctIngreso') m=ing*v/100; else if(c.modo==='porTratamiento') m=v*trat; else m=v*3; }
+    else m=v*3;
+    var s=String(c.seccion||'OPEX').toUpperCase(); if(!(s in sec)) s='OPEX'; sec[s]+=m;
+  });
+  var ub=ing-sec.COGS, uc=ub-sec.OPEX, eb=uc-sec.GA, un=eb-sec.TAXES;
+  function pc(n){ return ing>0?n/ing*100:0; }
+  return {ing:ing,cogs:sec.COGS,opex:sec.OPEX,ga:sec.GA,taxes:sec.TAXES,ub:ub,uc:uc,eb:eb,un:un,mUb:pc(ub),mUc:pc(uc),mEb:pc(eb),mUn:pc(un),total:sec.COGS+sec.OPEX+sec.GA+sec.TAXES};
+}
+function _presPnLHtml(){
+  var m=_presCostosCompute(), fM=_presFM;
+  function r(lbl,val,margin,bold,neg){
+    return '<div style="display:flex;justify-content:space-between;align-items:baseline;padding:'+(bold?'7px 0':'3px 0')+';'+(bold?'border-top:1px solid var(--color-divider,#e5e7eb);font-weight:800;font-size:13.5px':'font-size:12.5px;color:var(--text-secondary,#4b5563)')+'">'
+      +'<span>'+lbl+'</span><span style="'+(neg?'color:#991b1b':(bold?'color:var(--color-primary,#c46a7a)':''))+'">'+(neg?'−':'')+fM(Math.abs(val))+(margin!=null?' <span style="color:var(--text-secondary,#9ca3af);font-size:10.5px;font-weight:600">('+margin.toFixed(1)+'%)</span>':'')+'</span></div>';
+  }
+  return '<div style="background:var(--color-surface-2,#f8f8f9);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:14px 18px">'
+    +'<div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--color-primary,#c46a7a);margin-bottom:8px">Utilidad pronosticada · '+(_presCostosData?_presCostosData.periodo:'')+'</div>'
+    +r('Ingresos', m.ing)
+    +r('COGS (costo directo)', m.cogs,null,false,true)
+    +r('= Utilidad bruta', m.ub, m.mUb, true)
+    +r('OpEx (operación)', m.opex,null,false,true)
+    +r('= Utilidad clínica', m.uc, m.mUc, true)
+    +r('G&A (administración)', m.ga,null,false,true)
+    +r('= EBITDA', m.eb, m.mEb, true)
+    +r('Impuestos', m.taxes,null,false,true)
+    +r('= UTILIDAD NETA', m.un, m.mUn, true)
+    +'</div>';
+}
+function _presCostosTableHtml(canEdit){
+  var d=_presCostosData, fM=_presFM;
+  var secs=['COGS','OPEX','GA','TAXES'], secLbl={COGS:'COGS',OPEX:'OpEx',GA:'G&A',TAXES:'Impuestos'};
+  var modos=[['monto','Fijo $/mes'],['pctIngreso','% del ingreso'],['porTratamiento','$ por tratamiento']];
+  var st='padding:5px 7px;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)';
+  var h='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:640px"><thead><tr style="border-bottom:2px solid var(--color-divider,#e5e7eb)">'
+    +'<th style="text-align:left;padding:7px 8px;font-size:9.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Línea</th>'
+    +'<th style="text-align:left;padding:7px 8px;font-size:9.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Sección</th>'
+    +'<th style="text-align:left;padding:7px 8px;font-size:9.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Tipo</th>'
+    +'<th style="text-align:left;padding:7px 8px;font-size:9.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Modo</th>'
+    +'<th style="text-align:right;padding:7px 8px;font-size:9.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Valor</th>'
+    +'<th style="text-align:right;padding:7px 8px;font-size:9.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Trimestre</th>'
+    +(canEdit?'<th style="width:28px"></th>':'')+'</tr></thead><tbody>';
+  var ing=d.ingresos||0, trat=d.tratamientos||0;
+  (d.costos||[]).forEach(function(c,i){
+    var v=parseFloat(c.valor)||0, tp=String(c.tipo||'').toUpperCase(), mq;
+    if(tp==='VARIABLE'){ if(c.modo==='pctIngreso') mq=ing*v/100; else if(c.modo==='porTratamiento') mq=v*trat; else mq=v*3; } else mq=v*3;
+    function sel(field,opts,cur){ return '<select onchange="presCostosField('+i+',\''+field+'\',this.value)" style="'+st+'">'+opts.map(function(o){var val=o[0]!=null?o[0]:o,lb=o[1]!=null?o[1]:o; return '<option value="'+val+'"'+(String(val)===String(cur||'')?' selected':'')+'>'+lb+'</option>';}).join('')+'</select>'; }
+    h+='<tr style="border-bottom:1px solid var(--color-divider,#eee)">'
+      +'<td style="padding:5px 8px">'+(canEdit?'<input type="text" value="'+String(c.linea||'').replace(/"/g,'&quot;')+'" onchange="presCostosField('+i+',\'linea\',this.value)" style="'+st+';width:100%">':(c.linea||'—'))+'</td>'
+      +'<td style="padding:5px 8px">'+(canEdit?sel('seccion',secs.map(function(s){return [s,secLbl[s]];}),String(c.seccion||'OPEX').toUpperCase()):(secLbl[String(c.seccion||'').toUpperCase()]||c.seccion))+'</td>'
+      +'<td style="padding:5px 8px">'+(canEdit?sel('tipo',[['FIJO','Fijo'],['VARIABLE','Variable']],tp):tp)+'</td>'
+      +'<td style="padding:5px 8px">'+(canEdit?sel('modo',modos,c.modo||'monto'):(c.modo||'monto'))+'</td>'
+      +'<td style="padding:5px 8px;text-align:right">'+(canEdit?'<input type="number" step="0.01" value="'+v+'" onchange="presCostosField('+i+',\'valor\',this.value)" style="'+st+';width:96px;text-align:right">':v)+'</td>'
+      +'<td style="padding:5px 8px;text-align:right;color:var(--text-secondary,#6b7280)">'+fM(mq)+'</td>'
+      +(canEdit?'<td style="text-align:center"><button onclick="presCostosDel('+i+')" title="Quitar" style="border:1px solid #e3b3b3;background:none;border-radius:6px;color:#c83c3c;cursor:pointer;font-size:11px;padding:3px 6px">✕</button></td>':'')
+      +'</tr>';
+  });
+  h+='</tbody></table></div>';
+  if(canEdit) h+='<button onclick="presCostosAdd()" style="margin-top:8px;padding:6px 12px;background:var(--color-surface-2,#f1f1f1);border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:11.5px;font-weight:600;cursor:pointer;color:var(--text-primary,#111)">+ Agregar línea</button>';
+  return h;
+}
+function _presCostosRender(){
+  var ovl=document.getElementById('pres-cost-ovl'); if(!ovl||!_presCostosData) return;
+  var canEdit=(typeof hasPermission==='function') && hasPermission('bank_capture');
+  var d=_presCostosData;
+  var h='<div style="background:var(--color-surface,#fff);border-radius:14px;max-width:860px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);margin:auto">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--color-divider,#e5e7eb)">'
+      +'<div><h3 style="margin:0;font-size:17px;color:var(--text-primary,#111)">🧮 Costos y Utilidad</h3><p style="margin:3px 0 0;font-size:11.5px;color:var(--text-secondary,#9ca3af)">Marca cada gasto FIJO o VARIABLE. La utilidad se recalcula al mover. Ingreso proyectado del trimestre: <b>'+_presFM(d.ingresos)+'</b> · '+d.tratamientos+' tratamientos.</p></div>'
+      +'<button onclick="presCostosCerrar()" style="background:none;border:none;font-size:22px;color:var(--text-secondary,#9ca3af);cursor:pointer;line-height:1">×</button>'
+    +'</div>'
+    +'<div style="padding:18px 22px;max-height:70vh;overflow-y:auto">'
+      +'<div id="pr-pnl">'+_presPnLHtml()+'</div>'
+      +'<div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--color-primary,#c46a7a);margin:18px 0 8px">Estructura de costos</div>'
+      +(canEdit?'':'<div style="font-size:10.5px;color:#b45309;margin-bottom:8px">Solo lectura (necesitas permiso de captura para editar).</div>')
+      +'<div id="pr-cost-tbl">'+_presCostosTableHtml(canEdit)+'</div>'
+    +'</div>'
+    +(canEdit?'<div style="display:flex;justify-content:flex-end;gap:10px;padding:16px 22px;border-top:1px solid var(--color-divider,#e5e7eb)">'
+      +'<button onclick="presCostosCerrar()" style="padding:8px 16px;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;background:var(--color-surface,#fff);color:var(--text-secondary,#6b7280);font-size:12.5px;font-weight:600;cursor:pointer">Cerrar</button>'
+      +'<button id="pr-cost-save" onclick="presCostosSave()" style="padding:9px 20px;border:none;border-radius:8px;background:var(--color-primary,#c46a7a);color:#fff;font-size:13px;font-weight:700;cursor:pointer">Guardar costos</button>'
+    +'</div>':'')
+  +'</div>';
+  ovl.innerHTML=h;
+}
+function _presCostosRefresh(){
+  var p=document.getElementById('pr-pnl'); if(p) p.innerHTML=_presPnLHtml();
+  var t=document.getElementById('pr-cost-tbl'); if(t){ var canEdit=(typeof hasPermission==='function')&&hasPermission('bank_capture'); t.innerHTML=_presCostosTableHtml(canEdit); }
+}
+function presCostosField(i,key,val){ if(!_presCostosData||!_presCostosData.costos[i]) return; _presCostosData.costos[i][key]=(key==='valor')?(parseFloat(val)||0):val; _presCostosRefresh(); }
+function presCostosAdd(){ if(!_presCostosData) return; _presCostosData.costos.push({linea:'Nuevo gasto',seccion:'OPEX',tipo:'FIJO',modo:'monto',valor:0}); _presCostosRefresh(); }
+function presCostosDel(i){ if(!_presCostosData) return; _presCostosData.costos.splice(i,1); _presCostosRefresh(); }
+async function presCostosSave(){
+  if(!_presCostosData) return;
+  var btn=document.getElementById('pr-cost-save'); if(btn){ btn.textContent='Guardando…'; btn.disabled=true; }
+  try{
+    var s=getSession()||{};
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'savePresupuestoCostos', costos:_presCostosData.costos, token:s.token||getToken(), usuario:s.email||''})});
+    var j=await r.json();
+    if(j&&j.ok){ if(typeof setStatus==='function') setStatus('Costos guardados ('+j.guardados+' líneas).','ok'); presCostosCerrar(); }
+    else { alert('No se pudo guardar: '+((j&&j.error)||'error')); if(btn){ btn.textContent='Guardar costos'; btn.disabled=false; } }
+  }catch(e){ alert('Error de red: '+e.message); if(btn){ btn.textContent='Guardar costos'; btn.disabled=false; } }
 }
 
 /* ── Simulador de meta en la barra del hero ─────────────────────── */
