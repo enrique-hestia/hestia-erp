@@ -33,7 +33,7 @@ var COBRANZA_CFG_KEY  = 'COBRANZA_CONFIG';
 var COBRANZA_ABONOS   = 'Abonos_Cobrar';
 var COBRANZA_CARGOS   = 'Cuentas_Cobrar';
 var COBRANZA_SUS      = 'Suscripciones_Crio';
-var COBRANZA_VER      = 'cobranza-2026.07.09l';
+var COBRANZA_VER      = 'cobranza-2026.07.10m';
 
 /* ───────────────────────── Config ───────────────────────── */
 function _cobCfg() {
@@ -201,7 +201,8 @@ function _cobParseItems(x) {
     var c = _cobNum(it.cantidad) || 1;
     var p = _cobNum(it.precio);
     var t = (it.total != null && it.total !== '') ? _cobNum(it.total) : (p * c);
-    if (String(it.producto || '').trim() || t > 0) out.push({ producto: String(it.producto || '').trim(), cantidad: c, precio: p, total: t, saldo: 0 });
+    var pac = String(it.pac || it.paciente || '').trim(); // nombre del paciente real (agencias/externos)
+    if (String(it.producto || '').trim() || t > 0) out.push({ producto: String(it.producto || '').trim(), cantidad: c, precio: p, total: t, saldo: 0, pac: pac });
   }
   return out;
 }
