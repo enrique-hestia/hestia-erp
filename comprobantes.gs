@@ -379,22 +379,41 @@ function buscarXmlParaEgreso(body) {
       });
     } catch (e) {}
 
-    var candidatos = [];
-    [mesBase, mesBase - 1, mesBase + 1].forEach(function (m) {
-      var y = anio, mm = m;
-      if (mm < 1) { mm = 12; y--; }
-      if (mm > 12) { mm = 1; y++; }
-      _compIndexMes(y, mm).forEach(function (x) {
+    // REGLA (pedido del usuario): la factura se busca en el MISMO MES del egreso.
+    // Solo si NO hay del mismo mes Y el mes YA TERMINÓ se extiende a meses vecinos
+    // (por si se facturó/pagó en otro mes). Si el mes sigue EN CURSO no se toma la de
+    // otro mes: se deja sin vincular esperando la factura del mes (o el cierre del mes).
+    var hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    var finMes = new Date(anio, mesBase, 0);           // último día del mes del egreso
+    var mesTerminado = finMes < hoy;
+
+    function buscarEnMes(y, m, dist) {
+      var out = [];
+      var yy = y, mm = m; if (mm < 1) { mm = 12; yy--; } if (mm > 12) { mm = 1; yy++; }
+      _compIndexMes(yy, mm).forEach(function (x) {
         if (Math.abs((x.total || 0) - monto) > 0.5) return;
         var rfcOk = provRfc && x.emisorRfc.replace(/[\s-]/g, '') === provRfc;
         var nomEmisor = String(x.emisorNombre || '').toLowerCase().replace(/[\s.,]+/g, ' ').trim();
         var nombreOk = provNombre && nomEmisor && (nomEmisor.indexOf(provNombre) > -1 || provNombre.indexOf(nomEmisor) > -1);
-        candidatos.push(Object.assign({}, x, { matchProveedor: !!(rfcOk || nombreOk) }));
+        out.push(Object.assign({}, x, { matchProveedor: !!(rfcOk || nombreOk), mesDist: dist, mismoMes: dist === 0 }));
       });
-    });
-    candidatos.sort(function (a, b) { return (b.matchProveedor ? 1 : 0) - (a.matchProveedor ? 1 : 0); });
+      return out;
+    }
+
+    var candidatos = buscarEnMes(anio, mesBase, 0);     // 1) mismo mes
+    if (!candidatos.length) {
+      if (!mesTerminado) {
+        // 3) el mes NO ha terminado → no obviar; esperar la factura del mes
+        return { ok: true, encontrados: [], soloMonto: false, esperandoMes: true,
+                 mes: anio + '-' + ('0' + mesBase).slice(-2) };
+      }
+      // 2) mes cerrado sin factura del mismo mes → extender a meses vecinos
+      candidatos = buscarEnMes(anio, mesBase - 1, 1).concat(buscarEnMes(anio, mesBase + 1, 1));
+    }
+    candidatos.sort(function (a, b) { return ((b.matchProveedor ? 1 : 0) - (a.matchProveedor ? 1 : 0)) || (a.mesDist - b.mesDist); });
     var fuertes = candidatos.filter(function (c) { return c.matchProveedor; });
-    return { ok: true, encontrados: (fuertes.length ? fuertes : candidatos).slice(0, 5), soloMonto: !fuertes.length };
+    return { ok: true, encontrados: (fuertes.length ? fuertes : candidatos).slice(0, 5),
+             soloMonto: !fuertes.length, mesTerminado: mesTerminado };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 

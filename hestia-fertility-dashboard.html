@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.10.145 -->
+﻿<!-- app-build:2026.07.10.146 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -7319,8 +7319,13 @@ async function egCargarFiscal(rowNum){
       var db = await rb.json();
       if (!db.ok) throw new Error(db.error||'No se pudo buscar el XML');
       if (!db.encontrados || !db.encontrados.length) {
-        cont.innerHTML = _egBadge('SIN FACTURA NI XML','#f3f4f6','#6b7280')
-          +' <span style="color:var(--text-secondary,#9ca3af);font-size:11px">No hay adjunto y no se encontró un XML con este monto/proveedor en el repositorio del SAT.</span>';
+        if (db.esperandoMes) {
+          cont.innerHTML = _egBadge('ESPERANDO FACTURA DEL MES','#FEF3C7','#92400E')
+            +' <span style="color:#92400e;font-size:11px">El mes '+esc(db.mes||'')+' aún no termina. Se vinculará cuando aparezca la factura de <b>este mes</b>; si al cerrar el mes no hay, se buscará en meses cercanos. No se toma la de otro mes para no equivocar el periodo.</span>';
+        } else {
+          cont.innerHTML = _egBadge('SIN FACTURA NI XML','#f3f4f6','#6b7280')
+            +' <span style="color:var(--text-secondary,#9ca3af);font-size:11px">No hay adjunto y no se encontró un XML con este monto/proveedor'+(db.mesTerminado?' (mes ya cerrado; se buscó también en meses cercanos)':'')+' en el repositorio del SAT.</span>';
+        }
         return;
       }
       var x = db.encontrados[0];
@@ -7369,7 +7374,10 @@ async function egCargarFiscal(rowNum){
       +'<span>Factura <b>'+esc(folio)+'</b> · '+fmtM(d.total)+' '+esc(d.moneda||'MXN')+'</span>'
       +'<span style="font-family:monospace;font-size:10px" title="Folio fiscal">UUID '+esc(d.uuid||'—')+'</span>'
       +(d.fechaTimbrado?'<span style="color:var(--text-secondary,#6b7280)">Timbrada '+esc(d.fechaTimbrado.substring(0,10))+'</span>':'')
-      +'<button class="mv-btn-sec" style="padding:3px 12px;font-size:10.5px;margin-left:auto" onclick="compVerCfdiFile(\''+fid+'\',\'\',\''+esc(folio).replace(/'/g,"\\'")+'\')">👁 Ver factura completa</button>'
+      +'<span style="display:inline-flex;gap:6px;margin-left:auto">'
+      +'<button class="mv-btn-sec" style="padding:3px 12px;font-size:10.5px" onclick="compVerCfdiFile(\''+fid+'\',\'\',\''+esc(folio).replace(/'/g,"\\'")+'\')">👁 Ver factura completa</button>'
+      +((hasPermission('editar_egresos')||hasPermission('bank_edit'))?'<button class="mv-btn-sec" style="padding:3px 12px;font-size:10.5px;border-color:#e3b3b3;color:#c83c3c" onclick="egDesvincularFactura('+rowNum+')" title="Quitar esta factura del egreso (ej. si se vinculó una de otro mes) para poder vincular la correcta">Desvincular</button>':'')
+      +'</span>'
       +'</div>';
   } catch(e){
     if (cont) cont.innerHTML = '<span style="color:#dc2626">'+String(e.message).replace(/</g,'&lt;')+'</span>';
@@ -7399,6 +7407,21 @@ async function egVincularXmlDetectado(rowNum, fileId, etiqueta, anio, btn){
     alert('Error de conexión: '+e.message);
     if(btn){ btn.disabled = false; btn.textContent = 'Vincular'; }
   }
+}
+
+/* Desvincular la factura de un egreso (ej. se vinculó una de otro mes) — limpia
+   la columna "Link Factura" vía updateEgresoField (modo parcial, ya desplegado). */
+async function egDesvincularFactura(rowNum){
+  if(!confirm('¿Desvincular la factura de este egreso?\n\nQuedará sin factura para que puedas vincular la correcta (la del mismo mes).')) return;
+  try{
+    var s=getSession()||{};
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'updateEgresoField', rowNum:rowNum, anio:(typeof _egAnio!=='undefined'?_egAnio:undefined), usuario:s.email||'', fields:{'link factura':''}})});
+    var j=await r.json();
+    if(!j||!j.ok){ alert('No se pudo desvincular: '+((j&&j.error)||'error')); return; }
+    if(typeof _egData!=='undefined' && _egData && _egData.rows){ var lr=_egData.rows.find(function(x){ return x._rowNum===rowNum; }); if(lr){ lr.linkFacturaUrl=''; lr.linkFactura=''; } }
+    var box=document.getElementById('eg-fiscal-'+rowNum); if(box){ box.dataset.url=''; box.dataset.loaded=''; egCargarFiscal(rowNum); }
+    if(typeof _swrDel==='function') _swrDel('egresos');
+  }catch(e){ alert('Error de red: '+e.message); }
 }
 
 async function egToggleField(rowNum, field, value) {
