@@ -605,6 +605,12 @@ function doGet(e) {
         return jsonResponse({ ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.' });
       return jsonResponse(generarSuscripciones({ preview:true }));
     }
+    if (action === 'contarEgresosProveedor') {
+      if (typeof contarEgresosProveedor !== 'function')
+        return jsonResponse({ ok:false, error:'Actualiza providers.gs en Apps Script y redespliega.' });
+      var pnom = e && e.parameter.nombre ? decodeURIComponent(e.parameter.nombre) : '';
+      return jsonResponse(contarEgresosProveedor(pnom));
+    }
 
     if (action === 'pacienteLista') {
       var pacNombre = (e && e.parameter.paciente) || '';

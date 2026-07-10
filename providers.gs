@@ -424,13 +424,82 @@ function updateProveedor(body) {
     var rowNum = parseInt(body.rowNum, 10);
     if (rowNum < 2 || rowNum > sh.getLastRow()) return { ok: false, error: 'Fila fuera de rango.' };
 
+    // Nombre ANTERIOR (col B) para poder cascar el cambio a Egresos sin orfanar registros.
+    var nombreAnterior = String(sh.getRange(rowNum, 2).getValue() || '').trim();
+    var nombreNuevo = String(body.nombre || '').trim();
+
     var f = _provFields(body);
     // Cols B..M (2..13) = nombre..notas. ID, fecha alta y usuario alta se conservan.
     sh.getRange(rowNum, 2, 1, f.length).setValues([f]);
     try { _provWriteFiscal(sh, rowNum, body); } catch (e) {}
-    try { logAudit(body.usuario || '', 'Proveedores', 'Edición', String(body.id || rowNum), 'nombre', '', body.nombre); } catch (e) {}
-    return { ok: true, message: 'Proveedor actualizado.' };
+    try { logAudit(body.usuario || '', 'Proveedores', 'Edición', String(body.id || rowNum), 'nombre', nombreAnterior, nombreNuevo); } catch (e) {}
+
+    // Cascada: si cambió el nombre y el frontend lo pidió, renombra en TODOS los
+    // Egresos (2024/2025/2026) para no perder el historial del proveedor.
+    var cascadaMsg = '';
+    if ((body.cascadaNombre === true || body.cascadaNombre === 'true') &&
+        nombreAnterior && nombreNuevo && nombreAnterior.toLowerCase() !== nombreNuevo.toLowerCase()) {
+      var casc = _provRenombrarEnEgresos(nombreAnterior, nombreNuevo);
+      if (casc.total > 0) {
+        cascadaMsg = ' Se actualizaron ' + casc.total + ' registro(s) en Egresos.';
+        try { logAudit(body.usuario || '', 'Proveedores', 'Renombrar cascada', String(body.id || rowNum), 'egresos', nombreAnterior, nombreNuevo + ' (' + casc.total + ')'); } catch (e) {}
+      }
+    }
+    return { ok: true, message: 'Proveedor actualizado.' + cascadaMsg, cascada: cascadaMsg ? true : false };
   } catch (ex) {
     return { ok: false, error: ex.message };
   }
+}
+
+// Renombra un proveedor en TODAS las hojas de Egresos (batch por columna).
+function _provRenombrarEnEgresos(oldName, newName) {
+  var total = 0, porAnio = {};
+  var oldN = String(oldName || '').trim().toLowerCase();
+  var newV = String(newName || '').trim();
+  if (!oldN || !newV) return { total: 0, porAnio: {} };
+  var years = [2026, 2025, 2024];
+  for (var y = 0; y < years.length; y++) {
+    var yr = years[y];
+    try {
+      var ss = SpreadsheetApp.openById(EGRESOS_IDS[yr]);
+      var sh = ss.getSheetByName(EGRESOS_TABS[yr]);
+      if (!sh || sh.getLastRow() < 2) continue;
+      var hdr = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (x) { return String(x).trim().toLowerCase(); });
+      var iProv = hdr.indexOf('proveedor'); if (iProv < 0) iProv = 4; // fallback col E
+      var n = sh.getLastRow() - 1;
+      var rng = sh.getRange(2, iProv + 1, n, 1);
+      var col = rng.getValues();
+      var cnt = 0;
+      for (var r = 0; r < col.length; r++) {
+        if (String(col[r][0] || '').trim().toLowerCase() === oldN) { col[r][0] = newV; cnt++; }
+      }
+      if (cnt) { rng.setValues(col); total += cnt; porAnio[yr] = cnt; try { CacheService.getScriptCache().remove('gas_egresos_v1_' + yr); } catch (e) {} }
+    } catch (e) {}
+  }
+  return { total: total, porAnio: porAnio };
+}
+
+// Cuenta cuántos registros de Egresos tiene un proveedor (para avisar antes de renombrar).
+function contarEgresosProveedor(nombre) {
+  try {
+    var oldN = String(nombre || '').trim().toLowerCase();
+    if (!oldN) return { ok: true, total: 0, porAnio: {} };
+    var total = 0, porAnio = {};
+    var years = [2026, 2025, 2024];
+    for (var y = 0; y < years.length; y++) {
+      var yr = years[y];
+      try {
+        var ss = SpreadsheetApp.openById(EGRESOS_IDS[yr]);
+        var sh = ss.getSheetByName(EGRESOS_TABS[yr]);
+        if (!sh || sh.getLastRow() < 2) continue;
+        var hdr = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (x) { return String(x).trim().toLowerCase(); });
+        var iProv = hdr.indexOf('proveedor'); if (iProv < 0) iProv = 4;
+        var col = sh.getRange(2, iProv + 1, sh.getLastRow() - 1, 1).getValues();
+        var cnt = 0;
+        for (var r = 0; r < col.length; r++) { if (String(col[r][0] || '').trim().toLowerCase() === oldN) cnt++; }
+        if (cnt) { total += cnt; porAnio[yr] = cnt; }
+      } catch (e) {}
+    }
+    return { ok: true, total: total, porAnio: porAnio };
+  } catch (ex) { return { ok: false, error: ex.message }; }
 }

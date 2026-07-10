@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.09.128 -->
+﻿<!-- app-build:2026.07.09.129 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6917,7 +6917,16 @@ function _renderEgresosERP() {
   h.push('</div>');
   h.push('</div>');
 
+  // Preservar el foco/cursor del buscador: al re-renderizar por búsqueda, el input
+  // se recrea y perdía el foco (parecía que "no dejaba escribir").
+  var _egActive = document.activeElement;
+  var _egWasSearch = _egActive && _egActive.classList && _egActive.classList.contains('eg-search');
+  var _egCaret = _egWasSearch ? _egActive.selectionStart : null;
   root.innerHTML = h.join('');
+  if (_egWasSearch) {
+    var _egNew = root.querySelector('.eg-search');
+    if (_egNew) { _egNew.focus(); try { var _p=(_egCaret==null)?_egNew.value.length:_egCaret; _egNew.setSelectionRange(_p,_p); } catch(e){} }
+  }
 }
 
 /* ── Reporte por proveedor ──────────────────────────────────── */
@@ -15004,6 +15013,20 @@ async function provSave(){
   };
   if (_provEditRow){ payload.action='updateProveedor'; payload.rowNum=_provEditRow._rowNum; payload.id=_provEditRow.id; }
   else { payload.action='saveProveedor'; }
+  // Si se está renombrando (razón social), ofrecer cascar el cambio a todos los
+  // Egresos que tengan el nombre anterior — para no orfanar el historial.
+  if (_provEditRow){
+    var nombreAnterior=String(_provEditRow.nombre||'').trim();
+    if (nombreAnterior && nombreAnterior.toLowerCase()!==nombre.toLowerCase()){
+      var _cnt=0;
+      try { var _rc=await fetch(APPS_SCRIPT_URL+'?action=contarEgresosProveedor&nombre='+encodeURIComponent(nombreAnterior)+'&token='+encodeURIComponent(getToken())); var _jc=await _rc.json(); _cnt=(_jc&&_jc.ok)?(_jc.total||0):0; } catch(e){}
+      if (_cnt>0){
+        if (confirm('Vas a renombrar el proveedor:\n\n  "'+nombreAnterior+'"\n  →  "'+nombre+'"\n\nHay '+_cnt+' registro(s) en Egresos con el nombre anterior.\n\n¿Actualizarlos también para no perder el historial del proveedor?')) {
+          payload.cascadaNombre=true;
+        }
+      }
+    }
+  }
   if (btn){ btn.disabled=true; btn.textContent='Guardando…'; }
   if (msg){ msg.style.color='#6b7280'; msg.textContent='Guardando…'; }
   try {
@@ -15012,6 +15035,7 @@ async function provSave(){
     if (!d.ok){ if(msg){msg.style.color='#991b1b';msg.textContent=d.error||'No se pudo guardar.';} if(btn){btn.disabled=false;btn.textContent=_provEditRow?'Guardar cambios':'Registrar';} return; }
     var onSaved = _provOnSaved;
     provCloseForm();
+    if (typeof setStatus==='function' && d.message) setStatus(d.message, 'ok');
     // Si el catálogo completo está montado (#prov-root) se recarga la vista
     // entera; si no (ej. se abrió el formulario desde otro módulo, como
     // Cuentas por Pagar), basta con refrescar el catálogo en memoria y el
@@ -25670,10 +25694,11 @@ function ccRenderSus(){
   var list=(s.pacientes||[]).filter(function(p){ return _ccSusF==='Todos' || p.estatus===_ccSusF; });
   if(_ccSearch && _ccSearch.trim()){ var _qs=_ccSearch.toLowerCase(); list=list.filter(function(p){ return ((p.nombre||'')+' '+(p.plan||'')+' '+(p.estatus||'')+' '+(p.tipoPaciente||'')).toLowerCase().indexOf(_qs)>=0; }); }
   var h='';
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px">';
-  h+='<div style="font-size:12px;color:var(--color-text-muted);max-width:560px;line-height:1.45">Materializa los periodos vencidos como cuentas por cobrar reales (idempotente: no duplica). El atraso histórico se junta en un cargo consolidado por paciente.</div>';
-  h+='<button onclick="ccGenerarPreview()" style="padding:9px 16px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">⚙ Generar suscripciones</button>';
-  h+='</div>';
+  if(typeof hasPermission==='function' && hasPermission('editar_egresos')){
+    h+='<div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:12px">';
+    h+='<button onclick="ccGenerarPreview()" title="Materializa los periodos vencidos de suscripción como cuentas por cobrar REALES en la hoja (idempotente: no duplica). El atraso histórico se consolida en un cargo por paciente. Primero muestra un preview antes de crear nada. Requiere permiso de editar cuentas por pagar." style="padding:8px 15px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">⚙ Generar suscripciones</button>';
+    h+='</div>';
+  }
   h+='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">';
   ['Todos','Vencida','Falta suscripción','Por vencer','Vigente','Cortesía'].forEach(function(st){
     var on=_ccSusF===st;
@@ -26081,7 +26106,7 @@ function cobRender(d){
   if(d.ventas && d.ventas.length){
     h+='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px;overflow:hidden;margin-top:18px">';
     h+='<div style="padding:12px 16px;border-bottom:1px solid var(--color-divider);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span style="font-size:13px;font-weight:700">Detalle de lo vendido '+(_cobVista==='periodo'?'· periodo actual':'· histórico')+'</span><span style="font-size:11px;color:var(--color-text-muted)">'+_vv.length+' partidas · Total '+ccFmt(_vvTot)+' · Pagado '+ccFmt(_vvPag)+'</span></div>';
-    if(!_vv.length){ h+='<div style="padding:22px;text-align:center;color:var(--color-text-muted);font-size:12px">Sin ventas en el periodo seleccionado.</div>'; }
+    if(!_vv.length){ h+='<div style="padding:20px 22px;text-align:center;color:var(--color-text-muted);font-size:12px">No hay ventas capturadas entre <b>'+ccFch(currentFechaInicio)+'</b> y <b>'+ccFch(currentFechaFin)+'</b>.<br><span style="font-size:11px;line-height:1.5">El saldo pendiente puede venir de meses anteriores — cambia el rango <b>Del / al</b> de arriba, o usa <b>«Histórico completo»</b> para ver todo el detalle.</span></div>'; }
     else {
     h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:600px"><thead><tr style="border-bottom:2px solid var(--color-divider)">'
       +'<th style="padding:8px 12px;text-align:left;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Fecha</th>'

@@ -33,7 +33,7 @@ var COBRANZA_CFG_KEY  = 'COBRANZA_CONFIG';
 var COBRANZA_ABONOS   = 'Abonos_Cobrar';
 var COBRANZA_CARGOS   = 'Cuentas_Cobrar';
 var COBRANZA_SUS      = 'Suscripciones_Crio';
-var COBRANZA_VER      = 'cobranza-2026.07.09i';
+var COBRANZA_VER      = 'cobranza-2026.07.09j';
 
 /* ───────────────────────── Config ───────────────────────── */
 function _cobCfg() {
@@ -917,7 +917,9 @@ function generarSuscripciones(body) {
         consolidados: plan.filter(function (r) { return r.periodo === 'SALDO-INICIAL'; }).length,
         detalle: plan.slice(0, 300).map(function (r) { return { paciente: _cobMasked() ? '—' : r.paciente, plan: r.plan, periodo: r.periodo, monto: r.monto, concepto: r.concepto }; }) };
     }
-    // COMMIT (idempotente, con lock)
+    // COMMIT (idempotente, con lock) — requiere permiso (afecta datos)
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'editar_egresos'))
+      return { ok: false, error: 'Sin permiso para generar suscripciones (requiere editar cuentas por pagar).', version: COBRANZA_VER };
     var lock = LockService.getScriptLock();
     if (!lock.tryLock(20000)) return { ok: false, error: 'Sistema ocupado, reintenta.', version: COBRANZA_VER };
     var creadas = 0, dups = 0, montoG = 0;
