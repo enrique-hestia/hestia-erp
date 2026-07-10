@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.10.144 -->
+﻿<!-- app-build:2026.07.10.145 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -13806,7 +13806,7 @@ async function presCostosOpen(){
     var rC=await fetch(APPS_SCRIPT_URL+'?action=presupuestoCostos&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
     var cst=await rC.json();
     if(!mod||!mod.ok){ ovl.querySelector('div').innerHTML='<div style="color:#c83c3c">'+((mod&&mod.error)||'No disponible. ¿Redeployaste presupuesto.gs + core.gs?')+'</div>'; return; }
-    _presCostosData={ periodo:mod.periodo, ingresos:mod.ingresos||0, tratamientos:mod.tratamientos||0, costos:((cst&&cst.costos)||[]).map(function(c){return {linea:c.linea,seccion:c.seccion,tipo:c.tipo,modo:c.modo,valor:c.valor};}) };
+    _presCostosData={ periodo:mod.periodo, ingresos:mod.ingresos||0, tratamientos:mod.tratamientos||0, _recIng:mod.ingresos||0, _recTrat:mod.tratamientos||0, costos:((cst&&cst.costos)||[]).map(function(c){return {linea:c.linea,seccion:c.seccion,tipo:c.tipo,modo:c.modo,valor:c.valor};}) };
     _presCostosRender();
   }catch(e){ ovl.querySelector('div').innerHTML='<div style="color:#c83c3c">Error de red: '+e.message+'</div>'; }
 }
@@ -13881,10 +13881,19 @@ function _presCostosRender(){
   var d=_presCostosData;
   var h='<div style="background:var(--color-surface,#fff);border-radius:14px;max-width:860px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);margin:auto">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--color-divider,#e5e7eb)">'
-      +'<div><h3 style="margin:0;font-size:17px;color:var(--text-primary,#111)">🧮 Costos y Utilidad</h3><p style="margin:3px 0 0;font-size:11.5px;color:var(--text-secondary,#9ca3af)">Marca cada gasto FIJO o VARIABLE. La utilidad se recalcula al mover. Ingreso proyectado del trimestre: <b>'+_presFM(d.ingresos)+'</b> · '+d.tratamientos+' tratamientos.</p></div>'
+      +'<div><h3 style="margin:0;font-size:17px;color:var(--text-primary,#111)">🧮 Costos y Utilidad</h3><p style="margin:3px 0 0;font-size:11.5px;color:var(--text-secondary,#9ca3af)">Ajusta los ingresos/tratamientos y marca cada gasto FIJO o VARIABLE. La utilidad se recalcula al instante.</p></div>'
       +'<button onclick="presCostosCerrar()" style="background:none;border:none;font-size:22px;color:var(--text-secondary,#9ca3af);cursor:pointer;line-height:1">×</button>'
     +'</div>'
     +'<div style="padding:18px 22px;max-height:70vh;overflow-y:auto">'
+      +'<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;background:var(--color-surface-2,#f8f8f9);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:12px 14px;margin-bottom:14px">'
+        +'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:3px">Ingresos proyectados · '+d.periodo+'</div>'
+          +(canEdit?'<input type="number" step="1000" value="'+Math.round(d.ingresos)+'" onchange="presCostosDriver(\'ingresos\',this.value)" style="width:160px;padding:6px 9px;border:1.5px solid var(--color-primary,#c46a7a);border-radius:8px;font-size:14px;font-weight:700;text-align:right;background:var(--card-bg,#fff);color:var(--text-primary,#111)">':'<div style="font-size:15px;font-weight:800;color:var(--color-primary,#c46a7a)">'+_presFM(d.ingresos)+'</div>')+'</div>'
+        +'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:3px">Tratamientos</div>'
+          +(canEdit?'<input type="number" step="1" value="'+Math.round(d.tratamientos)+'" onchange="presCostosDriver(\'tratamientos\',this.value)" style="width:82px;padding:6px 9px;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:13px;text-align:right;background:var(--card-bg,#fff);color:var(--text-primary,#111)">':'<div style="font-size:14px;font-weight:700">'+Math.round(d.tratamientos)+'</div>')+'</div>'
+        +(canEdit?'<button onclick="presCostosRecomendado()" title="Restaurar el ingreso/tratamientos recomendados por el modelo (tendencia + estacionalidad real)" style="padding:8px 12px;background:var(--card-bg,#fff);border:1.5px solid var(--color-primary,#c46a7a);color:var(--color-primary,#c46a7a);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🔮 Recomendado</button>':'')
+        +(canEdit?'<button onclick="presCostosFijarMeta()" title="Guardar este ingreso como la meta del trimestre" style="padding:8px 12px;background:var(--color-surface,#f1f1f1);border:1px solid var(--color-divider,#e5e7eb);color:var(--text-primary,#111);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">📌 Fijar como meta</button>':'')
+        +'<div style="flex:1;min-width:110px;text-align:right;font-size:10.5px;color:var(--text-secondary,#9ca3af)">Recomendado del modelo: <b>'+_presFM(d._recIng||0)+'</b></div>'
+      +'</div>'
       +'<div id="pr-pnl">'+_presPnLHtml()+'</div>'
       +'<div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--color-primary,#c46a7a);margin:18px 0 8px">Estructura de costos</div>'
       +(canEdit?'':'<div style="font-size:10.5px;color:#b45309;margin-bottom:8px">Solo lectura (necesitas permiso de captura para editar).</div>')
@@ -13904,6 +13913,18 @@ function _presCostosRefresh(){
 function presCostosField(i,key,val){ if(!_presCostosData||!_presCostosData.costos[i]) return; _presCostosData.costos[i][key]=(key==='valor')?(parseFloat(val)||0):val; _presCostosRefresh(); }
 function presCostosAdd(){ if(!_presCostosData) return; _presCostosData.costos.push({linea:'Nuevo gasto',seccion:'OPEX',tipo:'FIJO',modo:'monto',valor:0}); _presCostosRefresh(); }
 function presCostosDel(i){ if(!_presCostosData) return; _presCostosData.costos.splice(i,1); _presCostosRefresh(); }
+function presCostosDriver(key,val){ if(!_presCostosData) return; _presCostosData[key]=parseFloat(val)||0; var p=document.getElementById('pr-pnl'); if(p) p.innerHTML=_presPnLHtml(); var t=document.getElementById('pr-cost-tbl'); if(t){ var ce=(typeof hasPermission==='function')&&hasPermission('bank_capture'); t.innerHTML=_presCostosTableHtml(ce); } }
+function presCostosRecomendado(){ if(!_presCostosData) return; _presCostosData.ingresos=_presCostosData._recIng||0; _presCostosData.tratamientos=_presCostosData._recTrat||0; _presCostosRender(); }
+async function presCostosFijarMeta(){
+  if(!_presCostosData) return;
+  var s=getSession()||{};
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'savePresupuestoMeta', periodo:_presCostosData.periodo, linea:'TOTAL', metaIngreso:Math.round(_presCostosData.ingresos||0), token:s.token||getToken(), usuario:s.email||''})});
+    var j=await r.json();
+    if(j&&j.ok){ if(typeof setStatus==='function') setStatus('Meta del trimestre fijada en '+_presFM(_presCostosData.ingresos)+'.','ok'); }
+    else alert('No se pudo fijar la meta: '+((j&&j.error)||'error'));
+  }catch(e){ alert('Error de red: '+e.message); }
+}
 async function presCostosSave(){
   if(!_presCostosData) return;
   var btn=document.getElementById('pr-cost-save'); if(btn){ btn.textContent='Guardando…'; btn.disabled=true; }
@@ -14789,6 +14810,9 @@ var _PRES_TOUR = [
   {el:'button[onclick="presOpenMeta()"]',
    title:'Fijar / editar meta',
    body:'Define la <b>meta total del trimestre</b> (el actual o el siguiente). Acepta el estimado con un clic o escribe tu cifra. Esta meta es la que enciende el semáforo del paso 1.'},
+  {el:'button[onclick="presCostosOpen()"]',
+   title:'🧮 Costos y Utilidad (P&L en vivo)',
+   body:'Abre el panel de <b>utilidad pronosticada</b>. Marca cada gasto <b>FIJO</b> ($/mes, ej. renta/nómina) o <b>VARIABLE</b> (% del ingreso, o $ por tratamiento). Ajusta los <b>ingresos y tratamientos</b> (o pulsa <b>🔮 Recomendado</b> para la mejor estimación del modelo) y el P&L se mueve al instante: Ingresos − COGS = Utilidad bruta − OpEx = Utilidad clínica − G&A = EBITDA − Impuestos = <b>Utilidad neta</b>, con márgenes %.<br><br><b>📌 Fijar como meta</b> guarda ese ingreso como la meta del trimestre. <b>Guardar costos</b> conserva tu estructura fijo/variable. <i>(Requiere haber redeployado presupuesto.gs.)</i>'},
   {el:'#pres-hist-card',
    title:'Histórico de metas',
    body:'Tu racha: meta fijada vs lo realmente logrado por trimestre (pasados y el próximo proyectado), con el % de cumplimiento. Sirve para ver si tiendes a quedarte corto o a cumplir. ¡Listo, ya conoces todo el módulo!'}
