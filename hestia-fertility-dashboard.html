@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.10.143 -->
+﻿<!-- app-build:2026.07.10.144 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6448,11 +6448,25 @@ function _ingAvisoCxC(paciente, op, monto){
    ══════════════════════════════════════════════════════════════ */
 var _egData = null;
 var _egAnio = new Date().getFullYear();
+var _egAnioSel = null; // año elegido a mano en el selector (null = sigue el periodo global). Permite ver histórico 2024/2025.
 var _egFilters = {mes:'',contable:'',subtipo:'',proveedor:'',formaPago:'',buscar:'',pagado:''};
+// Rango efectivo de la vista Egresos: el año elegido a mano (completo) o el periodo global.
+function _egRangeIni(){ return _egAnioSel ? (_egAnioSel+'-01-01') : (currentFechaInicio||''); }
+function _egRangeFin(){ return _egAnioSel ? (_egAnioSel+'-12-31') : (currentFechaFin||''); }
+// Mapa proveedor→nombre comercial (para buscar/mostrar el comercial en Egresos).
+function _egProvMap(){
+  var pv=window._proveedores||[];
+  if(window._egProvMapCache && window._egProvMapCache._n===pv.length) return window._egProvMapCache;
+  var idx={_n:pv.length};
+  pv.forEach(function(p){ var nom=String(p.nombre||'').trim().toLowerCase(), com=String(p.comercial||'').trim(); var rec={comercial:com};
+    if(nom) idx[nom]=rec; if(com) idx[com.toLowerCase()]=rec; });
+  window._egProvMapCache=idx; return idx;
+}
+function _egComercial(nombre){ var r=_egProvMap()[String(nombre||'').trim().toLowerCase()]; return (r&&r.comercial)||''; }
 var _egPage = 1, _egPerPage = 30;
 
 async function loadEgresosERP(force) {
-  var targetAnio = currentFechaInicio ? parseInt(currentFechaInicio.substring(0,4)) : new Date().getFullYear();
+  var targetAnio = _egAnioSel || (currentFechaInicio ? parseInt(currentFechaInicio.substring(0,4)) : new Date().getFullYear());
   if (targetAnio !== _egAnio) { _egAnio = targetAnio; _egPage = 1; _egFilters = {mes:'',contable:'',subtipo:'',proveedor:'',formaPago:'',buscar:'',pagado:''}; }
   var root = document.getElementById('eg-root');
   if (!root) return;
@@ -6493,10 +6507,11 @@ function _egFilterRows() {
     // El menú de Egresos solo muestra lo PAGADO (validado en checkbox PAG).
     // Lo pendiente de pago vive en Cuentas por Pagar.
     if (!r.pagado) return false;
-    // Respeta el rango Del/Al seleccionado en la parte superior
+    // Respeta el rango efectivo: el año elegido a mano (completo) o el Del/Al del topbar.
+    var _rIni=_egRangeIni(), _rFin=_egRangeFin();
     var fd = (r.fecha||'').substring(0,10);
-    if (currentFechaInicio && fd && fd < currentFechaInicio) return false;
-    if (currentFechaFin && fd && fd > currentFechaFin) return false;
+    if (_rIni && fd && fd < _rIni) return false;
+    if (_rFin && fd && fd > _rFin) return false;
     if (f.mes && r.mes !== f.mes) return false;
     if (f.contable && r.contable !== f.contable) return false;
     if (f.subtipo && r.subtipo !== f.subtipo) return false;
@@ -6504,7 +6519,8 @@ function _egFilterRows() {
     if (f.formaPago && r.formaPago !== f.formaPago) return false;
     if (f.buscar) {
       var q = f.buscar.toLowerCase();
-      var haystack = (r.proveedor+' '+r.concepto+' '+r.subtipo+' '+r.observaciones).toLowerCase();
+      // Incluye el nombre COMERCIAL del proveedor (del catálogo) para poder buscarlo por cualquiera de sus nombres.
+      var haystack = (r.proveedor+' '+_egComercial(r.proveedor)+' '+r.concepto+' '+r.subtipo+' '+r.observaciones).toLowerCase();
       if (haystack.indexOf(q) === -1) return false;
     }
     return true;
@@ -6513,6 +6529,8 @@ function _egFilterRows() {
 
 function _egSetFilter(k, v) { _egFilters[k]=v; _egPage=1; _renderEgresosERP(); }
 function _egSetPage(p) { _egPage=p; _renderEgresosERP(); }
+// Cambia el año de la vista Egresos (para ver histórico). '' = volver al periodo global.
+function egSetAnio(y){ _egAnioSel = y ? parseInt(y,10) : null; _egPage=1; if(typeof loadEgresosERP==='function') loadEgresosERP(true); }
 
 // Orden de la lista de Egresos (solo display). Default: fecha descendente.
 var _egSort = { col: 'fecha', dir: -1 };
@@ -6544,6 +6562,10 @@ function _egSearchDebounce(v) { clearTimeout(_egSearchTimer); _egSearchTimer=set
 function _renderEgresosERP() {
   var root = document.getElementById('eg-root');
   if (!root || !_egData) return;
+  // Asegura el catálogo de proveedores (para buscar/mostrar el nombre comercial). Una sola vez.
+  if(!window._egProvTried && (window._proveedores||[]).length===0 && typeof preloadProveedores==='function'){
+    window._egProvTried=true; preloadProveedores().then(function(){ window._egProvMapCache=null; if(document.getElementById('eg-root')) _renderEgresosERP(); }).catch(function(){});
+  }
 
 
   var data = _egData;
@@ -6563,7 +6585,7 @@ function _renderEgresosERP() {
   //   · Pendiente = filas NO pagadas (CxP) cuyo VENCIMIENTO cae en el rango
   //                 (las CxP no tienen fecha de pago; se ubican por vencimiento).
   // Se expone en window._egPeriodo para reutilizarlo en otros reportes.
-  var _pIni = currentFechaInicio || '', _pFin = currentFechaFin || '';
+  var _pIni = _egRangeIni() || '', _pFin = _egRangeFin() || '';
   function _inRange(f){ return f && (!_pIni || f >= _pIni) && (!_pFin || f <= _pFin); }
   var _rowsAll = data.rows || [];
   // BLINDAJE: cada fila se ubica en el periodo por su fecha de referencia,
@@ -6710,12 +6732,17 @@ function _renderEgresosERP() {
     arr.forEach(function(v){o+='<option value="'+v+'"'+(v===selected?' selected':'')+'>'+v+'</option>';});
     return o;
   }
+  // Selector de AÑO: por defecto sigue el periodo global; al elegir un año se ve
+  // ese año COMPLETO (histórico 2024/2025) — antes solo se veía el año del periodo.
+  var _egYNow=new Date().getFullYear(), _egYears=[]; for(var _y=2024; _y<=Math.max(_egYNow,2026); _y++) _egYears.push(_y);
+  var _egYSelStr=String(_egAnioSel||_egAnio);
   h.push('<div class="eg-filters">'
+    +'<div class="eg-fg"><div class="eg-fl">Año</div><select class="eg-sel" onchange="egSetAnio(this.value)"><option value="">Periodo actual</option>'+_egYears.map(function(y){return '<option value="'+y+'"'+((_egAnioSel&&String(y)===_egYSelStr)?' selected':'')+'>'+y+'</option>';}).join('')+'</select></div>'
     +'<div class="eg-fg"><div class="eg-fl">Mes</div><select class="eg-sel" onchange="_egSetFilter(\'mes\',this.value)">'+selOpts(meses,_egFilters.mes,'Todos')+'</select></div>'
     +'<div class="eg-fg"><div class="eg-fl">Contable</div><select class="eg-sel" onchange="_egSetFilter(\'contable\',this.value)">'+selOpts(contables,_egFilters.contable,'Todos')+'</select></div>'
     +'<div class="eg-fg"><div class="eg-fl">Subtipo</div><select class="eg-sel" onchange="_egSetFilter(\'subtipo\',this.value)">'+selOpts(subtipos,_egFilters.subtipo,'Todos')+'</select></div>'
     +'<div class="eg-fg"><div class="eg-fl">Forma pago</div><select class="eg-sel" onchange="_egSetFilter(\'formaPago\',this.value)">'+selOpts(fps,_egFilters.formaPago,'Todas')+'</select></div>'
-    +'<div class="eg-fg"><div class="eg-fl">Buscar</div><input class="eg-search" placeholder="Proveedor, concepto…" value="'+(_egFilters.buscar||'')+'" oninput="_egSearchDebounce(this.value)"></div>'
+    +'<div class="eg-fg"><div class="eg-fl">Buscar</div><input class="eg-search" placeholder="Proveedor, comercial, concepto…" value="'+(_egFilters.buscar||'')+'" oninput="_egSearchDebounce(this.value)"></div>'
     +'<div style="margin-left:auto;font-size:11px;font-weight:700;color:var(--text-primary,#111)">Filtrado: '+fE(totalFiltered)+'</div>'
     +'</div>');
 
@@ -6803,6 +6830,7 @@ function _renderEgresosERP() {
         +(_egRE?'<div style="padding:8px 18px 0;font-size:10px;color:var(--text-secondary,#9ca3af)">✏️ Edición rápida — cambia un campo y guarda solo (sin abrir «editar»); el total se actualiza al instante.</div>':'')
         +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px 18px;padding:14px 18px;font-size:12px">'
         +_egFld('Concepto completo', r._rowNum, 'concepto', r.concepto, 'text', _egRE)
+        +(_egComercial(r.proveedor)?'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Nombre comercial</div><div style="font-weight:600;color:var(--text-primary,#111)">'+_egComercial(r.proveedor)+'</div></div>':'')
         +_egFld('Monto (MXN)', r._rowNum, 'monto', r.monto, 'money', _egRE)
         +_egFld('Contable', r._rowNum, 'contable', r.contable, 'select', _egRE, ['Gasto','Costo','Crédito'])
         +_egFld('Tipo', r._rowNum, 'tipo', r.tipo, 'select', _egRE, ['Fijo','Variable'])
