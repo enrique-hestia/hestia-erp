@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.10.141 -->
+﻿<!-- app-build:2026.07.10.142 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6583,6 +6583,7 @@ function _renderEgresosERP() {
   window._egPeriodo = { inicio:_pIni, fin:_pFin, total:periodoTotal, pagado:periodoPagado,
                         pendiente:periodoPend, regsPagados:_pagRows.length,
                         regsPendientes:_penRows.length, registros:_periodoRegs };
+  window._egPeriodRows = { pag:_pagRows, pen:_penRows };   // para recalcular totales en vivo al editar inline
 
   // Opciones para filtros
   var meses=[],contables=[],subtipos=[],provs=[],fps=[];
@@ -6682,13 +6683,13 @@ function _renderEgresosERP() {
     +'</div>'
     +'<div class="eg-hero-stats">'
       +'<div class="eg-hero-stat"><div class="eg-hero-stat-lbl">Total del periodo</div>'
-        +'<div class="eg-hero-val" style="color:var(--text-primary,#111)">'+fE(periodoTotal)+'</div>'
+        +'<div class="eg-hero-val" id="eg-kpi-total" style="color:var(--text-primary,#111)">'+fE(periodoTotal)+'</div>'
         +'<div class="eg-hero-sub">Pagado + por pagar</div></div>'
       +'<div class="eg-hero-stat"><div class="eg-hero-stat-lbl">Pagado</div>'
-        +'<div class="eg-hero-val-sm" style="color:#166534">'+fE(periodoPagado)+'</div>'
+        +'<div class="eg-hero-val-sm" id="eg-kpi-pagado" style="color:#166534">'+fE(periodoPagado)+'</div>'
         +'<div class="eg-hero-sub">'+_pagRows.length+' pagado'+(_pagRows.length===1?'':'s')+'</div></div>'
       +'<div class="eg-hero-stat"><div class="eg-hero-stat-lbl">Pendiente por pagar</div>'
-        +'<div class="eg-hero-val-sm" style="color:#b45309">'+fE(periodoPend)+'</div>'
+        +'<div class="eg-hero-val-sm" id="eg-kpi-pend" style="color:#b45309">'+fE(periodoPend)+'</div>'
         +'<div class="eg-hero-sub">'+_penRows.length+' por vencer/vencido</div></div>'
     +'</div>'
   +'</div>');
@@ -6697,9 +6698,9 @@ function _renderEgresosERP() {
   var tEg=data.totalEgresos||0, tPag=data.totalPagado||0, tPend=data.totalPendiente||0, prom=data.promedioMensual||0;
   h.push('<div class="eg-year">'
     +'<span class="eg-year-tag">Acumulado '+(data.anio||new Date().getFullYear())+'</span>'
-    +'<span class="eg-year-item">Egresos <b>'+fE(tEg)+'</b></span>'
-    +'<span class="eg-year-item">Pagado <b style="color:#166534">'+fE(tPag)+'</b></span>'
-    +'<span class="eg-year-item">Pendiente <b style="color:#b45309">'+fE(tPend)+'</b></span>'
+    +'<span class="eg-year-item">Egresos <b id="eg-year-eg">'+fE(tEg)+'</b></span>'
+    +'<span class="eg-year-item">Pagado <b id="eg-year-pag" style="color:#166534">'+fE(tPag)+'</b></span>'
+    +'<span class="eg-year-item">Pendiente <b id="eg-year-pend" style="color:#b45309">'+fE(tPend)+'</b></span>'
     +'<span class="eg-year-item">Prom. mensual <b>'+fE(prom)+'</b></span>'
   +'</div>');
 
@@ -6782,7 +6783,7 @@ function _renderEgresosERP() {
         +'<td style="font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis" title="'+r.proveedor+'">'+provCell+'</td>'
         +'<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;color:var(--text-secondary,#374151)'+(esCancel?';text-decoration:line-through':'')+'" title="'+r.concepto+'">'+(r.concepto||'—')+'</td>'
         +'<td><span class="eg-badge '+contBadge+'">'+(r.subtipo||'—')+'</span></td>'
-        +'<td style="text-align:right;font-weight:700;color:#991b1b'+(esCancel?';text-decoration:line-through':'')+'">'+fE(r.monto)+'</td>'
+        +'<td id="eg-monto-'+r._rowNum+'" style="text-align:right;font-weight:700;color:#991b1b'+(esCancel?';text-decoration:line-through':'')+'">'+fE(r.monto)+'</td>'
         +'<td style="font-size:10.5px;color:var(--text-secondary,#6b7280)">'+(r.formaPago||'—')+'</td>'
         +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.facturacion?' checked':'')+(esCancel?' disabled':'')+' onchange="egToggleField('+r._rowNum+',\'facturación\',this.checked)"'+(r.linkFacturaUrl?' title="Factura adjunta"':'')+'></td>'
         +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.pagado?' checked':'')+(esCancel?' disabled':'')+' onchange="egToggleField('+r._rowNum+',\'pagado\',this.checked)"'+(r.linkPagoUrl?' title="Pago adjunto"':'')+'></td>'
@@ -6797,19 +6798,24 @@ function _renderEgresosERP() {
         +'</tr>');
       var egColSpanDet = (hasPermission('editar_egresos')||hasPermission('borrar_egresos')) ? 12 : 11;
       var hasUSD = (r.montoUSD||0) > 0;
+      var _egRE = (typeof hasPermission==='function' && hasPermission('editar_egresos')) && !esCancel; // editable inline
       h.push('<tr id="eg-det-'+r._rowNum+'" style="display:none"><td colspan="'+egColSpanDet+'" style="padding:0;background:var(--color-surface,#fafafa)">'
+        +(_egRE?'<div style="padding:8px 18px 0;font-size:10px;color:var(--text-secondary,#9ca3af)">✏️ Edición rápida — cambia un campo y guarda solo (sin abrir «editar»); el total se actualiza al instante.</div>':'')
         +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px 18px;padding:14px 18px;font-size:12px">'
-        +'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Concepto completo</div><div style="font-weight:600;color:var(--text-primary,#111)">'+(r.concepto||'—')+'</div></div>'
-        +'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Contable</div><div style="font-weight:600">'+(r.contable||'—')+'</div></div>'
-        +'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Tipo</div><div style="font-weight:600">'+(r.tipo||'—')+'</div></div>'
-        +'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Vencimiento</div><div style="font-weight:600">'+((r.vencimiento||'').substring(0,10)||'—')+'</div></div>'
-        +'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Póliza</div><div style="font-weight:600">'+(r.poliza||'—')+'</div></div>'
+        +_egFld('Concepto completo', r._rowNum, 'concepto', r.concepto, 'text', _egRE)
+        +_egFld('Monto (MXN)', r._rowNum, 'monto', r.monto, 'money', _egRE)
+        +_egFld('Contable', r._rowNum, 'contable', r.contable, 'select', _egRE, ['Gasto','Costo','Crédito'])
+        +_egFld('Tipo', r._rowNum, 'tipo', r.tipo, 'select', _egRE, ['Fijo','Variable'])
+        +_egFld('Subtipo', r._rowNum, 'subtipo', r.subtipo, 'text', _egRE)
+        +_egFld('Forma de pago', r._rowNum, 'formaPago', r.formaPago, 'text', _egRE)
+        +_egFld('Vencimiento', r._rowNum, 'vencimiento', (r.vencimiento||'').substring(0,10), 'date', _egRE)
+        +_egFld('Póliza', r._rowNum, 'poliza', r.poliza, 'text', _egRE)
         +(hasUSD
           ?'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#0369a1">Monto USD</div><div style="font-weight:700;color:#0369a1">$'+Number(r.montoUSD).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' USD</div></div>'
            +'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Tipo de cambio</div><div style="font-weight:600">'+((r.tipoCambio||0)>0?Number(r.tipoCambio).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:4}):'—')+'</div></div>'
           :'')
-        +'<div style="grid-column:1/-1"><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Notas</div><div style="color:var(--text-secondary,#374151)">'+(r.notas||'—')+'</div></div>'
-        +'<div style="grid-column:1/-1"><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Observaciones</div><div style="color:var(--text-secondary,#374151)">'+(r.observaciones||'—')+'</div></div>'
+        +'<div style="grid-column:1/-1">'+_egFld('Notas', r._rowNum, 'notas', r.notas, 'text', _egRE)+'</div>'
+        +'<div style="grid-column:1/-1">'+_egFld('Observaciones', r._rowNum, 'observaciones', r.observaciones, 'text', _egRE)+'</div>'
         +'<div style="grid-column:1/-1" id="eg-fiscal-'+r._rowNum+'" data-url="'+(r.linkFacturaUrl||'').replace(/"/g,'&quot;')+'"'
           +' data-ref="'+((!r.linkFacturaUrl&&r.linkFactura)?String(r.linkFactura).replace(/"/g,'&quot;'):'')+'"'
           +' data-refpago="'+((!r.linkPagoUrl&&r.linkPago)?String(r.linkPago).replace(/"/g,'&quot;'):'')+'"'
@@ -7382,6 +7388,80 @@ async function egToggleField(rowNum, field, value) {
       action:'updateEgresoField', rowNum:rowNum, usuario:s.email||'', fields:{}
     }).replace('{}', '{"'+field+'":'+value+'}')});
   } catch(e) { console.warn('Error actualizando campo:', e); }
+}
+
+/* ── Edición rápida INLINE de un egreso desde el drill-down: guarda SOLO ese
+   campo (modo parcial de updateEgresoField, no pisa el resto) y refresca el
+   total del periodo/año en vivo sin recargar. Amarrado a permiso editar_egresos. ── */
+function _egf(n){ return '$'+(Number(n)||0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function _egAttr(s){ return String(s==null?'':s).replace(/"/g,'&quot;'); }
+function _egFld(label, rowNum, field, value, kind, canEdit, selectOpts){
+  var lab='<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">'+label+'</div>';
+  if(!canEdit){
+    var disp=(kind==='money')?_egf(value):((value==null||value==='')?'—':String(value));
+    return '<div>'+lab+'<div style="font-weight:600;color:var(--text-primary,#111)">'+disp+'</div></div>';
+  }
+  var st='width:100%;margin-top:3px;padding:5px 8px;border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111);box-sizing:border-box';
+  var oc='onclick="event.stopPropagation()"';
+  var ctrl;
+  if(kind==='select'){
+    var opts=(selectOpts||[]).slice(), cur=(value==null?'':String(value)), has=false;
+    for(var i=0;i<opts.length;i++){ if(String(opts[i])===cur) has=true; }
+    if(cur!=='' && !has) opts.unshift(cur);
+    ctrl='<select onchange="egEditField('+rowNum+',\''+field+'\',this)" '+oc+' style="'+st+'">'
+      +opts.map(function(o){ return '<option value="'+_egAttr(o)+'"'+(String(o)===cur?' selected':'')+'>'+o+'</option>'; }).join('')+'</select>';
+  } else if(kind==='money'||kind==='number'){
+    ctrl='<input type="number" step="0.01" value="'+(Number(value)||0)+'" onchange="egEditField('+rowNum+',\''+field+'\',this)" '+oc+' style="'+st+';text-align:right">';
+  } else if(kind==='date'){
+    ctrl='<input type="date" value="'+_egAttr(String(value||'').substring(0,10))+'" onchange="egEditField('+rowNum+',\''+field+'\',this)" '+oc+' style="'+st+'">';
+  } else {
+    ctrl='<input type="text" value="'+_egAttr(value)+'" onchange="egEditField('+rowNum+',\''+field+'\',this)" '+oc+' style="'+st+'">';
+  }
+  return '<div>'+lab+ctrl+'</div>';
+}
+function _egFlashSaved(el){ if(!el)return; try{ var o=el.style.background; el.style.background='#dcfce7'; setTimeout(function(){ el.style.background=o||''; },700); }catch(e){} }
+function _egRecalcTotals(delta, wasPaid){
+  try{
+    var pr=window._egPeriodRows;
+    if(pr){
+      var sum=function(a){ var s=0; (a||[]).forEach(function(r){ s+=Number(r.monto)||0; }); return s; };
+      var pag=sum(pr.pag), pen=sum(pr.pen), tot=pag+pen, n;
+      n=document.getElementById('eg-kpi-total'); if(n)n.textContent=_egf(tot);
+      n=document.getElementById('eg-kpi-pagado'); if(n)n.textContent=_egf(pag);
+      n=document.getElementById('eg-kpi-pend'); if(n)n.textContent=_egf(pen);
+      if(window._egPeriodo){ window._egPeriodo.total=tot; window._egPeriodo.pagado=pag; window._egPeriodo.pendiente=pen; }
+    }
+    if(delta && typeof _egData!=='undefined' && _egData){
+      _egData.totalEgresos=(Number(_egData.totalEgresos)||0)+delta;
+      if(wasPaid) _egData.totalPagado=(Number(_egData.totalPagado)||0)+delta; else _egData.totalPendiente=(Number(_egData.totalPendiente)||0)+delta;
+      var y;
+      y=document.getElementById('eg-year-eg'); if(y)y.textContent=_egf(_egData.totalEgresos);
+      y=document.getElementById('eg-year-pag'); if(y)y.textContent=_egf(_egData.totalPagado);
+      y=document.getElementById('eg-year-pend'); if(y)y.textContent=_egf(_egData.totalPendiente);
+    }
+  }catch(e){}
+}
+async function egEditField(rowNum, field, el){
+  var raw=el.value;
+  var lr=(typeof _egData!=='undefined' && _egData && _egData.rows)?_egData.rows.find(function(r){return r._rowNum===rowNum;}):null;
+  var backendKey=({monto:'egresos', formaPago:'forma de pago'})[field]||field;
+  var isMoney=(field==='monto');
+  var val=isMoney?(parseFloat(String(raw).replace(/[$,\s]/g,''))||0):raw;
+  var localKey=({monto:'monto', formaPago:'formaPago'})[field]||field;
+  var oldMonto=lr?(Number(lr.monto)||0):0;
+  if(lr) lr[localKey]=val;
+  if(field==='monto'){
+    var mc=document.getElementById('eg-monto-'+rowNum); if(mc) mc.textContent=_egf(val);
+    _egRecalcTotals(val-oldMonto, lr?!!lr.pagado:true);
+  }
+  var fields={}; fields[backendKey]=val;
+  try{
+    var s=getSession()||{};
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'updateEgresoField', rowNum:rowNum, anio:(typeof _egAnio!=='undefined'?_egAnio:undefined), usuario:s.email||'', fields:fields})});
+    var j=await r.json();
+    if(j&&j.ok){ _egFlashSaved(el); if(typeof _swrDel==='function') _swrDel('egresos'); }
+    else { alert('No se pudo guardar: '+((j&&j.error)||'error')); }
+  }catch(e){ alert('Error de red: '+e.message); }
 }
 
 async function egRepararFechas(){
