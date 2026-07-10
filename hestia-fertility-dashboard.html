@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.09.120 -->
+﻿<!-- app-build:2026.07.09.121 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -25581,8 +25581,10 @@ function ccRenderSaldos(){
     +ccTh('Paciente / OP','left')+ccTh('Segmento','left')+ccTh('Concepto','left')+ccTh('Facturado','right')+ccTh('Abonado','right')+ccTh('Saldo','right')+ccTh('Antig.','right')+ccTh('','right')+'</tr></thead><tbody>';
   ops.forEach(function(o,i){
     var bg=i%2?'background:var(--color-surface-2)':'';
+    var rid='ccdet-'+i;
+    var chev=(o.items&&o.items.length)?'<span onclick="ccToggleDetalle(\''+rid+'\',this)" title="Ver desglose" style="cursor:pointer;color:var(--color-primary);font-weight:800;margin-right:6px;display:inline-block;width:10px">▸</span>':'<span style="display:inline-block;width:16px"></span>';
     h+='<tr style="border-bottom:1px solid var(--color-divider);'+bg+'">'
-      +'<td style="padding:9px 12px"><b>'+ccEsc(o.paciente)+'</b><div style="font-size:10px;color:var(--color-text-muted)">'+ccEsc(o.op)+' · '+ccFch(o.fecha)+'</div></td>'
+      +'<td style="padding:9px 12px">'+chev+'<b>'+ccEsc(o.paciente)+'</b><div style="font-size:10px;color:var(--color-text-muted);margin-left:16px">'+ccEsc(o.op)+' · '+ccFch(o.fecha)+' · '+(o.origen==='ingreso'?'venta':'registro')+'</div></td>'
       +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccEsc(o.segmento)+'</td>'
       +'<td style="padding:9px 12px;color:var(--color-text-muted);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+ccEsc(o.concepto)+'</td>'
       +'<td style="padding:9px 12px;text-align:right;color:var(--color-text-muted)">'+ccFmt(o.total)+'</td>'
@@ -25591,6 +25593,11 @@ function ccRenderSaldos(){
       +'<td style="padding:9px 12px;text-align:right;color:var(--color-text-muted)">'+o.dias+'d</td>'
       +'<td style="padding:9px 12px;text-align:right;white-space:nowrap">'+ccSaldoAcciones(o)+'</td>'
       +'</tr>';
+    if(o.items&&o.items.length){
+      var det='';
+      o.items.forEach(function(x){ det+='<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dotted var(--color-divider)"><span>'+ccEsc(x.producto)+(x.cantidad>1?' <span style="color:var(--color-text-muted)">×'+x.cantidad+'</span>':'')+'</span><span style="white-space:nowrap">'+ccFmt(x.total)+(x.saldo>0.01?' · <span style="color:#c83c3c">debe '+ccFmt(x.saldo)+'</span>':' <span style="color:#16a34a">✓</span>')+'</span></div>'; });
+      h+='<tr id="'+rid+'" style="display:none;'+bg+'"><td colspan="8" style="padding:6px 16px 12px 40px;font-size:12px"><div style="font-weight:700;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);margin-bottom:5px">Desglose de '+ccEsc(o.op)+' — qué se cobró</div>'+det+'</td></tr>';
+    }
   });
   h+='</tbody></table></div>';
   return h;
@@ -25626,7 +25633,7 @@ function ccRenderSus(){
     var debe = p.montoDebe>0;
     h+='<tr style="border-bottom:1px solid var(--color-divider);'+bg+'">'
       +'<td style="padding:9px 12px"><b>'+ccEsc(p.nombre)+'</b><div style="font-size:10px;color:var(--color-text-muted)">'+(p.oov||0)+' ov · '+(p.emb||0)+' emb'+((p.generadoCount>0)?' · <span style="color:#16a34a" title="Periodos ya materializados como cuenta por cobrar">⚑ '+p.generadoCount+' generada(s)</span>':'')+'</div></td>'
-      +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccEsc(p.tipoPaciente)+'</td>'
+      +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+((typeof hasPermission==='function'&&hasPermission('editar_egresos'))?'<span onclick="ccToggleExterno('+ccQ(p.nombre)+','+(p.tipoPaciente==='Externo'?'false':'true')+')" title="Clic para cambiar Hestia/Externo (Externo paga desde el año 1; Hestia año 1 gratis)" style="cursor:pointer;border-bottom:1px dashed var(--color-text-muted)">'+ccEsc(p.tipoPaciente)+'</span>':ccEsc(p.tipoPaciente))+'</td>'
       +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccEsc(p.plan)+(!p.tienePlan?' <span style="font-size:9px;color:#b45309">(s/def)</span>':'')+'</td>'
       +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccFch(p.crioInicio)+'</td>'
       +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccFch(p.ultimoPago)+'</td>'
@@ -25668,14 +25675,44 @@ function _ccBancoSel(id){ return '<select id="'+id+'" style="'+_ccInputStyle()+'
 
 /* ── Acciones por saldo: Abono + Editar/Borrar (permisos amarrados a CxP) ── */
 function ccSaldoAcciones(o){
+  var canEdit=typeof hasPermission==='function' && hasPermission('editar_egresos');
+  var canDel=typeof hasPermission==='function' && hasPermission('borrar_egresos');
+  var abtn='padding:5px 8px;background:none;border:1px solid var(--color-divider);border-radius:7px;font-size:11px;cursor:pointer;color:var(--color-text)';
+  var dbtn='padding:5px 8px;background:none;border:1px solid #e3b3b3;border-radius:7px;font-size:11px;cursor:pointer;color:#c83c3c';
   var h='<button onclick="ccAbrirAbono('+ccQ(o.op)+','+ccQ(o.paciente)+','+(o.saldo||0)+')" style="padding:5px 11px;background:var(--color-primary);color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Abono</button>';
-  if(o.rowNum && typeof hasPermission==='function' && hasPermission('editar_egresos')){
-    h+=' <button onclick="ccEditarSaldo('+o.rowNum+','+ccQ(o.paciente)+','+(o.saldo||0)+','+ccQ(o.concepto||'')+')" title="Editar (requiere editar cuentas por pagar)" style="padding:5px 8px;background:none;border:1px solid var(--color-divider);border-radius:7px;font-size:11px;cursor:pointer;color:var(--color-text)">✎</button>';
-  }
-  if(o.rowNum && typeof hasPermission==='function' && hasPermission('borrar_egresos')){
-    h+=' <button onclick="ccBorrarSaldo('+o.rowNum+','+ccQ(o.paciente)+','+(o.saldo||0)+')" title="Borrar (requiere borrar cuentas por pagar)" style="padding:5px 8px;background:none;border:1px solid #e3b3b3;border-radius:7px;font-size:11px;cursor:pointer;color:#c83c3c">✕</button>';
+  if(o.origen==='registro' && o.rowNum){
+    if(canEdit) h+=' <button onclick="ccEditarSaldo('+o.rowNum+','+ccQ(o.paciente)+','+(o.saldo||0)+','+ccQ(o.concepto||'')+')" title="Editar" style="'+abtn+'">✎</button>';
+    if(canDel)  h+=' <button onclick="ccBorrarSaldo('+o.rowNum+','+ccQ(o.paciente)+','+(o.saldo||0)+')" title="Borrar" style="'+dbtn+'">✕</button>';
+  } else if(o.origen==='ingreso'){
+    if(canEdit) h+=' <button onclick="ccAjustarIngreso('+ccQ(o.op)+','+ccQ(o.paciente)+','+(o.total||0)+','+(o.abonado||0)+')" title="Ajustar lo pagado" style="'+abtn+'">✎</button>';
+    if(canEdit) h+=' <button onclick="ccSaldarIngreso('+ccQ(o.op)+','+ccQ(o.paciente)+','+(o.saldo||0)+')" title="Marcar como pagado (saldar)" style="'+abtn+';color:#16a34a;border-color:#a7d7b5">✓</button>';
   }
   return h;
+}
+function ccToggleDetalle(id, el){ var r=document.getElementById(id); if(r){ var open=r.style.display!=='none'; r.style.display=open?'none':'table-row'; if(el) el.textContent=open?'▸':'▾'; } }
+function ccAjustarIngreso(op, paciente, total, abonado){
+  var body=''
+    +'<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:12px">Ajustar lo pagado de la venta <b>'+ccEsc(op)+'</b> ('+ccEsc(paciente)+'). Total: <b>'+ccFmt(total)+'</b>. El saldo se recalcula solo.</div>'
+    +_ccField('Monto pagado','<input id="cc-aj-pag" type="number" step="0.01" value="'+(abonado||0)+'" style="'+_ccInputStyle()+'">');
+  ccModal('Ajustar pago de la venta', body, function(){ ccGuardarAjuste(op); }, 'Guardar');
+}
+function ccGuardarAjuste(op){
+  var pag=parseFloat((document.getElementById('cc-aj-pag')||{}).value||'0')||0;
+  var btn=document.getElementById('cc-modal-save'); if(btn){ btn.textContent='Guardando…'; btn.disabled=true; }
+  var s=getSession()||{};
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'ajustarPagadoIngreso', op:op, pagado:pag, token:s.token||getToken(), usuario:s.email||''})})
+    .then(function(r){return r.json();}).then(function(d){ var m=document.getElementById('cc-modal'); if(m)m.remove(); if(d&&d.ok){ ccLoad(true);} else { alert('No se pudo: '+((d&&d.error)||'error')); } }).catch(function(e){alert('Error de red: '+e.message);});
+}
+function ccSaldarIngreso(op, paciente, saldo){
+  if(!confirm('¿Marcar como PAGADO el saldo de '+paciente+' (OP '+op+') por '+ccFmt(saldo)+'?\n\nPone Pagado = Total en la venta y quita la cuenta por cobrar.')) return;
+  var s=getSession()||{};
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'ajustarPagadoIngreso', op:op, saldar:true, token:s.token||getToken(), usuario:s.email||''})})
+    .then(function(r){return r.json();}).then(function(d){ if(d&&d.ok){ ccLoad(true);} else { alert('No se pudo: '+((d&&d.error)||'error')); } }).catch(function(e){alert('Error de red: '+e.message);});
+}
+function ccToggleExterno(nombre, externo){
+  var s=getSession()||{};
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'cobExterno', paciente:nombre, externo:externo, token:s.token||getToken(), usuario:s.email||''})})
+    .then(function(r){return r.json();}).then(function(d){ if(d&&d.ok){ ccLoad(true);} else { alert('No se pudo: '+((d&&d.error)||'error')); } }).catch(function(e){alert('Error de red: '+e.message);});
 }
 function ccEditarSaldo(rowNum, paciente, saldo, concepto){
   var body=''

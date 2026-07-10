@@ -589,6 +589,16 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(borrarCuentaCobrar(body));
     }
+    if (body.action === 'ajustarPagadoIngreso') {
+      if (typeof ajustarPagadoIngreso !== 'function')
+        return jsonResponse({ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(ajustarPagadoIngreso(body));
+    }
+    if (body.action === 'cobExterno') {
+      if (typeof cobExterno !== 'function')
+        return jsonResponse({ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(cobExterno(body));
+    }
     // Tareas programadas (scheduler)
     if (body.action === 'updateScheduledTask')     return jsonResponse(updateScheduledTask(body));
     if (body.action === 'setupScheduledTriggers')  return jsonResponse(setupScheduledTriggers());
@@ -3972,12 +3982,10 @@ function saveIngreso(payload) {
     // configurado — nunca debe tumbar la venta si el inventario falla.
     try { _descontarInventarioPorVenta(opId, lineas, payload.usuario); } catch (eInv) {}
 
+    // Pago parcial: las líneas ya quedaron con Pagado < TotalPagar, así que Cuentas
+    // por Cobrar (Motor A) lo detecta solo — no se escribe registro extra (evita
+    // doble conteo). saldoGenerado se devuelve para el aviso en pantalla.
     var saldoGenerado = Math.max(0, totalOP - pagadoOp);
-    // Pago parcial → registra explícitamente la cuenta por cobrar (no se infiere de
-    // la columna Pagado). Nunca debe tumbar la venta si Cobranza no está desplegado.
-    if (saldoGenerado > 0.01 && typeof _cobRegistrarSaldoIngreso === 'function') {
-      try { _cobRegistrarSaldoIngreso(opId, paciente, (lineas[0] && lineas[0].categoria) || '', saldoGenerado, fecha); } catch (eAR) {}
-    }
     return {ok:true, op:opId, lineas:rows.length, total:totalOP,
             pagado:pagadoOp, saldoGenerado:saldoGenerado, paciente:paciente};
   } catch(ex) {

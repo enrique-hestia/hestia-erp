@@ -33,7 +33,7 @@ var COBRANZA_CFG_KEY  = 'COBRANZA_CONFIG';
 var COBRANZA_ABONOS   = 'Abonos_Cobrar';
 var COBRANZA_CARGOS   = 'Cuentas_Cobrar';
 var COBRANZA_SUS      = 'Suscripciones_Crio';
-var COBRANZA_VER      = 'cobranza-2026.07.09c';
+var COBRANZA_VER      = 'cobranza-2026.07.09d';
 
 /* ───────────────────────── Config ───────────────────────── */
 function _cobCfg() {
@@ -64,6 +64,35 @@ function setupCobranzaConfig() {
   _cobEnsureCargos();
   _susEnsureSheet();
   return { ok: true, version: COBRANZA_VER, config: cfg };
+}
+
+/* ── Clasificación Externo (paga suscripción desde el año 1) ──
+ * Por DEFAULT todos son Hestia → primer año GRATIS. Solo los marcados
+ * explícitamente aquí (override manual) pagan desde el inicio. No se usa la
+ * columna EXTERNO del Inventario Crío porque no representa la clasificación de
+ * cobro (marcaba como externos a pacientes directos → cobraba de más). */
+var COBRANZA_EXT_KEY = 'COBRANZA_EXTERNOS';
+function _cobExternos() {
+  try {
+    var raw = PropertiesService.getScriptProperties().getProperty(COBRANZA_EXT_KEY);
+    if (raw) { var a = JSON.parse(raw); var m = {}; for (var i = 0; i < a.length; i++) m[_cobKeyNom(a[i])] = true; return m; }
+  } catch (e) {}
+  return {};
+}
+function cobExterno(body) {
+  try {
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'editar_egresos'))
+      return { ok: false, error: 'Sin permiso para marcar externos (requiere editar cuentas por pagar).' };
+    var key = _cobKeyNom(body.paciente || ''); if (!key) return { ok: false, error: 'Paciente inválido' };
+    var raw = PropertiesService.getScriptProperties().getProperty(COBRANZA_EXT_KEY);
+    var arr = []; try { if (raw) arr = JSON.parse(raw); } catch (e) {}
+    var esExt = (body.externo === true || body.externo === 'true');
+    var existe = false; for (var i = 0; i < arr.length; i++) { if (_cobKeyNom(arr[i]) === key) { existe = true; break; } }
+    if (esExt && !existe) arr.push(String(body.paciente).trim());
+    else if (!esExt) arr = arr.filter(function (k) { return _cobKeyNom(k) !== key; });
+    PropertiesService.getScriptProperties().setProperty(COBRANZA_EXT_KEY, JSON.stringify(arr));
+    return { ok: true, version: COBRANZA_VER, externo: esExt, paciente: String(body.paciente).trim() };
+  } catch (ex) { return { ok: false, error: ex.message, version: COBRANZA_VER }; }
 }
 
 /* ───────────────────────── Helpers ───────────────────────── */
@@ -238,39 +267,111 @@ function borrarCuentaCobrar(body) {
     return { ok: true, version: COBRANZA_VER, rowNum: rn };
   } catch (ex) { return { ok: false, error: ex.message, version: COBRANZA_VER }; }
 }
+// Ajusta el Pagado de una OP en BD_Ingresos (para saldos que vienen de un pago
+// parcial). saldar=true → marca pagado completo (borra el adeudo). Si no, fija el
+// monto pagado. Permiso amarrado a editar cuentas por pagar.
+function ajustarPagadoIngreso(body) {
+  try {
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'editar_egresos'))
+      return { ok: false, error: 'Sin permiso (requiere "Editar partidas de egreso" / cuentas por pagar).' };
+    var op = String(body.op || '').trim(); if (!op) return { ok: false, error: 'OP inválida' };
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sh = ss.getSheetByName(BD_INGRESOS_TAB); if (!sh) return { ok: false, error: 'No hay BD_Ingresos' };
+    var data = sh.getDataRange().getValues();
+    var H = data[0].map(function (x) { return _cobLower(x); });
+    var hc = function () { for (var a = 0; a < arguments.length; a++) { var k = H.indexOf(arguments[a]); if (k > -1) return k; } return -1; };
+    var iOp = hc('op'); if (iOp < 0) iOp = 0;
+    var iTotal = hc('totalpagar', 'total a pagar', 'total'), iPag = hc('pagado');
+    if (iPag < 0) return { ok: false, error: 'No se encontró la columna Pagado' };
+    var rows = [], totalOP = 0;
+    for (var r = 1; r < data.length; r++) {
+      if (String(data[r][iOp] || '').trim() === op) { var t = _cobNum(data[r][iTotal]); rows.push({ rowNum: r + 1, total: t }); totalOP += t; }
+    }
+    if (!rows.length) return { ok: false, error: 'OP no encontrada' };
+    var nuevoPagado = (body.saldar === true || body.saldar === 'true') ? totalOP : _cobNum(body.pagado);
+    if (nuevoPagado > totalOP) nuevoPagado = totalOP; if (nuevoPagado < 0) nuevoPagado = 0;
+    var rem = nuevoPagado;
+    for (var k = 0; k < rows.length; k++) { var apply = Math.min(rem, rows[k].total); if (apply < 0) apply = 0; sh.getRange(rows[k].rowNum, iPag + 1).setValue(apply); rem -= apply; }
+    try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch (e) {}
+    return { ok: true, version: COBRANZA_VER, op: op, pagado: nuevoPagado, total: totalOP, saldo: Math.max(0, totalOP - nuevoPagado) };
+  } catch (ex) { return { ok: false, error: ex.message, version: COBRANZA_VER }; }
+}
 
 /* ═════════════════ MOTOR A — Saldos por cobrar ═════════════════
- * Cuentas por Cobrar = registro EXPLÍCITO de adeudos (hoja Cuentas_Cobrar).
- * NO se infiere de la columna "Pagado" de BD_Ingresos: hacerlo generaba falsos
- * positivos porque muchísimos ingresos históricos/importados tienen Pagado en 0 o
- * en blanco (aunque el paciente sí pagó). Un adeudo nace SOLO cuando:
- *   (a) se captura un ingreso con pago parcial → saveIngreso escribe aquí,
- *   (b) se carga un saldo inicial, o
- *   (c) se registra un cargo a crédito.
- * Así, si según los ingresos nadie debe, esta vista sale vacía.
+ * Un adeudo se reconoce SOLO cuando hay un PAGO PARCIAL REAL: en BD_Ingresos la
+ * columna Pagado está entre 0 y el Total (0 < Pagado < Total). Si Pagado es 0 o
+ * está en blanco NO se considera adeudo (histórico = pagado) — así se evitan los
+ * falsos positivos. Además suma el registro explícito Cuentas_Cobrar (saldos
+ * iniciales / cargos a crédito). Cada partida trae su desglose (items) para poder
+ * ver qué es cada OP sin ir a la venta.
  */
 function _cobBuildSaldos() {
-  var cargos = _cobReadCargos();
   var abonos = _cobReadAbonos();
   var today = _cobToday();
   var out = [];
+  var ops = {};
+
+  // 1) Pagos parciales reales en BD_Ingresos
+  var sh = SpreadsheetApp.openById(INGRESOS_SS_ID).getSheetByName(BD_INGRESOS_TAB);
+  if (sh) {
+    var data = sh.getDataRange().getValues();
+    if (data.length >= 2) {
+      var H = data[0].map(function (x) { return _cobLower(x); });
+      var hc = function () { for (var a = 0; a < arguments.length; a++) { var k = H.indexOf(arguments[a]); if (k > -1) return k; } return -1; };
+      var iOp = hc('op'); if (iOp < 0) iOp = 0;
+      var iFecha = hc('fecha'), iPac = hc('paciente'), iCat = hc('categoria', 'categoría'),
+          iProd = hc('producto'), iCant = hc('cantidad'),
+          iTotal = hc('totalpagar', 'total a pagar', 'total'), iPag = hc('pagado');
+      for (var r = 1; r < data.length; r++) {
+        var row = data[r]; var op = String(row[iOp] || '').trim(); if (!op) continue;
+        var total = _cobNum(row[iTotal]);
+        var pag = iPag > -1 ? _cobNum(row[iPag]) : 0;
+        if (!ops[op]) ops[op] = { op: op, paciente: String(row[iPac] || '').trim(), categoria: String(row[iCat] || '').trim(), fecha: _cobStr(_cobD(row[iFecha])), total: 0, pagado: 0, items: [] };
+        var o = ops[op];
+        o.total += total; o.pagado += pag;
+        if (o.items.length < 30 && String(row[iProd] || '').trim()) o.items.push({ producto: String(row[iProd] || '').trim(), cantidad: iCant > -1 ? _cobNum(row[iCant]) : 1, total: total, pagado: pag });
+        if (!o.fecha) o.fecha = _cobStr(_cobD(row[iFecha]));
+      }
+    }
+  }
+  for (var k in ops) {
+    var it = ops[k];
+    // pago parcial real: pagó algo (>0) pero menos del total
+    if (!(it.pagado > 0.01 && it.pagado < it.total - 0.01)) continue;
+    var abo = abonos.byOp[it.op] || 0;
+    var saldo = it.total - it.pagado - abo;
+    if (saldo <= 0.01) continue;
+    var fd = _cobD(it.fecha) || today; var dias = _cobDaysDiff(fd, today); if (dias < 0) dias = 0;
+    var prods = it.items.map(function (x) { return x.producto; });
+    out.push({
+      origen: 'ingreso', op: it.op,
+      paciente: _cobMasked() ? _privPaciente(it.op) : it.paciente,
+      segmento: _cobSegmento(it.categoria, prods.join(' ')),
+      categoria: it.categoria, concepto: prods.slice(0, 3).join(', '),
+      fecha: it.fecha, total: it.total, abonado: it.pagado + abo, saldo: saldo,
+      dias: dias, bucket: _cobBucket(dias),
+      items: _cobMasked() ? [] : it.items.map(function (x) { return { producto: x.producto, cantidad: x.cantidad, total: x.total, saldo: Math.max(0, x.total - x.pagado) }; })
+    });
+  }
+
+  // 2) Registro explícito (Cuentas_Cobrar): saldos iniciales / cargos a crédito
+  var cargos = _cobReadCargos();
   for (var ci = 0; ci < cargos.rows.length; ci++) {
     var cg = cargos.rows[ci];
     var st = _cobLower(cg.estatus);
     if (st === 'cancelado' || st === 'pagado') continue;
-    var abo = cg.op ? (abonos.byOp[cg.op] || 0) : 0;
-    var saldo = cg.monto - abo;
-    if (saldo <= 0.01) continue;
-    var fd = _cobD(cg.fecha) || today;
-    var dias = _cobDaysDiff(fd, today); if (dias < 0) dias = 0;
+    if (cg.op && ops[cg.op]) continue; // ya contado por ingresos
+    var abo2 = cg.op ? (abonos.byOp[cg.op] || 0) : 0;
+    var saldo2 = cg.monto - abo2;
+    if (saldo2 <= 0.01) continue;
+    var fd2 = _cobD(cg.fecha) || today; var dias2 = _cobDaysDiff(fd2, today); if (dias2 < 0) dias2 = 0;
     out.push({
-      rowNum: cg.rowNum,
-      op: cg.op || '—',
+      origen: 'registro', rowNum: cg.rowNum, op: cg.op || '—',
       paciente: _cobMasked() ? (cg.op ? _privPaciente(cg.op) : 'Paciente') : cg.paciente,
       segmento: _cobSegmento(cg.categoria, cg.concepto),
       categoria: cg.categoria, concepto: cg.concepto || cg.estatus || 'Saldo',
-      fecha: cg.fecha, total: cg.monto, abonado: abo, saldo: saldo,
-      dias: dias, bucket: _cobBucket(dias)
+      fecha: cg.fecha, total: cg.monto, abonado: abo2, saldo: saldo2,
+      dias: dias2, bucket: _cobBucket(dias2), items: []
     });
   }
   out.sort(function (a, b) { return b.saldo - a.saldo; });
@@ -343,15 +444,19 @@ function _cobReadCrio() {
     var oov = _cobNum(row[iOov]);
     var emb = _cobNum(row[iEmb]);
     var extRaw = iExt > -1 ? row[iExt] : '';
-    var esExterno = _cobEsExterno(extRaw);
-    if (!map[key]) map[key] = { nombre: nom, key: key, crioInicio: f, oov: 0, emb: 0, externo: false, _extSet: false };
+    var esExtLab = _cobEsExterno(extRaw);
+    if (!map[key]) map[key] = { nombre: nom, key: key, crioInicio: f, oov: 0, emb: 0, externo: false, externoLab: false };
     var m = map[key];
     if (f && (!m.crioInicio || f.getTime() < m.crioInicio.getTime())) m.crioInicio = f;
     m.oov += oov; m.emb += emb;
-    if (iExt > -1 && !_cobIsBlank(extRaw)) { m.externo = m.externo || esExterno; m._extSet = true; }
+    if (iExt > -1 && !_cobIsBlank(extRaw)) { m.externoLab = m.externoLab || esExtLab; }
   }
+  // Clasificación de cobro = override manual (default Hestia = año gratis). La
+  // columna EXTERNO del Inventario Crío se guarda solo como pista (externoLab).
+  var externos = _cobExternos();
   for (var k in map) {
     var mm = map[k];
+    mm.externo = !!externos[mm.key];
     if ((mm.oov + mm.emb) <= 0 && !mm.crioInicio) continue;  // sin inventario ni fecha → ignorar
     out.pacientes.push(mm);
   }
