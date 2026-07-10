@@ -600,6 +600,11 @@ function doGet(e) {
         return jsonResponse({ ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.' });
       return jsonResponse(setupCobranzaConfig());
     }
+    if (action === 'generarSuscripcionesPreview') {
+      if (typeof generarSuscripciones !== 'function')
+        return jsonResponse({ ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.' });
+      return jsonResponse(generarSuscripciones({ preview:true }));
+    }
 
     if (action === 'pacienteLista') {
       var pacNombre = (e && e.parameter.paciente) || '';

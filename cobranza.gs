@@ -32,7 +32,8 @@
 var COBRANZA_CFG_KEY  = 'COBRANZA_CONFIG';
 var COBRANZA_ABONOS   = 'Abonos_Cobrar';
 var COBRANZA_CARGOS   = 'Cuentas_Cobrar';
-var COBRANZA_VER      = 'cobranza-2026.07.09a';
+var COBRANZA_SUS      = 'Suscripciones_Crio';
+var COBRANZA_VER      = 'cobranza-2026.07.09b';
 
 /* ───────────────────────── Config ───────────────────────── */
 function _cobCfg() {
@@ -61,6 +62,7 @@ function setupCobranzaConfig() {
   PropertiesService.getScriptProperties().setProperty(COBRANZA_CFG_KEY, JSON.stringify(cfg));
   _cobEnsureAbonos();
   _cobEnsureCargos();
+  _susEnsureSheet();
   return { ok: true, version: COBRANZA_VER, config: cfg };
 }
 
@@ -513,16 +515,26 @@ function _cobBuildSuscripciones() {
   if (crioData.error) return { error: crioData.error, pacientes: [] };
   var pagos = _cobStoragePagosByPac();
   var abonos = _cobReadAbonos();
+  var ledger = _susReadLedger();
   var lista = [];
   for (var i = 0; i < crioData.pacientes.length; i++) {
     var pac = crioData.pacientes[i];
     var calc = _cobCalcSuscripcion(pac, pagos[pac.key] || [], abonos.susByPac[pac.key] || [], cfg, today);
+    // Materializado (generado) pendiente de este paciente — informativo; el adeudo
+    // real sigue siendo calc.montoDebe (una sola fuente, sin doble conteo).
+    var lrows = ledger.byPac[pac.key] || [];
+    var genPend = 0, genCount = 0;
+    for (var lr = 0; lr < lrows.length; lr++) {
+      var est = _cobLower(lrows[lr].estatus);
+      if (est !== 'pagado' && est !== 'cancelado') { genPend += (lrows[lr].monto - lrows[lr].abonado); genCount++; }
+    }
     lista.push({
       nombre: _cobMasked() ? ('Paciente ' + (i + 1)) : pac.nombre,
       plan: calc.plan, tipoPaciente: calc.esExterno ? 'Externo' : 'Hestia',
       crioInicio: calc.crioInicio, billStart: calc.billStart,
       ultimoPago: calc.ultimoPago, coberturaHasta: calc.coberturaHasta, proximoCobro: calc.proximoCobro,
       estatus: calc.estatus, montoDebe: calc.montoDebe, mesesDebe: calc.mesesDebe,
+      generado: genPend, generadoCount: genCount, porGenerar: Math.max(0, calc.montoDebe - genPend),
       oov: calc.oov, emb: calc.emb, tienePlan: calc.tienePlan
     });
   }
@@ -583,13 +595,23 @@ function readEstadoCobranza(pacienteNombre) {
     for (var i = 0; i < susList.length; i++) {
       if (_cobKeyNom(susList[i].nombre) === keyBuscar) { miSus = susList[i]; break; }
     }
+    // Suscripciones materializadas (generadas) pendientes de este paciente
+    var ledger = _susReadLedger();
+    var lrows = (ledger.byPac[keyBuscar] || []).filter(function (r) {
+      var e = _cobLower(r.estatus); return e !== 'pagado' && e !== 'cancelado';
+    });
+    var susCargos = lrows.map(function (r) {
+      return { fecha: r.fecha, concepto: r.concepto, periodo: r.periodo, monto: r.monto - r.abonado, susId: r.susId };
+    });
+    var susCargosTotal = 0; susCargos.forEach(function (r) { susCargosTotal += r.monto; });
 
     return {
       ok: true, version: COBRANZA_VER,
       paciente: _cobMasked() ? '—' : String(pacienteNombre).trim(),
       masked: _cobMasked(),
       saldos: saldos, totalSaldo: totalSaldo,
-      abonos: misAbonos, suscripcion: miSus
+      abonos: misAbonos, suscripcion: miSus,
+      suscripcionCargos: susCargos, suscripcionCargosTotal: susCargosTotal
     };
   } catch (ex) {
     return { ok: false, error: ex.message, version: COBRANZA_VER };
@@ -609,6 +631,8 @@ function registrarAbono(body) {
       String(body.formaPago || ''), String(body.banco || ''), tipo,
       String(body.nota || ''), String(body.usuario || ''), new Date()
     ]);
+    // Cobro de suscripción: marca los periodos generados (ledger) como pagados FIFO.
+    if (tipo === 'suscripcion' && body.paciente) { _susAplicarPagoFIFO(body.paciente, monto); }
     return { ok: true, version: COBRANZA_VER, fecha: fecha, monto: monto };
   } catch (ex) {
     return { ok: false, error: ex.message, version: COBRANZA_VER };
@@ -631,4 +655,182 @@ function cargarSaldoInicial(body) {
   } catch (ex) {
     return { ok: false, error: ex.message, version: COBRANZA_VER };
   }
+}
+
+/* ═════════════ GENERACIÓN DE SUSCRIPCIONES (materializar por periodo) ═════════════
+ * Espejo de Gastos Fijos: cada periodo vencido se materializa como un renglón en la
+ * hoja Suscripciones_Crio (llave anti-duplicado paciente|plan|periodo + LockService).
+ * El backlog histórico se consolida en UN solo renglón 'SALDO-INICIAL' por paciente;
+ * de ahí en adelante, uno por periodo. Idempotente: correrla N veces no duplica.
+ */
+function _susEnsureSheet() {
+  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+  var sh = ss.getSheetByName(COBRANZA_SUS);
+  if (!sh) {
+    sh = ss.insertSheet(COBRANZA_SUS);
+    sh.appendRow(['SuscripcionID','Fecha','Paciente','Plan','PeriodoInicio','PeriodoFin','Periodo','Monto','Estatus','Abonado','Concepto','Usuario','Timestamp']);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+function _susReadLedger() {
+  var out = { byPac: {}, keys: {}, byId: {} };
+  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+  var sh = ss.getSheetByName(COBRANZA_SUS);
+  if (!sh) return out;
+  var raw = sh.getDataRange().getValues();
+  for (var i = 1; i < raw.length; i++) {
+    var r = raw[i];
+    var susId = String(r[0] || '').trim(); if (!susId) continue;
+    var pacKey = _cobKeyNom(r[2]);
+    var periodo = String(r[6] || '').trim();
+    var rec = {
+      rowNum: i + 1, susId: susId, fecha: _cobStr(_cobD(r[1])), paciente: String(r[2] || ''),
+      plan: String(r[3] || ''), inicio: _cobStr(_cobD(r[4])), fin: _cobStr(_cobD(r[5])),
+      periodo: periodo, monto: _cobNum(r[7]), estatus: String(r[8] || 'Pendiente'),
+      abonado: _cobNum(r[9]), concepto: String(r[10] || '')
+    };
+    if (!out.byPac[pacKey]) out.byPac[pacKey] = [];
+    out.byPac[pacKey].push(rec);
+    if (!out.keys[pacKey]) out.keys[pacKey] = {};
+    out.keys[pacKey][periodo] = true;
+    out.byId[susId] = rec;
+  }
+  return out;
+}
+// Periodos vencidos (no cubiertos por un pago de almacenamiento en Ingresos) desde
+// billStart hasta hoy. Cada uno: {key, inicio, fin, vencimiento, monto}.
+function _susPeriodosDue(pac, calc, cfg, today) {
+  var out = [];
+  var billStart = _cobD(calc.billStart); if (!billStart) return out;
+  var lastPago = _cobD(calc.ultimoPago);
+  if (calc.plan === 'mensual') {
+    var first = _cobStartMonth(billStart);
+    if (lastPago) { var afterPay = _cobStartMonth(_cobAddMonths(lastPago, 1)); if (afterPay.getTime() > first.getTime()) first = afterPay; }
+    var cur = first, g = 0;
+    while (cur.getTime() <= today.getTime() && g < cfg.maxMesesAtraso + 2) {
+      var fin = new Date(_cobAddMonths(cur, 1).getTime() - 86400000);
+      out.push({ key: _cobStr(cur).substring(0, 7), inicio: _cobStr(cur), fin: _cobStr(fin), vencimiento: _cobStr(cur), monto: cfg.tarifaMensual });
+      cur = _cobAddMonths(cur, 1); g++;
+    }
+  } else {
+    var firstY = billStart;
+    if (lastPago) { var afterPayY = _cobAddYears(lastPago, 1); if (afterPayY.getTime() > firstY.getTime()) firstY = afterPayY; }
+    var curY = firstY, g2 = 0;
+    while (curY.getTime() <= today.getTime() && g2 < 40) {
+      var finY = new Date(_cobAddYears(curY, 1).getTime() - 86400000);
+      out.push({ key: _cobStr(curY).substring(0, 7), inicio: _cobStr(curY), fin: _cobStr(finY), vencimiento: _cobStr(curY), monto: cfg.tarifaAnual });
+      curY = _cobAddYears(curY, 1); g2++;
+    }
+  }
+  return out;
+}
+function _susRowFromPeriod(pac, calc, p) {
+  var lbl;
+  if (calc.plan === 'mensual') lbl = 'Suscripción crío mensual ' + p.key;
+  else { var y1 = p.inicio.substring(0, 4), y2 = p.fin.substring(0, 4); lbl = 'Suscripción crío anual ' + y1 + (y2 !== y1 ? '–' + y2 : ''); }
+  return { pacKey: pac.key, paciente: pac.nombre, plan: calc.plan, periodo: p.key,
+    inicio: p.inicio, fin: p.fin, monto: p.monto, vencimiento: p.vencimiento, concepto: lbl };
+}
+function generarSuscripciones(body) {
+  try {
+    body = body || {};
+    var cfg = _cobCfg(), today = _cobToday();
+    var preview = !!body.preview;
+    var soloPac = body.soloPaciente ? _cobKeyNom(body.soloPaciente) : null;
+    var consolidar = !(body.consolidar === false);
+    var crioData = _cobReadCrio();
+    if (crioData.error) return { ok: false, error: crioData.error, version: COBRANZA_VER };
+    var pagos = _cobStoragePagosByPac();
+    var abonos = _cobReadAbonos();
+    var ledger = _susReadLedger();
+    var plan = [];
+    for (var i = 0; i < crioData.pacientes.length; i++) {
+      var pac = crioData.pacientes[i];
+      if (soloPac && pac.key !== soloPac) continue;
+      var calc = _cobCalcSuscripcion(pac, pagos[pac.key] || [], abonos.susByPac[pac.key] || [], cfg, today);
+      if (!calc.crioInicio || calc.estatus === 'Cortesía') continue;
+      var due = _susPeriodosDue(pac, calc, cfg, today);
+      if (!due.length) continue;
+      var existing = ledger.keys[pac.key] || {};
+      var news = [];
+      for (var d = 0; d < due.length; d++) { if (!existing[due[d].key]) news.push(due[d]); }
+      if (!news.length) continue;
+      var curKey = due[due.length - 1].key;
+      var backlog = news.filter(function (p) { return p.key !== curKey; });
+      var current = news.filter(function (p) { return p.key === curKey; });
+      var hasConsol = !!existing['SALDO-INICIAL'];
+      if (backlog.length) {
+        if (consolidar && !hasConsol) {
+          var sum = 0; backlog.forEach(function (p) { sum += p.monto; });
+          plan.push({ pacKey: pac.key, paciente: pac.nombre, plan: calc.plan, periodo: 'SALDO-INICIAL',
+            inicio: backlog[0].inicio, fin: backlog[backlog.length - 1].fin, monto: sum,
+            vencimiento: backlog[0].vencimiento, concepto: 'Saldo inicial suscripción — ' + backlog.length + ' periodo(s) al ' + _cobStr(today) });
+        } else {
+          backlog.forEach(function (p) { plan.push(_susRowFromPeriod(pac, calc, p)); });
+        }
+      }
+      current.forEach(function (p) { plan.push(_susRowFromPeriod(pac, calc, p)); });
+    }
+    if (preview) {
+      var tot = 0; plan.forEach(function (r) { tot += r.monto; });
+      return { ok: true, version: COBRANZA_VER, preview: true, count: plan.length, monto: tot,
+        consolidados: plan.filter(function (r) { return r.periodo === 'SALDO-INICIAL'; }).length,
+        detalle: plan.slice(0, 300).map(function (r) { return { paciente: _cobMasked() ? '—' : r.paciente, plan: r.plan, periodo: r.periodo, monto: r.monto, concepto: r.concepto }; }) };
+    }
+    // COMMIT (idempotente, con lock)
+    var lock = LockService.getScriptLock();
+    if (!lock.tryLock(20000)) return { ok: false, error: 'Sistema ocupado, reintenta.', version: COBRANZA_VER };
+    var creadas = 0, dups = 0, montoG = 0;
+    try {
+      var sh = _susEnsureSheet();
+      var led2 = _susReadLedger();
+      for (var j = 0; j < plan.length; j++) {
+        var r = plan[j];
+        var ex = led2.keys[r.pacKey] || {};
+        if (ex[r.periodo]) { dups++; continue; }
+        var susId = r.pacKey + '|' + r.plan + '|' + r.periodo;
+        sh.appendRow([susId, r.vencimiento, r.paciente, r.plan, r.inicio, r.fin, r.periodo, r.monto, 'Pendiente', 0, r.concepto, (body.usuario || 'sistema'), new Date()]);
+        if (!led2.keys[r.pacKey]) led2.keys[r.pacKey] = {};
+        led2.keys[r.pacKey][r.periodo] = true;
+        creadas++; montoG += r.monto;
+      }
+    } finally { lock.releaseLock(); }
+    return { ok: true, version: COBRANZA_VER, creadas: creadas, duplicadas: dups, monto: montoG };
+  } catch (ex) {
+    return { ok: false, error: ex.message, version: COBRANZA_VER };
+  }
+}
+// Aplica un cobro de suscripción a los periodos generados pendientes (FIFO): marca
+// filas del ledger como Pagado/parcial hasta agotar el monto. Mantiene el ledger en
+// sincronía con el cobro (la cobertura avanza vía el abono en Abonos_Cobrar).
+function _susAplicarPagoFIFO(paciente, monto) {
+  try {
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sh = ss.getSheetByName(COBRANZA_SUS); if (!sh) return;
+    var key = _cobKeyNom(paciente);
+    var raw = sh.getDataRange().getValues();
+    var rows = [];
+    for (var i = 1; i < raw.length; i++) {
+      if (_cobKeyNom(raw[i][2]) !== key) continue;
+      var est = _cobLower(raw[i][8]);
+      if (est === 'pagado' || est === 'cancelado') continue;
+      rows.push({ rowNum: i + 1, fecha: _cobD(raw[i][1]), monto: _cobNum(raw[i][7]), abonado: _cobNum(raw[i][9]) });
+    }
+    rows.sort(function (a, b) { return (a.fecha ? a.fecha.getTime() : 0) - (b.fecha ? b.fecha.getTime() : 0); });
+    var rem = monto;
+    for (var k = 0; k < rows.length && rem > 0.01; k++) {
+      var row = rows[k];
+      var pend = row.monto - row.abonado;
+      var apply = Math.min(pend, rem);
+      var nuevoAb = row.abonado + apply;
+      sh.getRange(row.rowNum, 10).setValue(nuevoAb);           // Abonado
+      if (nuevoAb >= row.monto - 0.01) sh.getRange(row.rowNum, 9).setValue('Pagado');
+      rem -= apply;
+    }
+  } catch (e) {}
+}
+// Handler para el scheduler (genera lo del mes automáticamente, sin consolidar backlog).
+function generarSuscripcionesMensual() {
+  return generarSuscripciones({ usuario: 'sistema (scheduler)', consolidar: false });
 }

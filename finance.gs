@@ -574,6 +574,11 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(setupCobranzaConfig());
     }
+    if (body.action === 'generarSuscripciones') {
+      if (typeof generarSuscripciones !== 'function')
+        return jsonResponse({ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(generarSuscripciones(body));
+    }
     // Tareas programadas (scheduler)
     if (body.action === 'updateScheduledTask')     return jsonResponse(updateScheduledTask(body));
     if (body.action === 'setupScheduledTriggers')  return jsonResponse(setupScheduledTriggers());
@@ -3887,16 +3892,42 @@ function saveIngreso(payload) {
 
     function num(v) { var n = parseFloat(String(v||'').replace(/[$,]/g,'')); return isNaN(n)?0:n; }
 
-    var rows = [];
+    // Pre-cálculo de totales por línea para poder repartir el pago REAL de la
+    // operación. Si el paciente no paga completo (ej. debe 1,000 y paga 900), la
+    // diferencia se registra como Pagado < TotalPagar → el módulo de Cuentas por
+    // Cobrar (Motor A) lo detecta y le genera automáticamente su cuenta por cobrar.
+    var lineTotals = [];
     var totalOP = 0;
+    for (var lt = 0; lt < lineas.length; lt++) {
+      var _lt = lineas[lt];
+      var _tp = num(_lt.pvp) * (num(_lt.cantidad) || 1) * (1 - num(_lt.descuento) / 100);
+      lineTotals.push(_tp); totalOP += _tp;
+    }
+    // Monto realmente cobrado en la operación (suma de formas de pago).
+    var _pagadoOpDefinido = (payload.pagado !== undefined && payload.pagado !== null && String(payload.pagado) !== '');
+    var pagadoOp = _pagadoOpDefinido ? num(payload.pagado) : totalOP;
+    if (pagadoOp > totalOP) pagadoOp = totalOP;   // sobrepago no se registra como pagado extra
+    var _remPagado = pagadoOp;
+
+    var rows = [];
     for (var li = 0; li < lineas.length; li++) {
       var l = lineas[li];
       var pvp  = num(l.pvp);
       var descPct = num(l.descuento) / 100; // Desc viene como % (ej. 10 = 10%)
       var cant = num(l.cantidad) || 1;
-      var totalPagar = pvp * cant * (1 - descPct);
-      var pagado = num(l.pagado) || totalPagar; // si no se especifica, pagado = total
-      totalOP += totalPagar;
+      var totalPagar = lineTotals[li];
+      // Pagado por línea: si viene explícito por línea se respeta; si no, se reparte
+      // el pago real de la operación en orden (llena cada línea hasta agotarlo).
+      var pagado;
+      if (num(l.pagado) > 0) {
+        pagado = num(l.pagado);
+      } else if (_pagadoOpDefinido) {
+        pagado = Math.min(_remPagado, totalPagar);
+        if (pagado < 0) pagado = 0;
+        _remPagado -= pagado;
+      } else {
+        pagado = totalPagar; // sin info de pago → asumido pagado (compatibilidad)
+      }
 
       // OP,Linea,Fecha,Paciente,Categoria,Producto,PVP,Descuento,Cantidad,TotalPagar,
       // Pagado,MontoFactMes,FormaPago,Facturacion,Conciliacion,Contabilidad,
@@ -3931,7 +3962,9 @@ function saveIngreso(payload) {
     // configurado — nunca debe tumbar la venta si el inventario falla.
     try { _descontarInventarioPorVenta(opId, lineas, payload.usuario); } catch (eInv) {}
 
-    return {ok:true, op:opId, lineas:rows.length, total:totalOP};
+    var saldoGenerado = Math.max(0, totalOP - pagadoOp);
+    return {ok:true, op:opId, lineas:rows.length, total:totalOP,
+            pagado:pagadoOp, saldoGenerado:saldoGenerado, paciente:paciente};
   } catch(ex) {
     return {ok:false, error:ex.message};
   }
