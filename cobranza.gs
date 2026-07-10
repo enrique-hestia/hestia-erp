@@ -33,7 +33,7 @@ var COBRANZA_CFG_KEY  = 'COBRANZA_CONFIG';
 var COBRANZA_ABONOS   = 'Abonos_Cobrar';
 var COBRANZA_CARGOS   = 'Cuentas_Cobrar';
 var COBRANZA_SUS      = 'Suscripciones_Crio';
-var COBRANZA_VER      = 'cobranza-2026.07.09j';
+var COBRANZA_VER      = 'cobranza-2026.07.09k';
 
 /* ───────────────────────── Config ───────────────────────── */
 function _cobCfg() {
@@ -318,9 +318,13 @@ function _cobBuildSaldos() {
   var today = _cobToday();
   // Desglose (items) SOLO para las OPs que están en el registro — para ver qué es
   // cada OP sin ir a la venta. No se derivan saldos de BD_Ingresos.
-  var opsNeeded = {};
-  for (var q = 0; q < cargos.rows.length; q++) { if (cargos.rows[q].op) opsNeeded[cargos.rows[q].op] = true; }
-  var itemsByOp = _cobItemsForOps(opsNeeded);
+  var opsNeeded = {}, pacsNeeded = {};
+  for (var q = 0; q < cargos.rows.length; q++) {
+    if (cargos.rows[q].op) opsNeeded[cargos.rows[q].op] = true;
+    if (cargos.rows[q].paciente) pacsNeeded[_cobKeyNom(cargos.rows[q].paciente)] = true;
+  }
+  var itemsByOp = _cobMasked() ? {} : _cobItemsForOps(opsNeeded);
+  var itemsByPac = _cobMasked() ? {} : _cobItemsForPacientes(pacsNeeded);
   var out = [];
   for (var ci = 0; ci < cargos.rows.length; ci++) {
     var cg = cargos.rows[ci];
@@ -331,6 +335,13 @@ function _cobBuildSaldos() {
     if (saldo <= 0.01) continue;
     var fd = _cobD(cg.fecha) || today;
     var dias = _cobDaysDiff(fd, today); if (dias < 0) dias = 0;
+    // Detalle (redespliegue): si el cargo tiene OP se usa el desglose de esa OP; si
+    // no (ej. REPROVIDA con saldo inicial), se jala TODO lo vendido a ese paciente.
+    var det = [];
+    if (!_cobMasked()) {
+      if (cg.op && itemsByOp[cg.op]) det = itemsByOp[cg.op];
+      else det = itemsByPac[_cobKeyNom(cg.paciente)] || [];
+    }
     out.push({
       origen: 'registro', rowNum: cg.rowNum, op: cg.op || '—',
       paciente: _cobMasked() ? (cg.op ? _privPaciente(cg.op) : 'Paciente') : cg.paciente,
@@ -338,7 +349,7 @@ function _cobBuildSaldos() {
       categoria: cg.categoria, concepto: cg.concepto || cg.estatus || 'Saldo',
       fecha: cg.fecha, total: cg.monto, abonado: abo, saldo: saldo,
       dias: dias, bucket: _cobBucket(dias),
-      items: (cg.op && !_cobMasked() && itemsByOp[cg.op]) ? itemsByOp[cg.op] : []
+      items: det
     });
   }
   out.sort(function (a, b) { return b.saldo - a.saldo; });
@@ -360,6 +371,28 @@ function _cobItemsForOps(opsNeeded) {
     var op = String(data[r][iOp] || '').trim(); if (!opsNeeded[op]) continue;
     if (!res[op]) res[op] = [];
     if (res[op].length < 30 && String(data[r][iProd] || '').trim()) res[op].push({ producto: String(data[r][iProd] || '').trim(), cantidad: iCant > -1 ? _cobNum(data[r][iCant]) : 1, total: _cobNum(data[r][iTotal]), saldo: 0 });
+  }
+  return res;
+}
+// Igual que _cobItemsForOps pero por PACIENTE (para saldos sin OP, ej. REPROVIDA).
+function _cobItemsForPacientes(pacsNeeded) {
+  var res = {};
+  if (!pacsNeeded || !Object.keys(pacsNeeded).length) return res;
+  var sh = SpreadsheetApp.openById(INGRESOS_SS_ID).getSheetByName(BD_INGRESOS_TAB);
+  if (!sh) return res;
+  var data = sh.getDataRange().getValues();
+  if (data.length < 2) return res;
+  var H = data[0].map(function (x) { return _cobLower(x); });
+  var hc = function () { for (var a = 0; a < arguments.length; a++) { var k = H.indexOf(arguments[a]); if (k > -1) return k; } return -1; };
+  var iPac = hc('paciente'), iOp = hc('op'), iFecha = hc('fecha'), iProd = hc('producto'), iCant = hc('cantidad'),
+      iTotal = hc('totalpagar', 'total a pagar', 'total'), iPag = hc('pagado');
+  for (var r = 1; r < data.length; r++) {
+    var pk = _cobKeyNom(data[r][iPac]); if (!pacsNeeded[pk]) continue;
+    if (!res[pk]) res[pk] = [];
+    if (res[pk].length < 60 && String(data[r][iProd] || '').trim()) {
+      var tot = _cobNum(data[r][iTotal]); var pag = iPag > -1 ? _cobNum(data[r][iPag]) : 0;
+      res[pk].push({ producto: String(data[r][iProd] || '').trim(), cantidad: iCant > -1 ? _cobNum(data[r][iCant]) : 1, total: tot, saldo: (pag > 0.01 && pag < tot - 0.01) ? (tot - pag) : 0, fecha: _cobStr(_cobD(data[r][iFecha])), op: String(data[r][iOp] || '').trim() });
+    }
   }
   return res;
 }

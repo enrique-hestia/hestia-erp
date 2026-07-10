@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.09.130 -->
+﻿<!-- app-build:2026.07.09.131 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -25413,8 +25413,8 @@ function ecOnInput(val) {
   var box = document.getElementById("ec-suggestions");
   if (!box) return;
   if (!val || val.length < 2) { box.style.display = "none"; return; }
-  var q = val.toLowerCase();
-  var matches = _ecPacientesList.filter(function(n){ return n.toLowerCase().indexOf(q) >= 0; }).slice(0, 10);
+  if(!_ecPacientesList||!_ecPacientesList.length){ if(typeof _ensurePacList==='function'){ _ensurePacList(function(){ ecOnInput(val); }); } return; }
+  var matches = (typeof _pacFuzzy==='function') ? _pacFuzzy(_ecPacientesList, val, 10) : _ecPacientesList.filter(function(n){ return n.toLowerCase().indexOf(val.toLowerCase()) >= 0; }).slice(0, 10);
   if (!matches.length) { box.style.display = "none"; return; }
   var html = "";
   for (var i = 0; i < matches.length; i++) {
@@ -26041,8 +26041,8 @@ function cobShell(){
 function cobOnInput(val){
   var box=document.getElementById('cob-sug'); if(!box) return;
   if(!val||val.length<2){ box.style.display='none'; return; }
-  var q=val.toLowerCase();
-  var matches=(_ecPacientesList||[]).filter(function(n){return n.toLowerCase().indexOf(q)>=0;}).slice(0,10);
+  if(!_ecPacientesList||!_ecPacientesList.length){ _ensurePacList(function(){ cobOnInput(val); }); return; }
+  var matches=_pacFuzzy(_ecPacientesList, val, 10);
   if(!matches.length){ box.style.display='none'; return; }
   box.innerHTML=matches.map(function(n){ return '<div class="cob-sug-item" data-n="'+ccEsc(n).replace(/"/g,'&quot;')+'" style="padding:9px 14px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--color-divider)">'+ccEsc(n)+'</div>'; }).join('');
   box.style.display='block';
@@ -26178,6 +26178,36 @@ function cobImprimir(){
       kpis:kpis, cols:['Fecha','Concepto','Cant','Total','Pagado','Saldo'], rows:rows, totalLabel:'Total por cobrar', totalValue:ccFmt(totalDebe) });
   } else { window.print(); }
 }
+/* ── Búsqueda de pacientes TOLERANTE a errores de dedo (fuzzy) ── */
+function _fzNorm(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9 ]/g,''); }
+function _fzLev(a,b){
+  if(a===b) return 0; var m=a.length,n=b.length; if(!m) return n; if(!n) return m;
+  var prev=[]; for(var j=0;j<=n;j++) prev[j]=j;
+  for(var i=1;i<=m;i++){ var cur=[i]; for(var k=1;k<=n;k++){ var cost=a.charCodeAt(i-1)===b.charCodeAt(k-1)?0:1; cur[k]=Math.min(prev[k]+1,cur[k-1]+1,prev[k-1]+cost); } prev=cur; }
+  return prev[n];
+}
+function _pacFuzzy(list, query, limit){
+  var q=_fzNorm(query); if(q.length<2) return [];
+  var subs=[], fz=[];
+  for(var i=0;i<(list||[]).length;i++){
+    var name=list[i]; var nn=_fzNorm(name);
+    if(nn.indexOf(q)>=0){ subs.push(name); continue; }
+    var toks=nn.split(' '), best=99;
+    for(var t=0;t<toks.length;t++){ var d=_fzLev(q,toks[t]); if(d<best)best=d; if(toks[t].length>q.length){ var d2=_fzLev(q,toks[t].substring(0,q.length)); if(d2<best)best=d2; } }
+    var dFull=_fzLev(q, nn.replace(/ /g,''));
+    var thr=Math.max(2, Math.floor(q.length*0.4));
+    if(best<=thr || dFull<=Math.max(2,Math.floor(q.length*0.35))){ fz.push({name:name, s:Math.min(best,dFull)}); }
+  }
+  fz.sort(function(a,b){return a.s-b.s;});
+  return subs.concat(fz.map(function(x){return x.name;})).slice(0, limit||10);
+}
+function _ensurePacList(cb){
+  if(_ecPacientesList && _ecPacientesList.length){ if(cb) cb(); return; }
+  var tok=encodeURIComponent(getToken());
+  fetch(APPS_SCRIPT_URL+'?action=listaPacientes&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
+    .then(function(r){return r.json();}).then(function(d){ if(d&&d.pacientes) _ecPacientesList=d.pacientes.map(function(p){return typeof p==='string'?p:p.nombre;}); if(cb) cb(); }).catch(function(){ if(cb) cb(); });
+}
+
 /* ═══════════ CARTA DE SEGURO (reembolso para pacientes extranjeros) ═══════════
  * Carta en inglés que el paciente presenta a su aseguradora. Lleva SOLO las
  * operaciones seleccionadas y el monto en moneda extranjera (lo que reclama).
@@ -26210,9 +26240,9 @@ function segShell(){
 function segOnInput(val){
   var box=document.getElementById('seg-sug'); if(!box) return;
   if(!val||val.length<2){ box.style.display='none'; return; }
-  var q=val.toLowerCase();
-  var matches=(_ecPacientesList||[]).filter(function(n){return n.toLowerCase().indexOf(q)>=0;}).slice(0,10);
-  if(!matches.length){ box.style.display='none'; return; }
+  if(!_ecPacientesList||!_ecPacientesList.length){ _ensurePacList(function(){ segOnInput(val); }); return; }
+  var matches=_pacFuzzy(_ecPacientesList, val, 10); // tolerante a errores de dedo
+  if(!matches.length){ box.innerHTML='<div style="padding:9px 14px;font-size:12px;color:var(--color-text-muted)">Sin coincidencias parecidas…</div>'; box.style.display='block'; return; }
   box.innerHTML=matches.map(function(n){ return '<div class="seg-sug-item" data-n="'+_esc(n).replace(/"/g,'&quot;')+'" style="padding:9px 14px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--color-divider)">'+_esc(n)+'</div>'; }).join('');
   box.style.display='block';
   Array.prototype.forEach.call(box.querySelectorAll('.seg-sug-item'),function(it){ it.addEventListener('mousedown',function(){ document.getElementById('seg-search').value=it.getAttribute('data-n'); box.style.display='none'; segBuscar(); }); });
