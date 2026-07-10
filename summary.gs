@@ -489,9 +489,10 @@ function readSummary(fechaInicio, fechaFin) {
         // Nivel 3 (sub-item) = PROVEEDOR (o subtipo si no hay proveedor, como en Gastos Varios)
         var provLbl = String(r.proveedor||'').trim() || String(r.subtipo||'').trim() || String(r.concepto||'').trim() || '(sin proveedor)';
         var meta = [String(r.concepto||'').trim(), String(r.subtipo||'').trim(), String(r.tipo||'').trim()].filter(Boolean).join(' · ');
-        // NÓMINA: no exponer sueldos individuales — colapsar a un solo "Nómina" con su total,
-        // sin desglose por persona ni montos individuales (aplica a todos los usuarios).
-        var _esNomina = (_sumNorm(sub2) === 'payroll');
+        // NÓMINA: para quien NO tiene permiso de ver datos sensibles, se colapsa a un solo
+        // "Nómina" con su total (sin desglose por persona ni montos individuales). Quien SÍ
+        // tenga el permiso (admin, etc.) ve el detalle completo.
+        var _esNomina = (_sumNorm(sub2) === 'payroll') && (typeof _privVer === 'function' && !_privVer());
         if (_esNomina) { provLbl = 'Nómina'; meta = ''; }
         if (enActual){ line.actual+=monto; recon.egresosTotal+=monto;
           addSub(line, provLbl, monto, 1, true, (_esNomina ? null : {fecha:f, nombre:r.proveedor, concepto:(String(r.concepto||'')+' · '+String(r.subtipo||'')), monto:monto, subtipo:r.subtipo}), '', meta);
