@@ -33,7 +33,7 @@ var COBRANZA_CFG_KEY  = 'COBRANZA_CONFIG';
 var COBRANZA_ABONOS   = 'Abonos_Cobrar';
 var COBRANZA_CARGOS   = 'Cuentas_Cobrar';
 var COBRANZA_SUS      = 'Suscripciones_Crio';
-var COBRANZA_VER      = 'cobranza-2026.07.09f';
+var COBRANZA_VER      = 'cobranza-2026.07.09g';
 
 /* ───────────────────────── Config ───────────────────────── */
 function _cobCfg() {
@@ -417,6 +417,7 @@ function _cobReadCrio() {
   var iFec = hc('fecha crío', 'fecha crio', 'fecha'); if (iFec < 0) iFec = 1;
   var iOov = hc('oov', 'ovoc'); if (iOov < 0) iOov = 2;
   var iEmb = hc('emb'); if (iEmb < 0) iEmb = 3;
+  var iInc = hc('inc emb', 'inc. emb', 'incemb', 'inc emb.', 'inc');  // embriones incluidos
   var iExt = hc('externo', 'hestia');
 
   var map = {};
@@ -429,12 +430,13 @@ function _cobReadCrio() {
     var f = _cobD(row[iFec]);
     var oov = _cobNum(row[iOov]);
     var emb = _cobNum(row[iEmb]);
+    var inc = iInc > -1 ? _cobNum(row[iInc]) : 0;
     var extRaw = iExt > -1 ? row[iExt] : '';
     var esExtLab = _cobEsExterno(extRaw);
-    if (!map[key]) map[key] = { nombre: nom, key: key, crioInicio: f, oov: 0, emb: 0, externo: false, externoLab: false };
+    if (!map[key]) map[key] = { nombre: nom, key: key, crioInicio: f, oov: 0, emb: 0, incEmb: 0, externo: false, externoLab: false };
     var m = map[key];
     if (f && (!m.crioInicio || f.getTime() < m.crioInicio.getTime())) m.crioInicio = f;
-    m.oov += oov; m.emb += emb;
+    m.oov += oov; m.emb += emb; m.incEmb += inc;
     if (iExt > -1 && !_cobIsBlank(extRaw)) { m.externoLab = m.externoLab || esExtLab; }
   }
   // Config de cobro por paciente (default Hestia + anual). SOLO se cobra a quien
@@ -626,7 +628,7 @@ function _cobBuildSuscripciones() {
       ultimoPago: calc.ultimoPago, coberturaHasta: calc.coberturaHasta, proximoCobro: calc.proximoCobro,
       estatus: calc.estatus, montoDebe: calc.montoDebe, mesesDebe: calc.mesesDebe,
       generado: genPend, generadoCount: genCount, porGenerar: Math.max(0, calc.montoDebe - genPend),
-      oov: calc.oov, emb: calc.emb, tienePlan: calc.tienePlan,
+      oov: calc.oov, emb: calc.emb, incEmb: pac.incEmb || 0, tienePlan: calc.tienePlan,
       autopay: !!calc.autopay, mensual: !!pac.mensual
     });
   }
