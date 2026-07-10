@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.10.148 -->
+﻿<!-- app-build:2026.07.10.149 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -13506,6 +13506,7 @@ function _renderPresupuesto(){
   var _ep = d.escenariosPct||{}; var _consP = (_ep.conservador!=null?_ep.conservador:10), _optP = (_ep.optimista!=null?_ep.optimista:8);
   window._presEscPct = {conservador:_consP, optimista:_optP};
   var _egP=(eg&&eg.proyeccion)||0; window._presEgProy=_egP;
+  window._presRecBase=_escBase;   // base recomendada del modelo (ancla para el % de ajuste de la Base)
   function _uHtml(id,ing){ var u=ing-_egP, p=u>=0; return '<div id="'+id+'" style="font-size:10.5px;font-weight:700;margin-top:4px;color:'+(p?'#166534':'#991b1b')+'">Utilidad '+(p?'':'−')+fM(Math.abs(u))+'</div>'; }
   function _escPctCtl(id,signo,val){ return canEdit
     ? '<span style="white-space:nowrap">'+signo+'<input type="number" id="'+id+'" value="'+val+'" min="0" max="300" step="1" onchange="presSetEscenario(\''+(id==='pr-esc-cons'?'conservador':'optimista')+'\',this.value)" style="width:40px;text-align:right;border:1px solid var(--color-divider,#e5e7eb);border-radius:5px;padding:1px 3px;font-size:10px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">% vs base</span>'
@@ -13513,7 +13514,7 @@ function _renderPresupuesto(){
   h.push('<div class="pr-sc"><div class="pr-sh">Proyección '+sg.periodo+' · con base en el comportamiento de ventas <span style="font-size:10px;font-weight:400;color:var(--text-secondary,#9ca3af)">· ajusta los % de Conservador/Optimista según tu mercado · cada tarjeta muestra su utilidad (egresos proy. '+fM(_egP)+')</span></div>'
     +'<div class="pr-scen">'
       +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280);display:flex;align-items:center;justify-content:space-between;gap:5px">Conservador '+_escPctCtl('pr-esc-cons','−',_consP)+'</div><div id="pr-scen-cons" style="font-size:21px;font-weight:800">'+fM(_escBase*(1-_consP/100))+'</div>'+_uHtml('pr-scen-cons-u',_escBase*(1-_consP/100))+'</div>'
-      +'<div class="pr-card base"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Base (esperado)'+(canEdit?' <span style="font-size:9px;color:#9ca3af">· editable</span>':'')+'</div>'+(canEdit?'<input type="number" step="1000" value="'+Math.round(_escBase)+'" onchange="presSetBase(this.value)" title="Ajusta la Base a mano; Conservador, Optimista y la utilidad se recalculan al instante" style="width:100%;font-size:19px;font-weight:800;color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:8px;padding:2px 7px;background:var(--card-bg,#fff);box-sizing:border-box">':'<div style="font-size:21px;font-weight:800;color:var(--color-primary,#c46a7a)">'+fM(_escBase)+'</div>')+_uHtml('pr-scen-base-u',_escBase)+'</div>'
+      +'<div class="pr-card base"><div style="font-size:11px;color:var(--text-secondary,#6b7280);display:flex;align-items:center;justify-content:space-between;gap:5px">Base (esperado)'+(canEdit?' <span style="white-space:nowrap"><input type="number" id="pr-esc-base" value="0" step="1" onchange="presSetBasePct(this.value)" title="Ajusta la Base ± un % sobre el recomendado del modelo. Conservador, Optimista y la utilidad se recalculan al instante." style="width:44px;text-align:right;border:1px solid var(--color-divider,#e5e7eb);border-radius:5px;padding:1px 3px;font-size:10px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">% vs recom.</span>':'')+'</div><div id="pr-scen-base" style="font-size:21px;font-weight:800;color:var(--color-primary,#c46a7a)">'+fM(_escBase)+'</div>'+_uHtml('pr-scen-base-u',_escBase)+'</div>'
       +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280);display:flex;align-items:center;justify-content:space-between;gap:5px">Optimista '+_escPctCtl('pr-esc-opt','+',_optP)+'</div><div id="pr-scen-opt" style="font-size:21px;font-weight:800">'+fM(_escBase*(1+_optP/100))+'</div>'+_uHtml('pr-scen-opt-u',_escBase*(1+_optP/100))+'</div>'
       +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Meta capturada</div><div id="pr-scen-meta" style="font-size:21px;font-weight:800">'+(tt.meta>0?fM(tt.meta):'—')+'</div>'+(tt.meta>0?_uHtml('pr-scen-meta-u',tt.meta):'<div id="pr-scen-meta-u" style="font-size:10.5px;color:#9ca3af;margin-top:4px">Utilidad —</div>')+'</div>'
     +'</div>'
@@ -14483,20 +14484,22 @@ function presToggleMaestro(nivel, gi, checked, si){
   var s=getSession()||{};
   fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'presSetLock',key:key,movible:movible,usuario:s.email||''})}).catch(function(){});
 }
-// Base editable a mano: al cambiarla se recalculan Conservador/Optimista, las utilidades
-// de cada tarjeta y la barra de "Utilidad esperada (con la Base)". Es un ajuste en vivo
-// (what-if); para fijar una cifra como plan usa "Fijar / editar meta".
-function presSetBase(val){
-  var base=Math.max(0, parseFloat(String(val).replace(/[$,\s]/g,''))||0);
+// Base editable por % vs el recomendado del modelo (igual que Conservador/Optimista).
+// El número se muestra formateado; al mover el % se recalculan las 3 tarjetas, sus
+// utilidades y la barra "Utilidad esperada (con la Base)". Es un ajuste en vivo (what-if).
+function presSetBasePct(pct){
+  pct=parseFloat(pct)||0;
+  var recBase=Number(window._presRecBase)||0;
+  var base=recBase*(1+pct/100);
   if(_presData&&_presData.siguiente&&_presData.siguiente.totales) _presData.siguiente.totales.proyeccion=base;
   var egP=Number(window._presEgProy)||0;
-  var pct=window._presEscPct||{conservador:10,optimista:8};
-  var consP=Number(pct.conservador)||0, optP=Number(pct.optimista)||0;
-  function setU(id,ing){ var u=ing-egP,p=u>=0; var e=document.getElementById(id); if(e){ e.textContent='Utilidad '+(p?'':'−')+_presFM(Math.abs(u)); e.style.color=p?'#166534':'#991b1b'; } }
+  var p=window._presEscPct||{conservador:10,optimista:8};
+  var consP=Number(p.conservador)||0, optP=Number(p.optimista)||0;
+  function setU(id,ing){ var u=ing-egP,pos=u>=0; var e=document.getElementById(id); if(e){ e.textContent='Utilidad '+(pos?'':'−')+_presFM(Math.abs(u)); e.style.color=pos?'#166534':'#991b1b'; } }
+  var b=document.getElementById('pr-scen-base'); if(b) b.textContent=_presFM(base); setU('pr-scen-base-u',base);
   var cons=base*(1-consP/100), opt=base*(1+optP/100);
   var ec=document.getElementById('pr-scen-cons'); if(ec) ec.textContent=_presFM(cons); setU('pr-scen-cons-u',cons);
   var eo=document.getElementById('pr-scen-opt'); if(eo) eo.textContent=_presFM(opt); setU('pr-scen-opt-u',opt);
-  setU('pr-scen-base-u', base);
   var u=base-egP, pos=u>=0;
   var bt=document.getElementById('pr-scen-base-total'); if(bt){ bt.textContent=(pos?'':'−')+_presFM(Math.abs(u)); bt.style.color=pos?'#166534':'#991b1b'; }
   var beq=document.getElementById('pr-scen-base-eq'); if(beq) beq.innerHTML='= ingresos base '+_presFM(base)+' − egresos proyectados '+_presFM(egP);
