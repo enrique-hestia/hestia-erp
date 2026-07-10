@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.09.131 -->
+﻿<!-- app-build:2026.07.09.132 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -25600,7 +25600,7 @@ function ccShell(){
       + '<div><h1 style="font-size:22px;font-weight:800;color:var(--color-text);margin:0">Cuentas por Cobrar</h1>'
       + '<p style="font-size:13px;color:var(--color-text-muted);margin:4px 0 0" id="cc-sub">Saldos de pacientes, médicos y agencias · suscripciones de criopreservación</p></div>'
       + '<div style="display:flex;gap:8px">'
-        + '<button onclick="ccAbrirSaldoInicial()" style="padding:8px 14px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">+ Saldo inicial</button>'
+        + '<button onclick="ccAbrirSaldoInicial()" title="Registra una cuenta por cobrar capturando las partidas (productos con precio) o un monto" style="padding:8px 14px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">+ Cuenta por cobrar</button>'
         + '<button onclick="ccLoad(true)" id="cc-refresh" style="padding:8px 16px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">↻ Actualizar</button>'
       + '</div>'
     + '</div>'
@@ -25837,19 +25837,73 @@ function _ccPacFlag(nombre, flag, value){
 }
 function ccTogglePlan(nombre, mensual){ _ccPacFlag(nombre,'mensual',mensual); }
 function ccToggleAutopay(nombre, autopay){ _ccPacFlag(nombre,'autopay',autopay); }
+/* ── Editor de PARTIDAS (productos con dropdown + precio automático) ── */
+var _ccItems=[];
+function _ccItemsEditorHtml(){
+  return '<div style="margin-bottom:12px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><label style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted)">Partidas (productos)</label>'
+    +'<button type="button" onclick="ccItemAdd()" style="padding:4px 10px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;color:var(--color-text)">+ Agregar producto</button></div>'
+    +'<div id="cc-items-body"></div>'
+    +'<div style="display:flex;justify-content:flex-end;gap:8px;align-items:center;margin-top:4px;font-size:12px"><span style="color:var(--color-text-muted)">Total partidas:</span> <b id="cc-items-total" style="font-size:15px;color:#c83c3c">$0.00</b></div>'
+    +'<span id="cc-prod-dl-holder"></span>'
+  +'</div>';
+}
+function _ccProdDatalist(){
+  var opts=((typeof _ingProductos!=='undefined'?_ingProductos:[])||[]).slice(0,3000).map(function(p){ var pr=(p.precios&&p.precios['General'])?p.precios['General']:(p.precio||0); return '<option value="'+ccEsc(p.descripcion).replace(/"/g,'&quot;')+'">'+ccEsc(p.categoria||'')+(pr?' · $'+pr:'')+'</option>'; }).join('');
+  return '<datalist id="cc-prod-dl">'+opts+'</datalist>';
+}
+function _ccItemsProductsReady(cb){ if(typeof _ingProductos!=='undefined' && _ingProductos && _ingProductos.length){ cb&&cb(); } else if(typeof ingLoadProductos==='function'){ try{ var p=ingLoadProductos(); if(p&&p.then){ p.then(function(){cb&&cb();}).catch(function(){cb&&cb();}); } else { cb&&cb(); } }catch(e){ cb&&cb(); } } else { cb&&cb(); } }
+function _ccItemsInit(preItems){
+  _ccItems=(preItems||[]).map(function(it){ var c=parseFloat(it.cantidad)||1; var pr=(it.precio!=null&&it.precio!=='')?parseFloat(it.precio):(c?((parseFloat(it.total)||0)/c):(parseFloat(it.total)||0)); return {producto:it.producto||'',cantidad:c,precio:pr||0}; });
+  _ccItemsProductsReady(function(){ var dh=document.getElementById('cc-prod-dl-holder'); if(dh) dh.innerHTML=_ccProdDatalist(); });
+  _ccItemsBody();
+}
+function _ccItemsBody(){
+  var el=document.getElementById('cc-items-body'); if(!el) return;
+  if(!_ccItems.length){ el.innerHTML='<div style="font-size:11.5px;color:var(--color-text-muted);padding:5px 0">Sin partidas — agrega productos, o deja el monto manual abajo.</div>'; _ccUpdTotal(); return; }
+  var h='';
+  _ccItems.forEach(function(it,i){
+    h+='<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">'
+      +'<input list="cc-prod-dl" value="'+ccEsc(it.producto).replace(/"/g,'&quot;')+'" oninput="ccItemSet('+i+',\'producto\',this.value)" placeholder="Producto…" style="flex:2;min-width:0;padding:7px 9px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)">'
+      +'<input type="number" min="1" step="1" value="'+(it.cantidad||1)+'" oninput="ccItemSet('+i+',\'cantidad\',this.value)" title="Cantidad" style="width:48px;padding:7px 4px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;text-align:center;background:var(--color-surface-2);color:var(--color-text)">'
+      +'<input id="cc-item-p-'+i+'" type="number" step="0.01" value="'+(it.precio||0)+'" oninput="ccItemSet('+i+',\'precio\',this.value)" title="Precio unitario" style="width:84px;padding:7px 5px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;text-align:right;background:var(--color-surface-2);color:var(--color-text)">'
+      +'<span id="cc-item-t-'+i+'" style="width:84px;text-align:right;font-size:12px;font-weight:700">'+ccFmt((it.precio||0)*(it.cantidad||1))+'</span>'
+      +'<button type="button" onclick="ccItemDel('+i+')" title="Quitar" style="padding:5px 8px;border:1px solid #e3b3b3;background:none;border-radius:7px;color:#c83c3c;cursor:pointer;font-size:11px">✕</button>'
+    +'</div>';
+  });
+  el.innerHTML=h; _ccUpdTotal();
+}
+function ccItemAdd(){ _ccItems.push({producto:'',cantidad:1,precio:0}); _ccItemsBody(); }
+function ccItemDel(i){ _ccItems.splice(i,1); _ccItemsBody(); }
+function ccItemSet(i,field,val){
+  if(!_ccItems[i]) return;
+  if(field==='cantidad'){ _ccItems[i].cantidad=parseFloat(val)||0; }
+  else if(field==='precio'){ _ccItems[i].precio=parseFloat(val)||0; }
+  else { _ccItems[i].producto=val; var p=((typeof _ingProductos!=='undefined'?_ingProductos:[])||[]).filter(function(x){return x.descripcion===val;})[0]; if(p){ var pr=(p.precios&&p.precios['General'])?p.precios['General']:(p.precio||0); if(pr>0){ _ccItems[i].precio=pr; var pe=document.getElementById('cc-item-p-'+i); if(pe) pe.value=pr; } } }
+  var ts=document.getElementById('cc-item-t-'+i); if(ts) ts.textContent=ccFmt((_ccItems[i].precio||0)*(_ccItems[i].cantidad||1));
+  _ccUpdTotal();
+}
+function _ccItemsTotal(){ var s=0; _ccItems.forEach(function(it){ s+=(parseFloat(it.precio)||0)*(parseFloat(it.cantidad)||1); }); return s; }
+function _ccUpdTotal(){ var t=document.getElementById('cc-items-total'); if(t) t.textContent=ccFmt(_ccItemsTotal()); var m=document.getElementById('cc-si-monto')||document.getElementById('cc-ed-monto'); if(m){ if(_ccItems.length){ m.value=_ccItemsTotal().toFixed(2); m.readOnly=true; m.style.opacity='.6'; } else { m.readOnly=false; m.style.opacity='1'; } } }
+function _ccItemsPayload(){ return _ccItems.filter(function(it){ return (it.producto&&it.producto.trim())||((parseFloat(it.precio)||0)*(parseFloat(it.cantidad)||1))>0; }).map(function(it){ return {producto:it.producto,cantidad:parseFloat(it.cantidad)||1,precio:parseFloat(it.precio)||0,total:(parseFloat(it.precio)||0)*(parseFloat(it.cantidad)||1)}; }); }
+
 function ccEditarSaldo(rowNum, paciente, saldo, concepto){
+  var o=(((typeof _ccData!=='undefined'&&_ccData)?_ccData.ops:[])||[]).filter(function(x){return x.rowNum===rowNum;})[0];
   var body=''
-    +'<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:12px">Editar la cuenta por cobrar de <b>'+ccEsc(paciente)+'</b>.</div>'
-    +_ccField('Concepto','<input id="cc-ed-con" type="text" value="'+ccEsc(concepto).replace(/"/g,'&quot;')+'" style="'+_ccInputStyle()+'">')
-    +_ccField('Monto adeudado','<input id="cc-ed-monto" type="number" step="0.01" value="'+(saldo||0)+'" style="'+_ccInputStyle()+'">');
+    +'<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:12px">Editar la cuenta por cobrar de <b>'+ccEsc(paciente)+'</b>. Captura/edita las partidas (el monto se calcula solo) o deja un monto manual.</div>'
+    +_ccField('Concepto','<input id="cc-ed-con" type="text" value="'+ccEsc(concepto||'').replace(/"/g,'&quot;')+'" style="'+_ccInputStyle()+'">')
+    +_ccItemsEditorHtml()
+    +_ccField('Monto adeudado (si no capturas partidas)','<input id="cc-ed-monto" type="number" step="0.01" value="'+(saldo||0)+'" style="'+_ccInputStyle()+'">');
   ccModal('Editar cuenta por cobrar', body, function(){ ccGuardarEdicion(rowNum); }, 'Guardar cambios');
+  _ccItemsInit((o&&o.items)||[]);
 }
 function ccGuardarEdicion(rowNum){
-  var monto=parseFloat((document.getElementById('cc-ed-monto')||{}).value||'0')||0;
-  if(monto<=0){ alert('Monto inválido'); return; }
+  var items=_ccItemsPayload();
+  var monto=items.length?_ccItemsTotal():(parseFloat((document.getElementById('cc-ed-monto')||{}).value||'0')||0);
+  if(monto<=0){ alert('Captura al menos una partida (producto) o un monto.'); return; }
   var btn=document.getElementById('cc-modal-save'); if(btn){ btn.textContent='Guardando…'; btn.disabled=true; }
   var s=getSession()||{};
-  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'editarCuentaCobrar', rowNum:rowNum, monto:monto, concepto:(document.getElementById('cc-ed-con')||{}).value||'', token:s.token||getToken(), usuario:s.email||''})})
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'editarCuentaCobrar', rowNum:rowNum, monto:monto, items:items, concepto:(document.getElementById('cc-ed-con')||{}).value||'', token:s.token||getToken(), usuario:s.email||''})})
     .then(function(r){return r.json();}).then(function(d){
       var m=document.getElementById('cc-modal'); if(m) m.remove();
       if(d&&d.ok){ ccLoad(true); } else { alert('No se pudo editar: '+((d&&d.error)||'error')); if(btn){ btn.textContent='Guardar cambios'; btn.disabled=false; } }
@@ -25950,26 +26004,27 @@ function ccAbrirSaldoInicial(){
       .then(function(r){return r.json();}).then(function(d){ if(d&&d.pacientes) _ecPacientesList=d.pacientes.map(function(p){return typeof p==='string'?p:p.nombre;}); }).catch(function(){});
   }
   var body=''
-    +'<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:14px">Registra un adeudo existente (saldo inicial) o un cargo a crédito para que aparezca en Cuentas por Cobrar.</div>'
+    +'<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:14px">Registra una cuenta por cobrar: captura las <b>partidas (productos con precio)</b>, o un monto manual.</div>'
     +_ccField('Paciente','<div style="position:relative"><input id="cc-si-pac" type="text" autocomplete="off" oninput="ccSiOnInput(this.value)" placeholder="Escribe el nombre…" style="'+_ccInputStyle()+'"><div id="cc-si-sug" style="display:none;position:absolute;top:calc(100% + 3px);left:0;right:0;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:8px;box-shadow:var(--shadow-dropdown);z-index:10;max-height:180px;overflow-y:auto"></div></div>')
     +'<div style="display:flex;gap:10px">'
       +'<div style="flex:1">'+_ccField('OP relacionada (opcional)','<input id="cc-si-op" type="text" placeholder="N° de operación" style="'+_ccInputStyle()+'">')+'</div>'
       +'<div style="flex:1">'+_ccField('Segmento','<select id="cc-si-cat" style="'+_ccInputStyle()+'"><option value="">Pacientes</option><option value="GrupoMedico">Médicos</option><option value="REPROVIDA">Agencias</option></select>')+'</div>'
     +'</div>'
     +'<div id="cc-si-ophint" style="display:none;font-size:11px;color:#b45309;margin:-6px 0 12px;line-height:1.45"></div>'
-    +_ccField('Concepto','<input id="cc-si-con" type="text" value="Saldo inicial" style="'+_ccInputStyle()+'">')
+    +_ccItemsEditorHtml()
+    +_ccField('Concepto (opcional)','<input id="cc-si-con" type="text" placeholder="Se arma de las partidas si lo dejas vacío" style="'+_ccInputStyle()+'">')
     +'<div style="display:flex;gap:10px">'
-      +'<div style="flex:1">'+_ccField('Monto adeudado','<input id="cc-si-monto" type="number" step="0.01" style="'+_ccInputStyle()+'">')+'</div>'
+      +'<div style="flex:1">'+_ccField('Monto (si no capturas partidas)','<input id="cc-si-monto" type="number" step="0.01" style="'+_ccInputStyle()+'">')+'</div>'
       +'<div style="flex:1">'+_ccField('Fecha del cargo','<input id="cc-si-fecha" type="date" value="'+new Date().toISOString().substring(0,10)+'" style="'+_ccInputStyle()+'">')+'</div>'
-    +'</div>'
-    +'<div style="font-size:10.5px;color:var(--color-text-muted);line-height:1.45">La <b>OP</b> es el número de operación/documento del ingreso al que corresponde el adeudo (opcional). Si el paciente ya tiene saldos detectados, te sugiero la OP automáticamente.</div>';
-  ccModal('Cargar saldo inicial', body, ccGuardarSaldoInicial, 'Cargar saldo');
+    +'</div>';
+  ccModal('Registrar cuenta por cobrar', body, ccGuardarSaldoInicial, 'Registrar');
+  _ccItemsInit([]);
 }
 function ccSiOnInput(val){
   var box=document.getElementById('cc-si-sug'); if(!box) return;
   if(!val||val.length<2){ box.style.display='none'; return; }
-  var q=val.toLowerCase();
-  var matches=(_ecPacientesList||[]).filter(function(n){return n.toLowerCase().indexOf(q)>=0;}).slice(0,8);
+  if(!_ecPacientesList||!_ecPacientesList.length){ if(typeof _ensurePacList==='function'){ _ensurePacList(function(){ ccSiOnInput(val); }); } return; }
+  var matches=(typeof _pacFuzzy==='function')?_pacFuzzy(_ecPacientesList,val,8):(_ecPacientesList||[]).filter(function(n){return n.toLowerCase().indexOf(val.toLowerCase())>=0;}).slice(0,8);
   if(!matches.length){ box.style.display='none'; return; }
   box.innerHTML=matches.map(function(n){ return '<div class="cc-si-item" data-n="'+ccEsc(n).replace(/"/g,'&quot;')+'" style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--color-divider)">'+ccEsc(n)+'</div>'; }).join('');
   box.style.display='block';
@@ -25991,15 +26046,16 @@ function ccSiPacientePick(nombre){
     }).catch(function(){});
 }
 function ccGuardarSaldoInicial(){
-  var monto=parseFloat((document.getElementById('cc-si-monto')||{}).value||'0')||0;
+  var items=_ccItemsPayload();
+  var monto=items.length?_ccItemsTotal():(parseFloat((document.getElementById('cc-si-monto')||{}).value||'0')||0);
   var pac=(document.getElementById('cc-si-pac')||{}).value||'';
-  if(monto<=0){ alert('Monto inválido'); return; }
   if(!pac.trim()){ alert('Falta el paciente'); return; }
+  if(monto<=0){ alert('Captura al menos una partida (producto) o un monto.'); return; }
   var btn=document.getElementById('cc-modal-save'); if(btn){ btn.textContent='Guardando…'; btn.disabled=true; }
   var s=getSession()||{};
   var payload={ action:'cargarSaldoInicial', paciente:pac, op:(document.getElementById('cc-si-op')||{}).value||'',
-    categoria:(document.getElementById('cc-si-cat')||{}).value||'', concepto:(document.getElementById('cc-si-con')||{}).value||'Saldo inicial',
-    monto:monto, fecha:(document.getElementById('cc-si-fecha')||{}).value||'',
+    categoria:(document.getElementById('cc-si-cat')||{}).value||'', concepto:(document.getElementById('cc-si-con')||{}).value||'',
+    monto:monto, items:items, fecha:(document.getElementById('cc-si-fecha')||{}).value||'',
     token:s.token||getToken(), usuario:s.email||'' };
   fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(payload)})
     .then(function(r){return r.json();}).then(function(d){

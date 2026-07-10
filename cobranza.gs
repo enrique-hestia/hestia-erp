@@ -33,7 +33,7 @@ var COBRANZA_CFG_KEY  = 'COBRANZA_CONFIG';
 var COBRANZA_ABONOS   = 'Abonos_Cobrar';
 var COBRANZA_CARGOS   = 'Cuentas_Cobrar';
 var COBRANZA_SUS      = 'Suscripciones_Crio';
-var COBRANZA_VER      = 'cobranza-2026.07.09k';
+var COBRANZA_VER      = 'cobranza-2026.07.09l';
 
 /* ───────────────────────── Config ───────────────────────── */
 function _cobCfg() {
@@ -176,11 +176,36 @@ function _cobEnsureCargos() {
   var sh = ss.getSheetByName(COBRANZA_CARGOS);
   if (!sh) {
     sh = ss.insertSheet(COBRANZA_CARGOS);
-    sh.appendRow(['Fecha', 'OP', 'Paciente', 'Categoria', 'Concepto', 'MontoCargo', 'Estatus', 'Nota', 'Usuario', 'Timestamp']);
+    sh.appendRow(['Fecha', 'OP', 'Paciente', 'Categoria', 'Concepto', 'MontoCargo', 'Estatus', 'Nota', 'Usuario', 'Timestamp', 'Items']);
     sh.setFrozenRows(1);
   }
   return sh;
 }
+// Índice (1-based) de la columna 'Items' (JSON de partidas); la crea si no existe.
+function _cobCargosItemsCol(sh) {
+  var lc = Math.max(sh.getLastColumn(), 1);
+  var hdr = sh.getRange(1, 1, 1, lc).getValues()[0].map(function (x) { return String(x).trim().toLowerCase(); });
+  var i = hdr.indexOf('items');
+  if (i > -1) return i + 1;
+  var col = lc + 1; sh.getRange(1, col).setValue('Items'); return col;
+}
+// Normaliza las partidas [{producto,cantidad,precio,total}]; total = precio*cant.
+function _cobParseItems(x) {
+  if (!x) return [];
+  var arr = x;
+  if (typeof x === 'string') { var s = x.trim(); if (!s) return []; try { arr = JSON.parse(s); } catch (e) { return []; } }
+  if (!arr || !arr.length) return [];
+  var out = [];
+  for (var i = 0; i < arr.length; i++) {
+    var it = arr[i] || {};
+    var c = _cobNum(it.cantidad) || 1;
+    var p = _cobNum(it.precio);
+    var t = (it.total != null && it.total !== '') ? _cobNum(it.total) : (p * c);
+    if (String(it.producto || '').trim() || t > 0) out.push({ producto: String(it.producto || '').trim(), cantidad: c, precio: p, total: t, saldo: 0 });
+  }
+  return out;
+}
+function _cobItemsMonto(items) { var s = 0; for (var i = 0; i < items.length; i++) s += items[i].total; return s; }
 function _cobReadAbonos() {
   var out = { byOp: {}, byPac: {}, susByPac: {}, rows: [] };
   var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
@@ -216,6 +241,8 @@ function _cobReadCargos() {  // registro manual de saldos iniciales / cargos a c
   var sh = ss.getSheetByName(COBRANZA_CARGOS);
   if (!sh) return out;
   var raw = sh.getDataRange().getValues();
+  var hdr0 = (raw[0] || []).map(function (x) { return String(x).trim().toLowerCase(); });
+  var iItems = hdr0.indexOf('items');
   for (var i = 1; i < raw.length; i++) {
     var r = raw[i];
     var op = String(r[1] || '').trim();
@@ -224,7 +251,8 @@ function _cobReadCargos() {  // registro manual de saldos iniciales / cargos a c
     var rec = {
       rowNum: i + 1, fecha: _cobStr(_cobD(r[0])), op: op, paciente: String(r[2] || ''),
       categoria: String(r[3] || ''), concepto: String(r[4] || ''),
-      monto: monto, estatus: String(r[6] || ''), nota: String(r[7] || '')
+      monto: monto, estatus: String(r[6] || ''), nota: String(r[7] || ''),
+      items: (iItems > -1) ? _cobParseItems(r[iItems]) : []
     };
     out.rows.push(rec);
     if (op) out.byOp[op] = rec;
@@ -254,8 +282,15 @@ function editarCuentaCobrar(body) {
     var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
     var sh = ss.getSheetByName(COBRANZA_CARGOS);
     if (!sh || rn > sh.getLastRow()) return { ok: false, error: 'Cuenta por cobrar no encontrada' };
-    // Cuentas_Cobrar: Fecha(1),OP(2),Paciente(3),Categoria(4),Concepto(5),MontoCargo(6),Estatus(7),Nota(8)
-    if (body.monto != null && String(body.monto) !== '') sh.getRange(rn, 6).setValue(_cobNum(body.monto));
+    // Cuentas_Cobrar: Fecha(1),OP(2),Paciente(3),Categoria(4),Concepto(5),MontoCargo(6),Estatus(7),Nota(8),...,Items
+    // Partidas: si vienen items, se guardan y el MONTO = suma de partidas.
+    var _itemsEdit = (body.items != null) ? _cobParseItems(body.items) : null;
+    if (_itemsEdit != null) {
+      var iItemsE = _cobCargosItemsCol(sh);
+      sh.getRange(rn, iItemsE).setValue(_itemsEdit.length ? JSON.stringify(_itemsEdit) : '');
+      if (_itemsEdit.length) sh.getRange(rn, 6).setValue(_cobItemsMonto(_itemsEdit));
+    }
+    if (!(_itemsEdit && _itemsEdit.length) && body.monto != null && String(body.monto) !== '') sh.getRange(rn, 6).setValue(_cobNum(body.monto));
     if (body.concepto != null) sh.getRange(rn, 5).setValue(String(body.concepto));
     if (body.paciente != null && String(body.paciente) !== '') sh.getRange(rn, 3).setValue(String(body.paciente));
     if (body.estatus != null && String(body.estatus) !== '') sh.getRange(rn, 7).setValue(String(body.estatus));
@@ -339,8 +374,9 @@ function _cobBuildSaldos() {
     // no (ej. REPROVIDA con saldo inicial), se jala TODO lo vendido a ese paciente.
     var det = [];
     if (!_cobMasked()) {
-      if (cg.op && itemsByOp[cg.op]) det = itemsByOp[cg.op];
-      else det = itemsByPac[_cobKeyNom(cg.paciente)] || [];
+      if (cg.items && cg.items.length) det = cg.items;          // partidas capturadas a mano
+      else if (cg.op && itemsByOp[cg.op]) det = itemsByOp[cg.op]; // por OP
+      else det = itemsByPac[_cobKeyNom(cg.paciente)] || [];       // por paciente (ej. REPROVIDA)
     }
     out.push({
       origen: 'registro', rowNum: cg.rowNum, op: cg.op || '—',
@@ -813,16 +849,21 @@ function registrarAbono(body) {
 
 function cargarSaldoInicial(body) {
   try {
-    var monto = _cobNum(body.monto);
-    if (monto <= 0) return { ok: false, error: 'Monto inválido' };
+    var items = _cobParseItems(body.items);
+    var monto = items.length ? _cobItemsMonto(items) : _cobNum(body.monto);
+    if (monto <= 0) return { ok: false, error: 'Captura al menos una partida (producto) o un monto.' };
     var sh = _cobEnsureCargos();
+    var iItems = _cobCargosItemsCol(sh);
     var fecha = body.fecha ? _cobStr(_cobD(body.fecha)) : _cobStr(_cobToday());
+    var concepto = String(body.concepto || '').trim();
+    if (!concepto) concepto = items.length ? (items.map(function (it) { return it.producto; }).filter(Boolean).slice(0, 3).join(', ') || 'Cuenta por cobrar') : 'Saldo inicial';
     sh.appendRow([
       fecha, String(body.op || '').trim(), String(body.paciente || '').trim(),
-      String(body.categoria || ''), String(body.concepto || 'Saldo inicial'),
-      monto, String(body.estatus || 'Saldo inicial'), String(body.nota || ''),
+      String(body.categoria || ''), concepto,
+      monto, String(body.estatus || 'Pendiente'), String(body.nota || ''),
       String(body.usuario || ''), new Date()
     ]);
+    if (items.length) sh.getRange(sh.getLastRow(), iItems).setValue(JSON.stringify(items));
     return { ok: true, version: COBRANZA_VER, fecha: fecha, monto: monto };
   } catch (ex) {
     return { ok: false, error: ex.message, version: COBRANZA_VER };
