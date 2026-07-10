@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.09.119 -->
+﻿<!-- app-build:2026.07.09.120 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -25589,7 +25589,7 @@ function ccRenderSaldos(){
       +'<td style="padding:9px 12px;text-align:right;color:#16a34a">'+ccFmt(o.abonado)+'</td>'
       +'<td style="padding:9px 12px;text-align:right;font-weight:800;color:#c83c3c">'+ccFmt(o.saldo)+'</td>'
       +'<td style="padding:9px 12px;text-align:right;color:var(--color-text-muted)">'+o.dias+'d</td>'
-      +'<td style="padding:9px 12px;text-align:right"><button onclick="ccAbrirAbono('+ccQ(o.op)+','+ccQ(o.paciente)+','+(o.saldo||0)+')" style="padding:5px 11px;background:var(--color-primary);color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Abono</button></td>'
+      +'<td style="padding:9px 12px;text-align:right;white-space:nowrap">'+ccSaldoAcciones(o)+'</td>'
       +'</tr>';
   });
   h+='</tbody></table></div>';
@@ -25665,6 +25665,44 @@ function _ccField(label,inner){ return '<div style="margin-bottom:12px"><label s
 function _ccInputStyle(){ return 'width:100%;padding:9px 12px;border:1.5px solid var(--color-divider);border-radius:8px;background:var(--color-surface-2);color:var(--color-text);font-size:13px'; }
 function _ccFormaPagoSel(id){ return '<select id="'+id+'" style="'+_ccInputStyle()+'"><option>Transferencia</option><option>Efectivo</option><option>Tarjeta</option><option>Mercado Pago</option><option>Depósito</option><option>Otro</option></select>'; }
 function _ccBancoSel(id){ return '<select id="'+id+'" style="'+_ccInputStyle()+'"><option>Santander</option><option>AMEX</option><option>Mercado Pago</option><option>Efectivo / Caja</option><option>Otro</option></select>'; }
+
+/* ── Acciones por saldo: Abono + Editar/Borrar (permisos amarrados a CxP) ── */
+function ccSaldoAcciones(o){
+  var h='<button onclick="ccAbrirAbono('+ccQ(o.op)+','+ccQ(o.paciente)+','+(o.saldo||0)+')" style="padding:5px 11px;background:var(--color-primary);color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Abono</button>';
+  if(o.rowNum && typeof hasPermission==='function' && hasPermission('editar_egresos')){
+    h+=' <button onclick="ccEditarSaldo('+o.rowNum+','+ccQ(o.paciente)+','+(o.saldo||0)+','+ccQ(o.concepto||'')+')" title="Editar (requiere editar cuentas por pagar)" style="padding:5px 8px;background:none;border:1px solid var(--color-divider);border-radius:7px;font-size:11px;cursor:pointer;color:var(--color-text)">✎</button>';
+  }
+  if(o.rowNum && typeof hasPermission==='function' && hasPermission('borrar_egresos')){
+    h+=' <button onclick="ccBorrarSaldo('+o.rowNum+','+ccQ(o.paciente)+','+(o.saldo||0)+')" title="Borrar (requiere borrar cuentas por pagar)" style="padding:5px 8px;background:none;border:1px solid #e3b3b3;border-radius:7px;font-size:11px;cursor:pointer;color:#c83c3c">✕</button>';
+  }
+  return h;
+}
+function ccEditarSaldo(rowNum, paciente, saldo, concepto){
+  var body=''
+    +'<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:12px">Editar la cuenta por cobrar de <b>'+ccEsc(paciente)+'</b>.</div>'
+    +_ccField('Concepto','<input id="cc-ed-con" type="text" value="'+ccEsc(concepto).replace(/"/g,'&quot;')+'" style="'+_ccInputStyle()+'">')
+    +_ccField('Monto adeudado','<input id="cc-ed-monto" type="number" step="0.01" value="'+(saldo||0)+'" style="'+_ccInputStyle()+'">');
+  ccModal('Editar cuenta por cobrar', body, function(){ ccGuardarEdicion(rowNum); }, 'Guardar cambios');
+}
+function ccGuardarEdicion(rowNum){
+  var monto=parseFloat((document.getElementById('cc-ed-monto')||{}).value||'0')||0;
+  if(monto<=0){ alert('Monto inválido'); return; }
+  var btn=document.getElementById('cc-modal-save'); if(btn){ btn.textContent='Guardando…'; btn.disabled=true; }
+  var s=getSession()||{};
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'editarCuentaCobrar', rowNum:rowNum, monto:monto, concepto:(document.getElementById('cc-ed-con')||{}).value||'', token:s.token||getToken(), usuario:s.email||''})})
+    .then(function(r){return r.json();}).then(function(d){
+      var m=document.getElementById('cc-modal'); if(m) m.remove();
+      if(d&&d.ok){ ccLoad(true); } else { alert('No se pudo editar: '+((d&&d.error)||'error')); if(btn){ btn.textContent='Guardar cambios'; btn.disabled=false; } }
+    }).catch(function(e){ alert('Error de red: '+e.message); });
+}
+function ccBorrarSaldo(rowNum, paciente, saldo){
+  if(!confirm('¿Borrar la cuenta por cobrar de '+paciente+' por '+ccFmt(saldo)+'?\n\nEsta acción no se puede deshacer.')) return;
+  var s=getSession()||{};
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'borrarCuentaCobrar', rowNum:rowNum, token:s.token||getToken(), usuario:s.email||''})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d&&d.ok){ ccLoad(true); } else { alert('No se pudo borrar: '+((d&&d.error)||'error')); }
+    }).catch(function(e){ alert('Error de red: '+e.message); });
+}
 
 /* ── Registrar abono a un saldo ── */
 function ccAbrirAbono(op, paciente, saldo){

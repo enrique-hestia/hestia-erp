@@ -579,6 +579,16 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(generarSuscripciones(body));
     }
+    if (body.action === 'editarCuentaCobrar') {
+      if (typeof editarCuentaCobrar !== 'function')
+        return jsonResponse({ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(editarCuentaCobrar(body));
+    }
+    if (body.action === 'borrarCuentaCobrar') {
+      if (typeof borrarCuentaCobrar !== 'function')
+        return jsonResponse({ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(borrarCuentaCobrar(body));
+    }
     // Tareas programadas (scheduler)
     if (body.action === 'updateScheduledTask')     return jsonResponse(updateScheduledTask(body));
     if (body.action === 'setupScheduledTriggers')  return jsonResponse(setupScheduledTriggers());
@@ -3963,6 +3973,11 @@ function saveIngreso(payload) {
     try { _descontarInventarioPorVenta(opId, lineas, payload.usuario); } catch (eInv) {}
 
     var saldoGenerado = Math.max(0, totalOP - pagadoOp);
+    // Pago parcial → registra explícitamente la cuenta por cobrar (no se infiere de
+    // la columna Pagado). Nunca debe tumbar la venta si Cobranza no está desplegado.
+    if (saldoGenerado > 0.01 && typeof _cobRegistrarSaldoIngreso === 'function') {
+      try { _cobRegistrarSaldoIngreso(opId, paciente, (lineas[0] && lineas[0].categoria) || '', saldoGenerado, fecha); } catch (eAR) {}
+    }
     return {ok:true, op:opId, lineas:rows.length, total:totalOP,
             pagado:pagadoOp, saldoGenerado:saldoGenerado, paciente:paciente};
   } catch(ex) {

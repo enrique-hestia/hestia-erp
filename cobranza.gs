@@ -33,7 +33,7 @@ var COBRANZA_CFG_KEY  = 'COBRANZA_CONFIG';
 var COBRANZA_ABONOS   = 'Abonos_Cobrar';
 var COBRANZA_CARGOS   = 'Cuentas_Cobrar';
 var COBRANZA_SUS      = 'Suscripciones_Crio';
-var COBRANZA_VER      = 'cobranza-2026.07.09b';
+var COBRANZA_VER      = 'cobranza-2026.07.09c';
 
 /* ───────────────────────── Config ───────────────────────── */
 function _cobCfg() {
@@ -186,109 +186,91 @@ function _cobReadCargos() {  // registro manual de saldos iniciales / cargos a c
     var monto = _cobNum(r[5]);
     if (monto <= 0) continue;
     var rec = {
-      fecha: _cobStr(_cobD(r[0])), op: op, paciente: String(r[2] || ''),
+      rowNum: i + 1, fecha: _cobStr(_cobD(r[0])), op: op, paciente: String(r[2] || ''),
       categoria: String(r[3] || ''), concepto: String(r[4] || ''),
       monto: monto, estatus: String(r[6] || ''), nota: String(r[7] || '')
     };
     out.rows.push(rec);
-    var key = op || ('_cargo_' + i);
-    out.byOp[key] = rec;
+    if (op) out.byOp[op] = rec;
   }
   return out;
 }
+// Registra automáticamente una cuenta por cobrar cuando un ingreso se captura con
+// pago parcial. La llama saveIngreso (finance.gs). Nunca debe tumbar la venta.
+function _cobRegistrarSaldoIngreso(op, paciente, categoria, monto, fecha) {
+  try {
+    if (!(_cobNum(monto) > 0)) return;
+    var sh = _cobEnsureCargos();
+    sh.appendRow([
+      fecha ? _cobStr(_cobD(fecha)) : _cobStr(_cobToday()),
+      String(op || '').trim(), String(paciente || '').trim(), String(categoria || ''),
+      'Saldo pendiente de OP ' + op, _cobNum(monto), 'Pendiente', 'auto-ingreso', '', new Date()
+    ]);
+  } catch (e) {}
+}
+// Editar / borrar una cuenta por cobrar. Permisos AMARRADOS a los de Cuentas por
+// Pagar (editar_egresos / borrar_egresos) para no crear permisos nuevos.
+function editarCuentaCobrar(body) {
+  try {
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'editar_egresos'))
+      return { ok: false, error: 'Sin permiso para editar cuentas por cobrar (requiere "Editar partidas de egreso" / cuentas por pagar).' };
+    var rn = parseInt(body.rowNum); if (!rn || rn < 2) return { ok: false, error: 'Fila inválida' };
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sh = ss.getSheetByName(COBRANZA_CARGOS);
+    if (!sh || rn > sh.getLastRow()) return { ok: false, error: 'Cuenta por cobrar no encontrada' };
+    // Cuentas_Cobrar: Fecha(1),OP(2),Paciente(3),Categoria(4),Concepto(5),MontoCargo(6),Estatus(7),Nota(8)
+    if (body.monto != null && String(body.monto) !== '') sh.getRange(rn, 6).setValue(_cobNum(body.monto));
+    if (body.concepto != null) sh.getRange(rn, 5).setValue(String(body.concepto));
+    if (body.paciente != null && String(body.paciente) !== '') sh.getRange(rn, 3).setValue(String(body.paciente));
+    if (body.estatus != null && String(body.estatus) !== '') sh.getRange(rn, 7).setValue(String(body.estatus));
+    return { ok: true, version: COBRANZA_VER, rowNum: rn };
+  } catch (ex) { return { ok: false, error: ex.message, version: COBRANZA_VER }; }
+}
+function borrarCuentaCobrar(body) {
+  try {
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'borrar_egresos'))
+      return { ok: false, error: 'Sin permiso para borrar cuentas por cobrar (requiere "Eliminar partidas de egreso" / cuentas por pagar).' };
+    var rn = parseInt(body.rowNum); if (!rn || rn < 2) return { ok: false, error: 'Fila inválida' };
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sh = ss.getSheetByName(COBRANZA_CARGOS);
+    if (!sh || rn > sh.getLastRow()) return { ok: false, error: 'Cuenta por cobrar no encontrada' };
+    sh.deleteRow(rn);
+    return { ok: true, version: COBRANZA_VER, rowNum: rn };
+  } catch (ex) { return { ok: false, error: ex.message, version: COBRANZA_VER }; }
+}
 
-/* ═════════════════ MOTOR A — Saldos por cobrar ═════════════════ */
+/* ═════════════════ MOTOR A — Saldos por cobrar ═════════════════
+ * Cuentas por Cobrar = registro EXPLÍCITO de adeudos (hoja Cuentas_Cobrar).
+ * NO se infiere de la columna "Pagado" de BD_Ingresos: hacerlo generaba falsos
+ * positivos porque muchísimos ingresos históricos/importados tienen Pagado en 0 o
+ * en blanco (aunque el paciente sí pagó). Un adeudo nace SOLO cuando:
+ *   (a) se captura un ingreso con pago parcial → saveIngreso escribe aquí,
+ *   (b) se carga un saldo inicial, o
+ *   (c) se registra un cargo a crédito.
+ * Así, si según los ingresos nadie debe, esta vista sale vacía.
+ */
 function _cobBuildSaldos() {
-  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
-  var sh = ss.getSheetByName(BD_INGRESOS_TAB);
-  if (!sh) return { ops: [], error: 'No se encontró ' + BD_INGRESOS_TAB };
-  var data = sh.getDataRange().getValues();
-  if (data.length < 2) return { ops: [] };
-
-  var H = data[0].map(function (x) { return _cobLower(x); });
-  function hc() { for (var a = 0; a < arguments.length; a++) { var k = H.indexOf(arguments[a]); if (k > -1) return k; } return -1; }
-  var iOp    = hc('op'); if (iOp < 0) iOp = 0;
-  var iFecha = hc('fecha');
-  var iPac   = hc('paciente');
-  var iCat   = hc('categoria', 'categoría');
-  var iProd  = hc('producto');
-  var iTotal = hc('totalpagar', 'total a pagar', 'total');
-  var iPag   = hc('pagado');
-
-  var abonos = _cobReadAbonos();
   var cargos = _cobReadCargos();
-
-  var ops = {};  // op → agregado
-  for (var r = 1; r < data.length; r++) {
-    var row = data[r];
-    var op = String(row[iOp] || '').trim();
-    if (!op) continue;
-    var total = _cobNum(row[iTotal]);
-    var pagCell = iPag > -1 ? row[iPag] : '';
-    var pagBlankRow = _cobIsBlank(pagCell);
-    var pag = _cobNum(pagCell);
-    if (!ops[op]) {
-      ops[op] = {
-        op: op, paciente: String(row[iPac] || '').trim(),
-        categoria: String(row[iCat] || '').trim(), producto: String(row[iProd] || '').trim(),
-        fecha: _cobStr(_cobD(row[iFecha])), total: 0, pagadoCol: 0, algunPagado: false, conceptos: []
-      };
-    }
-    var o = ops[op];
-    o.total += total;
-    if (!pagBlankRow) { o.pagadoCol += pag; o.algunPagado = true; }
-    if (o.conceptos.length < 6 && o.producto) o.conceptos.push(o.producto);
-    if (!o.fecha) o.fecha = _cobStr(_cobD(row[iFecha]));
-  }
-
+  var abonos = _cobReadAbonos();
   var today = _cobToday();
   var out = [];
-  var seen = {};
-  for (var k in ops) {
-    var it = ops[k];
-    // base a deber (antes de abonos):
-    var base;
-    if (cargos.byOp[it.op]) {
-      base = cargos.byOp[it.op].monto;                 // registro manual explícito
-    } else if (it.algunPagado && it.pagadoCol < it.total - 0.01) {
-      base = it.total - it.pagadoCol;                  // pago parcial capturado en Ingresos
-    } else {
-      base = 0;                                        // histórico/sin info = pagado
-    }
-    var abo = abonos.byOp[it.op] || 0;
-    var saldo = base - abo;
-    if (saldo <= 0.01) continue;
-    seen[it.op] = true;
-    var fd = _cobD(it.fecha) || today;
-    var dias = _cobDaysDiff(fd, today); if (dias < 0) dias = 0;
-    out.push({
-      op: it.op,
-      paciente: _cobMasked() ? _privPaciente(it.op) : it.paciente,
-      segmento: _cobSegmento(it.categoria, it.producto),
-      categoria: it.categoria,
-      concepto: it.conceptos.join(', ') || it.producto,
-      fecha: it.fecha,
-      total: it.total, abonado: (it.algunPagado ? it.pagadoCol : 0) + abo, saldo: saldo,
-      dias: dias, bucket: _cobBucket(dias)
-    });
-  }
-  // cargos manuales cuyo OP no está en Ingresos (ej. saldos iniciales sin OP)
   for (var ci = 0; ci < cargos.rows.length; ci++) {
     var cg = cargos.rows[ci];
-    if (cg.op && seen[cg.op]) continue;               // ya contado arriba
-    if (cg.op && ops[cg.op]) continue;
-    var abo2 = cg.op ? (abonos.byOp[cg.op] || 0) : 0;
-    var saldo2 = cg.monto - abo2;
-    if (saldo2 <= 0.01) continue;
-    var fd2 = _cobD(cg.fecha) || today;
-    var dias2 = _cobDaysDiff(fd2, today); if (dias2 < 0) dias2 = 0;
+    var st = _cobLower(cg.estatus);
+    if (st === 'cancelado' || st === 'pagado') continue;
+    var abo = cg.op ? (abonos.byOp[cg.op] || 0) : 0;
+    var saldo = cg.monto - abo;
+    if (saldo <= 0.01) continue;
+    var fd = _cobD(cg.fecha) || today;
+    var dias = _cobDaysDiff(fd, today); if (dias < 0) dias = 0;
     out.push({
+      rowNum: cg.rowNum,
       op: cg.op || '—',
       paciente: _cobMasked() ? (cg.op ? _privPaciente(cg.op) : 'Paciente') : cg.paciente,
       segmento: _cobSegmento(cg.categoria, cg.concepto),
-      categoria: cg.categoria, concepto: cg.concepto || cg.estatus || 'Saldo inicial',
-      fecha: cg.fecha, total: cg.monto, abonado: abo2, saldo: saldo2,
-      dias: dias2, bucket: _cobBucket(dias2)
+      categoria: cg.categoria, concepto: cg.concepto || cg.estatus || 'Saldo',
+      fecha: cg.fecha, total: cg.monto, abonado: abo, saldo: saldo,
+      dias: dias, bucket: _cobBucket(dias)
     });
   }
   out.sort(function (a, b) { return b.saldo - a.saldo; });
