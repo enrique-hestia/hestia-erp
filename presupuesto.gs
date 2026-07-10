@@ -679,6 +679,10 @@ function _presInyectaBudgetEnPL(plData, viewType, plMonth, plYear) {
         case 'ebitda': return mEbitda;
         case 'net profit': return mNet;
       }
+      // Agencias: suma el budget de todos los grupos de ingreso que sean agencia.
+      if (k === 'agencias' && typeof _summaryEsAgencia === 'function') {
+        var _ta = 0; for (var _gk in budG) { if (_summaryEsAgencia(_gk)) _ta += budG[_gk]; } return _ta || null;
+      }
       if (budG[k] != null) return budG[k];               // GRUPO de ingreso (Alta/Surrogacy/Externos/Other Income)
       if (bud[k] != null) return bud[k];                 // subtipo / categoría exacta
       if (budSub[k] != null) return budSub[k];           // subgrupo exacto

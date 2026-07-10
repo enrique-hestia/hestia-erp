@@ -307,6 +307,7 @@ function _buildPLReport(plSheet, erSheet, bgSheet, viewType, plMonth, yr, prv,
     {label:'Alta',                        tipo:'dato',   indent:1},
     {label:'Surrogacy',                   tipo:'dato',   indent:1},
     {label:'Externos',                    tipo:'dato',   indent:1},
+    {label:'Agencias',                    tipo:'dato',   indent:1, erAliases:['agencias','reprovida','reprovi']},
     {label:'Other Income',                tipo:'dato',   indent:1},
     {label:'COGS',                        tipo:'seccion',indent:0,erAlias:'total cogs'},
     {label:'Medicamentos',                tipo:'dato',   indent:1},
@@ -340,6 +341,9 @@ function _buildPLReport(plSheet, erSheet, bgSheet, viewType, plMonth, yr, prv,
     var s=STRUCTURE[si];
     var key=s.erAlias||normalize(s.label);
     var er=erLookup[key]||{actual:0,prev:0};
+    if (s.erAliases && !er.actual && !er.prev) {
+      for (var _ai=0; _ai<s.erAliases.length; _ai++){ if (erLookup[s.erAliases[_ai]]){ er = erLookup[s.erAliases[_ai]]; break; } }
+    }
     var bg=bgLookup[key]||bgLookup[normalize(s.label)]||0;
     rows.push({
       label:s.label, tipo:s.tipo, indent:s.indent,
