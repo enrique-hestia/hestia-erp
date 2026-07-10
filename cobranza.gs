@@ -33,7 +33,7 @@ var COBRANZA_CFG_KEY  = 'COBRANZA_CONFIG';
 var COBRANZA_ABONOS   = 'Abonos_Cobrar';
 var COBRANZA_CARGOS   = 'Cuentas_Cobrar';
 var COBRANZA_SUS      = 'Suscripciones_Crio';
-var COBRANZA_VER      = 'cobranza-2026.07.09h';
+var COBRANZA_VER      = 'cobranza-2026.07.09i';
 
 /* ───────────────────────── Config ───────────────────────── */
 function _cobCfg() {
@@ -534,11 +534,21 @@ function _cobCalcSuscripcion(pac, pagos, susAbonos, cfg, today) {
   }
 
   var estatus, montoDebe = 0, coberturaHasta = null, proximoCobro = null, mesesDebe = 0;
+  // Ventana de cobranza PROACTIVA = hasta el fin del mes SIGUIENTE. Lo que se
+  // vence dentro de esta ventana se marca "Por vencer" y ya es cobrable, para no
+  // esperar a que esté vencido.
+  var finVentana = new Date(today.getFullYear(), today.getMonth() + 2, 0);
 
   // ¿En cortesía (año gratis) y sin haber pagado aún?
   if (crio && !esExterno && cfg.anioGratisSoloHestia && today.getTime() < billStart.getTime() && !lastPago) {
-    estatus = 'Cortesía';
     proximoCobro = billStart;
+    if (billStart.getTime() <= finVentana.getTime()) {
+      // el año gratis termina este mes o el próximo → ya cobrable (proactivo)
+      estatus = 'Por vencer';
+      montoDebe = (plan === 'mensual') ? cfg.tarifaMensual : cfg.tarifaAnual;
+    } else {
+      estatus = 'Cortesía';
+    }
   } else if (plan === 'mensual') {
     // primer cobro: día 1 del mes de billStart (o mes siguiente si ya pasó el día)
     var primerCobro = _cobStartMonth(billStart);
@@ -555,7 +565,8 @@ function _cobCalcSuscripcion(pac, pagos, susAbonos, cfg, today) {
     coberturaHasta = lastPago ? new Date(_cobAddMonths(_cobStartMonth(lastPago), 1).getTime() - 86400000) : null;
     proximoCobro = cobertoHastaMes;
     if (mesesDebe <= 0) {
-      estatus = (proximoCobro && _cobDaysDiff(today, proximoCobro) <= cfg.diasPorVencer) ? 'Por vencer' : 'Vigente';
+      if (proximoCobro && proximoCobro.getTime() <= finVentana.getTime()) { estatus = 'Por vencer'; montoDebe = cfg.tarifaMensual; }
+      else estatus = 'Vigente';
     } else {
       estatus = 'Vencida';
       montoDebe = mesesDebe * cfg.tarifaMensual;
@@ -572,8 +583,8 @@ function _cobCalcSuscripcion(pac, pagos, susAbonos, cfg, today) {
     coberturaHasta = lastPago ? new Date(_cobAddYears(lastPago, 1).getTime() - 86400000) : null;
     proximoCobro = coberturaFin;
     if (today.getTime() < coberturaFin.getTime()) {
-      estatus = (_cobDaysDiff(today, coberturaFin) <= cfg.diasPorVencer) ? 'Por vencer' : 'Vigente';
-      montoDebe = 0;
+      if (coberturaFin.getTime() <= finVentana.getTime()) { estatus = 'Por vencer'; montoDebe = cfg.tarifaAnual; }
+      else { estatus = 'Vigente'; montoDebe = 0; }
     } else {
       // años vencidos
       var aniosDebe = 0, cursor = new Date(coberturaFin.getTime());
@@ -589,7 +600,7 @@ function _cobCalcSuscripcion(pac, pagos, susAbonos, cfg, today) {
     }
   }
 
-  if (!tienePlan && estatus !== 'Cortesía' && montoDebe > 0) estatus = 'Falta suscripción';
+  if (!tienePlan && estatus !== 'Cortesía' && estatus !== 'Por vencer' && montoDebe > 0) estatus = 'Falta suscripción';
 
   return {
     plan: plan, tarifa: tarifa, esExterno: esExterno,
