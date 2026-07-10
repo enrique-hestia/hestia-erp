@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.09.115 -->
+﻿<!-- app-build:2026.07.09.116 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4230,7 +4230,10 @@ async function ingOnPacienteChange() {
             var precio2 = (p.precios && p.precios[_ingPacienteLista]) ? p.precios[_ingPacienteLista]
                        : (p.precios && p.precios['General']) ? p.precios['General']
                        : p.precio || 0;
-            var lbl2 = (p.activo===false?'[INACTIVO] ':'')+p.descripcion;
+            // Etiqueta COMPLETA (igual que _ingBuildProdDatalist): categoría — $precio — SKU.
+            // Antes solo ponía el nombre → la línea 1 perdía los precios al elegir paciente.
+            var precioFmt2 = '$' + (precio2||0).toLocaleString('en-US', {minimumFractionDigits:0});
+            var lbl2 = (p.activo===false?'[INACTIVO] ':'') + p.categoria + ' — ' + precioFmt2 + (p.sku ? ' — ' + p.sku : '');
             dh += '<option value="'+p.descripcion.replace(/"/g,'&quot;')+'" label="'+lbl2.replace(/"/g,'&quot;')+'" data-precio="'+precio2+'">';
           });
           dlEl.innerHTML = dh;
@@ -4730,6 +4733,18 @@ function ingAddLine() {
     +(n>1?'<button onclick="ingRemoveLine('+n+')" style="font-size:16px;background:none;border:none;color:#dc2626;cursor:pointer;line-height:1;padding:0" title="Eliminar línea">×</button>':'<div></div>');
   el.appendChild(div);
   ingCalcTotal();
+  // Auto-reparación: si el catálogo aún no cargó, está vacío, o cargó SIN precios,
+  // (re)cárgalo fresco y vuelve a llenar el datalist de ESTA línea → los productos con
+  // precio salen desde la primera línea, no solo desde la segunda.
+  var _sinPrecios = _ingProductos.length && !_ingProductos.some(function(p){ return p.precios && Object.keys(p.precios).length; });
+  if (!_ingProductosLoaded || !_ingProductos.length || _sinPrecios) {
+    ingLoadProductos(true).then(function(){
+      var dl = document.getElementById('ing-prodlist-'+n);
+      if (dl) dl.innerHTML = _ingBuildProdDatalist(n);
+      var catEl = document.getElementById('ing-cat-'+n);
+      if (catEl && !catEl.value) { var _co='<option value="">— Categoría —</option>'+ING_CATEGORIAS.map(function(c){return '<option value="'+c+'">'+c+'</option>';}).join(''); catEl.innerHTML=_co; }
+    });
+  }
 }
 
 function ingRemoveLine(n) {
