@@ -767,6 +767,11 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega devengado.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(factVencidaGuardar(body));
     }
+    if (body.action === 'agenciaGuardar') {
+      if (typeof agenciaGuardar !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza summary.gs en Apps Script y redespliega.'});
+      return jsonResponse(agenciaGuardar(body));
+    }
     if (body.action === 'chatSend') {
       if (typeof chatSend !== 'function')
         return jsonResponse({ok:false, error:'Agrega chat.gs en Apps Script y redespliega.'});

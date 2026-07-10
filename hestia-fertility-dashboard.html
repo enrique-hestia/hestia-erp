@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.09.114 -->
+﻿<!-- app-build:2026.07.09.115 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -3409,6 +3409,7 @@ function _renderProductosView() {
       +'<button id="prod-import-btn" onclick="document.getElementById(\'prod-import-file\').click()" title="Subir el .xlsx editado para actualizar/crear productos en lote" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">'
       +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Importar Excel</button>'
       +'<input type="file" id="prod-import-file" accept=".xlsx" style="display:none" onchange="prodImportarExcel(this)">'
+      +'<button onclick="agenciasAdminOpen()" title="Administrar agencias (cada agencia = su lista de precios)" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🏢 Agencias</button>'
     +(hasPermission('sheets_access')?'<a href="https://docs.google.com/spreadsheets/d/'+PRODUCTOS_SS_ID+'/edit" target="_blank" style="display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--color-primary,#c46a7a);text-decoration:none">'
         +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Editar en Sheets</a>':'')
       +'</div></div>');
@@ -3498,6 +3499,59 @@ function _renderProductosView() {
 
 var PRODUCTOS_SS_ID = '1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY';
 
+/* ── Administración de AGENCIAS (cada agencia = una lista de precios) ── */
+async function agenciasAdminOpen(){
+  var ov=document.getElementById('ag-adm-ov');
+  if(!ov){ ov=document.createElement('div'); ov.id='ag-adm-ov'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9600;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.innerHTML='<div style="background:var(--color-surface,#fff);border-radius:14px;padding:24px;font-size:13px;color:var(--color-text,#1a252f)">Cargando agencias…</div>';
+  try {
+    var r=await fetch(APPS_SCRIPT_URL+'?action=agencias&token='+encodeURIComponent(getToken()));
+    var j=await r.json();
+    if(j&&j.ok&&j.agencias&&j.agencias.length) window._agencias=j.agencias;
+  } catch(e){}
+  if(!window._agencias||!window._agencias.length) window._agencias=['REPROVIDA'];
+  _agenciasAdminRender();
+}
+function _agenciasAdminRender(){
+  var ov=document.getElementById('ag-adm-ov'); if(!ov) return;
+  var ags=window._agencias||['REPROVIDA'];
+  var rows=ags.map(function(a){
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border:1px solid var(--color-border,#e5e7eb);border-radius:9px;margin-bottom:6px">'
+      +'<span style="font-weight:700">'+_esc(a)+'</span>'
+      +'<span style="display:flex;gap:10px;align-items:center"><span style="font-size:10.5px;color:var(--color-text-muted,#9ca3af)">lista de precios «'+_esc(a)+'»</span>'
+      +'<button onclick="agenciaBorrar(\''+_esc(String(a).replace(/'/g,"\\'"))+'\')" title="Quitar agencia" style="background:none;border:none;color:#c0505c;cursor:pointer;font-size:16px">✕</button></span></div>';
+  }).join('');
+  ov.innerHTML='<div style="background:var(--color-surface,#fff);color:var(--color-text,#1a252f);border-radius:14px;padding:24px 26px;max-width:560px;width:100%;max-height:88vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35)">'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px"><div style="font-weight:800;font-size:16px">🏢 Agencias</div>'
+    +'<button onclick="document.getElementById(\'ag-adm-ov\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--color-text-muted,#9ca3af)">✕</button></div>'
+    +'<p style="font-size:12.5px;color:var(--color-text-muted,#4b5563);margin:0 0 16px;line-height:1.6">Cada agencia (ej. REPROVIDA) tiene su propia <b>lista de precios</b> en el catálogo y se agrupa aparte en los reportes. Al crear una, aparece como opción de lista al fijar el precio de cada producto.</p>'
+    +(rows||'<div style="font-size:12px;color:var(--color-text-muted,#9ca3af)">Sin agencias aún.</div>')
+    +'<div style="display:flex;gap:8px;margin-top:14px"><input id="ag-new-name" placeholder="Nombre de la agencia nueva (ej. OVOBANK)" style="flex:1;padding:9px 11px;border:1px solid var(--color-border,#e5e7eb);border-radius:8px;font-size:13px;color:var(--color-text,#1a252f);background:var(--color-surface,#fff)" onkeydown="if(event.key===\'Enter\')agenciaCrear()">'
+    +'<button onclick="agenciaCrear()" style="padding:9px 18px;border:none;background:var(--color-primary,#c46a7a);color:#fff;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700">+ Crear</button></div>'
+    +'<div style="font-size:11px;color:var(--color-text-muted,#9ca3af);margin-top:12px">Tras crear/quitar, dale a <b>🔄 Actualizar</b> para que el menú y las listas de precios se refresquen.</div>'
+    +'</div>';
+}
+async function agenciaCrear(){
+  var el=document.getElementById('ag-new-name'); var nombre=(el?el.value:'').trim();
+  if(!nombre){ if(el) el.focus(); return; }
+  await _agenciaPost({accion:'crear', nombre:nombre});
+}
+async function agenciaBorrar(nombre){
+  if(!confirm('¿Quitar la agencia "'+nombre+'"?\n\nNo borra productos ni precios; solo deja de agruparse como agencia en menú y reportes.')) return;
+  await _agenciaPost({accion:'borrar', nombre:nombre});
+}
+async function _agenciaPost(body){
+  try {
+    var s=getSession()||{}; body.action='agenciaGuardar'; body.usuario=s.email||'';
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(body)});
+    var j=await r.json();
+    if(!j.ok) throw new Error(j.error||'Error');
+    window._agencias=j.agencias||window._agencias;
+    _agenciasAdminRender();
+  } catch(e){ alert('No se pudo guardar: '+(e.message||e)+'\n(Requiere summary.gs redesplegado.)'); }
+}
+
 /* ── Formulario agregar producto (página completa estilo Odoo) ── */
 function prodOpenForm(defaultCat) {
   var el = document.getElementById('view-productos-catalogo');
@@ -3505,7 +3559,9 @@ function prodOpenForm(defaultCat) {
   var cats = (_prodData && _prodData.categorias) ? _prodData.categorias.map(function(c){return c.nombre;}) : ING_CATEGORIAS;
   var tipos = ['ALTA','BAJA','FET','FEOC','PGT','CONSULTA','EXTERNOS','SURROGACY','REPROVIDA'];
   var monedas = ['MXN','USD'];
-  var listas = ['General','GM','Surrogacy','REPROVIDA'];
+  // Listas de precios = base + cada AGENCIA (REPROVIDA + las que se vayan creando).
+  var listas = ['General','GM','Surrogacy'].concat(window._agencias || ['REPROVIDA']);
+  listas = listas.filter(function(v,i,a){ return a.findIndex(function(x){ return String(x).toLowerCase()===String(v).toLowerCase(); })===i; });
 
   function opts(arr,sel){return arr.map(function(v){return '<option value="'+v+'"'+(v===sel?' selected':'')+'>'+v+'</option>';}).join('');}
   var S = 'style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"';
@@ -8220,6 +8276,7 @@ async function loadMenu() {
     if (json.error) throw new Error(json.error);
     var session = getSession();
     var bloqueadas = (session && session.vistasBloqueadas) || [];
+    window._agencias = (json.agencias && json.agencias.length) ? json.agencias : ['REPROVIDA'];
     // Fusionar "Gastos Operativos" y "Costos" en un solo ítem "Egresos"
     // Detecta por ID O por label (insensible a mayúsculas/acentos)
     var rawMenu = (json.menu || []);

@@ -499,6 +499,11 @@ function doGet(e) {
         return jsonResponse({ok:false, error:'Agrega devengado.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(factVencidaLeer());
     }
+    if (action === 'agencias') {
+      if (typeof agenciasLeer !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza summary.gs en Apps Script y redespliega.'});
+      return jsonResponse(agenciasLeer());
+    }
 
     if (action === 'boardReport') {
       if (typeof readBoardReport !== 'function')

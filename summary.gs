@@ -43,13 +43,37 @@ function _sumNorm(s){ return String(s||'').trim().toLowerCase(); }
 function _summaryAgencias(){
   var raw; try { raw = PropertiesService.getScriptProperties().getProperty('AGENCIAS'); } catch(e){ raw = null; }
   var arr = null; if (raw){ try { arr = JSON.parse(raw); } catch(e){ arr = null; } }
-  if (!arr || !arr.length) arr = ['reprovida'];
-  return arr.map(function(x){ return _sumNorm(x); }).filter(Boolean);
+  if (!arr || !arr.length) arr = ['REPROVIDA'];   // nombres tal cual (display); default REPROVIDA
+  return arr.map(function(x){ return String(x||'').trim(); }).filter(Boolean);
 }
 function _summaryEsAgencia(clave){
   var n = _sumNorm(clave), ags = _summaryAgencias();
-  for (var i=0;i<ags.length;i++){ if (ags[i] && n.indexOf(ags[i]) > -1) return true; }
+  for (var i=0;i<ags.length;i++){ var a=_sumNorm(ags[i]); if (a && n.indexOf(a) > -1) return true; }
   return false;
+}
+
+/* CRUD de AGENCIAS (Script Property). Cada agencia es también una LISTA DE PRECIOS
+   en el catálogo (BD_Precios usa el nombre de la agencia como "lista"). */
+function agenciasLeer(){ return { ok:true, agencias:_summaryAgencias() }; }
+function agenciaGuardar(body){
+  try {
+    var accion = String((body && body.accion)||'').toLowerCase();
+    var nombre = String((body && body.nombre)||'').trim();
+    var lista = _summaryAgencias();
+    if (accion === 'crear' || accion === 'add'){
+      if (!nombre) return { ok:false, error:'Nombre de agencia requerido.' };
+      var existe = lista.some(function(a){ return _sumNorm(a) === _sumNorm(nombre); });
+      if (!existe) lista.push(nombre);
+    } else if (accion === 'borrar' || accion === 'remove'){
+      lista = lista.filter(function(a){ return _sumNorm(a) !== _sumNorm(nombre); });
+    } else if (accion === 'set' && Array.isArray(body.agencias)){
+      lista = body.agencias.map(function(x){ return String(x||'').trim(); }).filter(Boolean);
+    } else {
+      return { ok:false, error:'Acción no válida (crear|borrar|set).' };
+    }
+    PropertiesService.getScriptProperties().setProperty('AGENCIAS', JSON.stringify(lista));
+    return { ok:true, agencias:lista };
+  } catch(ex){ return { ok:false, error:ex.message }; }
 }
 
 /* Clasificación por DEFECTO (cuando aún no está en Summary_Config).
