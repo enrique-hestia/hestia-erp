@@ -51,6 +51,12 @@ function _summaryEsAgencia(clave){
   for (var i=0;i<ags.length;i++){ var a=_sumNorm(ags[i]); if (a && n.indexOf(a) > -1) return true; }
   return false;
 }
+// Nombre CANÓNICO de la agencia que matchea (ej. "REPROVIDA"), para el sub-nivel del reporte.
+function _summaryAgenciaNombre(clave){
+  var n = _sumNorm(clave), ags = _summaryAgencias();
+  for (var i=0;i<ags.length;i++){ var a=_sumNorm(ags[i]); if (a && n.indexOf(a) > -1) return ags[i]; }
+  return '';
+}
 
 /* CRUD de AGENCIAS (Script Property). Cada agencia es también una LISTA DE PRECIOS
    en el catálogo (BD_Precios usa el nombre de la agencia como "lista"). */
@@ -542,8 +548,9 @@ function readSummary(fechaInicio, fechaFin) {
         // AGENCIAS: REPROVIDA (y futuras) se agrupan bajo "Agencias" → nombre de la agencia → items.
         // Ej: Agencias (l1) › REPROVIDA (l2 = nombre de la agencia) › productos.
         if (_summaryEsAgencia(l1) || _summaryEsAgencia(r.categoria)) {
-          var _agNom = String(r.grupoU||'').trim() || String(r.categoria||'').trim();
-          l1 = 'Agencias'; l2 = _agNom;
+          var _agNom = _summaryAgenciaNombre(l1) || _summaryAgenciaNombre(r.categoria)
+                     || String(r.grupoU||'').trim() || String(r.categoria||'').trim();
+          l1 = 'Agencias'; l2 = _agNom;   // Agencias › REPROVIDA (nombre canónico) › items
         }
         var prod = String(r.producto||'').trim() || l2 || '(sin producto)';
         var cant = Number(r.cantidad)||0; if(!cant) cant=1;
