@@ -611,7 +611,9 @@ function readSummary(fechaInicio, fechaFin) {
               rows:p.rows.sort(function(a,b){ return b.monto-a.monto; }) }; });
         }
         var subitems;
-        if (subsArr.length <= 1){
+        // Agencias SIEMPRE conserva el nivel del nombre de la agencia (aunque haya una sola),
+        // para que se vea "Agencias › REPROVIDA › items" y no se aplane.
+        if (subsArr.length <= 1 && l1.label !== 'Agencias'){
           // Un solo subgrupo → mostrar productos directos (nivel 2 = producto)
           subitems = subsArr.length ? prodsOf(subsArr[0]) : [];
         } else {
@@ -648,7 +650,7 @@ function readSummary(fechaInicio, fechaFin) {
     var egSum = cogsA+opexA+gaA+taxA;
     return {
       ok:true,
-      motorVer: 'agencias-l2-2026.07.09c',   // sello de versión del backend (para confirmar el redeploy)
+      motorVer: 'agencias-l2-2026.07.09d',   // sello de versión del backend (para confirmar el redeploy)
       periodo:{ inicio:fi, fin:ff }, prev:{ inicio:pi, fin:pf, yoy:comparaYoY },
       lineas: lineas,
       metricas:{ revenue:revA, cogs:cogsA, grossProfit:gpA, opex:opexA, clinicContribution:ccA,
