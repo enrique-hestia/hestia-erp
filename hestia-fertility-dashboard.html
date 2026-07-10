@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.09.113 -->
+﻿<!-- app-build:2026.07.09.114 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -10899,6 +10899,12 @@ function renderAjustes() {
     var savedR = localStorage.getItem('hestia_refresh_ms');
     sel.value  = savedR === 'manual' ? 'manual' : (savedR || String(AUTO_REFRESH_MS));
     if (!sel.value) sel.value = String(AUTO_REFRESH_MS);
+    // Permiso: solo quien tenga 'cambiar_auto_refresh' puede modificarlo (config en Roles).
+    var _puedeRefresh = (typeof hasPermission==='function') ? hasPermission('cambiar_auto_refresh') : true;
+    sel.disabled = !_puedeRefresh;
+    sel.title = _puedeRefresh ? '' : 'No tienes permiso para cambiar el auto-refresh. Se asigna en Gestión de Roles.';
+    sel.style.opacity = _puedeRefresh ? '' : '.6';
+    sel.style.cursor  = _puedeRefresh ? '' : 'not-allowed';
   }
   set('cfg-refresh', _refreshCurrentMs ? (_refreshCurrentMs / 60000) + ' min' : 'Manual');
   set('cfg-cache',       (FRONTEND_CACHE_MS / 60000) + ' min');
@@ -19758,7 +19764,8 @@ var OP_PERMS_CATALOG = [
   {key:'export_data',      label:'Exportar datos',                   cat:'General'},
   {key:'docs_enviar',      label:'Enviar documentos por correo',     cat:'Documentos y Correo'},
   {key:'pagos_autorizar',  label:'Autorizar pagos (flujo próximo)',  cat:'Documentos y Correo'},
-  {key:'ver_datos_sensibles', label:'Ver nombres y datos sensibles (pacientes, empleados, proveedores)', cat:'Privacidad'}
+  {key:'ver_datos_sensibles', label:'Ver nombres y datos sensibles (pacientes, empleados, proveedores)', cat:'Privacidad'},
+  {key:'cambiar_auto_refresh', label:'Cambiar el auto-refresh (frecuencia de actualización)', cat:'Sistema'}
 ];
 
 // Fallback hardcoded (se usa solo si la sesión no trae permisosOperativos)
@@ -19915,7 +19922,14 @@ function _applyRefreshInterval() {
   }
 }
 
-function startAutoRefresh(ms) {
+function startAutoRefresh(ms, _fromInit) {
+  // Blindaje: solo quien tiene el permiso puede CAMBIAR el auto-refresh (no aplica al
+  // arranque interno _fromInit, que solo restaura el valor guardado).
+  if (!_fromInit && typeof hasPermission === 'function' && !hasPermission('cambiar_auto_refresh')) {
+    try { var _s=document.getElementById('cfg-refresh-select'); if(_s) _s.value = _refreshCurrentMs ? String(_refreshCurrentMs) : 'manual'; } catch(e){}
+    if (typeof toast === 'function') toast('No tienes permiso para cambiar el auto-refresh.'); else alert('No tienes permiso para cambiar el auto-refresh.');
+    return;
+  }
   _refreshCurrentMs = ms;
   _applyRefreshInterval();   // arranca el polling solo si la pestaña está visible
   // Persistir en localStorage
@@ -19938,7 +19952,7 @@ async function initApp() {
   var initMs = savedRefresh === 'manual' ? null
              : savedRefresh ? parseInt(savedRefresh)
              : AUTO_REFRESH_MS;
-  startAutoRefresh(initMs);
+  startAutoRefresh(initMs, true);   // arranque: restaura el valor guardado sin checar permiso
   // Precargar catálogo de proveedores para los dropdowns de todo el ERP
   setTimeout(preloadProveedores, 1500);
   // Precargar configuración de dropdowns (subtipo, forma de pago, etc.)

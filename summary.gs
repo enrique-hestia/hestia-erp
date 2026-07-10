@@ -489,8 +489,12 @@ function readSummary(fechaInicio, fechaFin) {
         // Nivel 3 (sub-item) = PROVEEDOR (o subtipo si no hay proveedor, como en Gastos Varios)
         var provLbl = String(r.proveedor||'').trim() || String(r.subtipo||'').trim() || String(r.concepto||'').trim() || '(sin proveedor)';
         var meta = [String(r.concepto||'').trim(), String(r.subtipo||'').trim(), String(r.tipo||'').trim()].filter(Boolean).join(' · ');
+        // NÓMINA: no exponer sueldos individuales — colapsar a un solo "Nómina" con su total,
+        // sin desglose por persona ni montos individuales (aplica a todos los usuarios).
+        var _esNomina = (_sumNorm(sub2) === 'payroll');
+        if (_esNomina) { provLbl = 'Nómina'; meta = ''; }
         if (enActual){ line.actual+=monto; recon.egresosTotal+=monto;
-          addSub(line, provLbl, monto, 1, true, {fecha:f, nombre:r.proveedor, concepto:(String(r.concepto||'')+' · '+String(r.subtipo||'')), monto:monto, subtipo:r.subtipo}, '', meta);
+          addSub(line, provLbl, monto, 1, true, (_esNomina ? null : {fecha:f, nombre:r.proveedor, concepto:(String(r.concepto||'')+' · '+String(r.subtipo||'')), monto:monto, subtipo:r.subtipo}), '', meta);
           var sk=_sumNorm(r.subtipo); if (LAB_SUBS[sk]){ if(!labInsMap[sk]) labInsMap[sk]={subtipo:r.subtipo,total:0,count:0}; labInsMap[sk].total+=monto; labInsMap[sk].count++; }
         }
         if (enPrev){ line.prev+=monto; addSub(line, provLbl, monto, 1, false, null, '', meta); }
@@ -509,9 +513,13 @@ function readSummary(fechaInicio, fechaFin) {
         if (!enActual && !enPrev) return;
         // 3 niveles: Grupo (col U) → Subgrupo (categoría) → Producto
         var l1 = String(r.grupoU||'').trim() || String(r.categoria||'').trim() || '(Sin grupo)';
-        // AGENCIAS: REPROVIDA (y futuras) se agrupan bajo "Agencias" en el reporte.
-        if (_summaryEsAgencia(l1) || _summaryEsAgencia(r.categoria)) l1 = 'Agencias';
         var l2 = String(r.categoria||'').trim();
+        // AGENCIAS: REPROVIDA (y futuras) se agrupan bajo "Agencias" → nombre de la agencia → items.
+        // Ej: Agencias (l1) › REPROVIDA (l2 = nombre de la agencia) › productos.
+        if (_summaryEsAgencia(l1) || _summaryEsAgencia(r.categoria)) {
+          var _agNom = String(r.grupoU||'').trim() || String(r.categoria||'').trim();
+          l1 = 'Agencias'; l2 = _agNom;
+        }
         var prod = String(r.producto||'').trim() || l2 || '(sin producto)';
         var cant = Number(r.cantidad)||0; if(!cant) cant=1;
         var line = getRev(l1, _summaryRevOrden(l1));
