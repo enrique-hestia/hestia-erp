@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.09.126 -->
+﻿<!-- app-build:2026.07.09.127 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -18891,6 +18891,7 @@ var _REPORT_TPL_LIST=[
 var _REPORT_TYPES=[
   {id:'proveedor',     label:'Reporte de proveedor',       defaultTpl:'ejecutivo'},
   {id:'estado-cuenta', label:'Estado de cuenta',           defaultTpl:'celula'},
+  {id:'cobranza',      label:'Cobranza (estado por paciente)', defaultTpl:'celula'},
   {id:'orden-compra',  label:'Orden de compra',            defaultTpl:'editorial'},
   {id:'inventario-mov',label:'Movimientos de inventario',  defaultTpl:'vida'},
   {id:'ingresos-res',  label:'Resumen de ingresos',        defaultTpl:'ejecutivo'},
@@ -26052,19 +26053,46 @@ function cobRender(d){
     d.abonos.forEach(function(a,i){ h+='<tr style="border-bottom:1px solid var(--color-divider);'+(i%2?'background:var(--color-surface-2)':'')+'"><td style="padding:9px 14px">'+ccFch(a.fecha)+' · '+ccEsc(a.formaPago||a.tipo||'')+(a.nota?' · '+ccEsc(a.nota):'')+'</td><td style="padding:9px 14px;text-align:right;font-weight:700;color:#16a34a">'+ccFmt(a.monto)+'</td></tr>'; });
     h+='</tbody></table></div>';
   }
+  // detalle completo de lo vendido (todas las líneas de ingresos del paciente)
+  if(d.ventas && d.ventas.length){
+    h+='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px;overflow:hidden;margin-top:18px">';
+    h+='<div style="padding:12px 16px;border-bottom:1px solid var(--color-divider);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span style="font-size:13px;font-weight:700">Detalle de lo vendido</span><span style="font-size:11px;color:var(--color-text-muted)">'+d.ventas.length+' partidas · Total '+ccFmt(d.totalVendido||0)+' · Pagado '+ccFmt(d.totalPagadoVentas||0)+'</span></div>';
+    h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:600px"><thead><tr style="border-bottom:2px solid var(--color-divider)">'
+      +'<th style="padding:8px 12px;text-align:left;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Fecha</th>'
+      +'<th style="padding:8px 12px;text-align:left;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Concepto</th>'
+      +'<th style="padding:8px 12px;text-align:right;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Cant</th>'
+      +'<th style="padding:8px 12px;text-align:right;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Total</th>'
+      +'<th style="padding:8px 12px;text-align:right;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Pagado</th>'
+      +'<th style="padding:8px 12px;text-align:right;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Saldo</th>'
+      +'</tr></thead><tbody>';
+    d.ventas.forEach(function(v,i){
+      h+='<tr style="border-bottom:1px solid var(--color-divider);'+(i%2?'background:var(--color-surface-2)':'')+'">'
+        +'<td style="padding:7px 12px;white-space:nowrap;color:var(--color-text-muted)">'+ccFch(v.fecha)+'</td>'
+        +'<td style="padding:7px 12px">'+ccEsc(v.producto||'—')+'<div style="font-size:9.5px;color:var(--color-text-muted)">'+(v.op?'OP '+ccEsc(v.op)+' · ':'')+ccEsc(v.categoria||'')+(v.formaPago?' · '+ccEsc(v.formaPago):'')+'</div></td>'
+        +'<td style="padding:7px 12px;text-align:right;color:var(--color-text-muted)">'+(v.cantidad||1)+'</td>'
+        +'<td style="padding:7px 12px;text-align:right">'+ccFmt(v.total)+'</td>'
+        +'<td style="padding:7px 12px;text-align:right;color:#16a34a">'+ccFmt(v.pagado)+'</td>'
+        +'<td style="padding:7px 12px;text-align:right;font-weight:700;color:'+(v.saldo>0.01?'#c83c3c':'var(--color-text-muted)')+'">'+(v.saldo>0.01?ccFmt(v.saldo):'—')+'</td>'
+        +'</tr>';
+    });
+    h+='</tbody></table></div></div>';
+  }
   res.innerHTML=h;
   var pb=document.getElementById('cob-print'); if(pb) pb.style.display='flex';
 }
 function cobImprimir(){
   if(!_cobData) return;
   var d=_cobData, sus=d.suscripcion, hoy=ccFch(new Date().toISOString().substring(0,10));
-  var rows=(d.saldos||[]).map(function(o){ return [ccFch(o.fecha), o.concepto||'—', 'OP '+o.op, ccFmt(o.saldo)]; });
-  if(sus&&sus.montoDebe>0) rows.push([ccFch(sus.proximoCobro),'Suscripción crío ('+sus.plan+')', sus.estatus, ccFmt(sus.montoDebe)]);
+  // El PDF lleva TODO el detalle de lo vendido (partida por partida)
+  var rows=(d.ventas||[]).map(function(v){ return [ccFch(v.fecha), (v.producto||'—')+(v.op?' · OP '+v.op:''), String(v.cantidad||1), ccFmt(v.total), ccFmt(v.pagado), v.saldo>0.01?ccFmt(v.saldo):'—']; });
+  // Saldos de registro (saldo inicial / cargo a crédito) que no vienen de una venta
+  (d.saldos||[]).forEach(function(o){ if(o.origen==='registro') rows.push([ccFch(o.fecha), o.concepto||'Saldo', '—', ccFmt(o.total), ccFmt((o.total||0)-(o.saldo||0)), ccFmt(o.saldo)]); });
+  if(sus&&sus.montoDebe>0) rows.push([ccFch(sus.proximoCobro),'Suscripción crío ('+sus.plan+')', '—', ccFmt(sus.montoDebe), '$0.00', ccFmt(sus.montoDebe)]);
   var susDebe=(sus&&sus.montoDebe)||0, totalDebe=(d.totalSaldo||0)+susDebe;
-  var kpis=[{value:ccFmt(totalDebe),label:'Total por cobrar'},{value:ccFmt(d.totalSaldo||0),label:'Saldos'},{value:susDebe>0?ccFmt(susDebe):'Al día',label:'Suscripción'}];
+  var kpis=[{value:ccFmt(totalDebe),label:'Total por cobrar'},{value:ccFmt(d.totalSaldo||0),label:'Saldos'},{value:susDebe>0?ccFmt(susDebe):'Al día',label:'Suscripción'},{value:ccFmt(d.totalVendido||0),label:'Total vendido'}];
   if(typeof hfReportPrint==='function'){
-    hfReportPrint('estado-cuenta',{ title:'Estado de cobranza', subject:d.paciente, period:'Emitido el '+hoy, generado:'Hestia ERP · '+hoy,
-      kpis:kpis, cols:['Fecha','Concepto','Referencia','Saldo'], rows:rows, totalLabel:'Total por cobrar', totalValue:ccFmt(totalDebe) });
+    hfReportPrint('cobranza',{ title:'Estado de cobranza', subject:d.paciente, period:'Emitido el '+hoy, generado:'Hestia ERP · '+hoy,
+      kpis:kpis, cols:['Fecha','Concepto','Cant','Total','Pagado','Saldo'], rows:rows, totalLabel:'Total por cobrar', totalValue:ccFmt(totalDebe) });
   } else { window.print(); }
 }
 </script>

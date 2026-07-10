@@ -33,7 +33,7 @@ var COBRANZA_CFG_KEY  = 'COBRANZA_CONFIG';
 var COBRANZA_ABONOS   = 'Abonos_Cobrar';
 var COBRANZA_CARGOS   = 'Cuentas_Cobrar';
 var COBRANZA_SUS      = 'Suscripciones_Crio';
-var COBRANZA_VER      = 'cobranza-2026.07.09g';
+var COBRANZA_VER      = 'cobranza-2026.07.09h';
 
 /* ───────────────────────── Config ───────────────────────── */
 function _cobCfg() {
@@ -666,6 +666,34 @@ function readSuscripcionesCrio(body) {
 }
 
 /* ═════════════════ Estado de cuenta de cobranza (por paciente) ═════════════════ */
+// Detalle COMPLETO de lo que se le vendió al paciente (todas sus líneas de BD_Ingresos).
+function _cobVentasPaciente(keyBuscar) {
+  var out = [];
+  var sh = SpreadsheetApp.openById(INGRESOS_SS_ID).getSheetByName(BD_INGRESOS_TAB);
+  if (!sh) return out;
+  var data = sh.getDataRange().getValues();
+  if (data.length < 2) return out;
+  var H = data[0].map(function (x) { return _cobLower(x); });
+  var hc = function () { for (var a = 0; a < arguments.length; a++) { var k = H.indexOf(arguments[a]); if (k > -1) return k; } return -1; };
+  var iOp = hc('op'), iFecha = hc('fecha'), iPac = hc('paciente'), iCat = hc('categoria', 'categoría'),
+      iProd = hc('producto'), iCant = hc('cantidad'), iTotal = hc('totalpagar', 'total a pagar', 'total'),
+      iPag = hc('pagado'), iFP = hc('formapago', 'forma de pago', 'forma pago');
+  for (var r = 1; r < data.length; r++) {
+    var row = data[r];
+    if (_cobKeyNom(row[iPac]) !== keyBuscar) continue;
+    var total = _cobNum(row[iTotal]);
+    var pag = iPag > -1 ? _cobNum(row[iPag]) : 0;
+    var saldoL = (pag > 0.01 && pag < total - 0.01) ? (total - pag) : 0; // saldo real solo si pago parcial
+    out.push({
+      fecha: _cobStr(_cobD(row[iFecha])), op: String(row[iOp] || '').trim(),
+      producto: String(row[iProd] || ''), categoria: String(row[iCat] || ''),
+      cantidad: iCant > -1 ? _cobNum(row[iCant]) : 1, total: total, pagado: pag, saldo: saldoL,
+      formaPago: iFP > -1 ? String(row[iFP] || '') : ''
+    });
+  }
+  out.sort(function (a, b) { return a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0; });
+  return out;
+}
 function readEstadoCobranza(pacienteNombre) {
   try {
     if (!pacienteNombre) return { ok: false, error: 'Nombre de paciente requerido' };
@@ -699,13 +727,19 @@ function readEstadoCobranza(pacienteNombre) {
     });
     var susCargosTotal = 0; susCargos.forEach(function (r) { susCargosTotal += r.monto; });
 
+    // Detalle completo de lo vendido (todas las líneas de ingresos del paciente)
+    var ventas = _cobMasked() ? [] : _cobVentasPaciente(keyBuscar);
+    var totalVendido = 0, totalPagadoVentas = 0;
+    ventas.forEach(function (v) { totalVendido += v.total; totalPagadoVentas += v.pagado; });
+
     return {
       ok: true, version: COBRANZA_VER,
       paciente: _cobMasked() ? '—' : String(pacienteNombre).trim(),
       masked: _cobMasked(),
       saldos: saldos, totalSaldo: totalSaldo,
       abonos: misAbonos, suscripcion: miSus,
-      suscripcionCargos: susCargos, suscripcionCargosTotal: susCargosTotal
+      suscripcionCargos: susCargos, suscripcionCargosTotal: susCargosTotal,
+      ventas: ventas, totalVendido: totalVendido, totalPagadoVentas: totalPagadoVentas
     };
   } catch (ex) {
     return { ok: false, error: ex.message, version: COBRANZA_VER };
