@@ -599,6 +599,11 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(cobExterno(body));
     }
+    if (body.action === 'cobPacienteFlag') {
+      if (typeof cobPacienteFlag !== 'function')
+        return jsonResponse({ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(cobPacienteFlag(body));
+    }
     // Tareas programadas (scheduler)
     if (body.action === 'updateScheduledTask')     return jsonResponse(updateScheduledTask(body));
     if (body.action === 'setupScheduledTriggers')  return jsonResponse(setupScheduledTriggers());

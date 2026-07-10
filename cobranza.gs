@@ -33,7 +33,7 @@ var COBRANZA_CFG_KEY  = 'COBRANZA_CONFIG';
 var COBRANZA_ABONOS   = 'Abonos_Cobrar';
 var COBRANZA_CARGOS   = 'Cuentas_Cobrar';
 var COBRANZA_SUS      = 'Suscripciones_Crio';
-var COBRANZA_VER      = 'cobranza-2026.07.09e';
+var COBRANZA_VER      = 'cobranza-2026.07.09f';
 
 /* ───────────────────────── Config ───────────────────────── */
 function _cobCfg() {
@@ -66,34 +66,41 @@ function setupCobranzaConfig() {
   return { ok: true, version: COBRANZA_VER, config: cfg };
 }
 
-/* ── Clasificación Externo (paga suscripción desde el año 1) ──
- * Por DEFAULT todos son Hestia → primer año GRATIS. Solo los marcados
- * explícitamente aquí (override manual) pagan desde el inicio. No se usa la
- * columna EXTERNO del Inventario Crío porque no representa la clasificación de
- * cobro (marcaba como externos a pacientes directos → cobraba de más). */
-var COBRANZA_EXT_KEY = 'COBRANZA_EXTERNOS';
-function _cobExternos() {
-  try {
-    var raw = PropertiesService.getScriptProperties().getProperty(COBRANZA_EXT_KEY);
-    if (raw) { var a = JSON.parse(raw); var m = {}; for (var i = 0; i < a.length; i++) m[_cobKeyNom(a[i])] = true; return m; }
-  } catch (e) {}
+/* ── Configuración por paciente (suscripción crío) ──
+ * Por DEFAULT: Hestia (año 1 gratis) + plan ANUAL. Flags manuales por paciente:
+ *   externo → paga desde el año 1 (sin año gratis)
+ *   mensual → inscrito a pago mensual (registra vencimientos mensuales; el default
+ *             es anual — el plan mensual es opt-in, no se deriva del producto)
+ *   autopay → pago automático (solo informativo; se confirma el cobro del próximo año)
+ * No se usa la columna EXTERNO del Inventario Crío (no es clasificación de cobro). */
+var COBRANZA_PAC_KEY = 'COBRANZA_PAC_CFG';
+function _cobPacCfg() {
+  try { var raw = PropertiesService.getScriptProperties().getProperty(COBRANZA_PAC_KEY); if (raw) return JSON.parse(raw) || {}; } catch (e) {}
   return {};
 }
-function cobExterno(body) {
+function _cobSetPacFlag(paciente, flag, value) {
+  var key = _cobKeyNom(paciente); if (!key) return;
+  var cfg = _cobPacCfg();
+  if (!cfg[key]) cfg[key] = {};
+  cfg[key][flag] = !!value;
+  cfg[key]._nombre = String(paciente).trim();
+  if (!cfg[key].externo && !cfg[key].mensual && !cfg[key].autopay) delete cfg[key];
+  PropertiesService.getScriptProperties().setProperty(COBRANZA_PAC_KEY, JSON.stringify(cfg));
+}
+function cobPacienteFlag(body) {
   try {
     if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'editar_egresos'))
-      return { ok: false, error: 'Sin permiso para marcar externos (requiere editar cuentas por pagar).' };
-    var key = _cobKeyNom(body.paciente || ''); if (!key) return { ok: false, error: 'Paciente inválido' };
-    var raw = PropertiesService.getScriptProperties().getProperty(COBRANZA_EXT_KEY);
-    var arr = []; try { if (raw) arr = JSON.parse(raw); } catch (e) {}
-    var esExt = (body.externo === true || body.externo === 'true');
-    var existe = false; for (var i = 0; i < arr.length; i++) { if (_cobKeyNom(arr[i]) === key) { existe = true; break; } }
-    if (esExt && !existe) arr.push(String(body.paciente).trim());
-    else if (!esExt) arr = arr.filter(function (k) { return _cobKeyNom(k) !== key; });
-    PropertiesService.getScriptProperties().setProperty(COBRANZA_EXT_KEY, JSON.stringify(arr));
-    return { ok: true, version: COBRANZA_VER, externo: esExt, paciente: String(body.paciente).trim() };
+      return { ok: false, error: 'Sin permiso (requiere editar cuentas por pagar).' };
+    var flag = String(body.flag || '').toLowerCase();
+    if (['externo', 'mensual', 'autopay'].indexOf(flag) < 0) return { ok: false, error: 'Flag inválido' };
+    if (!body.paciente) return { ok: false, error: 'Paciente inválido' };
+    var val = (body.value === true || body.value === 'true');
+    _cobSetPacFlag(body.paciente, flag, val);
+    return { ok: true, version: COBRANZA_VER, flag: flag, value: val, paciente: String(body.paciente).trim() };
   } catch (ex) { return { ok: false, error: ex.message, version: COBRANZA_VER }; }
 }
+// Back-compat: el botón "Tipo" del frontend manda action=cobExterno.
+function cobExterno(body) { body.flag = 'externo'; body.value = (body.externo === true || body.externo === 'true'); return cobPacienteFlag(body); }
 
 /* ───────────────────────── Helpers ───────────────────────── */
 function _cobNum(v) {
@@ -430,13 +437,16 @@ function _cobReadCrio() {
     m.oov += oov; m.emb += emb;
     if (iExt > -1 && !_cobIsBlank(extRaw)) { m.externoLab = m.externoLab || esExtLab; }
   }
-  // Clasificación de cobro = override manual (default Hestia = año gratis). La
-  // columna EXTERNO del Inventario Crío se guarda solo como pista (externoLab).
-  var externos = _cobExternos();
+  // Config de cobro por paciente (default Hestia + anual). SOLO se cobra a quien
+  // tenga inventario (OOV o EMB > 0): en ceros no hay nada que almacenar → no se cobra.
+  var pacCfg = _cobPacCfg();
   for (var k in map) {
     var mm = map[k];
-    mm.externo = !!externos[mm.key];
-    if ((mm.oov + mm.emb) <= 0 && !mm.crioInicio) continue;  // sin inventario ni fecha → ignorar
+    if ((mm.oov + mm.emb) <= 0) continue;  // sin inventario → no se cobra almacenamiento
+    var pc = pacCfg[mm.key] || {};
+    mm.externo = !!pc.externo;
+    mm.mensual = !!pc.mensual;
+    mm.autopay = !!pc.autopay;
     out.pacientes.push(mm);
   }
   return out;
@@ -482,19 +492,34 @@ function _cobCalcSuscripcion(pac, pagos, susAbonos, cfg, today) {
   // Determina plan, última fecha de pago, cobertura, estatus y monto que debe.
   var esExterno = !!pac.externo;
   var crio = pac.crioInicio;
-  // plan: del último pago de almacenamiento que tenga plan definido, si no default
-  var plan = cfg.planDefault, meses = (cfg.planDefault === 'mensual' ? 1 : 12), tarifa = (cfg.planDefault === 'mensual' ? cfg.tarifaMensual : cfg.tarifaAnual);
+  // El plan es por INSCRIPCIÓN (override), NO se deriva del producto: DEFAULT ANUAL.
+  // Solo los inscritos a meses (pac.mensual) usan cobro mensual; los vencidos que no
+  // están inscritos se cobran anual (no se difiere a meses).
+  var plan = pac.mensual ? 'mensual' : 'anual';
+  var meses = plan === 'mensual' ? 1 : 12;
+  var tarifa = plan === 'mensual' ? cfg.tarifaMensual : cfg.tarifaAnual;
   var lastPago = null, ultProducto = '';
   var todos = (pagos || []).slice();
-  // incluir abonos de suscripción como "pagos"
-  (susAbonos || []).forEach(function (a) { var f = _cobD(a.fecha); if (f) todos.push({ fecha: f, producto: 'Abono suscripción', monto: a.monto, plan: null, meses: null }); });
+  (susAbonos || []).forEach(function (a) { var f = _cobD(a.fecha); if (f) todos.push({ fecha: f, producto: 'Abono suscripción', monto: a.monto }); });
   todos.sort(function (a, b) { return a.fecha.getTime() - b.fecha.getTime(); });
   for (var i = 0; i < todos.length; i++) {
     var p = todos[i];
-    if (p.plan) { plan = p.plan; meses = p.meses; ultProducto = p.producto; if (plan === 'mensual') tarifa = cfg.tarifaMensual; else if (plan === 'anual') tarifa = cfg.tarifaAnual; else tarifa = p.monto || tarifa; }
+    if (p.producto) ultProducto = p.producto;
     if (!lastPago || p.fecha.getTime() > lastPago.getTime()) lastPago = p.fecha;
   }
-  var tienePlan = todos.length > 0;
+  var tienePlan = todos.length > 0 || !!pac.mensual;
+
+  // Pago automático: solo informativo (se cobra solo). Se confirma el próximo año.
+  if (pac.autopay) {
+    var covUntil = lastPago ? _cobAddYears(lastPago, 1) : null;
+    return {
+      plan: plan, tarifa: tarifa, esExterno: esExterno, autopay: true,
+      crioInicio: _cobStr(crio), billStart: '', ultimoPago: _cobStr(lastPago), ultProducto: ultProducto,
+      coberturaHasta: _cobStr(covUntil ? new Date(covUntil.getTime() - 86400000) : null),
+      proximoCobro: _cobStr(covUntil), estatus: 'Pago automático', montoDebe: 0, mesesDebe: 0,
+      tienePlan: true, oov: pac.oov, emb: pac.emb
+    };
+  }
 
   // fecha de inicio de cobro (billStart): con año gratis para Hestia
   var billStart;
@@ -601,11 +626,12 @@ function _cobBuildSuscripciones() {
       ultimoPago: calc.ultimoPago, coberturaHasta: calc.coberturaHasta, proximoCobro: calc.proximoCobro,
       estatus: calc.estatus, montoDebe: calc.montoDebe, mesesDebe: calc.mesesDebe,
       generado: genPend, generadoCount: genCount, porGenerar: Math.max(0, calc.montoDebe - genPend),
-      oov: calc.oov, emb: calc.emb, tienePlan: calc.tienePlan
+      oov: calc.oov, emb: calc.emb, tienePlan: calc.tienePlan,
+      autopay: !!calc.autopay, mensual: !!pac.mensual
     });
   }
   // orden: vencidas primero (por monto), luego por vencer, luego el resto
-  var rank = { 'Vencida': 0, 'Falta suscripción': 1, 'Por vencer': 2, 'Vigente': 3, 'Cortesía': 4 };
+  var rank = { 'Vencida': 0, 'Falta suscripción': 1, 'Por vencer': 2, 'Vigente': 3, 'Cortesía': 4, 'Pago automático': 5 };
   lista.sort(function (a, b) {
     var ra = rank[a.estatus] === undefined ? 5 : rank[a.estatus];
     var rb = rank[b.estatus] === undefined ? 5 : rank[b.estatus];

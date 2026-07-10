@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.09.122 -->
+﻿<!-- app-build:2026.07.09.123 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -25478,7 +25478,8 @@ var CC_ESTATUS_COLOR = {
   'Falta suscripción':{bg:'rgba(217,119,6,.14)', fg:'#b45309'},
   'Por vencer':       {bg:'rgba(202,138,4,.14)', fg:'#a16207'},
   'Vigente':          {bg:'rgba(22,163,74,.12)', fg:'#16a34a'},
-  'Cortesía':         {bg:'rgba(99,102,241,.12)',fg:'#6366f1'}
+  'Cortesía':         {bg:'rgba(99,102,241,.12)',fg:'#6366f1'},
+  'Pago automático':  {bg:'rgba(14,154,167,.12)',fg:'#0e9aa7'}
 };
 
 function ccInit(force){
@@ -25634,7 +25635,10 @@ function ccRenderSus(){
     h+='<tr style="border-bottom:1px solid var(--color-divider);'+bg+'">'
       +'<td style="padding:9px 12px"><b>'+ccEsc(p.nombre)+'</b><div style="font-size:10px;color:var(--color-text-muted)">'+(p.oov||0)+' ov · '+(p.emb||0)+' emb'+((p.generadoCount>0)?' · <span style="color:#16a34a" title="Periodos ya materializados como cuenta por cobrar">⚑ '+p.generadoCount+' generada(s)</span>':'')+'</div></td>'
       +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+((typeof hasPermission==='function'&&hasPermission('editar_egresos'))?'<span onclick="ccToggleExterno('+ccQ(p.nombre)+','+(p.tipoPaciente==='Externo'?'false':'true')+')" title="Clic para cambiar Hestia/Externo (Externo paga desde el año 1; Hestia año 1 gratis)" style="cursor:pointer;border-bottom:1px dashed var(--color-text-muted)">'+ccEsc(p.tipoPaciente)+'</span>':ccEsc(p.tipoPaciente))+'</td>'
-      +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccEsc(p.plan)+(!p.tienePlan?' <span style="font-size:9px;color:#b45309">(s/def)</span>':'')+'</td>'
+      +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+((typeof hasPermission==='function'&&hasPermission('editar_egresos'))
+        ? '<span onclick="ccTogglePlan('+ccQ(p.nombre)+','+(p.plan==='mensual'?'false':'true')+')" title="Clic: inscribir/quitar pago mensual (default anual)" style="cursor:pointer;border-bottom:1px dashed var(--color-text-muted)">'+ccEsc(p.plan)+'</span>'
+          + ' <span onclick="ccToggleAutopay('+ccQ(p.nombre)+','+(p.autopay?'false':'true')+')" title="Pago automático (solo informativo)" style="cursor:pointer;font-size:9px;padding:1px 5px;border-radius:8px;border:1px solid '+(p.autopay?'#0e9aa7':'var(--color-divider)')+';color:'+(p.autopay?'#0e9aa7':'var(--color-text-muted)')+'">auto'+(p.autopay?' ✓':'')+'</span>'
+        : ccEsc(p.plan))+'</td>'
       +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccFch(p.crioInicio)+'</td>'
       +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccFch(p.ultimoPago)+'</td>'
       +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccFch(p.proximoCobro)+'</td>'
@@ -25714,6 +25718,13 @@ function ccToggleExterno(nombre, externo){
   fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'cobExterno', paciente:nombre, externo:externo, token:s.token||getToken(), usuario:s.email||''})})
     .then(function(r){return r.json();}).then(function(d){ if(d&&d.ok){ ccLoad(true);} else { alert('No se pudo: '+((d&&d.error)||'error')); } }).catch(function(e){alert('Error de red: '+e.message);});
 }
+function _ccPacFlag(nombre, flag, value){
+  var s=getSession()||{};
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'cobPacienteFlag', paciente:nombre, flag:flag, value:value, token:s.token||getToken(), usuario:s.email||''})})
+    .then(function(r){return r.json();}).then(function(d){ if(d&&d.ok){ ccLoad(true);} else { alert('No se pudo: '+((d&&d.error)||'error')); } }).catch(function(e){alert('Error de red: '+e.message);});
+}
+function ccTogglePlan(nombre, mensual){ _ccPacFlag(nombre,'mensual',mensual); }
+function ccToggleAutopay(nombre, autopay){ _ccPacFlag(nombre,'autopay',autopay); }
 function ccEditarSaldo(rowNum, paciente, saldo, concepto){
   var body=''
     +'<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:12px">Editar la cuenta por cobrar de <b>'+ccEsc(paciente)+'</b>.</div>'
