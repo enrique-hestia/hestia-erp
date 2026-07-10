@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.09.129 -->
+﻿<!-- app-build:2026.07.09.130 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1021,6 +1021,8 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 <div id="view-cuentas-cobrar" class="view" style="display:none"><div id="cc-root"></div></div>
 <!-- Cobranza: estado de cuenta de cobranza por paciente (reporte) -->
 <div id="view-cobranza" class="view" style="display:none"><div id="cob-root"></div></div>
+<!-- Seguro: carta de reembolso para pacientes extranjeros (por operación, con tipo de cambio) -->
+<div id="view-seguro" class="view" style="display:none"><div id="seg-root"></div></div>
 
 <!-- ══ VISTA: PRESUPUESTO ══ -->
 <div id="view-presupuesto" class="view" style="display:none">
@@ -8546,6 +8548,11 @@ async function loadMenu() {
           icono:'wallet', tipo:'vista', orden:(Number(_ecRef.orden)||5)+0.01,
           seccion:_ecRef.seccion, fuente:'cobranza'
         });
+        menuItems.push({
+          id:'seguro', label:'Carta de Seguro', padre:_ecRef.padre||'',
+          icono:'shield-check', tipo:'vista', orden:(Number(_ecRef.orden)||5)+0.02,
+          seccion:_ecRef.seccion, fuente:'seguro'
+        });
       }
     }
     // ── Reorganizar Finanzas: agrupar las vistas del CFO en un submenú "CFO" ──
@@ -11953,6 +11960,14 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     cobInit();
     return;
   }
+  // Carta de Seguro (reembolso para pacientes extranjeros)
+  if (viewId === 'seguro' || (_foundViewItem && /^seguro$/i.test(String(_foundViewItem.fuente||'')))) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _segEl = document.getElementById('view-seguro');
+    if (_segEl) _segEl.style.display = '';
+    segInit();
+    return;
+  }
   // Cuentas por Cobrar — cobranza (Motor A saldos + Motor B suscripciones crío)
   if (/cuentas?.?por.?cobrar/i.test(viewId) || (_foundViewItem && /por.?cobrar|cuentas.?cobrar/i.test(String(_foundViewItem.fuente||'')+' '+String(_foundViewItem.label||'')))) {
     document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
@@ -14847,7 +14862,16 @@ function _renderProveedores(){
   }
   h.push('</tbody></table></div></div>');
   h.push('</div>');
+  // Preservar foco/cursor del buscador al re-renderizar (si no, se perdía el foco
+  // y "no dejaba escribir").
+  var _pvActive = document.activeElement;
+  var _pvWasSearch = _pvActive && _pvActive.classList && _pvActive.classList.contains('pv-search');
+  var _pvCaret = _pvWasSearch ? _pvActive.selectionStart : null;
   root.innerHTML=h.join('');
+  if (_pvWasSearch) {
+    var _pvNew = root.querySelector('.pv-search');
+    if (_pvNew) { _pvNew.focus(); try { var _p=(_pvCaret==null)?_pvNew.value.length:_pvCaret; _pvNew.setSelectionRange(_p,_p); } catch(e){} }
+  }
 }
 
 /* ── Formulario crear / editar ──────────────────────────────────── */
@@ -17989,6 +18013,7 @@ function navigateTo(viewId) {
   if (viewId === 'egresos') { displayId = 'gastos'; }
   if (viewId === 'estado-cuenta') { displayId = 'estado-cuenta'; ecInit(); }
   if (viewId === 'cobranza' || (_foundItem && /^cobranza$/i.test(String(_foundItem.fuente||'')))) { displayId = 'cobranza'; }
+  else if (viewId === 'seguro' || (_foundItem && /^seguro$/i.test(String(_foundItem.fuente||'')))) { displayId = 'seguro'; }
   else if (/cuentas?.?por.?cobrar/i.test(viewId) || (_foundItem && /por.?cobrar|cuentas.?cobrar/i.test(String(_foundItem.fuente||'')+' '+String(_foundItem.label||'')))) { displayId = 'cuentas-cobrar'; }
   if (/concilia/i.test(viewId)) { displayId = 'conciliacion'; }
   // Productos: todas las sub-categorías usan view-productos-catalogo
@@ -23398,8 +23423,11 @@ window.cxpOpenPay = async function(rowNum, proveedor, monto, divisa) {
     var _prov = (_provList||[]).filter(function(p){ return p && (_nrm(p.nombre)===_pn || _nrm(p.comercial)===_pn); })[0];
     if (_prov && (_prov.cuenta || _prov.banco)) {
       clabeHtml = '<div style="background:var(--color-surface,#f8fafc);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:10px 12px;margin-bottom:14px">'
-        + '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af);margin-bottom:5px">Datos bancarios del proveedor</div>'
-        + (_prov.banco?'<div style="font-size:12px"><b>Banco:</b> '+_esc(_prov.banco)+'</div>':'')
+        + '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af);margin-bottom:5px">Datos del proveedor</div>'
+        + '<div style="font-size:12px"><b>Razón social:</b> '+_esc(_prov.nombre||'—')+'</div>'
+        + (_prov.comercial?'<div style="font-size:12px"><b>Comercial:</b> '+_esc(_prov.comercial)+'</div>':'')
+        + (_prov.rfc?'<div style="font-size:12px"><b>RFC:</b> <span style="font-family:monospace">'+_esc(_prov.rfc)+'</span></div>':'')
+        + (_prov.banco?'<div style="font-size:12px;margin-top:3px"><b>Banco:</b> '+_esc(_prov.banco)+'</div>':'')
         + (_prov.cuenta?'<div style="display:flex;align-items:center;gap:8px;margin-top:3px;flex-wrap:wrap"><span style="font-size:12px"><b>CLABE / Cuenta:</b> <span style="font-family:monospace;font-size:13px;user-select:all">'+_esc(_prov.cuenta)+'</span></span>'
             + '<button type="button" onclick="(function(b){var t=\''+_esc(String(_prov.cuenta).replace(/\s+/g,''))+'\';if(navigator.clipboard){navigator.clipboard.writeText(t);b.textContent=\'✓ Copiada\';setTimeout(function(){b.textContent=\'📋 Copiar\';},1500);}})(this)" style="padding:3px 9px;border:1px solid var(--color-divider,#e5e7eb);background:none;border-radius:6px;cursor:pointer;font-size:11px">📋 Copiar</button></div>':'')
         + '</div>';
@@ -26037,13 +26065,14 @@ function cobBuscar(){
       _cobData=d; cobRender(d);
     }).catch(function(e){ res.innerHTML='<div style="padding:30px;text-align:center;color:#c83c3c">Error de red: '+e.message+'</div>'; });
 }
-var _cobVista='historico'; // 'historico' | 'periodo'
+var _cobVista='historico'; // 'historico' (todo lo vendido) | 'pendiente' (solo lo que se debe)
 function cobSetVista(v){ _cobVista=v; if(_cobData) cobRender(_cobData); }
 function _cobVentasVista(d){
   var ventas=(d.ventas||[]);
-  if(_cobVista==='periodo'){
-    var fi=currentFechaInicio||'', ff=currentFechaFin||'';
-    ventas=ventas.filter(function(v){ var f=(v.fecha||'').substring(0,10); return (!fi||f>=fi) && (!ff||f<=ff); });
+  if(_cobVista==='pendiente'){
+    // Real por cobrar: solo las partidas con saldo pendiente (no filtra por fecha —
+    // el adeudo puede venir de meses anteriores).
+    ventas=ventas.filter(function(v){ return (v.saldo||0)>0.01; });
   }
   return ventas;
 }
@@ -26059,12 +26088,11 @@ function cobRender(d){
   h+='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:10px;padding:14px 18px"><div style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;margin-bottom:4px">Saldos (adeudos)</div><div style="font-size:18px;font-weight:800;color:#c83c3c">'+ccFmt(d.totalSaldo||0)+'</div></div>';
   h+='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:10px;padding:14px 18px"><div style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;margin-bottom:4px">Suscripción crío</div><div style="font-size:18px;font-weight:800;color:'+(susDebe>0?'#b45309':'#16a34a')+'">'+(susDebe>0?ccFmt(susDebe):'Al día')+'</div></div>';
   h+='</div>';
-  // toggle Histórico / Periodo actual (filtra el detalle de lo vendido)
+  // toggle Histórico completo / Solo por cobrar (filtra el detalle)
   h+='<div style="display:flex;gap:6px;margin-bottom:16px;align-items:center;flex-wrap:wrap">'
     +'<span style="font-size:11px;color:var(--color-text-muted);margin-right:4px">Ver detalle:</span>'
     +'<button onclick="cobSetVista(\'historico\')" style="padding:6px 14px;border:1px solid '+(_cobVista==='historico'?'var(--color-primary)':'var(--color-divider)')+';background:'+(_cobVista==='historico'?'var(--color-primary)':'transparent')+';color:'+(_cobVista==='historico'?'#fff':'var(--color-text-muted)')+';border-radius:20px;font-size:12px;font-weight:600;cursor:pointer">Histórico completo</button>'
-    +'<button onclick="cobSetVista(\'periodo\')" style="padding:6px 14px;border:1px solid '+(_cobVista==='periodo'?'var(--color-primary)':'var(--color-divider)')+';background:'+(_cobVista==='periodo'?'var(--color-primary)':'transparent')+';color:'+(_cobVista==='periodo'?'#fff':'var(--color-text-muted)')+';border-radius:20px;font-size:12px;font-weight:600;cursor:pointer">Periodo actual</button>'
-    +(_cobVista==='periodo'?'<span style="font-size:11px;color:var(--color-text-muted);margin-left:4px">'+ccFch(currentFechaInicio)+' → '+ccFch(currentFechaFin)+'</span>':'')
+    +'<button onclick="cobSetVista(\'pendiente\')" style="padding:6px 14px;border:1px solid '+(_cobVista==='pendiente'?'var(--color-primary)':'var(--color-divider)')+';background:'+(_cobVista==='pendiente'?'var(--color-primary)':'transparent')+';color:'+(_cobVista==='pendiente'?'#fff':'var(--color-text-muted)')+';border-radius:20px;font-size:12px;font-weight:600;cursor:pointer">Solo por cobrar</button>'
   +'</div>';
   // suscripción card
   if(sus){
@@ -26105,8 +26133,8 @@ function cobRender(d){
   var _vvTot=0, _vvPag=0; _vv.forEach(function(v){ _vvTot+=v.total; _vvPag+=v.pagado; });
   if(d.ventas && d.ventas.length){
     h+='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px;overflow:hidden;margin-top:18px">';
-    h+='<div style="padding:12px 16px;border-bottom:1px solid var(--color-divider);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span style="font-size:13px;font-weight:700">Detalle de lo vendido '+(_cobVista==='periodo'?'· periodo actual':'· histórico')+'</span><span style="font-size:11px;color:var(--color-text-muted)">'+_vv.length+' partidas · Total '+ccFmt(_vvTot)+' · Pagado '+ccFmt(_vvPag)+'</span></div>';
-    if(!_vv.length){ h+='<div style="padding:20px 22px;text-align:center;color:var(--color-text-muted);font-size:12px">No hay ventas capturadas entre <b>'+ccFch(currentFechaInicio)+'</b> y <b>'+ccFch(currentFechaFin)+'</b>.<br><span style="font-size:11px;line-height:1.5">El saldo pendiente puede venir de meses anteriores — cambia el rango <b>Del / al</b> de arriba, o usa <b>«Histórico completo»</b> para ver todo el detalle.</span></div>'; }
+    h+='<div style="padding:12px 16px;border-bottom:1px solid var(--color-divider);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span style="font-size:13px;font-weight:700">Detalle de lo vendido '+(_cobVista==='pendiente'?'· solo por cobrar':'· histórico')+'</span><span style="font-size:11px;color:var(--color-text-muted)">'+_vv.length+' partidas · Total '+ccFmt(_vvTot)+' · Pagado '+ccFmt(_vvPag)+'</span></div>';
+    if(!_vv.length){ h+='<div style="padding:20px 22px;text-align:center;color:#16a34a;font-size:12px">✓ '+(_cobVista==='pendiente'?'No hay ventas con saldo pendiente. Revisa arriba «Saldos por cobrar» y la suscripción; usa «Histórico completo» para ver todo lo vendido.':'Sin ventas registradas para este paciente.')+'</div>'; }
     else {
     h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:600px"><thead><tr style="border-bottom:2px solid var(--color-divider)">'
       +'<th style="padding:8px 12px;text-align:left;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Fecha</th>'
@@ -26143,12 +26171,134 @@ function cobImprimir(){
   (d.saldos||[]).forEach(function(o){ if(o.origen==='registro') rows.push([ccFch(o.fecha), o.concepto||'Saldo', '—', ccFmt(o.total), ccFmt((o.total||0)-(o.saldo||0)), ccFmt(o.saldo)]); });
   if(sus&&sus.montoDebe>0) rows.push([ccFch(sus.proximoCobro),'Suscripción crío ('+sus.plan+')', '—', ccFmt(sus.montoDebe), '$0.00', ccFmt(sus.montoDebe)]);
   var susDebe=(sus&&sus.montoDebe)||0, totalDebe=(d.totalSaldo||0)+susDebe;
-  var kpis=[{value:ccFmt(totalDebe),label:'Total por cobrar'},{value:ccFmt(d.totalSaldo||0),label:'Saldos'},{value:susDebe>0?ccFmt(susDebe):'Al día',label:'Suscripción'},{value:ccFmt(_vvTot),label:(_cobVista==='periodo'?'Vendido (periodo)':'Total vendido')}];
-  var periodTxt = (_cobVista==='periodo') ? ('Periodo '+ccFch(currentFechaInicio)+' → '+ccFch(currentFechaFin)+' · Emitido el '+hoy) : ('Histórico completo · Emitido el '+hoy);
+  var kpis=[{value:ccFmt(totalDebe),label:'Total por cobrar'},{value:ccFmt(d.totalSaldo||0),label:'Saldos'},{value:susDebe>0?ccFmt(susDebe):'Al día',label:'Suscripción'},{value:ccFmt(_vvTot),label:(_cobVista==='pendiente'?'Por cobrar (detalle)':'Total vendido')}];
+  var periodTxt = (_cobVista==='pendiente') ? ('Solo lo pendiente por cobrar · Emitido el '+hoy) : ('Histórico completo · Emitido el '+hoy);
   if(typeof hfReportPrint==='function'){
     hfReportPrint('cobranza',{ title:'Estado de cobranza', subject:d.paciente, period:periodTxt, generado:'Hestia ERP · '+hoy,
       kpis:kpis, cols:['Fecha','Concepto','Cant','Total','Pagado','Saldo'], rows:rows, totalLabel:'Total por cobrar', totalValue:ccFmt(totalDebe) });
   } else { window.print(); }
+}
+/* ═══════════ CARTA DE SEGURO (reembolso para pacientes extranjeros) ═══════════
+ * Carta en inglés que el paciente presenta a su aseguradora. Lleva SOLO las
+ * operaciones seleccionadas y el monto en moneda extranjera (lo que reclama).
+ */
+var _segData=null;
+function segInit(){
+  var root=document.getElementById('seg-root'); if(!root) return;
+  root.innerHTML=segShell();
+  if(!_ecPacientesList||!_ecPacientesList.length){
+    var tok=encodeURIComponent(getToken());
+    fetch(APPS_SCRIPT_URL+'?action=listaPacientes&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
+      .then(function(r){return r.json();}).then(function(d){ if(d&&d.pacientes) _ecPacientesList=d.pacientes.map(function(p){return typeof p==='string'?p:p.nombre;}); }).catch(function(){});
+  }
+}
+function segShell(){
+  return '<div style="max-width:960px;margin:0 auto;padding:24px 16px">'
+    +'<div style="margin-bottom:22px"><h1 style="font-size:22px;font-weight:800;color:var(--color-text);margin:0">Carta de Seguro (Reembolso)</h1>'
+    +'<p style="font-size:13px;color:var(--color-text-muted);margin:4px 0 0">Carta en inglés para que el paciente reclame a su aseguradora · por operación · con el monto en moneda extranjera</p></div>'
+    +'<div style="background:var(--color-surface);border-radius:12px;padding:18px;margin-bottom:18px;box-shadow:var(--shadow-card)">'
+      +'<label style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);display:block;margin-bottom:8px">Buscar paciente</label>'
+      +'<div style="display:flex;gap:10px">'
+        +'<div style="flex:1;position:relative"><input id="seg-search" type="text" placeholder="Escriba el nombre de la paciente…" oninput="segOnInput(this.value)" autocomplete="off" style="width:100%;padding:10px 14px;border-radius:8px;background:var(--color-surface-2);border:1.5px solid var(--color-divider);color:var(--color-text);font-size:14px">'
+        +'<div id="seg-sug" style="display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:8px;box-shadow:var(--shadow-dropdown);z-index:200;max-height:220px;overflow-y:auto"></div></div>'
+        +'<button onclick="segBuscar()" style="padding:10px 20px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Ver operaciones</button>'
+      +'</div>'
+    +'</div>'
+    +'<div id="seg-result"></div>'
+  +'</div>';
+}
+function segOnInput(val){
+  var box=document.getElementById('seg-sug'); if(!box) return;
+  if(!val||val.length<2){ box.style.display='none'; return; }
+  var q=val.toLowerCase();
+  var matches=(_ecPacientesList||[]).filter(function(n){return n.toLowerCase().indexOf(q)>=0;}).slice(0,10);
+  if(!matches.length){ box.style.display='none'; return; }
+  box.innerHTML=matches.map(function(n){ return '<div class="seg-sug-item" data-n="'+_esc(n).replace(/"/g,'&quot;')+'" style="padding:9px 14px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--color-divider)">'+_esc(n)+'</div>'; }).join('');
+  box.style.display='block';
+  Array.prototype.forEach.call(box.querySelectorAll('.seg-sug-item'),function(it){ it.addEventListener('mousedown',function(){ document.getElementById('seg-search').value=it.getAttribute('data-n'); box.style.display='none'; segBuscar(); }); });
+}
+function segBuscar(){
+  var nombre=((document.getElementById('seg-search')||{}).value||'').trim(); if(!nombre) return;
+  var box=document.getElementById('seg-sug'); if(box) box.style.display='none';
+  var res=document.getElementById('seg-result'); res.innerHTML='<div style="padding:30px;text-align:center;color:var(--color-text-muted)">Cargando operaciones…</div>';
+  var tok=encodeURIComponent(getToken());
+  fetch(APPS_SCRIPT_URL+'?action=estadoCobranza&paciente='+encodeURIComponent(nombre)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
+    .then(function(r){return r.json();}).then(function(d){ _segData=d; segRenderResult(d); })
+    .catch(function(e){ res.innerHTML='<div style="padding:24px;color:#c83c3c">Error de red: '+e.message+'</div>'; });
+}
+function segRenderResult(d){
+  var res=document.getElementById('seg-result');
+  if(!d||!d.ok){ res.innerHTML='<div style="padding:24px;text-align:center;color:#c83c3c;font-size:13px">'+_esc((d&&d.error)||'No disponible. ¿Agregaste cobranza.gs y redeployaste?')+'</div>'; return; }
+  var ventas=d.ventas||[];
+  if(!ventas.length){ res.innerHTML='<div style="padding:24px;text-align:center;color:var(--color-text-muted);font-size:13px">Sin operaciones registradas para este paciente.</div>'; return; }
+  var h='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px;padding:16px 18px">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px"><b style="font-size:14px">'+_esc(d.paciente)+'</b>'
+    +'<div style="display:flex;gap:8px;align-items:center"><label style="font-size:11px;color:var(--color-text-muted)">Moneda</label><select id="seg-moneda" style="padding:6px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)"><option>USD</option><option>EUR</option><option>CAD</option><option>GBP</option></select>'
+    +'<button onclick="segGenerar()" style="padding:9px 18px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Generar carta / PDF</button></div></div>';
+  h+='<div style="font-size:11.5px;color:var(--color-text-muted);margin-bottom:10px;line-height:1.5">Selecciona la(s) operación(es) del reclamo y captura el <b>monto en la moneda extranjera</b> (lo que se reclama al seguro) y el código <b>CPT/ICD</b> si aplica.</div>';
+  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:660px"><thead><tr style="border-bottom:2px solid var(--color-divider)">'
+    +'<th style="padding:8px;width:32px"></th><th style="padding:8px;text-align:left;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Fecha</th><th style="padding:8px;text-align:left;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Servicio (OP)</th><th style="padding:8px;text-align:right;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">MXN</th><th style="padding:8px;text-align:center;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">CPT/ICD</th><th style="padding:8px;text-align:right;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Monto extranjero</th></tr></thead><tbody>';
+  ventas.forEach(function(v,i){
+    h+='<tr style="border-bottom:1px solid var(--color-divider)">'
+      +'<td style="padding:6px;text-align:center"><input type="checkbox" class="seg-chk" data-i="'+i+'"></td>'
+      +'<td style="padding:6px;color:var(--color-text-muted);white-space:nowrap">'+ccFch(v.fecha)+'</td>'
+      +'<td style="padding:6px">'+_esc(v.producto||'—')+'<div style="font-size:9.5px;color:var(--color-text-muted)">'+(v.op?'OP '+_esc(v.op):'')+'</div></td>'
+      +'<td style="padding:6px;text-align:right;color:var(--color-text-muted);white-space:nowrap">'+ccFmt(v.total)+'</td>'
+      +'<td style="padding:6px;text-align:center"><input id="seg-cpt-'+i+'" type="text" placeholder="—" style="width:82px;padding:4px 6px;border:1px solid var(--color-divider);border-radius:6px;font-size:11px;text-align:center;background:var(--color-surface-2);color:var(--color-text)"></td>'
+      +'<td style="padding:6px;text-align:right"><input id="seg-usd-'+i+'" type="number" step="0.01" placeholder="0.00" style="width:104px;padding:4px 6px;border:1px solid var(--color-divider);border-radius:6px;font-size:12px;text-align:right;background:var(--color-surface-2);color:var(--color-text)"></td>'
+      +'</tr>';
+  });
+  h+='</tbody></table></div></div>';
+  res.innerHTML=h;
+}
+function segGenerar(){
+  if(!_segData) return;
+  var chks=document.querySelectorAll('.seg-chk:checked');
+  if(!chks.length){ alert('Selecciona al menos una operación/servicio para la carta.'); return; }
+  var currency=(document.getElementById('seg-moneda')||{}).value||'USD';
+  var rows=[], total=0, faltaMonto=false;
+  Array.prototype.forEach.call(chks,function(chk){
+    var i=chk.getAttribute('data-i'); var v=_segData.ventas[i];
+    var cpt=((document.getElementById('seg-cpt-'+i)||{}).value||'').trim();
+    var amt=parseFloat((document.getElementById('seg-usd-'+i)||{}).value||'0')||0;
+    if(amt<=0) faltaMonto=true;
+    total+=amt; rows.push({desc:v.producto||'—', cpt:cpt, fecha:v.fecha, cur:currency, amt:amt});
+  });
+  if(faltaMonto){ if(!confirm('Alguna operación no tiene monto en '+currency+'. ¿Generar de todas formas?')) return; }
+  var pac=_segData.paciente||'';
+  var hoy=new Date();
+  var fechaLarga=hoy.toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  function money(n){ return '$ '+(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function dLarga(s){ try{ return new Date(String(s).substring(0,10)+'T12:00:00').toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'}); }catch(e){ return s||'—'; } }
+  var w=window.open('','_blank');
+  if(!w){ alert('Habilita las ventanas emergentes para este sitio e intenta de nuevo.'); return; }
+  var trs=rows.map(function(r){ return '<tr><td>'+_esc(r.desc)+'</td><td style="text-align:center">'+_esc(r.cpt||'—')+'</td><td style="text-align:center">'+dLarga(r.fecha)+'</td><td style="text-align:center">'+_esc(r.cur)+'</td><td style="text-align:right">'+money(r.amt)+'</td></tr>'; }).join('');
+  var logo=(typeof _HF_LOGO_DEFAULT!=='undefined'?_HF_LOGO_DEFAULT:'');
+  w.document.write('<html><head><meta charset="utf-8"><title>Insurance Reimbursement Letter — '+_esc(pac)+'</title><style>'
+    +'@page{margin:22mm}body{font-family:Georgia,"Times New Roman",serif;color:#1a1a1a;font-size:12.5px;line-height:1.65}'
+    +'.hd{text-align:center;border-bottom:2px solid #c46a7a;padding-bottom:10px;margin-bottom:20px}.hd img{height:56px}.hd .cn{font-size:15px;font-weight:700;letter-spacing:1px;color:#c46a7a;margin-top:6px}'
+    +'h2{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:#c46a7a;border-bottom:1px solid #e5cdd4;padding-bottom:3px;margin:20px 0 8px}'
+    +'table{width:100%;border-collapse:collapse;margin:8px 0}th{background:#f6eef0;font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:#6b4a52;padding:7px 9px;border-bottom:1.5px solid #d9b8c1;text-align:left}td{padding:7px 9px;border-bottom:1px solid #eee}'
+    +'.tot{text-align:right;font-size:14px;font-weight:700;margin-top:8px;color:#111}'
+    +'.sig{margin-top:44px}.sig .line{border-top:1px solid #333;width:250px;margin-top:36px;padding-top:5px;font-size:11px}'
+    +'</style></head><body>'
+    +'<div class="hd">'+(logo?'<img src="'+logo+'" onerror="this.style.display=\'none\'">':'')+'<div class="cn">HESTIA FERTILITY CLINIC</div></div>'
+    +'<div>Date: '+fechaLarga+'</div>'
+    +'<div style="margin-top:14px">To Whom It May Concern:<br>Insurance Company / Claims Department</div>'
+    +'<div style="margin-top:8px"><b>Re: Insurance Reimbursement Request</b></div>'
+    +'<p>This letter serves as an official confirmation that the following patient has received medical services at Hestia Fertility Clinic and has made full payment for the services rendered. This document is issued for the purpose of insurance reimbursement.</p>'
+    +'<h2>Patient Information</h2><div><b>Patient Full Name:</b> '+_esc(pac)+'</div>'
+    +'<h2>Medical Services Rendered</h2>'
+    +'<table><thead><tr><th>Description of Service</th><th style="text-align:center">CPT / ICD Code</th><th style="text-align:center">Date of Service</th><th style="text-align:center">Currency</th><th style="text-align:right">Amount Charged</th></tr></thead><tbody>'+trs+'</tbody></table>'
+    +'<div class="tot">TOTAL AMOUNT PAID: '+money(total)+' '+_esc(currency)+'</div>'
+    +'<h2>Payment Confirmation</h2>'
+    +'<p>We hereby certify that the above-mentioned patient has paid in full the total amount for the medical services listed above. Payment was received by Hestia Fertility Clinic. No balance remains outstanding.</p>'
+    +'<p>This document is issued upon request of the patient for the sole purpose of submitting a reimbursement claim to their health insurance provider. Hestia Fertility Clinic is not a party to, and makes no representations regarding, any insurance coverage or reimbursement obligations.</p>'
+    +'<h2>Provider Information</h2>'
+    +'<div><b>Clinic Name:</b> Hestia Clinic</div><div><b>Address:</b> Lomas de Chapultepec, Mexico City, Mexico</div><div><b>Email:</b> facturas@hestiafertility.com</div><div><b>Website:</b> www.hestiafertility.com</div>'
+    +'<div class="sig">Sincerely,<div class="line">Clinic Administrator</div></div>'
+    +'</body></html>');
+  w.document.close(); setTimeout(function(){ try{ w.print(); }catch(e){} },400);
 }
 </script>
 
