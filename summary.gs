@@ -648,6 +648,7 @@ function readSummary(fechaInicio, fechaFin) {
     var egSum = cogsA+opexA+gaA+taxA;
     return {
       ok:true,
+      motorVer: 'agencias-l2-2026.07.09c',   // sello de versión del backend (para confirmar el redeploy)
       periodo:{ inicio:fi, fin:ff }, prev:{ inicio:pi, fin:pf, yoy:comparaYoY },
       lineas: lineas,
       metricas:{ revenue:revA, cogs:cogsA, grossProfit:gpA, opex:opexA, clinicContribution:ccA,
