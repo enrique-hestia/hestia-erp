@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.10.151 -->
+﻿<!-- app-build:2026.07.10.152 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -20172,9 +20172,21 @@ function pcLoadMenu() {
         .then(function(r){ return r.json(); })
         .then(function(data){
           if (data && data.menu) {
-            menuItems = data.menu;
-            try { localStorage.setItem(LS_PREFIX+'menu', JSON.stringify({items:data.menu,ts:Date.now()})); } catch(e){}
-            _pcMenuAll = menuItems.slice();
+            var _sheet = data.menu;
+            // Los items DINÁMICOS (Novedades, Manual, Cobranza, Seguro, Nota, Semanal,
+            // Gastos Fijos, Recordatorios) los inyecta loadMenu y NO están en la hoja, por
+            // eso no salían en el editor. Los traemos del menú vivo para poder ordenarlos;
+            // al Guardar, saveMenu crea su fila (preserva id/fuente/tipo) y la inyección los
+            // salta a partir de ahí, así que su posición ya la manda la hoja.
+            var _sids = {}; _sheet.forEach(function(i){ if(i&&i.id) _sids[i.id]=1; });
+            var _dynAllow = {novedades:1,manual:1,cobranza:1,seguro:1,nota:1,semanal:1,'gastos-fijos':1,recordatorios:1};
+            var _live = (typeof menuItems!=='undefined' && menuItems) ? menuItems : [];
+            var _dyn = _live.filter(function(i){ return i && i.id && !_sids[i.id] && _dynAllow[i.id]; })
+              .map(function(i){ return {id:i.id, padre:i.padre||'', label:i.label||'', icono:i.icono||'', orden:i.orden||0, activo:i.activo!==false, seccion:i.seccion||'', tipo:i.tipo||'vista', fuente:i.fuente||i.id}; });
+            var _full = _sheet.concat(_dyn);
+            menuItems = _full;
+            try { localStorage.setItem(LS_PREFIX+'menu', JSON.stringify({items:_full,ts:Date.now()})); } catch(e){}
+            _pcMenuAll = _full.slice();
             pcRenderMenuTable(_pcMenuAll);
             renderSidebar(menuItems);
           } else {
