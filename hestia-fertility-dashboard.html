@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.10.148 -->
+﻿<!-- app-build:2026.07.10.151 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -28205,7 +28205,9 @@ setTimeout(novCheckPopup, 2500);
  * MANUAL GENERAL ILUSTRADO DEL ERP  ·  vista propia #view-manual (menú «📖 Manual»)
  * Guía click-por-click de TODA la app: para cada módulo → para qué sirve, un
  * MOCKUP del UI real (dibujado con HTML/CSS, callouts numerados «dónde pulsar»),
- * pasos, ejemplo con números y tips. Buscador en vivo + índice + imprimir.
+ * pasos, «¿Qué hace cada botón?», ejemplo con números y tips.
+ * DOS NIVELES según permisos: usuario normal ve solo lo funcional; admin/técnico
+ * ve además el bloque técnico «Bajo el capó» (hojas, .gs, funciones, deploy…).
  * Autocontenido: sin CDNs ni imágenes; usa var(--color-*) → tema claro/oscuro.
  * El botón flotante «?» (hfhelpOpen) se redirige aquí para no duplicar manuales.
  * ═══════════════════════════════════════════════════════════════════════════ */
@@ -28229,6 +28231,27 @@ setTimeout(novCheckPopup, 2500);
     return s;
   }
   function pin(n){ return (n||n===0) && n!==''? '<span class="hfm-pin">'+n+'</span>' : ''; }
+
+  /* ── Detección de admin/técnico en tiempo de render ──
+     El bloque técnico «Bajo el capó» y las secciones técnicas SOLO se muestran
+     a quien administra el sistema. Señal robusta: permiso de gestión de roles/
+     usuarios, rol admin/superadmin/director, o permisos operativos con '*'. */
+  function _hfManTech(){
+    try {
+      if (typeof hasPermission === 'function' &&
+          (hasPermission('gestionar_roles') || hasPermission('gestionar_usuarios'))) return true;
+    } catch(e){}
+    try {
+      var s = (typeof getSession === 'function') ? getSession() : null;
+      if (s){
+        var rol = String(s.rol || '').toLowerCase();
+        if (rol === 'admin' || rol === 'superadmin' || rol === 'director') return true;
+        if (s.permisosOperativos && s.permisosOperativos.indexOf &&
+            s.permisosOperativos.indexOf('*') !== -1) return true;
+      }
+    } catch(e2){}
+    return false;
+  }
 
   /* ────────────────── ÍNDICE / GRUPOS ────────────────── */
   var HFMAN_GROUPS = [
@@ -28308,26 +28331,34 @@ setTimeout(novCheckPopup, 2500);
 
   /* ============ PRIMEROS PASOS ============ */
   { id:'primeros-pasos', group:'inicio', icon:'🚀', title:'Bienvenida y acceso',
-    keywords:'inicio login sesion contraseña ingresar empezar bienvenida acceso correo usuario rol githack github pages',
-    para:'Este es el **ERP de Hestia Fertility**: un tablero financiero y operativo que vive en una sola página web. Todo sale en vivo de Google Sheets; no instalas nada, solo abres la liga e inicias sesión.',
-    where:'Abre la liga del ERP en tu navegador (si tu internet bloquea `github.io`, usa la liga alterna de **githack**).',
+    keywords:'inicio login sesion contraseña ingresar empezar bienvenida acceso correo usuario rol githack',
+    para:'Este es el **ERP de Hestia Fertility**: un tablero financiero y operativo que vive en una página web. No instalas nada: abres la liga e inicias sesión. Lo que ves y lo que puedes editar depende de tu **rol**.',
+    where:'Abre la liga del ERP en tu navegador. Si tu internet bloquea la liga principal, usa la **liga alterna** que te compartieron (es el mismo sistema).',
     mock:{ title:'Iniciar sesión', h:'Hestia Fertility · ERP',
       form:[ {label:'Correo', val:'tu@hestiafertility.com', n:1, wide:true}, {label:'Contraseña', val:'••••••••', n:2, wide:true} ],
       toolbar:[ {t:'btn', label:'Entrar', pri:true, n:3} ],
-      callouts:[ {n:1,text:'Escribe tu **correo** (los usuarios se dan de alta en la hoja `Usuarios`).'},
+      callouts:[ {n:1,text:'Escribe tu **correo**.'},
                  {n:2,text:'Tu **contraseña**. Tu **rol** define qué ves y qué puedes editar.'},
                  {n:3,text:'Pulsa **Entrar**. Caes en el **Resumen** (pantalla de inicio).'} ] },
     steps:[
-      'Abre la liga del ERP. Si tu proveedor de internet bloquea `github.io`, usa la liga alterna de **githack** (es el mismo sistema).',
+      'Abre la liga del ERP (o la liga alterna si tu internet bloquea la principal).',
       'Escribe tu **correo** y **contraseña** y pulsa **Entrar**.',
       'Al entrar caes en el **Resumen**. El **menú de la izquierda** te lleva a cada módulo; **arriba** eliges el periodo (mes/rango de fechas).',
-      'Los datos se **auto-refrescan cada 30 segundos**. Si la conexión falla, verás datos de muestra y el sistema reintenta solo.'
+      'Los datos se **actualizan solos cada 30 segundos**. Si la conexión falla, verás datos de muestra y el sistema reintenta solo.'
+    ],
+    buttons:[
+      { k:'Entrar', d:'Inicia sesión con tu correo y contraseña.' },
+      { k:'? (botón flotante, abajo a la derecha)', d:'Abre este manual en cualquier momento.' },
+      { k:'💬 (botón flotante)', d:'Abre el chat interno del equipo.' }
     ],
     tips:[
-      'Los **botones flotantes** (abajo a la derecha): **? (Ayuda)** abre este manual, **💬 Chat** abre el chat del equipo.',
       'Al iniciar sesión pueden aparecer avisos: **Novedades ✨** (una vez por versión), tus **Recordatorios** del día y **Gastos Fijos** por programar.',
-      'Si no ves un módulo en el menú, tu **rol** probablemente lo tiene bloqueado — pídele al administrador que lo habilite en Panel de Control → Roles.'
-    ] },
+      'Si no ves un módulo en el menú, tu **rol** probablemente lo tiene bloqueado — pídele al administrador que lo habilite.'
+    ],
+    tech:{ intro:'La sesión se guarda en el navegador y trae el rol y los permisos operativos.',
+      hojas:['`Usuarios` y `Roles` en el Sheets principal (`SHEET_ID` = 1FMB2Qmv…IBaR4)'],
+      funciones:['getSession','hasPermission','navigateTo','loadData'],
+      nota:'El HTML se sirve desde **GitHub Pages** (se actualiza solo al publicar). Si el ISP bloquea github.io se usa **githack** temporalmente. El backend (`core.gs` y demás `.gs`) se despliega **manual** en Apps Script.' } },
 
   { id:'interfaz', group:'inicio', icon:'🧭', title:'La interfaz: menú, periodo, tema',
     keywords:'menu periodo tema oscuro claro dark segmento local internacional filtro fechas navegacion sidebar topbar barra superior',
@@ -28336,7 +28367,7 @@ setTimeout(novCheckPopup, 2500);
     mock:{ title:'Hestia ERP', crumb:'Barra superior (topbar)', period:'Julio 2026', periodN:3,
       sidebar:[ {label:'Resumen', icon:'📈', active:true}, {label:'Finanzas', icon:'💰', n:1}, {label:'Ingresos', icon:'💵', sub:true}, {label:'Cuentas por Pagar', icon:'💳', sub:true}, {label:'Reportes', icon:'📄'}, {label:'Panel de Control', icon:'⚙️'} ],
       toolbar:[ {t:'date', label:'Del 01/07 — Al 31/07', n:2}, {t:'select', label:'Todos / Local / Internacional', n:4}, {t:'pill', label:'☀️ / 🌙 Tema', n:5} ],
-      note:'El menú se lee **en vivo** de la hoja `Menu`: se puede reordenar y renombrar sin tocar código (ver «Menú editable»).',
+      note:'El menú se puede reordenar y renombrar sin tocar código (ver «Menú editable»).',
       callouts:[ {n:1,text:'**Menú lateral**: clic en un grupo lo expande; clic en una vista te lleva a ella.'},
                  {n:2,text:'**Periodo (Del/Al)**: casi todos los reportes recalculan en vivo para ese rango.'},
                  {n:3,text:'Atajos rápidos de **mes/trimestre**.'},
@@ -28348,10 +28379,20 @@ setTimeout(novCheckPopup, 2500);
       'Para **segmentar**: donde aparezca, elige Todos / Local / Internacional.',
       'Para el **tema**: pulsa el interruptor ☀️/🌙.'
     ],
+    buttons:[
+      { k:'Grupo del menú (▸/▾)', d:'Clic para expandir o plegar sus vistas.' },
+      { k:'Del / Al (fechas)', d:'Define el periodo; los reportes se recalculan para ese rango.' },
+      { k:'Atajos de mes / trimestre', d:'Saltan a un rango común de un clic.' },
+      { k:'Todos / Local / Internacional', d:'Segmenta la vista por tipo de paciente.' },
+      { k:'☀️ / 🌙', d:'Cambia entre tema claro y oscuro.' },
+      { k:'☰ (en móvil)', d:'Abre o cierra el menú lateral.' }
+    ],
     tips:[
-      'Si un reporte «no cambia», revisa el **periodo** de arriba — casi siempre es que el rango de fechas no incluye lo que buscas.',
+      'Si un reporte «no cambia», revisa el **periodo** de arriba — casi siempre el rango de fechas no incluye lo que buscas.',
       'El menú es **editable** desde Panel de Control → Menú (arrastrar, renombrar, activar/desactivar).'
-    ] },
+    ],
+    tech:{ hojas:['`Menu` (SHEET_ID): A id · B padre · C label · D seccion · E icono · F orden · G tipo · H fuente · I activo'],
+      funciones:['navigateTo','renderView','readMenu','currentPeriodo','currentSegment'] } },
 
   /* ============ OPERACIÓN DIARIA ============ */
   { id:'resumen', group:'operacion', icon:'📈', title:'Resumen / Dashboard',
@@ -28363,81 +28404,129 @@ setTimeout(novCheckPopup, 2500);
       toolbar:[ {t:'btn', label:'Facturación vencida', n:2} ],
       note:'**Resumen Contable**: facturado, pendiente por facturar y **Notas de Crédito** (descuentos no fiscales) en su propio renglón para que cuadre.',
       callouts:[ {n:1,text:'Los **KPIs** se recalculan solos al cambiar el periodo de arriba.'},
-                 {n:2,text:'**Facturación vencida** abre el ajuste informativo de gasto devengado (ver «Facturación vencida»).'} ] },
+                 {n:2,text:'**Facturación vencida** abre el ajuste informativo de gasto que corresponde al mes (ver «Facturación vencida»).'} ] },
     steps:[
       'Elige el **periodo** arriba. Los KPIs y gráficas se recalculan solos.',
       'Revisa el **Resumen Contable**: facturado, pendiente por facturar y notas de crédito.',
       'Si aparece el memo teal **«Gasto que corresponde al periodo»**, es el ajuste por facturación vencida (informativo).'
     ],
+    buttons:[
+      { k:'Selector de periodo (arriba)', d:'Cambia el mes/rango; todo el resumen se recalcula.' },
+      { k:'Facturación vencida', d:'Abre el ajuste informativo del gasto que corresponde al mes (no toca tu caja).' },
+      { k:'Clic en una gráfica / segmento', d:'Resalta el detalle de esa categoría.' }
+    ],
     ejemplo:'Con ingresos $1,240,000 y egresos $820,000, la **utilidad** = $420,000 y el **margen** = 420,000 ÷ 1,240,000 = **33.9%**.',
     tips:[
       'La forma de pago **«Nota de Crédito»** es un descuento **no fiscal**: no rutea a banco y se excluye de lo facturado.',
       'Los ingresos «sin fecha válida» se avisan aparte porque descuadran totales — corrige la fecha en Ingresos.'
-    ] },
+    ],
+    tech:{ funciones:['loadSummary','renderAll','_summaryReadIngresos','readEgresosData','gastoDevengado'],
+      nota:'El Resumen combina Ingresos + Egresos del rango. Los ingresos con fecha no parseable se avisan aparte porque descuadran totales.' } },
 
   { id:'ingresos', group:'operacion', icon:'💵', title:'Ingresos (venta y pago parcial)',
-    keywords:'ingresos venta captura cobro pago mixto multipago mercado pago comision factura banco pago parcial cuenta por cobrar producto op operacion',
+    keywords:'ingresos venta captura cobro pago mixto multipago mercado pago comision factura banco pago parcial cuenta por cobrar producto op operacion editar borrar',
     para:'**Ingresos** es donde capturas cada venta/cobro a paciente. Una operación (OP) puede tener varias líneas de producto y **varias formas de pago**, cada una ruteada a su banco. Si el paciente paga de menos, la diferencia se vuelve **cuenta por cobrar** sola.',
     where:'Menú → Finanzas → **Ingresos**. Botón **+ Nuevo** (arriba a la derecha).',
     mock:{ title:'Ingresos', crumb:'Finanzas › Ingresos', period:'Julio 2026',
       tabs:[ {label:'Lista', active:true}, {label:'Facturación', n:5} ],
       toolbar:[ {t:'search', label:'Buscar paciente / OP…'}, {t:'btn', label:'+ Nuevo', pri:true, n:1} ],
-      table:{ cols:['OP','Paciente','Producto','Total','Pagado','Formas de pago'],
-        rows:[ ['OP-1042','A. López','Ciclo FIV Alta','$30,000',{label:'$18,000',n:3},{label:'Santander + AMEX',n:2}],
-               ['OP-1041','B. Ruiz','Consulta','$1,200','$1,200','Efectivo'] ] },
+      table:{ cols:['OP','Paciente','Producto','Total','Pagado','Formas de pago',{label:'',n:4}],
+        rows:[ ['OP-1042','A. López','Ciclo FIV Alta','$30,000',{label:'$18,000',n:3},{label:'Santander + AMEX',n:2},{raw:'<span class="hfm-mini">✎ · 🗑</span>'}],
+               ['OP-1041','B. Ruiz','Consulta','$1,200','$1,200','Efectivo','✎ · 🗑'] ] },
       callouts:[ {n:1,text:'**+ Nuevo** abre el formulario (estilo Odoo): eliges productos, cantidad, precio y paciente.'},
                  {n:2,text:'**Formas de pago**: si son varias (pago mixto), cada monto se rutea a su banco. Mercado Pago pide su **comisión** en un modal.'},
                  {n:3,text:'Si **Pagado < Total**, el sistema avisa antes de guardar y la diferencia queda como **cuenta por cobrar**.'},
+                 {n:4,text:'**✎ Editar** corrige la operación · **🗑** la borra (revierte su movimiento bancario).'},
                  {n:5,text:'Pestaña **Facturación**: concilia los XML/CFDI contra las ventas (ver «Comprobantes»).'} ] },
     steps:[
       'Abre **Ingresos → + Nuevo**.',
-      'Elige el/los **productos** (salen de `BD_Productos`) con cantidad y precio; captura al paciente.',
+      'Elige el/los **productos** con cantidad y precio; captura al paciente.',
       'Registra la(s) **forma(s) de pago**. En pago mixto cada monto va a su banco (Santander, AMEX, Mercado Pago, Caja Chica…). Si es **Mercado Pago**, captura la **comisión**.',
       'Si el paciente paga **menos del total**, confirma el aviso: la diferencia se **registra** como cuenta por cobrar (aparece en Cobranza).',
       'Guarda. El movimiento bancario se crea automáticamente, listo para conciliar.'
     ],
+    buttons:[
+      { k:'Buscar', d:'Filtra la lista por paciente u OP.' },
+      { k:'Pestaña Lista', d:'Muestra las operaciones capturadas.' },
+      { k:'Pestaña Facturación', d:'Concilia los XML/CFDI contra tus ventas.' },
+      { k:'+ Nuevo', d:'Abre el formulario para capturar una venta.' },
+      { k:'✎ Editar (en la fila)', d:'Corrige productos, montos o formas de pago de esa operación.' },
+      { k:'🗑 (en la fila)', d:'Borra la operación y revierte su movimiento bancario (pide confirmar).' },
+      { k:'Campo «Núm. factura» (en la fila)', d:'Captura el folio de la factura de esa venta.' },
+      { k:'Ver factura', d:'Aparece cuando ya está vinculada: abre el XML/PDF.' },
+      { k:'+ producto / línea (dentro del formulario)', d:'Agrega otra línea a la misma venta.' },
+      { k:'Guardar (formulario)', d:'Registra la venta y crea el movimiento bancario.' },
+      { k:'🔗 Vincular todo automáticamente (pestaña Facturación)', d:'Liga de un jalón los folios ya localizados y las sugerencias sin ambigüedad.' }
+    ],
     ejemplo:'Paciente con total **$30,000** que abona **$18,000** en Santander: al guardar sale «se generará un saldo de **$12,000**». Ese saldo aparece luego en **Cuentas por Cobrar** del paciente.',
     tips:[
       '**Nota de Crédito** como forma de pago NO rutea a banco (es descuento no fiscal).',
-      'El desglose de pago mixto vive en la columna `PagosDetalle`; al editar/borrar, el reverso bancario reversa **cada** forma por su monto.'
-    ] },
+      'Antes de vincular una factura, compara el total de la operación contra el del XML: si no coinciden, el folio capturado probablemente no es el correcto.'
+    ],
+    tech:{ hojas:['`BD_Ingresos` (INGRESOS_SS_ID): col C=Fecha, col 5=Producto, col 10=TotalPagar, col 11=Pagado, col U(20)=Grupo/línea, `PagosDetalle` (JSON multipago)','`BD_Productos`/`BD_Precios` (PRODUCTOS_SS_ID = 1eXsk…DdIAY) alimentan el dropdown de venta'],
+      funciones:['saveIngreso','updateIngresoConBancos','_ingTodosProductos','readProductos','_cobRegistrarSaldoIngreso','_bankMpComisionDeOp','ingEditOp','ingDeleteOp'],
+      permisos:['editar_ingresos','borrar_ingresos','bank_capture'],
+      nota:'Formas de pago en `ING_FORMAS_PAGO`. El pago parcial llama `_cobRegistrarSaldoIngreso` (hoja `Cuentas_Cobrar`). El desglose de pago mixto vive en `PagosDetalle` (JSON) de la primera línea.' } },
 
   { id:'egresos', group:'operacion', icon:'💳', title:'Egresos y Cuentas por Pagar (CxP)',
-    keywords:'egresos gasto cxp cuentas por pagar proveedor pagar credito abono cancelar cancelacion devolucion moneda extranjera usd tipo de cambio clasificacion factura pago fact cont checkbox nombre comercial año historico',
-    para:'**Egresos** son los gastos ya pagados; **Cuentas por Pagar (CxP)** los que aún no. Viven en la misma hoja: una fila con **PAG** marcado es un egreso; sin pagar es una CxP. Incluye créditos de proveedor, abonos, cancelación y moneda extranjera.',
+    keywords:'egresos gasto cxp cuentas por pagar proveedor pagar credito abono cancelar cancelacion devolucion moneda extranjera usd tipo de cambio clasificacion factura pago fact cont checkbox nombre comercial año historico editar borrar',
+    para:'**Egresos** son los gastos ya pagados; **Cuentas por Pagar (CxP)** los que aún no. Una fila con **PAG** marcado es un egreso; sin pagar es una CxP. Incluye créditos de proveedor, abonos, cancelación y moneda extranjera.',
     where:'Menú → Finanzas → **Cuentas por Pagar** (para lo pendiente) y **Egresos** (para lo pagado).',
     mock:{ title:'Cuentas por Pagar', crumb:'Finanzas › Cuentas por Pagar', period:'Julio 2026',
       toolbar:[ {t:'search', label:'Buscar por nombre comercial…', n:1}, {t:'select', label:'Año: 2026', n:2}, {t:'btn', label:'+ Nuevo', pri:true, n:3} ],
       table:{ cols:[{label:'FACT',n:5},{label:'PAG',n:5},{label:'CONT',n:5},'Proveedor','Concepto','Monto',{label:'Docs',n:6},{label:'',n:4}],
-        rows:[ ['☑','☐','☑','LEPSI PRISMA','Reactivos lab','$2,463.39','📄 🔗',{raw:'<span class="hfm-mini">Pagar · ⊘</span>'}],
+        rows:[ ['☑','☐','☑','LEPSI PRISMA','Reactivos lab','$2,463.39','📄 🔗',{raw:'<span class="hfm-mini">Pagar · ✎ · ⊘ · 🗑</span>'}],
                ['☐','☐','☐','Vianto','Estudios','$14,200','—',{raw:'<span class="hfm-mini">Pagar · ⊘ · ↩</span>'}] ] },
       callouts:[ {n:1,text:'**Buscar por nombre comercial** filtra proveedores por su nombre corto de todos los días.'},
                  {n:2,text:'**Selector de año**: cambia entre 2026 / 2025 / 2024 para ver el histórico.'},
-                 {n:3,text:'**+ Nuevo**: captura un gasto (proveedor, contable/tipo/subtipo, monto, vencimiento). El sistema **recomienda** la clasificación (💡 histórica / 📌 fija) → «Aplicar».'},
-                 {n:4,text:'**Pagar** (setea Fecha+PAG y crea el movimiento bancario). **⊘** cancela la orden. **↩** regresa a «por programar» si vino de un gasto fijo.'},
-                 {n:5,text:'Checkboxes **FACT** (facturado) · **PAG** (pagado) · **CONT** (registrado en contabilidad). Se marcan/desmarcan inline.'},
+                 {n:3,text:'**+ Nuevo**: captura un gasto. El sistema **recomienda** la clasificación (💡 histórica / 📌 fija) → «Aplicar».'},
+                 {n:4,text:'**Pagar** · **✎** editar · **⊘** cancelar · **↩** regresar a «por programar» · **🗑** borrar.'},
+                 {n:5,text:'Checkboxes **FACT** (facturado) · **PAG** (pagado) · **CONT** (registrado en contabilidad). Se marcan inline.'},
                  {n:6,text:'Iconos de documentos: **📄** factura/XML, **🔗** comprobante de pago. Clic para ver o vincular.'} ] },
     steps:[
       'Registra un gasto en **Cuentas por Pagar → + Nuevo**. Al capturar el proveedor, pulsa **Aplicar** en la clasificación recomendada.',
-      'Puedes capturar **inline desde el despliegue** de una fila (expandir) sin abrir el formulario completo.',
+      'Puedes capturar/corregir **inline desde el despliegue** de una fila (expandir) sin abrir el formulario completo.',
       'Cuando lo pagues, usa **Pagar**: eliges forma de pago; se marca **PAG**, la fila pasa a Egresos y se genera su movimiento bancario.',
       'Si el proveedor te dio **crédito** (por una cancelación previa), lo aplicas desde el modal de Pagar; si solo cubre parte, el resto va al banco (no se duplica el importe).',
       'Para **cancelar** usa **⊘** (está en CxP y en Egresos, porque lo pagado vive en Egresos).'
     ],
+    buttons:[
+      { k:'Buscar por nombre comercial', d:'Localiza al proveedor por su nombre corto de todos los días.' },
+      { k:'Año (selector)', d:'Cambia entre 2026 / 2025 / 2024 para ver el histórico.' },
+      { k:'+ Nuevo', d:'Captura un gasto (proveedor, contable/tipo/subtipo, monto, vencimiento).' },
+      { k:'Aplicar (clasificación recomendada)', d:'Acepta la categoría que el sistema propone para ese proveedor.' },
+      { k:'FACT (casilla)', d:'Marca/desmarca que la partida está facturada.' },
+      { k:'PAG (casilla)', d:'Marca pagado: crea el movimiento bancario y la fila pasa a Egresos.' },
+      { k:'CONT (casilla)', d:'Marca que ya está registrado en contabilidad.' },
+      { k:'Pagar', d:'Registra el pago (forma de pago + fecha) y genera el movimiento bancario.' },
+      { k:'⊘ (cancelar orden)', d:'Cancela la orden: queda tachada en el histórico y el dinero pagado va a saldo a favor o devolución.' },
+      { k:'↩ (regresar a programación)', d:'Devuelve una CxP no pagada a «por programar» (si vino de un gasto fijo).' },
+      { k:'✎ (editar)', d:'Corrige la partida.' },
+      { k:'🗑 (borrar)', d:'Elimina la partida (pide confirmar).' },
+      { k:'📄 (factura/XML)', d:'Ver o vincular la factura de ese egreso.' },
+      { k:'🔗 (comprobante de pago)', d:'Ver o adjuntar el comprobante de la transferencia/pago.' },
+      { k:'Desvincular', d:'Quita una factura vinculada por error para poder poner la correcta.' },
+      { k:'Expandir fila (▸)', d:'Abre la captura inline y la traza del dinero de esa partida.' }
+    ],
     bloques:[
       { h:'Cancelación: crédito vs devolución', p:'El modal de cancelar tiene dos modos: **crédito** (default) deja saldo a favor del proveedor sin tocar bancos; **devolución** registra una ENTRADA al banco/caja. La fila queda **tachada con badge CANCELADA** (referencia histórica, excluida de totales). La **traza del dinero** se ve al expandir la fila.' },
-      { h:'Moneda extranjera', p:'CxP acepta **Divisa MXN/USD + tipo de cambio**; guarda el monto ya en MXN (USD×TC) para cuadrar totales, y conserva Divisa/Monto USD/TC. Al pagar aplica el USD con el TC real.' }
+      { h:'Moneda extranjera', p:'CxP acepta **Divisa MXN/USD + tipo de cambio**; guarda el monto ya en pesos (USD × TC) para cuadrar totales. Al pagar aplica el USD con el TC real.' }
     ],
     ejemplo:'**LEPSI PRISMA**: egreso pagado $2,463.39 en Santander que se cancela en modo **crédito** → queda saldo a favor de LEPSI que luego abonas a otra orden **del mismo** proveedor.',
     tips:[
-      'Un **crédito** solo se aplica a órdenes del **mismo** proveedor (blindaje). Hay botón admin **🔧 Reparar créditos cruzados** para casos históricos.',
-      'La primera vez, correr `setupCxPCreditosAbonos()` en Apps Script para crear las hojas de créditos/abonos.'
-    ] },
+      'Un **crédito** solo se aplica a órdenes del **mismo** proveedor.',
+      'La clasificación recomendada al capturar sale del historial de ese proveedor (💡) o de su valor fijo (📌).'
+    ],
+    tech:{ hojas:['`Egresos2026` (EGRESOS_SS_2026 = 1iRj…RAQw): A=ID, B=Fecha, C=Mes, E=Proveedor, F=Contable, G=Tipo, H=Subtipo, I=Concepto, J=Monto, N=PAGADO, Q=Forma de Pago, S=Link Factura(19), T=Link Pago(20), + Estatus, RecurrenteID, Divisa/Monto USD/TC','Multi-año: `Egresos2025` y `Egresos2024`','`Creditos_Proveedor` y `Abonos_CxP` (EGRESOS_SS_2026)'],
+      funciones:['saveCxP','pagarCxP','cxpCancelarOrden','aplicarAbonoCxP','readTrazaCancelacion','readClasificacionProveedores','regresarCxPaProgramacion','egEditRow','egDeleteRow'],
+      permisos:['editar_egresos','borrar_egresos','bank_capture'],
+      deploy:'La primera vez, correr `setupCxPCreditosAbonos()`.',
+      nota:'La clasificación automática vive en `prov_defaults.gs` (columnas Def Contable/Tipo/Subtipo/Concepto en la hoja Proveedores). Botón admin **🔧 Reparar créditos cruzados** para casos históricos.' } },
 
   { id:'xml-cfdi', group:'operacion', icon:'🧷', title:'Vinculación de facturas XML / CFDI',
     keywords:'vincular factura xml cfdi mismo mes cross month mes cerrado espera esperando factura desvincular egreso comprobante folio',
     para:'Vincular un **XML/CFDI** a un egreso deja la factura amarrada a esa fila para reportes y contabilidad. La regla nueva evita amarrar una factura del **mes equivocado**.',
-    where:'En **Cuentas por Pagar / Egresos**, expande una fila → icono **📄** de factura. También en Comprobantes.',
+    where:'En **Cuentas por Pagar / Egresos**, expande una fila → icono **📄** de factura. También desde Comprobantes.',
     mock:{ title:'Egreso · vincular factura', crumb:'Cuentas por Pagar › (fila expandida)',
       note:'Regla de vinculación por mes del egreso:',
       table:{ cols:['Situación','Qué hace el sistema'],
@@ -28456,14 +28545,21 @@ setTimeout(novCheckPopup, 2500);
       'Si **el mes sigue en curso**, verás **ESPERANDO FACTURA DEL MES** — espera a que llegue la del mes.',
       'Si te equivocaste, pulsa **Desvincular** y vincula la correcta.'
     ],
+    buttons:[
+      { k:'📄 (vincular factura)', d:'Busca y amarra la factura del egreso (primero la del mismo mes).' },
+      { k:'Desvincular', d:'Quita la factura amarrada para poder poner la correcta.' },
+      { k:'Badge «ESPERANDO FACTURA DEL MES»', d:'No es un botón: te avisa que el mes sigue en curso y conviene esperar la factura de ese mes.' }
+    ],
     tips:[
       'Antes de vincular, compara **Total op. vs Total XML**: si no coinciden, probablemente el folio no es el correcto.',
       'Un mismo folio no se puede vincular a dos operaciones; corrige el número de factura mal capturado antes de seguir.'
-    ] },
+    ],
+    tech:{ funciones:['vincularXmlFactura','uploadYVincularXmlFactura','egDesvincularFactura','buscarEnMes'],
+      nota:'Regla en `comprobantes.gs`: 1) mismo mes; 2) si no hay y el mes cerró → meses vecinos; 3) si el mes no ha terminado → esperar (badge ESPERANDO FACTURA DEL MES). La factura se identifica por folio dentro de la carpeta de Drive por año/mes.' } },
 
   { id:'conciliacion', group:'operacion', icon:'🏦', title:'Conciliación bancaria',
     keywords:'conciliacion banco estado de cuenta amex santander mercado pago csv pdf gap conciliado extra cheques cargo arrastrar analizar registrar',
-    para:'Cruza tu **estado de cuenta del banco** contra los egresos capturados para encontrar lo que falta registrar. Soporta **CSV/TXT**, **PDF AMEX** y **PDF Santander**. El PDF se procesa 100% en tu navegador (no se sube al servidor).',
+    para:'Cruza tu **estado de cuenta del banco** contra los egresos capturados para encontrar lo que falta registrar. Acepta **CSV/TXT**, **PDF AMEX** y **PDF Santander**. El PDF se procesa 100% en tu navegador (no se sube al servidor).',
     where:'Menú → **Conciliación** (o Bancos → Conciliación).',
     mock:{ title:'Conciliación bancaria', crumb:'Bancos › Conciliación',
       toolbar:[ {t:'select', label:'Banco: AMEX', n:1}, {t:'pill', label:'⬇ Arrastra aquí el CSV/PDF', n:2}, {t:'btn', label:'Analizar', pri:true, n:3} ],
@@ -28482,10 +28578,21 @@ setTimeout(novCheckPopup, 2500);
       'Revisa los tres grupos: **Conciliados** (cuadran), **Gaps** (→ Registrar) y **Extras** (revisar).',
       'Para un gap AMEX, «Registrar» crea el egreso directo; para Santander/MP abre un panel pre-llenado.'
     ],
+    buttons:[
+      { k:'Banco (selector)', d:'Elige la cuenta cuyo estado de cuenta vas a cruzar.' },
+      { k:'Zona de arrastre', d:'Suelta ahí el CSV/TXT o el PDF del banco.' },
+      { k:'Analizar', d:'Cruza los movimientos del banco contra los egresos capturados.' },
+      { k:'Registrar (en un Gap)', d:'Crea el egreso que faltaba (directo en AMEX; panel pre-llenado en Santander/MP).' },
+      { k:'Fila «Extra»', d:'No hay botón: revísala — está en el sistema pero no aparece en el banco.' }
+    ],
     tips:[
-      'AMEX usa el **corte del ciclo** (no el mes calendario) y cruce 1:1 en [año-1, año, año+1] — por eso avisa «N cargos ya registrados en otro mes, no los dupliques».',
+      'AMEX usa el **corte del ciclo** (no el mes calendario); por eso avisa «N cargos ya registrados en otro mes, no los dupliques».',
       'Layout Santander: Fecha, Depósito, Retiro, Saldo, Descripción, columnas USD.'
-    ] },
+    ],
+    tech:{ hojas:['Bancos (1O1t…u0cg): AMEX GID 13958125 (A=Fecha, B=Monto MXN, C=Saldo, D=Referencia, E=USD, F=TC, G=Notas, H=Póliza, I=Mes)','Egresos por banco (columna Forma de Pago)'],
+      funciones:['ecHandleFile','_ecParsePDF','_ecParseSantanderPdfText','_ecParseAmexPdfText','ecAnalyze','ecRegisterGap','conciliaAMEX'],
+      permisos:['bank_capture'],
+      nota:'El cruce AMEX es 1:1 en [año-1, año, año+1] sin filtrar por mes.' } },
 
   { id:'cobranza', group:'operacion', icon:'📥', title:'Cobranza / Cuentas por Cobrar',
     keywords:'cobranza cuentas por cobrar cxc adeudo saldo abono suscripcion crio criopreservacion almacenamiento agencia reprovida descuento volumen deposito partida bloque paciente aging motor a motor b anual mensual saldo inicial',
@@ -28508,21 +28615,39 @@ setTimeout(novCheckPopup, 2500);
       'Para **cobrar**: pulsa **Abonar** en el saldo o suscripción (en suscripciones marca periodos FIFO).',
       'Para el estado de cuenta imprimible: **Reportes → Cobranza**, busca la agencia/paciente e imprime (muestra Bruto − Descuento = Neto y datos de depósito).'
     ],
+    buttons:[
+      { k:'Pestaña «Saldos por cobrar»', d:'Adeudos de ventas (Motor A), por pacientes/médicos/agencias.' },
+      { k:'Pestaña «Suscripciones Crío»', d:'Almacenamiento de óvulos/embriones (Motor B).' },
+      { k:'Buscar', d:'Localiza al paciente o a la agencia.' },
+      { k:'Cargar saldo inicial', d:'Registra un adeudo desde cero (autocompleta paciente y OP; avisa si ya existe).' },
+      { k:'Abonar', d:'Registra un cobro. En suscripciones marca los periodos pagados del más viejo al más nuevo.' },
+      { k:'Editar', d:'Abre el editor de partidas por bloque (paciente + fecha + productos).' },
+      { k:'+ Otro paciente / fecha (en el editor)', d:'Agrega otro bloque de paciente a la misma nota.' },
+      { k:'Toggle Tipo (Hestia / Externo)', d:'Define si aplica el primer año gratis (solo Hestia).' },
+      { k:'Toggle Plan (Anual / Mensual)', d:'Define cómo se cobra la suscripción.' },
+      { k:'Autopay', d:'Marca cobro automático informativo (muestra el próximo cobro; no cobra solo).' },
+      { k:'Generar (suscripciones)', d:'Crea los cargos del periodo: primero muestra un preview, luego confirmas.' }
+    ],
     bloques:[
-      { h:'⚠ Motor A: SOLO registro explícito', p:'El sistema **NO deduce** adeudos de la columna Pagado (los precios viejos darían saldos falsos). Un adeudo **solo nace** al: (1) capturar un ingreso con **pago parcial**, (2) **cargar un saldo inicial**, o (3) hacer un **cargo a crédito**. Se lee **solo** de la hoja `Cuentas_Cobrar`.' },
+      { h:'⚠ Motor A: solo registro explícito', p:'El sistema **NO deduce** adeudos automáticamente (los precios viejos darían saldos falsos). Un adeudo **solo nace** al: (1) capturar un ingreso con **pago parcial**, (2) **cargar un saldo inicial**, o (3) hacer un **cargo a crédito**.' },
       { h:'Partidas por bloque (agencias/externos)', p:'En agencias NUESTRO cliente es la agencia (ej. REPROVIDA), pero el reporte lista a los **pacientes reales**. El editor trabaja por **bloques**: cada bloque = **un paciente + la fecha de su tratamiento + sus productos**. El botón **«+ Otro paciente / fecha»** deja seguir capturando en la misma nota.' },
-      { h:'Motor B: reglas de suscripción', p:'Universo = hoja `Inventario Crío`. **Solo se cobra a quien tenga inventario** (OOV o EMB > 0). **Año 1 gratis solo para Hestia** (externos pagan desde el inicio); plan **anual $5,700** o **mensual $475**, default anual por inscripción. **Autopay** es informativo. Estatus: Cortesía / Vigente / Por vencer / Vencida / Falta suscripción.' },
-      { h:'Descuento por volumen por agencia', p:'La hoja `Descuentos_Agencia` (`Agencia · Producto · Desde · Hasta · %`) define escalones por producto sobre la **cantidad ACUMULADA DEL MES**. REPROVIDA se autocarga con escala **1-3 = 0% / 4-8 = 7% / 9+ = 12%**. El estado de cuenta muestra **Neto a cobrar = Bruto − Descuento**.' }
+      { h:'Motor B: reglas de suscripción', p:'Solo se cobra a quien **tenga inventario** (óvulos u embriones > 0). **Año 1 gratis solo para Hestia** (externos pagan desde el inicio); plan **anual $5,700** o **mensual $475**, default anual por inscripción. Estatus: Cortesía / Vigente / Por vencer / Vencida / Falta suscripción.' },
+      { h:'Descuento por volumen por agencia', p:'Cada agencia tiene escalones por producto según la **cantidad ACUMULADA DEL MES**. REPROVIDA escala **1-3 = 0% / 4-8 = 7% / 9+ = 12%**. El estado de cuenta muestra **Neto a cobrar = Bruto − Descuento**.' }
     ],
     ejemplo:'REPROVIDA acumula **5** «Preparación endometrial» en el mes → cae en el escalón **4-8 = 7%**. Bruto 5×$5,000 = $25,000, descuento $1,750, **Neto a cobrar = $23,250**.',
     tips:[
-      'La primera vez, `cobranza.gs` requiere **agregarse al Apps Script + redeploy + `setupCobranzaConfig()`**.',
       'Cuentas por Cobrar también aparece **resumido dentro de Flujo de Efectivo** (con buscador).',
-      'Los datos de depósito por defecto: Santander / Hestia Clinic / 65-51043096-7 / CLABE 014180655104309670 (editables en config).'
-    ] },
+      'Los datos bancarios de depósito salen al pie del estado de cuenta (editables en la configuración).'
+    ],
+    tech:{ hojas:['`Cuentas_Cobrar` y `Abonos_Cobrar` (INGRESOS_SS_ID) — Motor A; columna `Items` = JSON de partidas (pac, fecha, producto, cant, importe)','`Suscripciones_Crio` (INGRESOS_SS_ID) — Motor B','`Inventario Crío` (LAB_SS_ID): NOMBRE / FECHA CRÍO / OOV / EMB / EXTERNO','`Descuentos_Agencia` (INGRESOS_SS_ID): Agencia | Producto | Desde | Hasta | Descuento(%)'],
+      props:['`COBRANZA_CONFIG` (tarifas/reglas)','`COBRANZA_PAC_CFG` (por paciente: {externo, mensual, autopay})','`COBRANZA_DESCUENTOS` · `COBRANZA_DEPOSITO` · `AGENCIAS` (default [reprovida])'],
+      funciones:['readEstadoCobranza','cuentasCobrar','suscripcionesCrio','registrarAbono','cargarSaldoInicial','editarCuentaCobrar','generarSuscripciones','_cobDescuentosAgencia','_cobDeposito','_cobParseItems'],
+      permisos:['editar_egresos (alta/edición y toggles)','borrar_egresos'],
+      motor:'cobranza-2026.07.10o',
+      deploy:'`cobranza.gs` requiere **agregarse al Apps Script + redeploy + `setupCobranzaConfig()`** una vez.' } },
 
   { id:'gastos-fijos', group:'operacion', icon:'🔁', title:'Gastos Fijos (recurrentes)',
-    keywords:'gastos fijos recurrente renta nomina programacion proyeccion mensual plantilla vencimiento recurrenteid',
+    keywords:'gastos fijos recurrente renta nomina programacion proyeccion mensual plantilla vencimiento',
     para:'Los **Gastos Fijos** son plantillas de gastos recurrentes (renta, nómina, servicios). Cada mes se **programan** a Cuentas por Pagar por el monto que toque.',
     where:'Menú → Finanzas → **Gastos Fijos** (junto a Cuentas por Pagar).',
     mock:{ title:'Gastos Fijos', crumb:'Finanzas › Gastos Fijos',
@@ -28531,14 +28656,24 @@ setTimeout(novCheckPopup, 2500);
         rows:[ ['Renta','Todos','1','$45,000',{raw:'<span class="hfm-mini">Programar</span>',n:2}],
                ['Nómina','Todos','15','variable','—'] ] },
       callouts:[ {n:1,text:'**Catálogo**: das de alta la partida (Desde/Hasta, meses, día de vencimiento, monto).'},
-                 {n:2,text:'**Programación**: crea las CxP del mes con el monto sugerido (anti-duplicado por `RecurrenteID`).'},
+                 {n:2,text:'**Programación**: crea las CxP del mes con el monto sugerido (evita duplicados).'},
                  {n:3,text:'**Proyección**: estima el gasto fijo del trimestre por venir.'} ] },
     steps:[
       'En **Gastos Fijos → Catálogo**, da de alta la partida.',
       'En **Programación**, acepta el monto sugerido (el real del mes pasado); crea las CxP del mes.',
       'Revisa la **Proyección del trimestre**.'
     ],
-    tips:[ 'Cada fila programada lleva `RecurrenteID`. Con el botón **↩** en CxP puedes regresar una a «por programar».' ] },
+    buttons:[
+      { k:'Pestaña Catálogo', d:'Alta y edición de las partidas recurrentes.' },
+      { k:'Pestaña Programación', d:'Crea las Cuentas por Pagar del mes con el monto sugerido.' },
+      { k:'Pestaña Proyección', d:'Estima el gasto fijo del trimestre por venir.' },
+      { k:'Programar', d:'Genera la CxP de esa partida para el mes (no la duplica si ya existe).' },
+      { k:'Programar todos / en lote', d:'Genera de un jalón todas las partidas que apliquen al mes.' }
+    ],
+    tips:[ 'Con el botón **↩** en Cuentas por Pagar puedes regresar una partida programada a «por programar» y recapturarla por el monto correcto.' ],
+    tech:{ hojas:['`GastosFijos` (EGRESOS_SS_2026): vigencia Desde/Hasta, Meses (Todos/1,4,7), MontoVariable, DiaVencimiento'],
+      funciones:['programarGastoFijo','programarGastoFijoBatch','_gfAplica','readBDCxP'],
+      nota:'Cada fila programada lleva `RecurrenteID` (GF-xxx|mes) para el anti-duplicado.' } },
 
   /* ============ CATÁLOGOS E INVENTARIO ============ */
   { id:'proveedores', group:'catalogos', icon:'🏭', title:'Proveedores',
@@ -28548,38 +28683,61 @@ setTimeout(novCheckPopup, 2500);
     mock:{ title:'Proveedores', crumb:'Catálogos › Proveedores',
       toolbar:[ {t:'search', label:'Buscar proveedor…'}, {t:'btn', label:'🔍 Autocompletar desde XML', n:2}, {t:'btn', label:'+ Nuevo', pri:true, n:1} ],
       table:{ cols:['Comercial','Razón social','RFC',''],
-        rows:[ ['LEPSI','Lepsi Prisma S.A. de C.V.','LPR120…',{raw:'<span class="hfm-mini">Editar</span>',n:3}],
-               ['Vianto','Vianto Diagnóstico SC','VDI15…','Editar'] ] },
+        rows:[ ['LEPSI','Lepsi Prisma S.A. de C.V.','LPR120…',{raw:'<span class="hfm-mini">✎ Editar</span>',n:3}],
+               ['Vianto','Vianto Diagnóstico SC','VDI15…','✎ Editar'] ] },
       callouts:[ {n:1,text:'**+ Nuevo**: alta manual (comercial, razón social, RFC, datos fiscales).'},
                  {n:2,text:'**🔍 Autocompletar desde XML**: escanea los CFDI recibidos, matchea por RFC/nombre y propone solo campos vacíos o distintos (confianza alta ≥85% / baja).'},
-                 {n:3,text:'**Editar**: al cambiar el nombre, si hay egresos el sistema pregunta y **cascadea** el cambio a 2024/25/26.'} ] },
+                 {n:3,text:'**✎ Editar**: al cambiar el nombre, si hay egresos el sistema pregunta y **cascadea** el cambio a 2024/25/26.'} ] },
     steps:[
       'Alta/edición en **Proveedores → + Nuevo**.',
       'Para llenar RFC y datos fiscales en masa: **🔍 Autocompletar desde XML** (revisa la confianza antes de aplicar).',
       'Al editar el **nombre**, confirma la pregunta «hay N registros, ¿actualizarlos?» para cascadear al historial.'
     ],
-    tips:[ 'Un proveedor suele capturarse con nombre **comercial** pero facturar con **razón social**; el autocompletado trae la razón social desde los CFDI.' ] },
+    buttons:[
+      { k:'Buscar', d:'Localiza un proveedor.' },
+      { k:'🔍 Autocompletar desde XML', d:'Llena RFC y datos fiscales de todos los proveedores leyendo los CFDI recibidos.' },
+      { k:'+ Nuevo', d:'Da de alta un proveedor a mano.' },
+      { k:'✎ Editar', d:'Corrige un proveedor; al cambiar el nombre ofrece cascadear el cambio al historial de Egresos.' }
+    ],
+    tips:[ 'Un proveedor suele capturarse con nombre **comercial** pero facturar con **razón social**; el autocompletado trae la razón social desde los CFDI.' ],
+    tech:{ hojas:['`Proveedores` (CXP_SS_ID): RFC = col D; datos fiscales (Régimen, CP, Forma de pago, Uso CFDI) al final','Egresos 2024/25/26: proveedor en col E'],
+      funciones:['provOpenForm','provSave','updateProveedor','_provRenombrarEnEgresos','contarEgresosProveedor','autocompletarProveedoresDesdeXML','buscarDatosFiscalesProveedor','_provEmisorIndex'],
+      permisos:['editar_egresos'],
+      nota:'Requiere `providers.gs` + `comprobantes.gs` desplegados (el índice de emisores usa los XML).' } },
 
   { id:'productos', group:'catalogos', icon:'🛒', title:'Productos / Catálogo General',
     keywords:'productos catalogo servicio precio lista importar exportar excel inventariable sat contadigital combo medicamento categoria',
-    para:'Hay **dos catálogos**: `BD_Productos`/`BD_Precios` (lo que ve **Ingresos** al vender, con listas de precios) y la **Catálogo General** con columnas fiscales SAT (para exportar a **ContaDigital**). Importas/exportas Excel y marcas productos como inventariables.',
+    para:'Hay **dos catálogos**: uno para vender (lo que ve **Ingresos**, con listas de precios) y la **Catálogo General** con las columnas fiscales SAT (para exportar a ContaDigital). Importas/exportas Excel y marcas productos como inventariables.',
     where:'Menú → Productos → **Catálogo General**.',
     mock:{ title:'Catálogo General', crumb:'Productos › Catálogo General',
       toolbar:[ {t:'search', label:'Buscar producto…'}, {t:'btn', label:'Importar Excel', n:2}, {t:'btn', label:'Exportar', n:3}, {t:'btn', label:'+ Agregar producto', pri:true, n:1} ],
-      table:{ cols:['Producto','Categoría','Precio General',{label:'Inventariable',n:4}],
-        rows:[ ['Ciclo FIV Alta','Tratamiento','$85,000','☐'],
-               ['Menotropina','Medicamento','$1,200','☑'] ] },
+      table:{ cols:['Producto','Categoría','Precio General',{label:'Inventariable',n:4},{label:'',n:5}],
+        rows:[ ['Ciclo FIV Alta','Tratamiento','$85,000','☐','✎'],
+               ['Menotropina','Medicamento','$1,200','☑','✎'] ] },
       callouts:[ {n:1,text:'**+ Agregar producto**: categoría, precios por lista y, si aplica, marca **«Es inventariable»**.'},
-                 {n:2,text:'**Importar Excel** (SheetJS se carga solo al usarlo) para carga masiva.'},
+                 {n:2,text:'**Importar Excel** para carga masiva.'},
                  {n:3,text:'**Exportar** a Excel (incluye el formato ContaDigital fiscal).'},
-                 {n:4,text:'**Inventariable**: categoría Medicamento lo activa solo; insumos se marcan a mano. Solo los inventariables aparecen en **Combos**.'} ] },
+                 {n:4,text:'**Inventariable**: categoría Medicamento lo activa solo; insumos se marcan a mano. Solo los inventariables aparecen en **Combos**.'},
+                 {n:5,text:'**✎** edita el producto.'} ] },
     steps:[
       'Agrega/edita en **Catálogo General → + Agregar producto**.',
       'Para carga masiva: **Importar Excel**. Para respaldo/ContaDigital: **Exportar**.',
       'Marca **«Es inventariable»** en los que lleven stock.'
     ],
+    buttons:[
+      { k:'Buscar', d:'Localiza un producto.' },
+      { k:'Importar Excel', d:'Carga masiva de productos desde una hoja de cálculo.' },
+      { k:'Exportar', d:'Baja el catálogo a Excel (incluye el formato fiscal ContaDigital).' },
+      { k:'+ Agregar producto', d:'Da de alta un producto con su categoría y precios por lista.' },
+      { k:'✎ (en la fila)', d:'Edita el producto.' },
+      { k:'Casilla «Inventariable»', d:'Marca si el producto lleva control de stock (aparece en Combos).' },
+      { k:'Ver en Sheets', d:'Abre la hoja original del catálogo por si prefieres editar ahí.' }
+    ],
     tips:[ 'Las **listas de precios** son General, GM, Surrogacy + una por cada **agencia** (ej. REPROVIDA).',
-           'Los items de menú «Tratamientos/Estudios/Medicamentos/Agencias» son atajos que abren esta misma vista **filtrada por categoría**.' ] },
+           'Los items de menú «Tratamientos/Estudios/Medicamentos/Agencias» son atajos que abren esta misma vista **filtrada por categoría**.' ],
+    tech:{ hojas:['`BD_Productos` / `BD_Precios` (PRODUCTOS_SS_ID = 1eXsk…DdIAY) — ventas; columnas inventario: Inventariable, Unidad, StockMinimo/Maximo, CostoUnitario, ProveedorPreferido, StockActual','Catálogo General (mismo spreadsheet) — columnas fiscales SAT para ContaDigital'],
+      funciones:['prodOpenForm','prodEditForm','readProductos','_loadSheetJS'],
+      nota:'La exportación ContaDigital vive en `catalogo.gs`. SheetJS se carga solo al usar «Importar Excel».' } },
 
   { id:'inventario', group:'catalogos', icon:'📦', title:'Inventario (órdenes, movimientos, combos)',
     keywords:'inventario stock orden de compra movimiento entrada salida combo medicamento insumo reactivo sobrante recepcion recibida',
@@ -28590,7 +28748,7 @@ setTimeout(novCheckPopup, 2500);
       table:{ cols:['Orden','Proveedor','Estado',''],
         rows:[ ['OC-014','LEPSI',{raw:'<b class="hfm-badge amber">Pendiente</b>'},{raw:'<span class="hfm-mini">Marcar recibida</span>',n:4}],
                ['OC-013','Vianto',{raw:'<b class="hfm-badge ok">Recibida</b>'},'—'] ] },
-      callouts:[ {n:1,text:'**Órdenes de compra**: `crearOrdenCompra` **siempre** crea su CxP de inmediato.'},
+      callouts:[ {n:1,text:'**Órdenes de compra**: al crear una orden se genera su Cuenta por Pagar de inmediato.'},
                  {n:2,text:'**Movimientos**: un renglón por Entrada/Salida con saldo corrido; incluye **«Registrar sobrante»**.'},
                  {n:3,text:'**Combos**: define qué componentes descuenta un producto de venta (universo Inventariable).'},
                  {n:4,text:'**Marcar recibida**: dispara una **Entrada** al stock. Recibir y pagar son interruptores independientes.'} ] },
@@ -28600,8 +28758,19 @@ setTimeout(novCheckPopup, 2500);
       'Carga **stock inicial** vía órdenes recibidas, alta de producto o ajuste en Movimientos.',
       'Verifica: una compra recibida sube stock; una venta con combo lo baja.'
     ],
-    tips:[ 'Setups una vez: `setupOrdenesCompra()`, `configurarMenuInventario()`, `activarInventarioMedicamentosExistentes()`.',
-           'El motor está listo; falta terminar la carga de datos (combos + stock inicial) para dejarlo 100% sincronizado.' ] },
+    buttons:[
+      { k:'Pestaña Órdenes de compra', d:'Crea y sigue las compras (cada orden genera su CxP).' },
+      { k:'Pestaña Movimientos', d:'Ledger de Entradas/Salidas con saldo corrido.' },
+      { k:'Pestaña Combos', d:'Define qué descuenta cada producto de venta al venderse.' },
+      { k:'Nueva orden', d:'Crea una orden de compra (y su Cuenta por Pagar).' },
+      { k:'Marcar recibida', d:'Registra la Entrada al stock de la mercancía recibida.' },
+      { k:'Registrar sobrante', d:'Regresa a stock lo no usado de un componente (ej. medio frasco).' }
+    ],
+    tips:[ 'Recibir y pagar son **independientes**: puedes recibir ahora y pagar después (o al revés).',
+           'El motor ya está cableado; falta terminar la carga de datos (combos + stock inicial) para dejarlo 100% sincronizado.' ],
+    tech:{ hojas:['`Ordenes_Compra`, `Ordenes_Compra_Lineas`, `Movimientos_Inventario`, `Combos` (MED_INV_SS_ID)','Stock en `BD_Productos` (StockActual)'],
+      funciones:['crearOrdenCompra','marcarOrdenRecibida','_registrarMovimientoInventario','_descontarInventarioPorVenta'],
+      deploy:'Setups una vez: `setupOrdenesCompra()`, `configurarMenuInventario()`, `activarInventarioMedicamentosExistentes()`.' } },
 
   /* ============ DOCUMENTOS Y REPORTES ============ */
   { id:'comprobantes', group:'documentos', icon:'📨', title:'Comprobantes / CFDI + correo',
@@ -28617,14 +28786,27 @@ setTimeout(novCheckPopup, 2500);
       callouts:[ {n:1,text:'**Chips de año/mes**: elige el periodo de comprobantes.'},
                  {n:2,text:'El sistema cruza cada comprobante (RFC→proveedor + monto ±$0.50 + fecha ±45d) y marca vinculado / sugerido / múltiple / sin coincidencia.'},
                  {n:3,text:'**⚡ Vincular sugeridos**: liga en lote los que no tienen ambigüedad.'},
-                 {n:4,text:'**👁** abre el **visor CFDI** (réplica SAT + QR). **✉ Enviar** manda por Gmail con plantilla (requiere permiso `docs_enviar`).'} ] },
+                 {n:4,text:'**👁** abre el **visor CFDI** (réplica SAT + QR). **✉ Enviar** manda por correo con plantilla.'} ] },
     steps:[
       'Abre **Comprobantes**, elige año/mes con los chips.',
       'Revisa el cruce automático; con **⚡ Vincular sugeridos** los ligas en lote.',
       'Pulsa **👁** para ver el CFDI (visor con datos SAT y QR).',
       'Para enviarlo por correo, **✉ Enviar** en la fila; elige plantilla y destinatario.'
     ],
-    tips:[ '`comprobantes.gs` requiere deploy + `configurarMenuComprobantes()`. El primer envío pide autorizar el scope de Gmail.' ] },
+    buttons:[
+      { k:'Chips de año / mes', d:'Eligen el periodo de comprobantes a mostrar.' },
+      { k:'Pestañas (Facturas / Pagos / XML SAT)', d:'Cambian entre los tres tipos de documento.' },
+      { k:'⚡ Vincular sugeridos', d:'Liga en lote los comprobantes cuyo match es inequívoco.' },
+      { k:'👁 (ver)', d:'Abre el visor del CFDI (réplica con datos SAT y código QR).' },
+      { k:'✉ Enviar', d:'Manda el documento por correo con una plantilla (requiere permiso de envío).' },
+      { k:'Vincular (en una fila sugerida)', d:'Amarra ese comprobante al egreso que le corresponde.' }
+    ],
+    tips:[ 'El primer envío de correo pide autorizar el permiso de Gmail una sola vez.' ],
+    tech:{ hojas:['`Plantillas_Correo` (5 defaults, variables {{folio}} {{monto}} {{fecha}} {{destinatario}} {{proveedor}} {{referencia}})','Bitácora `Correos_Enviados`'],
+      props:['Carpetas Drive: Facturas `1t8--HM1…`, Pagos `1D9H3nNI…`, XML SAT `1rIWggc…` (subcarpetas Enero…Diciembre)'],
+      funciones:['readComprobantesMes','vincularComprobanteEgreso','vincularComprobantesLote','compVerCfdi','_tplCfdiHTML','enviarDocumentoCorreo','hfEnviarCorreo'],
+      permisos:['docs_enviar'],
+      deploy:'`comprobantes.gs` requiere deploy + `configurarMenuComprobantes()` una vez.' } },
 
   { id:'reportes', group:'documentos', icon:'🧾', title:'Reportes: Estado de Cuenta y Cobranza',
     keywords:'reportes estado de cuenta paciente cobranza imprimir pdf excel drill saldo neto bruto descuento deposito',
@@ -28644,7 +28826,15 @@ setTimeout(novCheckPopup, 2500);
       'Revisa el detalle (en Cobranza, una fila por paciente).',
       'Pulsa **Imprimir/PDF**.'
     ],
-    tips:[ 'Todos los reportes pasan por el motor de plantillas (ver «Plantillas de impresión»).' ] },
+    buttons:[
+      { k:'Buscar', d:'Localiza al paciente o agencia.' },
+      { k:'🖨 Imprimir / PDF', d:'Genera el documento con la plantilla configurada (y firma/marca de agua si las activaste).' },
+      { k:'Exportar Excel', d:'Baja los datos del reporte a una hoja de cálculo.' },
+      { k:'Clic en una fila', d:'Abre el detalle (drill) de ese movimiento.' }
+    ],
+    tips:[ 'Todos los reportes pasan por el motor de plantillas (ver «Plantillas de impresión»).' ],
+    tech:{ funciones:['ecImprimir','cobImprimir','readEstadoCuentaPaciente','readEstadoCobranza','hfReportPrint'],
+      nota:'El pie de depósito y la nota se inyectan vía `data.notaHtml`.' } },
 
   { id:'carta-seguro', group:'documentos', icon:'🛡️', title:'Carta de Seguro (reembolso)',
     keywords:'carta seguro insurance reembolso reimbursement extranjero moneda usd eur idioma ingles frances portugues cpt icd personalizar formato aseguradora',
@@ -28667,8 +28857,20 @@ setTimeout(novCheckPopup, 2500);
       '(Opcional) **🎨 Personalizar formato**.',
       'Pulsa **Generar carta / PDF**.'
     ],
+    buttons:[
+      { k:'Buscar', d:'Localiza al paciente.' },
+      { k:'Idioma (selector)', d:'Elige el idioma de la carta: inglés, español, francés o portugués.' },
+      { k:'Casilla ✓ (por operación)', d:'Incluye o excluye esa operación en la carta.' },
+      { k:'Campos Monto / CPT / ICD', d:'Capturas, por operación, el monto en la moneda del seguro y sus códigos.' },
+      { k:'Editar nombre del paciente', d:'Si es una agencia/doctor, pones el nombre del paciente real.' },
+      { k:'🎨 Personalizar formato', d:'Ajusta color, fuente, tamaño de logo, márgenes y el orden/visibilidad de secciones.' },
+      { k:'Generar carta / PDF', d:'Produce la carta lista para imprimir o guardar en PDF.' }
+    ],
     ejemplo:'Paciente de EE. UU.: eliges 3 operaciones, capturas cada monto en **USD** y sus CPT, generas la carta en **inglés** con la firma del administrador.',
-    tips:[ 'La leyenda que explica CPT/ICD está en pantalla, **no** en la carta. Es frontend-only (no requiere redeploy).' ] },
+    tips:[ 'La leyenda que explica CPT/ICD está en pantalla, **no** en la carta.' ],
+    tech:{ props:['`localStorage hf_seg_design` (formato libre)'],
+      funciones:['segInit','segBuscar','segRenderResult','segGenerar','SEG_L (idiomas)','SEG_BLOCKS_DEF (bloques)'],
+      nota:'Frontend-only (usa `estadoCobranza`, no requiere redeploy). Secciones: header/date/recipient/re/intro/patient/services/total/payment/provider/signature.' } },
 
   { id:'nota-recibo', group:'documentos', icon:'🧾', title:'Nota / Recibo (no fiscal)',
     keywords:'nota recibo comprobante no fiscal importe en letras folio pago sin factura',
@@ -28681,7 +28883,16 @@ setTimeout(novCheckPopup, 2500);
                  {n:2,text:'Ajusta receptor, forma de pago e importe de cada operación seleccionada.'},
                  {n:3,text:'**Generar**: sale en español con total en número y en **letras**, y opcionalmente tu firma.'} ] },
     steps:[ 'Abre **Nota / Recibo** y busca al paciente.', 'Ajusta receptor, forma de pago e importe.', 'Pulsa **Generar nota / recibo**.' ],
-    tips:[ 'El folio es automático. El importe en letras es es-MX con apócope («veintiún pesos»).' ] },
+    buttons:[
+      { k:'Buscar', d:'Localiza al paciente.' },
+      { k:'Receptor (editable)', d:'Cambia a quién va dirigido el recibo.' },
+      { k:'Forma de pago', d:'Elige cómo pagó (efectivo, transferencia, tarjeta…).' },
+      { k:'Importe / Total', d:'Ajusta el monto de cada operación seleccionada.' },
+      { k:'Generar nota / recibo', d:'Produce el recibo con el total en número y en letras (y tu firma si la activaste).' }
+    ],
+    tips:[ 'El folio es automático. El importe en letras es es-MX con apócope («veintiún pesos»).' ],
+    tech:{ funciones:['notaInit','notaBuscar','notaGenerar','_notaNumLetras','_notaImporteLetra','hfFirmaBloque'],
+      nota:'Frontend-only. No sustituye a un CFDI (lleva la leyenda).' } },
 
   { id:'plantillas', group:'documentos', icon:'🎨', title:'Plantillas de impresión + firma',
     keywords:'plantilla impresion celula editorial vida marca de agua watermark firma autografa logo reporte panel de control diseño',
@@ -28693,7 +28904,16 @@ setTimeout(novCheckPopup, 2500);
                  {n:2,text:'**Marca de agua** global.'},
                  {n:3,text:'**Firma autógrafa**: sube tu imagen y marca en qué documentos «lleva firma». No se corta al imprimir.'} ] },
     steps:[ 'Ve a **Panel de Control → Reportes**.', 'Elige plantilla y marca de agua por tipo de reporte.', 'En **Firma autógrafa** sube tu imagen y activa «lleva firma» donde quieras.' ],
-    tips:[ 'Todo es frontend (localStorage): **no** requiere redeploy.' ] },
+    buttons:[
+      { k:'Plantilla (selector por reporte)', d:'Elige el diseño (Célula, Editorial, Vida u otros) para cada tipo de documento.' },
+      { k:'Marca de agua (selector)', d:'Pone o quita la marca de agua de fondo.' },
+      { k:'Subir firma', d:'Carga la imagen de tu firma autógrafa.' },
+      { k:'Casilla «lleva firma»', d:'Activa que ese documento salga firmado.' }
+    ],
+    tips:[ 'La firma **no se corta** al imprimir: si no cabe, se va completa a la página siguiente.' ],
+    tech:{ props:['`localStorage`: firma (`hfSig*`), toggle por reporte (`hfFirma*`), marca de agua (`hf_tpl_watermark`)'],
+      funciones:['hfReportPrint','hfReportExcel','_REPORT_TEMPLATES','_REPORT_TYPES','hfSigGet/hfSigSet','hfFirmaGet/hfFirmaSet','hfFirmaBloque'],
+      nota:'Todo es frontend (localStorage), NO requiere redeploy. El logo sale de `getFmtConfig().logo`.' } },
 
   /* ============ FINANZAS / CFO ============ */
   { id:'summary', group:'cfo', icon:'📑', title:'Estado de Resultados / Summary',
@@ -28712,14 +28932,24 @@ setTimeout(novCheckPopup, 2500);
     steps:[
       'Abre **Finanzas → CFO → Summary** y elige el rango.',
       'Haz clic en una línea para ver su detalle.',
-      'Revisa el panel de **reconciliación** (caja vs P&L) — deben cuadrar salvo el pago AMEX.',
+      'Revisa el panel de **reconciliación** (caja vs P&L) — deben cuadrar salvo el pago de tarjeta.',
       'Exporta a Excel o imprime.'
     ],
-    bloques:[
-      { h:'Reglas de devengado', p:'El **pago de la tarjeta AMEX** del periodo anterior queda **fuera del P&L** (es nota de caja). El **Gasto No Deducible SÍ es gasto** (ámbar). Nómina/IMSS = Payroll (G&A); solo impuestos reales (SAT/ISN) = Taxes. Las canceladas se excluyen.' },
-      { h:'Mapeo editable', p:'La clasificación vive en la hoja `Summary_Config` y se edita desde la propia vista. `setupSummaryConfig()` la auto-siembra.' }
+    buttons:[
+      { k:'Selector de periodo', d:'Define el rango del estado de resultados.' },
+      { k:'Clic en una línea', d:'Abre el detalle (línea → sub-item → movimientos).' },
+      { k:'Exportar Excel', d:'Baja el estado de resultados a una hoja.' },
+      { k:'🖨 Imprimir', d:'Genera el documento imprimible.' },
+      { k:'Editar mapeo (solo admin)', d:'Reclasifica una clave (a qué línea del P&L pertenece).' }
     ],
-    tips:[ '`summary.gs` requiere deploy + `setupSummaryConfig()`. El Estado de Resultados por meses llama a `readSummary` una vez por mes (un año ≈ 13 llamadas; puede tardar).' ] },
+    bloques:[
+      { h:'Reglas útiles', p:'El **pago de la tarjeta** del periodo anterior queda **fuera del P&L** (es movimiento de caja, no gasto). El **Gasto No Deducible sí cuenta como gasto** (marcado ámbar). Nómina va a G&A; solo los impuestos reales cuentan como Taxes. Las operaciones canceladas se excluyen.' }
+    ],
+    tips:[ 'El Estado de Resultados por meses recalcula mes por mes, así que un año completo puede tardar unos segundos.' ],
+    tech:{ hojas:['`BD_Ingresos` (revenue) y Egresos por año','`Summary_Config` (mapeo Fuente|Clave|Grupo|Linea|Orden|Flag)'],
+      funciones:['readSummary','readEstadoResultadosMensual','readSummaryConfig','saveSummaryConfig','_summaryReadIngresos'],
+      deploy:'`summary.gs` requiere deploy + `setupSummaryConfig()`.',
+      nota:'`readEstadoResultadosMensual` llama a `readSummary` una vez por mes (un año ≈ 13 llamadas).' } },
 
   { id:'board', group:'cfo', icon:'📊', title:'Board Deck (informe a socios)',
     keywords:'board deck presentacion socios inversionistas slides kpi narrativa trimestre meta portada tablero',
@@ -28731,15 +28961,24 @@ setTimeout(novCheckPopup, 2500);
       callouts:[ {n:1,text:'Elige el **trimestre a presentar** (se desacopla del rango global): Qx real vs meta + Qx+1 proyectado.'},
                  {n:2,text:'**Presentar**: deck navegable de slides.'},
                  {n:3,text:'**Imprimir/PDF** para exportarlo.'},
-                 {n:4,text:'**Plantilla**: portada, colores y títulos (también en Panel de Control → Reportes).'} ] },
+                 {n:4,text:'**Plantilla**: portada, colores y títulos.'} ] },
     steps:[
       'Abre **Finanzas → CFO → Board Deck** y elige el **trimestre a presentar**.',
       'Revisa el **tablero** (narrativa + KPIs + gráficas).',
       'Pulsa **Presentar** o **Imprimir/PDF**.',
       'Personaliza desde **Plantilla**.'
     ],
-    tips:[ 'La **cantidad de ventas** cuenta solo procedimientos (Alta, Baja, Surrogacy, Reprovida, Consulta); estudios/medicamentos suman al **monto** pero no a la cantidad.',
-           '`board.gs` requiere deploy (con summary.gs y presupuesto.gs en el proyecto).' ] },
+    buttons:[
+      { k:'Trimestre a presentar (selector)', d:'Elige el Qx a mostrar (se desacopla del periodo global).' },
+      { k:'Presentar', d:'Abre el deck navegable de slides.' },
+      { k:'🖨 Imprimir / PDF', d:'Exporta la presentación.' },
+      { k:'Plantilla', d:'Personaliza portada, colores y títulos del deck.' }
+    ],
+    tips:[ 'La **cantidad de ventas** cuenta solo procedimientos (Alta, Baja, Surrogacy, Reprovida, Consulta); estudios/medicamentos suman al **monto** pero no a la cantidad.' ],
+    tech:{ hojas:['`Board_Config` (titulo, empresa, portada, colores)'],
+      funciones:['readBoardReport','readBoardConfig','saveBoardConfig','_boardNarrative','_boardPresupuesto'],
+      deploy:'`board.gs` requiere deploy (con summary.gs y presupuesto.gs en el proyecto).',
+      nota:'Portada subible en `localStorage hestia_board_cover_<email>`.' } },
 
   { id:'semanal', group:'cfo', icon:'🗓️', title:'Resumen Semanal (director)',
     keywords:'resumen semanal director semana meta operacion gasto area caja cxp facturacion wow bloque corte',
@@ -28752,10 +28991,19 @@ setTimeout(novCheckPopup, 2500);
       callouts:[ {n:1,text:'Elige el **día de corte**; arma la semana [corte-6, corte] y recarga.'},
                  {n:2,text:'**Config**: enciende/apaga bloques y ajusta metas por tipo.'} ] },
     steps:[ 'Abre **Finanzas → CFO → Resumen Semanal**.', 'Elige el **día de corte**.', 'Enciende/apaga bloques y ajusta metas; imprime.' ],
-    tips:[ '`semanal.gs` requiere deploy + `setupSemanalConfig()`. Meta semanal = presupuesto Qx ÷ 13 semanas (con override manual).' ] },
+    buttons:[
+      { k:'Día de corte (fecha)', d:'Fija el último día de la semana a analizar; arma la semana y compara con la previa.' },
+      { k:'⚙ Config bloques/metas', d:'Enciende/apaga cada uno de los 8 bloques y ajusta las metas por tipo.' },
+      { k:'🖨 Imprimir', d:'Genera el reporte semanal imprimible.' }
+    ],
+    tips:[ 'La meta semanal se calcula sola a partir del presupuesto del trimestre (con override manual por tipo).' ],
+    tech:{ hojas:['`Semanal_Config`: filas `bloque:X`=bool, `meta:Tipo`=número'],
+      funciones:['readResumenSemanal','readSemanalConfig','saveSemanalConfig','_semMetaSemanal'],
+      deploy:'`semanal.gs` requiere deploy + `setupSemanalConfig()`.',
+      nota:'Meta semanal = presupuesto Qx ÷ 13 semanas, con override manual por tipo.' } },
 
   { id:'presupuesto', group:'cfo', icon:'🎯', title:'Presupuesto (+ Costos y Utilidad)',
-    keywords:'presupuesto meta proyeccion cantidad precio grupo subgrupo escenario conservador optimista base maestro cuadrar trimestre candado utilidad costos fijo variable driver recomendado autollenar',
+    keywords:'presupuesto meta proyeccion cantidad precio grupo subgrupo escenario conservador optimista base maestro cuadrar trimestre candado utilidad costos fijo variable driver recomendado autollenar vaciar',
     para:'El **Presupuesto** se arma por **cantidad × precio real**, agrupado como el Board Deck. Permite metas por grupo, % maestro, cuadrar a un monto y escenarios. Incluye el panel **🧮 Costos y Utilidad** (P&L en vivo).',
     where:'Menú → Finanzas → **CFO → Presupuesto**.',
     mock:{ title:'Presupuesto', crumb:'Finanzas › CFO › Presupuesto',
@@ -28785,13 +29033,37 @@ setTimeout(novCheckPopup, 2500);
       'Captura cantidades por grupo o usa **% maestro / cuadrar a monto**.',
       'Abre **🧮 Costos y Utilidad**, marca cada gasto **FIJO/VARIABLE**, ajusta los **drivers** (ingresos/tratamientos) y mira la utilidad recalcularse; **Guardar costos**.'
     ],
+    buttons:[
+      { k:'Trimestre (selector)', d:'Elige el Qx a presupuestar (histórico o futuro).' },
+      { k:'⚙ Grupos', d:'Abre el editor de buckets: qué productos entran a cada grupo.' },
+      { k:'+ Nuevo grupo', d:'Crea un grupo de presupuesto.' },
+      { k:'✨ Autollenar', d:'Precarga todos los productos por categoría para que luego podes lo que no va.' },
+      { k:'🧹 Vaciar', d:'Limpia el tablero para empezar de cero.' },
+      { k:'%m (casilla por grupo)', d:'Marca si ese grupo se mueve con las herramientas en bloque.' },
+      { k:'% maestro', d:'Sube o baja todo un grupo por un porcentaje.' },
+      { k:'Cuadrar a monto', d:'Reparte proporcionalmente para llegar a un total objetivo.' },
+      { k:'Usar proyección', d:'Adopta la proyección que calcula el modelo.' },
+      { k:'Escenarios (Conservador / Optimista / Meta)', d:'Muestran la utilidad esperada de cada escenario.' },
+      { k:'🔓 Abrir para editar / 🔒 Cerrar', d:'Quita/pone el candado de un trimestre terminado (permiso de supervisor).' },
+      { k:'🧮 Costos y Utilidad', d:'Abre el panel de utilidad pronosticada (P&L en vivo).' },
+      { k:'FIJO / VARIABLE (toggle por gasto)', d:'Clasifica cada gasto; los variables se ajustan solos con los drivers.' },
+      { k:'+ Agregar línea (en el panel)', d:'Añade un concepto de costo a la estructura.' },
+      { k:'🔮 Recomendado', d:'Restaura el ingreso y tratamientos que sugiere el modelo.' },
+      { k:'📌 Fijar como meta', d:'Guarda el ingreso mostrado como la meta del trimestre.' },
+      { k:'Guardar costos', d:'Conserva tu estructura fijo/variable para la próxima vez.' }
+    ],
     bloques:[
       { h:'Escenarios', p:'Conservador = Base×(1−%), Optimista = Base×(1+%), con % editable, más una tarjeta Meta. Cada escenario muestra su utilidad esperada.' },
       { h:'Candado por trimestre', p:'Un trimestre terminado queda solo-lectura, pero se puede **🔓 Abrir para editar** la meta y volver a **🔒 Cerrar**.' }
     ],
     ejemplo:'Con ingresos proyectados **$3.6M**, costos fijos **$1.2M** y variables que escalan al 15% de los ingresos (**$540k**)… la **utilidad pronosticada** se recalcula al instante al subir/bajar el driver de tratamientos.',
-    tips:[ '`presupuesto.gs` requiere deploy (usa helpers de summary.gs). El Presupuesto alimenta el Board Deck.',
-           'La **última acción manda**: capturar por producto borra el TOTAL manual y viceversa.' ] },
+    tips:[ 'La **última acción manda**: capturar por producto borra el TOTAL manual y viceversa.',
+           'El Presupuesto alimenta el Board Deck y la meta semanal.' ],
+    tech:{ hojas:['`Presupuesto_Grupos`: Grupo|Subgrupo|Producto|IncluirMaestro|Orden'],
+      props:['`PRES_ABIERTOS` (trimestres abiertos)','`PRES_ESCENARIOS` (% conservador/optimista)','`PRES_CREC_MAX` (techo de crecimiento)'],
+      funciones:['readPresupuesto','savePresupuestoMeta','readGruposPresupuesto','saveGruposPresupuesto','readHistoricoMetas','_presIngresosProy','presCostosOpen','presCostosRecomendado'],
+      permisos:['abrir_periodo_presupuesto (fallback bank_capture)'],
+      deploy:'`presupuesto.gs` requiere deploy (usa helpers de summary.gs).' } },
 
   { id:'flujo', group:'cfo', icon:'💧', title:'Flujo de Efectivo',
     keywords:'flujo efectivo caja bancos entradas salidas saldo cuentas por cobrar panel liquidez',
@@ -28802,11 +29074,19 @@ setTimeout(novCheckPopup, 2500);
       note:'Cada banco muestra su saldo. El panel **Cuentas por Cobrar** trae su propio **buscador**.',
       callouts:[ {n:1,text:'Panel **Cuentas por Cobrar** (resumen de adeudos) con buscador — lo que está por entrar.'} ] },
     steps:[ 'Abre **Finanzas → CFO → Flujo de Efectivo**.', 'Revisa entradas/salidas y saldo por banco.', 'Consulta el panel **Cuentas por Cobrar** con su buscador.' ],
-    tips:[ 'El panel de Cuentas por Cobrar dentro de Flujo trae buscador para localizar un deudor rápido.' ] },
+    buttons:[
+      { k:'Pestañas por banco', d:'Cambian entre Santander, AMEX, Mercado Pago…' },
+      { k:'+ Nuevo / + Agregar movimiento', d:'Captura una entrada o salida en ese banco (con permiso).' },
+      { k:'Buscar (panel Cuentas por Cobrar)', d:'Localiza rápido a un deudor dentro del resumen de adeudos.' }
+    ],
+    tips:[ 'El panel de Cuentas por Cobrar te deja ver lo que está por entrar sin salir del Flujo.' ],
+    tech:{ funciones:['readBanksData','readEstadoCobranza'],
+      permisos:['cf_capture'],
+      nota:'El panel de Cuentas por Cobrar dentro de Flujo se agregó en el build .140.' } },
 
   { id:'devengado', group:'cfo', icon:'📅', title:'Facturación vencida / devengado',
-    keywords:'devengado facturacion vencida vianto laboratorio pagado corresponde mes informativo offset mes devengado',
-    para:'Algunos proveedores (ej. **Vianto**) cobran el servicio de un mes al inicio del siguiente, quedando el egreso en el mes «equivocado». Este módulo muestra **solo informativo** cuánto gasto **corresponde** a cada mes, sin tocar flujo ni el P&L.',
+    keywords:'devengado facturacion vencida vianto laboratorio pagado corresponde mes informativo offset',
+    para:'Algunos proveedores (ej. **Vianto**) cobran el servicio de un mes al inicio del siguiente, quedando el egreso en el mes «equivocado». Este módulo muestra **solo informativo** cuánto gasto **corresponde** a cada mes, sin tocar tu caja ni el P&L.',
     where:'En el header del **Resumen**, botón **«Facturación vencida»**.',
     mock:{ title:'Facturación vencida', crumb:'Resumen › Facturación vencida',
       form:[ {label:'Proveedor', val:'Vianto', n:1}, {label:'Offset (meses)', val:'−1', n:2}, {label:'Día tope', val:'5', n:2} ],
@@ -28814,37 +29094,66 @@ setTimeout(novCheckPopup, 2500);
       callouts:[ {n:1,text:'Agrega el **proveedor** cuyo cobro se atrasa.'},
                  {n:2,text:'Define **offset** (ej. −1 mes) y **día tope**; el memo teal aparece en Resumen y Board Deck.'} ] },
     steps:[ 'En el header del **Resumen** pulsa **«Facturación vencida»**.', 'Agrega el proveedor con su offset y día tope.', 'El memo teal aparece en el Resumen y el Board Deck.' ],
-    tips:[ '`devengado.gs` requiere deploy. Para overrides manuales, crea la columna «Mes Devengado» (AAAA-MM) en Egresos.' ] },
+    buttons:[
+      { k:'+ (agregar proveedor)', d:'Añade un proveedor cuyo cobro se atrasa.' },
+      { k:'Offset (meses)', d:'Cuántos meses atrás corresponde el gasto (ej. −1).' },
+      { k:'Día tope', d:'Hasta qué día del mes siguiente se atribuye al mes anterior.' }
+    ],
+    tips:[ 'Para overrides puntuales, se puede fijar el «Mes Devengado» manual de una partida.' ],
+    tech:{ props:['`FACT_VENCIDA` = [{proveedor, offset, diaTope}] (semilla: Vianto)'],
+      funciones:['readGastoDevengado','factVencidaLeer','factVencidaGuardar','_dvMesServicio'],
+      deploy:'`devengado.gs` requiere deploy.',
+      nota:'Para overrides, crear columna «Mes Devengado» (AAAA-MM) en las hojas de Egresos.' } },
 
   /* ============ ADMINISTRACIÓN ============ */
   { id:'roles', group:'admin', icon:'🔐', title:'Roles y Permisos',
     keywords:'roles permisos rbac vistas bloqueadas solo lectura operativos gestion panel de control usuarios editar borrar',
-    para:'El acceso se controla con **roles** (RBAC). Cada rol define vistas bloqueadas, si es solo-lectura y permisos operativos. Se administra en **Panel de Control → Gestión de Roles**.',
+    para:'El acceso se controla con **roles**. Cada rol define qué vistas se bloquean, si es solo-lectura y qué acciones (permisos) puede hacer. Se administra en **Panel de Control → Gestión de Roles**.',
     where:'Menú → **Panel de Control → Gestión de Roles**.',
     mock:{ title:'Gestión de Roles', crumb:'Panel de Control › Roles',
       toolbar:[ {t:'select', label:'Rol: Operador', n:1}, {t:'btn', label:'+ Nuevo', n:1} ],
       table:{ cols:['Permiso operativo',{label:'Activo',n:2}],
-        rows:[ ['editar_egresos','☑'], ['borrar_egresos','☐'], ['bank_capture','☑'], ['ver_datos_sensibles','☐'] ] },
+        rows:[ ['Editar egresos','☑'], ['Eliminar egresos','☐'], ['Capturar bancos','☑'], ['Ver datos sensibles','☐'] ] },
       callouts:[ {n:1,text:'Elige o crea un **rol**.'},
-                 {n:2,text:'Marca **vistas bloqueadas**, solo-lectura y **permisos operativos** (habilitan botones y acciones).'} ] },
-    steps:[ 'Abre **Panel de Control → Gestión de Roles**.', 'Edita por rol: vistas bloqueadas, solo-lectura y permisos.', 'Asigna el rol a cada usuario en la hoja `Usuarios`.' ],
-    tips:[ 'Permisos: `editar_egresos`, `borrar_egresos`, `bank_capture`, `docs_enviar`, `ver_datos_sensibles`, `export_data`. `*` = todo; admin/director siempre pueden.' ] },
+                 {n:2,text:'Marca **vistas bloqueadas**, solo-lectura y **permisos** (habilitan botones y acciones).'} ] },
+    steps:[ 'Abre **Panel de Control → Gestión de Roles**.', 'Edita por rol: vistas bloqueadas, solo-lectura y permisos.', 'Asigna el rol a cada usuario en Gestión de Usuarios.' ],
+    buttons:[
+      { k:'Rol (selector)', d:'Elige el rol a editar.' },
+      { k:'+ Nuevo', d:'Crea un rol nuevo.' },
+      { k:'Casillas de permisos', d:'Cada permiso habilita/oculta un botón o acción (editar, borrar, capturar bancos, enviar documentos, ver datos sensibles…).' },
+      { k:'Vistas bloqueadas', d:'Oculta del menú las pantallas que ese rol no debe ver.' },
+      { k:'Solo lectura', d:'Deja al rol ver todo pero sin poder editar.' },
+      { k:'Guardar', d:'Aplica los cambios al rol.' }
+    ],
+    tips:[ 'Los roles **admin** y **director** pueden todo. El resto ve solo lo que su rol permite.' ],
+    tech:{ hojas:['`Roles`: rol · vistas_bloqueadas · solo_lectura · permisos_operativos','`Usuarios` (rol por usuario)'],
+      funciones:['hasPermission','getRolConfig','handleLogin','OP_PERMS_CATALOG'],
+      permisos:['editar_ingresos','editar_egresos','borrar_egresos','bank_capture','docs_enviar','ver_datos_sensibles','export_data'],
+      nota:'`*` = todos los permisos. El login devuelve los permisos operativos personalizados del rol.' } },
 
   { id:'privacidad', group:'admin', icon:'🕶️', title:'Privacidad (rol Socio)',
-    keywords:'privacidad socio datos sensibles enmascarar op paciente nomina proveedor pii confidencial ver_datos_sensibles',
-    para:'Quien **no** tenga el permiso `ver_datos_sensibles` no debe ver nombres de pacientes, empleados ni proveedores — solo el **número de operación (OP)**. El enmascarado se hace en el **backend** (seguro).',
-    where:'Correr `setupRolSocio()` y asignar el rol **Socio** en la hoja `Usuarios`.',
+    keywords:'privacidad socio datos sensibles enmascarar op paciente nomina proveedor confidencial',
+    para:'Quien **no** tenga permiso de «ver datos sensibles» no ve nombres de pacientes, empleados ni proveedores — solo el **número de operación (OP)**. El enmascarado se hace del lado del servidor (seguro).',
+    where:'Se crea el rol **Socio** en Gestión de Roles y se asigna a los socios en Gestión de Usuarios.',
     mock:{ title:'Vista de un rol Socio', crumb:'(datos enmascarados)',
       table:{ cols:['Normal','Con rol Socio'],
         rows:[ ['A. López','OP-1042'], ['Egreso: Vianto · Estudios','Subtipo: Estudios'], ['Nómina detallada','Nómina (total)'] ] },
       note:'Los **totales no cambian**; solo se ocultan los nombres.',
       callouts:[] },
-    steps:[ 'Corre `setupRolSocio()` (o crea el rol Socio en Gestión de Roles).', 'Asigna el rol **Socio** a los socios en la hoja `Usuarios`.' ],
-    tips:[ '`privacidad.gs` requiere deploy. Es **fail-secure**: ante error, enmascara.' ] },
+    steps:[ 'Crea/activa el rol **Socio** en Gestión de Roles (sin el permiso de datos sensibles).', 'Asigna el rol **Socio** a los socios en Gestión de Usuarios.' ],
+    buttons:[
+      { k:'Permiso «Ver datos sensibles» (en Roles)', d:'Si está apagado, ese rol ve OP en vez de nombres. Enciéndelo solo para quien deba ver nombres.' },
+      { k:'Asignar rol Socio (en Usuarios)', d:'Aplica el enmascarado a esa persona.' }
+    ],
+    tips:[ 'El enmascarado solo oculta nombres; las **cifras** (totales, KPIs) siguen igual.' ],
+    tech:{ funciones:['_privVer','_privSet','_privPaciente','_privNombre','_privRef','setupRolSocio'],
+      permisos:['ver_datos_sensibles'],
+      deploy:'`privacidad.gs` requiere deploy (con core/summary/finance).',
+      nota:'Fail-secure: ante error, enmascara.' } },
 
   { id:'menu', group:'admin', icon:'🧩', title:'Menú editable (Panel de Control)',
-    keywords:'menu editar reordenar renombrar padre grupo submenu arrastrar activo panel de control sidebar hoja',
-    para:'El menú lateral es 100% editable sin tocar código. Se administra desde **Panel de Control → Menú** (o directo en la hoja `Menu`).',
+    keywords:'menu editar reordenar renombrar padre grupo submenu arrastrar activo panel de control sidebar',
+    para:'El menú lateral es 100% editable sin tocar código. Se administra desde **Panel de Control → Menú**.',
     where:'Menú → **Panel de Control → Menú**.',
     mock:{ title:'Panel de Control · Menú', crumb:'Panel de Control › Menú',
       toolbar:[ {t:'btn', label:'+ Nuevo submenú', n:3}, {t:'btn', label:'↺ Recargar', n:4} ],
@@ -28855,11 +29164,23 @@ setTimeout(novCheckPopup, 2500);
                  {n:3,text:'**+ Nuevo submenú** crea agrupadores.'},
                  {n:4,text:'**↺ Recargar** refresca el sidebar (el menú se cachea).'} ] },
     steps:[ 'Abre **Panel de Control → Menú**.', 'Reordena (▲▼ o arrastrar), cambia label/icono/padre, activa/desactiva.', 'Crea grupos con **+ Nuevo submenú**. Guarda y el sidebar se refresca.' ],
-    tips:[ '`saveMenu` actualiza in-place por id (nunca toca id/tipo/fuente/seccion). Si no ves un cambio, usa **↺ Recargar**.' ] },
+    buttons:[
+      { k:'▲ / ▼', d:'Sube o baja el ítem en el orden.' },
+      { k:'Arrastrar', d:'Reordena o suelta sobre un grupo para meterlo ahí.' },
+      { k:'Casilla Activo', d:'Muestra u oculta ese ítem del menú.' },
+      { k:'Label / Icono / Padre', d:'Renombra, cambia el ícono o mueve el ítem a otro grupo.' },
+      { k:'+ Nuevo submenú', d:'Crea un grupo agrupador.' },
+      { k:'↺ Recargar', d:'Refresca el sidebar si no ves un cambio (el menú se cachea).' },
+      { k:'Guardar', d:'Aplica los cambios al menú.' }
+    ],
+    tips:[ 'Si no ves un cambio recién hecho, usa **↺ Recargar**.' ],
+    tech:{ hojas:['`Menu` (SHEET_ID): A id · B padre · C label · D seccion · E icono · F orden · G tipo · H fuente · I activo'],
+      funciones:['readMenu','saveMenu','pcMenuSave'],
+      nota:'`saveMenu` actualiza in-place por id (nunca toca id/tipo/fuente/seccion). El menú se cachea en `erp_menu_v3_*` (1800s).' } },
 
   { id:'chat', group:'admin', icon:'💬', title:'Chat interno',
     keywords:'chat mensaje directo dm canal general equipo adjunto tarea emoji flotante sondeo online',
-    para:'El **Chat interno** permite conversar con el equipo dentro del ERP: un **canal general** y **mensajes directos**. Funciona por **sondeo cada 7 segundos** (no es tiempo real).',
+    para:'El **Chat interno** permite conversar con el equipo dentro del ERP: un **canal general** y **mensajes directos**. Funciona por **sondeo cada 7 segundos** (los mensajes llegan en el siguiente sondeo, no es tiempo real).',
     where:'Botón flotante **💬** (abajo a la derecha).',
     mock:{ title:'Chat interno', crumb:'(botón flotante 💬)',
       sidebar:[ {label:'General', icon:'#', active:true, n:2}, {label:'🟢 María', n:2}, {label:'⚪ Juan', n:2} ],
@@ -28869,7 +29190,19 @@ setTimeout(novCheckPopup, 2500);
                  {n:3,text:'**📎** adjuntar · **😀** emojis.'},
                  {n:4,text:'**📌 Tarea**: le llega como **Recordatorio** al destinatario.'} ] },
     steps:[ 'Pulsa el botón flotante **💬**.', 'Elige General o un contacto.', 'Escribe; adjunta 📎, inserta 😀 o **📌 asigna una tarea**.' ],
-    tips:[ '`chat.gs` requiere agregarse al Apps Script + redeploy. La hoja `Chat` y la carpeta se crean solas.' ] },
+    buttons:[
+      { k:'💬 (botón flotante)', d:'Abre/cierra el chat.' },
+      { k:'General', d:'Canal para todo el equipo.' },
+      { k:'Contacto (🟢/⚪)', d:'Abre un mensaje directo; el punto indica si está conectado.' },
+      { k:'📎', d:'Adjunta un archivo (hasta 9 MB).' },
+      { k:'😀', d:'Inserta emojis.' },
+      { k:'📌 Tarea', d:'Envía una tarea que le llega al destinatario como Recordatorio.' },
+      { k:'Enviar', d:'Manda el mensaje (llega en el siguiente sondeo).' }
+    ],
+    tech:{ hojas:['`Chat` (SHEET_ID): Fecha|Canal|DeEmail|DeNombre|Mensaje','Adjuntos en Drive `Chat_Adjuntos` (≤9 MB)'],
+      props:['`CHAT_PRES` (presencia; online = ping < 90s)'],
+      funciones:['_chatMount','chatSend','chatPoll','chatUpload','chatTareaSave'],
+      deploy:'`chat.gs` requiere agregarse al Apps Script + redeploy.' } },
 
   { id:'recordatorios', group:'admin', icon:'⏰', title:'Recordatorios (agenda)',
     keywords:'recordatorios agenda tarea pendiente fecha banner correo programar ofrecer hecho descartado',
@@ -28882,12 +29215,19 @@ setTimeout(novCheckPopup, 2500);
                ['08/07','Programar renta',{raw:'<b class="hfm-badge ok">hecho</b>'}] ] },
       callouts:[ {n:1,text:'**+ Nuevo** crea un recordatorio (título, fecha, detalle).'},
                  {n:2,text:'Cambia el **estado**: pendiente / hecho / descartado.'} ] },
-    steps:[ 'Abre **Recordatorios** para ver/crear/actualizar.', 'La tarea `recordatoriosDelDia` envía el recordatorio por correo.' ],
-    tips:[ 'Cualquier módulo puede engancharse con `crearRecordatorio(...)` u `ofrecerRecordatorio(...)`. Ejemplo: la captura de inventario ofrece «Recibir <producto>».' ] },
+    steps:[ 'Abre **Recordatorios** para ver/crear/actualizar.', 'Marca cada uno como hecho o descartado cuando corresponda.' ],
+    buttons:[
+      { k:'+ Nuevo recordatorio', d:'Crea un recordatorio con título, fecha y detalle.' },
+      { k:'Estado (pendiente / hecho / descartado)', d:'Actualiza el avance de la tarea.' }
+    ],
+    tips:[ 'Otras áreas te «ofrecen» recordatorios: por ejemplo, la captura de inventario ofrece «Recibir <producto>».' ],
+    tech:{ hojas:['`Recordatorios` (SHEET_ID)'],
+      funciones:['crearRecordatorio','ofrecerRecordatorio','saveRecordatorio','updateRecordatorioEstado','recordatoriosDelDia'],
+      nota:'`recordatorios.gs`. La tarea programada `recordatoriosDelDia` envía el recordatorio por correo.' } },
 
   { id:'novedades', group:'admin', icon:'✨', title:'Novedades (qué hay de nuevo)',
     keywords:'novedades changelog cambios nuevo version mejora aviso popup tutorial como usar',
-    para:'La página de **Novedades** es el changelog del ERP: cada mejora con «qué hace» y «cómo usarlo». Al publicar una versión aparece un **aviso emergente una vez por versión**.',
+    para:'La página de **Novedades** es el historial de cambios del ERP: cada mejora con «qué hace» y «cómo usarlo». Al publicar una versión aparece un **aviso emergente una vez por versión**.',
     where:'Menú → **Novedades ✨** (o el aviso emergente).',
     mock:{ title:'Novedades ✨', crumb:'Novedades',
       table:{ cols:['Fecha','Mejora','Cómo usarlo'],
@@ -28895,12 +29235,20 @@ setTimeout(novCheckPopup, 2500);
                ['2026-07-10','Manual ilustrado','Menú → 📖 Manual'] ] },
       callouts:[] },
     steps:[ 'Abre **Novedades ✨** desde el menú (o el aviso emergente).', 'Lee las entradas por fecha con su mini-tutorial «Cómo usarlo».' ],
-    tips:[ 'El aviso emergente aparece **una vez por versión** para quien tenga acceso a esas áreas.' ] },
+    buttons:[
+      { k:'Ver novedades (en el aviso emergente)', d:'Te lleva a la página de Novedades.' },
+      { k:'Después', d:'Cierra el aviso; lo vuelves a abrir desde el menú Novedades ✨.' }
+    ],
+    tips:[ 'El aviso emergente aparece **una vez por versión** para quien tenga acceso a esas áreas.' ],
+    tech:{ props:['`localStorage hf_nov_seen` (última versión vista)'],
+      funciones:['novInit','novCheckPopup','NOVEDADES'],
+      nota:'Frontend-only. Las entradas se pueden gatear por permiso (perm).' } },
 
   /* ============ CONFIGURACIÓN Y REFERENCIA ============ */
   { id:'config-inicial', group:'ref', icon:'🧰', title:'Configuración inicial (hojas, setups, deploy)',
+    techOnly:true,
     keywords:'configuracion inicial setup deploy redeploy script property hojas apps script core finance backend spreadsheet id githack github pages instalar',
-    para:'Referencia de puesta en marcha: qué **hojas** y **Script Properties** existen, qué `setup…()` correr y cómo se **despliega** cada cambio.',
+    para:'Referencia de puesta en marcha para el administrador: qué **hojas** y **Script Properties** existen, qué `setup…()` correr y cómo se **despliega** cada cambio.',
     where:'Backend: proyecto de **Google Apps Script** ligado al spreadsheet.',
     bloques:[
       { h:'Cómo se despliega', lista:[
@@ -28919,17 +29267,16 @@ setTimeout(novCheckPopup, 2500);
       ]},
       { h:'Backend (Apps Script)', p:'El router GET activo es **`core.gs`** (ahí se agregan acciones GET). Las funciones de datos y el `doPost` viven en **`finance.gs`**. Módulos: cobranza.gs, providers.gs, summary.gs, board.gs, presupuesto.gs, semanal.gs, comprobantes.gs, gastosfijos.gs, privacidad.gs, devengado.gs, chat.gs, inventario.gs, recordatorios.gs. ⚠ `core_working.gs` está **desfasado** (no agregar acciones ahí).' }
     ],
-    reminder:true,
     tips:[ 'Si un módulo «no responde» tras publicar, casi siempre falta **redeploy del backend** o correr su `setup…()`.' ] },
 
   { id:'glosario', group:'ref', icon:'📖', title:'Glosario',
-    keywords:'glosario terminos definiciones cxp cxc cfdi rfc uuid clabe ebitda cogs opex aging fifo devengado motor script property deploy conciliacion nota credito op',
+    keywords:'glosario terminos definiciones cxp cxc cfdi rfc uuid clabe ebitda cogs opex aging fifo devengado nota credito op',
     para:'Términos que se usan por todo el ERP.',
     bloques:[
       { h:'Contabilidad y cobranza', lista:[
-        '**CxP (Cuentas por Pagar)** — lo que le debes a proveedores (Egresos sin pagar).',
-        '**CxCobrar / AR (Cuentas por Cobrar)** — lo que te deben pacientes/agencias.',
-        '**Aging** — antigüedad del adeudo por rangos (0-30 / 31-60 / 61-90 / +90 días).',
+        '**CxP (Cuentas por Pagar)** — lo que le debes a proveedores (gastos aún no pagados).',
+        '**CxCobrar / Cuentas por Cobrar** — lo que te deben pacientes/agencias.',
+        '**Aging / Antigüedad** — qué tan viejo es el adeudo (0-30 / 31-60 / 61-90 / +90 días).',
         '**FIFO** — los abonos pagan primero los periodos más viejos.',
         '**Devengado vs pagado** — devengado = el gasto/ingreso del mes que corresponde; pagado = cuando entró/salió el dinero.',
         '**Nota de Crédito** — descuento **no fiscal** (no rutea a banco, no cuenta como facturado).',
@@ -28944,11 +29291,11 @@ setTimeout(novCheckPopup, 2500);
       { h:'Fiscal (SAT)', lista:[
         '**CFDI** — factura electrónica. **UUID** — folio fiscal único. **RFC** — registro del contribuyente. **CLABE** — clave bancaria de 18 dígitos.'
       ]},
-      { h:'Técnicos', lista:[
+      { h:'Técnicos (solo administradores)', tech:true, lista:[
         '**Script Property** — configuración guardada en Apps Script (tarifas, listas, flags).',
         '**Deploy / redeploy** — publicar una versión nueva del backend (manual).',
         '**Conciliación** — cruzar el estado de cuenta del banco contra lo capturado.',
-        '**Autopay** — cobro automático informativo de una suscripción.'
+        '**Motor / motorVer** — versión del backend de un módulo (ej. `cobranza-2026.07.10o`).'
       ]}
     ] }
 
@@ -28962,18 +29309,46 @@ setTimeout(novCheckPopup, 2500);
     if (s.steps) p.push(s.steps.join(' '));
     if (s.ejemplo) p.push(s.ejemplo);
     if (s.tips) p.push(s.tips.join(' '));
+    if (s.buttons){ for(var q=0;q<s.buttons.length;q++) p.push((s.buttons[q].k||'')+' '+(s.buttons[q].d||'')); }
     if (s.bloques){ for(var i=0;i<s.bloques.length;i++){ var bl=s.bloques[i]; if(bl.h)p.push(bl.h); if(bl.p)p.push(bl.p); if(bl.lista)p.push(bl.lista.join(' ')); } }
+    if (_hfManTech() && s.tech){ var d=s.tech; var kk=['hojas','funciones','props','permisos'];
+      for(var t=0;t<kk.length;t++){ if(d[kk[t]]) p.push(d[kk[t]].join(' ')); }
+      if(d.intro)p.push(d.intro); if(d.motor)p.push(d.motor); if(d.deploy)p.push(d.deploy); if(d.nota)p.push(d.nota);
+    }
     var g = grpById(s.group); if(g) p.push(g.label);
     s._st = p.join(' ').toLowerCase().replace(/<[^>]+>/g,' ');
     return s._st;
   }
 
-  /* ────────────────── RENDER DE UNA SECCIÓN ────────────────── */
-  function reminderHtml(){
-    return '<div class="hfm-tech"><div class="hfm-tech-t">🔧 Puesta en marcha</div>'
-      +'<div class="hfm-p">Ver la sección **Configuración inicial** para la lista completa de hojas, Script Properties, `setup…()` y pasos de deploy.</div></div>';
+  /* ────────────────── RENDER: botones + técnico ────────────────── */
+  function buttonsHtml(arr){
+    if (!arr || !arr.length) return '';
+    var h = '<div class="hfm-block hfm-btns"><div class="hfm-blabel">🔘 ¿Qué hace cada botón?</div><div class="hfm-btl">';
+    for (var i=0;i<arr.length;i++){ var b=arr[i];
+      h += '<div class="hfm-btrow"><span class="hfm-bk">'+fmt(b.k)+'</span><span class="hfm-bd">'+fmt(b.d)+'</span></div>';
+    }
+    return h + '</div></div>';
   }
+  function techHtml(d){
+    if (!d) return '';
+    function lines(arr){ var o=''; for(var i=0;i<arr.length;i++) o+='<div class="hfm-dline">'+fmt(arr[i])+'</div>'; return o; }
+    function chips(arr){ var o=''; for(var i=0;i<arr.length;i++) o+='<code class="hfm-chip2">'+esc(arr[i])+'</code>'; return o; }
+    function row(label,val){ if(!val) return ''; return '<div class="hfm-drow"><div class="hfm-dk">'+label+'</div><div class="hfm-dv">'+val+'</div></div>'; }
+    var h = '<div class="hfm-tech"><div class="hfm-tech-t">🔧 Bajo el capó · <span class="hfm-tech-badge">solo modo técnico</span></div>';
+    if (d.intro)     h += '<p class="hfm-tech-intro">'+fmt(d.intro)+'</p>';
+    if (d.hojas)     h += row('Hojas / columnas', lines(d.hojas));
+    if (d.props)     h += row('Script Properties / config', lines(d.props));
+    if (d.funciones) h += row('Funciones clave', chips(d.funciones));
+    if (d.permisos)  h += row('Permisos', chips(d.permisos));
+    if (d.motor)     h += row('Motor', '<code class="hfm-chip2">'+esc(d.motor)+'</code>');
+    if (d.deploy)    h += row('Deploy / setup', fmt(d.deploy));
+    if (d.nota)      h += row('Nota', fmt(d.nota));
+    return h + '</div>';
+  }
+
+  /* ────────────────── RENDER DE UNA SECCIÓN ────────────────── */
   function sectionHtml(s){
+    var tech = _hfManTech();
     var h = '<article class="hfm-sec" id="hfm-sec-'+esc(s.id)+'">';
     h += '<div class="hfm-sec-head"><span class="hfm-sec-ic">'+(s.icon||'📄')+'</span><h2 class="hfm-h2">'+esc(s.title)+'</h2></div>';
     if (s.where) h += '<div class="hfm-where">📍 <span>Cómo llegar:</span> '+fmt(s.where)+'</div>';
@@ -28985,7 +29360,9 @@ setTimeout(novCheckPopup, 2500);
       h += '</ol></div>';
     }
     if (s.mock2) h += mock(s.mock2);
+    if (s.buttons) h += buttonsHtml(s.buttons);
     if (s.bloques){ for(var b=0;b<s.bloques.length;b++){ var bl=s.bloques[b];
+      if (bl.tech && !tech) continue;
       h += '<div class="hfm-block">';
       if (bl.h) h += '<div class="hfm-blabel">'+esc(bl.h)+'</div>';
       if (bl.p) h += '<p class="hfm-p">'+fmt(bl.p)+'</p>';
@@ -28994,7 +29371,7 @@ setTimeout(novCheckPopup, 2500);
     } }
     if (s.ejemplo) h += '<div class="hfm-ex"><div class="hfm-ex-t">💡 Ejemplo con números</div><div class="hfm-ex-b">'+fmt(s.ejemplo)+'</div></div>';
     if (s.tips && s.tips.length){ h += '<div class="hfm-tips"><div class="hfm-tips-t">✅ Tips y errores comunes</div><ul class="hfm-ul">'; for(var t=0;t<s.tips.length;t++) h += '<li>'+fmt(s.tips[t])+'</li>'; h += '</ul></div>'; }
-    if (s.reminder) h += reminderHtml();
+    if (tech && s.tech) h += techHtml(s.tech);
     h += '</article>';
     return h;
   }
@@ -29003,11 +29380,13 @@ setTimeout(novCheckPopup, 2500);
   function curQ(){ var q=document.getElementById('hfm-q'); return q?q.value:''; }
   function renderToc(q){
     var side = document.getElementById('hfm-toc'); if(!side) return;
+    var tech = _hfManTech();
     q = String(q||'').toLowerCase().replace(/^\s+|\s+$/g,'');
     var html='', any=false; _hfmFirst=null;
     for (var g=0; g<HFMAN_GROUPS.length; g++){
       var grp = HFMAN_GROUPS[g], items=[];
       for (var i=0;i<HFMAN.length;i++){ var s=HFMAN[i]; if(s.group!==grp.id) continue;
+        if (s.techOnly && !tech) continue;
         if (q && searchText(s).indexOf(q)<0) continue; items.push(s); if(!_hfmFirst) _hfmFirst=s.id;
       }
       if (!items.length) continue; any=true;
@@ -29028,7 +29407,8 @@ setTimeout(novCheckPopup, 2500);
   window.hfManToggle = function(g){ _hfmColl[g] = !_hfmColl[g]; renderToc(curQ()); };
   window.hfManShow = function(id){
     var s=null; for(var i=0;i<HFMAN.length;i++){ if(HFMAN[i].id===id){ s=HFMAN[i]; break; } }
-    if (!s){ if(!HFMAN.length) return; s=HFMAN[0]; }
+    if (!s || (s.techOnly && !_hfManTech())){ s=null; for(var j=0;j<HFMAN.length;j++){ if(!HFMAN[j].techOnly){ s=HFMAN[j]; break; } } }
+    if (!s) return;
     _hfmCur = s.id;
     var c=document.getElementById('hfm-cont'); if(c){ c.innerHTML=sectionHtml(s); c.scrollTop=0; }
     renderToc(curQ());
@@ -29044,14 +29424,14 @@ setTimeout(novCheckPopup, 2500);
   };
   window.hfManPrint = function(){
     var w=window.open('','_blank'); if(!w) return;
-    var body='';
+    var tech=_hfManTech(), body='';
     for (var g=0; g<HFMAN_GROUPS.length; g++){ var grp=HFMAN_GROUPS[g], got=false;
-      for (var i=0;i<HFMAN.length;i++){ if(HFMAN[i].group!==grp.id) continue;
+      for (var i=0;i<HFMAN.length;i++){ if(HFMAN[i].group!==grp.id) continue; if(HFMAN[i].techOnly && !tech) continue;
         if(!got){ body+='<h1 class="pg">'+esc(grp.icon||'')+' '+esc(grp.label)+'</h1>'; got=true; }
         body += sectionHtml(HFMAN[i]);
       }
     }
-    w.document.write('<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Manual del ERP · Hestia Fertility</title><style>'+HFM_CSS+HFM_PRINT_CSS+'</style></head><body class="hfm-printdoc"><h1 class="hfm-cover">📖 Manual del ERP</h1><div class="hfm-cover-sub">Hestia Fertility · Guía ilustrada de uso</div>'+body+'</body></html>');
+    w.document.write('<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Manual del ERP · Hestia Fertility</title><style>'+HFM_CSS+HFM_PRINT_CSS+'</style></head><body class="hfm-printdoc"><h1 class="hfm-cover">📖 Manual del ERP</h1><div class="hfm-cover-sub">Hestia Fertility · Guía ilustrada de uso'+(tech?' · modo técnico':'')+'</div>'+body+'</body></html>');
     w.document.close(); setTimeout(function(){ try{ w.print(); }catch(e){} }, 400);
   };
 
@@ -29059,29 +29439,30 @@ setTimeout(novCheckPopup, 2500);
   window.hfManInit = function(){
     injectCss();
     var root=document.getElementById('manual-root'); if(!root) return;
-    if (!root._built){
-      root.innerHTML =
-        '<div class="hfm-wrap">'
-        +'<div class="hfm-head">'
-        +'<div class="hfm-htitle">📖 Manual del ERP<span class="hfm-hsub">Guía ilustrada · aprende a usar y configurar todo el sistema</span></div>'
-        +'<div class="hfm-hactions">'
-        +'<div class="hfm-search"><input id="hfm-q" type="search" autocomplete="off" placeholder="Buscar… (ej: cuentas por pagar, CFDI, cobranza, presupuesto)" oninput="hfManSearch()"></div>'
-        +'<button class="hfm-pbtn" onclick="hfManPrint()" title="Imprimir el manual completo">🖨 Imprimir</button>'
-        +'</div></div>'
-        +'<div class="hfm-body"><nav id="hfm-toc" class="hfm-toc"></nav><div id="hfm-cont" class="hfm-cont"></div></div>'
-        +'</div>';
-      root._built = true;
-    }
+    var badge = _hfManTech() ? '<span class="hfm-techbadge" title="Ves también los detalles técnicos (hojas, funciones, deploy)">🔧 Modo técnico</span>' : '';
+    root.innerHTML =
+      '<div class="hfm-wrap">'
+      +'<div class="hfm-head">'
+      +'<div class="hfm-htitle">📖 Manual del ERP '+badge+'<span class="hfm-hsub">Guía ilustrada · aprende a usar y configurar todo el sistema</span></div>'
+      +'<div class="hfm-hactions">'
+      +'<div class="hfm-search"><input id="hfm-q" type="search" autocomplete="off" placeholder="Buscar… (ej: cuentas por pagar, CFDI, cobranza, presupuesto)" oninput="hfManSearch()"></div>'
+      +'<button class="hfm-pbtn" onclick="hfManPrint()" title="Imprimir el manual completo">🖨 Imprimir</button>'
+      +'</div></div>'
+      +'<div class="hfm-body"><nav id="hfm-toc" class="hfm-toc"></nav><div id="hfm-cont" class="hfm-cont"></div></div>'
+      +'</div>';
+    // Si la sección actual es técnica y el usuario ya no es admin, cae en la primera visible.
+    var curOk=false; for(var i=0;i<HFMAN.length;i++){ if(HFMAN[i].id===_hfmCur){ curOk=!(HFMAN[i].techOnly && !_hfManTech()); break; } }
     renderToc('');
-    window.hfManShow(_hfmCur || 'primeros-pasos');
+    window.hfManShow(curOk ? _hfmCur : 'primeros-pasos');
   };
 
   /* ────────────────── ESTILOS ────────────────── */
   var HFM_CSS =
     '.hfm-wrap{max-width:1180px;margin:0 auto;font-family:var(--font-body,inherit);color:var(--color-text,#28251d)}'
     +'.hfm-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:0 0 16px}'
-    +'.hfm-htitle{font-size:21px;font-weight:800;display:flex;flex-direction:column;gap:2px;color:var(--color-text,#28251d)}'
-    +'.hfm-hsub{font-size:12px;font-weight:500;color:var(--color-text-muted,#7a7670)}'
+    +'.hfm-htitle{font-size:21px;font-weight:800;display:flex;flex-wrap:wrap;align-items:center;gap:2px 10px;color:var(--color-text,#28251d)}'
+    +'.hfm-hsub{font-size:12px;font-weight:500;color:var(--color-text-muted,#7a7670);flex-basis:100%}'
+    +'.hfm-techbadge{font-size:11px;font-weight:800;color:#fff;background:var(--color-primary,#c46a7a);border-radius:20px;padding:3px 10px;letter-spacing:.02em}'
     +'.hfm-hactions{display:flex;align-items:center;gap:10px;flex:1;justify-content:flex-end;min-width:260px}'
     +'.hfm-search{flex:1;max-width:420px}'
     +'.hfm-search input{width:100%;box-sizing:border-box;padding:10px 14px;border:1px solid var(--color-border,#d8d4cd);border-radius:10px;background:var(--color-surface-2,#fff);color:var(--color-text,#28251d);font-size:13px;font-family:inherit;outline:none}'
@@ -29119,8 +29500,22 @@ setTimeout(novCheckPopup, 2500);
     +'.hfm-ex-b{font-size:13.5px;line-height:1.6;color:var(--color-text,#28251d)}'
     +'.hfm-tips{background:var(--color-surface,#faf9f7);border:1px solid var(--color-divider,#e5e2dc);border-left:3px solid var(--color-primary,#c46a7a);border-radius:10px;padding:12px 16px;margin:4px 0 18px}'
     +'.hfm-tips-t{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--color-primary,#c46a7a);margin-bottom:6px}'
-    +'.hfm-tech{background:var(--color-surface-2,#fff);border:1px solid var(--color-divider,#e5e2dc);border-radius:12px;padding:12px 16px;margin-top:16px}'
-    +'.hfm-tech-t{font-size:12px;font-weight:800;color:var(--color-text,#28251d);margin-bottom:6px}'
+    +'.hfm-btns{background:var(--color-surface-2,#fff);border:1px solid var(--color-divider,#e5e2dc);border-radius:12px;padding:14px 16px}'
+    +'.hfm-btl{display:flex;flex-direction:column;gap:2px}'
+    +'.hfm-btrow{display:flex;gap:12px;padding:8px 0;border-top:1px solid var(--color-divider,#eee);flex-wrap:wrap;align-items:baseline}'
+    +'.hfm-btrow:first-child{border-top:none}'
+    +'.hfm-bk{flex:0 0 220px;max-width:100%;font-size:12.5px;font-weight:700;color:var(--color-primary-active,#8c3848)}'
+    +'.hfm-bd{flex:1 1 260px;font-size:12.8px;line-height:1.5;color:var(--color-text,#28251d)}'
+    +'.hfm-tech{background:var(--color-surface-2,#fff);border:1px solid var(--color-divider,#e5e2dc);border-left:3px solid var(--color-text-muted,#7a7670);border-radius:12px;padding:14px 16px;margin-top:18px}'
+    +'.hfm-tech-t{font-size:12px;font-weight:800;color:var(--color-text,#28251d);margin-bottom:8px}'
+    +'.hfm-tech-badge{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--color-text-muted,#7a7670);background:var(--color-surface-offset,#f0ede9);border-radius:10px;padding:2px 7px}'
+    +'.hfm-tech-intro{font-size:12.5px;line-height:1.55;color:var(--color-text-muted,#7a7670);margin:0 0 8px}'
+    +'.hfm-drow{display:flex;gap:12px;padding:7px 0;border-top:1px solid var(--color-divider,#e5e2dc);flex-wrap:wrap}'
+    +'.hfm-drow:first-of-type{border-top:none}'
+    +'.hfm-dk{flex:0 0 160px;font-size:11px;font-weight:700;color:var(--color-text-muted,#7a7670);padding-top:2px}'
+    +'.hfm-dv{flex:1 1 300px;font-size:12px;line-height:1.55;color:var(--color-text,#28251d)}'
+    +'.hfm-dline{margin-bottom:4px}'
+    +'.hfm-chip2{display:inline-block;background:var(--color-surface-offset,#f0ede9);border:1px solid var(--color-divider,#e5e2dc);border-radius:6px;padding:2px 7px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:var(--color-text,#28251d);margin:0 5px 5px 0}'
     +'.hfm-mock{margin:6px 0 20px;border:1px solid var(--color-divider,#e5e2dc);border-radius:14px;overflow:hidden;background:var(--color-surface-2,#fff);box-shadow:0 2px 14px rgba(0,0,0,.06)}'
     +'.hfm-mbar{display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--color-surface,#faf9f7);border-bottom:1px solid var(--color-divider,#e5e2dc);border-top:3px solid var(--color-primary,#c46a7a)}'
     +'.hfm-dots{display:flex;gap:5px}'
@@ -29180,6 +29575,7 @@ setTimeout(novCheckPopup, 2500);
       +'.hfm-body{flex-direction:column}'
       +'.hfm-toc{position:static;width:100%;max-height:none;border-bottom:1px solid var(--color-divider,#e5e2dc);margin-bottom:12px}'
       +'.hfm-mside{display:none}'
+      +'.hfm-bk{flex-basis:100%}'
     +'}';
 
   var HFM_PRINT_CSS =
