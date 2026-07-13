@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.10.152 -->
+﻿<!-- app-build:2026.07.13.153 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -26019,6 +26019,7 @@ function ccShell(){
       + '<p style="font-size:13px;color:var(--color-text-muted);margin:4px 0 0" id="cc-sub">Saldos de pacientes, médicos y agencias · suscripciones de criopreservación</p></div>'
       + '<div style="display:flex;gap:8px">'
         + '<button onclick="ccAbrirSaldoInicial()" title="Registra una cuenta por cobrar capturando las partidas (productos con precio) o un monto" style="padding:8px 14px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">+ Cuenta por cobrar</button>'
+        + (hasPermission('editar_egresos') ? '<button onclick="cobDescOpen()" title="Configura los descuentos por volumen de cada agencia: qué productos cuentan, escalones, y si aplica el mes actual o el anterior" style="padding:8px 14px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;margin-left:6px">🏷️ Descuentos agencia</button>' : '')
         + '<button onclick="ccLoad(true)" id="cc-refresh" style="padding:8px 16px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">↻ Actualizar</button>'
       + '</div>'
     + '</div>'
@@ -26446,6 +26447,152 @@ function ccGuardarAbono(op, paciente, tipo){
       else { alert('No se pudo registrar: '+((d&&d.error)||'error')); if(btn){ btn.textContent='Reintentar'; btn.disabled=false; } }
     }).catch(function(e){ alert('Error de red: '+e.message); if(btn){ btn.textContent='Reintentar'; btn.disabled=false; } });
 }
+/* ═══════════ DESCUENTOS POR AGENCIA — panel de configuración ═══════════
+ * Cada agencia es distinta: aquí se configura SIN tocar código — la lista de
+ * productos que cuentan/reciben descuento, los escalones (desde-hasta-%), cómo
+ * se cuenta (todo junto o por producto; por agencia o por miembro) y el periodo
+ * base (mismo mes, o lo vendido el mes anterior aplicado a futuro). */
+var _cobDescData=null, _cobDescSel=0;
+function cobDescOpen(){
+  var ovl=document.getElementById('cob-desc-ovl'); if(ovl) ovl.remove();
+  ovl=document.createElement('div'); ovl.id='cob-desc-ovl';
+  ovl.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:4200;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px 12px';
+  ovl.innerHTML='<div style="background:var(--color-surface);border-radius:14px;max-width:780px;width:100%;margin:auto;padding:40px;text-align:center;color:var(--color-text-muted)">Cargando configuración de descuentos…</div>';
+  ovl.addEventListener('click',function(e){ if(e.target===ovl) ovl.remove(); });
+  document.body.appendChild(ovl);
+  _ccItemsProductsReady(function(){ if(document.getElementById('cob-desc-ovl') && _cobDescData) cobDescRender(); }); // catálogo para el dropdown
+  var tok=encodeURIComponent(getToken());
+  fetch(APPS_SCRIPT_URL+'?action=cobDescCfg&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok){ ovl.firstChild.innerHTML='<span style="color:#c83c3c">'+ccEsc((d&&d.error)||'No disponible. ¿Actualizaste cobranza.gs + core.gs y redeployaste?')+'</span>'; return; }
+      _cobDescData=(d.agencias||[]); _cobDescSel=0; cobDescRender();
+    }).catch(function(e){ ovl.firstChild.innerHTML='<span style="color:#c83c3c">Error de red: '+ccEsc(e.message)+'</span>'; });
+}
+function cobDescCerrar(){ var o=document.getElementById('cob-desc-ovl'); if(o) o.remove(); }
+function _cobDescA(){ return (_cobDescData&&_cobDescData[_cobDescSel])||null; }
+function cobDescSelAg(i){ _cobDescSel=parseInt(i,10)||0; cobDescRender(); }
+function cobDescAddAg(){
+  var nom=prompt('Nombre de la agencia (igual que aparece como cliente en Cuentas por Cobrar, ej. REPROVIDA o Daniel Madero):');
+  if(!nom||!nom.trim()) return;
+  _cobDescData.push({agencia:nom.trim(), activo:true, modo:'directo', conteo:'combinado', base:'mesActual', productos:[], escalones:[{desde:1,hasta:3,pct:0},{desde:4,hasta:8,pct:7},{desde:9,hasta:'',pct:12}], notas:''});
+  _cobDescSel=_cobDescData.length-1; cobDescRender();
+}
+function cobDescDelAg(){
+  var a=_cobDescA(); if(!a) return;
+  if(!confirm('¿Quitar la configuración de descuentos de '+a.agencia+'?\n\nSus cuentas dejarán de calcular descuento.')) return;
+  _cobDescData.splice(_cobDescSel,1); _cobDescSel=0; cobDescRender();
+}
+function cobDescSet(k,v){ var a=_cobDescA(); if(a) a[k]=v; }
+function cobDescProdAdd(){
+  var a=_cobDescA(); if(!a) return;
+  var inp=document.getElementById('cob-desc-prod'); var v=(inp&&inp.value||'').trim(); if(!v) return;
+  var dup=false; a.productos.forEach(function(p){ if(String(p).toLowerCase()===v.toLowerCase()) dup=true; });
+  if(!dup) a.productos.push(v);
+  if(inp) inp.value='';
+  cobDescRender();
+}
+function cobDescProdDel(j){ var a=_cobDescA(); if(!a) return; a.productos.splice(j,1); cobDescRender(); }
+function cobDescEscAdd(){ var a=_cobDescA(); if(!a) return; a.escalones.push({desde:1,hasta:'',pct:0}); cobDescRender(); }
+function cobDescEscDel(j){ var a=_cobDescA(); if(!a) return; a.escalones.splice(j,1); cobDescRender(); }
+function cobDescEscSet(j,k,v){ var a=_cobDescA(); if(!a||!a.escalones[j]) return; a.escalones[j][k]=(k==='hasta'&&String(v).trim()==='')?'':(parseFloat(v)||0); }
+function _cobDescDl(){
+  var opts=((typeof _ingProductos!=='undefined'?_ingProductos:[])||[]).slice(0,3000).map(function(p){ return '<option value="'+ccEsc(p.descripcion).replace(/"/g,'&quot;')+'">'; }).join('');
+  return '<datalist id="cob-desc-dl">'+opts+'</datalist>';
+}
+function cobDescRender(){
+  var ovl=document.getElementById('cob-desc-ovl'); if(!ovl||!_cobDescData) return;
+  var canEdit=(typeof hasPermission==='function')&&hasPermission('editar_egresos');
+  var a=_cobDescA();
+  var lab='font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--color-primary);margin:16px 0 6px;display:block';
+  var radio=function(name,val,cur,tit,desc){
+    return '<label style="display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border:1.5px solid '+(cur===val?'var(--color-primary)':'var(--color-divider)')+';border-radius:9px;cursor:pointer;flex:1;min-width:200px;background:'+(cur===val?'rgba(196,106,122,.06)':'transparent')+'">'
+      +'<input type="radio" name="'+name+'" '+(cur===val?'checked':'')+' onchange="cobDescSet(\''+name.replace('cobd-','')+'\',\''+val+'\');cobDescRender()" style="margin-top:2px;accent-color:#c46a7a"'+(canEdit?'':' disabled')+'>'
+      +'<span><b style="font-size:12.5px;color:var(--color-text)">'+tit+'</b><br><span style="font-size:10.5px;color:var(--color-text-muted);line-height:1.4">'+desc+'</span></span></label>';
+  };
+  var h='<div style="background:var(--color-surface);border-radius:14px;max-width:780px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3);margin:auto">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--color-divider)">'
+      +'<div><h3 style="margin:0;font-size:17px;color:var(--color-text)">🏷️ Descuentos por agencia</h3><p style="margin:3px 0 0;font-size:11.5px;color:var(--color-text-muted)">Cada agencia con su propia regla: productos que cuentan, escalones y condiciones. Sin tocar código.</p></div>'
+      +'<button onclick="cobDescCerrar()" style="background:none;border:none;font-size:22px;color:var(--color-text-muted);cursor:pointer;line-height:1">×</button>'
+    +'</div>'
+    +'<div style="padding:18px 22px;max-height:70vh;overflow-y:auto">';
+  // Selector de agencia
+  h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px">'
+    +'<label style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted)">Agencia</label>'
+    +'<select onchange="cobDescSelAg(this.value)" style="padding:8px 12px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:13px;font-weight:700;background:var(--color-surface-2);color:var(--color-text);min-width:220px">'
+      +(_cobDescData.length?_cobDescData.map(function(x,i){ return '<option value="'+i+'"'+(i===_cobDescSel?' selected':'')+'>'+ccEsc(x.agencia)+(x.activo===false?' (inactiva)':'')+'</option>'; }).join(''):'<option value="0">— sin agencias —</option>')
+    +'</select>'
+    +(canEdit?'<button onclick="cobDescAddAg()" style="padding:8px 12px;background:none;border:1.5px dashed var(--color-primary);color:var(--color-primary);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">＋ Nueva agencia</button>':'')
+    +(canEdit&&a?'<button onclick="cobDescDelAg()" style="padding:8px 10px;background:none;border:1px solid #e3b3b3;color:#c83c3c;border-radius:8px;font-size:11px;cursor:pointer">✕ Quitar agencia</button>':'')
+  +'</div>';
+  if(!a){
+    h+='<div style="padding:30px;text-align:center;color:var(--color-text-muted);font-size:12.5px">No hay agencias configuradas. '+(canEdit?'Crea la primera con «＋ Nueva agencia».':'')+'</div>';
+  } else {
+    h+='<label style="display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--color-text);margin-top:10px"><input type="checkbox" '+(a.activo!==false?'checked':'')+' onchange="cobDescSet(\'activo\',this.checked)" style="width:15px;height:15px;accent-color:#c46a7a"'+(canEdit?'':' disabled')+'> Descuento <b>activo</b> para esta agencia</label>';
+    h+='<span style="'+lab+'">¿A quién se le cuenta la condición?</span>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+      +radio('cobd-modo','directo',a.modo||'directo','Directo (por agencia)','Todo lo de la agencia suma junto: el descuento va sobre su cuenta.')
+      +radio('cobd-modo','miembro',a.modo||'directo','Por miembro / paciente','Cada paciente de la agencia alcanza su propio escalón con SUS tratamientos.')
+      +'</div>';
+    h+='<span style="'+lab+'">¿Cómo se cuenta para alcanzar el escalón?</span>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+      +radio('cobd-conteo','combinado',a.conteo||'combinado','Combinado','Todos los productos de la lista suman a UN solo conteo (ej. 3 FET + 2 estimulaciones = 5).')
+      +radio('cobd-conteo','porProducto',a.conteo||'combinado','Por producto','Cada producto alcanza su escalón por separado.')
+      +'</div>';
+    h+='<span style="'+lab+'">¿Qué periodo define el descuento?</span>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+      +radio('cobd-base','mesActual',a.base||'mesActual','Mes actual','Lo vendido en el mes define el descuento de ese mismo mes.')
+      +radio('cobd-base','mesAnterior',a.base||'mesActual','Mes anterior (a futuro)','Lo vendido el mes PASADO define el % que se aplica a las ventas de este mes.')
+      +'</div>';
+    // Productos elegibles
+    h+='<span style="'+lab+'">Productos que aplican <span style="font-weight:400;text-transform:none;color:var(--color-text-muted)">· solo estos cuentan para la condición y reciben el descuento</span></span>';
+    h+='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">';
+    if((a.productos||[]).length){ a.productos.forEach(function(p,j){ h+='<span style="display:inline-flex;align-items:center;gap:6px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:20px;padding:5px 6px 5px 12px;font-size:12px;color:var(--color-text)">'+ccEsc(p)+(canEdit?'<button onclick="cobDescProdDel('+j+')" title="Quitar" style="border:none;background:#fbeeec;color:#c83c3c;border-radius:50%;width:18px;height:18px;font-size:10px;cursor:pointer;line-height:1">✕</button>':'')+'</span>'; }); }
+    else h+='<span style="font-size:11.5px;color:#b45309">⚠ Sin productos — sin lista no se aplica ningún descuento.</span>';
+    h+='</div>';
+    if(canEdit){
+      h+='<div style="display:flex;gap:8px"><input id="cob-desc-prod" list="cob-desc-dl" placeholder="Escribe o elige un producto del catálogo…" style="flex:1;padding:8px 11px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:12.5px;background:var(--color-surface-2);color:var(--color-text)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();cobDescProdAdd();}">'
+        +'<button onclick="cobDescProdAdd()" style="padding:8px 14px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">Agregar</button></div>'
+        +_cobDescDl();
+    }
+    // Escalones
+    h+='<span style="'+lab+'">Escalones del descuento <span style="font-weight:400;text-transform:none;color:var(--color-text-muted)">· «Hasta» vacío = sin límite</span></span>';
+    h+='<table style="width:100%;max-width:420px;border-collapse:collapse;font-size:12px"><thead><tr>'
+      +'<th style="text-align:left;padding:4px 8px;font-size:9.5px;text-transform:uppercase;color:var(--color-text-muted)">Desde</th>'
+      +'<th style="text-align:left;padding:4px 8px;font-size:9.5px;text-transform:uppercase;color:var(--color-text-muted)">Hasta</th>'
+      +'<th style="text-align:left;padding:4px 8px;font-size:9.5px;text-transform:uppercase;color:var(--color-text-muted)">% Desc.</th>'
+      +(canEdit?'<th style="width:30px"></th>':'')+'</tr></thead><tbody>';
+    var inS='width:74px;padding:6px 8px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)';
+    (a.escalones||[]).forEach(function(t,j){
+      h+='<tr>'
+        +'<td style="padding:3px 8px">'+(canEdit?'<input type="number" min="1" step="1" value="'+(t.desde||1)+'" onchange="cobDescEscSet('+j+',\'desde\',this.value)" style="'+inS+'">':(t.desde||1))+'</td>'
+        +'<td style="padding:3px 8px">'+(canEdit?'<input type="number" min="1" step="1" value="'+(t.hasta===''||t.hasta==null?'':t.hasta)+'" placeholder="∞" onchange="cobDescEscSet('+j+',\'hasta\',this.value)" style="'+inS+'">':(t.hasta===''||t.hasta==null?'∞':t.hasta))+'</td>'
+        +'<td style="padding:3px 8px">'+(canEdit?'<input type="number" min="0" step="0.5" value="'+(t.pct||0)+'" onchange="cobDescEscSet('+j+',\'pct\',this.value)" style="'+inS+'">':((t.pct||0)+'%'))+'</td>'
+        +(canEdit?'<td style="text-align:center"><button onclick="cobDescEscDel('+j+')" title="Quitar escalón" style="border:1px solid #e3b3b3;background:none;border-radius:6px;color:#c83c3c;cursor:pointer;font-size:11px;padding:3px 7px">✕</button></td>':'')
+      +'</tr>';
+    });
+    h+='</tbody></table>';
+    if(canEdit) h+='<button onclick="cobDescEscAdd()" style="margin-top:6px;padding:5px 11px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;color:var(--color-text)">+ Agregar escalón</button>';
+    h+='<div style="margin-top:14px;font-size:10.5px;color:var(--color-text-muted);background:var(--color-surface-2);border-radius:8px;padding:8px 11px;line-height:1.5">El descuento se ve en <b>Reportes → Cobranza</b> al buscar a la agencia: Bruto − Descuento = <b>Neto a cobrar</b>, con el detalle por mes'+(a.modo==='miembro'?' y por miembro':'')+'.</div>';
+  }
+  h+='</div>';
+  h+='<div style="display:flex;justify-content:flex-end;gap:10px;padding:16px 22px;border-top:1px solid var(--color-divider)">'
+    +'<button onclick="cobDescCerrar()" style="padding:8px 16px;border:1px solid var(--color-divider);border-radius:8px;background:var(--color-surface);color:var(--color-text-muted);font-size:12.5px;font-weight:600;cursor:pointer">Cerrar</button>'
+    +(canEdit?'<button id="cob-desc-save" onclick="cobDescSave()" style="padding:9px 20px;border:none;border-radius:8px;background:var(--color-primary);color:#fff;font-size:13px;font-weight:700;cursor:pointer">Guardar descuentos</button>':'')
+  +'</div></div>';
+  ovl.innerHTML=h;
+}
+async function cobDescSave(){
+  if(!_cobDescData) return;
+  var btn=document.getElementById('cob-desc-save'); if(btn){ btn.textContent='Guardando…'; btn.disabled=true; }
+  try{
+    var s=getSession()||{};
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'cobDescCfgSave', agencias:_cobDescData, token:s.token||getToken(), usuario:s.email||''})});
+    var j=await r.json();
+    if(j&&j.ok){ cobDescCerrar(); alert('✓ Descuentos guardados ('+j.guardadas+' agencia(s)). Revisa el resultado en Reportes → Cobranza.'); }
+    else { alert('No se pudo guardar: '+((j&&j.error)||'error')); if(btn){ btn.textContent='Guardar descuentos'; btn.disabled=false; } }
+  }catch(e){ alert('Error de red: '+e.message); if(btn){ btn.textContent='Guardar descuentos'; btn.disabled=false; } }
+}
+
 /* ── Generar suscripciones (materializar periodos vencidos) ── */
 function ccGenerarPreview(){
   ccModal('Generar suscripciones','<div style="padding:18px;text-align:center;color:var(--color-text-muted);font-size:13px">Calculando lo que se generará…</div>', function(){}, ' ');
@@ -26654,7 +26801,9 @@ function cobRender(d){
   // Detalle del descuento por volumen (escala por agencia, acumulado del mes)
   if(_desc){
     h+='<div style="background:var(--color-surface);border:1px solid #cde0cf;border-radius:12px;overflow:hidden;margin-bottom:18px">';
-    h+='<div style="padding:12px 16px;border-bottom:1px solid var(--color-divider);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span style="font-size:13px;font-weight:700">🏷️ Descuento por volumen <span style="font-weight:400;color:var(--color-text-muted);font-size:11px">· por producto, acumulado del mes</span></span><span style="font-size:11px;color:#16a34a;font-weight:700">−'+ccFmt(_descTot)+'</span></div>';
+    var _reglaTxt=(function(){ var r=_desc.regla; if(!r) return 'por producto, acumulado del mes';
+      return (r.conteo==='porProducto'?'por producto':'productos combinados')+' · '+(r.base==='mesAnterior'?'según lo vendido el mes anterior':'acumulado del mes')+(r.modo==='miembro'?' · por miembro':''); })();
+    h+='<div style="padding:12px 16px;border-bottom:1px solid var(--color-divider);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><span style="font-size:13px;font-weight:700">🏷️ Descuento por volumen <span style="font-weight:400;color:var(--color-text-muted);font-size:11px">· '+_reglaTxt+'</span></span><span style="font-size:11px;color:#16a34a;font-weight:700">−'+ccFmt(_descTot)+'</span></div>';
     h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:520px"><thead><tr style="border-bottom:2px solid var(--color-divider)">'
       +'<th style="padding:8px 12px;text-align:left;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Mes</th>'
       +'<th style="padding:8px 12px;text-align:left;font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Producto</th>'
@@ -26665,8 +26814,8 @@ function cobRender(d){
       +'</tr></thead><tbody>';
     _desc.lineas.forEach(function(l,i){ h+='<tr style="border-bottom:1px solid var(--color-divider);'+(i%2?'background:var(--color-surface-2)':'')+'">'
       +'<td style="padding:7px 12px;white-space:nowrap;color:var(--color-text-muted)">'+ccEsc(l.mes)+'</td>'
-      +'<td style="padding:7px 12px">'+ccEsc(l.producto)+'</td>'
-      +'<td style="padding:7px 12px;text-align:center">'+l.cantidad+'</td>'
+      +'<td style="padding:7px 12px">'+(l.paciente?'<b style="color:var(--color-primary)">'+ccEsc(l.paciente)+'</b> · ':'')+ccEsc(l.producto)+'</td>'
+      +'<td style="padding:7px 12px;text-align:center"'+(l.mesConteo&&l.mesConteo!==l.mes?' title="Cantidad del mes '+ccEsc(l.mesConteo)+' (regla: mes anterior)"':'')+'>'+l.cantidad+'</td>'
       +'<td style="padding:7px 12px;text-align:center;font-weight:700;color:#16a34a">'+l.pct+'%</td>'
       +'<td style="padding:7px 12px;text-align:right;color:var(--color-text-muted)">'+ccFmt(l.base)+'</td>'
       +'<td style="padding:7px 12px;text-align:right;font-weight:700;color:#16a34a">−'+ccFmt(l.descuento)+'</td>'
@@ -26800,7 +26949,7 @@ function cobImprimir(){
   var _desc=(d.descuentos&&d.descuentos.aplica)?d.descuentos:null;
   var _descTot=_desc?(_desc.total||0):0;
   var _neto=totalDebe-_descTot; if(_neto<0) _neto=0;
-  if(_desc){ _desc.lineas.forEach(function(l){ rows.push([ccEsc(l.mes), 'Descuento '+l.pct+'% · '+ccEsc(l.producto), String(l.cantidad||1), '', '', '−'+ccFmt(l.descuento)]); }); }
+  if(_desc){ _desc.lineas.forEach(function(l){ rows.push([ccEsc(l.mes), 'Descuento '+l.pct+'% · '+(l.paciente?ccEsc(l.paciente)+' · ':'')+ccEsc(l.producto), String(l.cantidad||1), '', '', '−'+ccFmt(l.descuento)]); }); }
   var kpis = _desc
     ? [{value:ccFmt(_neto),label:'Neto a cobrar'},{value:ccFmt(totalDebe),label:'Bruto'},{value:'−'+ccFmt(_descTot),label:'Descuento vol.'},{value:susDebe>0?ccFmt(susDebe):'Al día',label:'Suscripción'}]
     : [{value:ccFmt(totalDebe),label:'Total por cobrar'},{value:ccFmt(d.totalSaldo||0),label:'Saldos'},{value:susDebe>0?ccFmt(susDebe):'Al día',label:'Suscripción'},{value:ccFmt(_vvTot),label:(_cobVista==='pendiente'?'Por cobrar (detalle)':'Total vendido')}];
@@ -27288,6 +27437,10 @@ function notaGenerar(){
  * aviso emergente (1 vez por versión) para quien tenga acceso a esas áreas.
  * Cada entrada puede llevar `perm`: si el usuario no lo tiene, se oculta. */
 var NOVEDADES=[
+  { build:'2026.07.13', fecha:'13 jul 2026', area:'Cobranza', icon:'⚙️',
+    titulo:'Descuentos por agencia 100% configurables (panel)',
+    puntos:['Nuevo panel «🏷️ Descuentos agencia» en Cuentas por Cobrar: cada agencia con su propia regla, sin depender de nadie para cambiarla.','Eliges QUÉ productos cuentan (solo los de la lista suman y reciben descuento), los escalones (desde–hasta–%), si se cuenta todo junto o por producto, si es por agencia o por miembro, y si aplica con lo del mes o con lo vendido el mes anterior (a futuro).','El estado de cuenta (Reportes → Cobranza) aplica la regla automáticamente y muestra el detalle.'],
+    comoUsar:['Cuentas por Cobrar → «🏷️ Descuentos agencia» (requiere permiso de edición).','Elige la agencia o crea una con «＋ Nueva agencia».','Marca las condiciones, agrega los productos de la lista y los escalones.','Guarda y revisa en Reportes → Cobranza buscando a la agencia.'] },
   { build:'2026.07.10', fecha:'10 jul 2026', area:'Cobranza', icon:'🏷️',
     titulo:'Descuento por volumen para agencias (REPROVIDA)',
     puntos:['Los 3 productos con escala (Valoración inicial, Preparación endometrial, FET) aplican descuento según la cantidad ACUMULADA DEL MES: 1-3 = 0%, 4-8 = 7%, 9+ = 12%.','En el estado de cuenta de la agencia sale el descuento por producto/mes y el «Neto a cobrar» (Bruto − Descuento).','El reporte incluye los datos para depósito (banco / cuenta / CLABE).'],
@@ -27538,7 +27691,7 @@ setTimeout(novCheckPopup, 2500);
       { h:'Editor de partidas por bloque (agencias/externos)', p:'En agencias/externos NUESTRO cliente es la agencia (ej. REPROVIDA), pero el reporte debe listar a los **pacientes reales**. El editor trabaja por **bloques**: cada bloque = **un paciente + la fecha de su tratamiento + sus productos**. El botón **«+ Otro paciente / fecha»** (cierre parcial) te deja seguir capturando otro paciente en la **misma** nota. En pacientes normales es un solo bloque sin cabecera.' },
       { h:'Motor B — Suscripciones de criopreservación', p:'Universo = hoja `Inventario Crío`. **Solo se cobra a quien tenga inventario** (óvulos OOV o embriones EMB > 0); en ceros se excluye. Reglas: **año 1 gratis solo para Hestia** (externos pagan desde el inicio); plan **anual $5,700** cubre un año desde el pago; plan **mensual $475** el día 1 de cada mes acumulando atrasos. El plan se define por **inscripción**, default **anual**. **Autopay** es informativo (montoDebe 0, muestra el próximo cobro). Estatus: Cortesía / Vigente / Por vencer / Vencida / Falta suscripción.' },
       { h:'Generación de suscripciones', p:'`generarSuscripciones` (preview/commit, idempotente por `paciente|plan|periodo`) escribe cargos en la hoja `Suscripciones_Crio`: primero un cargo consolidado `SALDO-INICIAL` por el backlog histórico y luego periodo por periodo. Los abonos marcan periodos pagados **FIFO**.' },
-      { h:'Descuento por volumen por agencia', p:'La hoja `Descuentos_Agencia` (`Agencia | Producto | Desde | Hasta | Descuento(%)`) define escalones por producto. La base es la **cantidad ACUMULADA DEL MES** de ese producto (no por nota). REPROVIDA se autocarga con 3 productos y escala **1-3 = 0% / 4-8 = 7% / 9+ = 12%**. El estado de cuenta muestra **Neto a cobrar = Bruto − Descuento**.' },
+      { h:'Descuento por volumen por agencia', p:'Se configura desde el panel **«🏷️ Descuentos agencia»** (Cuentas por Cobrar): lista de productos que aplican, escalones desde–hasta–%, conteo combinado o por producto, directo o por miembro, y base mes actual o mes anterior (a futuro). Config en Script Property `COBRANZA_DESC_CFG` (`cobDescCfgRead`/`cobDescCfgSave`, gate `editar_egresos`); si no existe se migra sola desde la hoja legacy `Descuentos_Agencia`. El estado de cuenta muestra **Neto a cobrar = Bruto − Descuento**.' },
       { h:'Datos para depósito', p:'El estado de cuenta incluye los **datos bancarios para depósito** (default Santander / Hestia Clinic / 65-51043096-7 / CLABE 014180655104309670), editables en la config.' }
     ],
     pasos:[
@@ -28659,13 +28812,14 @@ setTimeout(novCheckPopup, 2500);
       { k:'Toggle Tipo (Hestia / Externo)', d:'Define si aplica el primer año gratis (solo Hestia).' },
       { k:'Toggle Plan (Anual / Mensual)', d:'Define cómo se cobra la suscripción.' },
       { k:'Autopay', d:'Marca cobro automático informativo (muestra el próximo cobro; no cobra solo).' },
-      { k:'Generar (suscripciones)', d:'Crea los cargos del periodo: primero muestra un preview, luego confirmas.' }
+      { k:'Generar (suscripciones)', d:'Crea los cargos del periodo: primero muestra un preview, luego confirmas.' },
+      { k:'🏷️ Descuentos agencia', d:'Abre el panel para configurar el descuento por volumen de CADA agencia: qué productos cuentan (solo los de la lista), los escalones (desde–hasta–%), si se cuenta todo junto o por producto, por agencia o por miembro, y si aplica con lo del mes o con lo vendido el mes anterior. Guarda y el estado de cuenta lo aplica solo.' }
     ],
     bloques:[
       { h:'⚠ Motor A: solo registro explícito', p:'El sistema **NO deduce** adeudos automáticamente (los precios viejos darían saldos falsos). Un adeudo **solo nace** al: (1) capturar un ingreso con **pago parcial**, (2) **cargar un saldo inicial**, o (3) hacer un **cargo a crédito**.' },
       { h:'Partidas por bloque (agencias/externos)', p:'En agencias NUESTRO cliente es la agencia (ej. REPROVIDA), pero el reporte lista a los **pacientes reales**. El editor trabaja por **bloques**: cada bloque = **un paciente + la fecha de su tratamiento + sus productos**. El botón **«+ Otro paciente / fecha»** deja seguir capturando en la misma nota.' },
       { h:'Motor B: reglas de suscripción', p:'Solo se cobra a quien **tenga inventario** (óvulos u embriones > 0). **Año 1 gratis solo para Hestia** (externos pagan desde el inicio); plan **anual $5,700** o **mensual $475**, default anual por inscripción. Estatus: Cortesía / Vigente / Por vencer / Vencida / Falta suscripción.' },
-      { h:'Descuento por volumen por agencia', p:'Cada agencia tiene escalones por producto según la **cantidad ACUMULADA DEL MES**. REPROVIDA escala **1-3 = 0% / 4-8 = 7% / 9+ = 12%**. El estado de cuenta muestra **Neto a cobrar = Bruto − Descuento**.' }
+      { h:'Descuento por volumen por agencia', p:'Se configura en el panel **«🏷️ Descuentos agencia»** (Cuentas por Cobrar): productos que aplican, escalones desde–hasta–%, conteo combinado/por producto, directo/por miembro, base mes actual/mes anterior. Config en Script Property `COBRANZA_DESC_CFG` (`cobDescCfgRead`/`cobDescCfgSave`, permiso `editar_egresos`); migra sola desde la hoja legacy `Descuentos_Agencia`. Requiere redeploy de cobranza.gs + core.gs + finance.gs.' }
     ],
     ejemplo:'REPROVIDA acumula **5** «Preparación endometrial» en el mes → cae en el escalón **4-8 = 7%**. Bruto 5×$5,000 = $25,000, descuento $1,750, **Neto a cobrar = $23,250**.',
     tips:[

@@ -611,6 +611,12 @@ function doGet(e) {
         return jsonResponse({ ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.' });
       return jsonResponse(setupCobranzaConfig());
     }
+    // Cobranza: configuración de descuentos por agencia (panel)
+    if (action === 'cobDescCfg') {
+      if (typeof cobDescCfgRead !== 'function')
+        return jsonResponse({ ok:false, error:'Actualiza cobranza.gs en Apps Script y redespliega.' });
+      return jsonResponse(cobDescCfgRead());
+    }
     if (action === 'generarSuscripcionesPreview') {
       if (typeof generarSuscripciones !== 'function')
         return jsonResponse({ ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.' });

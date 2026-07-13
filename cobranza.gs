@@ -35,7 +35,7 @@ var COBRANZA_CARGOS   = 'Cuentas_Cobrar';
 var COBRANZA_SUS      = 'Suscripciones_Crio';
 var COBRANZA_DESCUENTOS = 'Descuentos_Agencia'; // escala de descuento por volumen, por agencia
 var COBRANZA_DEPOSITO_KEY = 'COBRANZA_DEPOSITO';
-var COBRANZA_VER      = 'cobranza-2026.07.10o';
+var COBRANZA_VER      = 'cobranza-2026.07.13p';
 // Cuenta de depósito por defecto (Hestia recibe aquí). Editable en Script Property COBRANZA_DEPOSITO.
 var COBRANZA_DEPOSITO_DEF = { banco:'Santander', beneficiario:'Hestia Clinic', cuenta:'65-51043096-7', clabe:'014180655104309670' };
 
@@ -828,33 +828,128 @@ function _cobTierPct(tiers, qty) {
   for (var i = 0; i < tiers.length; i++) { if (qty >= tiers[i].desde && qty <= tiers[i].hasta) return tiers[i].pct; }
   return 0;
 }
+/* ── CONFIG de descuentos por agencia (panel, sin tocar código) ──────────────
+ * Script Property COBRANZA_DESC_CFG = { agencias:[{ agencia, activo,
+ *   modo:'directo'|'miembro'        (la condición se cuenta por agencia o por paciente),
+ *   conteo:'combinado'|'porProducto'(todos los productos de la lista suman juntos, o cada uno aparte),
+ *   base:'mesActual'|'mesAnterior'  (lo del mes define su descuento, o lo del mes pasado aplica a futuro),
+ *   productos:[...], escalones:[{desde,hasta,pct}], notas }] }
+ * Solo los productos de la lista cuentan para la condición Y reciben el descuento.
+ * Migración: si no hay config, se construye desde la hoja legacy Descuentos_Agencia. */
+var COBRANZA_DESC_CFG_KEY = 'COBRANZA_DESC_CFG';
+function _cobDescCfgMigrar() {
+  var out = [];
+  try {
+    var sh = _cobEnsureDescuentos();
+    var raw = sh.getDataRange().getValues();
+    var byAg = {}, order = [];
+    for (var i = 1; i < raw.length; i++) {
+      var ag = String(raw[i][0] || '').trim(); if (!ag) continue;
+      var prod = String(raw[i][1] || '').trim();
+      var k = _cobKeyNom(ag);
+      if (!byAg[k]) { byAg[k] = { agencia: ag, activo: true, modo: 'directo', conteo: 'porProducto', base: 'mesActual', productos: [], _ps: {}, escalones: [], _es: {}, notas: '' }; order.push(k); }
+      var A = byAg[k];
+      if (prod && !A._ps[_cobKeyProd(prod)]) { A._ps[_cobKeyProd(prod)] = 1; A.productos.push(prod); }
+      var desde = _cobNum(raw[i][2]) || 1;
+      var hastaRaw = String(raw[i][3] == null ? '' : raw[i][3]).trim();
+      var hasta = hastaRaw === '' ? '' : _cobNum(raw[i][3]);
+      var pct = _cobNum(raw[i][4]);
+      var ek = desde + '|' + hasta + '|' + pct;
+      if (!A._es[ek]) { A._es[ek] = 1; A.escalones.push({ desde: desde, hasta: hasta, pct: pct }); }
+    }
+    order.forEach(function (k) { var A = byAg[k]; delete A._ps; delete A._es; A.escalones.sort(function (a, b) { return a.desde - b.desde; }); out.push(A); });
+  } catch (e) {}
+  return { agencias: out };
+}
+function _cobDescCfg() {
+  try {
+    var raw = PropertiesService.getScriptProperties().getProperty(COBRANZA_DESC_CFG_KEY);
+    if (raw) { var o = JSON.parse(raw); if (o && o.agencias) return o; }
+  } catch (e) {}
+  var mig = _cobDescCfgMigrar();
+  try { PropertiesService.getScriptProperties().setProperty(COBRANZA_DESC_CFG_KEY, JSON.stringify(mig)); } catch (e2) {}
+  return mig;
+}
+function cobDescCfgRead() {
+  try { return { ok: true, version: COBRANZA_VER, agencias: (_cobDescCfg().agencias || []) }; }
+  catch (ex) { return { ok: false, error: ex.message, version: COBRANZA_VER }; }
+}
+function cobDescCfgSave(body) {
+  try {
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'editar_egresos'))
+      return { ok: false, error: 'Sin permiso para editar los descuentos (requiere editar cuentas por pagar).' };
+    var list = [];
+    (body.agencias || []).forEach(function (a) {
+      var nom = String(a.agencia || '').trim(); if (!nom) return;
+      var esc = [];
+      (a.escalones || []).forEach(function (t) {
+        var h = (t.hasta === '' || t.hasta == null) ? '' : _cobNum(t.hasta);
+        esc.push({ desde: _cobNum(t.desde) || 1, hasta: h, pct: _cobNum(t.pct) });
+      });
+      esc.sort(function (x, y) { return x.desde - y.desde; });
+      list.push({
+        agencia: nom, activo: a.activo !== false,
+        modo: (a.modo === 'miembro' ? 'miembro' : 'directo'),
+        conteo: (a.conteo === 'porProducto' ? 'porProducto' : 'combinado'),
+        base: (a.base === 'mesAnterior' ? 'mesAnterior' : 'mesActual'),
+        productos: (a.productos || []).map(function (p) { return String(p || '').trim(); }).filter(function (p) { return !!p; }),
+        escalones: esc, notas: String(a.notas || '')
+      });
+    });
+    PropertiesService.getScriptProperties().setProperty(COBRANZA_DESC_CFG_KEY, JSON.stringify({ agencias: list }));
+    try { logAudit(body.usuario || '', 'Cobranza', 'Guardar descuentos agencia', '', '', '', list.length + ' agencia(s)'); } catch (e) {}
+    return { ok: true, version: COBRANZA_VER, guardadas: list.length };
+  } catch (ex) { return { ok: false, error: ex.message, version: COBRANZA_VER }; }
+}
+function _cobMesPrev(mes) {
+  var y = parseInt(String(mes).substring(0, 4), 10), m = parseInt(String(mes).substring(5, 7), 10);
+  if (!y || !m) return mes;
+  m--; if (m < 1) { m = 12; y--; }
+  return y + '-' + ('0' + m).slice(-2);
+}
 function _cobDescuentosAgencia(agenciaNombre) {
-  var conf = _cobLoadDescuentos();
   var agK = _cobKeyNom(agenciaNombre);
-  var reglas = conf[agK];
-  if (!reglas) return { aplica: false, lineas: [], total: 0 };
-  // Reunir partidas de las cuentas de la agencia cuyo producto tenga escala; acumular por (producto, mes).
-  var cargos = _cobReadCargos().rows.filter(function (c) { return _cobKeyNom(c.paciente) === agK; });
-  var agg = {}; // prodKey|mes -> {prodLabel, mes, cantidad, base}
-  cargos.forEach(function (c) {
+  var cfg = null;
+  (_cobDescCfg().agencias || []).forEach(function (a) { if (_cobKeyNom(a.agencia) === agK) cfg = a; });
+  if (!cfg || cfg.activo === false || !(cfg.productos || []).length || !(cfg.escalones || []).length)
+    return { aplica: false, lineas: [], total: 0 };
+  var prodSet = {};
+  cfg.productos.forEach(function (p) { prodSet[_cobKeyProd(p)] = 1; });
+  var tiers = cfg.escalones.map(function (t) { return { desde: _cobNum(t.desde) || 1, hasta: (t.hasta === '' || t.hasta == null) ? 1e9 : (_cobNum(t.hasta) || 1e9), pct: _cobNum(t.pct) }; });
+  var porProd = cfg.conteo === 'porProducto', porMiembro = cfg.modo === 'miembro', mesAnt = cfg.base === 'mesAnterior';
+  // Partidas elegibles: SOLO los productos de la lista cuentan y reciben descuento.
+  var items = [];
+  _cobReadCargos().rows.forEach(function (c) {
+    if (_cobKeyNom(c.paciente) !== agK) return;
     (c.items || []).forEach(function (it) {
       var pk = _cobKeyProd(it.producto);
-      if (!reglas[pk]) return;
+      if (!prodSet[pk]) return;
       var f = String(it.fecha || c.fecha || '');
       var mes = f.length >= 7 ? f.substring(0, 7) : '—';
-      var key = pk + '|' + mes;
-      if (!agg[key]) agg[key] = { prodKey: pk, prodLabel: it.producto, mes: mes, cantidad: 0, base: 0 };
-      agg[key].cantidad += _cobNum(it.cantidad) || 1;
-      agg[key].base += _cobNum(it.total);
+      items.push({ pk: pk, prod: String(it.producto || ''), mes: mes, pac: String(it.pac || '').trim(), cant: _cobNum(it.cantidad) || 1, base: _cobNum(it.total) });
     });
   });
-  var lineas = [], total = 0;
-  Object.keys(agg).forEach(function (k) {
-    var a = agg[k]; var pct = _cobTierPct(reglas[a.prodKey], a.cantidad);
-    if (pct > 0) { var desc = a.base * pct / 100; total += desc; lineas.push({ producto: a.prodLabel, mes: a.mes, cantidad: a.cantidad, pct: pct, base: a.base, descuento: desc }); }
+  if (!items.length) return { aplica: false, lineas: [], total: 0 };
+  // Conteo del periodo según la regla: [miembro] | [producto] | mes
+  function ck(it, mes) { return (porMiembro ? (it.pac || '(sin paciente)') : '') + '|' + (porProd ? it.pk : '') + '|' + mes; }
+  var cant = {};
+  items.forEach(function (it) { var k = ck(it, it.mes); cant[k] = (cant[k] || 0) + it.cant; });
+  // Escalón por partida: si base = mesAnterior, la cantidad del MES PASADO define el % de este mes.
+  var out = {};
+  items.forEach(function (it) {
+    var mesConteo = mesAnt ? _cobMesPrev(it.mes) : it.mes;
+    var qty = cant[ck(it, mesConteo)] || 0;
+    var pct = _cobTierPct(tiers, qty);
+    if (pct <= 0) return;
+    var dk = (porMiembro ? (it.pac || '(sin paciente)') : '') + '|' + (porProd ? it.pk : '*') + '|' + it.mes;
+    if (!out[dk]) out[dk] = { producto: porProd ? it.prod : 'Productos de la lista', paciente: porMiembro ? (it.pac || '(sin paciente)') : '', mes: it.mes, mesConteo: mesConteo, cantidad: qty, pct: pct, base: 0, descuento: 0 };
+    out[dk].base += it.base;
   });
-  lineas.sort(function (x, y) { return x.mes < y.mes ? -1 : x.mes > y.mes ? 1 : (x.producto < y.producto ? -1 : 1); });
-  return { aplica: lineas.length > 0, agencia: String(agenciaNombre).trim(), lineas: lineas, total: total };
+  var lineas = [], total = 0;
+  Object.keys(out).forEach(function (k) { var a = out[k]; a.descuento = a.base * a.pct / 100; total += a.descuento; lineas.push(a); });
+  lineas.sort(function (x, y) { return x.mes < y.mes ? -1 : x.mes > y.mes ? 1 : ((x.paciente + x.producto) < (y.paciente + y.producto) ? -1 : 1); });
+  return { aplica: lineas.length > 0, agencia: String(agenciaNombre).trim(), lineas: lineas, total: total,
+           regla: { modo: cfg.modo, conteo: cfg.conteo, base: cfg.base, productos: cfg.productos.length } };
 }
 function _cobDeposito() {
   try {
