@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.13.156 -->
+﻿<!-- app-build:2026.07.13.157 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -3055,7 +3055,12 @@ function _renderIngresosERP() {
   // Facturado = SOLO operaciones con su CFDI (XML) emitido en Drive.
   h.push('<tr><td style="padding:11px 16px 1px;font-size:13px;font-weight:800;color:#166534">✓ Facturado <span style="font-weight:600;font-size:10.5px">con CFDI emitido</span></td>'
     +'<td id="ing-facturado-val" style="padding:11px 16px 1px;font-size:15px;font-weight:800;text-align:right;color:#166534">'+fC(_facturado)+'</td></tr>');
-  h.push('<tr><td style="padding:0 16px 11px 30px;font-size:10.5px;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)"><span id="ing-fac-count">—</span></td><td style="border-bottom:1px solid var(--color-divider,#f0f0f0)"></td></tr>');
+  h.push('<tr><td colspan="2" style="padding:0 16px 3px 30px;font-size:10.5px;color:var(--text-secondary,#9ca3af)"><span id="ing-fac-count">—</span></td></tr>');
+  // Desglose de Facturado por MES DE TIMBRADO (una venta de junio timbrada en
+  // julio se declara en JULIO — impacta la declaración). Lo llena _ingPaintFacturado.
+  h.push('<tr><td colspan="2" id="ing-fac-mes" style="padding:0"></td></tr>');
+  // Base a declarar del mes (todo lo timbrado dentro del período). Lo llena _ingFillMontoTimbrado.
+  h.push('<tr><td colspan="2" id="ing-fac-declara" style="padding:0;border-bottom:1px solid var(--color-divider,#f0f0f0)"></td></tr>');
   // Sin factura = operaciones sin XML (falta timbrar).
   h.push('<tr><td style="padding:11px 16px 1px;font-size:13px;font-weight:800;color:#b45309">⏳ Sin factura <span style="font-weight:600;font-size:10.5px">falta timbrar</span></td>'
     +'<td id="ing-sinfac-val" style="padding:11px 16px 1px;font-size:15px;font-weight:800;text-align:right;color:#b45309">'+fC(_pendienteFacturar)+'</td></tr>');
@@ -5335,25 +5340,45 @@ function _ingSetDescInline(fiscal, cfdi, horneado) {
 // cachea por rango para no releer Drive en cada auto-refresh; "Re-verificar"
 // fuerza una lectura nueva. Todo esto cuadra exacto contra "Cobrado" porque el
 // split se hace sobre lo Pagado: Facturado + Sin factura + NC = Cobrado.
-var _ingXmlSet = null, _ingXmlSetRange = '';
+var _ingXmlSet = null, _ingXmlSetRange = '', _ingXmlMesMap = {};
 function _ingFmtMon(v){ return (typeof fmtMoney==='function') ? fmtMoney(Math.abs(Number(v)||0),'Ingresos') : '$'+(Number(v)||0).toFixed(2); }
+function _ingMesNombre(key){
+  if (!key || key.length < 7) return key || '—';
+  var M = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  var m = parseInt(key.substring(5,7),10);
+  var nom = M[m-1] || key.substring(5,7);
+  return nom.charAt(0).toUpperCase() + nom.slice(1) + ' ' + key.substring(0,4);
+}
 function _ingComputeFac(hasXmlFn) {
   var rc = window._ingRC; if (!rc || !rc.rows) return null;
   function esNC(fp){ return (fp||'').trim().toLowerCase().indexOf('nota de cr')===0; }
-  var fac=0, pen=0, nc=0, facOps={}, penOps={}, ncDone={};
+  // Se acumula POR OPERACIÓN para poder repartir Facturado por mes de timbrado.
+  var facByOp={}, penByOp={}, opMes={}, nc=0, ncDone={};
   rc.rows.forEach(function(r){
     var pag = r.pagado||0;
     var split = rc.split && rc.split[r.id];
     if (!split && esNC(r.formaPago)) { nc += pag; return; } // op pagada 100% con NC
-    if (hasXmlFn(r.id)) { fac += pag; facOps[r.id]=true; } else { pen += pag; penOps[r.id]=true; }
+    if (!opMes[r.id] && r.fecha) opMes[r.id] = String(r.fecha).substring(0,7); // mes de la venta (=mes de timbrado si no hubo cruce)
+    if (hasXmlFn(r.id)) facByOp[r.id]=(facByOp[r.id]||0)+pag; else penByOp[r.id]=(penByOp[r.id]||0)+pag;
     if (split && !ncDone[r.id]) {
       ncDone[r.id]=true;
       var ncOp=0; split.forEach(function(p){ if(esNC(p.fp)) ncOp += parseFloat(p.monto)||0; });
-      if (ncOp>0){ nc += ncOp; if(hasXmlFn(r.id)) fac -= ncOp; else pen -= ncOp; }
+      if (ncOp>0){ nc += ncOp; if(hasXmlFn(r.id)) facByOp[r.id]=(facByOp[r.id]||0)-ncOp; else penByOp[r.id]=(penByOp[r.id]||0)-ncOp; }
     }
   });
-  return { facturado:Math.max(0,fac), pendiente:Math.max(0,pen), nc:nc,
-           nFac:Object.keys(facOps).length, nSin:Object.keys(penOps).length };
+  var fac=0, pen=0, nFac=0, nSin=0, facMes={};
+  var periodoIni = (typeof currentFechaInicio==='string'?currentFechaInicio:'').substring(0,7);
+  for (var id in facByOp){ if(!facByOp.hasOwnProperty(id)) continue;
+    var v = facByOp[id]; fac += v; nFac++;
+    // Mes que impacta la declaración = mes en que se TIMBRÓ el CFDI: si hubo
+    // cruce (venta de un mes, factura de otro) lo da el backend; si no, es el
+    // mes de la venta.
+    var mk = (_ingXmlMesMap && _ingXmlMesMap[id]) || opMes[id] || periodoIni || '—';
+    if (!facMes[mk]) facMes[mk] = { monto:0, n:0 };
+    facMes[mk].monto += Math.max(0, v); facMes[mk].n++;
+  }
+  for (var id2 in penByOp){ if(!penByOp.hasOwnProperty(id2)) continue; pen += penByOp[id2]; nSin++; }
+  return { facturado:Math.max(0,fac), pendiente:Math.max(0,pen), nc:nc, nFac:nFac, nSin:nSin, facMes:facMes };
 }
 function _ingPaintFacturado(xmlSet) {
   var rc = window._ingRC; if (!rc) return;
@@ -5365,20 +5390,61 @@ function _ingPaintFacturado(xmlSet) {
   if (g('ing-fac-count')) g('ing-fac-count').textContent = c.nFac + (c.nFac===1?' operación facturada':' operaciones facturadas');
   if (g('ing-sinfac-count')) g('ing-sinfac-count').textContent = c.nSin + (c.nSin===1?' operación sin factura':' operaciones sin factura');
   if (g('ing-verif-val')) g('ing-verif-val').textContent = _ingFmtMon(c.facturado + c.pendiente + c.nc);
+  // Desglose de Facturado por mes de timbrado — solo cuando ya hay verificación
+  // real contra Drive (provisional no conoce el mes exacto del timbrado).
+  var mesEl = g('ing-fac-mes');
+  if (mesEl) {
+    var hm = '';
+    if (xmlSet) {
+      var minM = (typeof currentFechaInicio==='string'?currentFechaInicio:'').substring(0,7);
+      var maxM = (typeof currentFechaFin==='string'?currentFechaFin:'').substring(0,7);
+      var keys = []; for (var k in c.facMes){ if(c.facMes.hasOwnProperty(k)) keys.push(k); }
+      keys.sort();
+      keys.forEach(function(key){
+        var b = c.facMes[key];
+        var dentro = (key >= minM && key <= maxM);
+        var col = dentro ? '#166534' : '#7c3aed';
+        var ico = dentro ? '🟢' : '⏭';
+        var nota = dentro ? 'se declara en este período' : 'se declara en '+_ingMesNombre(key)+', NO en este mes';
+        hm += '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding:3px 16px 3px 30px">'
+          +'<span style="font-size:10.5px;color:'+col+'">'+ico+' Timbrado en <b>'+_ingMesNombre(key)+'</b> · '+b.n+' fac. <span style="color:var(--text-secondary,#9ca3af)">('+nota+')</span></span>'
+          +'<span style="font-size:11px;font-weight:700;color:'+col+'">'+_ingFmtMon(b.monto)+'</span>'
+        +'</div>';
+      });
+    }
+    mesEl.innerHTML = hm;
+  }
   var st = g('ing-fac-status');
   if (st) st.innerHTML = xmlSet
     ? '<span style="color:#166534;font-weight:700">✓ Verificado contra los XML de Drive</span>'
     : '<span style="color:#9ca3af">⏳ Provisional (por Factura# capturado) — verificando XML de Drive…</span>';
 }
 function _ingFillMontoTimbrado(d) {
+  if (!d || !d.resumenFacturacion) return;
+  var tot = d.resumenFacturacion.totalFacturadoXml||0;
   var el = document.getElementById('ing-timbrado-val');
-  if (el && d && d.resumenFacturacion) el.textContent = _ingFmtMon(d.resumenFacturacion.totalFacturadoXml||0);
+  if (el) el.textContent = _ingFmtMon(tot);
+  // Base a declarar del mes = todo lo timbrado DENTRO del período (lo que ve el
+  // SAT). Incluye CFDI de otro mes timbrados aquí y excluye ventas de este mes
+  // timbradas en otro mes — por eso puede diferir de "Facturado".
+  var dec = document.getElementById('ing-fac-declara');
+  if (dec) {
+    var minM = (typeof currentFechaInicio==='string'?currentFechaInicio:'').substring(0,7);
+    var maxM = (typeof currentFechaFin==='string'?currentFechaFin:'').substring(0,7);
+    var lbl = (minM===maxM) ? _ingMesNombre(minM) : (_ingMesNombre(minM)+' a '+_ingMesNombre(maxM));
+    dec.innerHTML = '<div style="padding:7px 16px;background:rgba(12,74,110,.05);font-size:10.5px;color:#0c4a6e;line-height:1.5">'
+      +'📅 <b>Base a declarar en '+lbl+'</b>: <b>'+_ingFmtMon(tot)+'</b> — todo lo timbrado <b>dentro</b> del período (suma los CFDI de otro mes timbrados aquí; resta las ventas de este mes timbradas en otro mes).</div>';
+  }
 }
 async function _ingCargarFacturadoReal(force) {
   if (!window._ingRC) return;
   if (!currentFechaInicio || !currentFechaFin) return;
   var rango = currentFechaInicio+'|'+currentFechaFin;
-  if (!force && _ingXmlSet && _ingXmlSetRange===rango) { _ingPaintFacturado(_ingXmlSet); return; }
+  if (!force && _ingXmlSet && _ingXmlSetRange===rango) {
+    _ingPaintFacturado(_ingXmlSet);
+    if (_ingFacResult) _ingFillMontoTimbrado(_ingFacResult);
+    return;
+  }
   var st = document.getElementById('ing-fac-status');
   if (force && st) st.innerHTML = '<span style="color:#9ca3af"><span class="ing-spinner ing-spinner-dark"></span>Verificando facturas en Drive…</span>';
   try {
@@ -5387,10 +5453,14 @@ async function _ingCargarFacturadoReal(force) {
     var d = await r.json();
     if (!d || !d.ok) { _ingPaintFacturado(null); return; }
     _ingFacResult = d;
-    var set = {};
+    var set = {}, mesMap = {};
     (d.conDocumento||[]).forEach(function(o){ if(o&&o.id!=null) set[o.id]=true; });
     (d.faltaDocumento||[]).forEach(function(o){ if(o&&o.id!=null) set[o.id]=true; });
-    _ingXmlSet = set; _ingXmlSetRange = rango;
+    // Mes de timbrado por OP para las que cruzaron de período (venta de un mes,
+    // factura de otro) — el backend ya lo detectó.
+    var cz = d.cfdiCruzados||{};
+    (cz.opsFacturadasOtroMes||[]).forEach(function(o){ if(o&&o.opId!=null && o.xmlMes) mesMap[o.opId]=o.xmlMes; });
+    _ingXmlSet = set; _ingXmlSetRange = rango; _ingXmlMesMap = mesMap;
     _ingPaintFacturado(set);
     _ingFillMontoTimbrado(d);
     if (typeof _ingFacFillResumenContable==='function') _ingFacFillResumenContable();
