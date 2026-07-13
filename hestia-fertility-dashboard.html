@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.13.154 -->
+﻿<!-- app-build:2026.07.13.155 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -8773,15 +8773,21 @@ function buildSidebar(items) {
   var container = document.getElementById('sidebar-nav');
   if (!container) return;
 
-  // Agrupa los items raíz por sección, en orden
+  // Agrupa los items raíz por sección. La posición de CADA sección la define el
+  // menor "orden" de sus items → así, subir el orden de un grupo (ej. Ayuda=760)
+  // manda la sección hasta abajo, no solo lo reordena dentro de ella.
   var secciones = [];
   var seccionVista = {};
+  var seccionOrden = {};
   items.forEach(function(item) {
-    if (!item.padre && item.seccion && !seccionVista[item.seccion]) {
-      seccionVista[item.seccion] = true;
-      secciones.push(item.seccion);
+    if (!item.padre && item.seccion) {
+      if (!seccionVista[item.seccion]) { seccionVista[item.seccion] = true; secciones.push(item.seccion); }
+      var o = (item.orden != null ? item.orden : 9999);
+      if (!(item.seccion in seccionOrden) || o < seccionOrden[item.seccion]) seccionOrden[item.seccion] = o;
     }
   });
+  var _secIdx = {}; secciones.forEach(function(s, i) { _secIdx[s] = i; });
+  secciones.sort(function(a, b) { return (seccionOrden[a] - seccionOrden[b]) || (_secIdx[a] - _secIdx[b]); });
 
   var html = '';
   secciones.forEach(function(sec) {
