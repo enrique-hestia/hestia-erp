@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.13.153 -->
+﻿<!-- app-build:2026.07.13.154 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -8823,7 +8823,9 @@ function buildSidebar(items) {
   setActiveNav(currentView);
 }
 
-var _lucideIconMap = {mx:'map-pin', usa:'globe', 'local':'map-pin', 'internacional':'globe', 'nacional':'map-pin'};
+var _lucideIconMap = {mx:'map-pin', usa:'globe', 'local':'map-pin', 'internacional':'globe', 'nacional':'map-pin',
+  // Alias amables: nombres que la gente escribe en la hoja Menu pero que no existen en Lucide
+  'question-mark':'circle-help', 'question':'circle-help', 'help':'circle-help', 'ayuda':'circle-help', 'interrogacion':'circle-help'};
 function _safeIcon(name) { return _lucideIconMap[name] || name || 'circle'; }
 
 /* ── Construye un nodo del menú (recursivo para sub-submenús) ─── */
@@ -20188,7 +20190,9 @@ function pcLoadMenu() {
             try { localStorage.setItem(LS_PREFIX+'menu', JSON.stringify({items:_full,ts:Date.now()})); } catch(e){}
             _pcMenuAll = _full.slice();
             pcRenderMenuTable(_pcMenuAll);
-            renderSidebar(menuItems);
+            // FIX: antes llamaba renderSidebar() (no existe) → el error caía al catch
+            // y el sidebar NO se repintaba al Recargar. La función real es buildSidebar.
+            if (typeof buildSidebar === 'function') buildSidebar(menuItems);
           } else {
             if (empty) empty.textContent = 'Error al cargar menú: ' + (data&&data.error||'respuesta inválida');
           }
