@@ -609,6 +609,17 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Actualiza cobranza.gs en Apps Script y redespliega.'});
       return jsonResponse(cobDescCfgSave(body));
     }
+    // Declaraciones fiscales (captura manual persistente)
+    if (body.action === 'saveDeclaracion') {
+      if (typeof saveDeclaracion !== 'function')
+        return jsonResponse({ok:false, error:'Agrega declaraciones.gs en Apps Script y redespliega.'});
+      return jsonResponse(saveDeclaracion(body));
+    }
+    if (body.action === 'deleteDeclaracion') {
+      if (typeof deleteDeclaracion !== 'function')
+        return jsonResponse({ok:false, error:'Agrega declaraciones.gs en Apps Script y redespliega.'});
+      return jsonResponse(deleteDeclaracion(body));
+    }
     // Tareas programadas (scheduler)
     if (body.action === 'updateScheduledTask')     return jsonResponse(updateScheduledTask(body));
     if (body.action === 'setupScheduledTriggers')  return jsonResponse(setupScheduledTriggers());

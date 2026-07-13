@@ -419,6 +419,12 @@ function doGet(e) {
       return jsonResponse(reconciliarFacturasXml(fIni, fFin));
     }
 
+    if (action === 'declaraciones') {
+      if (typeof readDeclaraciones !== 'function') return jsonResponse({ ok: false, error: 'declaraciones.gs no desplegado' });
+      var declPer = (e && e.parameter.periodo) || '';
+      return jsonResponse(readDeclaraciones(declPer));
+    }
+
     if (action === 'buscarXmlAmplio') {
       var baIni = (e && e.parameter.fechaInicio) || '';
       var baFin = (e && e.parameter.fechaFin) || '';

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.13.157 -->
+﻿<!-- app-build:2026.07.13.158 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -3080,29 +3080,13 @@ function _renderIngresosERP() {
     +'<span id="ing-fac-status"><span style="color:#9ca3af">⏳ Verificando facturas en Drive…</span></span> '
     +'<button onclick="_ingCargarFacturadoReal(true)" style="margin-left:2px;background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;color:var(--color-primary,#c46a7a);cursor:pointer">🔄 Re-verificar</button>'
     +'</div>');
-  // ── Detalle fiscal (avanzado) — colapsado, para el contador ──
-  h.push('<details style="border-top:1px solid var(--color-divider,#e5e7eb)"><summary style="padding:11px 16px;font-size:11px;font-weight:800;color:var(--text-secondary,#6b7280);cursor:pointer">Detalle fiscal para tu contador (avanzado)</summary>');
-  h.push('<table style="width:100%;border-collapse:collapse">');
-  h.push('<tr><td colspan="2" style="padding:8px 16px 4px;font-size:9.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Base fiscal del CFDI (lo que el SAT prellena)</td></tr>');
-  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:var(--text-primary,#111);border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ Monto fiscal a declarar (SAT)</td><td id="ing-desc-fiscal-inline" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:var(--text-primary,#111);border-bottom:1px solid var(--color-divider,#f0f0f0)"><span class="ing-spinner ing-spinner-dark"></span></td></tr>');
-  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#b45309;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ Descuento CFDI a capturar aparte</td><td id="ing-desc-cfdi-inline" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#b45309;border-bottom:1px solid var(--color-divider,#f0f0f0)">…</td></tr>');
-  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ Descuento ya horneado en precio</td><td id="ing-desc-horneado-inline" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)">…</td></tr>');
-  h.push('<tr><td style="padding:8px 16px;font-size:11.5px;font-weight:700;color:var(--text-primary,#111);border-bottom:1px solid var(--color-divider,#f0f0f0)">Total timbrado (suma de CFDI del mes)</td><td id="ing-timbrado-val" style="padding:8px 16px;font-size:12px;font-weight:700;text-align:right;color:var(--text-primary,#111);border-bottom:1px solid var(--color-divider,#f0f0f0)" title="Suma de todos los CFDI de ingreso timbrados dentro del período — lo que ve el SAT">—</td></tr>');
-  h.push('<tr><td colspan="2" style="padding:10px 16px 4px;font-size:9.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Cruces de periodo e ISR</td></tr>');
-  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#0c4a6e;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ CFDI de otro periodo timbrados este mes (+)</td><td id="ing-cfdi-cruz-in" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#0c4a6e;border-bottom:1px solid var(--color-divider,#f0f0f0)" title="Se calcula al verificar las facturas del período">—</td></tr>');
-  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ Ventas del periodo timbradas en otro mes (−)</td><td id="ing-cfdi-cruz-out" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)" title="Se calcula al verificar las facturas del período">—</td></tr>');
-  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#dc2626;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ CFDI sobrantes por cancelar</td><td id="ing-cfdi-sobrantes" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#dc2626;border-bottom:1px solid var(--color-divider,#f0f0f0)" title="Se calcula al verificar las facturas del período">—</td></tr>');
-  h.push('<tr><td '+LS+'>CFDI Ingreso mes anterior</td><td style="padding:8px 16px;text-align:right;border-bottom:1px solid var(--color-divider,#f0f0f0)"><input id="ing-cfdi-anterior" type="number" value="0" step="0.01" style="width:130px;text-align:right;padding:5px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;font-weight:700;background:var(--card-bg,#fff)" oninput="ingCalcISR()"></td></tr>');
-  h.push('<tr><td '+LS+'>Contabilizado en el período</td><td '+VS+'>'+fC(_contabilizado)+'</td></tr>');
-  h.push('<tr style="background:rgba(196,106,122,.06)"><td style="padding:12px 16px;font-size:14px;font-weight:800;color:var(--color-primary,#c46a7a);border-top:2px solid var(--color-primary,#c46a7a)">ISR Declarado</td>'
-    +'<td id="ing-isr-val" style="padding:12px 16px;font-size:18px;font-weight:800;text-align:right;color:var(--color-primary,#c46a7a);border-top:2px solid var(--color-primary,#c46a7a)">'+fC(_isrDeclarado)+'</td></tr>');
-  h.push('</table>');
-  h.push('<div style="padding:10px 16px;font-size:10px;color:var(--text-secondary,#9ca3af);line-height:1.5">'
-    +'<strong>Cobrado</strong> = todo lo que entró en el período (Mercado Pago + Efectivo + Santander).<br>'
-    +'<strong>Facturado</strong> = de ese cobrado, lo que ya tiene su CFDI (XML) emitido en Drive.<br>'
-    +'<strong>Sin factura</strong> = Cobrado − Facturado − Notas de crédito (lo que falta timbrar).<br>'
-    +'<strong>Total timbrado</strong> = suma de los CFDI del mes; puede diferir de "Facturado" por cruces de periodo (una venta de este mes timbrada el siguiente, o viceversa).<br>'
-    +'<strong>ISR Declarado</strong> = Contabilizado + CFDI mes anterior (lo ajusta el contador).</div>');
+  // ── Declaración presentada (captura manual + consulta) ──
+  // Reemplaza el detalle auto-calculado: aquí se captura A MANO la declaración
+  // ya presentada (número, importe, cómo se llegó al número con el coeficiente
+  // de utilidad) y se guarda para consultarla después. _ingDeclCargar() lo llena.
+  h.push('<details style="border-top:1px solid var(--color-divider,#e5e7eb)" id="ing-decl-details" ontoggle="if(this.open)_ingDeclCargar(false)"><summary style="padding:11px 16px;font-size:11.5px;font-weight:800;color:var(--color-primary,#c46a7a);cursor:pointer">📋 Declaración presentada — capturar y consultar</summary>');
+  h.push('<div style="padding:6px 16px 2px;font-size:10px;color:var(--text-secondary,#9ca3af)">Referencia · Total timbrado del período (lo que ve el SAT): <b id="ing-timbrado-val" style="color:var(--text-primary,#111)">—</b></div>');
+  h.push('<div id="ing-decl-panel" style="padding:6px 16px 14px"><div style="font-size:11px;color:var(--text-secondary,#9ca3af)">Abre este panel para capturar/consultar la declaración del período.</div></div>');
   h.push('</details>');
   h.push('</div>');
 
@@ -5465,6 +5449,192 @@ async function _ingCargarFacturadoReal(force) {
     _ingFillMontoTimbrado(d);
     if (typeof _ingFacFillResumenContable==='function') _ingFacFillResumenContable();
   } catch(e) { _ingPaintFacturado(null); }
+}
+
+// ── Declaración presentada: captura manual + consulta (persistente) ────
+// El usuario captura a mano la declaración ya presentada al SAT para
+// consultarla después: número, importe, y "cómo llegó al número" (pago
+// provisional de ISR PM, Art. 14 LISR). Cards read-only inline (sobreviven al
+// re-render); el formulario va en MODAL (fuera del DOM de Ingresos, no se pierde
+// la captura si entra un auto-refresh). Backend: declaraciones.gs (hoja Declaraciones).
+var _ingDeclCache = null, _ingDeclCacheKey = '', _ingDeclImporteTocado = false;
+var ING_DECL_TIPOS = ['ISR provisional','IVA','ISR anual','DIOT','Otro'];
+function _ingDeclPeriodo(){ return (typeof currentFechaInicio==='string'?currentFechaInicio:'').substring(0,7); }
+function _ingDeclN(id){ var el=document.getElementById(id); if(!el) return 0; var n=parseFloat(String(el.value).replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
+function _ingDeclV(id){ var el=document.getElementById(id); return el?String(el.value||''):''; }
+function _ingDeclPuede(){ return (typeof hasPermission==='function')?hasPermission('editar_ingresos'):true; }
+async function _ingDeclCargar(force){
+  var panel=document.getElementById('ing-decl-panel'); if(!panel) return;
+  var per=_ingDeclPeriodo();
+  if(!force && _ingDeclCacheKey===per && _ingDeclCache){ _ingDeclRender(); return; }
+  panel.innerHTML='<div style="font-size:11px;color:var(--text-secondary,#9ca3af)"><span class="ing-spinner ing-spinner-dark"></span>Cargando declaración…</div>';
+  try{
+    var tok=encodeURIComponent(getToken());
+    var r=await fetch(APPS_SCRIPT_URL+'?action=declaraciones&periodo='+encodeURIComponent(per)+'&token='+tok);
+    var d=await r.json();
+    _ingDeclCache=(d&&d.ok&&d.items)?d.items:[]; _ingDeclCacheKey=per;
+    _ingDeclRender();
+  }catch(e){ panel.innerHTML='<div style="font-size:11px;color:#dc2626">No se pudo cargar: '+e.message+'</div>'; }
+}
+function _ingDeclRender(){
+  var panel=document.getElementById('ing-decl-panel'); if(!panel) return;
+  var per=_ingDeclCacheKey||_ingDeclPeriodo();
+  var items=_ingDeclCache||[]; var puede=_ingDeclPuede(); var h='';
+  var mesLbl=(typeof _ingMesNombre==='function')?_ingMesNombre(per):per;
+  if(!items.length){
+    h+='<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-bottom:8px">Aún no capturas la declaración de <b>'+mesLbl+'</b>.</div>';
+    if(puede) h+='<button onclick="_ingDeclNueva()" style="background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:11.5px;font-weight:700;cursor:pointer">+ Capturar declaración</button>';
+    else h+='<div style="font-size:10.5px;color:#9ca3af">Sin permiso para capturar (necesitas editar_ingresos).</div>';
+  } else {
+    items.forEach(function(it){ h+=_ingDeclCard(it,puede); });
+    if(puede) h+='<button onclick="_ingDeclNueva()" style="background:none;border:1px dashed var(--color-divider,#cbd5e1);color:var(--color-primary,#c46a7a);border-radius:8px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;margin-top:2px">+ Otra declaración de este mes (IVA, etc.)</button>';
+  }
+  panel.innerHTML=h;
+}
+function _ingDeclCard(it, puede){
+  var fmt=_ingFmtMon;
+  var esISR=String(it.Tipo||'').toLowerCase().indexOf('isr provisional')>-1;
+  var id=String(it.ID||'').replace(/'/g,"\\'");
+  function ln(lbl,val,op,strong){ return '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:10.5px;'+(strong?'font-weight:800;color:var(--text-primary,#111);border-top:1px solid var(--color-divider,#e5e7eb);margin-top:2px;padding-top:4px':'color:var(--text-secondary,#374151)')+'"><span>'+(op?op+' ':'')+lbl+'</span><span style="font-weight:700">'+val+'</span></div>'; }
+  var h='<div style="border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:12px 14px;margin-bottom:10px;background:var(--color-surface,#fafafa)">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'
+    +'<div><div style="font-size:12.5px;font-weight:800;color:var(--text-primary,#111)">'+_cxpEsc(it.Tipo||'Declaración')+'</div>'
+    +'<div style="font-size:10.5px;color:var(--text-secondary,#6b7280)">N.º '+_cxpEsc(it.NumeroDeclaracion||'—')+(it.FechaPresentacion?' · '+_cxpEsc(String(it.FechaPresentacion)):'')+'</div></div>'
+    +'<div style="text-align:right"><div style="font-size:9px;color:var(--text-secondary,#9ca3af);text-transform:uppercase;font-weight:700">Importe declarado</div>'
+    +'<div style="font-size:17px;font-weight:800;color:var(--color-primary,#c46a7a)">'+fmt(it.ImporteDeclarado)+'</div></div>'
+  +'</div>';
+  if(esISR){
+    h+='<div style="margin-top:8px">';
+    h+=ln('Ingresos nominales', fmt(it.IngresosNominales));
+    h+=ln('Coeficiente de utilidad', (parseFloat(it.CoeficienteUtilidad)||0).toFixed(4), '×');
+    h+=ln('Utilidad fiscal', fmt(it.UtilidadFiscal), '=', true);
+    if(parseFloat(it.PerdidasAplicadas)) h+=ln('Pérdidas fiscales anteriores', fmt(it.PerdidasAplicadas), '−');
+    if(parseFloat(it.PTU)) h+=ln('PTU pagada', fmt(it.PTU), '−');
+    if(parseFloat(it.OtrasDeducciones)) h+=ln('Otras deducciones', fmt(it.OtrasDeducciones), '−');
+    h+=ln('Base gravable', fmt(it.BaseGravable), '=', true);
+    h+=ln('Tasa ISR', (parseFloat(it.TasaISR)||0)+'%', '×');
+    h+=ln('ISR causado', fmt(it.ISRCausado), '=', true);
+    if(parseFloat(it.PagosProvPrevios)) h+=ln('Pagos provisionales anteriores', fmt(it.PagosProvPrevios), '−');
+    if(parseFloat(it.RetencionesISR)) h+=ln('Retenciones de ISR', fmt(it.RetencionesISR), '−');
+    if(parseFloat(it.OtrosAcreditamientos)) h+=ln('Otros acreditamientos', fmt(it.OtrosAcreditamientos), '−');
+    h+=ln('ISR a cargo', fmt(it.ISRaCargo), '=', true);
+    h+='</div>';
+  }
+  if(it.Notas) h+='<div style="margin-top:8px;font-size:10.5px;color:var(--text-secondary,#374151);background:var(--card-bg,#fff);border-radius:8px;padding:7px 9px;white-space:pre-wrap">📝 '+_cxpEsc(String(it.Notas))+'</div>';
+  h+='<div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">'
+    +'<span style="font-size:9px;color:var(--text-secondary,#9ca3af)">'+(it.Usuario?_cxpEsc(String(it.Usuario))+' · ':'')+_cxpEsc(String(it.Actualizado||''))+'</span>'
+    +(puede?'<span><button onclick="_ingDeclEditar(\''+id+'\')" style="background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;padding:3px 10px;font-size:10px;font-weight:700;color:var(--text-primary,#374151);cursor:pointer;margin-right:6px">Editar</button>'
+      +'<button onclick="_ingDeclBorrar(\''+id+'\')" style="background:none;border:1px solid #fecaca;border-radius:6px;padding:3px 10px;font-size:10px;font-weight:700;color:#dc2626;cursor:pointer">Borrar</button></span>':'')
+  +'</div></div>';
+  return h;
+}
+function _ingDeclNueva(){ _ingDeclModal({ Periodo:_ingDeclPeriodo(), Tipo:'ISR provisional', TasaISR:30 }, false); }
+function _ingDeclEditar(id){
+  var it=(_ingDeclCache||[]).filter(function(x){return String(x.ID)===String(id);})[0];
+  _ingDeclModal(it||{ Periodo:_ingDeclPeriodo(), Tipo:'ISR provisional', TasaISR:30 }, true);
+}
+function _ingDeclCerrar(){ var ov=document.getElementById('ing-decl-ov'); if(ov) ov.remove(); }
+function _ingDeclModal(it, esEdicion){
+  it=it||{};
+  _ingDeclImporteTocado = !!esEdicion; // en edición no se pisa el importe guardado
+  var ov=document.getElementById('ing-decl-ov');
+  if(!ov){ ov=document.createElement('div'); ov.id='ing-decl-ov'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9700;display:flex;align-items:flex-start;justify-content:center;padding:24px 16px;overflow:auto';
+  function inp(id,val,ph,step){ return '<input id="'+id+'" type="number" step="'+(step||'0.01')+'" value="'+(val!==undefined&&val!==''&&val!==null?val:'')+'" placeholder="'+(ph||'0')+'" oninput="_ingDeclCalc()" style="width:140px;text-align:right;padding:5px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;font-weight:700;background:var(--card-bg,#fff)">'; }
+  function rowI(lbl,field,op){ return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:3px 0"><span style="font-size:11px;color:var(--text-secondary,#374151)">'+(op?'<b>'+op+'</b> ':'')+lbl+'</span>'+field+'</div>'; }
+  function rowC(lbl,spanId,op){ return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0;border-top:1px solid var(--color-divider,#f0f0f0)"><span style="font-size:11px;font-weight:800;color:var(--text-primary,#111)">'+(op?op+' ':'')+lbl+'</span><span id="'+spanId+'" style="font-size:12.5px;font-weight:800;color:var(--text-primary,#111)">$0.00</span></div>'; }
+  var tipo=it.Tipo||'ISR provisional';
+  var tipoOpts=ING_DECL_TIPOS.map(function(t){ return '<option value="'+t+'"'+(t===tipo?' selected':'')+'>'+t+'</option>'; }).join('');
+  var f='<input type="hidden" id="ingd-id" value="'+_cxpEsc(String(it.ID||''))+'">';
+  f+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px">'
+    +'<label style="font-size:10px;color:var(--text-secondary,#6b7280)">Tipo de declaración<br><select id="ingd-tipo" onchange="_ingDeclOnTipo()" style="width:100%;padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff)">'+tipoOpts+'</select></label>'
+    +'<label style="font-size:10px;color:var(--text-secondary,#6b7280)">Periodo (YYYY-MM)<br><input id="ingd-periodo" value="'+_cxpEsc(it.Periodo||_ingDeclPeriodo())+'" style="width:100%;padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff)"></label>'
+    +'<label style="font-size:10px;color:var(--text-secondary,#6b7280)">N.º de declaración (acuse)<br><input id="ingd-num" value="'+_cxpEsc(it.NumeroDeclaracion||'')+'" placeholder="folio del acuse SAT" style="width:100%;padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff)"></label>'
+    +'<label style="font-size:10px;color:var(--text-secondary,#6b7280)">Fecha de presentación<br><input id="ingd-fecha" type="date" value="'+_cxpEsc(String(it.FechaPresentacion||''))+'" style="width:100%;padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff)"></label>'
+  +'</div>';
+  f+='<div id="ingd-calc" style="border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:11px 13px;margin-bottom:10px'+(tipo==='ISR provisional'?'':';display:none')+'">'
+    +'<div style="font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:5px">Cómo llegué al número — pago provisional de ISR</div>'
+    +rowI('Ingresos nominales acumulados', inp('ingd-ing', it.IngresosNominales))
+    +rowI('Coeficiente de utilidad', inp('ingd-coef', it.CoeficienteUtilidad,'0.0000','0.0001'), '×')
+    +rowC('Utilidad fiscal','ingd-util','=')
+    +rowI('Pérdidas fiscales anteriores', inp('ingd-perd', it.PerdidasAplicadas), '−')
+    +rowI('PTU pagada en el ejercicio', inp('ingd-ptu', it.PTU), '−')
+    +rowI('Otras deducciones / anticipos', inp('ingd-otras', it.OtrasDeducciones), '−')
+    +rowC('Base gravable','ingd-base','=')
+    +rowI('Tasa de ISR (%)', inp('ingd-tasa', (it.TasaISR!==undefined&&it.TasaISR!==''?it.TasaISR:30),'30','0.01'), '×')
+    +rowC('ISR causado','ingd-causado','=')
+    +rowI('Pagos provisionales anteriores', inp('ingd-pagosprev', it.PagosProvPrevios), '−')
+    +rowI('Retenciones de ISR (bancos, etc.)', inp('ingd-ret', it.RetencionesISR), '−')
+    +rowI('Otros acreditamientos / estímulos', inp('ingd-otrosacr', it.OtrosAcreditamientos), '−')
+    +rowC('ISR a cargo','ingd-cargo','=')
+  +'</div>';
+  f+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:2px 0 8px">'
+    +'<span style="font-size:12px;font-weight:800;color:var(--color-primary,#c46a7a)">Importe declarado (lo que pagaste)</span>'
+    +'<input id="ingd-importe" type="number" step="0.01" value="'+(it.ImporteDeclarado!==undefined&&it.ImporteDeclarado!==''?it.ImporteDeclarado:'')+'" oninput="_ingDeclImporteTocado=true" style="width:160px;text-align:right;padding:7px 9px;border:2px solid var(--color-primary,#c46a7a);border-radius:7px;font-size:15px;font-weight:800;background:var(--card-bg,#fff)">'
+  +'</div>';
+  f+='<label style="font-size:10px;color:var(--text-secondary,#6b7280)">Notas (para consultar después)<br><textarea id="ingd-notas" rows="2" placeholder="ej. se aplicó pérdida de 2024, ajuste por…, retención del banco X…" style="width:100%;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11.5px;background:var(--card-bg,#fff);resize:vertical;box-sizing:border-box">'+_cxpEsc(String(it.Notas||''))+'</textarea></label>';
+  f+='<div id="ingd-msg" style="font-size:10.5px;color:#dc2626;margin:6px 0;min-height:12px"></div>';
+  f+='<div style="display:flex;gap:8px;margin-top:6px">'
+    +'<button onclick="_ingDeclGuardar()" id="ingd-save" style="background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:12.5px;font-weight:800;cursor:pointer">Guardar declaración</button>'
+    +'<button onclick="_ingDeclCerrar()" style="background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:9px 18px;font-size:12.5px;font-weight:700;color:var(--text-secondary,#6b7280);cursor:pointer">Cancelar</button>'
+  +'</div>';
+  ov.innerHTML='<div style="background:var(--card-bg,#fff);color:var(--text-primary,#1a252f);border-radius:14px;padding:22px 24px;max-width:520px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.35)">'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px"><div style="font-weight:800;font-size:16px">📋 '+(esEdicion?'Editar':'Capturar')+' declaración</div>'
+    +'<button onclick="_ingDeclCerrar()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-secondary,#9ca3af)">✕</button></div>'
+    +f+'</div>';
+  _ingDeclOnTipo(); _ingDeclCalc();
+}
+function _ingDeclOnTipo(){
+  var t=_ingDeclV('ingd-tipo'); var calc=document.getElementById('ingd-calc');
+  if(calc) calc.style.display=(t==='ISR provisional')?'block':'none';
+}
+function _ingDeclCalc(){
+  var ing=_ingDeclN('ingd-ing'), coef=_ingDeclN('ingd-coef');
+  var util=ing*coef;
+  var base=util-_ingDeclN('ingd-perd')-_ingDeclN('ingd-ptu')-_ingDeclN('ingd-otras');
+  var tasa=_ingDeclN('ingd-tasa'); var causado=base*(tasa/100);
+  var cargo=causado-_ingDeclN('ingd-pagosprev')-_ingDeclN('ingd-ret')-_ingDeclN('ingd-otrosacr');
+  function set(id,v){ var el=document.getElementById(id); if(el) el.textContent=_ingFmtMon(v); }
+  set('ingd-util',util); set('ingd-base',base); set('ingd-causado',causado); set('ingd-cargo',cargo);
+  var imp=document.getElementById('ingd-importe');
+  if(imp && !_ingDeclImporteTocado && _ingDeclV('ingd-tipo')==='ISR provisional') imp.value=(cargo>0?cargo.toFixed(2):'0');
+}
+async function _ingDeclGuardar(){
+  var msg=document.getElementById('ingd-msg');
+  var per=_ingDeclV('ingd-periodo').trim(); var tipo=_ingDeclV('ingd-tipo');
+  if(!/^\d{4}-\d{2}$/.test(per)){ if(msg) msg.textContent='Periodo inválido (usa YYYY-MM, ej. 2026-06).'; return; }
+  var ing=_ingDeclN('ingd-ing'), coef=_ingDeclN('ingd-coef');
+  var util=ing*coef;
+  var base=util-_ingDeclN('ingd-perd')-_ingDeclN('ingd-ptu')-_ingDeclN('ingd-otras');
+  var tasa=_ingDeclN('ingd-tasa'); var causado=base*(tasa/100);
+  var cargo=causado-_ingDeclN('ingd-pagosprev')-_ingDeclN('ingd-ret')-_ingDeclN('ingd-otrosacr');
+  var decl={
+    ID:_ingDeclV('ingd-id')||'', Periodo:per, Tipo:tipo,
+    NumeroDeclaracion:_ingDeclV('ingd-num'), FechaPresentacion:_ingDeclV('ingd-fecha'),
+    ImporteDeclarado:_ingDeclN('ingd-importe'),
+    IngresosNominales:ing, CoeficienteUtilidad:coef, UtilidadFiscal:util,
+    PerdidasAplicadas:_ingDeclN('ingd-perd'), PTU:_ingDeclN('ingd-ptu'), OtrasDeducciones:_ingDeclN('ingd-otras'),
+    BaseGravable:base, TasaISR:tasa, ISRCausado:causado,
+    PagosProvPrevios:_ingDeclN('ingd-pagosprev'), RetencionesISR:_ingDeclN('ingd-ret'), OtrosAcreditamientos:_ingDeclN('ingd-otrosacr'),
+    ISRaCargo:cargo, Notas:_ingDeclV('ingd-notas')
+  };
+  var btn=document.getElementById('ingd-save'); if(btn){ btn.disabled=true; btn.innerHTML='<span class="ing-spinner"></span>Guardando…'; }
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveDeclaracion',token:getToken(),decl:decl})});
+    var d=await r.json();
+    if(!d.ok){ if(msg) msg.textContent=d.error||'No se pudo guardar'; if(btn){btn.disabled=false;btn.textContent='Guardar declaración';} return; }
+    _ingDeclCerrar();
+    await _ingDeclCargar(true);
+  }catch(e){ if(msg) msg.textContent='Error de conexión: '+e.message; if(btn){btn.disabled=false;btn.textContent='Guardar declaración';} }
+}
+async function _ingDeclBorrar(id){
+  if(!confirm('¿Borrar esta declaración capturada? No se puede deshacer.')) return;
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'deleteDeclaracion',token:getToken(),id:id})});
+    var d=await r.json();
+    if(!d.ok){ alert(d.error||'No se pudo borrar'); return; }
+    await _ingDeclCargar(true);
+  }catch(e){ alert('Error: '+e.message); }
 }
 
 async function _ingCargarDescuentosFiscales() {
