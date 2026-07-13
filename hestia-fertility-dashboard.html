@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.13.155 -->
+﻿<!-- app-build:2026.07.13.156 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2987,6 +2987,12 @@ function _renderIngresosERP() {
   _facturado = Math.max(0, _facturado);
   _pendienteFacturar = Math.max(0, _pendienteFacturar);
 
+  // Contexto para recalcular "Facturado" contra los XML realmente emitidos en
+  // Drive (async): el split de arriba usa el Factura# capturado como provisional;
+  // _ingCargarFacturadoReal() lo reemplaza por el conjunto de OPs que sí tienen
+  // su CFDI (XML) emitido. Se guarda lo mínimo para no re-renderizar toda la vista.
+  window._ingRC = { rows: filtered, split: _opSplit, facturaMap: _opFacturaMap, subtPagado: _subtPagado };
+
   // Ordenar desglose detallado por monto
   var _fpArr = [];
   for (var fpk in _fpDetail) { if (_fpDetail[fpk]>0) _fpArr.push({name:fpk, total:_fpDetail[fpk]}); }
@@ -3043,38 +3049,56 @@ function _renderIngresosERP() {
   h.push('<div>');
   h.push('<div '+HS+'>Resumen contable</div>');
   h.push('<table style="width:100%;border-collapse:collapse">');
-  h.push('<tr><td '+LS+' style="font-weight:700;color:#166534">Facturado</td><td '+VS+' style="color:#166534">'+fC(_facturado)+'</td></tr>');
+  // Cobrado — el ancla: el dinero que realmente entró en el período.
+  h.push('<tr style="background:rgba(12,74,110,.04)"><td style="padding:12px 16px;font-size:13px;font-weight:800;color:#0c4a6e;border-bottom:2px solid #0c4a6e">Cobrado <span style="font-weight:600;font-size:10.5px">(lo que entró)</span></td>'
+    +'<td style="padding:12px 16px;font-size:17px;font-weight:800;text-align:right;color:#0c4a6e;border-bottom:2px solid #0c4a6e">'+fC(_subtPagado)+'</td></tr>');
+  // Facturado = SOLO operaciones con su CFDI (XML) emitido en Drive.
+  h.push('<tr><td style="padding:11px 16px 1px;font-size:13px;font-weight:800;color:#166534">✓ Facturado <span style="font-weight:600;font-size:10.5px">con CFDI emitido</span></td>'
+    +'<td id="ing-facturado-val" style="padding:11px 16px 1px;font-size:15px;font-weight:800;text-align:right;color:#166534">'+fC(_facturado)+'</td></tr>');
+  h.push('<tr><td style="padding:0 16px 11px 30px;font-size:10.5px;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)"><span id="ing-fac-count">—</span></td><td style="border-bottom:1px solid var(--color-divider,#f0f0f0)"></td></tr>');
+  // Sin factura = operaciones sin XML (falta timbrar).
+  h.push('<tr><td style="padding:11px 16px 1px;font-size:13px;font-weight:800;color:#b45309">⏳ Sin factura <span style="font-weight:600;font-size:10.5px">falta timbrar</span></td>'
+    +'<td id="ing-sinfac-val" style="padding:11px 16px 1px;font-size:15px;font-weight:800;text-align:right;color:#b45309">'+fC(_pendienteFacturar)+'</td></tr>');
+  h.push('<tr><td style="padding:0 16px 11px 30px;font-size:10.5px;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)"><span id="ing-sinfac-count">—</span></td><td style="border-bottom:1px solid var(--color-divider,#f0f0f0)"></td></tr>');
+  // Notas de crédito: descuento aplicado, no es cobro.
+  if (_ncFiscal > 0) {
+    h.push('<tr><td style="padding:9px 16px;font-size:12px;font-weight:700;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)">• Notas de crédito <span style="font-weight:600;font-size:10px">(descuento, no es cobro)</span></td>'
+      +'<td style="padding:9px 16px;font-size:13px;font-weight:800;text-align:right;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)">'+fC(_ncFiscal)+'</td></tr>');
+  }
+  // Verificación de cuadre exacto contra Cobrado.
+  h.push('<tr style="background:var(--color-surface,#fafafa)"><td id="ing-verif-lbl" style="padding:9px 16px;font-size:10.5px;color:var(--text-secondary,#6b7280)">Facturado + Sin factura'+(_ncFiscal>0?' + NC':'')+' = Cobrado</td>'
+    +'<td id="ing-verif-val" style="padding:9px 16px;font-size:11px;font-weight:700;text-align:right;color:var(--text-secondary,#6b7280)">'+fC(_facturado+_pendienteFacturar+_ncFiscal)+'</td></tr>');
+  h.push('</table>');
+  // Nota + estatus de verificación contra Drive + botón re-verificar.
+  h.push('<div style="padding:11px 16px;font-size:10.5px;color:var(--text-secondary,#6b7280);line-height:1.55">'
+    +'<b>Facturado</b> = operaciones con su factura (CFDI/XML) realmente emitida en Drive. Si no hay XML, cuenta como <b>Sin factura</b> (falta timbrar).<br>'
+    +'<span id="ing-fac-status"><span style="color:#9ca3af">⏳ Verificando facturas en Drive…</span></span> '
+    +'<button onclick="_ingCargarFacturadoReal(true)" style="margin-left:2px;background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;color:var(--color-primary,#c46a7a);cursor:pointer">🔄 Re-verificar</button>'
+    +'</div>');
+  // ── Detalle fiscal (avanzado) — colapsado, para el contador ──
+  h.push('<details style="border-top:1px solid var(--color-divider,#e5e7eb)"><summary style="padding:11px 16px;font-size:11px;font-weight:800;color:var(--text-secondary,#6b7280);cursor:pointer">Detalle fiscal para tu contador (avanzado)</summary>');
+  h.push('<table style="width:100%;border-collapse:collapse">');
+  h.push('<tr><td colspan="2" style="padding:8px 16px 4px;font-size:9.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Base fiscal del CFDI (lo que el SAT prellena)</td></tr>');
   h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:var(--text-primary,#111);border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ Monto fiscal a declarar (SAT)</td><td id="ing-desc-fiscal-inline" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:var(--text-primary,#111);border-bottom:1px solid var(--color-divider,#f0f0f0)"><span class="ing-spinner ing-spinner-dark"></span></td></tr>');
   h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#b45309;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ Descuento CFDI a capturar aparte</td><td id="ing-desc-cfdi-inline" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#b45309;border-bottom:1px solid var(--color-divider,#f0f0f0)">…</td></tr>');
   h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ Descuento ya horneado en precio</td><td id="ing-desc-horneado-inline" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)">…</td></tr>');
-  h.push('<tr><td '+LS+' style="font-weight:700;color:#b45309">Pendiente por facturar</td><td '+VS+' style="color:#b45309">'+fC(_pendienteFacturar)+'</td></tr>');
-  if (_ncFiscal > 0) {
-    h.push('<tr><td '+LS+' style="font-weight:700;color:#7c3aed">Notas de Crédito (no fiscal — descuento)</td><td '+VS+' style="color:#7c3aed">'+fC(_ncFiscal)+'</td></tr>');
-  }
-  h.push('<tr style="background:var(--color-surface,#fafafa)"><td style="padding:6px 16px;font-size:10px;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)">Verificación (Facturado + Pendiente'+(_ncFiscal>0?' + NC':'')+')</td>'
-    +'<td style="padding:6px 16px;font-size:10px;text-align:right;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)">'+fC(_facturado+_pendienteFacturar+_ncFiscal)+'</td></tr>');
-  h.push('<tr><td '+LS+'>Contabilizado en el período</td><td '+VS+'>'+fC(_contabilizado)+'</td></tr>');
-  h.push('<tr><td '+LS+'>Diferencia</td><td '+VS+' style="color:'+(_diferencia>0?'#b45309':'#166534')+'">'+fC(_diferencia)+'</td></tr>');
-  h.push('<tr><td style="padding:8px 16px;font-size:11px;color:var(--text-secondary,#6b7280);border-bottom:1px solid var(--color-divider,#f0f0f0)">Pagado − Contabilizado</td><td style="padding:8px 16px;font-size:10px;text-align:right;color:var(--text-secondary,#9ca3af);border-bottom:1px solid var(--color-divider,#f0f0f0)">'+fC(_subtPagado)+' − '+fC(_contabilizado)+'</td></tr>');
+  h.push('<tr><td style="padding:8px 16px;font-size:11.5px;font-weight:700;color:var(--text-primary,#111);border-bottom:1px solid var(--color-divider,#f0f0f0)">Total timbrado (suma de CFDI del mes)</td><td id="ing-timbrado-val" style="padding:8px 16px;font-size:12px;font-weight:700;text-align:right;color:var(--text-primary,#111);border-bottom:1px solid var(--color-divider,#f0f0f0)" title="Suma de todos los CFDI de ingreso timbrados dentro del período — lo que ve el SAT">—</td></tr>');
+  h.push('<tr><td colspan="2" style="padding:10px 16px 4px;font-size:9.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Cruces de periodo e ISR</td></tr>');
+  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#0c4a6e;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ CFDI de otro periodo timbrados este mes (+)</td><td id="ing-cfdi-cruz-in" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#0c4a6e;border-bottom:1px solid var(--color-divider,#f0f0f0)" title="Se calcula al verificar las facturas del período">—</td></tr>');
+  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ Ventas del periodo timbradas en otro mes (−)</td><td id="ing-cfdi-cruz-out" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)" title="Se calcula al verificar las facturas del período">—</td></tr>');
+  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#dc2626;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ CFDI sobrantes por cancelar</td><td id="ing-cfdi-sobrantes" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#dc2626;border-bottom:1px solid var(--color-divider,#f0f0f0)" title="Se calcula al verificar las facturas del período">—</td></tr>');
   h.push('<tr><td '+LS+'>CFDI Ingreso mes anterior</td><td style="padding:8px 16px;text-align:right;border-bottom:1px solid var(--color-divider,#f0f0f0)"><input id="ing-cfdi-anterior" type="number" value="0" step="0.01" style="width:130px;text-align:right;padding:5px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;font-weight:700;background:var(--card-bg,#fff)" oninput="ingCalcISR()"></td></tr>');
-  // CFDI cruzados de periodo — se llenan al correr "Analizar periodo actual"
-  // en el tab Facturación (necesita el escaneo de XML en Drive). El campo de
-  // arriba se auto-llena con el monto detectado de CFDIs de otro periodo.
-  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#0c4a6e;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ CFDI de otro periodo timbrados este mes (+)</td><td id="ing-cfdi-cruz-in" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#0c4a6e;border-bottom:1px solid var(--color-divider,#f0f0f0)" title="Corre Analizar periodo actual en el tab Facturación para calcularlo">—</td></tr>');
-  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ Ventas del periodo timbradas en otro mes (−)</td><td id="ing-cfdi-cruz-out" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#7c3aed;border-bottom:1px solid var(--color-divider,#f0f0f0)" title="Corre Analizar periodo actual en el tab Facturación para calcularlo">—</td></tr>');
-  h.push('<tr><td style="padding:6px 16px 6px 30px;font-size:11px;color:#dc2626;border-bottom:1px solid var(--color-divider,#f0f0f0)">↳ CFDI sobrantes por cancelar</td><td id="ing-cfdi-sobrantes" style="padding:6px 16px;font-size:12px;font-weight:700;text-align:right;color:#dc2626;border-bottom:1px solid var(--color-divider,#f0f0f0)" title="Corre Analizar periodo actual en el tab Facturación para calcularlo">—</td></tr>');
+  h.push('<tr><td '+LS+'>Contabilizado en el período</td><td '+VS+'>'+fC(_contabilizado)+'</td></tr>');
   h.push('<tr style="background:rgba(196,106,122,.06)"><td style="padding:12px 16px;font-size:14px;font-weight:800;color:var(--color-primary,#c46a7a);border-top:2px solid var(--color-primary,#c46a7a)">ISR Declarado</td>'
     +'<td id="ing-isr-val" style="padding:12px 16px;font-size:18px;font-weight:800;text-align:right;color:var(--color-primary,#c46a7a);border-top:2px solid var(--color-primary,#c46a7a)">'+fC(_isrDeclarado)+'</td></tr>');
   h.push('</table>');
   h.push('<div style="padding:10px 16px;font-size:10px;color:var(--text-secondary,#9ca3af);line-height:1.5">'
-    +'<strong>Facturado</strong> = Σ Pagado de operaciones con Factura# capturado<br>'
-    +'<strong>Monto fiscal a declarar</strong> = Importe bruto del CFDI (antes de descuento) — lo que el SAT prellena, no el neto ya facturado<br>'
-    +'<strong>Descuento CFDI a capturar aparte</strong> = captúralo tú mismo en "Descuentos y devoluciones" del SAT para bajar la base<br>'
-    +'<strong>Descuento horneado en precio</strong> = ya está absorbido en el Importe facturado, no hay nada que capturar aparte (solo informativo)<br>'
-    +'<strong>Pendiente por facturar</strong> = Subtotal Pagado − Facturado<br>'
-    +'<strong>ISR Declarado</strong> = Contabilizado + CFDI mes anterior (no usa el monto fiscal — sigue siendo manual)<br>'
-    +'<strong>Contabilizado</strong> = Σ Monto Fact/Mes donde Contabilidad ✓<br>'
-    +'<strong>Total TDC/TDD</strong> = Subtotal − Efectivo − Santander</div>');
+    +'<strong>Cobrado</strong> = todo lo que entró en el período (Mercado Pago + Efectivo + Santander).<br>'
+    +'<strong>Facturado</strong> = de ese cobrado, lo que ya tiene su CFDI (XML) emitido en Drive.<br>'
+    +'<strong>Sin factura</strong> = Cobrado − Facturado − Notas de crédito (lo que falta timbrar).<br>'
+    +'<strong>Total timbrado</strong> = suma de los CFDI del mes; puede diferir de "Facturado" por cruces de periodo (una venta de este mes timbrada el siguiente, o viceversa).<br>'
+    +'<strong>ISR Declarado</strong> = Contabilizado + CFDI mes anterior (lo ajusta el contador).</div>');
+  h.push('</details>');
   h.push('</div>');
 
   h.push('</div></div>'); // /grid, /panel
@@ -3171,6 +3195,14 @@ function _renderIngresosERP() {
   setTimeout(function(){ if(typeof _tourStart==='function') _tourStart(_ING_TOUR,'hestia_tour_ing_v1'); },700);
 
   if (document.getElementById('ing-desc-fiscal-body') && _ingActiveTab==='lista') _ingCargarDescuentosFiscales();
+  // Resumen contable: pinta Facturado/Sin factura provisional (por Factura#) al
+  // instante y luego verifica contra los XML emitidos en Drive (cacheado por
+  // rango, así el auto-refresh no relee Drive cada 30s).
+  if (document.getElementById('ing-facturado-val') && _ingActiveTab==='lista') {
+    var _ingRng = currentFechaInicio+'|'+currentFechaFin;
+    _ingPaintFacturado((_ingXmlSet && _ingXmlSetRange===_ingRng) ? _ingXmlSet : null);
+    _ingCargarFacturadoReal(false);
+  }
   // Si ya hay un análisis de facturación en memoria, repoblar los renglones
   // de CFDI cruzados del Resumen Contable (el re-render los deja en "—").
   if (typeof _ingFacFillResumenContable === 'function') _ingFacFillResumenContable();
@@ -5294,6 +5326,75 @@ function _ingSetDescInline(fiscal, cfdi, horneado) {
   if (e1) e1.innerHTML = fiscal;
   if (e2) e2.innerHTML = cfdi;
   if (e3) e3.innerHTML = horneado;
+}
+
+// ── Facturado real: contra los XML realmente emitidos en Drive ─────────
+// El "Resumen contable" muestra Facturado = SOLO operaciones cuyo CFDI (XML)
+// existe en Drive, no las que tienen un Factura# capturado. La lista de OPs con
+// XML viene de reconciliarFacturas (mismo escaneo del tab Facturación). Se
+// cachea por rango para no releer Drive en cada auto-refresh; "Re-verificar"
+// fuerza una lectura nueva. Todo esto cuadra exacto contra "Cobrado" porque el
+// split se hace sobre lo Pagado: Facturado + Sin factura + NC = Cobrado.
+var _ingXmlSet = null, _ingXmlSetRange = '';
+function _ingFmtMon(v){ return (typeof fmtMoney==='function') ? fmtMoney(Math.abs(Number(v)||0),'Ingresos') : '$'+(Number(v)||0).toFixed(2); }
+function _ingComputeFac(hasXmlFn) {
+  var rc = window._ingRC; if (!rc || !rc.rows) return null;
+  function esNC(fp){ return (fp||'').trim().toLowerCase().indexOf('nota de cr')===0; }
+  var fac=0, pen=0, nc=0, facOps={}, penOps={}, ncDone={};
+  rc.rows.forEach(function(r){
+    var pag = r.pagado||0;
+    var split = rc.split && rc.split[r.id];
+    if (!split && esNC(r.formaPago)) { nc += pag; return; } // op pagada 100% con NC
+    if (hasXmlFn(r.id)) { fac += pag; facOps[r.id]=true; } else { pen += pag; penOps[r.id]=true; }
+    if (split && !ncDone[r.id]) {
+      ncDone[r.id]=true;
+      var ncOp=0; split.forEach(function(p){ if(esNC(p.fp)) ncOp += parseFloat(p.monto)||0; });
+      if (ncOp>0){ nc += ncOp; if(hasXmlFn(r.id)) fac -= ncOp; else pen -= ncOp; }
+    }
+  });
+  return { facturado:Math.max(0,fac), pendiente:Math.max(0,pen), nc:nc,
+           nFac:Object.keys(facOps).length, nSin:Object.keys(penOps).length };
+}
+function _ingPaintFacturado(xmlSet) {
+  var rc = window._ingRC; if (!rc) return;
+  var hasXml = xmlSet ? function(id){ return !!xmlSet[id]; } : function(id){ return !!(rc.facturaMap && rc.facturaMap[id]); };
+  var c = _ingComputeFac(hasXml); if (!c) return;
+  function g(id){ return document.getElementById(id); }
+  if (g('ing-facturado-val')) g('ing-facturado-val').textContent = _ingFmtMon(c.facturado);
+  if (g('ing-sinfac-val')) g('ing-sinfac-val').textContent = _ingFmtMon(c.pendiente);
+  if (g('ing-fac-count')) g('ing-fac-count').textContent = c.nFac + (c.nFac===1?' operación facturada':' operaciones facturadas');
+  if (g('ing-sinfac-count')) g('ing-sinfac-count').textContent = c.nSin + (c.nSin===1?' operación sin factura':' operaciones sin factura');
+  if (g('ing-verif-val')) g('ing-verif-val').textContent = _ingFmtMon(c.facturado + c.pendiente + c.nc);
+  var st = g('ing-fac-status');
+  if (st) st.innerHTML = xmlSet
+    ? '<span style="color:#166534;font-weight:700">✓ Verificado contra los XML de Drive</span>'
+    : '<span style="color:#9ca3af">⏳ Provisional (por Factura# capturado) — verificando XML de Drive…</span>';
+}
+function _ingFillMontoTimbrado(d) {
+  var el = document.getElementById('ing-timbrado-val');
+  if (el && d && d.resumenFacturacion) el.textContent = _ingFmtMon(d.resumenFacturacion.totalFacturadoXml||0);
+}
+async function _ingCargarFacturadoReal(force) {
+  if (!window._ingRC) return;
+  if (!currentFechaInicio || !currentFechaFin) return;
+  var rango = currentFechaInicio+'|'+currentFechaFin;
+  if (!force && _ingXmlSet && _ingXmlSetRange===rango) { _ingPaintFacturado(_ingXmlSet); return; }
+  var st = document.getElementById('ing-fac-status');
+  if (force && st) st.innerHTML = '<span style="color:#9ca3af"><span class="ing-spinner ing-spinner-dark"></span>Verificando facturas en Drive…</span>';
+  try {
+    var tok = encodeURIComponent(getToken());
+    var r = await fetch(APPS_SCRIPT_URL+'?action=reconciliarFacturas&fechaInicio='+currentFechaInicio+'&fechaFin='+currentFechaFin+'&token='+tok);
+    var d = await r.json();
+    if (!d || !d.ok) { _ingPaintFacturado(null); return; }
+    _ingFacResult = d;
+    var set = {};
+    (d.conDocumento||[]).forEach(function(o){ if(o&&o.id!=null) set[o.id]=true; });
+    (d.faltaDocumento||[]).forEach(function(o){ if(o&&o.id!=null) set[o.id]=true; });
+    _ingXmlSet = set; _ingXmlSetRange = rango;
+    _ingPaintFacturado(set);
+    _ingFillMontoTimbrado(d);
+    if (typeof _ingFacFillResumenContable==='function') _ingFacFillResumenContable();
+  } catch(e) { _ingPaintFacturado(null); }
 }
 
 async function _ingCargarDescuentosFiscales() {
