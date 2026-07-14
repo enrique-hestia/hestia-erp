@@ -3619,8 +3619,8 @@ async function _agenciaPost(body){
 function prodOpenForm(defaultCat) {
   var el = document.getElementById('view-productos-catalogo');
   if (!el) return;
-  var cats = (_prodData && _prodData.categorias) ? _prodData.categorias.map(function(c){return c.nombre;}) : ING_CATEGORIAS;
-  var tipos = ['ALTA','BAJA','FET','FEOC','PGT','CONSULTA','EXTERNOS','SURROGACY','REPROVIDA'];
+  var cats = _prodCatList(defaultCat);
+  var tipos = _ddVals('Productos','tipo', _PROD_TIPOS_FALLBACK);
   var monedas = ['MXN','USD'];
   // Listas de precios = base + cada AGENCIA (REPROVIDA + las que se vayan creando).
   var listas = ['General','GM','Surrogacy'].concat(window._agencias || ['REPROVIDA']);
@@ -3703,6 +3703,62 @@ function prodOpenForm(defaultCat) {
   el.innerHTML = h;
   el.scrollTop = 0;
   _prodInvToggle();
+  // Si la config de dropdowns aún no había cargado, tráela y repuebla Tipo/Categoría
+  // (así "Nuevo producto" muestra los valores administrados sin recargar la página).
+  if (!_ddData) { _ddEnsure().then(function(){ _prodRefreshTipoCat(defaultCat); }); }
+}
+
+/* Fallback del dropdown "Tipo" del producto (por si aún no cargó la config del
+   Panel). La fuente real es Config_Dropdowns > Productos > tipo. */
+var _PROD_TIPOS_FALLBACK = ['ALTA','BAJA','FET','FEOC','PGT','CONSULTA','EXTERNOS','SURROGACY','REPROVIDA'];
+
+/* Lista de categorías del formulario de producto: unión de las categorías
+   administradas (Config_Dropdowns > Productos > categoria) + las que existen en
+   el catálogo vivo + la lista base ING_CATEGORIAS. No destructiva: nunca pierde
+   una categoría ya usada, y suma las que se agreguen en el Panel. */
+function _prodCatList(extra) {
+  var set = {};
+  _ddVals('Productos','categoria', []).forEach(function(c){ if(c) set[String(c).trim()] = 1; });
+  if (_prodData && _prodData.categorias) _prodData.categorias.forEach(function(c){ if(c && c.nombre) set[String(c.nombre).trim()] = 1; });
+  (ING_CATEGORIAS||[]).forEach(function(c){ if(c) set[String(c).trim()] = 1; });
+  if (extra) set[String(extra).trim()] = 1;
+  return Object.keys(set).filter(Boolean).sort();
+}
+
+/* Repuebla los <select> Tipo/Categoría del formulario de producto conservando el
+   valor elegido. Se llama cuando _ddData llega tarde (carga asíncrona). */
+function _prodRefreshTipoCat(defaultCat) {
+  var catEl  = document.getElementById('prod-f-cat');
+  var tipoEl = document.getElementById('prod-f-tipo');
+  if (catEl) {
+    var cv   = catEl.value || defaultCat || '';
+    var cats = _prodCatList(cv);
+    catEl.innerHTML = '<option value="">— Seleccionar —</option>'
+      + cats.map(function(c){ return '<option value="'+c+'"'+(c===cv?' selected':'')+'>'+c+'</option>'; }).join('');
+    catEl.value = cv;
+  }
+  if (tipoEl) {
+    var tv    = tipoEl.value || '';
+    var tipos = _ddVals('Productos','tipo', _PROD_TIPOS_FALLBACK);
+    if (tv && tipos.indexOf(tv) < 0) tipos = [tv].concat(tipos);
+    tipoEl.innerHTML = '<option value="">— Seleccionar —</option>'
+      + tipos.map(function(t){ return '<option value="'+t+'"'+(t===tv?' selected':'')+'>'+t+'</option>'; }).join('');
+    tipoEl.value = tv;
+  }
+}
+
+/* Garantiza que un <select> pueda mostrar un valor aunque no esté en la lista
+   administrada (registros antiguos): si falta, lo inyecta como opción. Mantiene
+   la edición de productos no destructiva. */
+function _selEnsureValue(id, val) {
+  if (!val) return;
+  var sel = document.getElementById(id);
+  if (!sel) return;
+  for (var i = 0; i < sel.options.length; i++) { if (sel.options[i].value === val) { sel.value = val; return; } }
+  var o = document.createElement('option');
+  o.value = val; o.textContent = val;
+  sel.appendChild(o);
+  sel.value = val;
 }
 
 // Muestra/oculta los campos de stock. "Medicamento" siempre es inventariable
@@ -3841,8 +3897,10 @@ function prodEditForm(jsonStr) {
   // Sobreescribir botón y título de inmediato, sin setTimeout.
   var _el = function(id){ return document.getElementById(id); };
   if(_el('prod-f-desc')) _el('prod-f-desc').value = p.descripcion||'';
-  if(_el('prod-f-cat')) _el('prod-f-cat').value = p.categoria||'';
-  if(_el('prod-f-tipo')) _el('prod-f-tipo').value = p.tipo||'';
+  // Categoría/Tipo: si el registro trae un valor que no está en la lista
+  // administrada (dato antiguo), se inyecta como opción para no perderlo.
+  _selEnsureValue('prod-f-cat', p.categoria||'');
+  _selEnsureValue('prod-f-tipo', p.tipo||'');
   if(_el('prod-f-notas')) _el('prod-f-notas').value = p.notas||'';
   if(_el('prod-f-precio')) _el('prod-f-precio').value = p.precio||'';
   if(_el('prod-f-activo')) _el('prod-f-activo').value = p.activo?'true':'false';
@@ -4053,6 +4111,10 @@ async function ingLoadProductos() {
       _ingProductosLoaded = true;
       var cats = {};
       _ingTodosProductos.forEach(function(p){ if(p.categoria) cats[p.categoria]=1; });
+      // Sumar las categorías administradas en el Panel (Productos > categoria)
+      // para que aparezcan en la captura de ingresos aunque aún no tengan producto.
+      try { await _ddEnsure(); } catch(e){}
+      _ddVals('Productos','categoria', []).forEach(function(c){ if(c) cats[c]=1; });
       ING_CATEGORIAS = Object.keys(cats).sort();
     }
   } catch(e) { console.warn('Error cargando productos:', e); }
@@ -20871,6 +20933,34 @@ function hfTplPreview(tplId){
    ══════════════════════════════════════════════════════════════ */
 var _ddData = null; // cache de dropdowns cargados
 
+/* Lector genérico de dropdowns administrados (Panel de Control > Formularios).
+   Devuelve el array de valores de {seccion, campo}. Si aún no cargó o no existe,
+   usa el fallback. Cualquier formulario del ERP puede leer sus opciones de aquí
+   para que agregar un valor en el Panel se refleje sin tocar código. */
+function _ddVals(sec, campo, fallback) {
+  var v = _ddData && _ddData[sec] && _ddData[sec][campo] && _ddData[sec][campo].valores;
+  return (v && v.length) ? v.slice() : (fallback ? fallback.slice() : []);
+}
+
+/* Garantiza que _ddData esté cargado (fetch silencioso, una sola vez en vuelo).
+   Se usa cuando un formulario se abre antes de que termine la precarga inicial. */
+var _ddEnsurePromise = null;
+function _ddEnsure() {
+  if (_ddData) return Promise.resolve(_ddData);
+  if (_ddEnsurePromise) return _ddEnsurePromise;
+  _ddEnsurePromise = (async function(){
+    try {
+      var tok = encodeURIComponent(getToken());
+      var r = await fetch(APPS_SCRIPT_URL+'?action=getDropdowns&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+      var d = await r.json();
+      if (d && d.ok) _ddData = d.dropdowns;
+    } catch(e) { /* silencioso: los formularios caen a su fallback */ }
+    _ddEnsurePromise = null;
+    return _ddData;
+  })();
+  return _ddEnsurePromise;
+}
+
 async function ddLoad(force) {
   var loading = document.getElementById('dd-loading');
   var editor  = document.getElementById('dd-editor');
@@ -20947,9 +21037,9 @@ function ddRender(data) {
     h += '</div>'; // end section
   });
 
-  // Botón para crear nueva sección/campo
+  // Botón para crear nueva sección/campo (abre el asistente con lista + semilla)
   h += '<div style="border-top:1px solid var(--color-divider);padding-top:16px;margin-top:4px">'
-     + '<button onclick="ddNuevoCampo()" style="padding:8px 18px;border-radius:8px;border:1.5px dashed var(--color-divider);background:transparent;font-size:12px;font-weight:600;color:var(--color-text-muted);cursor:pointer;width:100%">+ Agregar nueva sección / campo</button>'
+     + '<button onclick="ddNuevaSeccion()" style="padding:8px 18px;border-radius:8px;border:1.5px dashed var(--color-divider);background:transparent;font-size:12px;font-weight:600;color:var(--color-text-muted);cursor:pointer;width:100%">➕ Nueva sección / dropdown</button>'
      + '</div>';
 
   editor.innerHTML = h;
@@ -21012,17 +21102,118 @@ async function ddSave(sec, campo, etiqueta) {
   }
 }
 
-function ddNuevoCampo() {
-  var sec   = prompt('Sección (ej: Egresos, Ingresos, CxP, General):');
-  if (!sec) return;
-  var campo = prompt('Nombre del campo (clave, sin espacios, ej: subtipo):');
-  if (!campo) return;
-  var etiq  = prompt('Etiqueta que verá el usuario (ej: Subtipo / Categoría):');
-  if (!etiq) return;
+/* ── Asistente "Nueva sección / dropdown" ───────────────────────
+   Lista todos los dropdowns ya registrados (para elegir uno como plantilla),
+   deja crear una sección/campo nuevo y, si se pide, SIEMBRA los valores desde
+   un dropdown existente. Al crear se guarda de inmediato en Config_Dropdowns y
+   se re-renderiza, de modo que los valores se reflejan sin recargar. */
+function ddNuevaSeccion() {
+  var modal = document.getElementById('dd-newsec-modal');
+  if (!modal) { modal = document.createElement('div'); modal.id = 'dd-newsec-modal'; document.body.appendChild(modal); }
+  modal.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)';
+
+  // Inventario de dropdowns registrados: opciones para "sembrar desde" + lista visual.
+  var pares = [];
+  Object.keys(_ddData||{}).sort().forEach(function(sec){
+    Object.keys(_ddData[sec]||{}).sort().forEach(function(campo){
+      var cfg = _ddData[sec][campo] || {};
+      pares.push({ sec:sec, campo:campo, etiqueta:cfg.etiqueta||campo, n:(cfg.valores||[]).length });
+    });
+  });
+  var seccionesUnicas = Object.keys(_ddData||{}).sort();
+
+  var seedOpts = '<option value="">— No sembrar (vacío) —</option>' + pares.map(function(p){
+    return '<option value="'+_escH(p.sec)+'|'+_escH(p.campo)+'">'+_escH(p.sec)+' › '+_escH(p.etiqueta)+' ('+p.n+')</option>';
+  }).join('');
+  var secDatalist = seccionesUnicas.map(function(s){ return '<option value="'+_escH(s)+'">'; }).join('');
+
+  var listaHtml = pares.length
+    ? pares.map(function(p){
+        return '<div onclick="_ddSeedPick(\''+_escJs(p.sec)+'\',\''+_escJs(p.campo)+'\')" '
+          + 'style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;border:1px solid var(--color-divider);border-radius:8px;margin-bottom:6px;cursor:pointer;background:var(--color-surface)" '
+          + 'onmouseover="this.style.borderColor=\'#c46a7a\'" onmouseout="this.style.borderColor=\'var(--color-divider)\'">'
+          + '<span style="font-size:12px;color:var(--color-text)"><b>'+_escH(p.sec)+'</b> › '+_escH(p.etiqueta)+'</span>'
+          + '<span style="font-size:11px;color:var(--color-text-muted)">'+p.n+' valores · usar de plantilla</span>'
+          + '</div>';
+      }).join('')
+    : '<div style="font-size:12px;color:var(--color-text-muted);padding:8px">Aún no hay dropdowns registrados.</div>';
+
+  var S   = 'width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:13px;background:var(--card-bg,#fff);color:var(--color-text)';
+  var LBL = 'display:block;font-size:10px;font-weight:700;color:var(--color-text-muted);margin-bottom:4px;letter-spacing:.4px;text-transform:uppercase';
+
+  modal.innerHTML =
+    '<div style="background:var(--color-surface,#fff);border-radius:16px;padding:24px;width:min(560px,94vw);max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.25)">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+    +   '<div style="font-size:16px;font-weight:800;color:var(--color-text)">Nueva sección / dropdown</div>'
+    +   '<button onclick="ddCloseNuevaSeccion()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#9ca3af;line-height:1">×</button>'
+    + '</div>'
+    + '<p style="font-size:12px;color:var(--color-text-muted);margin:0 0 16px">Elige un dropdown existente como plantilla (opcional) o crea uno nuevo desde cero. Si siembras desde otro, se copian todos sus valores para que empieces a partir de ellos.</p>'
+    + '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--color-text-muted);margin-bottom:8px">Dropdowns ya registrados</div>'
+    + '<div style="max-height:190px;overflow-y:auto;margin-bottom:18px">'+listaHtml+'</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'
+    +   '<div><label style="'+LBL+'">Sección *</label><input id="dd-ns-sec" list="dd-ns-sec-list" style="'+S+'" placeholder="Productos, Egresos, General…"><datalist id="dd-ns-sec-list">'+secDatalist+'</datalist></div>'
+    +   '<div><label style="'+LBL+'">Clave del campo *</label><input id="dd-ns-campo" style="'+S+'" placeholder="ej: tipo, categoria"></div>'
+    +   '<div style="grid-column:1/-1"><label style="'+LBL+'">Etiqueta (lo que ve el usuario)</label><input id="dd-ns-etiq" style="'+S+'" placeholder="ej: Tipo de producto"></div>'
+    +   '<div style="grid-column:1/-1"><label style="'+LBL+'">Sembrar valores desde</label><select id="dd-ns-seed" style="'+S+'">'+seedOpts+'</select></div>'
+    + '</div>'
+    + '<div id="dd-ns-status" style="min-height:16px;font-size:12px;margin:10px 0 4px"></div>'
+    + '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">'
+    +   '<button onclick="ddCloseNuevaSeccion()" style="padding:9px 18px;border:1.5px solid var(--color-divider);border-radius:8px;background:var(--color-surface);color:var(--color-text);font-size:12px;font-weight:600;cursor:pointer">Cancelar</button>'
+    +   '<button id="dd-ns-crear" onclick="ddCrearSeccion()" style="padding:9px 22px;background:#c46a7a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">Crear dropdown</button>'
+    + '</div>'
+    + '</div>';
+  modal.style.display = 'flex';
+}
+
+// Al hacer clic en un dropdown de la lista: precarga sección/clave/etiqueta y lo
+// selecciona como fuente de la semilla (clonar un dropdown existente).
+function _ddSeedPick(sec, campo) {
+  var cfg = (_ddData && _ddData[sec] && _ddData[sec][campo]) || {};
+  var secEl = document.getElementById('dd-ns-sec');
+  var campoEl = document.getElementById('dd-ns-campo');
+  var etiqEl = document.getElementById('dd-ns-etiq');
+  var seedEl = document.getElementById('dd-ns-seed');
+  if (secEl && !secEl.value) secEl.value = sec;
+  if (campoEl && !campoEl.value) campoEl.value = campo;
+  if (etiqEl && !etiqEl.value) etiqEl.value = cfg.etiqueta || campo;
+  if (seedEl) seedEl.value = sec+'|'+campo;
+  var st = document.getElementById('dd-ns-status');
+  if (st) { st.style.color='var(--color-text-muted)'; st.textContent='Plantilla: '+sec+' › '+(cfg.etiqueta||campo)+' ('+((cfg.valores||[]).length)+' valores).'; }
+}
+
+function ddCloseNuevaSeccion() {
+  var m = document.getElementById('dd-newsec-modal');
+  if (m) m.style.display = 'none';
+}
+
+async function ddCrearSeccion() {
+  var st  = document.getElementById('dd-ns-status');
+  var sec = ((document.getElementById('dd-ns-sec')||{}).value||'').trim();
+  var campo = ((document.getElementById('dd-ns-campo')||{}).value||'').trim().replace(/\s+/g,'_');
+  var etiq  = ((document.getElementById('dd-ns-etiq')||{}).value||'').trim() || campo;
+  if (!sec || !campo) { if(st){st.style.color='#dc2626';st.textContent='Sección y clave del campo son obligatorias.';} return; }
+
+  // Valores semilla desde el dropdown fuente elegido (si hay).
+  var valores = [];
+  var seedKey = (document.getElementById('dd-ns-seed')||{}).value || '';
+  if (seedKey) {
+    var pk  = seedKey.split('|');
+    var src = _ddData && _ddData[pk[0]] && _ddData[pk[0]][pk[1]];
+    if (src && src.valores) valores = src.valores.slice();
+  }
+  // No destructivo: si el destino ya existía con datos, se conservan y se unen.
+  if (_ddData && _ddData[sec] && _ddData[sec][campo] && _ddData[sec][campo].valores) {
+    _ddData[sec][campo].valores.forEach(function(v){ if (valores.indexOf(v) < 0) valores.push(v); });
+    if (!etiq) etiq = _ddData[sec][campo].etiqueta || campo;
+  }
+
   if (!_ddData) _ddData = {};
   if (!_ddData[sec]) _ddData[sec] = {};
-  _ddData[sec][campo] = { etiqueta: etiq, valores: [] };
-  ddRender(_ddData);
+  _ddData[sec][campo] = { etiqueta: etiq, valores: valores };
+  ddRender(_ddData);            // dibuja la nueva sección con sus chips sembrados
+  ddCloseNuevaSeccion();
+  // Persistir de inmediato (lee los chips ya en el DOM) → se refleja al releer.
+  await ddSave(sec, campo, etiq);
 }
 
 function _ddApply(sec, campo, valores) {
@@ -21032,6 +21223,8 @@ function _ddApply(sec, campo, valores) {
   if (sec==='Egresos'  && campo==='contable')  selId = 'eg-contable';
   if (sec==='Egresos'  && campo==='tipo')      selId = 'eg-tipo';
   if (sec==='Egresos'  && campo==='formaPago') selId = 'eg-fpago';
+  if (sec==='Productos'&& campo==='tipo')       selId = 'prod-f-tipo';
+  if (sec==='Productos'&& campo==='categoria')  selId = 'prod-f-cat';
   if (selId) {
     var sel = document.getElementById(selId);
     if (sel) {

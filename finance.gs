@@ -5428,7 +5428,28 @@ var CFG_DD_DEFAULTS = [
   ['Ingresos',  'facturacion','Facturación',            'No Factura|Factura|Factura Global|REPROVIDA|Grupo Médico'],
   ['General',   'sucursal',  'Sucursales',             'Lomas|Santa Fe|Interlomas'],
   ['General',   'moneda',    'Moneda',                 'MXN|USD|EUR'],
+  // Formulario de productos (Catálogo General). Antes hardcodeados en el HTML,
+  // ahora administrables desde Panel de Control > Formularios.
+  ['Productos', 'tipo',      'Tipo de producto',       'Tratamientos|Complemento|PGT-A|PGT-M|Estudios - Andrología|Estudios - Consulta|Estudios - Ciclo|Complementos|Laboratorio|Suplementos|Medicamento|Almacenamiento|Especial|Externos|Extras Externos|PGT-A Externos|PGT-M Externos|Violet Externos|Magenta Ext|Histeroscopia-Ext|Consulta|Comisiones|Consultation|Carrier|Andrology|Egg Donor|Art Lab|PGTA|Transfer and follow up|Admin|REPROVIDA'],
+  ['Productos', 'categoria', 'Categoría de producto',  'Almacenamiento|Consulta|Estudios - Andrologia|Estudios - Ciclo|Estudios - Consulta|Extras Externos|Medicamento|PGT-A|Tratamientos|VIOLET'],
 ];
+
+// Inserta en la hoja las filas por defecto (CFG_DD_DEFAULTS) que aún no existan.
+// NO destructivo: nunca toca ni reordena filas ya presentes; solo agrega las
+// combinaciones Seccion|Campo faltantes (p.ej. los dropdowns nuevos de Productos).
+// Devuelve cuántas filas se añadieron.
+function _ddAddMissingDefaults(sh) {
+  var data = sh.getDataRange().getValues();
+  var existing = {};
+  for (var i = 1; i < data.length; i++) {
+    existing[String(data[i][0]).trim()+'|'+String(data[i][1]).trim()] = true;
+  }
+  var toAdd = CFG_DD_DEFAULTS.filter(function(r){
+    return !existing[r[0]+'|'+r[1]];
+  }).map(function(r){ return [r[0], r[1], r[2], r[3], true]; });
+  if (toAdd.length) sh.getRange(sh.getLastRow()+1, 1, toAdd.length, 5).setValues(toAdd);
+  return toAdd.length;
+}
 
 function setupConfigDropdowns() {
   var ss = SpreadsheetApp.openById(SHEET_ID);
@@ -5439,18 +5460,9 @@ function setupConfigDropdowns() {
     sh.getRange(1,1,1,5).setFontWeight('bold').setBackground('#c46a7a').setFontColor('#fff');
     sh.setFrozenRows(1);
   }
-  // Solo insertar las filas que no existan aún
-  var data = sh.getDataRange().getValues();
-  var existing = {};
-  for (var i = 1; i < data.length; i++) {
-    existing[data[i][0]+'|'+data[i][1]] = true;
-  }
-  var toAdd = CFG_DD_DEFAULTS.filter(function(r){
-    return !existing[r[0]+'|'+r[1]];
-  }).map(function(r){ return [r[0], r[1], r[2], r[3], true]; });
-  if (toAdd.length) sh.getRange(sh.getLastRow()+1, 1, toAdd.length, 5).setValues(toAdd);
+  var added = _ddAddMissingDefaults(sh);
   sh.autoResizeColumns(1,5);
-  return {ok:true, msg:'Config_Dropdowns lista. Filas añadidas: '+toAdd.length};
+  return {ok:true, msg:'Config_Dropdowns lista. Filas añadidas: '+added};
 }
 
 function readDropdowns() {
@@ -5458,6 +5470,7 @@ function readDropdowns() {
     var ss = SpreadsheetApp.openById(SHEET_ID);
     var sh = ss.getSheetByName(CFG_DD_TAB);
     if (!sh) { setupConfigDropdowns(); sh = ss.getSheetByName(CFG_DD_TAB); }
+    else { _ddAddMissingDefaults(sh); } // auto-cura: agrega defaults nuevos (Productos) sin tocar lo existente
     var data = sh.getDataRange().getValues();
     var result = {}; // { Seccion: { campo: { etiqueta, valores:[] } } }
     for (var i = 1; i < data.length; i++) {
