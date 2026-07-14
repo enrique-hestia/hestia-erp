@@ -173,6 +173,10 @@ function asignarPolizaEgreso(body) {
     if (colPol < 1) return { ok: false, error: 'Columna Póliza no encontrada en egresos.' };
     sheet.getRange(rowNum, colPol).setValue(poliza);
 
+    // Con póliza asignada → marca Contabilidad = true (el checkbox CONT queda palomeado y persiste).
+    var colCont = _pcnColByHeader(sheet, ['contabilidad']);
+    if (colCont > 0) sheet.getRange(rowNum, colCont).setValue(true);
+
     try { logAudit((body && body.usuario) || 'sistema', 'Egresos', 'Asignar póliza (ContaDigital)', 'Fila ' + rowNum, '', '', poliza); } catch (ae) {}
     return { ok: true, rowNum: rowNum, poliza: poliza };
   } catch (ex) { return { ok: false, error: ex.message }; }
@@ -198,12 +202,15 @@ function asignarPolizaIngreso(body) {
 
     var colPol = _pcnColByHeader(sheet, ['poliza', 'póliza']);
     if (colPol < 1) return { ok: false, error: 'Columna Poliza no encontrada en ingresos.' };
+    var colCont = _pcnColByHeader(sheet, ['contabilidad']);
 
     var data = sheet.getDataRange().getValues();
     var updated = 0;
     for (var r = 1; r < data.length; r++) {
       if (String(data[r][0] || '').trim() === opId) {
         sheet.getRange(r + 1, colPol).setValue(poliza);
+        // Con póliza → Contabilidad = true en todas las líneas del OP (persiste el CONT).
+        if (colCont > 0) sheet.getRange(r + 1, colCont).setValue(true);
         updated++;
       }
     }
@@ -248,6 +255,7 @@ function asignarPolizasLote(body) {
       for (var e0 = 0; e0 < shsE.length; e0++) { if (shsE[e0].getName() === tabE) { shE = shsE[e0]; break; } }
       if (!shE) shE = shsE[0];
       var colPolE = shE ? _pcnColByHeader(shE, ['póliza', 'poliza']) : -1;
+      var colContE = shE ? _pcnColByHeader(shE, ['contabilidad']) : -1;
       for (var ei = 0; ei < items.length; ei++) {
         var it = items[ei];
         if (!it || it.side !== 'egreso') continue;
@@ -260,6 +268,7 @@ function asignarPolizasLote(body) {
           if (idc !== String(it.egId).trim()) { resultados.push({ side: 'egreso', rowNum: rn, ok: false, error: 'Fila cambió.' }); fail++; continue; }
         }
         shE.getRange(rn, colPolE).setValue(pol);
+        if (colContE > 0) shE.getRange(rn, colContE).setValue(true); // Contabilidad = true (persiste el CONT)
         resultados.push({ side: 'egreso', rowNum: rn, ok: true, poliza: pol }); okEg++;
       }
     }
@@ -270,6 +279,7 @@ function asignarPolizasLote(body) {
       var shI = null, shsI = ssI.getSheets();
       for (var i0 = 0; i0 < shsI.length; i0++) { if (shsI[i0].getName() === BD_INGRESOS_TAB) { shI = shsI[i0]; break; } }
       var colPolI = shI ? _pcnColByHeader(shI, ['poliza', 'póliza']) : -1;
+      var colContI = shI ? _pcnColByHeader(shI, ['contabilidad']) : -1;
       var dataI = shI ? shI.getDataRange().getValues() : [];
       // índice OP -> filas (1-based) para no recorrer la hoja por cada item
       var opRows = {};
@@ -287,7 +297,10 @@ function asignarPolizasLote(body) {
         if (!shI || colPolI < 1) { resultados.push({ side: 'ingreso', opId: opId, ok: false, error: 'Sin hoja/columna.' }); fail++; continue; }
         if (!opId || !polI || !opRows[opId]) { resultados.push({ side: 'ingreso', opId: opId, ok: false, error: 'OP no encontrado.' }); fail++; continue; }
         var rows = opRows[opId];
-        for (var rr = 0; rr < rows.length; rr++) shI.getRange(rows[rr], colPolI).setValue(polI);
+        for (var rr = 0; rr < rows.length; rr++) {
+          shI.getRange(rows[rr], colPolI).setValue(polI);
+          if (colContI > 0) shI.getRange(rows[rr], colContI).setValue(true); // Contabilidad = true en todas las líneas
+        }
         resultados.push({ side: 'ingreso', opId: opId, ok: true, poliza: polI, lineas: rows.length }); okIng++;
       }
       try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch (ce) {}
