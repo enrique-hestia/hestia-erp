@@ -2311,6 +2311,16 @@ var ingChart=null, ingDonutChart=null;
 var _ingChart=null, _ingDonutChart=null, _ingPage=1, _ingPerPage=50;
 var _ingFilters={mes:[],categoria:[],formaPago:[],sucursal:[],buscar:'',factura:''};
 var _ingData=null;
+// Año elegido a mano en la vista Ingresos (null = año en curso). Permite consultar
+// el historial 2024/2025 desde el libro correcto. Al ver un año anterior la vista
+// es de SOLO LECTURA (los escritores de ingresos apuntan al libro del año en curso).
+var _ingAnioSel=null;
+function _ingReadOnly(){ return !!_ingAnioSel && parseInt(_ingAnioSel,10)!==new Date().getFullYear(); }
+function _ingSwrKey(){ return _ingAnioSel ? ('ingresos_'+_ingAnioSel) : 'ingresos'; }
+// Guarda para escrituras: bloquea editar/pagar/borrar cuando se ve un año histórico.
+function _ingHistBlock(){ if(_ingReadOnly()){ alert('Estás viendo el histórico '+_ingAnioSel+' (solo lectura). Cambia el año a «Periodo actual» para capturar o editar.'); return true; } return false; }
+// Cambia el año de la vista Ingresos (para ver histórico). '' = volver al año en curso.
+function ingSetAnio(y){ _ingAnioSel = y ? parseInt(y,10) : null; _ingPage=1; _ingData=null; if(typeof loadIngresosERP==='function') loadIngresosERP(); }
 var _ingActiveTab='lista';
 var _ingFacResult=null;
 var _ingFacLoteResult=null;
@@ -2329,11 +2339,15 @@ function renderIngresos(data) {
 
 async function _fetchIngresosRaw() {
   var tok = encodeURIComponent(getToken());
-  var resp = await fetch(APPS_SCRIPT_URL+'?action=ingresos&token='+tok, {redirect:'follow'});
+  var anioQS = _ingAnioSel ? ('&anio='+_ingAnioSel) : ''; // año histórico → libro correcto
+  var resp = await fetch(APPS_SCRIPT_URL+'?action=ingresos'+anioQS+'&token='+tok, {redirect:'follow'});
   return await resp.json();
 }
 
 function _ingApplyDateFilter(data) {
+  // Año histórico elegido a mano: el libro ya es solo ese año, no filtres por el
+  // periodo global (que apunta al año en curso y borraría todas las filas).
+  if (_ingAnioSel) return data;
   var fi = currentFechaInicio || '', ff = currentFechaFin || '';
   if (!fi && !ff) return data;
   var origRows = data.rows || [];
@@ -2376,24 +2390,25 @@ async function loadIngresosERP() {
   var el = document.getElementById('view-ingresos');
   if (!el) return;
   var fi = currentFechaInicio || '', ff = currentFechaFin || '';
-  var swrHit = _swrGet('ingresos', fi, ff);
+  var _sk = _ingSwrKey();
+  var swrHit = _swrGet(_sk, fi, ff);
   if (swrHit) {
     _ingData = swrHit.data; _ingPage = 1;
     await hfFinish(); _renderIngresosERP();
     if (Date.now() - swrHit.ts > SWR_STALE_MS) {
       _fetchIngresosRaw().then(function(raw){
         var d = _ingApplyDateFilter(raw);
-        _swrSet('ingresos', d, fi, ff);
+        _swrSet(_sk, d, fi, ff);
         _ingData = d; _renderIngresosERP();
       }).catch(function(){});
     }
     return;
   }
-  el.innerHTML = hestiaLoader('Cargando ingresos…');
+  el.innerHTML = hestiaLoader('Cargando ingresos'+(_ingAnioSel?(' '+_ingAnioSel):'')+'…');
   try {
     var raw = await _fetchIngresosRaw();
     var data = _ingApplyDateFilter(raw);
-    _swrSet('ingresos', data, fi, ff);
+    _swrSet(_sk, data, fi, ff);
     _ingData = data;
     _ingPage = 1;
     await hfFinish();
@@ -2696,8 +2711,12 @@ function _renderIngresosERP() {
     +'</div>'
     +'<button onclick="ingShowManual()" title="Manual completo de Ingresos" style="display:inline-flex;align-items:center;gap:5px;padding:8px 12px;background:var(--color-surface,#f1f1f1);color:var(--text-secondary,#374151);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:9px;font-size:11px;font-weight:600;cursor:pointer">📖 Manual</button>'
     +'<button onclick="_tourStart(_ING_TOUR)" title="Tutorial interactivo" style="width:34px;height:34px;border-radius:50%;background:transparent;color:var(--color-primary,#c46a7a);border:2px solid var(--color-primary,#c46a7a);font-size:17px;font-weight:900;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1">?</button>'
-    +(hasPermission('bank_capture')?'<button onclick="ingOpenDrawer()" style="display:inline-flex;align-items:center;gap:6px;padding:10px 18px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(196,106,122,.25)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Registrar operación</button>':'')
+    +((hasPermission('bank_capture')&&!_ingReadOnly())?'<button onclick="ingOpenDrawer()" style="display:inline-flex;align-items:center;gap:6px;padding:10px 18px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(196,106,122,.25)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Registrar operación</button>':'')
     +'</div></div>');
+
+  // Aviso de SOLO LECTURA al consultar un año histórico (evita capturar/editar
+  // en el libro equivocado: los escritores de ingresos apuntan al año en curso).
+  if (_ingReadOnly()) h.push('<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;padding:10px 14px;background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;font-size:12px;color:#92400e"><span style="font-size:15px">🕮</span><span><strong>Histórico '+_ingAnioSel+' — solo lectura.</strong> Estás consultando el libro de '+_ingAnioSel+'. Para capturar o editar, vuelve a «Año en curso».</span></div>');
 
   // ── Submenú Lista / Facturación ──
   h.push('<div class="ing-subtabs">'
@@ -2722,7 +2741,12 @@ function _renderIngresosERP() {
     arr.forEach(function(v){o+='<option value="'+v+'"'+(v===selected?' selected':'')+'>'+v+'</option>';});
     return o;
   }
+  // Selector de AÑO: por defecto el año en curso; al elegir un año anterior se ve
+  // ese año COMPLETO desde su libro (histórico 2024/2025) en SOLO LECTURA.
+  var _ingYNow=new Date().getFullYear(), _ingYears=[]; for(var _iy=2024; _iy<=Math.max(_ingYNow,2026); _iy++) _ingYears.push(_iy);
+  var _ingYSelStr=String(_ingAnioSel||'');
   h.push('<div class="ing-filters">'
+    +'<div class="ing-fg"><div class="ing-fl">Año</div><select class="ing-sel" onchange="ingSetAnio(this.value)"><option value="">Año en curso</option>'+_ingYears.map(function(y){return '<option value="'+y+'"'+(String(y)===_ingYSelStr?' selected':'')+'>'+y+'</option>';}).join('')+'</select></div>'
     +_ingMSelHTML('mes','Mes',meses)
     +_ingMSelHTML('categoria','Categoría',cats)
     +_ingMSelHTML('formaPago','Forma de pago',fps)
@@ -2832,7 +2856,7 @@ function _renderIngresosERP() {
             ?('<span title="'+op.pagosDetalle.map(function(p){return _cxpEsc(p.fp)+' '+fC(p.monto);}).join(' + ')+'" style="font-weight:700;color:#0c4a6e">'+op.pagosDetalle.map(function(p){return _cxpEsc(p.fp);}).join(' + ')+'</span>')
             :(op.formaPago||'—'))+'</td>'
         +'<td id="ing-badges-'+safeId+'" style="white-space:nowrap">'+_badges+'</td>'
-        +((hasPermission('editar_ingresos')||hasPermission('borrar_ingresos'))?'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'+(hasPermission('editar_ingresos')?'<button class="btn-edit-row" onclick="ingEditOp(\''+opId.replace(/'/g,"\\'")+'\')">✎ Editar</button>':'')+(hasPermission('borrar_ingresos')?'<button class="btn-delete-row" onclick="ingDeleteOp(\''+opId.replace(/'/g,"\\'")+'\')">🗑</button>':'')+'</td>':'')
+        +((hasPermission('editar_ingresos')||hasPermission('borrar_ingresos'))?'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'+(_ingReadOnly()?'<span style="font-size:10px;color:#9ca3af" title="Histórico (solo lectura)">🕮 histórico</span>':((hasPermission('editar_ingresos')?'<button class="btn-edit-row" onclick="ingEditOp(\''+opId.replace(/'/g,"\\'")+'\')">✎ Editar</button>':'')+(hasPermission('borrar_ingresos')?'<button class="btn-delete-row" onclick="ingDeleteOp(\''+opId.replace(/'/g,"\\'")+'\')">🗑</button>':'')))+'</td>':'')
         +'</tr>');
       var colSpan = (hasPermission('editar_ingresos')||hasPermission('borrar_ingresos')) ? 11 : 10;
       // Fila expandible con detalle de líneas
@@ -4329,6 +4353,7 @@ var _ingOrigFormaPago = '';
 var _ingOrigFecha = '';
 
 function ingEditOp(opId) {
+  if (_ingHistBlock()) return; // año histórico → solo lectura
   if (!hasPermission('editar_ingresos')) { alert('No tienes permisos para editar operaciones.'); return; }
   if (!_ingData || !_ingData.rows) { alert('Datos no cargados. Recarga la página.'); return; }
   var opRows = _ingData.rows.filter(function(r){ return r.id === opId; });
@@ -4432,6 +4457,7 @@ function ingEditOp(opId) {
 
 
 async function ingDeleteOp(opId) {
+  if (_ingHistBlock()) return; // año histórico → solo lectura
   if (!hasPermission('borrar_ingresos')) { alert('No tienes permisos para borrar operaciones.'); return; }
   var modal = document.getElementById('modal-ing-delete');
   if (modal) {
@@ -4473,6 +4499,7 @@ function ingDeleteCancel() {
 }
 
 async function ingOpenDrawer() {
+  if (_ingHistBlock()) return; // año histórico → solo lectura
   if (!_ingEditMode) _ingEditMode = null; // reset cuando se abre como nuevo
   _ingLineCount = 0;
   var view = document.getElementById('ing-form-view');
@@ -4963,6 +4990,7 @@ function ingHandleFacturaFile(input) {
 }
 
 async function ingUploadFacturaOp(opId, input) {
+  if (_ingHistBlock()) { input.value=''; return; } // año histórico → solo lectura
   if (!input.files.length) return;
   var file = input.files[0];
   var safeId = opId.replace(/[^a-zA-Z0-9_-]/g,'_');
@@ -6581,6 +6609,7 @@ function ingShowManual(){
 
 // Guarda solo factura# o póliza# directo desde la barra fiscal (sin tocar items ni pagos)
 async function ingFiscalSave(opId, campo, input) {
+  if (_ingReadOnly()) return; // año histórico → solo lectura (silencioso, es onblur)
   var val = (input.value||'').trim();
   var safeId = opId.replace(/[^a-zA-Z0-9_-]/g,'_');
   var stId = campo==='factura' ? 'ing-fac-st-'+safeId : 'ing-pol-st-'+safeId;
@@ -7297,7 +7326,11 @@ function _renderEgresosERP() {
         ? ' <span onclick="egEnviarCorreoRow(decodeURIComponent(\''+encodeURIComponent(JSON.stringify({proveedor:r.proveedor||'',concepto:r.concepto||'',monto:r.monto||0,fecha:(r.fecha||'').substring(0,10),pagado:!!r.pagado,linkFacturaUrl:r.linkFacturaUrl||'',linkPagoUrl:r.linkPagoUrl||''}))+'\'))" style="cursor:pointer;font-size:13px" title="Enviar documentos por correo (factura/pago adjuntos)">✉</span>'
         : '';
       var esCancel = r.estatus === 'Cancelada';
-      var provCell = (r.proveedor||'—') + (esCancel?' <span style="font-size:9px;font-weight:800;padding:1px 7px;border-radius:20px;background:#e5e7eb;color:#6b7280;vertical-align:middle">CANCELADA</span>':'');
+      // Partida AUTOMÁTICA (comisiones Mercado Pago): se recalcula sola con cada
+      // ingreso MP. Se marca con un badge y se BLOQUEA la edición manual.
+      var esAuto = !!r.esAuto;
+      var autoBadge = esAuto?' <span style="font-size:9px;font-weight:800;padding:1px 7px;border-radius:20px;background:#e0f2fe;color:#0369a1;border:1px solid #7dd3fc;vertical-align:middle" title="Partida automática — se recalcula sola con cada ingreso de Mercado Pago; no la edites a mano">🔄 automática</span>':'';
+      var provCell = (r.proveedor||'—') + autoBadge + (esCancel?' <span style="font-size:9px;font-weight:800;padding:1px 7px;border-radius:20px;background:#e5e7eb;color:#6b7280;vertical-align:middle">CANCELADA</span>':'');
       h.push('<tr class="eg-row" onclick="egToggleRow('+r._rowNum+')" style="cursor:pointer'+(esCancel?';opacity:.6':'')+'">'
         +'<td style="text-align:center"><span class="eg-row-toggle" id="eg-tog-'+r._rowNum+'">▶</span></td>'
         +'<td style="color:var(--text-secondary,#6b7280)">'+((r.fecha||'').substring(0,10)||'—')+'</td>'
@@ -7306,12 +7339,13 @@ function _renderEgresosERP() {
         +'<td><span class="eg-badge '+contBadge+'">'+(r.subtipo||'—')+'</span></td>'
         +'<td id="eg-monto-'+r._rowNum+'" style="text-align:right;font-weight:700;color:#991b1b'+(esCancel?';text-decoration:line-through':'')+'">'+fE(r.monto)+'</td>'
         +'<td style="font-size:10.5px;color:var(--text-secondary,#6b7280)">'+(r.formaPago||'—')+'</td>'
-        +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.facturacion?' checked':'')+(esCancel?' disabled':'')+' onchange="egToggleField('+r._rowNum+',\'facturación\',this.checked)"'+(r.linkFacturaUrl?' title="Factura adjunta"':'')+'></td>'
-        +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.pagado?' checked':'')+(esCancel?' disabled':'')+' onchange="egToggleField('+r._rowNum+',\'pagado\',this.checked)"'+(r.linkPagoUrl?' title="Pago adjunto"':'')+'></td>'
-        +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.contabilidad?' checked':'')+(esCancel?' disabled':'')+' onchange="egToggleField('+r._rowNum+',\'contabilidad\',this.checked)"></td>'
+        +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.facturacion?' checked':'')+(esCancel||esAuto?' disabled':'')+' onchange="egToggleField('+r._rowNum+',\'facturación\',this.checked)"'+(r.linkFacturaUrl?' title="Factura adjunta"':'')+'></td>'
+        +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.pagado?' checked':'')+(esCancel||esAuto?' disabled':'')+' onchange="egToggleField('+r._rowNum+',\'pagado\',this.checked)"'+(esAuto?' title="Partida automática (siempre pagada)"':(r.linkPagoUrl?' title="Pago adjunto"':''))+'></td>'
+        +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.contabilidad?' checked':'')+(esCancel||esAuto?' disabled':'')+' onchange="egToggleField('+r._rowNum+',\'contabilidad\',this.checked)"></td>'
         +'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'+cotizIcon+' '+factIcon+' '+pagoIcon+mailIcon+'</td>'
         +((hasPermission('editar_egresos')||hasPermission('borrar_egresos'))?'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'
-          +(esCancel?'<span style="font-size:10px;color:#9ca3af">—</span>'
+          +(esAuto?'<span style="font-size:10px;color:#0369a1" title="Se recalcula sola con cada ingreso de Mercado Pago; no la edites a mano">🔒 auto</span>'
+            :esCancel?'<span style="font-size:10px;color:#9ca3af">—</span>'
             :(hasPermission('editar_egresos')?'<button class="btn-edit-row" onclick="egEditRow('+r._rowNum+')">✎</button>'
               +' <button class="btn-delete-row" style="color:#b45309;border-color:#b45309;background:rgba(180,83,9,.08)" onclick="cxpCancelarOrden('+r._rowNum+',decodeURIComponent(\''+encodeURIComponent(r.proveedor||'')+'\'))" title="Cancelar orden (queda en el histórico; el dinero pagado va a saldo a favor o devolución)">⊘</button>':'')
               +(hasPermission('borrar_egresos')?'<button class="btn-delete-row" onclick="egDeleteRow('+r._rowNum+')">🗑</button>':''))
@@ -7319,8 +7353,9 @@ function _renderEgresosERP() {
         +'</tr>');
       var egColSpanDet = (hasPermission('editar_egresos')||hasPermission('borrar_egresos')) ? 12 : 11;
       var hasUSD = (r.montoUSD||0) > 0;
-      var _egRE = (typeof hasPermission==='function' && hasPermission('editar_egresos')) && !esCancel; // editable inline
+      var _egRE = (typeof hasPermission==='function' && hasPermission('editar_egresos')) && !esCancel && !esAuto; // editable inline (nunca la partida automática)
       h.push('<tr id="eg-det-'+r._rowNum+'" style="display:none"><td colspan="'+egColSpanDet+'" style="padding:0;background:var(--color-surface,#fafafa)">'
+        +(esAuto?'<div style="margin:10px 18px 0;padding:9px 12px;background:#e0f2fe;border:1px solid #7dd3fc;border-radius:8px;font-size:11px;color:#0369a1"><strong>🔄 Partida automática.</strong> Suma las comisiones cobradas por Mercado Pago del mes y se recalcula sola con cada ingreso de MP. No la edites a mano; si necesitas forzar el recálculo usa la acción «recalcComisionesMP».</div>':'')
         +(_egRE?'<div style="padding:8px 18px 0;font-size:10px;color:var(--text-secondary,#9ca3af)">✏️ Edición rápida — cambia un campo y guarda solo (sin abrir «editar»); el total se actualiza al instante.</div>':'')
         +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px 18px;padding:14px 18px;font-size:12px">'
         +_egFld('Concepto completo', r._rowNum, 'concepto', r.concepto, 'text', _egRE)
@@ -7919,6 +7954,9 @@ async function egDesvincularFactura(rowNum){
 }
 
 async function egToggleField(rowNum, field, value) {
+  // Partida automática (comisiones MP): bloqueo defensivo (el checkbox ya va disabled).
+  var _lrAuto = (_egData&&_egData.rows)?_egData.rows.find(function(r){return r._rowNum===rowNum;}):null;
+  if (_lrAuto && _lrAuto.esAuto) { alert('Partida automática de comisiones Mercado Pago: se recalcula sola con cada ingreso; no la edites a mano.'); _renderEgresosERP(); return; }
   // Reflejar el cambio en el estado local. Al desmarcar PAG, la partida
   // queda pendiente y debe salir de la vista de Egresos (pasa a Cuentas por Pagar).
   var localKey = ({'pagado':'pagado','facturación':'facturacion','contabilidad':'contabilidad'})[field] || field;
@@ -7989,6 +8027,7 @@ function _egRecalcTotals(delta, wasPaid){
 async function egEditField(rowNum, field, el){
   var raw=el.value;
   var lr=(typeof _egData!=='undefined' && _egData && _egData.rows)?_egData.rows.find(function(r){return r._rowNum===rowNum;}):null;
+  if (lr && lr.esAuto) { alert('Partida automática de comisiones Mercado Pago: se recalcula sola; no la edites a mano.'); return; } // bloqueo defensivo
   var backendKey=({monto:'egresos', formaPago:'forma de pago'})[field]||field;
   var isMoney=(field==='monto');
   var val=isMoney?(parseFloat(String(raw).replace(/[$,\s]/g,''))||0):raw;
@@ -8030,6 +8069,7 @@ function egEditRow(rowNum) {
   if (!_egData || !_egData.rows) return;
   var row = _egData.rows.find(function(r){ return r._rowNum === rowNum; });
   if (!row) { alert('Registro no encontrado'); return; }
+  if (row.esAuto) { alert('Partida automática de comisiones Mercado Pago: se recalcula sola con cada ingreso de MP; no se edita a mano.'); return; } // bloqueo defensivo
 
   _egEditRowNum = rowNum;
   egOpenForm();

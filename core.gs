@@ -405,7 +405,8 @@ function doGet(e) {
     }
 
     if (action === 'ingresos') {
-      return jsonResponse(readIngresosData());
+      var anioIng = (e && e.parameter.anio) || '';
+      return jsonResponse(readIngresosData(anioIng ? parseInt(anioIng) : undefined));
     }
 
     if (action === 'leerXmlFactura') {
