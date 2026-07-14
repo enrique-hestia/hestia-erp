@@ -642,6 +642,10 @@ function doPost(e) {
       if (typeof recalcComisionesMP !== 'function') return jsonResponse({ok:false, error:'Actualiza finance.gs y redespliega.'});
       return jsonResponse(recalcComisionesMP(body));
     }
+    if (body.action === 'repararComisionesMP') {
+      if (typeof _repararComisionesMPPost !== 'function') return jsonResponse({ok:false, error:'Actualiza finance.gs y redespliega.'});
+      return jsonResponse(_repararComisionesMPPost(body));
+    }
     if (body.action === 'vincularEmpleadoUsuario') {
       if (typeof vincularEmpleadoUsuario !== 'function') return jsonResponse({ok:false, error:'Agrega/actualiza nomina.gs en Apps Script y redespliega.'});
       return jsonResponse(vincularEmpleadoUsuario(body));
@@ -1863,6 +1867,25 @@ function _egFinDeMes(anio, mes) {
   var d = new Date(anio, mes, 0); // día 0 del mes siguiente = último día del mes
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
+// Determina el período YYYY-MM de una fila de egresos candidata a partida MP,
+// usando col2 (Mes) si ya viene en formato YYYY-MM, o derivándolo de col1 (Fecha).
+function _egFilaPeriodo(row) {
+  var m = String(row[2] || '').trim();
+  if (/^\d{4}-\d{2}$/.test(m)) return m;
+  var f = row[1];
+  var d = (f instanceof Date) ? f : new Date(String(f || ''));
+  if (isNaN(d.getTime())) return '';
+  return d.getFullYear() + '-' + (d.getMonth() + 1 < 10 ? '0' : '') + (d.getMonth() + 1);
+}
+// true si la fila calza por SIGNATURE con una partida automática de comisiones MP
+// (Proveedor="Mercado Pago" + Subtipo="Comisiones" + Concepto que empieza con
+// "Comisiones Mercado Pago"), independientemente de si ya trae la etiqueta o no.
+function _egFilaEsComisionMPSignature(row) {
+  var proveedor = String(row[4] || '').trim();
+  var subtipo = String(row[7] || '').trim();
+  var concepto = String(row[8] || '').trim();
+  return /^mercado\s*pago$/i.test(proveedor) && /^comisiones$/i.test(subtipo) && /^comisiones mercado pago/i.test(concepto);
+}
 function _egUpsertComisionesMP(anio, mes, usuario) {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(15000)) return { ok: false, error: 'lock' };
@@ -1875,36 +1898,131 @@ function _egUpsertComisionesMP(anio, mes, usuario) {
     var ss = SpreadsheetApp.openById(_egIdDeAnio(anio));
     var sh = ss.getSheetByName(_egTabDeAnio(anio));
     if (!sh) { lock.releaseLock(); return { ok: false, error: 'Hoja Egresos' + anio + ' no encontrada' }; }
-    var iTag = _egColEnsure(sh, 'mpcomid', 'MpComisionID');
+    var iTag = _egColEnsure(sh, 'mpcomisionid', 'MpComisionID');
     var data = sh.getDataRange().getValues();
-    var tag = 'MPCOM-' + per, foundRow = -1;
-    for (var i = 1; i < data.length; i++) { if (String(data[i][iTag - 1] || '').trim() === tag) { foundRow = i + 1; break; } }
+    var tag = 'MPCOM-' + per;
+    // Recolecta TODAS las filas (1-based) que son partida de comisiones MP de ESTE mes,
+    // por etiqueta o por firma. Idempotencia real: si hubo duplicados, se colapsan a una.
+    var matched = [];
+    for (var i = 1; i < data.length; i++) {
+      var row = data[i];
+      var tagCell = String(row[iTag - 1] || '').trim();
+      var isThisMonth = false;
+      if (tagCell === tag) {
+        isThisMonth = true;
+      } else if (_egFilaEsComisionMPSignature(row) && _egFilaPeriodo(row) === per) {
+        isThisMonth = true;
+      }
+      if (isThisMonth) matched.push(i + 1); // fila real 1-based
+    }
     var fin = _egFinDeMes(anio, mes);
     var concepto = 'Comisiones Mercado Pago ' + (EGRESOS_MESES_FOLDER[mes - 1] || mes) + ' ' + anio;
     var notas = 'Partida automática — suma de comisiones cobradas por Mercado Pago del ' + per + ' (se actualiza sola con cada ingreso).';
+
     if (total <= 0) {
-      if (foundRow > 0) sh.getRange(foundRow, 10).setValue(0);
-      lock.releaseLock(); return { ok: true, total: 0, row: foundRow };
+      // Sin comisiones este mes: no debe quedar ninguna partida. Borra todas (de abajo hacia arriba).
+      for (var d = matched.length - 1; d >= 0; d--) sh.deleteRow(matched[d]);
+      try { logAudit(usuario || 'sistema', 'Egresos', 'ComisionesMP', tag, 'Mes', per, '0 (eliminada)'); } catch (e0) {}
+      lock.releaseLock();
+      return { ok: true, total: 0, eliminadas: matched.length };
     }
-    if (foundRow > 0) {
-      sh.getRange(foundRow, 2).setValue(fin);     // B Fecha (pagado)
-      sh.getRange(foundRow, 10).setValue(total);  // J Monto
-      sh.getRange(foundRow, 11).setValue(notas);  // K Notas
-      sh.getRange(foundRow, 14).setValue(true);   // N Pagado
+
+    var foundRow = -1;
+    if (matched.length > 0) {
+      foundRow = matched[0]; // conserva la de menor fila
+      // Borra el resto de abajo hacia arriba (índices mayores primero, no invalida foundRow).
+      for (var e = matched.length - 1; e >= 1; e--) sh.deleteRow(matched[e]);
+      sh.getRange(foundRow, 2).setValue(fin);        // B Fecha (pagado)
+      sh.getRange(foundRow, 5).setValue('Mercado Pago'); // E Proveedor
+      sh.getRange(foundRow, 6).setValue('Gasto');        // F Contable
+      sh.getRange(foundRow, 7).setValue('Variable');     // G Tipo
+      sh.getRange(foundRow, 8).setValue('Comisiones');   // H Subtipo
+      sh.getRange(foundRow, 9).setValue(concepto);       // I Concepto
+      sh.getRange(foundRow, 10).setValue(total);         // J Monto
+      sh.getRange(foundRow, 11).setValue(notas);         // K Notas
+      sh.getRange(foundRow, 14).setValue(true);          // N Pagado
+      sh.getRange(foundRow, iTag).setValue(tag);
     } else {
       var lr = sh.getLastRow(), lastId = 0;
       if (lr > 1) { var ids = sh.getRange(2, 1, lr - 1, 1).getValues(); for (var k = 0; k < ids.length; k++) { var nn = parseInt(ids[k][0]); if (nn > lastId) lastId = nn; } }
-      var row = [lastId + 1, fin, per, 1, 'Mercado Pago', 'Gasto', 'Variable', 'Comisiones',
+      var newRow = [lastId + 1, fin, per, 1, 'Mercado Pago', 'Gasto', 'Variable', 'Comisiones',
         concepto, total, notas, '', false, true, false, '', 'Transferencia', '', '', ''];
-      sh.appendRow(row);
+      sh.appendRow(newRow);
       foundRow = sh.getLastRow();
       sh.getRange(foundRow, iTag).setValue(tag);
       var iDiv = _egColEnsure(sh, 'divisa', 'Divisa'); sh.getRange(foundRow, iDiv).setValue('MXN');
     }
     try { logAudit(usuario || 'sistema', 'Egresos', 'ComisionesMP', tag, 'Mes', per, String(total)); } catch (e) {}
     lock.releaseLock();
-    return { ok: true, total: total, row: foundRow, id: tag };
+    return { ok: true, total: total, row: foundRow, id: tag, eliminadas: Math.max(0, matched.length - 1) };
   } catch (ex) { try { lock.releaseLock(); } catch (e) {} return { ok: false, error: ex.message }; }
+}
+// Reparación única: colapsa duplicados históricos de la partida de comisiones MP
+// (creados por el bug de _egColEnsure con clave 'mpcomid' que no calzaba con el
+// header real 'MpComisionID') y consolida columnas MpComisionID duplicadas.
+// Callable desde el editor de Apps Script: repararComisionesMP(2026)
+function repararComisionesMP(anio) {
+  anio = parseInt(anio, 10) || new Date().getFullYear();
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) return { ok: false, error: 'lock' };
+  try {
+    var ss = SpreadsheetApp.openById(_egIdDeAnio(anio));
+    var sh = ss.getSheetByName(_egTabDeAnio(anio));
+    if (!sh) { lock.releaseLock(); return { ok: false, error: 'Hoja Egresos' + anio + ' no encontrada' }; }
+
+    // 1) Consolidar columnas MpComisionID duplicadas (el bug creaba una nueva en cada recalc).
+    var lastCol = sh.getLastColumn();
+    var hdrs = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim().toLowerCase(); });
+    var mpCols = [];
+    for (var c = 0; c < hdrs.length; c++) { if (hdrs[c].indexOf('mpcomisionid') > -1) mpCols.push(c + 1); } // 1-based
+    var columnasConsolidadas = 0;
+    if (mpCols.length > 1) {
+      var lastRow = sh.getLastRow();
+      if (lastRow > 1) {
+        var primera = mpCols[0];
+        var valPrimera = sh.getRange(2, primera, lastRow - 1, 1).getValues();
+        for (var extraIdx = 1; extraIdx < mpCols.length; extraIdx++) {
+          var valExtra = sh.getRange(2, mpCols[extraIdx], lastRow - 1, 1).getValues();
+          for (var rr = 0; rr < valExtra.length; rr++) {
+            var actual = String(valPrimera[rr][0] || '').trim();
+            var extra = String(valExtra[rr][0] || '').trim();
+            if (!actual && extra) valPrimera[rr][0] = extra;
+          }
+        }
+        sh.getRange(2, primera, lastRow - 1, 1).setValues(valPrimera);
+      }
+      // Borra las columnas extra de derecha a izquierda para no mover índices ya usados.
+      for (var delIdx = mpCols.length - 1; delIdx >= 1; delIdx--) {
+        sh.deleteColumn(mpCols[delIdx]);
+        columnasConsolidadas++;
+      }
+    }
+
+    // 2) Escanear todas las filas por SIGNATURE y juntar los meses distintos afectados.
+    var data = sh.getDataRange().getValues();
+    var mesesSet = {};
+    for (var i = 1; i < data.length; i++) {
+      var row = data[i];
+      if (_egFilaEsComisionMPSignature(row)) {
+        var per = _egFilaPeriodo(row);
+        if (per) mesesSet[per] = true;
+      }
+    }
+    var meses = Object.keys(mesesSet).sort();
+
+    lock.releaseLock(); // _egUpsertComisionesMP toma su propio lock por mes
+
+    var resultados = [];
+    for (var m = 0; m < meses.length; m++) {
+      var partes = meses[m].split('-');
+      var res = _egUpsertComisionesMP(parseInt(partes[0], 10), parseInt(partes[1], 10), 'reparación');
+      resultados.push({ mes: meses[m], resultado: res });
+    }
+    return { ok: true, meses: meses, columnasConsolidadas: columnasConsolidadas, resultados: resultados };
+  } catch (ex) {
+    try { lock.releaseLock(); } catch (e) {}
+    return { ok: false, error: ex.message };
+  }
 }
 // Recalcula la partida MP del mes de una fecha dada (nunca lanza).
 function _egRecalcComisionesMPFecha(fechaStr, usuario) {
@@ -1914,6 +2032,16 @@ function _egRecalcComisionesMPFecha(fechaStr, usuario) {
     if (isNaN(d.getTime())) return;
     _egUpsertComisionesMP(d.getFullYear(), d.getMonth() + 1, usuario || '');
   } catch (e) {}
+}
+// Wrapper POST (gated por permiso) de repararComisionesMP(anio) — la función
+// editor-callable no recibe token/body, así que el router usa este wrapper para
+// la acción 'repararComisionesMP'.
+function _repararComisionesMPPost(body) {
+  try {
+    if (!_tokenHasPermission(body.token || '', 'editar_egresos')) return { ok: false, error: 'Sin autorización (editar_egresos).' };
+    var anio = parseInt(body.anio, 10) || new Date().getFullYear();
+    return repararComisionesMP(anio);
+  } catch (ex) { return { ok: false, error: ex.message }; }
 }
 // Recálculo manual (POST recalcComisionesMP) por si editas cobros directo en la hoja.
 function recalcComisionesMP(body) {
@@ -2053,7 +2181,7 @@ function readEgresosData(anio) {
         iLinkPago=col('link pago'), iLinkCotiz=col('cotiz'),
         iUSD=col('usd'), iTC=col('tipo de cambio'), iEstatus=col('estatus'),
         iRec=col('recurrente'), iDeveng=col('devengado'),
-        iMpCom=col('mpcomid');  // etiqueta MPCOM-YYYY-MM de la partida automática de comisiones MP
+        iMpCom=col('mpcomisionid');  // etiqueta MPCOM-YYYY-MM de la partida automática de comisiones MP
 
     function num(v) { if (typeof v==='number') return v; var n=parseFloat(String(v||'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
     function dt(v) { if(!v)return''; if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0'); return String(v); }
