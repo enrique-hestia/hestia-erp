@@ -949,6 +949,19 @@ function doPost(e) {
     if (body.action === 'renamePacienteIngresos') {
       return jsonResponse(renamePacienteIngresos(body.oldNombre, body.newNombre));
     }
+    // Orígenes externos (atribución del dueño de un ingreso externo)
+    if (body.action === 'saveOrigen') {
+      if (typeof saveOrigen !== 'function') return jsonResponse({ok:false, error:'Agrega origenes.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(saveOrigen(body));
+    }
+    if (body.action === 'deleteOrigen') {
+      if (typeof deleteOrigen !== 'function') return jsonResponse({ok:false, error:'Agrega origenes.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(deleteOrigen(body));
+    }
+    if (body.action === 'aplicarOrigenesHistorico') {
+      if (typeof aplicarOrigenesHistorico !== 'function') return jsonResponse({ok:false, error:'Agrega origenes.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(aplicarOrigenesHistorico(body));
+    }
     if (body.action === 'updateCajaChica') {
       return jsonResponse(updateCajaChicaRow(body));
     }
@@ -1834,6 +1847,18 @@ function _egColEnsure(sh, want, headerText) {
   var hdrs = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h){ return String(h).trim().toLowerCase(); });
   for (var c = 0; c < hdrs.length; c++) { if (hdrs[c].indexOf(want) > -1) return c + 1; }
   sh.getRange(1, lastCol + 1).setValue(headerText);
+  return lastCol + 1;
+}
+
+// Igual que _egColEnsure pero para BD_Ingresos: devuelve la columna (1-indexed)
+// cuyo header contiene `want`; si no existe la CREA al final (append-safe: nunca
+// desplaza columnas existentes). Se usa para la columna dinámica OrigenExterno.
+function _ingColEnsure(sh, want, headerText) {
+  var lastCol = sh.getLastColumn();
+  var hdrs = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h){ return String(h).trim().toLowerCase(); });
+  for (var c = 0; c < hdrs.length; c++) { if (hdrs[c].indexOf(want) > -1) return c + 1; }
+  sh.getRange(1, lastCol + 1).setValue(headerText);
+  sh.getRange(1, lastCol + 1).setFontWeight('bold').setBackground('#f3f4f6');
   return lastCol + 1;
 }
 var EGRESOS_MESES_FOLDER = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -2769,12 +2794,13 @@ function _readFromBDIngresos(sheet) {
 
   // FacturaRFC/FacturaUUID/PagosDetalle se agregaron después (columnas dinámicas, no posición fija)
   var hdrs0 = raw[0]||[];
-  var idxFacRFC = -1, idxFacUUID = -1, idxPagosDet = -1;
+  var idxFacRFC = -1, idxFacUUID = -1, idxPagosDet = -1, idxOrigen = -1;
   for (var hci=0; hci<hdrs0.length; hci++) {
     var h0=String(hdrs0[hci]).trim();
     if (h0==='FacturaRFC') idxFacRFC=hci;
     if (h0==='FacturaUUID') idxFacUUID=hci;
     if (h0==='PagosDetalle') idxPagosDet=hci;
+    if (h0.toLowerCase().indexOf('origenexterno')>-1) idxOrigen=hci;
   }
 
   var MESES_MAP = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio',
@@ -2827,6 +2853,7 @@ function _readFromBDIngresos(sheet) {
       sucursal: String(r[21]||''),
       archivoURL: String(r[22]||''),
       razonSocial: String(r[23]||''),
+      origenExterno: idxOrigen>-1 ? String(r[idxOrigen]||'') : '',
       facturaRFC: idxFacRFC>-1 ? String(r[idxFacRFC]||'') : '',
       facturaUUID: idxFacUUID>-1 ? String(r[idxFacUUID]||'') : '',
       pagosDetalle: (function(){
@@ -4138,7 +4165,8 @@ var BD_INGRESOS_TAB = 'BD_Ingresos';
 var BD_INGRESOS_HEADERS = ['OP','Linea','Fecha','Paciente','Categoria','Producto',
   'PVP','Descuento','Cantidad','TotalPagar','Pagado','MontoFactMes',
   'FormaPago','Facturacion','Conciliacion','Contabilidad',
-  'Observaciones','Factura','Poliza','USMX','CicloAltaBaja','Sucursal','ArchivoURL','RazonSocial'];
+  'Observaciones','Factura','Poliza','USMX','CicloAltaBaja','Sucursal','ArchivoURL','RazonSocial',
+  'OrigenExterno'];
 
 function setupBDIngresos() {
   var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
@@ -4292,6 +4320,18 @@ function saveIngreso(payload) {
     // Pago mixto: guardar el desglose de formas de pago en la primera línea
     try { _bdIngresosWritePagosDetalle(sheet, startRow, payload.pagos); } catch (ePag) {}
 
+    // Origen externo (dueño de un ingreso externo). Se escribe en su propia
+    // columna APPENDED (creada si falta) → nunca desplaza columnas existentes.
+    // Se replica en todas las líneas de la OP para que la atribución por dueño
+    // sea consistente en Summary/Presupuesto también en operaciones multi-línea.
+    try {
+      var _ocSave = _ingColEnsure(sheet, 'origenexterno', 'OrigenExterno');
+      var _ovSave = String(payload.origenExterno || '').trim();
+      var _ovsSave = [];
+      for (var _ki = 0; _ki < rows.length; _ki++) _ovsSave.push([_ovSave]);
+      sheet.getRange(startRow, _ocSave, rows.length, 1).setValues(_ovsSave);
+    } catch (eOrig) {}
+
     try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch(e) {}
 
     // Descuenta inventario si alguno de los productos vendidos tiene un combo
@@ -4435,6 +4475,15 @@ function updateIngreso(payload) {
 
     // Pago mixto: re-guardar el desglose (la edición borra y re-inserta filas)
     try { _bdIngresosWritePagosDetalle(sheet, startRowUpd, payload.pagos); } catch (ePag) {}
+
+    // Origen externo (dueño): columna APPENDED, no desplaza columnas existentes.
+    try {
+      var _ocUpd = _ingColEnsure(sheet, 'origenexterno', 'OrigenExterno');
+      var _ovUpd = String(payload.origenExterno || '').trim();
+      var _ovsUpd = [];
+      for (var _ku = 0; _ku < rows.length; _ku++) _ovsUpd.push([_ovUpd]);
+      sheet.getRange(startRowUpd, _ocUpd, rows.length, 1).setValues(_ovsUpd);
+    } catch (eOrig) {}
 
     // Auditoría
     try {
