@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.14.173 -->
+﻿<!-- app-build:2026.07.14.174 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1025,6 +1025,10 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 <div id="view-seguro" class="view" style="display:none"><div id="seg-root"></div></div>
 <div id="view-nota" class="view" style="display:none"><div id="nota-root"></div></div>
 <div id="view-novedades" class="view" style="display:none"><div id="nov-root"></div></div>
+<!-- ══ VISTA: ORÍGENES EXTERNOS (catálogo de agencias / médicos externos) ══ -->
+<div id="view-origenes" class="view" style="display:none"><div id="orig-root"></div></div>
+<!-- ══ VISTA: ATRIBUIR EXTERNOS (histórico) — asigna origen a ingresos externos ya capturados ══ -->
+<div id="view-atribuir-externos" class="view" style="display:none"><div id="atrib-root"></div></div>
 <!-- Manual general ilustrado (guía de uso click-por-click de toda la app) -->
 <div id="view-manual" class="view" style="display:none"><div id="manual-root"></div></div>
 <!-- Nómina: lee CFDI de nómina emitidos por mes, desglose por empleado, ISN/vacaciones -->
@@ -3468,6 +3472,7 @@ function _renderProductosView() {
       +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Importar Excel</button>'
       +'<input type="file" id="prod-import-file" accept=".xlsx" style="display:none" onchange="prodImportarExcel(this)">'
       +'<button onclick="agenciasAdminOpen()" title="Administrar agencias (cada agencia = su lista de precios)" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🏢 Agencias</button>'
+      +'<button onclick="navigateTo(\'origenes\')" title="Orígenes externos: agencias y médicos que refieren ingresos (para atribución)" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🏷️ Orígenes externos</button>'
     +(hasPermission('sheets_access')?'<a href="https://docs.google.com/spreadsheets/d/'+PRODUCTOS_SS_ID+'/edit" target="_blank" style="display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--color-primary,#c46a7a);text-decoration:none">'
         +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Editar en Sheets</a>':'')
       +'</div></div>');
@@ -4401,6 +4406,11 @@ function ingEditOp(opId) {
     });
     ingCalcTotal();
 
+    // Origen externo (agencia / médico) — precargar el guardado en la operación.
+    // ingOpenDrawer() ya awaitó la carga del catálogo, así que aquí solo se reselecciona.
+    _ingUpdateOrigenVisibility();
+    _ingLoadOrigenesIntoSelect(first.origenExterno || first.origen || '');
+
     // Pre-llenar pago — si la operación tiene desglose mixto (pagosDetalle),
     // recrear una línea de pago por cada forma para no perder el split al editar
     var payLinesEl = document.getElementById('ing-pay-lines');
@@ -4551,6 +4561,12 @@ async function ingOpenDrawer() {
     +'<div><label '+LBL+'>Fecha *</label><input type="date" id="ing-fecha" '+S+' value="'+today+'"></div>'
     +'<div><label '+LBL+'>Ciclo Alta/Baja <span style="font-size:9px;font-weight:500;color:var(--color-text-muted,#9ca3af);letter-spacing:.3px">(automático)</span></label><select id="ing-ciclo" '+S+' disabled style="opacity:.7;cursor:default;pointer-events:none"><option value="">— Automático —</option>'+selOpts(ING_CICLOS)+'</select></div>'
     +'</div>';
+  // Origen (agencia / médico externo) — solo se muestra cuando la operación es de
+  // EXTERNOS (categoría con "externo" o ciclo EXTERNOS). Se puebla vía action=origenes.
+  h += '<div id="ing-f-origen-wrap" style="display:none;margin-top:14px">'
+    +'<label '+LBL+'>Origen (agencia / médico) <span id="ing-f-origen-req" style="color:#dc2626">*</span> <span style="font-size:9px;font-weight:500;color:var(--color-text-muted,#9ca3af);letter-spacing:.3px">— quién refirió este ingreso de externos</span></label>'
+    +'<select id="ing-f-origen" '+S+'><option value="">— Sin origen —</option></select>'
+    +'</div>';
   h += '<div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-top:14px">'
     +'<div><label '+LBL+'>Razón Social (facturación) <span style="font-size:9px;font-weight:500;color:var(--color-text-muted,#9ca3af);letter-spacing:.3px">— se autocompleta al elegir paciente</span></label>'
     +'<input id="ing-razon-social" '+S+' placeholder="Se llena al seleccionar el paciente">'
@@ -4664,6 +4680,10 @@ async function ingOpenDrawer() {
   _ingPayCount = 0;
   ingAddLine();
   ingAddPay();
+  // Cargar el catálogo de orígenes en el <select> (se awaita para evitar carreras
+  // con la precarga de origen en modo edición). Queda en caché tras la 1ª vez.
+  await _ingLoadOrigenesIntoSelect();
+  _ingUpdateOrigenVisibility();
   view.scrollTop = 0;
 }
 
@@ -4925,6 +4945,47 @@ function ingCalcTotal() {
   }
   var valEl = document.getElementById('ing-total-val');
   if (valEl) valEl.textContent = '$' + total.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+  // Mostrar/ocultar el selector de origen según si la operación es de externos.
+  _ingUpdateOrigenVisibility();
+}
+
+/* ── Origen externo (agencia / médico) en la captura de ingreso ───────────
+   El catálogo de orígenes se comparte con la vista de Orígenes externos vía
+   _origFetchList() (caché en _origListCache). El campo #ing-f-origen solo se
+   muestra cuando la operación es de EXTERNOS. */
+function _ingIsExternosForm() {
+  for (var i = 1; i <= _ingLineCount; i++) {
+    var catEl = document.getElementById('ing-cat-'+i);
+    if (!catEl) continue;
+    var cat = (catEl.value||'').toLowerCase();
+    if (!cat) continue;
+    if (cat.indexOf('extern') >= 0) return true;
+    if ((_ING_CAT_TO_CICLO[cat]||'') === 'EXTERNOS') return true;
+  }
+  var cicloEl = document.getElementById('ing-ciclo');
+  if (cicloEl && String(cicloEl.value||'').toUpperCase() === 'EXTERNOS') return true;
+  return false;
+}
+function _ingUpdateOrigenVisibility() {
+  var wrap = document.getElementById('ing-f-origen-wrap');
+  if (!wrap) return;
+  wrap.style.display = _ingIsExternosForm() ? 'block' : 'none';
+}
+async function _ingLoadOrigenesIntoSelect(preselect) {
+  var sel = document.getElementById('ing-f-origen');
+  if (!sel) return;
+  try {
+    var list = await _origFetchList();
+    var actives = list.filter(function(o){ return o.activo !== false; });
+    var cur = (preselect != null) ? preselect : sel.value;
+    sel.innerHTML = _origOptionsHTML(actives, cur);
+  } catch(e) { /* sin catálogo aún: se queda el placeholder "— Sin origen —" */ }
+}
+// Valor de origen a persistir: solo si la operación es de externos; si no, ''.
+function _ingCollectOrigen() {
+  if (!_ingIsExternosForm()) return '';
+  var sel = document.getElementById('ing-f-origen');
+  return sel ? (sel.value || '') : '';
 }
 
 /* ── Líneas de pago múltiple ───────────────────────────── */
@@ -6729,10 +6790,18 @@ function _ingCollectPayload() {
     }
   }
 
+  // Externos: el origen (agencia / médico) es requerido. Si falta, se confirma
+  // antes de continuar (no bloquea del todo por si el catálogo aún no existe).
+  var _origExterno = _ingCollectOrigen();
+  if (_ingIsExternosForm() && !_origExterno) {
+    if (!confirm('Este ingreso es de EXTERNOS (agencia / médico) y no tiene un origen asignado.\n\n¿Guardar de todos modos sin origen? Podrás atribuirlo después en "Atribuir externos (histórico)".')) return null;
+  }
+
   var s = getSession() || {};
   return {
     action: _ingEditMode ? 'updateIngresoConBancos' : 'saveIngreso',
     token:  getToken(),
+    origenExterno: _origExterno,
     opId:   _ingEditMode || undefined,
     usuario: s.email || s.nombre || '',
     paciente: paciente,
@@ -9002,7 +9071,8 @@ const VIEW_TITLES = {
   resumen:'Resumen Financiero', ingresos:'Ingresos', gastos:'Egresos', egresos:'Egresos',
   costos:'Egresos', pacientes:'Pacientes', servicios:'Servicios',
   turismo:'Turismo Médico', rentabilidad:'Rentabilidad',
-  inventarios:'Inventarios', laboratorios:'Laboratorios', configuracion:'Configuración'
+  inventarios:'Inventarios', laboratorios:'Laboratorios', configuracion:'Configuración',
+  origenes:'Orígenes externos', 'atribuir-externos':'Atribuir externos (histórico)'
 };
 
 /* ── Carga menú y rango de fechas por defecto ─── */
@@ -12765,6 +12835,24 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     novInit();
     return;
   }
+  // Orígenes externos (catálogo de agencias / médicos externos) — va ANTES del
+  // bloque de Productos porque 'atribuir-externos' contiene "externo" y sería
+  // absorbido por el ruteo genérico de catálogo.
+  if (viewId === 'origenes' || (_foundViewItem && /^or[ií]genes(\s|-)?externos?$/i.test(String(_foundViewItem.fuente||'')))) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _origEl = document.getElementById('view-origenes');
+    if (_origEl) _origEl.style.display = '';
+    loadOrigenes();
+    return;
+  }
+  // Atribuir externos (histórico) — back-fill de origen en ingresos externos ya capturados
+  if (viewId === 'atribuir-externos' || (_foundViewItem && /atribuir.?externos/i.test(String(_foundViewItem.fuente||'')))) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _atribEl = document.getElementById('view-atribuir-externos');
+    if (_atribEl) _atribEl.style.display = '';
+    loadAtribuirExternos();
+    return;
+  }
   // Cuentas por Cobrar — cobranza (Motor A saldos + Motor B suscripciones crío)
   if (/cuentas?.?por.?cobrar/i.test(viewId) || (_foundViewItem && /por.?cobrar|cuentas.?cobrar/i.test(String(_foundViewItem.fuente||'')+' '+String(_foundViewItem.label||'')))) {
     document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
@@ -14077,6 +14165,7 @@ function _renderPresupuesto(){
     +(canEdit?'<button class="pr-btn" onclick="presOpenMeta()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Fijar / editar meta</button>':'')
     +(canEdit?'<button onclick="presGruposConfigOpen()" title="Agrupar productos para capturar la meta por bucket, no producto por producto" style="display:inline-flex;align-items:center;gap:6px;padding:9px 14px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;margin-left:6px">⚙ Grupos</button>':'')
     +'<button onclick="presCostosOpen()" title="Estructura de costos fijo/variable y utilidad pronosticada (P&amp;L en vivo)" style="display:inline-flex;align-items:center;gap:6px;padding:9px 14px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">🧮 Costos y Utilidad</button>'
+    +'<button onclick="navigateTo(\'origenes\')" title="Catálogo de agencias y médicos externos + atribución histórica de ingresos" style="display:inline-flex;align-items:center;gap:6px;padding:9px 14px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">🏷️ Orígenes externos</button>'
     +'<button onclick="presShowManual()" title="Manual completo de Presupuesto" style="display:inline-flex;align-items:center;gap:5px;padding:8px 12px;background:var(--color-surface,#f1f1f1);color:var(--text-secondary,#374151);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:9px;font-size:11px;font-weight:600;cursor:pointer">📖 Manual</button>'
     +'<button onclick="_tourStart(_PRES_TOUR)" title="Tutorial interactivo" style="width:34px;height:34px;border-radius:50%;background:transparent;color:var(--color-primary,#c46a7a);border:2px solid var(--color-primary,#c46a7a);font-size:17px;font-weight:900;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1">?</button>'
     +'</div>'
@@ -19015,6 +19104,11 @@ function navigateTo(viewId) {
   for (var _npi=0; _npi<_navProdKeys.length; _npi++) {
     if (_navVidLow.indexOf(_navProdKeys[_npi]) >= 0) { displayId = 'productos-catalogo'; break; }
   }
+  // Orígenes externos / Atribuir externos: se resuelven DESPUÉS del loop de
+  // productos porque 'atribuir-externos' contiene "externo" y sería mandado a
+  // 'productos-catalogo'. Estos ganan por id exacto.
+  if (viewId === 'origenes' || (_foundItem && /^or[ií]genes(\s|-)?externos?$/i.test(String(_foundItem.fuente||'')))) { displayId = 'origenes'; }
+  else if (viewId === 'atribuir-externos' || (_foundItem && /atribuir.?externos/i.test(String(_foundItem.fuente||'')))) { displayId = 'atribuir-externos'; }
   console.log('[navigateTo] viewId:', viewId, '→ displayId:', displayId);
   // Resolver alias: variantes de config siempre usan view-configuracion
   var resolvedId = isConfigFuente(displayId) ? 'configuracion' : displayId;
@@ -24763,6 +24857,302 @@ async function recDelete(rowNum){
   if(!confirm('¿Eliminar este recordatorio?')) return;
   var s=getSession()||{};
   try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'deleteRecordatorio', rowNum:rowNum, usuario:s.email||''})}); var res=await r.json(); if(res.ok) loadRecordatorios(); else alert('Error: '+(res.error||'')); }catch(e){ alert('Error: '+e.message); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ORÍGENES EXTERNOS — catálogo de agencias / médicos externos + atribución
+   histórica. El catálogo se comparte con la captura de ingresos vía
+   _origFetchList()/_origListCache. Backend: action=origenes, saveOrigen,
+   deleteOrigen, sugerirOrigenes, aplicarOrigenesHistorico.
+   ═══════════════════════════════════════════════════════════════════════ */
+var _origListCache = null;   // [{rowNum,id,nombre,tipo,alias,activo,notas}]
+var _origEditRow = null;     // objeto en edición (o null al crear)
+
+async function _origFetchList(force){
+  if (_origListCache && !force) return _origListCache;
+  var tok = encodeURIComponent(getToken());
+  var r = await fetch(APPS_SCRIPT_URL+'?action=origenes&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+  var d = await r.json();
+  if (d && d.ok && Array.isArray(d.origenes)) { _origListCache = d.origenes; return _origListCache; }
+  throw new Error((d && d.error) || 'No se pudieron cargar los orígenes externos.');
+}
+function _origEsTipoAgencia(o){ return String((o&&o.tipo)||'').toLowerCase().indexOf('agenc') >= 0; }
+// Opciones <select> agrupadas por tipo, con "— Sin origen —" y fallback al valor actual.
+function _origOptionsHTML(list, selected){
+  selected = selected || '';
+  list = list || [];
+  var ags = list.filter(_origEsTipoAgencia);
+  var meds = list.filter(function(o){ return !_origEsTipoAgencia(o); });
+  function opt(o){
+    var v = _cxpEsc(o.nombre).replace(/"/g,'&quot;');
+    var sel = (String(o.nombre) === String(selected)) ? ' selected' : '';
+    return '<option value="'+v+'"'+sel+'>'+_cxpEsc(o.nombre)+'</option>';
+  }
+  var h = '<option value="">— Sin origen —</option>';
+  if (ags.length)  h += '<optgroup label="Agencias">'+ags.map(opt).join('')+'</optgroup>';
+  if (meds.length) h += '<optgroup label="Médicos externos">'+meds.map(opt).join('')+'</optgroup>';
+  // Si el valor actual ya no está en el catálogo (borrado/renombrado), preservarlo.
+  if (selected && !list.some(function(o){ return String(o.nombre) === String(selected); })) {
+    h += '<option value="'+_cxpEsc(selected).replace(/"/g,'&quot;')+'" selected>'+_cxpEsc(selected)+' (actual)</option>';
+  }
+  return h;
+}
+
+async function loadOrigenes(){
+  var root = document.getElementById('orig-root'); if (!root) return;
+  root.innerHTML = hestiaLoader('Cargando orígenes externos…');
+  try {
+    var list = await _origFetchList(true); // siempre fresco al entrar a la vista
+    window._origData = list;
+    if (typeof hfFinish === 'function') await hfFinish();
+    _renderOrigenes();
+  } catch(e) {
+    root.innerHTML = '<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px;line-height:1.6">⚠ '+_cxpEsc(e.message)+'<br><span style="color:#6b7280">Primera vez: agrega el backend de <b>Orígenes externos</b> (action=origenes) en Apps Script y vuelve a desplegar.</span></div>';
+  }
+}
+
+function _origCard(o, canEdit){
+  var inactive = o.activo === false;
+  var badge = inactive ? '<span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:20px;background:#f3f4f6;color:#6b7280;margin-left:6px">Inactivo</span>' : '';
+  var pj = encodeURIComponent(JSON.stringify({rowNum:o.rowNum, id:o.id, nombre:o.nombre||'', tipo:o.tipo||'', alias:o.alias||'', activo:o.activo!==false, notas:o.notas||''}));
+  var acc = '';
+  if (canEdit) {
+    acc = '<button onclick="origOpenForm(JSON.parse(decodeURIComponent(\''+pj+'\')))" style="padding:5px 10px;background:rgba(37,99,235,.08);color:#2563eb;border:none;border-radius:7px;font-size:12px;cursor:pointer" title="Editar">✎</button>'
+        + '<button onclick="origDelete('+o.rowNum+',decodeURIComponent(\''+encodeURIComponent(o.nombre||'')+'\'))" style="padding:5px 10px;background:rgba(220,38,38,.07);color:#dc2626;border:none;border-radius:7px;font-size:12px;cursor:pointer" title="Eliminar">🗑</button>';
+  }
+  return '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:12px 15px;margin-bottom:10px;'+(inactive?'opacity:.65':'')+'">'
+    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">'
+    + '<div style="flex:1;min-width:180px"><div style="font-size:13.5px;font-weight:700;color:var(--text-primary,#111)">'+_cxpEsc(o.nombre)+badge+'</div>'
+    + (o.alias ? '<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-top:3px">Alias: '+_cxpEsc(o.alias)+'</div>' : '')
+    + (o.notas ? '<div style="font-size:11px;color:var(--text-secondary,#9ca3af);margin-top:3px">'+_cxpEsc(o.notas)+'</div>' : '')
+    + '</div>'
+    + '<div style="display:flex;gap:6px;align-items:center">'+acc+'</div></div></div>';
+}
+
+function _renderOrigenes(){
+  var root = document.getElementById('orig-root'); if (!root) return;
+  var list = window._origData || [];
+  var canEdit = hasPermission('bank_capture');
+  var ags = list.filter(_origEsTipoAgencia);
+  var meds = list.filter(function(o){ return !_origEsTipoAgencia(o); });
+  function sec(titulo, arr, emoji){
+    if (!arr.length) return '<div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin:18px 0 8px">'+emoji+' '+titulo+' (0)</div>'
+      + '<div style="font-size:12px;color:var(--text-secondary,#9ca3af);padding:0 2px 4px">Sin registros.</div>';
+    return '<div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin:18px 0 8px">'+emoji+' '+titulo+' ('+arr.length+')</div>'
+      + arr.map(function(o){ return _origCard(o, canEdit); }).join('');
+  }
+  var h = '<div style="max-width:760px;margin:0 auto;padding:4px 2px 44px">';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px">'
+    + '<div><div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility</div>'
+    + '<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Orígenes externos</h1>'
+    + '<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">Agencias y médicos externos que refieren ingresos · se usan para atribuir cada venta de externos</div></div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    + '<button onclick="navigateTo(\'atribuir-externos\')" title="Asignar origen a ingresos de externos ya capturados" style="padding:9px 16px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">📌 Atribuir histórico</button>'
+    + (canEdit ? '<button onclick="origOpenForm()" style="padding:9px 16px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">+ Nuevo origen</button>' : '')
+    + '</div></div>';
+  if (!list.length) {
+    h += '<div style="background:var(--card-bg,#fff);border:1px dashed var(--color-divider,#e5e7eb);border-radius:14px;padding:40px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:13px;margin-top:16px">🏷️ Aún no hay orígenes externos.'
+      + (canEdit ? ' Crea el primero con <b>+ Nuevo origen</b>.' : '')
+      + '<br><span style="font-size:11px">Los alias ayudan a auto-detectar el origen en el histórico y en la captura.</span></div>';
+  } else {
+    h += sec('Agencias', ags, '🏢') + sec('Médicos externos', meds, '🩺');
+  }
+  h += '</div>' + _origModalHTML();
+  root.innerHTML = h;
+}
+
+function _origModalHTML(){
+  var S = 'style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"';
+  var L = 'style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px"';
+  return '<div id="orig-ovl" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9998;backdrop-filter:blur(3px)" onclick="origCloseForm()"></div>'
+    + '<div id="orig-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9999;background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(460px,94vw);max-height:90vh;overflow:auto;padding:20px">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div id="orig-modal-title" style="font-size:15px;font-weight:800">Nuevo origen externo</div><button onclick="origCloseForm()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary,#6b7280)">×</button></div>'
+    + '<div style="margin-bottom:12px"><label '+L+'>Nombre *</label><input id="orig-f-nombre" '+S+' placeholder="Ej. Reprovida, Dr. Juan Pérez"></div>'
+    + '<div style="margin-bottom:12px"><label '+L+'>Tipo *</label><select id="orig-f-tipo" '+S+'><option value="Agencia">Agencia</option><option value="Médico externo">Médico externo</option></select></div>'
+    + '<div style="margin-bottom:12px"><label '+L+'>Alias (separados por coma)</label><input id="orig-f-alias" '+S+' placeholder="reprovida, repro vida, RPV"><div style="font-size:10.5px;color:var(--text-secondary,#9ca3af);margin-top:5px;line-height:1.4">Ayudan a <b>auto-detectar el origen</b> en el histórico y en la captura (busca estos textos en paciente/producto/observaciones).</div></div>'
+    + '<div style="margin-bottom:12px;display:flex;align-items:center;gap:8px"><input type="checkbox" id="orig-f-activo" checked style="width:15px;height:15px;accent-color:var(--color-primary,#c46a7a);cursor:pointer"><label for="orig-f-activo" style="font-size:12px;font-weight:600;color:var(--text-primary,#374151);cursor:pointer">Activo (aparece en la captura de ingresos)</label></div>'
+    + '<div style="margin-bottom:14px"><label '+L+'>Notas</label><textarea id="orig-f-notas" '+S+' rows="2" style="resize:vertical"></textarea></div>'
+    + '<div style="display:flex;gap:10px"><button id="orig-save-btn" onclick="origSaveForm()" style="flex:1;padding:12px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">Guardar</button>'
+    + '<button onclick="origCloseForm()" style="padding:12px 20px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider);border-radius:10px;font-size:13px;cursor:pointer">Cancelar</button></div></div>';
+}
+
+function origOpenForm(o){
+  _origEditRow = (o && o.id) ? o : null;
+  var n = document.getElementById('orig-f-nombre'); if (n) n.value = (o && o.nombre) || '';
+  var t = document.getElementById('orig-f-tipo');   if (t) t.value = (o && o.tipo) || 'Agencia';
+  var a = document.getElementById('orig-f-alias');  if (a) a.value = (o && o.alias) || '';
+  var ac = document.getElementById('orig-f-activo');if (ac) ac.checked = o ? (o.activo !== false) : true;
+  var nt = document.getElementById('orig-f-notas'); if (nt) nt.value = (o && o.notas) || '';
+  var ttl = document.getElementById('orig-modal-title'); if (ttl) ttl.textContent = _origEditRow ? 'Editar origen externo' : 'Nuevo origen externo';
+  var ovl = document.getElementById('orig-ovl'), md = document.getElementById('orig-modal');
+  if (ovl) ovl.style.display = 'block';
+  if (md) md.style.display = 'block';
+}
+function origCloseForm(){
+  _origEditRow = null;
+  var md = document.getElementById('orig-modal'), ovl = document.getElementById('orig-ovl');
+  if (md) md.style.display = 'none';
+  if (ovl) ovl.style.display = 'none';
+}
+async function origSaveForm(){
+  var nombre = ((document.getElementById('orig-f-nombre')||{}).value || '').trim();
+  if (!nombre) { alert('El nombre es obligatorio'); return; }
+  var tipo = (document.getElementById('orig-f-tipo')||{}).value || 'Agencia';
+  var alias = (document.getElementById('orig-f-alias')||{}).value || '';
+  var activo = !!(document.getElementById('orig-f-activo')||{}).checked;
+  var notas = (document.getElementById('orig-f-notas')||{}).value || '';
+  var btn = document.getElementById('orig-save-btn'); if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+  var s = getSession() || {};
+  var payload = { action:'saveOrigen', nombre:nombre, tipo:tipo, alias:alias, activo:activo, notas:notas, token:getToken(), usuario:s.email||s.nombre||'' };
+  if (_origEditRow && _origEditRow.id) payload.id = _origEditRow.id;
+  try {
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify(payload)});
+    var res = await r.json();
+    if (res && res.ok) { _origListCache = null; origCloseForm(); loadOrigenes(); }
+    else { alert('Error: '+((res && res.error) || 'No se pudo guardar.')); if (btn) { btn.disabled = false; btn.textContent = 'Guardar'; } }
+  } catch(e) { alert('Error de conexión: '+e.message); if (btn) { btn.disabled = false; btn.textContent = 'Guardar'; } }
+}
+async function origDelete(rowNum, nombre){
+  if (!hasPermission('bank_capture')) { alert('No tienes permiso para borrar orígenes.'); return; }
+  if (!confirm('¿Eliminar el origen "'+(nombre||'')+'"?\n\nLos ingresos ya atribuidos conservan el nombre; solo desaparece del catálogo.')) return;
+  var s = getSession() || {};
+  try {
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify({action:'deleteOrigen', rowNum:rowNum, token:getToken(), usuario:s.email||s.nombre||''})});
+    var res = await r.json();
+    if (res && res.ok) { _origListCache = null; loadOrigenes(); }
+    else alert('Error: '+((res && res.error) || 'No se pudo eliminar.'));
+  } catch(e) { alert('Error de conexión: '+e.message); }
+}
+
+/* ── Atribuir externos (histórico) ─── back-fill de origen en ingresos ya
+   capturados. Backend: action=sugerirOrigenes / aplicarOrigenesHistorico. */
+var _atribData = null;    // respuesta de sugerirOrigenes
+var _atribOrigList = [];  // orígenes activos para los <select> de cada fila
+
+function loadAtribuirExternos(){
+  var root = document.getElementById('atrib-root'); if (!root) return;
+  var anio = window._atribAnio || (new Date().getFullYear());
+  var cy = new Date().getFullYear();
+  var yrOpts = '';
+  for (var y = cy + 1; y >= cy - 5; y--) { yrOpts += '<option value="'+y+'"'+(String(y)===String(anio)?' selected':'')+'>'+y+'</option>'; }
+  var h = '<div style="max-width:1080px;margin:0 auto;padding:4px 2px 44px">';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px">'
+    + '<div><div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility</div>'
+    + '<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Atribuir externos (histórico)</h1>'
+    + '<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">Asigna la agencia / médico a los ingresos de externos ya capturados sin origen</div></div>'
+    + '<button onclick="navigateTo(\'origenes\')" style="padding:8px 14px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">🏷️ Orígenes externos</button>'
+    + '</div>';
+  h += '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:12px 15px;margin-bottom:14px">'
+    + '<label style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary,#9ca3af)">Año</label>'
+    + '<select id="atrib-anio" style="padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'+yrOpts+'</select>'
+    + '<button onclick="atribCargar()" style="padding:9px 16px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">Cargar sugerencias</button>'
+    + '<span style="flex:1"></span>'
+    + '<button id="atrib-apply-btn" onclick="atribAplicar()" style="display:none;padding:9px 16px;background:#166534;color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">Aplicar cambios</button>'
+    + '</div>';
+  h += '<div id="atrib-body"><div style="background:var(--card-bg,#fff);border:1px dashed var(--color-divider,#e5e7eb);border-radius:14px;padding:40px;text-align:center;color:var(--text-secondary,#9ca3af);font-size:13px">Elige un año y pulsa <b>Cargar sugerencias</b>.</div></div>';
+  h += '</div>';
+  root.innerHTML = h;
+}
+
+async function atribCargar(){
+  var anio = (document.getElementById('atrib-anio')||{}).value || (new Date().getFullYear());
+  window._atribAnio = anio;
+  var cont = document.getElementById('atrib-body'); if (!cont) return;
+  cont.innerHTML = hestiaLoader('Buscando externos sin atribuir…');
+  var applyBtn = document.getElementById('atrib-apply-btn'); if (applyBtn) applyBtn.style.display = 'none';
+  try {
+    var tok = encodeURIComponent(getToken());
+    var listP = _origFetchList();
+    var r = await fetch(APPS_SCRIPT_URL+'?action=sugerirOrigenes&anio='+encodeURIComponent(anio)+'&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+    var d = await r.json();
+    if (!d || !d.ok) throw new Error((d && d.error) || 'No se pudieron cargar las sugerencias.');
+    var list = await listP;
+    _atribData = d;
+    _atribOrigList = (list || []).filter(function(o){ return o.activo !== false; });
+    _atribRenderTabla();
+  } catch(e) {
+    cont.innerHTML = '<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px;line-height:1.6">⚠ '+_cxpEsc(e.message)+'<br><span style="color:#6b7280">Requiere el backend de externos (action=sugerirOrigenes) desplegado.</span></div>';
+  }
+}
+
+function _atribMoney(v){ return '$'+(Number(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function _atribConfBadge(c){
+  if (c === 'alta') return '<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;background:#dcfce7;color:#166534;margin-left:2px">alta</span>';
+  if (c === 'baja') return '<span style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;background:#fef9c3;color:#854d0e;margin-left:2px">baja</span>';
+  return '';
+}
+
+function _atribRenderTabla(){
+  var cont = document.getElementById('atrib-body'); if (!cont || !_atribData) return;
+  var sug = _atribData.sugerencias || [];
+  var applyBtn = document.getElementById('atrib-apply-btn');
+  if (!sug.length) {
+    cont.innerHTML = '<div style="background:var(--card-bg,#fff);border:1px dashed var(--color-divider,#e5e7eb);border-radius:14px;padding:44px;text-align:center;color:var(--text-secondary,#6b7280);font-size:14px">No hay externos sin atribuir 🎉<br><span style="font-size:12px;color:var(--text-secondary,#9ca3af)">Todos los ingresos de externos de '+_cxpEsc(String(_atribData.anio||''))+' ya tienen origen.</span></div>';
+    if (applyBtn) applyBtn.style.display = 'none';
+    return;
+  }
+  var rows = sug.map(function(s){
+    var opts = _origOptionsHTML(_atribOrigList, s.sugeridoNombre || '');
+    var fecha = (s.fecha || '').substring(0,10);
+    return '<tr>'
+      + '<td style="padding:8px 12px;border-bottom:1px solid var(--color-divider,#f0f0f0);white-space:nowrap;color:var(--text-secondary,#6b7280)">'+_cxpEsc(fecha)+'</td>'
+      + '<td style="padding:8px 12px;border-bottom:1px solid var(--color-divider,#f0f0f0);font-weight:600;color:var(--text-primary,#111)">'+_cxpEsc(s.paciente||'')+'<div style="font-size:10px;color:var(--text-secondary,#9ca3af);font-weight:400">'+_cxpEsc(s.op||'')+'</div></td>'
+      + '<td style="padding:8px 12px;border-bottom:1px solid var(--color-divider,#f0f0f0);color:var(--text-secondary,#6b7280)">'+_cxpEsc(s.categoria||'')+'</td>'
+      + '<td style="padding:8px 12px;border-bottom:1px solid var(--color-divider,#f0f0f0);color:var(--text-secondary,#6b7280)">'+_cxpEsc(s.producto||'')+'</td>'
+      + '<td style="padding:8px 12px;border-bottom:1px solid var(--color-divider,#f0f0f0);text-align:right;white-space:nowrap;font-weight:700;color:var(--text-primary,#111)">'+_atribMoney(s.total)+'</td>'
+      + '<td style="padding:8px 12px;border-bottom:1px solid var(--color-divider,#f0f0f0);min-width:210px"><div style="display:flex;align-items:center;gap:6px">'
+        + '<select id="atrib-sel-'+s.rowNum+'" onchange="_atribUpdateCount()" style="flex:1;padding:6px 8px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'+opts+'</select>'
+        + _atribConfBadge(s.confianza)
+      + '</div></td>'
+      + '</tr>';
+  }).join('');
+  function th(t, right){ return '<th style="text-align:'+(right?'right':'left')+';padding:9px 12px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);background:var(--color-surface,#fafafa);border-bottom:2px solid var(--color-divider,#d1d5db);white-space:nowrap">'+t+'</th>'; }
+  var h = '<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-bottom:8px">'+sug.length+' ingreso'+(sug.length===1?'':'s')+' de externos sin origen · elige la agencia/médico en cada fila y pulsa Aplicar.</div>';
+  h += '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;overflow:hidden">'
+    + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+    + '<thead><tr>'+th('Fecha')+th('Paciente')+th('Categoría')+th('Producto')+th('Importe',true)+th('Origen (agencia / médico)')+'</tr></thead>'
+    + '<tbody>'+rows+'</tbody></table></div></div>';
+  cont.innerHTML = h;
+  _atribUpdateCount();
+}
+
+function _atribUpdateCount(){
+  if (!_atribData) return;
+  var sug = _atribData.sugerencias || [];
+  var n = 0;
+  sug.forEach(function(s){ var sel = document.getElementById('atrib-sel-'+s.rowNum); if (sel && sel.value) n++; });
+  var btn = document.getElementById('atrib-apply-btn');
+  if (btn) { btn.disabled = false; btn.style.display = n ? 'inline-flex' : 'none'; btn.textContent = 'Aplicar '+n+' cambio'+(n===1?'':'s'); }
+}
+
+async function atribAplicar(){
+  if (!_atribData) return;
+  var sug = _atribData.sugerencias || [];
+  var asignaciones = [];
+  sug.forEach(function(s){
+    var sel = document.getElementById('atrib-sel-'+s.rowNum);
+    if (sel && sel.value) asignaciones.push({ rowNum: s.rowNum, origenNombre: sel.value });
+  });
+  if (!asignaciones.length) { alert('No hay filas con origen seleccionado para aplicar.'); return; }
+  if (!confirm('Se atribuirá el origen a '+asignaciones.length+' ingreso'+(asignaciones.length===1?'':'s')+'. ¿Continuar?')) return;
+  var btn = document.getElementById('atrib-apply-btn'); if (btn) { btn.disabled = true; btn.textContent = 'Aplicando…'; }
+  var s = getSession() || {};
+  try {
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify({ action:'aplicarOrigenesHistorico', anio: window._atribAnio || (new Date().getFullYear()), asignaciones: asignaciones, token: getToken(), usuario: s.email||s.nombre||'' })});
+    var res = await r.json();
+    if (res && res.ok) {
+      var nAp = (res.aplicadas != null) ? res.aplicadas : asignaciones.length;
+      if (typeof setStatus === 'function') setStatus('Atribuidas '+nAp+' operacion'+(nAp===1?'':'es')+' de externos', 'ok');
+      else alert('Listo: '+nAp+' atribuidas.');
+      atribCargar(); // recargar: las ya atribuidas desaparecen de la lista
+    } else {
+      alert('Error: '+((res && res.error) || 'No se pudo aplicar.'));
+      if (btn) { btn.disabled = false; _atribUpdateCount(); }
+    }
+  } catch(e) {
+    alert('Error de conexión: '+e.message);
+    if (btn) { btn.disabled = false; _atribUpdateCount(); }
+  }
 }
 
 /* ── API ABIERTA: cualquier área llama a estas dos funciones ───────────── */
