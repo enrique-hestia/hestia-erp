@@ -14994,7 +14994,20 @@ function _presMasterBar(tipo){
     +'<input type="number" id="pr-target-'+tipo+'" placeholder="$ objetivo" step="1000" style="width:118px;text-align:right;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;padding:6px 8px;font-size:12.5px">'
     +'<button class="pr-btn" style="padding:6px 13px;font-size:11px;background:#374151" onclick="presMasterTarget(\''+tipo+'\')">Repartir</button>'
     +'<button class="pr-btn" style="padding:6px 12px;font-size:11px;margin-left:auto;background:var(--color-surface,#f1f1f1);color:var(--text-secondary,#374151);border:1.5px solid var(--color-divider,#e5e7eb)" onclick="presApplyProjAll(\''+tipo+'\')">Usar proyección</button>'
+    +'<button class="pr-btn" id="pr-save-all-'+tipo+'" style="padding:6px 14px;font-size:11px;background:#166534" onclick="presGuardarTodo(this)" title="Guarda TODO el presupuesto actual (ingresos y egresos visibles) en un solo lote, ahora mismo. El auto-guardado sigue activo; este botón es un guardado masivo de reaseguro.">💾 Guardar presupuesto</button>'
     +'</div>';
+}
+// Restaura la cantidad a mostrar en el grid. La meta MANUAL manda: si el backend marca
+// que hay meta guardada (p.tieneMeta) se usa la CANTIDAD capturada (exacta); si es una meta
+// vieja sin cantidad guardada se reconstruye del importe/precio (legado); solo cuando NO hay
+// meta se usa el estimado del sistema (cantProy). Así una cantidad movida NO revierte al recargar.
+function _presRestoreCant(p){
+  if(p && p.tieneMeta){
+    if(p.budgetCant>0) return Math.max(0,Math.round(p.budgetCant));            // cantidad manual (exacta)
+    if(p.budget>0 && p.precio>0) return Math.round(p.budget/p.precio);          // legado: solo importe guardado
+    return 0;                                                                   // meta guardada en 0 → respetar
+  }
+  return (p&&p.cantProy)||0;                                                    // sin meta → estimado del sistema
 }
 function _presBuildIngresos(grupos, canEdit){
   if (_presGrouped()) return _presBuildIngresosGrouped(grupos, canEdit);
@@ -15003,7 +15016,7 @@ function _presBuildIngresos(grupos, canEdit){
   if(!grupos.length) h+='<tr><td colspan="7" style="text-align:center;padding:1.6rem;color:var(--text-secondary,#9ca3af)">Sin datos.</td></tr>';
   (grupos||[]).forEach(function(G){
     var gImp=0,gProy=0;
-    (G.subgrupos||[]).forEach(function(S){ (S.productos||[]).forEach(function(p){ p._budCant=(p.budget>0&&p.precio>0)?Math.round(p.budget/p.precio):(p.cantProy||0); p._budImp=p._budCant*(p.precio||0); gImp+=p._budImp; gProy+=p.importeProy||0; }); });
+    (G.subgrupos||[]).forEach(function(S){ (S.productos||[]).forEach(function(p){ p._budCant=_presRestoreCant(p); p._budImp=p._budCant*(p.precio||0); gImp+=p._budImp; gProy+=p.importeProy||0; }); });
     totImp+=gImp; totProy+=gProy;
     h+='<tr style="background:var(--color-primary-hl,rgba(196,106,122,.06))"><td style="font-weight:800">'+_esc(G.grupo)+'</td><td></td><td></td><td></td><td style="font-weight:800;color:'+primary+'">'+fM(gImp)+'</td><td style="font-weight:700;color:var(--text-secondary,#9ca3af)">'+fM(gProy)+'</td><td></td></tr>';
     var multiSub=(G.subgrupos||[]).length>1;
@@ -15050,7 +15063,7 @@ function _presBuildEgresos(grupos, canEdit){
 }
 function presProdCant(key,val){ var p=_presProdMap[key]; if(!p)return; p._budCant=Math.max(0,Math.round(parseFloat(val)||0)); p._budImp=p._budCant*(p.precio||0);
   var im=document.getElementById(key+'-imp'); if(im)im.textContent=_presFM(p._budImp); _presProdDlUI(key); _presIngTotUI();
-  var s=getSession()||{}; fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMeta',periodo:_presData.siguiente.periodo,linea:p.producto,metaIngreso:p._budImp,usuario:s.email||''})}).then(function(){_presFlashSaved();}).catch(function(){}); }
+  var s=getSession()||{}; fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMeta',periodo:_presData.siguiente.periodo,linea:p.producto,metaIngreso:p._budImp,metaCantidad:p._budCant,usuario:s.email||''})}).then(function(){_presFlashSaved();}).catch(function(){}); }
 function _presProdDlUI(key){ var p=_presProdMap[key]; if(!p)return; var dl=p.importeProy>0?(p._budImp-p.importeProy):null; var dc=document.getElementById(key+'-dl'); if(dc){dc.textContent=dl==null?'—':_presFM(dl);dc.style.color=dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b');} }
 function _presIngTotUI(){ var tot=0; Object.keys(_presProdMap).forEach(function(k){tot+=_presProdMap[k]._budImp;}); var el=document.getElementById('pr-ing-tot'); if(el)el.textContent=_presFM(tot);
   if(_presData&&_presData.siguiente&&_presData.siguiente.totales){ _presData.siguiente.totales.meta=tot; var sc=document.getElementById('pr-scen-meta'); if(sc)sc.textContent=tot>0?_presFM(tot):'—'; } }
@@ -15059,25 +15072,49 @@ function presEgBud(key,val){ var l=_presEgMap[key]; if(!l)return; l.meta=parseFl
 function _presEgRowUI(key){ var l=_presEgMap[key]; if(!l)return; var dl=l.proyeccion>0?((l.meta||0)-l.proyeccion):null; var dc=document.getElementById(key+'-dl'); if(dc){dc.textContent=dl==null?'—':_presFM(dl);dc.style.color=dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b');} }
 function _presEgTotUI(){ var tot=0; Object.keys(_presEgMap).forEach(function(k){tot+=_presEgMap[k].meta||0;}); var el=document.getElementById('pr-eg-tot'); if(el)el.textContent=tot>0?_presFM(tot):'—'; if(_presData&&_presData.egresos&&_presData.egresos.totales)_presData.egresos.totales.meta=tot; }
 // Confirmación visible: el presupuesto se guarda solo al mover; esto lo hace notorio.
-function _presFlashSaved(){
+function _presFlashSaved(msg){
   var el=document.getElementById('pres-saved-toast');
   if(!el){ el=document.createElement('div'); el.id='pres-saved-toast'; document.body.appendChild(el); }
-  el.textContent='✓ Guardado';
+  el.textContent=msg||'✓ Guardado';
   el.style.cssText='position:fixed;bottom:20px;right:20px;z-index:9000;background:#166534;color:#fff;padding:8px 16px;border-radius:10px;font-size:12.5px;font-weight:800;box-shadow:0 6px 20px rgba(0,0,0,.25);opacity:1;transition:opacity .5s';
   clearTimeout(window._presSavedT); window._presSavedT=setTimeout(function(){ if(el) el.style.opacity='0'; },1400);
 }
 function _presBatchSave(metas){ var s=getSession()||{}; fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMetasBatch',periodo:_presData.siguiente.periodo,metas:metas,usuario:s.email||''})}).then(function(){_presFlashSaved();}).catch(function(){}); }
+// 💾 Guardar TODO el presupuesto actual (ingresos + egresos visibles) en un solo lote.
+// Refuerza el auto-guardado: fija como meta manual cada línea visible para que NO derive
+// al estimado. Snapshot completo: todos los productos visibles (aunque no se hayan movido)
+// + egresos con budget capturado (>0). Reusa savePresupuestoMetasBatch.
+async function presGuardarTodo(btn){
+  if(!(_presData&&_presData.siguiente&&_presData.siguiente.periodo)) return;
+  var metas=[];
+  Object.keys(_presProdMap).forEach(function(k){ var p=_presProdMap[k]; metas.push({linea:p.producto, metaIngreso:Math.round(p._budImp||0), metaCantidad:Math.max(0,Math.round(p._budCant||0))}); });
+  Object.keys(_presEgMap).forEach(function(k){ var l=_presEgMap[k]; if((l.meta||0)>0) metas.push({linea:'EG:'+l.linea, metaIngreso:Math.round(l.meta)}); });
+  if(!metas.length){ _presFlashSaved('Nada que guardar'); return; }
+  var s=getSession()||{};
+  var old=btn?btn.innerHTML:null, oldbg=btn?btn.style.background:'';
+  if(btn){ btn.disabled=true; btn.innerHTML='Guardando…'; }
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'savePresupuestoMetasBatch',periodo:_presData.siguiente.periodo,metas:metas,usuario:s.email||''})});
+    var res=await r.json();
+    if(!(res&&res.ok)) throw new Error((res&&res.error)||'no se pudo guardar');
+    _presFlashSaved('💾 Presupuesto guardado · '+metas.length+' líneas');
+    if(btn){ btn.innerHTML='✓ Guardado'; btn.style.background='#0f5132'; setTimeout(function(){ btn.innerHTML=old; btn.style.background='#166534'; btn.disabled=false; },1900); }
+  }catch(e){
+    if(btn){ btn.innerHTML='⚠ Error'; btn.style.background='#991b1b'; setTimeout(function(){ btn.innerHTML=old; btn.style.background=oldbg||'#166534'; btn.disabled=false; },2200); }
+    else alert('No se pudo guardar el presupuesto: '+(e.message||e));
+  }
+}
 function presMasterApply(tipo){ var pct=parseFloat((document.getElementById('pr-master-'+tipo)||{}).value)||0; var f=1+pct/100;
   if(tipo==='ing'&&_presGrouped()){ _presMasterApplyGrouped(f); return; }
-  if(tipo==='ing'){ var metas=[]; Object.keys(_presProdMap).forEach(function(k){var p=_presProdMap[k]; p._budCant=Math.max(0,Math.round(p._budCant*f)); p._budImp=p._budCant*(p.precio||0); var ci=document.getElementById(k+'-c');if(ci)ci.value=p._budCant; var im=document.getElementById(k+'-imp');if(im)im.textContent=_presFM(p._budImp); _presProdDlUI(k); metas.push({linea:p.producto,metaIngreso:p._budImp});}); _presIngTotUI(); _presBatchSave(metas); }
+  if(tipo==='ing'){ var metas=[]; Object.keys(_presProdMap).forEach(function(k){var p=_presProdMap[k]; p._budCant=Math.max(0,Math.round(p._budCant*f)); p._budImp=p._budCant*(p.precio||0); var ci=document.getElementById(k+'-c');if(ci)ci.value=p._budCant; var im=document.getElementById(k+'-imp');if(im)im.textContent=_presFM(p._budImp); _presProdDlUI(k); metas.push({linea:p.producto,metaIngreso:p._budImp,metaCantidad:p._budCant});}); _presIngTotUI(); _presBatchSave(metas); }
   else { var metasE=[]; Object.keys(_presEgMap).forEach(function(k){var l=_presEgMap[k]; l.meta=Math.round((l.meta>0?l.meta:l.proyeccion||0)*f); var ei=document.getElementById(k+'-b');if(ei)ei.value=l.meta; _presEgRowUI(k); metasE.push({linea:'EG:'+l.linea,metaIngreso:l.meta});}); _presEgTotUI(); _presBatchSave(metasE); } }
 function presMasterTarget(tipo){ var tgt=parseFloat((document.getElementById('pr-target-'+tipo)||{}).value)||0; if(tgt<=0)return;
   if(tipo==='ing'&&_presGrouped()){ _presMasterTargetGrouped(tgt); return; }
-  if(tipo==='ing'){ var cur=0; Object.keys(_presProdMap).forEach(function(k){cur+=_presProdMap[k]._budImp;}); if(cur<=0)return; var f=tgt/cur; var metas=[]; Object.keys(_presProdMap).forEach(function(k){var p=_presProdMap[k]; p._budCant=Math.max(0,Math.round(p._budCant*f)); p._budImp=p._budCant*(p.precio||0); var ci=document.getElementById(k+'-c');if(ci)ci.value=p._budCant; var im=document.getElementById(k+'-imp');if(im)im.textContent=_presFM(p._budImp); _presProdDlUI(k); metas.push({linea:p.producto,metaIngreso:p._budImp});}); _presIngTotUI(); _presBatchSave(metas); }
+  if(tipo==='ing'){ var cur=0; Object.keys(_presProdMap).forEach(function(k){cur+=_presProdMap[k]._budImp;}); if(cur<=0)return; var f=tgt/cur; var metas=[]; Object.keys(_presProdMap).forEach(function(k){var p=_presProdMap[k]; p._budCant=Math.max(0,Math.round(p._budCant*f)); p._budImp=p._budCant*(p.precio||0); var ci=document.getElementById(k+'-c');if(ci)ci.value=p._budCant; var im=document.getElementById(k+'-imp');if(im)im.textContent=_presFM(p._budImp); _presProdDlUI(k); metas.push({linea:p.producto,metaIngreso:p._budImp,metaCantidad:p._budCant});}); _presIngTotUI(); _presBatchSave(metas); }
   else { var cur2=0; Object.keys(_presEgMap).forEach(function(k){var l=_presEgMap[k];cur2+=(l.meta>0?l.meta:l.proyeccion||0);}); if(cur2<=0)return; var f2=tgt/cur2; var metasE=[]; Object.keys(_presEgMap).forEach(function(k){var l=_presEgMap[k]; l.meta=Math.round((l.meta>0?l.meta:l.proyeccion||0)*f2); var ei=document.getElementById(k+'-b');if(ei)ei.value=l.meta; _presEgRowUI(k); metasE.push({linea:'EG:'+l.linea,metaIngreso:l.meta});}); _presEgTotUI(); _presBatchSave(metasE); } }
 function presApplyProjAll(tipo){
   if(tipo==='ing'&&_presGrouped()){ _presApplyProjAllGrouped(); return; }
-  if(tipo==='ing'){ var metas=[]; Object.keys(_presProdMap).forEach(function(k){var p=_presProdMap[k]; p._budCant=p.cantProy||0; p._budImp=p.importeProy||0; var ci=document.getElementById(k+'-c');if(ci)ci.value=p._budCant; var im=document.getElementById(k+'-imp');if(im)im.textContent=_presFM(p._budImp); _presProdDlUI(k); metas.push({linea:p.producto,metaIngreso:p._budImp});}); _presIngTotUI(); _presBatchSave(metas); }
+  if(tipo==='ing'){ var metas=[]; Object.keys(_presProdMap).forEach(function(k){var p=_presProdMap[k]; p._budCant=p.cantProy||0; p._budImp=p.importeProy||0; var ci=document.getElementById(k+'-c');if(ci)ci.value=p._budCant; var im=document.getElementById(k+'-imp');if(im)im.textContent=_presFM(p._budImp); _presProdDlUI(k); metas.push({linea:p.producto,metaIngreso:p._budImp,metaCantidad:p._budCant});}); _presIngTotUI(); _presBatchSave(metas); }
   else { var metasE=[]; Object.keys(_presEgMap).forEach(function(k){var l=_presEgMap[k]; l.meta=l.proyeccion||0; var ei=document.getElementById(k+'-b');if(ei)ei.value=Math.round(l.meta); _presEgRowUI(k); metasE.push({linea:'EG:'+l.linea,metaIngreso:l.meta});}); _presEgTotUI(); _presBatchSave(metasE); } }
 
 /* ══ Vista AGRUPADA de captura de ingresos (D2, anidada grupo→subgrupo) ══
@@ -15092,7 +15129,7 @@ function _presBuildIngresosGrouped(grupos, canEdit){
   var rutaDe=cfg.productoARuta||{};
   var allByName={};
   (grupos||[]).forEach(function(G){ (G.subgrupos||[]).forEach(function(S){ (S.productos||[]).forEach(function(p){
-    p._budCant=(p.budget>0&&p.precio>0)?Math.round(p.budget/p.precio):(p.cantProy||0); p._budImp=p._budCant*(p.precio||0);
+    p._budCant=_presRestoreCant(p); p._budImp=p._budCant*(p.precio||0);
     p._ciclo=String(G.grupo||'').trim()||'(Sin ciclo)'; // Ciclo Alta/Baja (col U) → subgrupo automático
     allByName[p.producto]=p;
   }); }); });
@@ -15173,7 +15210,7 @@ function _presDistribute(prods, tgt){
   if(wsum<=0){ var ps=0; prods.forEach(function(p){ ps+=(p.precio||0); }); prods.forEach(function(p){ p._budImp=ps>0?tgt*((p.precio||0)/ps):(tgt/(prods.length||1)); }); }
   else { var f=tgt/wsum; prods.forEach(function(p){ p._budImp=p._budImp*f; }); }
   var metas=[];
-  prods.forEach(function(p){ p._budCant=(p.precio||0)>0?Math.max(0,Math.round(p._budImp/(p.precio||1))):0; p._budImp=p._budCant*(p.precio||0); _presProdCellUI(p); metas.push({linea:p.producto,metaIngreso:p._budImp}); });
+  prods.forEach(function(p){ p._budCant=(p.precio||0)>0?Math.max(0,Math.round(p._budImp/(p.precio||1))):0; p._budImp=p._budCant*(p.precio||0); _presProdCellUI(p); metas.push({linea:p.producto,metaIngreso:p._budImp,metaCantidad:p._budCant}); });
   return metas;
 }
 function _presProdCellUI(p){ /* productos colapsados: no hay celda por producto, no-op seguro */ }
@@ -15185,7 +15222,7 @@ function _presDistributeCant(prods, targetCant){
   if(wsum<=0){ var per=Math.floor(targetCant/(prods.length||1)); prods.forEach(function(p){ p._budCant=per; }); }
   else { var f=targetCant/wsum; prods.forEach(function(p){ p._budCant=Math.max(0,Math.round(p._budCant*f)); }); }
   var metas=[];
-  prods.forEach(function(p){ p._budImp=p._budCant*(p.precio||0); metas.push({linea:p.producto,metaIngreso:p._budImp}); });
+  prods.forEach(function(p){ p._budImp=p._budCant*(p.precio||0); metas.push({linea:p.producto,metaIngreso:p._budImp,metaCantidad:p._budCant}); });
   return metas;
 }
 function presGrupoCant(gi,val){ var G=_presGrupoMap[gi]; if(!G) return;
@@ -15256,7 +15293,7 @@ function _presMasterApplyGrouped(f){
   var metas=[];
   _presGrupoMap.forEach(function(G,gi){ if(G.movible===false) return;
     G.subs.forEach(function(S){ if(S.movible===false) return;
-      S.prods.forEach(function(p){ p._budCant=Math.max(0,Math.round(p._budCant*f)); p._budImp=p._budCant*(p.precio||0); metas.push({linea:p.producto,metaIngreso:p._budImp}); });
+      S.prods.forEach(function(p){ p._budCant=Math.max(0,Math.round(p._budCant*f)); p._budImp=p._budCant*(p.precio||0); metas.push({linea:p.producto,metaIngreso:p._budImp,metaCantidad:p._budCant}); });
     });
     _presRefreshGrupo(gi);
   });
@@ -15272,7 +15309,7 @@ function _presMasterTargetGrouped(tgt){
 function _presApplyProjAllGrouped(){
   var metas=[];
   _presGrupoMap.forEach(function(G,gi){ if(G.movible===false) return;
-    G.subs.forEach(function(S){ if(S.movible===false) return; S.prods.forEach(function(p){ p._budCant=p.cantProy||0; p._budImp=p.importeProy||0; metas.push({linea:p.producto,metaIngreso:p._budImp}); }); });
+    G.subs.forEach(function(S){ if(S.movible===false) return; S.prods.forEach(function(p){ p._budCant=p.cantProy||0; p._budImp=p.importeProy||0; metas.push({linea:p.producto,metaIngreso:p._budImp,metaCantidad:p._budCant}); }); });
     _presRefreshGrupo(gi);
   });
   _presIngTotUI(); _presBatchSave(metas);
