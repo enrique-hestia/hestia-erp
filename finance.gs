@@ -638,6 +638,10 @@ function doPost(e) {
       if (typeof nominaCfgSave !== 'function') return jsonResponse({ok:false, error:'Agrega nomina.gs en Apps Script y redespliega.'});
       return jsonResponse(nominaCfgSave(body));
     }
+    if (body.action === 'recalcComisionesMP') {
+      if (typeof recalcComisionesMP !== 'function') return jsonResponse({ok:false, error:'Actualiza finance.gs y redespliega.'});
+      return jsonResponse(recalcComisionesMP(body));
+    }
     if (body.action === 'vincularEmpleadoUsuario') {
       if (typeof vincularEmpleadoUsuario !== 'function') return jsonResponse({ok:false, error:'Agrega/actualiza nomina.gs en Apps Script y redespliega.'});
       return jsonResponse(vincularEmpleadoUsuario(body));
@@ -1229,6 +1233,8 @@ function saveBankRow(banco, row) {
       row[6]=runSum+(parseFloat(row[5])||0);
     }
     sheet.appendRow(row);
+    // Comisión de Mercado Pago movida → recalcular la partida automática de egreso del mes.
+    if (key === 'mercadopago') { try { _egRecalcComisionesMPFecha((row && row[1]) || '', ''); } catch(e) {} }
     return {ok:true, banco:banco, newSaldo:row[sc-1], totalRows:sheet.getLastRow()-1};
   } catch(ex) { return {ok:false, error:ex.message}; }
 }
@@ -1813,6 +1819,97 @@ function _egColEnsure(sh, want, headerText) {
   return lastCol + 1;
 }
 var EGRESOS_MESES_FOLDER = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+// ── Partida automática de COMISIONES DE MERCADO PAGO ────────────────────
+// Suma las comisiones cobradas por Mercado Pago del mes (hoja Mercado Pago del
+// libro de bancos, col 3 = Comisiones, negativa) y las refleja como UNA sola
+// partida de EGRESO YA PAGADO por mes (MP descuenta la comisión al momento del
+// cobro → el dinero ya salió). Idempotente: una fila por mes, etiqueta MPCOM-YYYY-MM.
+// Se recalcula al guardar/editar ingresos y al mover cobros de MP.
+function _mpComisionesDelMes(anio, mes) {
+  try {
+    var ss = SpreadsheetApp.openById(BANKS_SS_ID);
+    var shs = ss.getSheets(), sheet = null;
+    for (var i = 0; i < shs.length; i++) { if (shs[i].getSheetId() === BANKS_GID.mercadopago) { sheet = shs[i]; break; } }
+    if (!sheet) return 0;
+    var r = sheet.getDataRange().getValues(), tot = 0;
+    for (var j = 1; j < r.length; j++) {
+      var f = r[j][1]; if (!f) continue;
+      var d = (f instanceof Date) ? f : new Date(String(f));
+      if (isNaN(d.getTime())) continue;
+      if (d.getFullYear() === anio && (d.getMonth() + 1) === mes) {
+        var com = parseFloat(String(r[j][3] || '').replace(/[$,\s]/g, '')) || 0;
+        tot += Math.abs(com);
+      }
+    }
+    return Math.round(tot * 100) / 100;
+  } catch (e) { return 0; }
+}
+function _egFinDeMes(anio, mes) {
+  var d = new Date(anio, mes, 0); // día 0 del mes siguiente = último día del mes
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function _egUpsertComisionesMP(anio, mes, usuario) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) return { ok: false, error: 'lock' };
+  try {
+    anio = parseInt(anio, 10); mes = parseInt(mes, 10);
+    if (!anio || !mes) { lock.releaseLock(); return { ok: false, error: 'anio/mes' }; }
+    var total = _mpComisionesDelMes(anio, mes);
+    var per = anio + '-' + (mes < 10 ? '0' : '') + mes;
+    var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
+    var sh = ss.getSheetByName(EGRESOS_TABS[anio] || ('Egresos' + anio));
+    if (!sh) { lock.releaseLock(); return { ok: false, error: 'Hoja Egresos' + anio + ' no encontrada' }; }
+    var iTag = _egColEnsure(sh, 'mpcomid', 'MpComisionID');
+    var data = sh.getDataRange().getValues();
+    var tag = 'MPCOM-' + per, foundRow = -1;
+    for (var i = 1; i < data.length; i++) { if (String(data[i][iTag - 1] || '').trim() === tag) { foundRow = i + 1; break; } }
+    var fin = _egFinDeMes(anio, mes);
+    var concepto = 'Comisiones Mercado Pago ' + (EGRESOS_MESES_FOLDER[mes - 1] || mes) + ' ' + anio;
+    var notas = 'Partida automática — suma de comisiones cobradas por Mercado Pago del ' + per + ' (se actualiza sola con cada ingreso).';
+    if (total <= 0) {
+      if (foundRow > 0) sh.getRange(foundRow, 10).setValue(0);
+      lock.releaseLock(); return { ok: true, total: 0, row: foundRow };
+    }
+    if (foundRow > 0) {
+      sh.getRange(foundRow, 2).setValue(fin);     // B Fecha (pagado)
+      sh.getRange(foundRow, 10).setValue(total);  // J Monto
+      sh.getRange(foundRow, 11).setValue(notas);  // K Notas
+      sh.getRange(foundRow, 14).setValue(true);   // N Pagado
+    } else {
+      var lr = sh.getLastRow(), lastId = 0;
+      if (lr > 1) { var ids = sh.getRange(2, 1, lr - 1, 1).getValues(); for (var k = 0; k < ids.length; k++) { var nn = parseInt(ids[k][0]); if (nn > lastId) lastId = nn; } }
+      var row = [lastId + 1, fin, per, 1, 'Mercado Pago', 'Gasto', 'Variable', 'Comisiones',
+        concepto, total, notas, '', false, true, false, '', 'Transferencia', '', '', ''];
+      sh.appendRow(row);
+      foundRow = sh.getLastRow();
+      sh.getRange(foundRow, iTag).setValue(tag);
+      var iDiv = _egColEnsure(sh, 'divisa', 'Divisa'); sh.getRange(foundRow, iDiv).setValue('MXN');
+    }
+    try { logAudit(usuario || 'sistema', 'Egresos', 'ComisionesMP', tag, 'Mes', per, String(total)); } catch (e) {}
+    lock.releaseLock();
+    return { ok: true, total: total, row: foundRow, id: tag };
+  } catch (ex) { try { lock.releaseLock(); } catch (e) {} return { ok: false, error: ex.message }; }
+}
+// Recalcula la partida MP del mes de una fecha dada (nunca lanza).
+function _egRecalcComisionesMPFecha(fechaStr, usuario) {
+  try {
+    if (!fechaStr) return;
+    var d = (fechaStr instanceof Date) ? fechaStr : new Date(String(fechaStr).substring(0, 10) + 'T12:00:00');
+    if (isNaN(d.getTime())) return;
+    _egUpsertComisionesMP(d.getFullYear(), d.getMonth() + 1, usuario || '');
+  } catch (e) {}
+}
+// Recálculo manual (POST recalcComisionesMP) por si editas cobros directo en la hoja.
+function recalcComisionesMP(body) {
+  try {
+    if (!_tokenHasPermission(body.token || '', 'editar_egresos')) return { ok: false, error: 'Sin autorización (editar_egresos).' };
+    var anio = parseInt(body.anio, 10), mes = parseInt(body.mes, 10);
+    if (!anio || !mes) { var h = new Date(); anio = h.getFullYear(); mes = h.getMonth() + 1; }
+    var usuario = ''; try { usuario = verifyToken(body.token || '') || ''; } catch (e) {}
+    return _egUpsertComisionesMP(anio, mes, usuario);
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
 
 function _getOrCreateMonthFolder(parentFolderId, anio, mes) {
   var parent = DriveApp.getFolderById(parentFolderId);
@@ -4048,6 +4145,8 @@ function saveIngreso(payload) {
     if (saldoGenerado > 0.01 && typeof _cobRegistrarSaldoIngreso === 'function') {
       try { _cobRegistrarSaldoIngreso(opId, paciente, (lineas[0] && lineas[0].categoria) || '', saldoGenerado, fecha); } catch (eAR) {}
     }
+    // Partida automática de comisiones de Mercado Pago del mes del ingreso.
+    try { _egRecalcComisionesMPFecha(fecha, ''); } catch(_mp) {}
     return {ok:true, op:opId, lineas:rows.length, total:totalOP,
             pagado:pagadoOp, saldoGenerado:saldoGenerado, paciente:paciente};
   } catch(ex) {
@@ -5035,6 +5134,8 @@ function updateIngresoConBancos(payload) {
     _bankRecompute('santander', _sanOpen);
     _bankRecompute('mercadopago', 0);
 
+    // Partida automática de comisiones MP del mes (ya con la comisión recién movida).
+    try { _egRecalcComisionesMPFecha(payload.fecha || '', ''); } catch(_mp) {}
     return {ok:true, op:opId, edited:true, bankSynced:true};
   } catch(ex) {
     return {ok:false, error:ex.message};
