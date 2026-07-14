@@ -7320,6 +7320,15 @@ function _renderEgresosERP() {
   var periodoPend   = _sum(_penRows);
   var periodoTotal  = periodoPagado + periodoPend;
   var _periodoRegs  = _pagRows.length + _penRows.length;
+  // ── Gasto real: resta los pagos de la tarjeta de crédito (subtipo "Crédito") ──
+  // Los gastos pagados con AMEX se capturan uno por uno Y además se captura el pago
+  // de la tarjeta como subtipo "Crédito" (ej. "AMERICAN EXPRESS GASTOS…"). Eso
+  // duplica: el pago de la tarjeta es realmente el gasto del mes anterior ya
+  // capturado línea por línea. El "gasto real" del mes lo excluye.
+  function _esCredito(r){ return /^\s*cr[eé]dito\s*$/i.test(String(r.subtipo||'')); }
+  var _credRows     = _pagRows.concat(_penRows).filter(_esCredito);
+  var periodoCredito= _sum(_credRows);
+  var periodoReal   = periodoTotal - periodoCredito;
   window._egPeriodo = { inicio:_pIni, fin:_pFin, total:periodoTotal, pagado:periodoPagado,
                         pendiente:periodoPend, regsPagados:_pagRows.length,
                         regsPendientes:_penRows.length, registros:_periodoRegs };
@@ -7424,7 +7433,7 @@ function _renderEgresosERP() {
     +'<div class="eg-hero-stats">'
       +'<div class="eg-hero-stat"><div class="eg-hero-stat-lbl">Total del periodo</div>'
         +'<div class="eg-hero-val" id="eg-kpi-total" style="color:var(--text-primary,#111)">'+fE(periodoTotal)+'</div>'
-        +'<div class="eg-hero-sub">Pagado + por pagar</div></div>'
+        +'<div class="eg-hero-sub">Pagado + por pagar'+(periodoCredito>0?' · incluye '+fE(periodoCredito)+' de tarjeta':'')+'</div></div>'
       +'<div class="eg-hero-stat"><div class="eg-hero-stat-lbl">Pagado</div>'
         +'<div class="eg-hero-val-sm" id="eg-kpi-pagado" style="color:#166534">'+fE(periodoPagado)+'</div>'
         +'<div class="eg-hero-sub">'+_pagRows.length+' pagado'+(_pagRows.length===1?'':'s')+'</div></div>'
@@ -7434,11 +7443,27 @@ function _renderEgresosERP() {
     +'</div>'
   +'</div>');
 
+  // ── Gasto real del mes (sin pagos de tarjeta de crédito) ──
+  // El pago de la tarjeta (subtipo "Crédito") duplica gastos ya capturados uno por
+  // uno; el gasto real del mes lo excluye. Solo se muestra si hay pagos "Crédito".
+  if (periodoCredito > 0) {
+    h.push('<div style="display:flex;flex-wrap:wrap;align-items:center;gap:16px 26px;margin:-4px 0 14px;padding:14px 20px;border-radius:14px;background:linear-gradient(135deg,rgba(22,101,52,.06),var(--card-bg,#fff));border:1px solid rgba(22,101,52,.25)">'
+      +'<div style="display:flex;flex-direction:column;gap:2px">'
+        +'<div style="font-size:9.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#166534" title="Total del periodo menos los pagos de la tarjeta de crédito (subtipo «Crédito»), que ya están contados en los gastos capturados uno por uno.">💳 Gasto real del mes <span style="font-weight:600;text-transform:none;letter-spacing:0;color:var(--text-secondary,#9ca3af)">(sin pagos de tarjeta de crédito)</span></div>'
+        +'<div style="font-size:26px;font-weight:800;letter-spacing:-.8px;line-height:1;color:#166534">'+fE(periodoReal)+'</div>'
+      +'</div>'
+      +'<div style="font-size:11px;color:var(--text-secondary,#6b7280);max-width:420px;line-height:1.45">Excluye <b style="color:#991b1b">'+fE(periodoCredito)+'</b> del subtipo «Crédito» (pagos de tarjeta AMEX) porque esos gastos ya están capturados uno por uno. «Total del periodo» los sigue incluyendo.</div>'
+    +'</div>');
+  }
+
   // ── Año (secundaria, discreta) ──
   var tEg=data.totalEgresos||0, tPag=data.totalPagado||0, tPend=data.totalPendiente||0, prom=data.promedioMensual||0;
+  // Crédito acumulado del año (todas las filas, no solo el periodo): gasto real = Egresos − Crédito.
+  var _credYear = _rowsAll.filter(function(r){ return r.estatus!=='Cancelada' && _esCredito(r); }).reduce(function(s,r){return s+(r.monto||0);},0);
   h.push('<div class="eg-year">'
     +'<span class="eg-year-tag">Acumulado '+(data.anio||new Date().getFullYear())+'</span>'
     +'<span class="eg-year-item">Egresos <b id="eg-year-eg">'+fE(tEg)+'</b></span>'
+    +(_credYear>0?'<span class="eg-year-item" title="Egresos del año menos los pagos de tarjeta de crédito (subtipo «Crédito»), ya contados en los gastos capturados uno por uno.">Gasto real <b style="color:#166534">'+fE(tEg-_credYear)+'</b></span>':'')
     +'<span class="eg-year-item">Pagado <b id="eg-year-pag" style="color:#166534">'+fE(tPag)+'</b></span>'
     +'<span class="eg-year-item">Pendiente <b id="eg-year-pend" style="color:#b45309">'+fE(tPend)+'</b></span>'
     +'<span class="eg-year-item">Prom. mensual <b>'+fE(prom)+'</b></span>'
@@ -7537,7 +7562,7 @@ function _renderEgresosERP() {
         +'<td style="font-size:10.5px;color:var(--text-secondary,#6b7280)">'+(r.formaPago||'—')+'</td>'
         +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.facturacion?' checked':'')+(esCancel||esAuto?' disabled':'')+' onchange="egToggleField('+r._rowNum+',\'facturación\',this.checked)"'+(r.linkFacturaUrl?' title="Factura adjunta"':'')+'></td>'
         +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.pagado?' checked':'')+(esCancel||esAuto?' disabled':'')+' onchange="egToggleField('+r._rowNum+',\'pagado\',this.checked)"'+(esAuto?' title="Partida automática (siempre pagada)"':(r.linkPagoUrl?' title="Pago adjunto"':''))+'></td>'
-        +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+(r.contabilidad?' checked':'')+(esCancel||esAuto?' disabled':'')+' onchange="egToggleField('+r._rowNum+',\'contabilidad\',this.checked)"></td>'
+        +'<td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" class="eg-chk"'+((r.contabilidad||(r.poliza&&String(r.poliza).trim()))?' checked':'')+(esCancel||esAuto?' disabled':'')+(r.poliza&&String(r.poliza).trim()?' title="Con póliza '+String(r.poliza).replace(/"/g,'&quot;')+' — registrado en contabilidad"':'')+' onchange="egToggleField('+r._rowNum+',\'contabilidad\',this.checked)"></td>'
         +'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'+cotizIcon+' '+factIcon+' '+pagoIcon+mailIcon+'</td>'
         +((hasPermission('editar_egresos')||hasPermission('borrar_egresos'))?'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'
           +(esAuto?'<span style="font-size:10px;color:#0369a1" title="Se recalcula sola con cada ingreso de Mercado Pago; no la edites a mano">🔒 auto</span>'
@@ -8230,6 +8255,9 @@ async function egEditField(rowNum, field, el){
   var localKey=({monto:'monto', formaPago:'formaPago'})[field]||field;
   var oldMonto=lr?(Number(lr.monto)||0):0;
   if(lr) lr[localKey]=val;
+  // Con póliza no vacía → Contabilidad = true (espeja lo que hace el backend, así el
+  // checkbox CONT queda palomeado al re-renderar, sin esperar al refresh del servidor).
+  if(lr && field==='poliza' && String(val||'').trim()!==''){ lr.contabilidad=true; }
   if(field==='monto'){
     var mc=document.getElementById('eg-monto-'+rowNum); if(mc) mc.textContent=_egf(val);
     _egRecalcTotals(val-oldMonto, lr?!!lr.pagado:true);

@@ -2646,6 +2646,9 @@ function updateEgresoField(payload) {
         'usd':parseFloat(String(payload.montoUSD||'').replace(/[$,]/g,''))||0,
         'tipo de cambio':parseFloat(String(payload.tipoCambio||'').replace(/[$,]/g,''))||0
       };
+      // Con póliza asignada → Contabilidad = true (el CONT queda palomeado). Si la póliza
+      // está vacía se respeta el valor manual de Contabilidad (no se fuerza a false).
+      if (String(colMap['poliza']||'').trim() !== '') colMap['contabilidad'] = true;
       // Actualizar mes automáticamente
       var fd = new Date(payload.fecha);
       var meses = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -2670,6 +2673,12 @@ function updateEgresoField(payload) {
     for (var key in fields) {
       var ci2 = findCol(key);
       if (ci2 > -1) sheet.getRange(rowNum, ci2+1).setValue(fields[key]);
+    }
+    // Si en esta edición inline se puso una Póliza no vacía → marca Contabilidad = true
+    // (el CONT queda palomeado y persiste). Póliza vacía no toca el CONT manual.
+    if (('poliza' in fields) && String(fields.poliza||'').trim() !== '') {
+      var iContF = findCol('contabilidad');
+      if (iContF > -1) sheet.getRange(rowNum, iContF+1).setValue(true);
     }
     // Al marcar PAGADO por checkbox y no haber fecha de pago, poner la de hoy
     // (col Fecha) + actualizar Mes — para que no quede el egreso con fecha vacía.
