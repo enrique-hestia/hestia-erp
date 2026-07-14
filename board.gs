@@ -284,16 +284,24 @@ function _boardPresLee(per){
     if(!pr || !pr.ok) return null;
     var sig = pr.siguiente||{}, eg = pr.egresos||{};
     var metaGuardada = (sig.totales && _boardNum(sig.totales.meta)>0);
-    var metaIng = metaGuardada ? _boardNum(sig.totales.meta) : _boardNum(sig.ingresosTotalProy);
+    // Ingreso proyectado = la PROYECCIÓN GUARDADA (escenario activo del panel: base/conservador/optimista/meta).
+    // readPresupuesto ya resuelve el escenario activo y sus %s guardados; si no hay nada guardado,
+    // proyeccionSeleccionada cae a la meta capturada o a la recomendación del modelo (compat. previa).
+    var proySel = _boardNum(sig.totales && sig.totales.proyeccionSeleccionada);
+    var metaIng = proySel>0 ? proySel
+                : (metaGuardada ? _boardNum(sig.totales.meta) : _boardNum(sig.ingresosTotalProy));
     var metaEg  = (eg.totales && _boardNum(eg.totales.meta)>0) ? _boardNum(eg.totales.meta)
                 : (eg.totales ? _boardNum(eg.totales.proyeccion) : _boardNum(eg.proyeccion));
-    var baseIng = _boardNum(sig.ingresosTotalProy) || _boardNum(sig.totales && sig.totales.proyeccion) || metaIng;
+    var baseIng = _boardNum(sig.totales && sig.totales.proyeccion) || _boardNum(sig.ingresosTotalProy) || metaIng;
+    var escSel  = (sig.totales && sig.totales.seleccionado) || (metaGuardada?'meta':'base');
+    var escGuardado = !!(pr.escenariosPct && pr.escenariosPct.esGuardado);   // el usuario guardó %s/escenario
     var escenarios = { base:baseIng,
       conservador:_boardNum(sig.totales && sig.totales.conservador) || baseIng,
       optimista:_boardNum(sig.totales && sig.totales.optimista) || baseIng,
-      meta:_boardNum(sig.totales && sig.totales.meta), egresos:metaEg };
+      meta:_boardNum(sig.totales && sig.totales.meta), egresos:metaEg, seleccionado:escSel };
     return { periodo:per, ventas:_boardSumQtyProy(sig.ingresosGrupos), ingresos:metaIng,
-             egresos:metaEg, utilidad:metaIng-metaEg, fuente: metaGuardada?'guardada':'automatica',
+             egresos:metaEg, utilidad:metaIng-metaEg,
+             fuente: (metaGuardada || escGuardado) ? 'guardada' : 'automatica',
              desglose:_boardVentasDesgloseProy(sig.ingresosGrupos), escenarios:escenarios };
   }catch(e){ return null; }
 }

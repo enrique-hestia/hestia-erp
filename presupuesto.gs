@@ -267,6 +267,52 @@ function presSetEscenarios(body) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
+/* ══ PARÁMETROS DE PROYECCIÓN (escenarios) POR PERIODO ════════════════════
+   Persisten los %s del panel de escenarios y el escenario activo por trimestre,
+   en la MISMA hoja Presupuesto_Metas, como una fila especial:
+     Periodo | '__PROYECCION__' | Conservador % | Optimista % | Base % (vs recom) | Notas=escenario
+   El recomendado del modelo es solo la SEMILLA: una vez que el usuario guarda
+   sus %s, esos MANDAN y no se sobrescriben al recargar. Guardado PARCIAL: cada
+   campo omitido conserva su valor previo (o la semilla si nunca se guardó).     */
+function savePresupuestoProyeccion(body) {
+  try {
+    var per = String((body && body.periodo) || '').trim();
+    if (!/^\d{4}-Q[1-4]$/.test(per)) return { ok: false, error: 'Periodo inválido (usa YYYY-Qn).' };
+    if (_presQEnded(per)) return { ok: false, error: 'Ese trimestre ya terminó; el presupuesto no se puede modificar.' };
+    var ss = SpreadsheetApp.openById(ER_SS_ID);
+    var sh = ss.getSheetByName(PRES_METAS_TAB);
+    if (!sh) { setupPresupuesto(); sh = ss.getSheetByName(PRES_METAS_TAB); }
+    // Valores previos (o la semilla global) para permitir guardado parcial.
+    var seed = _presEscenariosCfg();
+    var prev = { conservador: seed.conservador, optimista: seed.optimista, basePct: 0, seleccionado: 'base' };
+    var lr = sh.getLastRow(), found = 0;
+    if (lr > 1) {
+      var vals = sh.getRange(2, 1, lr - 1, 6).getValues();
+      for (var i = 0; i < vals.length; i++) {
+        if (String(vals[i][0]).trim() === per && String(vals[i][1]).trim().toUpperCase() === '__PROYECCION__') {
+          found = i + 2;
+          prev = { conservador: _presNum(vals[i][2]), optimista: _presNum(vals[i][3]), basePct: _presNum(vals[i][4]),
+                   seleccionado: String(vals[i][5] || '').trim().toLowerCase() || 'base' };
+          break;
+        }
+      }
+    }
+    function pick(v, d) { return (v === undefined || v === null || v === '') ? d : v; }
+    var cons = Math.max(0, _presNum(pick(body.conservador, prev.conservador)));
+    var opt  = Math.max(0, _presNum(pick(body.optimista,   prev.optimista)));
+    var base = _presNum(pick(body.basePct, prev.basePct));   // puede ser negativo (Base bajo el recomendado)
+    var sel  = String(pick(body.seleccionado, prev.seleccionado) || 'base').trim().toLowerCase();
+    if (['conservador', 'base', 'optimista', 'meta'].indexOf(sel) < 0) sel = 'base';
+    var fila = [per, '__PROYECCION__', cons, opt, base, sel, ''];
+    if (found) sh.getRange(found, 1, 1, fila.length).setValues([fila]);
+    else sh.appendRow(fila);
+    try { logAudit(body.usuario || '', 'Presupuesto', found ? 'Edición proyección' : 'Alta proyección',
+      per + ' · esc=' + sel + ' base%=' + base + ' cons%=' + cons + ' opt%=' + opt, 'proyeccion', '', ''); } catch (e) {}
+    return { ok: true, message: 'Proyección guardada.',
+      proyeccion: { conservador: cons, optimista: opt, basePct: base, seleccionado: sel } };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 /* ── Histórico de metas por trimestre (últimos ~7 Q + el siguiente proyectado):
    meta fijada vs real logrado + cumplimiento, para ver la racha. Solo 2 lecturas. */
 function readHistoricoMetas() {
@@ -318,6 +364,16 @@ function _presLeerMetas() {
       if (!map[per]) map[per] = { __total: 0, __totalEg: 0, __tot: null, _lineas: {}, _egLineas: {} };
       if (lin.toUpperCase() === 'TOTAL') {
         map[per].__tot = meta;
+      } else if (lin.toUpperCase() === '__PROYECCION__') {
+        // Fila especial: parámetros de PROYECCIÓN (escenarios) por periodo — NO es una línea de meta,
+        // no suma al total. col C = Conservador % (vs base), col D = Optimista % (vs base),
+        // col E = Base % (vs recomendado del modelo), col F (Notas) = escenario seleccionado.
+        map[per]._proyeccion = {
+          conservador: _presNum(raw[r][2]),
+          optimista: _presNum(raw[r][3]),
+          basePct: _presNum(raw[r][4]),
+          seleccionado: String(raw[r][5] || '').trim().toLowerCase() || 'base'
+        };
       } else if (lin.substring(0, 3).toUpperCase() === 'EG:') {
         // Meta de EGRESO (prefijo EG:)
         map[per]._egLineas[lin.substring(3)] = meta;
@@ -360,7 +416,7 @@ function _presCrecCantTotal(map, refY, refQ) {
    Reutiliza helpers de summary.gs (_summaryReadIngresos, _summaryRevOrden,
    _sumOrdIn, SUMMARY_SUBGROUP_ORDER, SUMMARY_PRODUCT_ORDER). ───────────── */
 function _presIngresosProy(tY, tQ) {
-  var q = {}, qCantTot = {};
+  var q = {}, qCantTot = {}, origenSub = {};   // origenSub[gs] = true si el sub proviene de un ORIGEN externo atribuido
   var thisYear = new Date().getFullYear();
   for (var y = thisYear - 2; y <= thisYear; y++) {
     var rows; try { rows = _summaryReadIngresos(y); } catch (e) { rows = []; }
@@ -371,7 +427,9 @@ function _presIngresosProy(tY, tQ) {
       var g = String(r.grupoU || '').trim() || String(r.categoria || '').trim() || '(Sin grupo)';
       // Ingresos externos atribuidos: el sub-nivel se abre por DUEÑO (Origen
       // externo). Los no-externos traen r.origen='' → sub = categoría (sin cambio).
-      var s = (r.origen && String(r.origen).trim()) ? String(r.origen).trim() : (String(r.categoria || '').trim() || g);
+      var _tieneOrigen = !!(r.origen && String(r.origen).trim());
+      var s = _tieneOrigen ? String(r.origen).trim() : (String(r.categoria || '').trim() || g);
+      if (_tieneOrigen) origenSub[g + '' + s] = true;   // este sub SÍ tiene dueño (origen) atribuido
       var p = String(r.producto || '').trim() || s;
       var cant = Number(r.cantidad) || 0, imp = Number(r.total) || 0;
       if (!q[qk]) q[qk] = {}; if (!q[qk][g]) q[qk][g] = {}; if (!q[qk][g][s]) q[qk][g][s] = {};
@@ -389,7 +447,11 @@ function _presIngresosProy(tY, tQ) {
   var allG = {};
   [kRec, kAA].forEach(function (k) { Object.keys(q[k] || {}).forEach(function (g) { allG[g] = 1; }); });
   var grupos = [], totImp = 0;
+  // ¿El grupo es el bucket de EXTERNOS? (ciclo/categoría con 'extern'). Sus sub-líneas se
+  // muestran por DUEÑO: con origen → nombre del origen; sin origen → "Externos — sin atribuir".
+  function _esExternos(name) { return /extern/i.test(String(name || '')); }
   Object.keys(allG).forEach(function (g) {
+    var esExtGrupo = _esExternos(g);
     var subMap = {};
     [kRec, kAA].forEach(function (k) { Object.keys((q[k] || {})[g] || {}).forEach(function (s) { subMap[s] = 1; }); });
     var subgrupos = [], gImp = 0, gCant = 0, gAA = 0, gRe = 0;
@@ -410,7 +472,13 @@ function _presIngresosProy(tY, tQ) {
       });
       if (!productos.length) return;
       productos.sort(function (a, b) { return (_sumOrdIn(SUMMARY_PRODUCT_ORDER, a.producto) - _sumOrdIn(SUMMARY_PRODUCT_ORDER, b.producto)) || (b.importeProy - a.importeProy); });
-      subgrupos.push({ sub: s, importeProy: sImp, cantProy: sCant, productos: productos });
+      // Etiqueta a nivel medio de detalle (más que la categoría, menos que Summary):
+      // externo con dueño → nombre del origen (= s); externo sin dueño → "sin atribuir".
+      var _tuvoOrigen = !!origenSub[g + '' + s];
+      var _extSin = esExtGrupo && !_tuvoOrigen;
+      var _subLabel = _extSin ? 'Externos — sin atribuir' : s;
+      subgrupos.push({ sub: s, subLabel: _subLabel, externoSinAtribuir: _extSin, categoriaOriginal: s,
+        importeProy: sImp, cantProy: sCant, productos: productos });
       gImp += sImp; gCant += sCant;
     });
     if (gImp <= 0.5) return;
@@ -569,6 +637,26 @@ function readPresupuesto(periodo) {
     // ── Tendencia mensual (income + egresos) para la gráfica ──
     var tendencia = _presTendencia(histM, egQ.m || {}, tgtY, tgtQ, _ingProyTot, egProy);
 
+    // ── Parámetros de PROYECCIÓN (escenarios) guardados por periodo ──
+    // La recomendación del modelo (ingProd.totalImporte) es solo la SEMILLA. Si el usuario
+    // guardó su Base % / Conservador % / Optimista % y el escenario activo, esos MANDAN.
+    var _proyCfg = (metas[perSig] && metas[perSig]._proyeccion) || null;
+    var _escSeed = _presEscenariosCfg();
+    var _consP  = (_proyCfg && _proyCfg.conservador != null) ? _proyCfg.conservador : _escSeed.conservador;
+    var _optP   = (_proyCfg && _proyCfg.optimista  != null) ? _proyCfg.optimista  : _escSeed.optimista;
+    var _basePct = (_proyCfg && _proyCfg.basePct   != null) ? _proyCfg.basePct    : 0;
+    var _recomBase = ingProd.totalImporte || totProy;                              // recomendación cruda del modelo
+    var _baseAjust = Math.round(_recomBase * (1 + (_basePct || 0) / 100));         // Base con el % vs recom del usuario
+    var _consAmt   = Math.round(_baseAjust * (1 - (_consP || 0) / 100));
+    var _optAmt    = Math.round(_baseAjust * (1 + (_optP  || 0) / 100));
+    var _metaTot   = (metas[perSig] && metas[perSig].__total) || 0;
+    // Escenario activo: el guardado manda; si no hay pero sí hay meta capturada, se implica 'meta'; si no, 'base'.
+    var _selScen = (_proyCfg && _proyCfg.seleccionado) ? _proyCfg.seleccionado : (_metaTot > 0 ? 'meta' : 'base');
+    var _proySel = _selScen === 'conservador' ? _consAmt
+                 : _selScen === 'optimista'   ? _optAmt
+                 : _selScen === 'meta'        ? _metaTot
+                 : _baseAjust;
+
     return {
       ok: true,
       _setup: metasInfo._setup,
@@ -595,14 +683,17 @@ function readPresupuesto(periodo) {
         ingresosGrupos: ingProd.grupos,              // NUEVO: cantidad × precio, agrupado como Board Deck
         ingresosTotalProy: ingProd.totalImporte,
         crecimientoCant: ingProd.crecimientoCant,
-        totales: (function(){ var _b = ingProd.totalImporte || totProy; var _e = _presEscenariosCfg();
-          return { anioAnterior: totAnioAnt, reciente: totReciente, base: totBase,
-            conservador: Math.round(_b * (1 - (_e.conservador||0)/100)),
-            proyeccion: _b,
-            optimista: Math.round(_b * (1 + (_e.optimista||0)/100)),
-            meta: (metas[perSig] && metas[perSig].__total) || 0 }; })()
+        totales: { anioAnterior: totAnioAnt, reciente: totReciente, base: totBase,
+            recomendado: _recomBase,                 // recomendación cruda del modelo (semilla)
+            conservador: _consAmt,
+            proyeccion: _baseAjust,                  // Base (con el % vs recom guardado por el usuario)
+            optimista: _optAmt,
+            meta: _metaTot,
+            seleccionado: _selScen,                  // escenario activo (conservador|base|optimista|meta)
+            proyeccionSeleccionada: _proySel }       // importe del escenario activo → lo consume el Board Deck
       },
-      escenariosPct: _presEscenariosCfg(),
+      // %s + escenario activo del panel; esGuardado=true una vez que el usuario los persistió (no revertir al recom).
+      escenariosPct: { conservador: _consP, optimista: _optP, basePct: _basePct, seleccionado: _selScen, esGuardado: !!_proyCfg },
       egresos: {
         reciente: egTotReciente, proyeccion: egProy,
         margenProyectado: margenProy, margenPct: margenPct,
