@@ -442,6 +442,14 @@ function doGet(e) {
       if (typeof nominaMisRecibos !== 'function') return jsonResponse({ ok: false, error: 'nomina.gs no desplegado' });
       return jsonResponse(nominaMisRecibos((e && e.parameter.token) || '', (e && e.parameter.anio) || '', (e && e.parameter.mes) || ''));
     }
+    if (action === 'nominaMesEstado') {
+      if (typeof nominaMesEstado !== 'function') return jsonResponse({ ok: false, error: 'nomina.gs no desplegado — redespliega core.gs/finance.gs/nomina.gs' });
+      return jsonResponse(nominaMesEstado((e && e.parameter.anio) || '', (e && e.parameter.mes) || ''));
+    }
+    if (action === 'nominaBonos') {
+      if (typeof readBonos !== 'function') return jsonResponse({ ok: false, error: 'nomina.gs no desplegado — redespliega core.gs/finance.gs/nomina.gs' });
+      return jsonResponse(readBonos((e && e.parameter.anio) || '', (e && e.parameter.mes) || ''));
+    }
 
     if (action === 'buscarXmlAmplio') {
       var baIni = (e && e.parameter.fechaInicio) || '';

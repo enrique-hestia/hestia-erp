@@ -381,3 +381,340 @@ function nominaDiagnostico() {
   } catch (ex) { out.push('EXCEPCIÓN: ' + ex.message); }
   Logger.log(out.join('\n'));
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * F3/F4 — Vínculo Usuario↔Empleado · Bonos por empleado/mes · Validación
+ * del mes a Cuentas por Pagar (una orden por empleado).
+ *
+ * Hojas nuevas (se crean solas al primer uso):
+ *   - "Nomina_Bonos" (en SHEET_ID): bonos capturados por empleado/mes.
+ *   - "Nomina_Meses" (en SHEET_ID): estado Borrador/Validada por periodo.
+ * Las órdenes de pago se escriben en Egresos2026 (mismo mecanismo que Gastos
+ * Fijos: fila sin fecha de pago en col B + Pagado=false en col N ⇒ aparece
+ * como Cuenta por Pagar en la vista CxP, que lee readBDCxP de Egresos2026).
+ *
+ * Rutas nuevas (registrar en core.gs GET / finance.gs POST):
+ *   GET  nominaMesEstado&anio=&mes=          → nominaMesEstado(anio, mes)
+ *   GET  nominaBonos&anio=&mes=              → readBonos(anio, mes)
+ *   POST vincularEmpleadoUsuario {token, email, numEmpleado, nombre, vincular}
+ *   POST nominaValidarMes {token, anio, mes, forzar}
+ *   POST saveBono {token, anio, mes, numEmpleado, nombre, concepto, monto}
+ *   POST deleteBono {token, bonoId}
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+// ── Utilidades de periodo/fecha ────────────────────────────────────────
+function _nomPeriodo(anio, mes) {
+  var a = parseInt(anio, 10), m = parseInt(mes, 10);
+  if (!a || !m || m < 1 || m > 12) return '';
+  return a + '-' + (m < 10 ? '0' : '') + m;
+}
+function _nomFinDeMes(anio, mes) {
+  var a = parseInt(anio, 10), m = parseInt(mes, 10);
+  var last = new Date(a, m, 0).getDate(); // día 0 del mes siguiente = último día
+  return a + '-' + (m < 10 ? '0' : '') + m + '-' + (last < 10 ? '0' : '') + last;
+}
+function _nomMesNombreEs(mes) {
+  var M = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+  return M[(parseInt(mes, 10) || 1) - 1] || String(mes);
+}
+function _nomFechaStr(v) {
+  try {
+    if (!v) return '';
+    if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone() || 'America/Mexico_City', 'yyyy-MM-dd');
+    return String(v).substring(0, 10);
+  } catch (e) { return String(v || ''); }
+}
+
+// ── A. Vínculo Usuario ↔ Empleado ──────────────────────────────────────
+// Merge no destructivo sobre la hoja Empleados: conserva el resto de la fila
+// si el empleado ya existía; sólo fija NumEmpleado/Nombre/UsuarioEmail/Activo.
+// vincular:false ⇒ desvincula (limpia UsuarioEmail) sin borrar al empleado.
+function vincularEmpleadoUsuario(body) {
+  try {
+    if (!_tokenHasPermission(body.token || '', 'editar_egresos')) {
+      return { ok: false, error: 'Sin autorización para vincular empleados (editar_egresos).' };
+    }
+    var email = String(body.email || '').trim().toLowerCase();
+    if (!email) return { ok: false, error: 'Email del usuario requerido.' };
+    var vincular = (body.vincular === undefined) ? true : !!body.vincular;
+    var num = String(body.numEmpleado || '').trim();
+    var nombre = String(body.nombre || '').trim();
+    var usuario = ''; try { usuario = verifyToken(body.token || '') || ''; } catch (e) {}
+
+    var sh = _nomEmpSheet();
+    var data = sh.getDataRange().getValues();
+    var h = data[0];
+    var iNum = h.indexOf('NumEmpleado'), iNom = h.indexOf('Nombre'),
+        iEmail = h.indexOf('UsuarioEmail'), iActivo = h.indexOf('Activo');
+    if (iEmail < 0) return { ok: false, error: 'La hoja Empleados no tiene columna UsuarioEmail.' };
+
+    // ── Desvincular: limpia UsuarioEmail de cualquier empleado con este email ──
+    if (!vincular) {
+      var cleared = 0;
+      for (var r = 1; r < data.length; r++) {
+        if (String(data[r][iEmail] || '').trim().toLowerCase() === email) {
+          sh.getRange(r + 1, iEmail + 1).setValue(''); cleared++;
+        }
+      }
+      try { logAudit(usuario || 'sistema', 'Nómina', 'DesvincularEmpleado', email, '', '', String(cleared)); } catch (x) {}
+      return { ok: true, desvinculado: true, filas: cleared };
+    }
+
+    if (!num) return { ok: false, error: 'El número de empleado es obligatorio para vincular.' };
+
+    // 1 usuario ↔ 1 empleado: si OTRO empleado tenía este email, límpialo.
+    for (var r2 = 1; r2 < data.length; r2++) {
+      if (String(data[r2][iEmail] || '').trim().toLowerCase() === email &&
+          String(data[r2][iNum] || '').trim() !== num) {
+        sh.getRange(r2 + 1, iEmail + 1).setValue('');
+      }
+    }
+    // Buscar la fila del empleado; si existe → merge; si no → crear con lo mínimo.
+    var found = -1;
+    for (var r3 = 1; r3 < data.length; r3++) {
+      if (String(data[r3][iNum] || '').trim() === num) { found = r3; break; }
+    }
+    if (found > -1) {
+      var rowNum = found + 1;
+      sh.getRange(rowNum, iEmail + 1).setValue(email);
+      if (nombre && iNom > -1 && !String(data[found][iNom] || '').trim()) sh.getRange(rowNum, iNom + 1).setValue(nombre);
+      if (iActivo > -1) sh.getRange(rowNum, iActivo + 1).setValue('Sí');
+      try { logAudit(usuario || 'sistema', 'Nómina', 'VincularEmpleado', num + ' ' + email, '', '', 'merge'); } catch (x) {}
+      return { ok: true, numEmpleado: num, creado: false };
+    }
+    var vals = h.map(function (col) {
+      col = String(col);
+      if (col === 'NumEmpleado') return num;
+      if (col === 'Nombre') return nombre;
+      if (col === 'UsuarioEmail') return email;
+      if (col === 'Activo') return 'Sí';
+      if (col === 'SalarioDiario' || col === 'SBC') return 0;
+      return '';
+    });
+    sh.appendRow(vals);
+    try { logAudit(usuario || 'sistema', 'Nómina', 'VincularEmpleado', num + ' ' + email, '', '', 'nuevo'); } catch (x) {}
+    return { ok: true, numEmpleado: num, creado: true };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// ── C. Bonos por empleado/mes (hoja Nomina_Bonos) ──────────────────────
+var NOM_BONOS_TAB = 'Nomina_Bonos';
+var NOM_BONOS_HEADERS = ['BonoID', 'Periodo', 'NumEmpleado', 'Nombre', 'Concepto', 'Monto', 'Usuario', 'Fecha'];
+function _nomBonosSheet() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sh = ss.getSheetByName(NOM_BONOS_TAB);
+  if (!sh) {
+    sh = ss.insertSheet(NOM_BONOS_TAB);
+    sh.getRange(1, 1, 1, NOM_BONOS_HEADERS.length).setValues([NOM_BONOS_HEADERS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+function readBonos(anio, mes) {
+  try {
+    var per = _nomPeriodo(anio, mes);
+    if (!per) return { ok: false, error: 'anio y mes requeridos', bonos: [] };
+    var sh = _nomBonosSheet();
+    var data = sh.getDataRange().getValues();
+    var out = [], total = 0;
+    for (var i = 1; i < data.length; i++) {
+      var t = data[i];
+      if (String(t[1] || '') !== per) continue;
+      var monto = parseFloat(String(t[5] || '').replace(/[$,\s]/g, '')) || 0;
+      out.push({ bonoId: String(t[0] || ''), periodo: per, numEmpleado: String(t[2] || ''), nombre: String(t[3] || ''),
+        concepto: String(t[4] || ''), monto: monto, usuario: String(t[6] || ''), fecha: _nomFechaStr(t[7]) });
+      total += monto;
+    }
+    return { ok: true, periodo: per, bonos: out, total: total };
+  } catch (ex) { return { ok: false, error: ex.message, bonos: [] }; }
+}
+function saveBono(body) {
+  try {
+    if (!_tokenHasPermission(body.token || '', 'editar_egresos')) return { ok: false, error: 'Sin autorización (editar_egresos).' };
+    var per = _nomPeriodo(body.anio, body.mes);
+    if (!per) return { ok: false, error: 'anio y mes requeridos' };
+    var num = String(body.numEmpleado || '').trim();
+    if (!num) return { ok: false, error: 'numEmpleado requerido' };
+    var concepto = String(body.concepto || 'Bono').trim() || 'Bono';
+    var monto = parseFloat(String(body.monto || '').replace(/[$,\s]/g, '')) || 0;
+    if (!monto) return { ok: false, error: 'El monto del bono debe ser mayor a cero.' };
+    var sh = _nomBonosSheet();
+    var id = 'BON-' + new Date().getTime() + '-' + Math.floor(Math.random() * 1000);
+    var usuario = ''; try { usuario = verifyToken(body.token || '') || ''; } catch (e) {}
+    sh.appendRow([id, per, num, String(body.nombre || ''), concepto, monto, usuario, new Date()]);
+    try { logAudit(usuario || 'sistema', 'Nómina', 'CrearBono', num + ' ' + per, '', '', concepto + ' $' + monto); } catch (x) {}
+    return { ok: true, bonoId: id };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+function deleteBono(body) {
+  try {
+    if (!_tokenHasPermission(body.token || '', 'editar_egresos')) return { ok: false, error: 'Sin autorización (editar_egresos).' };
+    var id = String(body.bonoId || '').trim();
+    if (!id) return { ok: false, error: 'bonoId requerido' };
+    var sh = _nomBonosSheet();
+    var data = sh.getDataRange().getValues();
+    for (var i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][0] || '').trim() === id) {
+        sh.deleteRow(i + 1);
+        try { logAudit(verifyToken(body.token || '') || 'sistema', 'Nómina', 'BorrarBono', id, '', '', ''); } catch (x) {}
+        return { ok: true };
+      }
+    }
+    return { ok: false, error: 'Bono no encontrado' };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+// Suma de bonos del mes por NumEmpleado. {porNum:{num->total}, total, list}.
+function _nomBonosDelMes(periodo) {
+  var sh = _nomBonosSheet();
+  var data = sh.getDataRange().getValues();
+  var porNum = {}, total = 0, list = [];
+  for (var i = 1; i < data.length; i++) {
+    var t = data[i];
+    if (String(t[1] || '') !== periodo) continue;
+    var num = String(t[2] || '').trim();
+    var monto = parseFloat(String(t[5] || '').replace(/[$,\s]/g, '')) || 0;
+    porNum[num] = (porNum[num] || 0) + monto;
+    total += monto;
+    list.push({ numEmpleado: num, concepto: String(t[4] || ''), monto: monto });
+  }
+  return { porNum: porNum, total: total, list: list };
+}
+
+// ── B. Estado del mes (Nomina_Meses) + validación a Cuentas por Pagar ───
+var NOM_MESES_TAB = 'Nomina_Meses';
+var NOM_MESES_HEADERS = ['Periodo', 'Estado', 'FechaValidacion', 'Usuario', 'NumOrdenes', 'TotalNeto', 'Notas'];
+function _nomMesesSheet() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sh = ss.getSheetByName(NOM_MESES_TAB);
+  if (!sh) {
+    sh = ss.insertSheet(NOM_MESES_TAB);
+    sh.getRange(1, 1, 1, NOM_MESES_HEADERS.length).setValues([NOM_MESES_HEADERS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+function nominaMesEstado(anio, mes) {
+  try {
+    var per = _nomPeriodo(anio, mes);
+    if (!per) return { ok: false, error: 'anio y mes requeridos' };
+    var sh = _nomMesesSheet();
+    var data = sh.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0] || '') === per) {
+        return { ok: true, periodo: per, encontrado: true,
+          estado: String(data[i][1] || 'Borrador'),
+          fechaValidacion: _nomFechaStr(data[i][2]), usuario: String(data[i][3] || ''),
+          numOrdenes: parseInt(data[i][4], 10) || 0, totalNeto: parseFloat(data[i][5]) || 0,
+          notas: String(data[i][6] || '') };
+      }
+    }
+    return { ok: true, periodo: per, encontrado: false, estado: 'Borrador', numOrdenes: 0, totalNeto: 0 };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+function _nomSetMesEstado(per, o) {
+  var sh = _nomMesesSheet();
+  var data = sh.getDataRange().getValues();
+  var row = [per, o.estado || 'Borrador', o.fechaValidacion || new Date(), o.usuario || '', o.numOrdenes || 0, o.totalNeto || 0, o.notas || ''];
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0] || '') === per) { sh.getRange(i + 1, 1, 1, NOM_MESES_HEADERS.length).setValues([row]); return; }
+  }
+  sh.appendRow(row);
+}
+
+// Crea UNA orden de pago (fila CxP en Egresos2026) para un empleado. Idempotente
+// por NominaID (columna propia, independiente de RecurrenteID de Gastos Fijos).
+// Estructura de fila IDÉNTICA a la que genera Gastos Fijos (_gfAppendCxP): sin
+// fecha de pago (col B vacía) + Pagado=false (col N) ⇒ Cuenta por Pagar.
+// LockService hace atómico "revisar duplicado + append" (evita doble orden).
+function _nomAppendCxP(egSh, iNom1, item, usuario) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) return { ok: false, error: 'No se pudo obtener el bloqueo, intenta de nuevo' };
+  try {
+    var monto = parseFloat(String(item.monto || '').replace(/[$,\s]/g, '')) || 0;
+    var data = egSh.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][iNom1 - 1] || '').trim() === item.nominaId) return { ok: false, dup: true, id: item.nominaId };
+    }
+    var lr = egSh.getLastRow(), lastId = 0;
+    if (lr > 1) { var ids = egSh.getRange(2, 1, lr - 1, 1).getValues(); for (var k = 0; k < ids.length; k++) { var n = parseInt(ids[k][0]); if (n > lastId) lastId = n; } }
+    var newId = lastId + 1;
+    // A ID, B Fecha(''), C Mes, D prioridad, E Proveedor, F Contable, G Tipo, H Subtipo,
+    // I Concepto, J Monto, K Notas, L Vencimiento, M/N/O false, P Poliza, Q FormaPago, R Obs, S/T links
+    var row = [newId, '', item.periodo, 1, item.proveedor || 'Nómina', item.contable || 'Gasto', 'Fijo', item.subtipo || 'Nómina',
+      item.concepto || '', monto, item.notas || '', item.vencimiento || '', false, false, false, '',
+      item.formaPago || '', '', '', ''];
+    egSh.appendRow(row);
+    var newRow = egSh.getLastRow();
+    egSh.getRange(newRow, iNom1).setValue(item.nominaId); // NominaID
+    var iDiv = _egColEnsure(egSh, 'divisa', 'Divisa');
+    egSh.getRange(newRow, iDiv).setValue('MXN');
+    try { logAudit(usuario || 'sistema', 'Nómina', 'OrdenCxP', item.nominaId, 'Mes', item.periodo, (item.proveedor || '') + ' ' + monto); } catch (x) {}
+  } finally { lock.releaseLock(); }
+  return { ok: true, id: newId };
+}
+
+// Valida la nómina del mes: crea UNA orden de pago por empleado en Cuentas por
+// Pagar (neto CFDI + bonos del mes), y marca el mes como Validada. Idempotente:
+// no duplica órdenes (dedup por NominaID); re-enviar con forzar sólo agrega las
+// faltantes.
+function nominaValidarMes(body) {
+  try {
+    if (!_tokenHasPermission(body.token || '', 'editar_egresos')) {
+      return { ok: false, error: 'Sin autorización para validar nómina (editar_egresos).' };
+    }
+    var anio = parseInt(body.anio, 10), mes = parseInt(body.mes, 10);
+    var per = _nomPeriodo(anio, mes);
+    if (!per) return { ok: false, error: 'anio y mes requeridos' };
+    var forzar = !!body.forzar;
+    var est = nominaMesEstado(anio, mes);
+    if (est.ok && est.estado === 'Validada' && !forzar) {
+      return { ok: false, yaValidada: true, periodo: per, estado: est,
+        error: 'La nómina de ' + per + ' ya fue validada (' + (est.numOrdenes || 0) + ' órdenes). Vuelve a enviar si quieres generar las faltantes.' };
+    }
+    var data = readNominaMes(anio, mes);
+    if (!data.ok) return { ok: false, error: data.error || 'No se pudo leer la nómina del mes.' };
+    if (!data.encontrada || !data.empleados.length) {
+      return { ok: false, error: 'No hay recibos de nómina (CFDI tipo N) para ' + per + '; no hay nada que validar.' };
+    }
+    var cfg = _nominaCfg();
+    var bonos = _nomBonosDelMes(per);
+    var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
+    var egSh = ss.getSheetByName(EGRESOS_TABS[2026] || 'Egresos2026');
+    if (!egSh) return { ok: false, error: 'Hoja Egresos2026 no encontrada.' };
+    var iNom1 = _egColEnsure(egSh, 'nominaid', 'NominaID');
+    var venc = _nomFinDeMes(anio, mes);
+    var mesNom = _nomMesNombreEs(mes);
+    var usuario = ''; try { usuario = verifyToken(body.token || '') || ''; } catch (e) {}
+
+    var creadas = 0, dups = 0, totalNeto = 0, detalle = [];
+    for (var i = 0; i < data.empleados.length; i++) {
+      var e = data.empleados[i];
+      var key1 = String(e.numEmpleado || '').trim(), key2 = String(e.clave || '').trim();
+      var bono = 0, seen = {};
+      [key1, key2].forEach(function (kk) { if (kk && !seen[kk]) { seen[kk] = 1; bono += (bonos.porNum[kk] || 0); } });
+      var netoCfdi = parseFloat(e.neto) || 0;
+      var monto = netoCfdi + bono;
+      totalNeto += monto;
+      var clave = key1 || key2 || ('r' + i);
+      var nombre = e.nombre || e.rfc || clave;
+      var nominaId = 'NOM-' + per + '-' + String(clave).replace(/[^A-Za-z0-9_\-]/g, '');
+      var notas = 'Nómina ' + per + ' · neto CFDI ' + netoCfdi.toFixed(2) + (bono > 0 ? (' + bonos ' + bono.toFixed(2)) : '') + (e.asimilado ? ' · asimilado' : '');
+      var r = _nomAppendCxP(egSh, iNom1, {
+        periodo: per, nominaId: nominaId,
+        proveedor: cfg.cxpProveedor || 'Nómina', contable: 'Gasto', subtipo: 'Nómina',
+        concepto: 'Nómina ' + mesNom + ' ' + anio + ' — ' + nombre,
+        monto: monto, notas: notas, vencimiento: venc
+      }, usuario);
+      if (r.ok) { creadas++; detalle.push({ empleado: nombre, monto: monto, id: nominaId }); }
+      else if (r.dup) dups++;
+    }
+    _nomSetMesEstado(per, {
+      estado: 'Validada', fechaValidacion: new Date(), usuario: usuario,
+      numOrdenes: (est.numOrdenes || 0) + creadas, totalNeto: totalNeto,
+      notas: (forzar ? 'Re-generada. ' : '') + creadas + ' orden(es) creadas, ' + dups + ' ya existían.'
+    });
+    try { CacheService.getScriptCache().remove('gas_egresos_v1_2026'); } catch (e) {}
+    return { ok: true, periodo: per, creadas: creadas, duplicadas: dups, totalNeto: totalNeto,
+      numEmpleados: data.empleados.length, bonosTotal: bonos.total, detalle: detalle };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
