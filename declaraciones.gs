@@ -64,14 +64,41 @@ function _declSheet() {
   return sh;
 }
 
-// Carpeta de Drive para los PDF adjuntos de declaraciones (por año).
+// Carpeta RAÍZ de los PDF de declaraciones. Configurable con la Script Property
+// DECL_FOLDER_ID (id o carpeta que dé el usuario) para que NO queden regados; si
+// no está configurada, usa/crea una sola carpeta "Declaraciones ERP".
+function _declFolderRoot() {
+  var pid = '';
+  try { pid = PropertiesService.getScriptProperties().getProperty('DECL_FOLDER_ID') || ''; } catch (e) {}
+  if (pid) { try { return DriveApp.getFolderById(pid); } catch (e) {} }
+  var it = DriveApp.getFoldersByName('Declaraciones ERP');
+  return it.hasNext() ? it.next() : DriveApp.createFolder('Declaraciones ERP');
+}
+
+// Devuelve (creando si hace falta) la subcarpeta <raíz>/<año>/<mes> para dejar
+// todo ordenado por periodo.
 function _declFolder(periodo) {
-  var rootIt = DriveApp.getFoldersByName('Declaraciones_Adjuntos');
-  var root = rootIt.hasNext() ? rootIt.next() : DriveApp.createFolder('Declaraciones_Adjuntos');
-  var m = String(periodo || '').match(/^(\d{4})/);
+  var root = _declFolderRoot();
+  var m = String(periodo || '').match(/^(\d{4})-(\d{2})/);
   if (!m) return root;
-  var sub = root.getFoldersByName(m[1]);
-  return sub.hasNext() ? sub.next() : root.createFolder(m[1]);
+  var subA = root.getFoldersByName(m[1]);
+  var fA = subA.hasNext() ? subA.next() : root.createFolder(m[1]);
+  var subM = fA.getFoldersByName(m[2]);
+  return subM.hasNext() ? subM.next() : fA.createFolder(m[2]);
+}
+
+// Configura la carpeta destino de las declaraciones desde un ID o URL de Drive.
+// Correr una vez desde el editor de Apps Script: configurarCarpetaDeclaraciones('<link>')
+function configurarCarpetaDeclaraciones(idOrUrl) {
+  try {
+    var s = String(idOrUrl || '');
+    var m = s.match(/[-\w]{25,}/);
+    var id = m ? m[0] : s.trim();
+    if (!id) return { ok: false, error: 'Da el ID o el link de la carpeta de Drive.' };
+    var f = DriveApp.getFolderById(id); // valida acceso
+    PropertiesService.getScriptProperties().setProperty('DECL_FOLDER_ID', id);
+    return { ok: true, carpeta: f.getName(), url: f.getUrl(), id: id };
+  } catch (ex) { return { ok: false, error: 'No pude acceder a esa carpeta: ' + ex.message }; }
 }
 
 // Sube un PDF (declaración o comprobante de pago) a Drive y devuelve su URL.
