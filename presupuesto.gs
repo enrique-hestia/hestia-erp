@@ -28,7 +28,10 @@
 // Este tope mantiene la proyección realista (el piso ya cuida el mínimo).
 var PRES_CREC_MAX = 0.30;   // 30% — ajustable
 var PRES_METAS_TAB = 'Presupuesto_Metas';
-var PRES_METAS_HEADERS = ['Periodo', 'Línea de servicio', 'Meta ingresos', 'Meta margen %', 'Crecimiento objetivo %', 'Notas'];
+// Col 7 "Meta cantidad": la CANTIDAD manual capturada por producto. El grid de ingresos
+// es cantidad×precio; guardar solo el importe obligaba a reconstruir la cantidad dividiendo
+// por un precio que se recalcula en vivo (deriva). Persistir la cantidad la vuelve exacta.
+var PRES_METAS_HEADERS = ['Periodo', 'Línea de servicio', 'Meta ingresos', 'Meta margen %', 'Crecimiento objetivo %', 'Notas', 'Meta cantidad'];
 
 function _presNum(v) { if (typeof v === 'number') return v; var n = parseFloat(String(v || '').replace(/[$,\s]/g, '')); return isNaN(n) ? 0 : n; }
 function _presQ(month) { return Math.floor((month - 1) / 3) + 1; }          // mes 1-12 → trimestre 1-4
@@ -90,7 +93,7 @@ function setupPresupuesto() {
       .setFontWeight('bold').setFontColor('#ffffff').setBackground('#c46a7a').setVerticalAlignment('middle');
     sh.setFrozenRows(1);
     sh.setRowHeight(1, 30);
-    var widths = [110, 220, 140, 120, 160, 240];
+    var widths = [110, 220, 140, 120, 160, 240, 120];
     for (var w = 0; w < widths.length; w++) sh.setColumnWidth(w + 1, widths[w]);
     try {
       var bandings = sh.getBandings();
@@ -320,7 +323,7 @@ function _presLeerMetas() {
         map[per]._egLineas[lin.substring(3)] = meta;
         map[per].__totalEg += meta;
       } else {
-        map[per]._lineas[lin] = { metaIngreso: meta, metaMargen: _presNum(raw[r][3]), crecObjetivo: _presNum(raw[r][4]) / 100 };
+        map[per]._lineas[lin] = { metaIngreso: meta, metaMargen: _presNum(raw[r][3]), crecObjetivo: _presNum(raw[r][4]) / 100, metaCantidad: _presNum(raw[r][6]) };
         map[per].__total += meta;
       }
     }
@@ -544,9 +547,23 @@ function readPresupuesto(periodo) {
     var margenProy = _ingProyTot - egProy;
     var margenPct = _ingProyTot > 0 ? (margenProy / _ingProyTot) * 100 : 0;
 
-    // Adjuntar budget guardado (meta por producto) a la estructura nueva de ingresos
+    // Adjuntar budget guardado (meta por producto) a la estructura nueva de ingresos.
+    // La meta MANUAL manda: se devuelve el importe guardado (p.budget), la CANTIDAD
+    // capturada (p.budgetCant) y una bandera de presencia (p.tieneMeta). El estimado
+    // del sistema es solo la SEMILLA cuando NO hay meta guardada. Índice normalizado
+    // (trim + minúsculas) por si el nombre del producto llegó con diferencias de
+    // espacios/mayúsculas entre la captura y la relectura (evita reversión al estimado).
+    var _metaNorm = {};
+    Object.keys(metaSig).forEach(function (k) { _metaNorm[String(k).trim().toLowerCase()] = metaSig[k]; });
+    function _metaDeProducto(prod) {
+      var m = metaSig[prod]; if (m) return m;
+      return _metaNorm[String(prod || '').trim().toLowerCase()] || null;
+    }
     (ingProd.grupos || []).forEach(function (G) { (G.subgrupos || []).forEach(function (S) { (S.productos || []).forEach(function (p) {
-      p.budget = (metaSig[p.producto] && metaSig[p.producto].metaIngreso) || 0;
+      var mm = _metaDeProducto(p.producto);
+      p.budget = (mm && mm.metaIngreso) || 0;
+      p.budgetCant = (mm && mm.metaCantidad) || 0;
+      p.tieneMeta = !!mm;                       // hay meta manual guardada (aunque valga 0)
     }); }); });
 
     // ── Tendencia mensual (income + egresos) para la gráfica ──
@@ -788,7 +805,7 @@ function savePresupuestoMeta(body) {
     var per = String(body.periodo).trim(), lin = String(body.linea).trim();
     // Si capturan una meta POR PRODUCTO, se retira el TOTAL fijo para que gobierne la suma (última acción manda).
     if (lin.toUpperCase() !== 'TOTAL') { try { _presClearTotal(sh, per); } catch (e) {} }
-    var fila = [per, lin, _presNum(body.metaIngreso), _presNum(body.metaMargen), _presNum(body.crecimiento), String(body.notas || '')];
+    var fila = [per, lin, _presNum(body.metaIngreso), _presNum(body.metaMargen), _presNum(body.crecimiento), String(body.notas || ''), _presNum(body.metaCantidad)];
     // Buscar fila existente (mismo periodo + línea)
     var lr = sh.getLastRow(), found = 0;
     if (lr > 1) {
@@ -825,7 +842,7 @@ function savePresupuestoMetasBatch(body) {
     var appends = [];
     body.metas.forEach(function (m) {
       var lin = String(m.linea || '').trim(); if (!lin) return;
-      var row = [per, lin, _presNum(m.metaIngreso), 0, 0, ''];
+      var row = [per, lin, _presNum(m.metaIngreso), 0, 0, '', _presNum(m.metaCantidad)];
       var found = existing[lin.toLowerCase()];
       if (found) sh.getRange(found, 1, 1, row.length).setValues([row]);
       else appends.push(row);
