@@ -67,6 +67,7 @@ function setupCobranzaConfig() {
   _cobEnsureAbonos();
   _cobEnsureCargos();
   _susEnsureSheet();
+  if (typeof _mpEnsureSheet === 'function') _mpEnsureSheet();
   return { ok: true, version: COBRANZA_VER, config: cfg };
 }
 
@@ -1235,3 +1236,421 @@ function _susAplicarPagoFIFO(paciente, monto) {
 function generarSuscripcionesMensual() {
   return generarSuscripciones({ usuario: 'sistema (scheduler)', consolidar: false });
 }
+
+/* ═════════════════ CONCILIACIÓN MERCADO PAGO (Suscriptores) ═════════════════
+ * Cruza la exportación de "Suscriptores" de Mercado Pago contra el universo de
+ * suscripciones de crío del ERP (Motor B). El objetivo: saber quién está de verdad
+ * dado de alta en la suscripción recurrente de MP (cobro automático) vs. quién solo
+ * pagó a mano (transferencia/efectivo) y NO se le va a cobrar solo.
+ *
+ * VÍNCULO NO DESTRUCTIVO: la liga payer_id ↔ paciente se guarda en una hoja NUEVA
+ * y aparte, `Suscripciones_MP` (nunca toca ni Cuentas_Cobrar ni Inventario Crío).
+ * Las columnas se agregan al FINAL (patrón _ingColEnsure): jamás se reordenan ni se
+ * quitan columnas existentes. Re-subir el archivo es idempotente: primero empata por
+ * payer_id (si ya está ligado → solo refresca estatus), si no por nombre; ACTUALIZA la
+ * misma fila (nunca duplica). Es solo sincronización: no rompe la base de cobranza.
+ */
+var COBRANZA_MP        = 'Suscripciones_MP';
+var COBRANZA_MP_VER    = 'crio-mp-2026.07.14';
+var COBRANZA_MP_HEADERS = ['PacienteKey','Paciente','PayerID','MP_Email','MP_Status','MP_Plan','MP_Monto',
+  'MP_Inicio','MP_ProxCobro','MP_UltCobro','MP_UltMonto','MP_Cobros','Clasificacion','ActualizadoEn','ActualizadoPor'];
+
+function _mpEnsureSheet() {
+  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+  var sh = ss.getSheetByName(COBRANZA_MP);
+  if (!sh) {
+    sh = ss.insertSheet(COBRANZA_MP);
+    sh.getRange(1, 1, 1, COBRANZA_MP_HEADERS.length).setValues([COBRANZA_MP_HEADERS])
+      .setFontWeight('bold').setFontColor('#ffffff').setBackground('#c46a7a');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+// Índice (1-based) de la columna `want` por coincidencia de encabezado. Si no existe,
+// la AGREGA al final sin tocar las columnas previas (mismo patrón que _ingColEnsure).
+function _mpColEnsure(sh, want, headerText) {
+  var lastCol = Math.max(sh.getLastColumn(), 1);
+  var hdrs = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h).trim().toLowerCase(); });
+  want = String(want).toLowerCase();
+  for (var c = 0; c < hdrs.length; c++) { if (hdrs[c] === want) return c + 1; }
+  sh.getRange(1, lastCol + 1).setValue(headerText || want);
+  sh.getRange(1, lastCol + 1).setFontWeight('bold').setFontColor('#ffffff').setBackground('#c46a7a');
+  return lastCol + 1;
+}
+// Mapa {clave lógica → índice 1-based}. Asegura (append-safe) todas las columnas que
+// usamos, de modo que una hoja creada por una versión previa se migra sin perder datos.
+function _mpColMap(sh) {
+  return {
+    key:    _mpColEnsure(sh, 'pacientekey', 'PacienteKey'),
+    pac:    _mpColEnsure(sh, 'paciente', 'Paciente'),
+    payer:  _mpColEnsure(sh, 'payerid', 'PayerID'),
+    email:  _mpColEnsure(sh, 'mp_email', 'MP_Email'),
+    status: _mpColEnsure(sh, 'mp_status', 'MP_Status'),
+    plan:   _mpColEnsure(sh, 'mp_plan', 'MP_Plan'),
+    monto:  _mpColEnsure(sh, 'mp_monto', 'MP_Monto'),
+    inicio: _mpColEnsure(sh, 'mp_inicio', 'MP_Inicio'),
+    prox:   _mpColEnsure(sh, 'mp_proxcobro', 'MP_ProxCobro'),
+    ultC:   _mpColEnsure(sh, 'mp_ultcobro', 'MP_UltCobro'),
+    ultM:   _mpColEnsure(sh, 'mp_ultmonto', 'MP_UltMonto'),
+    cobros: _mpColEnsure(sh, 'mp_cobros', 'MP_Cobros'),
+    clase:  _mpColEnsure(sh, 'clasificacion', 'Clasificacion'),
+    upd:    _mpColEnsure(sh, 'actualizadoen', 'ActualizadoEn'),
+    updBy:  _mpColEnsure(sh, 'actualizadopor', 'ActualizadoPor')
+  };
+}
+// Lee todas las ligas persistidas → índices por payer_id y por paciente (idempotencia).
+function _mpReadLinks() {
+  var sh = _mpEnsureSheet();
+  var cm = _mpColMap(sh);
+  var out = { sh: sh, cm: cm, byPayer: {}, byKey: {}, rows: [] };
+  var lr = sh.getLastRow();
+  if (lr < 2) return out;
+  var lc = sh.getLastColumn();
+  var raw = sh.getRange(1, 1, lr, lc).getValues();
+  for (var i = 1; i < raw.length; i++) {
+    var r = raw[i];
+    function cell(idx) { return (idx && idx <= r.length) ? r[idx - 1] : ''; }
+    var payer = String(cell(cm.payer) || '').trim();
+    var key = String(cell(cm.key) || '').trim();
+    if (!payer && !key) continue;
+    var rec = {
+      rowNum: i + 1, pacKey: key, paciente: String(cell(cm.pac) || ''), payerId: payer,
+      mpEmail: String(cell(cm.email) || ''), mpStatus: String(cell(cm.status) || ''),
+      mpPlan: String(cell(cm.plan) || ''), mpMonto: _cobNum(cell(cm.monto)),
+      mpInicio: _cobStr(_cobD(cell(cm.inicio))), mpProx: _cobStr(_cobD(cell(cm.prox))),
+      mpUltCobro: _cobStr(_cobD(cell(cm.ultC))), mpUltMonto: _cobNum(cell(cm.ultM)),
+      mpCobros: _cobNum(cell(cm.cobros)), clasificacion: String(cell(cm.clase) || '')
+    };
+    out.rows.push(rec);
+    if (payer) out.byPayer[payer.toLowerCase()] = rec;
+    if (key) out.byKey[key] = rec;
+  }
+  return out;
+}
+// Upsert idempotente de una liga. Empata por payer_id, si no por PacienteKey; si no,
+// agrega una fila nueva. NUNCA duplica. Actualiza también los índices en memoria.
+function _mpUpsertLink(links, rec, usuario) {
+  var sh = links.sh, cm = links.cm;
+  var existing = null;
+  if (rec.payerId && links.byPayer[String(rec.payerId).toLowerCase()]) existing = links.byPayer[String(rec.payerId).toLowerCase()];
+  else if (rec.pacKey && links.byKey[rec.pacKey]) existing = links.byKey[rec.pacKey];
+  var lc = Math.max(sh.getLastColumn(), COBRANZA_MP_HEADERS.length);
+  var rowNum, arr;
+  if (existing) {
+    rowNum = existing.rowNum;
+    arr = sh.getRange(rowNum, 1, 1, lc).getValues()[0];
+  } else {
+    rowNum = sh.getLastRow() + 1;
+    arr = []; for (var z = 0; z < lc; z++) arr.push('');
+  }
+  function setC(idx, val) { if (idx && idx <= arr.length && val !== undefined && val !== null) arr[idx - 1] = val; }
+  // Si ya existía y no traemos payer/campo, respetamos lo que ya había (no lo borramos).
+  if (rec.pacKey) setC(cm.key, rec.pacKey);
+  if (rec.paciente) setC(cm.pac, rec.paciente);
+  if (rec.payerId) setC(cm.payer, rec.payerId);
+  if (rec.mpEmail !== undefined && rec.mpEmail !== '') setC(cm.email, rec.mpEmail);
+  if (rec.mpStatus !== undefined) setC(cm.status, rec.mpStatus);
+  if (rec.mpPlan !== undefined) setC(cm.plan, rec.mpPlan);
+  if (rec.mpMonto !== undefined && rec.mpMonto !== '') setC(cm.monto, rec.mpMonto);
+  if (rec.mpInicio !== undefined && rec.mpInicio !== '') setC(cm.inicio, rec.mpInicio);
+  if (rec.mpProx !== undefined && rec.mpProx !== '') setC(cm.prox, rec.mpProx);
+  if (rec.mpUltCobro !== undefined && rec.mpUltCobro !== '') setC(cm.ultC, rec.mpUltCobro);
+  if (rec.mpUltMonto !== undefined && rec.mpUltMonto !== '') setC(cm.ultM, rec.mpUltMonto);
+  if (rec.mpCobros !== undefined && rec.mpCobros !== '') setC(cm.cobros, rec.mpCobros);
+  if (rec.clasificacion !== undefined) setC(cm.clase, rec.clasificacion);
+  setC(cm.upd, _cobStr(_cobToday()));
+  setC(cm.updBy, usuario || '');
+  sh.getRange(rowNum, 1, 1, arr.length).setValues([arr]);
+  // refresca índices en memoria para que un mismo run no duplique
+  var mem = {
+    rowNum: rowNum, pacKey: String(arr[cm.key - 1] || ''), paciente: String(arr[cm.pac - 1] || ''),
+    payerId: String(arr[cm.payer - 1] || ''), mpEmail: String(arr[cm.email - 1] || ''),
+    mpStatus: String(arr[cm.status - 1] || ''), mpPlan: String(arr[cm.plan - 1] || ''),
+    mpMonto: _cobNum(arr[cm.monto - 1]), mpInicio: _cobStr(_cobD(arr[cm.inicio - 1])),
+    mpProx: _cobStr(_cobD(arr[cm.prox - 1])), mpUltCobro: _cobStr(_cobD(arr[cm.ultC - 1])),
+    mpUltMonto: _cobNum(arr[cm.ultM - 1]), mpCobros: _cobNum(arr[cm.cobros - 1]),
+    clasificacion: String(arr[cm.clase - 1] || '')
+  };
+  if (mem.payerId) links.byPayer[mem.payerId.toLowerCase()] = mem;
+  if (mem.pacKey) links.byKey[mem.pacKey] = mem;
+  var idx = -1; for (var q = 0; q < links.rows.length; q++) { if (links.rows[q].rowNum === rowNum) { idx = q; break; } }
+  if (idx >= 0) links.rows[idx] = mem; else links.rows.push(mem);
+  return { rowNum: rowNum, created: !existing };
+}
+
+/* ── Normalización de un suscriptor de MP (acepta llaves snake_case o variantes) ── */
+function _mpg(obj) {
+  if (!obj) return '';
+  // índice normalizado (minúsculas, sin no-alfanuméricos) una sola vez
+  if (!obj.__mpidx) {
+    var idx = {}; for (var k in obj) { if (k === '__mpidx') continue; idx[String(k).toLowerCase().replace(/[^a-z0-9]/g, '')] = obj[k]; }
+    obj.__mpidx = idx;
+  }
+  for (var a = 1; a < arguments.length; a++) {
+    var v = obj.__mpidx[arguments[a]];
+    if (v !== undefined && v !== null && String(v).trim() !== '') return v;
+  }
+  return '';
+}
+function _mpParseSub(raw) {
+  var first = String(_mpg(raw, 'payerfirstname', 'firstname', 'nombre') || '').trim();
+  var last = String(_mpg(raw, 'payerlastname', 'lastname', 'apellido') || '').trim();
+  var nombreMP = (first + ' ' + last).trim();
+  return {
+    id: String(_mpg(raw, 'id') || '').trim(),
+    payerId: String(_mpg(raw, 'payerid') || '').trim(),
+    first: first, last: last, nombreMP: nombreMP,
+    status: String(_mpg(raw, 'status', 'estado') || '').trim().toLowerCase(),
+    reason: String(_mpg(raw, 'reason', 'motivo', 'razon') || '').trim(),
+    externalRef: String(_mpg(raw, 'externalreference', 'referencia') || '').trim(),
+    planId: String(_mpg(raw, 'preapprovalplanid', 'planid') || '').trim(),
+    frequency: _cobNum(_mpg(raw, 'frequency')),
+    frequencyType: String(_mpg(raw, 'frequencytype') || '').trim().toLowerCase(),
+    monto: _cobNum(_mpg(raw, 'transactionamount', 'amount', 'monto', 'chargeamount')),
+    startDate: _cobStr(_cobD(_mpg(raw, 'startdate'))),
+    nextPayment: _cobStr(_cobD(_mpg(raw, 'nextpaymentdate'))),
+    lastChargeDate: _cobStr(_cobD(_mpg(raw, 'lastchargedate'))),
+    lastChargeAmount: _cobNum(_mpg(raw, 'lastchargeamount')),
+    chargedQty: _cobNum(_mpg(raw, 'chargedquantity')),
+    pendingQty: _cobNum(_mpg(raw, 'pendingchargequantity')),
+    email: String(_mpg(raw, 'payeremail', 'email', 'correo') || '').trim(),
+    billingStatus: String(_mpg(raw, 'billingstatus') || '').trim().toLowerCase()
+  };
+}
+// Plan MP: anual (~tarifaAnual) vs mensual (~tarifaMensual), por frecuencia o monto.
+function _mpPlan(sub, cfg) {
+  if (sub.frequencyType && (sub.frequencyType.indexOf('month') > -1 || sub.frequencyType.indexOf('mes') > -1)) {
+    if (sub.frequency >= 12) return 'anual';
+    if (sub.frequency === 1) return 'mensual';
+  }
+  if (sub.frequencyType && (sub.frequencyType.indexOf('year') > -1 || sub.frequencyType.indexOf('año') > -1 || sub.frequencyType.indexOf('anio') > -1)) return 'anual';
+  var m = sub.monto || 0;
+  if (m > 0) {
+    var dA = Math.abs(m - (cfg.tarifaAnual || 5700)), dM = Math.abs(m - (cfg.tarifaMensual || 475));
+    return dA <= dM ? 'anual' : 'mensual';
+  }
+  return 'anual';
+}
+// Estado del suscriptor visto desde MP.
+function _mpClaseMP(sub, today) {
+  var authorized = (sub.status === 'authorized');
+  var hasCharged = (sub.lastChargeAmount > 0) || (sub.chargedQty > 0) || !!sub.lastChargeDate;
+  var firstCharge = sub.nextPayment || sub.startDate;
+  var fcD = _cobD(firstCharge);
+  var future = fcD && fcD.getTime() > today.getTime();
+  if (!authorized) return 'inactiva';                 // pausada / cancelada / pendiente
+  if (hasCharged) return 'cobrando';                  // ya cobra automáticamente
+  if (future) return 'anio-gratis';                   // autorizada, primer cobro a futuro (año gratis)
+  return 'por-cobrar';                                // autorizada, sin cobro aún, primer cobro inminente
+}
+function _mpFirstCharge(sub) { return sub.nextPayment || sub.startDate || ''; }
+
+// Convierte una liga persistida (fila) a una forma "sub" para clasificar sin re-subir.
+function _mpLinkToSub(link, today) {
+  var sub = {
+    payerId: link.payerId, nombreMP: link.paciente, status: String(link.mpStatus || '').toLowerCase(),
+    plan: link.mpPlan, monto: link.mpMonto, startDate: link.mpInicio, nextPayment: link.mpProx,
+    lastChargeDate: link.mpUltCobro, lastChargeAmount: link.mpUltMonto, chargedQty: link.mpCobros,
+    email: link.mpEmail
+  };
+  sub.claseMP = link.clasificacion || _mpClaseMP(sub, today);
+  return sub;
+}
+
+/* ── Motor de conciliación (upload) o de estado (solo lectura de ligas) ── */
+function conciliarSuscripcionesMP(body) {
+  try {
+    body = body || {};
+    var soloEstado = !!body.soloEstado;
+    var canWrite = !(typeof _tokenHasPermission === 'function') || _tokenHasPermission(body.token || '', 'editar_egresos');
+    var subsRaw = body.suscriptores || body.subs || [];
+    if (!soloEstado && (!subsRaw || !subsRaw.length))
+      return { ok: false, error: 'El archivo no traía suscriptores legibles.', version: COBRANZA_MP_VER };
+
+    var cfg = _cobCfg(), today = _cobToday();
+    // Universo ERP de crío con su cálculo (Motor B), por llave de paciente.
+    var crioData = _cobReadCrio();
+    if (crioData.error) return { ok: false, error: crioData.error, version: COBRANZA_MP_VER };
+    var pagos = _cobStoragePagosByPac();
+    var abonos = _cobReadAbonos();
+    var erpByKey = {}, erpList = [];
+    for (var i = 0; i < crioData.pacientes.length; i++) {
+      var pac = crioData.pacientes[i];
+      var calc = _cobCalcSuscripcion(pac, pagos[pac.key] || [], abonos.susByPac[pac.key] || [], cfg, today);
+      var rec = {
+        key: pac.key, nombre: pac.nombre, estatus: calc.estatus, plan: calc.plan,
+        proximoCobro: calc.proximoCobro, billStart: calc.billStart, ultimoPago: calc.ultimoPago,
+        montoDebe: calc.montoDebe, esExterno: calc.esExterno, tienePago: !!calc.ultimoPago,
+        oov: pac.oov, emb: pac.emb
+      };
+      erpByKey[pac.key] = rec; erpList.push(rec);
+    }
+
+    var links = _mpReadLinks();
+    var mpByKey = {};   // pacKey → sub (de esta subida)
+    var sinMatch = [];  // suscriptores MP sin paciente en el ERP
+    var updated = 0;
+
+    // 1) Procesar suscriptores subidos: clasificar, empatar, y persistir la liga.
+    for (var s = 0; s < (subsRaw ? subsRaw.length : 0); s++) {
+      var sub = _mpParseSub(subsRaw[s]);
+      if (!sub.payerId && !sub.nombreMP) continue;
+      sub.claseMP = _mpClaseMP(sub, today);
+      sub.plan = _mpPlan(sub, cfg);
+      // (a) por payer_id ya ligado, (b) por nombre exacto, (c) difuso.
+      var matchedKey = '';
+      var lk = sub.payerId ? links.byPayer[sub.payerId.toLowerCase()] : null;
+      if (lk && lk.pacKey && erpByKey[lk.pacKey]) matchedKey = lk.pacKey;
+      if (!matchedKey) {
+        var nk = _cobKeyNom(sub.nombreMP);
+        if (nk && erpByKey[nk]) matchedKey = nk;
+        else matchedKey = _mpFuzzyMatch(sub, erpByKey);
+      }
+      if (matchedKey) {
+        mpByKey[matchedKey] = sub;
+        if (canWrite) {
+          _mpUpsertLink(links, {
+            pacKey: matchedKey, paciente: erpByKey[matchedKey].nombre, payerId: sub.payerId,
+            mpEmail: sub.email, mpStatus: sub.status, mpPlan: sub.plan, mpMonto: sub.monto,
+            mpInicio: sub.startDate, mpProx: sub.nextPayment, mpUltCobro: sub.lastChargeDate,
+            mpUltMonto: sub.lastChargeAmount, mpCobros: sub.chargedQty, clasificacion: sub.claseMP
+          }, body.usuario || '');
+          updated++;
+        }
+      } else {
+        sinMatch.push({
+          payerId: sub.payerId, nombre: sub.nombreMP, status: sub.status, clase: sub.claseMP,
+          plan: sub.plan, monto: sub.monto, inicio: sub.startDate, proxCobro: sub.nextPayment,
+          ultCobro: sub.lastChargeDate, ref: sub.externalRef
+        });
+      }
+    }
+
+    // 2) Para cada paciente de crío del ERP, determinar su MP (subida o liga persistida)
+    //    y clasificar en las variantes.
+    function mpForKey(key) {
+      if (mpByKey[key]) return mpByKey[key];
+      var l = links.byKey[key];
+      if (l && (l.payerId || l.mpStatus)) return _mpLinkToSub(l, today);
+      return null;
+    }
+    var buckets = { cobrando: 0, mpAnioGratis: 0, pagoSinMP: 0, anioGratisSinMP: 0, faltaSinMP: 0, sinMatchERP: sinMatch.length };
+    var pacientes = [];
+    for (var e = 0; e < erpList.length; e++) {
+      var er = erpList[e];
+      var mp = mpForKey(er.key);
+      var enAnioGratis = (er.estatus === 'Cortesía');
+      var bAnio = _cobD(er.billStart);
+      if (!enAnioGratis && bAnio && bAnio.getTime() > today.getTime() && !er.tienePago) enAnioGratis = true;
+      var bucket, accion = '', accionFecha = '';
+      var mpActivo = mp && (mp.status === 'authorized');
+      if (mpActivo && mp.claseMP === 'cobrando') {
+        bucket = 'cobrando';
+      } else if (mpActivo && (mp.claseMP === 'anio-gratis' || mp.claseMP === 'por-cobrar')) {
+        bucket = 'mpAnioGratis';
+        accionFecha = _mpFirstCharge(mp);
+        accion = 'Sin acción — MP cobra solo el ' + (accionFecha || '¿fecha?');
+      } else if (enAnioGratis) {
+        bucket = 'anioGratisSinMP';
+        accionFecha = er.proximoCobro || er.billStart || '';
+        accion = 'Registrar en MP o recordar cobro al terminar año gratis (' + (accionFecha || '¿fecha?') + ')';
+      } else if (er.tienePago) {
+        bucket = 'pagoSinMP';
+        accionFecha = er.proximoCobro || '';
+        accion = 'No se cobra solo — registrar en MP o recordar cobro (' + (accionFecha || '¿fecha?') + ')';
+      } else {
+        bucket = 'faltaSinMP';
+        accionFecha = er.proximoCobro || '';
+        accion = 'Sin suscripción y sin pago — dar de alta en MP o cobrar (' + (accionFecha || '¿fecha?') + ')';
+      }
+      buckets[bucket] = (buckets[bucket] || 0) + 1;
+      pacientes.push({
+        nombre: _cobMasked() ? ('Paciente ' + (e + 1)) : er.nombre, key: _cobMasked() ? '' : er.key,
+        bucket: bucket, estatusERP: er.estatus, plan: (mp && mp.plan) ? mp.plan : er.plan,
+        payerId: mp ? (mp.payerId || '') : '', mpEmail: mp ? (mp.email || '') : '',
+        mpStatus: mp ? (mp.status || '') : '', mpClase: mp ? (mp.claseMP || '') : '',
+        proximoCobroERP: er.proximoCobro, primerCobroMP: mp ? _mpFirstCharge(mp) : '',
+        montoMP: mp ? (mp.monto || 0) : 0, ultimoCobroMP: mp ? (mp.lastChargeDate || '') : '',
+        ultimoPagoERP: er.ultimoPago, montoDebe: er.montoDebe, tipoPaciente: er.esExterno ? 'Externo' : 'Hestia',
+        oov: er.oov, emb: er.emb, accion: accion, accionFecha: accionFecha
+      });
+    }
+    // orden: primero los que requieren acción
+    var rank = { pagoSinMP: 0, anioGratisSinMP: 1, faltaSinMP: 2, mpAnioGratis: 3, cobrando: 4 };
+    pacientes.sort(function (a, b) {
+      var ra = rank[a.bucket] === undefined ? 9 : rank[a.bucket];
+      var rb = rank[b.bucket] === undefined ? 9 : rank[b.bucket];
+      if (ra !== rb) return ra - rb;
+      return b.montoDebe - a.montoDebe;
+    });
+
+    return {
+      ok: true, version: COBRANZA_MP_VER, view: 'conciliar-crio-mp',
+      resumen: buckets, total: pacientes.length, pacientes: pacientes, sinMatch: sinMatch,
+      updated: updated, canWrite: canWrite, masked: _cobMasked(),
+      tarifaAnual: cfg.tarifaAnual, tarifaMensual: cfg.tarifaMensual
+    };
+  } catch (ex) {
+    return { ok: false, error: ex.message, version: COBRANZA_MP_VER };
+  }
+}
+// Empate difuso: mismo nombre invertido (apellido+nombre) o contención de nombres.
+function _mpFuzzyMatch(sub, erpByKey) {
+  var a = _cobKeyNom((sub.last + ' ' + sub.first).trim());
+  if (a && erpByKey[a]) return a;
+  var ref = _cobKeyNom(sub.externalRef);
+  if (ref && erpByKey[ref]) return ref;
+  var target = _cobKeyNom(sub.nombreMP);
+  if (!target || target.length < 5) return '';
+  var tw = target.split(' ').filter(function (w) { return w.length >= 3; });
+  if (tw.length < 2) return '';
+  var best = '';
+  for (var k in erpByKey) {
+    var kw = k.split(' ');
+    var hits = 0;
+    for (var i = 0; i < tw.length; i++) { if (kw.indexOf(tw[i]) > -1) hits++; }
+    if (hits >= 2 && hits === tw.length) { if (best) return ''; best = k; } // único candidato exacto en palabras
+  }
+  return best;
+}
+// Guardar liga manual (payer_id ↔ paciente) confirmada por el usuario.
+function guardarLinkMP(body) {
+  try {
+    body = body || {};
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'editar_egresos'))
+      return { ok: false, error: 'Sin permiso (requiere editar cuentas por pagar).', version: COBRANZA_MP_VER };
+    var paciente = String(body.paciente || '').trim();
+    var payerId = String(body.payer_id || body.payerId || '').trim();
+    if (!paciente) return { ok: false, error: 'Falta el paciente a vincular.', version: COBRANZA_MP_VER };
+    if (!payerId) return { ok: false, error: 'Falta el payer_id de MP.', version: COBRANZA_MP_VER };
+    var links = _mpReadLinks();
+    var up = _mpUpsertLink(links, {
+      pacKey: _cobKeyNom(paciente), paciente: paciente, payerId: payerId,
+      mpEmail: body.mp_email || '', mpStatus: body.mp_status || '', mpPlan: body.mp_plan || '',
+      mpMonto: (body.mp_monto === undefined ? '' : body.mp_monto), mpInicio: body.mp_inicio || '',
+      mpProx: body.mp_prox || '', mpUltCobro: body.mp_ultcobro || '',
+      mpUltMonto: (body.mp_ultmonto === undefined ? '' : body.mp_ultmonto),
+      mpCobros: (body.mp_cobros === undefined ? '' : body.mp_cobros), clasificacion: body.clase || ''
+    }, body.usuario || '');
+    return { ok: true, version: COBRANZA_MP_VER, rowNum: up.rowNum, created: up.created, paciente: paciente, payerId: payerId };
+  } catch (ex) { return { ok: false, error: ex.message, version: COBRANZA_MP_VER }; }
+}
+// Deshacer una liga manual (por payer_id o por paciente). No borra datos de cobranza.
+function desvincularLinkMP(body) {
+  try {
+    body = body || {};
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'editar_egresos'))
+      return { ok: false, error: 'Sin permiso (requiere editar cuentas por pagar).', version: COBRANZA_MP_VER };
+    var payerId = String(body.payer_id || body.payerId || '').trim();
+    var paciente = String(body.paciente || '').trim();
+    var links = _mpReadLinks();
+    var target = null;
+    if (payerId && links.byPayer[payerId.toLowerCase()]) target = links.byPayer[payerId.toLowerCase()];
+    else if (paciente && links.byKey[_cobKeyNom(paciente)]) target = links.byKey[_cobKeyNom(paciente)];
+    if (!target) return { ok: false, error: 'No se encontró la liga a deshacer.', version: COBRANZA_MP_VER };
+    links.sh.deleteRow(target.rowNum);
+    return { ok: true, version: COBRANZA_MP_VER, borrada: target.rowNum };
+  } catch (ex) { return { ok: false, error: ex.message, version: COBRANZA_MP_VER }; }
+}
+// Inicializa la hoja de ligas MP (idempotente).
+function setupConciliacionMP() { _mpEnsureSheet(); return { ok: true, version: COBRANZA_MP_VER, tab: COBRANZA_MP }; }

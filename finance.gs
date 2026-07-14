@@ -604,6 +604,22 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(cobPacienteFlag(body));
     }
+    // ── CONCILIACIÓN MERCADO PAGO (suscripciones crío) ──
+    if (body.action === 'conciliarSuscripcionesMP') {
+      if (typeof conciliarSuscripcionesMP !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza cobranza.gs en Apps Script y redespliega.'});
+      return jsonResponse(conciliarSuscripcionesMP(body));
+    }
+    if (body.action === 'guardarLinkMP') {
+      if (typeof guardarLinkMP !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza cobranza.gs en Apps Script y redespliega.'});
+      return jsonResponse(guardarLinkMP(body));
+    }
+    if (body.action === 'desvincularLinkMP') {
+      if (typeof desvincularLinkMP !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza cobranza.gs en Apps Script y redespliega.'});
+      return jsonResponse(desvincularLinkMP(body));
+    }
     if (body.action === 'cobDescCfgSave') {
       if (typeof cobDescCfgSave !== 'function')
         return jsonResponse({ok:false, error:'Actualiza cobranza.gs en Apps Script y redespliega.'});
