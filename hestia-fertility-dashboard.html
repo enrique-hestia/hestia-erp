@@ -29429,8 +29429,7 @@ var SEG_BLOCKS_DEF=[
   {id:'re',       label:'Asunto (Re:)'},
   {id:'intro',    label:'Párrafo de introducción'},
   {id:'patient',  label:'Información del paciente'},
-  {id:'services', label:'Tabla de servicios'},
-  {id:'total',    label:'Total pagado'},
+  {id:'services', label:'Tabla de servicios (incluye el total)'},
   {id:'payment',  label:'Confirmación de pago'},
   {id:'provider', label:'Información del prestador'},
   {id:'signature',label:'Firma'}
@@ -29586,43 +29585,67 @@ function segGenerar(cfgOverride, isPreview){
   var sym=({USD:'$',CAD:'$',MXN:'$',EUR:'€',GBP:'£'})[currency]||'$';
   function money(n){ return sym+' '+(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
   function dLarga(s){ try{ return new Date(String(s).substring(0,10)+'T12:00:00').toLocaleDateString(L.loc,{year:'numeric',month:'long',day:'numeric'}); }catch(e){ return s||'—'; } }
-  var fechaLarga=new Date().toLocaleDateString(L.loc,{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  // Formato del documento Word: "Wednesday July 1, 2026" (sin coma tras el día de la
+  // semana). replace(',','') quita solo la primera coma; en inglés queda idéntico al
+  // .docx y en los demás idiomas conserva su forma natural.
+  var fechaLarga=new Date().toLocaleDateString(L.loc,{weekday:'long',year:'numeric',month:'long',day:'numeric'}).replace(',','');
   var w=window.open('','_blank');
   if(!w){ alert('Habilita las ventanas emergentes para este sitio e intenta de nuevo.'); return; }
-  var trs=rows.map(function(r){ return '<tr><td>'+_esc(r.desc)+'</td><td style="text-align:center">'+_esc(r.cpt||'—')+'</td><td style="text-align:center">'+dLarga(r.fecha)+'</td><td style="text-align:center">'+_esc(r.cur)+'</td><td style="text-align:right">'+money(r.amt)+'</td></tr>'; }).join('');
+  var trs=rows.map(function(r){ return '<tr><td>'+_esc(r.desc)+'</td><td class="c">'+_esc(r.cpt||'—')+'</td><td class="c">'+dLarga(r.fecha)+'</td><td class="c">'+_esc(r.cur)+'</td><td class="r">'+money(r.amt)+'</td></tr>'; }).join('');
   var logo=(typeof _HF_LOGO_DEFAULT!=='undefined'?_HF_LOGO_DEFAULT:'');
   var firma=(typeof hfFirmaBloque==='function')?hfFirmaBloque('seguro','Clinic Administrator'):'';
   var sigInner= firma
     ? _esc(L.sincerely)+firma
     : _esc(L.sincerely)+'<div style="border-top:1px solid #333;width:250px;margin-top:44px;padding-top:5px;font-size:11px">'+_esc(hfSigName?hfSigName():'Clinic Administrator')+'</div>';
   // constructor por bloque
+  // Constructor por bloque — formato de CARTA DE NEGOCIOS idéntico al documento Word
+  // del cliente: encabezados de sección en banda gris (bold band), datos del
+  // paciente y del prestador en tablas de 2 columnas etiqueta/valor, servicios en
+  // tabla de 5 columnas con la fila TOTAL AMOUNT PAID abarcando hasta el importe.
   function blk(id){
     switch(id){
       case 'header': return '<div class="hd">'+(cfg.showLogo&&logo?'<img src="'+logo+'" onerror="this.style.display=\'none\'">':'')+(cfg.clinicName?'<div class="cn">'+_esc(cfg.clinicName)+'</div>':'')+'</div>';
-      case 'date': return '<div>'+_esc(L.dateLbl)+': '+fechaLarga+'</div>';
-      case 'recipient': return '<div style="margin-top:12px">'+_esc(L.toWhom)+'<br>'+_esc(L.dept)+'</div>';
-      case 're': return '<div style="margin-top:7px"><b>'+_esc(ov.re||L.re)+'</b></div>';
+      case 'date': return '<div class="meta">'+_esc(L.dateLbl)+': '+fechaLarga+'</div>';
+      case 'recipient': return '<div class="rcpt">'+_esc(L.toWhom)+'<br>'+_esc(L.dept)+'</div>';
+      case 're': return '<div class="re"><b>'+_esc(ov.re||L.re)+'</b></div>';
       case 'intro': return '<p>'+_esc(ov.intro||L.intro)+'</p>';
-      case 'patient': return '<h2>'+_esc(L.pInfo)+'</h2><div><b>'+_esc(L.pName)+':</b> '+_esc(pac)+'</div>';
-      case 'services': return '<h2>'+_esc(L.services)+'</h2><table><thead><tr><th>'+_esc(L.cDesc)+'</th><th style="text-align:center">'+_esc(L.cCode)+'</th><th style="text-align:center">'+_esc(L.cDate)+'</th><th style="text-align:center">'+_esc(L.cCur)+'</th><th style="text-align:right">'+_esc(L.cAmt)+'</th></tr></thead><tbody>'+trs+'</tbody></table>';
-      case 'total': return '<div class="tot">'+_esc(L.total)+': '+money(total)+' '+_esc(currency)+'</div>';
-      case 'payment': return '<h2>'+_esc(L.payConf)+'</h2><p>'+_esc(ov.payP1||L.payP1)+'</p><p>'+_esc(ov.payP2||L.payP2)+'</p>';
-      case 'provider': return '<h2>'+_esc(L.provInfo)+'</h2><div><b>'+_esc(L.clinic)+':</b> '+_esc(cfg.provClinic)+'</div><div><b>'+_esc(L.addr)+':</b> '+_esc(cfg.provAddr)+'</div><div><b>'+_esc(L.email)+':</b> '+_esc(cfg.provEmail)+'</div><div><b>'+_esc(L.web)+':</b> '+_esc(cfg.provWeb)+'</div>';
-      case 'signature': return '<div style="margin-top:30px;page-break-inside:avoid">'+sigInner+'</div>';
+      case 'patient': return '<div class="sec">'+_esc(L.pInfo)+'</div>'
+        +'<table class="kv"><tbody><tr><td class="k">'+_esc(L.pName)+':</td><td class="v">'+_esc(pac)+'</td></tr></tbody></table>';
+      case 'services': return '<div class="sec">'+_esc(L.services)+'</div>'
+        +'<table class="svc"><thead><tr><th>'+_esc(L.cDesc)+'</th><th class="c">'+_esc(L.cCode)+'</th><th class="c">'+_esc(L.cDate)+'</th><th class="c">'+_esc(L.cCur)+'</th><th class="r">'+_esc(L.cAmt)+'</th></tr></thead>'
+        +'<tbody>'+trs
+          +'<tr class="totrow"><td class="r" colspan="4">'+_esc(L.total)+':</td><td class="r">'+money(total)+'</td></tr>'
+        +'</tbody></table>';
+      case 'total': return ''; // el total ahora vive dentro de la tabla de servicios (formato Word)
+      case 'payment': return '<div class="sec">'+_esc(L.payConf)+'</div><p>'+_esc(ov.payP1||L.payP1)+'</p><p>'+_esc(ov.payP2||L.payP2)+'</p>';
+      case 'provider': return '<div class="sec">'+_esc(L.provInfo)+'</div>'
+        +'<table class="kv"><tbody>'
+          +'<tr><td class="k">'+_esc(L.clinic)+':</td><td class="v">'+_esc(cfg.provClinic)+'</td></tr>'
+          +'<tr><td class="k">'+_esc(L.addr)+':</td><td class="v">'+_esc(cfg.provAddr)+'</td></tr>'
+          +'<tr><td class="k">'+_esc(L.email)+':</td><td class="v">'+_esc(cfg.provEmail)+'</td></tr>'
+          +'<tr><td class="k">'+_esc(L.web)+':</td><td class="v">'+_esc(cfg.provWeb)+'</td></tr>'
+        +'</tbody></table>';
+      case 'signature': return '<div class="sig">'+sigInner+'</div>';
     }
     return '';
   }
   var body=(cfg.order||SEG_BLOCKS_DEF.map(function(b){return b.id;})).map(function(id){ return (cfg.off&&cfg.off[id])?'':blk(id); }).join('');
-  var hs=({underline:'border-bottom:1px solid '+cfg.accent+'55;padding-bottom:2px', bold:'', plain:''})[cfg.headStyle||'underline'];
+  // El estilo de título controla la regla de acento bajo la banda de sección.
+  var secRule=(cfg.headStyle==='plain') ? '' : ('border-bottom:2px solid '+cfg.accent+';');
   var fontStack=cfg.font+', Georgia, "Times New Roman", serif';
   // <title> vacío para minimizar el encabezado del navegador al imprimir.
   w.document.write('<html><head><meta charset="utf-8"><title> </title><style>'
-    +'@page{margin:'+(cfg.margin||18)+'mm}body{font-family:'+fontStack+';color:'+cfg.ink+';font-size:12px;line-height:1.55;margin:0}'
-    +'.hd{text-align:center;border-bottom:2px solid '+cfg.accent+';padding-bottom:9px;margin-bottom:16px}.hd img{height:'+(cfg.logoSize||52)+'px;max-height:'+(cfg.logoSize||52)+'px}.hd .cn{font-size:14px;font-weight:700;letter-spacing:1px;color:'+cfg.accent+';margin-top:5px}'
-    +'h2{font-size:10.5px;letter-spacing:1px;text-transform:uppercase;color:'+cfg.accent+';'+hs+';margin:15px 0 6px}'
-    +'p{margin:7px 0}'
-    +'table{width:100%;border-collapse:collapse;margin:6px 0}th{background:'+cfg.accent+'18;font-size:9px;text-transform:uppercase;letter-spacing:.4px;color:'+cfg.ink+';padding:6px 8px;border-bottom:1.5px solid '+cfg.accent+'66;text-align:left}td{padding:6px 8px;border-bottom:1px solid #eee;font-size:11px}'
-    +'.tot{text-align:right;font-size:13px;font-weight:700;margin-top:6px;color:'+cfg.ink+'}'
+    +'@page{margin:'+(cfg.margin||18)+'mm;size:letter}*{box-sizing:border-box}'
+    +'body{font-family:'+fontStack+';color:'+cfg.ink+';font-size:11pt;line-height:1.5;margin:0}'
+    +'.hd{text-align:center;border-bottom:2px solid '+cfg.accent+';padding-bottom:9px;margin-bottom:18px}.hd img{height:'+(cfg.logoSize||52)+'px;max-height:'+(cfg.logoSize||52)+'px}.hd .cn{font-size:13pt;font-weight:700;letter-spacing:1px;color:'+cfg.accent+';margin-top:5px}'
+    +'.meta{margin:0 0 14px}.rcpt{margin:0 0 3px;line-height:1.4}.re{margin:8px 0 14px}'
+    +'p{margin:9px 0}'
+    +'.sec{background:#eeeeee;'+secRule+'font-weight:700;text-transform:uppercase;letter-spacing:.6px;font-size:10.5pt;color:#1a1a1a;padding:6px 9px;margin:18px 0 8px}'
+    +'table{width:100%;border-collapse:collapse}'
+    +'.kv{margin:2px 0 6px}.kv td{padding:3px 9px;font-size:11pt;vertical-align:top;border:none}.kv .k{font-weight:700;width:210px;white-space:nowrap}'
+    +'.svc{margin:4px 0 10px}.svc th{background:#eeeeee;border:1px solid #cfcfcf;font-weight:700;font-size:9.5pt;text-transform:uppercase;letter-spacing:.3px;color:#1a1a1a;padding:6px 8px;text-align:left}.svc td{border:1px solid #d6d6d6;padding:6px 8px;font-size:10.5pt}.svc .c{text-align:center}.svc .r{text-align:right}.svc th.c{text-align:center}.svc th.r{text-align:right}'
+    +'.svc tr.totrow td{border-top:2px solid #9a9a9a;font-weight:700;background:#f6f6f6}'
+    +'.sig{margin-top:40px;page-break-inside:avoid}'
     +'</style></head><body>'
     +body
     +'</body></html>');
