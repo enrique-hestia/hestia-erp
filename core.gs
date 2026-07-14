@@ -656,6 +656,15 @@ function doGet(e) {
         return jsonResponse({ ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.' });
       return jsonResponse(setupCobranzaConfig());
     }
+    // Traducción de textos dinámicos (descripciones de servicio) para la Carta de Seguro.
+    if (action === 'traducir') {
+      if (typeof traducirTextos !== 'function')
+        return jsonResponse({ ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.' });
+      return jsonResponse(traducirTextos({
+        lang:   (e && e.parameter.lang) || 'en',
+        textos: (e && e.parameter.textos) || '[]'
+      }));
+    }
     // Cobranza: configuración de descuentos por agencia (panel)
     if (action === 'cobDescCfg') {
       if (typeof cobDescCfgRead !== 'function')

@@ -1654,3 +1654,146 @@ function desvincularLinkMP(body) {
 }
 // Inicializa la hoja de ligas MP (idempotente).
 function setupConciliacionMP() { _mpEnsureSheet(); return { ok: true, version: COBRANZA_MP_VER, tab: COBRANZA_MP }; }
+
+/* ════════════════════ Traducción de textos dinámicos ════════════════════
+ * Traduce descripciones de servicio (español → idioma destino) para la
+ * Carta de Seguro / Insurance Reimbursement Letter, de modo que la carta
+ * NO muestre nombres de productos en español dentro de una carta en inglés.
+ *
+ *   traducirTextos({ lang:'en'|'fr'|'pt', textos:[...] | '["..",".."]' })
+ *     → { ok:true, lang, textos:{ original: traducido, ... } }
+ *
+ * - Mapa curado (SEG_TRAD_OVERRIDES) para términos de fertilidad, para que
+ *   la terminología médica quede correcta (LanguageApp a veces la falla).
+ * - Cache en CacheService (6 h) por texto normalizado + idioma → menos
+ *   llamadas a LanguageApp y respuesta instantánea en repeticiones.
+ * - Batch: procesa toda la lista en una sola llamada.
+ * - Nunca lanza: si algo falla, devuelve el texto original (no bloquea).
+ */
+var SEG_TRAD_OVERRIDES = {
+  en: {
+    'fertilizacion in vitro':'In Vitro Fertilization (IVF)',
+    'fertilizacion in vitro (fiv)':'In Vitro Fertilization (IVF)',
+    'fiv':'In Vitro Fertilization (IVF)',
+    'histeroscopia':'Hysteroscopy',
+    'histeroscopia diagnostica':'Diagnostic Hysteroscopy',
+    'laparoscopia':'Laparoscopy',
+    'criopreservacion':'Cryopreservation',
+    'criopreservacion de embriones':'Embryo Cryopreservation',
+    'criopreservacion de ovulos':'Egg Cryopreservation',
+    'vitrificacion de ovulos':'Egg Vitrification',
+    'estimulacion ovarica controlada':'Controlled Ovarian Stimulation',
+    'estimulacion ovarica':'Ovarian Stimulation',
+    'transferencia de embriones':'Embryo Transfer',
+    'transferencia de embrion':'Embryo Transfer',
+    'transferencia de embriones congelados':'Frozen Embryo Transfer',
+    'inseminacion artificial':'Artificial Insemination',
+    'inseminacion intrauterina':'Intrauterine Insemination (IUI)',
+    'icsi':'Intracytoplasmic Sperm Injection (ICSI)',
+    'aspiracion folicular':'Follicular Aspiration',
+    'captura ovocitaria':'Oocyte Retrieval',
+    'aspiracion de ovulos':'Oocyte Retrieval',
+    'donacion de ovulos':'Egg Donation',
+    'ovodonacion':'Egg Donation',
+    'donacion de esperma':'Sperm Donation',
+    'biopsia embrionaria':'Embryo Biopsy',
+    'estudio genetico preimplantacional':'Preimplantation Genetic Testing (PGT)',
+    'diagnostico genetico preimplantacional':'Preimplantation Genetic Diagnosis (PGD)',
+    'almacenamiento de embriones':'Embryo Storage',
+    'almacenamiento crio':'Cryogenic Storage',
+    'renta de vientre':'Gestational Surrogacy',
+    'gestacion subrogada':'Gestational Surrogacy',
+    'consulta':'Consultation',
+    'consulta medica':'Medical Consultation',
+    'ultrasonido':'Ultrasound',
+    'laboratorio':'Laboratory',
+    'medicamentos':'Medications'
+  },
+  fr: {
+    'fertilizacion in vitro':'Fécondation in vitro (FIV)',
+    'fiv':'Fécondation in vitro (FIV)',
+    'histeroscopia':'Hystéroscopie',
+    'criopreservacion':'Cryoconservation',
+    'criopreservacion de embriones':"Cryoconservation d'embryons",
+    'estimulacion ovarica controlada':'Stimulation ovarienne contrôlée',
+    'transferencia de embriones':"Transfert d'embryons",
+    'inseminacion artificial':'Insémination artificielle',
+    'icsi':'Injection intracytoplasmique de spermatozoïdes (ICSI)',
+    'donacion de ovulos':"Don d'ovocytes",
+    'consulta':'Consultation',
+    'ultrasonido':'Échographie',
+    'medicamentos':'Médicaments'
+  },
+  pt: {
+    'fertilizacion in vitro':'Fertilização in vitro (FIV)',
+    'fiv':'Fertilização in vitro (FIV)',
+    'histeroscopia':'Histeroscopia',
+    'criopreservacion':'Criopreservação',
+    'criopreservacion de embriones':'Criopreservação de embriões',
+    'estimulacion ovarica controlada':'Estimulação ovariana controlada',
+    'transferencia de embriones':'Transferência de embriões',
+    'inseminacion artificial':'Inseminação artificial',
+    'icsi':'Injeção intracitoplasmática de espermatozoides (ICSI)',
+    'donacion de ovulos':'Doação de óvulos',
+    'consulta':'Consulta',
+    'ultrasonido':'Ultrassom',
+    'medicamentos':'Medicamentos'
+  }
+};
+// Normaliza para comparar contra el mapa curado y para la clave de cache:
+// minúsculas, sin acentos, espacios colapsados (sin depender de String.normalize).
+function _segTrNorm(s) {
+  s = String(s || '').toLowerCase();
+  var map = { 'á':'a','é':'e','í':'i','ó':'o','ú':'u','ü':'u','ñ':'n' };
+  s = s.replace(/[áéíóúüñ]/g, function (c) { return map[c] || c; });
+  return s.replace(/\s+/g, ' ').trim();
+}
+function _segTrHash(s) {
+  var h = 0;
+  for (var i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
+  return (h >>> 0).toString(36);
+}
+function traducirTextos(body) {
+  try {
+    body = body || {};
+    var lang = String(body.lang || body.idioma || 'en').toLowerCase().substring(0, 2);
+    var textos = body.textos;
+    if (typeof textos === 'string') { try { textos = JSON.parse(textos); } catch (e) { textos = textos ? [textos] : []; } }
+    if (!textos || !textos.length) return { ok: true, lang: lang, textos: {} };
+
+    var out = {};
+    // Español o idioma no soportado por el traductor → passthrough (texto original).
+    if (lang === 'es' || (lang !== 'en' && lang !== 'fr' && lang !== 'pt')) {
+      for (var p = 0; p < textos.length; p++) out[textos[p]] = textos[p];
+      return { ok: true, lang: lang, textos: out };
+    }
+
+    var over = SEG_TRAD_OVERRIDES[lang] || {};
+    var cache = null; try { cache = CacheService.getScriptCache(); } catch (e) { cache = null; }
+    var pend = [], pendKey = [];
+
+    for (var i = 0; i < textos.length; i++) {
+      var orig = String(textos[i] == null ? '' : textos[i]).trim();
+      if (!orig) { out[textos[i]] = textos[i]; continue; }
+      if (out.hasOwnProperty(orig)) continue;
+      var norm = _segTrNorm(orig);
+      if (over[norm]) { out[orig] = over[norm]; continue; }          // término médico curado
+      var ck = 'segtr_' + lang + '_' + _segTrHash(norm);
+      var hit = cache ? cache.get(ck) : null;
+      if (hit != null) { out[orig] = hit; continue; }                 // cache
+      pend.push(orig); pendKey.push(ck);
+    }
+
+    // Traduce los pendientes (uno por uno; LanguageApp no admite lote real).
+    for (var j = 0; j < pend.length; j++) {
+      var tr = '';
+      try { tr = LanguageApp.translate(pend[j], 'es', lang); } catch (e2) { tr = ''; }
+      if (!tr) tr = pend[j];
+      out[pend[j]] = tr;
+      if (cache) { try { cache.put(pendKey[j], tr, 21600); } catch (e3) {} }
+    }
+    return { ok: true, lang: lang, textos: out };
+  } catch (ex) {
+    return { ok: false, error: ex.message };
+  }
+}
