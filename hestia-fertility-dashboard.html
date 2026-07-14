@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.13.165 -->
+﻿<!-- app-build:2026.07.13.166 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -23500,18 +23500,35 @@ function _nomRenderMes(){
   if(!d||!d.ok){ h+=_nomBackendBanner(d&&d.error); body.innerHTML=h; return; }
   if(!d.encontrada){ h+='<div style="padding:24px;color:#9ca3af;text-align:center">No hay carpeta de CFDI para '+_nomMesNombre(_nomMes)+' '+_nomAnio+' todavía.</div>'; body.innerHTML=h; return; }
   var t=d.totales;
-  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:18px">'
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:8px">'
     +_nomKpi('Neto pagado',_nomFmt(t.neto),'#166534')+_nomKpi('Empleados',t.numEmpleados,'#0c4a6e')
-    +_nomKpi('Recibos',t.numRecibos,'#6b7280')+_nomKpi('ISN ('+t.isnTasa+'%)',_nomFmt(t.isn),'#b45309')+'</div>';
+    +_nomKpi('Recibos',t.numRecibos,'#6b7280')+_nomKpi('ISN sueldos ('+t.isnTasa+'%)',_nomFmt(t.isn),'#b45309')+'</div>';
+  // División sueldos vs asimilados (el ISN de CDMX solo aplica a sueldos).
+  h+='<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:16px;font-size:11px;color:#6b7280">'
+    +'<span><span style="color:#166534;font-weight:800">●</span> Sueldos y salarios: <b>'+(t.numSueldos||0)+'</b> · '+_nomFmt(t.netoSueldos)+'</span>'
+    +'<span><span style="color:#7c3aed;font-weight:800">●</span> Asimilados a salarios: <b>'+(t.numAsimilados||0)+'</b> · '+_nomFmt(t.netoAsimilados)+'</span>'
+  +'</div>';
   if(!d.empleados.length){ h+='<div style="padding:20px;color:#9ca3af">No se encontraron recibos de nómina (tipo N) en este mes.</div>'; body.innerHTML=h; return; }
-  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+  h+=_nomTablaEmp(d,false,'Sueldos y salarios','#166534');
+  h+=_nomTablaEmp(d,true,'Asimilados a salarios','#7c3aed');
+  var notaAsim=t.isnExcluirAsimilados?' Los <b>asimilados a salarios NO causan ISN</b> en CDMX, por eso la base excluye sus percepciones.':' (La base incluye asimilados según tu configuración.)';
+  h+='<div style="margin-top:6px;padding:10px 14px;background:rgba(180,83,9,.06);border-radius:10px;font-size:11px;color:#92400e">ISN del mes: <b>'+_nomFmt(t.isn)+'</b> = base '+_nomFmt(t.isnBase)+' × '+t.isnTasa+'% (solo sueldos).'+notaAsim+' &nbsp;·&nbsp; Validar → Cuentas por Pagar, bonos y "Mis recibos": en camino.</div>';
+  body.innerHTML=h;
+}
+// Tabla de empleados filtrada por tipo (sueldos vs asimilados), con subtotal.
+function _nomTablaEmp(d, filtroAsim, titulo, color){
+  var rows=[], subNeto=0, subPerc=0;
+  d.empleados.forEach(function(e,i){ if(!!e.asimilado!==filtroAsim) return; rows.push([e,i]); subNeto+=e.neto; subPerc+=e.totalPercepciones; });
+  if(!rows.length) return '';
+  var h='<div style="margin-bottom:20px"><div style="font-size:12.5px;font-weight:800;color:'+color+';margin-bottom:6px">'+titulo+' <span style="font-weight:600;color:#9ca3af">('+rows.length+')</span></div>'
+    +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
     +'<thead><tr style="text-align:left;color:#9ca3af;border-bottom:2px solid var(--color-divider,#e5e7eb);font-size:9.5px;text-transform:uppercase;font-weight:700">'
     +'<th style="padding:8px 6px">Empleado</th><th style="padding:8px 6px">Puesto</th><th style="padding:8px 6px;text-align:center">Rec.</th>'
     +'<th style="padding:8px 6px;text-align:right">Percepciones</th><th style="padding:8px 6px;text-align:right">Deducciones</th>'
     +'<th style="padding:8px 6px;text-align:right">ISR</th><th style="padding:8px 6px;text-align:right">Neto</th><th></th></tr></thead><tbody>';
-  d.empleados.forEach(function(e,i){
+  rows.forEach(function(rw){ var e=rw[0], i=rw[1];
     h+='<tr style="border-bottom:1px solid var(--color-divider,#f0f0f0);cursor:pointer" onclick="_nomToggleEmp('+i+')">'
-      +'<td style="padding:8px 6px;font-weight:700;color:var(--text-primary,#111)">'+_cxpEsc(e.nombre||e.rfc||'¿?')+(e.asimilado?' <span style="font-size:8px;font-weight:800;color:#7c3aed;background:rgba(124,58,237,.1);border-radius:4px;padding:1px 5px;vertical-align:middle">ASIM</span>':'')+'</td>'
+      +'<td style="padding:8px 6px;font-weight:700;color:var(--text-primary,#111)">'+_cxpEsc(e.nombre||e.rfc||'¿?')+'</td>'
       +'<td style="padding:8px 6px;color:#6b7280">'+_cxpEsc(e.puesto||'—')+'</td>'
       +'<td style="padding:8px 6px;text-align:center">'+e.recibos+'</td>'
       +'<td style="padding:8px 6px;text-align:right">'+_nomFmt(e.totalPercepciones)+'</td>'
@@ -23531,9 +23548,8 @@ function _nomRenderMes(){
       h+='<tr><td colspan="8" style="padding:6px 6px 12px 22px;background:var(--color-surface,#fafafa)"><div style="font-size:9.5px;color:#9ca3af;text-transform:uppercase;font-weight:700;padding-bottom:2px">Recibos</div>'+det+'</td></tr>';
     }
   });
-  h+='</tbody><tfoot><tr style="border-top:2px solid var(--color-divider,#e5e7eb);font-weight:800"><td colspan="6" style="padding:10px 6px">Total neto del mes</td><td style="padding:10px 6px;text-align:right;color:#166534">'+_nomFmt(t.neto)+'</td><td></td></tr></tfoot></table></div>';
-  h+='<div style="margin-top:14px;padding:10px 14px;background:rgba(180,83,9,.06);border-radius:10px;font-size:11px;color:#92400e">ISN del mes: <b>'+_nomFmt(t.isn)+'</b> = base '+_nomFmt(t.isnBase)+' × '+t.isnTasa+'%. &nbsp;·&nbsp; Validar → Cuentas por Pagar, bonos y "Mis recibos": en camino.</div>';
-  body.innerHTML=h;
+  h+='</tbody><tfoot><tr style="border-top:2px solid var(--color-divider,#e5e7eb);font-weight:800"><td colspan="3" style="padding:10px 6px">Subtotal</td><td style="padding:10px 6px;text-align:right">'+_nomFmt(subPerc)+'</td><td colspan="2"></td><td style="padding:10px 6px;text-align:right;color:'+color+'">'+_nomFmt(subNeto)+'</td><td></td></tr></tfoot></table></div></div>';
+  return h;
 }
 /* ── Catálogo de empleados ── */
 async function _nomCargarEmpleados(){
@@ -23650,6 +23666,7 @@ function _nomRenderCfg(d){
     +'<label style="font-size:11px;color:#6b7280">Tasa ISN (%)<br><input id="nom-c-isntasa" type="number" step="0.01" value="'+(c.isnTasa)+'"'+dis+' style="width:100%;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:13px;font-weight:700"></label>'
     +'<label style="font-size:11px;color:#6b7280">Base del ISN<br><select id="nom-c-isnbase"'+dis+' style="width:100%;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:13px"><option value="percepciones"'+(c.isnBase==='percepciones'?' selected':'')+'>Total de percepciones</option><option value="gravado"'+(c.isnBase==='gravado'?' selected':'')+'>Solo gravado</option></select></label>'
     +'</div>'
+    +'<label style="font-size:11.5px;color:#374151;display:flex;align-items:center;gap:7px;margin-bottom:18px"><input type="checkbox" id="nom-c-exasim" '+(c.isnExcluirAsimilados===false?'':'checked')+dis+'> Excluir <b style="margin:0 3px">asimilados a salarios</b> del ISN <span style="color:#9ca3af">(CDMX: el ISN solo aplica a sueldos/salarios)</span></label>'
     +'<div style="font-size:13px;font-weight:800;margin-bottom:12px">Envío a Cuentas por Pagar (al validar)</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">'
     +'<label style="font-size:11px;color:#6b7280">Proveedor/beneficiario<br><input id="nom-c-prov" value="'+_cxpEsc(c.cxpProveedor||'')+'"'+dis+' style="width:100%;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:13px"></label>'
@@ -23662,7 +23679,7 @@ function _nomRenderCfg(d){
 }
 async function _nomCfgGuardar(){
   var g=function(id){ var el=document.getElementById(id); return el?el.value:''; };
-  var cfg={ isnTasa:parseFloat(g('nom-c-isntasa'))||0, isnBase:g('nom-c-isnbase'), cxpProveedor:g('nom-c-prov'), cxpCuentaContable:g('nom-c-cta') };
+  var cfg={ isnTasa:parseFloat(g('nom-c-isntasa'))||0, isnBase:g('nom-c-isnbase'), isnExcluirAsimilados:(document.getElementById('nom-c-exasim')||{}).checked!==false, cxpProveedor:g('nom-c-prov'), cxpCuentaContable:g('nom-c-cta') };
   var msg=document.getElementById('nom-c-msg'), btn=document.getElementById('nom-c-save');
   if(btn){ btn.disabled=true; btn.innerHTML='<span class="ing-spinner"></span>Guardando…'; }
   try{

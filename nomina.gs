@@ -34,6 +34,7 @@ function _nominaCfgDefault() {
   return {
     isnTasa: 3,            // % Impuesto Sobre Nómina (configurable por estado)
     isnBase: 'percepciones', // 'percepciones' (total) | 'gravado'
+    isnExcluirAsimilados: true, // CDMX: el ISN aplica a sueldos/salarios, NO a asimilados
     cxpProveedor: 'Nómina',  // proveedor/beneficiario en Cuentas por Pagar
     cxpCuentaContable: 'Sueldos y salarios'
   };
@@ -293,16 +294,28 @@ function readNominaMes(anio, mes) {
     for (var k in porEmp) if (porEmp.hasOwnProperty(k)) empleados.push(porEmp[k]);
     empleados.sort(function (a, b) { return String(a.nombre || '').localeCompare(String(b.nombre || '')); });
 
+    // ISN: en CDMX aplica SOLO a sueldos/salarios (no a asimilados). Se separan
+    // los totales por tipo y la base del ISN excluye asimilados (configurable).
     var baseISN = 0, totNeto = 0, totPercT = 0;
+    var netoSueldos = 0, netoAsim = 0, numSueldos = 0, numAsim = 0, percSueldos = 0, percAsim = 0;
     empleados.forEach(function (e) {
-      baseISN += (cfg.isnBase === 'gravado' ? e.gravado : e.totalPercepciones);
+      var esAsim = !!e.asimilado;
+      var baseE = (cfg.isnBase === 'gravado' ? e.gravado : e.totalPercepciones);
+      if (!esAsim || !cfg.isnExcluirAsimilados) baseISN += baseE;
       totNeto += e.neto; totPercT += e.totalPercepciones;
+      if (esAsim) { netoAsim += e.neto; numAsim++; percAsim += e.totalPercepciones; }
+      else { netoSueldos += e.neto; numSueldos++; percSueldos += e.totalPercepciones; }
     });
     var isn = baseISN * ((parseFloat(cfg.isnTasa) || 0) / 100);
     return {
       ok: true, anio: anio, mes: mes, encontrada: true, empleados: empleados, recibos: recibos,
-      totales: { neto: totNeto, percepciones: totPercT, isnBase: baseISN, isnTasa: cfg.isnTasa, isn: isn,
-        numRecibos: recibos.length, numEmpleados: empleados.length }
+      totales: {
+        neto: totNeto, percepciones: totPercT, isnBase: baseISN, isnTasa: cfg.isnTasa, isn: isn,
+        isnExcluirAsimilados: !!cfg.isnExcluirAsimilados,
+        numRecibos: recibos.length, numEmpleados: empleados.length,
+        netoSueldos: netoSueldos, netoAsimilados: netoAsim, numSueldos: numSueldos, numAsimilados: numAsim,
+        percepcionesSueldos: percSueldos, percepcionesAsimilados: percAsim
+      }
     };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
