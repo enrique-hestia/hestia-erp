@@ -11480,15 +11480,16 @@ function _erSpark(vals,color){
   return '<svg width="'+w+'" height="'+hh+'" viewBox="0 0 '+w+' '+hh+'"><polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.5"/></svg>';
 }
 function _erRowHtml(r,months,rev){
-  var esSec=r.tipo==='seccion', esMet=r.tipo==='metric', esDato=r.tipo==='dato';
+  var esSec=r.tipo==='seccion', esMet=r.tipo==='metric', esSub=r.tipo==='subdato', esDato=r.tipo==='dato';
   var costo=_erEsCosto(r.grupo), esNet=esMet&&/net profit/i.test(r.label||'');
   var stickBg='var(--card-bg,#fff)', rowStyle='', lblStyle='', valCol='var(--text-primary,#111)';
   if(esSec){ var inc=/REVENUE/.test(r.grupo); rowStyle='background:'+(inc?'rgba(63,143,94,.08)':'rgba(192,80,92,.07)'); stickBg=inc?'#eef6f1':'#fbf0f1'; lblStyle='font-weight:800;color:'+(inc?'#2f7a53':'#a94452'); valCol=inc?'#2f7a53':'#a94452'; }
   else if(esMet){ rowStyle='border-top:1.5px solid var(--color-divider,#e5e7eb)'+(esNet?';background:rgba(196,106,122,.09)':''); stickBg=esNet?'#f7edf0':'var(--card-bg,#fff)'; lblStyle='font-weight:800;color:var(--text-primary,#111)'; }
+  else if(esSub){ lblStyle='color:var(--text-secondary,#9ca3af);font-style:italic'; valCol='#9ca3af'; }
   else { lblStyle='color:var(--text-secondary,#374151)'; if(costo) valCol='#b45309'; }
-  var pad=esDato?'6px 12px 6px 28px':'8px 12px';
+  var pad=esSub?'4px 12px 4px 46px':(esDato?'6px 12px 6px 28px':'8px 12px');
   function fmt(v){ v=Number(v)||0; if(_erShowPct) return rev?(v/rev*100).toFixed(1)+'%':'—'; var disp=(costo&&(esSec||esDato))?-Math.abs(v):v; return _erMoney(disp); }
-  var h='<tr style="'+rowStyle+'"><td style="padding:'+pad+';position:sticky;left:0;background:'+stickBg+';'+lblStyle+';white-space:nowrap;z-index:1">'+_esc(r.label||r.linea)+'</td>';
+  var h='<tr style="'+rowStyle+'"><td style="padding:'+pad+';position:sticky;left:0;background:'+stickBg+';'+lblStyle+';white-space:nowrap;z-index:1">'+(esSub?'↳ ':'')+_esc(r.label||r.linea)+'</td>';
   months.forEach(function(mo){ var v=(r.valores&&r.valores[mo.key])||0; if(Math.abs(v)<0.005){ h+='<td style="text-align:right;padding:'+pad+';color:#cbd5e1">—</td>'; return; } var col=esMet?(v<0?'#c0505c':'#3f8f5e'):valCol; h+='<td style="text-align:right;padding:'+pad+';color:'+col+((esSec||esMet)?';font-weight:700':'')+';white-space:nowrap">'+fmt(v)+'</td>'; });
   var tcol=esMet?((Number(r.total)||0)<0?'#c0505c':'#3f8f5e'):valCol;
   h+='<td style="text-align:right;padding:'+pad+';font-weight:800;color:'+tcol+';white-space:nowrap">'+fmt(r.total)+'</td>';
@@ -11509,14 +11510,15 @@ function _erDetailHtml(d){
   var rev=Number(d.totalIngresos)||0;
   var h='<table style="width:100%;border-collapse:collapse;font-size:13px">';
   (d.rows||[]).forEach(function(r){
-    var esSec=r.tipo==='seccion', esMet=r.tipo==='metric', esDato=r.tipo==='dato', costo=_erEsCosto(r.grupo), esNet=esMet&&/net profit/i.test(r.label||'');
-    var v=Number(r.total)||0; if(esDato && Math.abs(v)<0.005) return;
+    var esSec=r.tipo==='seccion', esMet=r.tipo==='metric', esSub=r.tipo==='subdato', esDato=r.tipo==='dato', costo=_erEsCosto(r.grupo), esNet=esMet&&/net profit/i.test(r.label||'');
+    var v=Number(r.total)||0; if((esDato||esSub) && Math.abs(v)<0.005) return;
     var disp=(costo&&(esSec||esDato))?-Math.abs(v):v, rowStyle='', lbl='', col='var(--text-primary,#111)';
     if(esSec){ var inc=/REVENUE/.test(r.grupo); rowStyle='background:'+(inc?'rgba(63,143,94,.08)':'rgba(192,80,92,.07)'); lbl='font-weight:800;color:'+(inc?'#2f7a53':'#a94452'); col=inc?'#2f7a53':'#a94452'; }
     else if(esMet){ rowStyle='border-top:1.5px solid var(--color-divider,#e5e7eb)'+(esNet?';background:rgba(196,106,122,.09)':''); lbl='font-weight:800'; col=v<0?'#c0505c':'#3f8f5e'; }
+    else if(esSub){ lbl='color:var(--text-secondary,#9ca3af);font-style:italic'; col='#9ca3af'; }
     else { lbl='color:var(--text-secondary,#374151)'; if(costo) col='#b45309'; }
-    var pad=esDato?'6px 14px 6px 28px':'8px 14px';
-    h+='<tr style="'+rowStyle+'"><td style="padding:'+pad+';'+lbl+'">'+_esc(r.label||r.linea)+'</td><td style="text-align:right;padding:'+pad+';font-weight:'+((esSec||esMet)?'800':'600')+';color:'+col+'">'+_erMoney2(disp)+'</td><td style="text-align:right;padding:'+pad+';color:var(--text-secondary,#9ca3af);width:64px">'+(rev?(v/rev*100).toFixed(1)+'%':'—')+'</td></tr>';
+    var pad=esSub?'4px 14px 4px 46px':(esDato?'6px 14px 6px 28px':'8px 14px');
+    h+='<tr style="'+rowStyle+'"><td style="padding:'+pad+';'+lbl+'">'+(esSub?'↳ ':'')+_esc(r.label||r.linea)+'</td><td style="text-align:right;padding:'+pad+';font-weight:'+((esSec||esMet)?'800':'600')+';color:'+col+'">'+_erMoney2(disp)+'</td><td style="text-align:right;padding:'+pad+';color:var(--text-secondary,#9ca3af);width:64px">'+(rev?(v/rev*100).toFixed(1)+'%':'—')+'</td></tr>';
   });
   return h+'</table>';
 }
@@ -17699,6 +17701,8 @@ function _renderBoard(){
     h+='<div class="bd-card"><h4>Egresos por sección</h4>'+_boardEgresosTable(false)+'</div>';
   }
   h+='</div>';
+  // Externos y agencias · desglose por origen (drill-down; totales sin cambio)
+  h+=_boardOrigenesExternosCard();
   // Detalle completo de egresos (secciones → subgrupos → proveedores)
   h+='<div class="bd-card" style="margin-bottom:18px"><h4>Egresos a detalle — de nómina a gastos varios</h4>'+_boardEgresosTable(true)+'</div>';
   root.innerHTML=h;
@@ -17796,6 +17800,20 @@ function _bComparTable(comp){
   return h+'</table>';
 }
 function _bLineTable(arr,total){ var h='<table class="bd-tbl">'; (arr||[]).forEach(function(x){ if(Math.abs(x.valor)<=0.005) return; var p=total>0?(x.valor/total*100):0; h+='<tr><td>'+_esc(x.label)+'</td><td class="pctcell">'+p.toFixed(1)+'%</td><td>'+_bMoney(x.valor)+'</td></tr>'; }); return h+'</table>'; }
+/* Card: ingresos de EXTERNOS/AGENCIAS abiertos por ORIGEN (Reprovida, Dr. X, …).
+   Drill-down: la suma de orígenes == total de la línea, no re-totaliza. */
+function _boardOrigenesExternosCard(){
+  var d=_boardData; var arr=(d&&d.origenesExternos)||[]; if(!arr.length) return '';
+  var tot=(d.kpis&&d.kpis.ingresos)||0;
+  var h='<div class="bd-card" style="margin-bottom:18px"><h4>Externos y agencias · por origen</h4><table class="bd-tbl" style="font-size:12px">';
+  arr.forEach(function(g){
+    h+='<tr style="background:var(--color-primary-hl,rgba(196,106,122,.06))"><td style="font-weight:800">'+_esc(g.grupo)+'</td><td class="pctcell">'+(tot>0?(g.total/tot*100).toFixed(1):'0')+'%</td><td style="font-weight:800">'+_bMoney(g.total)+'</td></tr>';
+    (g.origenes||[]).forEach(function(o){
+      h+='<tr><td style="padding-left:18px;color:#9c4f5f;font-weight:700;font-size:11.5px">'+_esc(o.origen)+(o.cantidad>0?' ×'+o.cantidad:'')+'</td><td class="pctcell">'+(tot>0?(o.valor/tot*100).toFixed(1):'0')+'%</td><td style="font-weight:700">'+_bMoney(o.valor)+'</td></tr>';
+    });
+  });
+  return h+'</table></div>';
+}
 /* Tabla detallada de ingresos: grupo → subgrupo → producto (desde d.lineas). */
 function _boardIngresosTable(detailed){
   var d=_boardData; var tot=(d.kpis&&d.kpis.ingresos)||0;
