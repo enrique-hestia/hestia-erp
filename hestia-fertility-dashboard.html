@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.13.161 -->
+﻿<!-- app-build:2026.07.13.162 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -5497,9 +5497,19 @@ async function _ingDeclCargar(force){
     var tok=encodeURIComponent(getToken());
     var r=await fetch(APPS_SCRIPT_URL+'?action=declaraciones&periodo='+encodeURIComponent(per)+'&token='+tok);
     var d=await r.json();
-    _ingDeclCache=(d&&d.ok&&d.items)?d.items:[]; _ingDeclCacheKey=per;
-    _ingDeclRender();
-  }catch(e){ panel.innerHTML='<div style="font-size:11px;color:#dc2626">No se pudo cargar: '+e.message+'</div>'; }
+    if(d && d.ok){ _ingDeclCache=d.items||[]; _ingDeclCacheKey=per; _ingDeclRender(); return; }
+    // No hay respuesta válida => el backend de declaraciones no está publicado.
+    _ingDeclCache=null; _ingDeclCacheKey='';
+    panel.innerHTML=_ingDeclBannerNoListo(d && d.error);
+  }catch(e){ _ingDeclCache=null; _ingDeclCacheKey=''; panel.innerHTML=_ingDeclBannerNoListo(e.message); }
+}
+function _ingDeclBannerNoListo(err){
+  return '<div style="background:rgba(220,38,38,.06);border:1px solid #fecaca;border-radius:10px;padding:12px 14px;font-size:11.5px;color:#991b1b;line-height:1.55">'
+    +'<b>⚠ El módulo de declaraciones aún no está publicado en el servidor</b> — por eso no guarda.<br>'
+    +'En el editor de <b>Apps Script</b>: <b>1)</b> crea el archivo <b>declaraciones.gs</b> (➕ junto a "Archivos" → Script) y pega su contenido · <b>2)</b> confirma que <b>core.gs</b> y <b>finance.gs</b> están actualizados · <b>3)</b> <b>Implementar → Administrar implementaciones → ✏️ editar → Versión: Nueva → Implementar</b>.'
+    +(err?'<br><span style="color:#6b7280;font-size:10px">Detalle del servidor: '+_cxpEsc(String(err))+'</span>':'')
+    +'<br><button onclick="_ingDeclCargar(true)" style="margin-top:8px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer">↻ Ya lo publiqué — reintentar</button>'
+  +'</div>';
 }
 function _ingDeclRender(){
   var panel=document.getElementById('ing-decl-panel'); if(!panel) return;
@@ -5637,6 +5647,7 @@ function _ingDeclModal(it, esEdicion){
       +'<input type="hidden" id="ingd-'+cual+'-nombre" value="'+_cxpEsc(nombre||'')+'">'
       +'<input type="hidden" id="ingd-'+cual+'-id" value="'+_cxpEsc(fid||'')+'">'
       +'<input type="file" id="ingd-file-'+cual+'" accept="application/pdf,.pdf" onchange="_ingDeclSubirPdf(this,\''+cual+'\')" style="font-size:10px;width:100%">'
+      +'<input type="text" id="ingd-'+cual+'-link" placeholder="…o pega el link de Drive" oninput="_ingDeclPegarLink(\''+cual+'\')" style="font-size:10px;width:100%;margin-top:4px;padding:4px 6px;border:1px solid var(--color-divider,#e5e7eb);border-radius:5px;box-sizing:border-box;background:var(--card-bg,#fff)">'
       +'<div id="ingd-pdf-'+cual+'-status" style="font-size:10.5px;margin-top:4px"></div>'
     +'</div>';
   }
@@ -5677,14 +5688,28 @@ function _ingDeclSubirPdf(input, cual){
         filename:file.name, mimeType:file.type||'application/pdf', dataBase64:String(reader.result||'')
       })});
       var d=await r.json();
-      if(!d||!d.ok){ if(st) st.innerHTML='<span style="color:#dc2626">'+((d&&d.error)||'Error al subir')+'</span>'; return; }
+      if(!d||!d.ok){
+        var em=(d&&d.error)||'Error al subir (probablemente falta publicar declaraciones.gs en Apps Script).';
+        if(st) st.innerHTML='<span style="color:#dc2626">'+_cxpEsc(em)+'</span>';
+        alert('No se pudo adjuntar el PDF:\n\n'+em+'\n\nMientras tanto puedes pegar el link de Drive del archivo en el campo "…o pega el link de Drive".');
+        return;
+      }
       var u=document.getElementById('ingd-'+cual+'-url'); if(u) u.value=d.url||'';
       var n=document.getElementById('ingd-'+cual+'-nombre'); if(n) n.value=d.nombre||file.name;
       var i=document.getElementById('ingd-'+cual+'-id'); if(i) i.value=d.fileId||'';
       _ingDeclPdfUI(cual);
-    }catch(e){ if(st) st.innerHTML='<span style="color:#dc2626">Error: '+e.message+'</span>'; }
+    }catch(e){ if(st) st.innerHTML='<span style="color:#dc2626">Error de red: '+_cxpEsc(e.message)+'</span>'; }
   };
   reader.readAsDataURL(file);
+}
+// Alternativa a subir: pegar directamente el link de Drive del PDF (siempre
+// funciona aunque la subida al servidor falle).
+function _ingDeclPegarLink(cual){
+  var link=_ingDeclV('ingd-'+cual+'-link').trim();
+  var u=document.getElementById('ingd-'+cual+'-url'); if(u) u.value=link;
+  var n=document.getElementById('ingd-'+cual+'-nombre');
+  if(n && !n.value) n.value=(cual==='pago'?'Formato de pago':'Declaración');
+  _ingDeclPdfUI(cual);
 }
 function _ingDeclPdfUI(cual){
   var st=document.getElementById('ingd-pdf-'+cual+'-status'); if(!st) return;
@@ -5693,7 +5718,7 @@ function _ingDeclPdfUI(cual){
   else st.innerHTML='';
 }
 function _ingDeclQuitarPdf(cual){
-  ['url','nombre','id'].forEach(function(k){ var el=document.getElementById('ingd-'+cual+'-'+k); if(el) el.value=''; });
+  ['url','nombre','id','link'].forEach(function(k){ var el=document.getElementById('ingd-'+cual+'-'+k); if(el) el.value=''; });
   var inp=document.getElementById('ingd-file-'+cual); if(inp) inp.value='';
   _ingDeclPdfUI(cual);
 }
@@ -5740,7 +5765,13 @@ async function _ingDeclGuardar(){
   try{
     var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveDeclaracion',token:getToken(),decl:decl})});
     var d=await r.json();
-    if(!d.ok){ if(msg) msg.textContent=d.error||'No se pudo guardar'; if(btn){btn.disabled=false;btn.textContent='Guardar declaración';} return; }
+    if(!d || !d.ok){
+      var em=(d&&d.error)||'El servidor no respondió correctamente (probablemente falta publicar declaraciones.gs).';
+      if(msg) msg.textContent=em;
+      if(btn){btn.disabled=false;btn.textContent='Guardar declaración';}
+      alert('No se guardó la declaración:\n\n'+em);
+      return;
+    }
     _ingDeclCerrar();
     await _ingDeclCargar(true);
   }catch(e){ if(msg) msg.textContent='Error de conexión: '+e.message; if(btn){btn.disabled=false;btn.textContent='Guardar declaración';} }
