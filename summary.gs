@@ -343,7 +343,7 @@ function _summaryReadIngresos(anio) {
   var iOp=col(['op'],0), iFecha=col(['fecha'],2), iPac=col(['paciente'],3),
       iCat=col(['categoria'],4), iProd=col(['producto'],5), iCant=col(['cantidad'],8),
       iTot=col(['totalpagar','total a pagar','total'],9), iFP=col(['forma de pago','formapago'],12),
-      iCiclo=col(['ciclo'],20);
+      iCiclo=col(['ciclo'],20), iOrigen=col(['origenexterno','origen'],-1);
 
   // ── Red de seguridad: si la columna Fecha detectada NO trae fechas de verdad
   //    (encabezado engañoso u hoja recorrida), buscar la columna con más fechas y
@@ -356,7 +356,7 @@ function _summaryReadIngresos(anio) {
       var _shift = iFecha - bestC;
       iFecha = bestC;
       if (_shift !== 0){ function _adj(x){ return x<0?x:Math.max(0, x-_shift); }
-        iPac=_adj(iPac); iCat=_adj(iCat); iProd=_adj(iProd); iCant=_adj(iCant); iTot=_adj(iTot); iFP=_adj(iFP); iCiclo=_adj(iCiclo); }
+        iPac=_adj(iPac); iCat=_adj(iCat); iProd=_adj(iProd); iCant=_adj(iCant); iTot=_adj(iTot); iFP=_adj(iFP); iCiclo=_adj(iCiclo); iOrigen=_adj(iOrigen); }
     }
   }
 
@@ -369,6 +369,7 @@ function _summaryReadIngresos(anio) {
       categoria:String(r[iCat]||''), producto:String(r[iProd]||''), cantidad:num(r[iCant]),
       total:num(r[iTot]), formaPago:(iFP>-1?String(r[iFP]||''):''),
       grupoU:(iCiclo>-1?String(r[iCiclo]||'').trim():''),
+      origen:(iOrigen>-1?String(r[iOrigen]||'').trim():''),
       _anio:anio, _fila:(i+1), _fechaAlt:_sumBuscaFechaEnFila(r, iFecha) });
   }
   return out;

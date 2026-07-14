@@ -409,6 +409,18 @@ function doGet(e) {
       return jsonResponse(readIngresosData(anioIng ? parseInt(anioIng) : undefined));
     }
 
+    if (action === 'origenes') {
+      if (typeof readOrigenes !== 'function')
+        return jsonResponse({ok:false, error:'Agrega origenes.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readOrigenes());
+    }
+
+    if (action === 'sugerirOrigenes') {
+      if (typeof sugerirOrigenesHistorico !== 'function')
+        return jsonResponse({ok:false, error:'Agrega origenes.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(sugerirOrigenesHistorico((e && e.parameter.anio) || ''));
+    }
+
     if (action === 'leerXmlFactura') {
       var fid = (e && e.parameter.fileId) || '';
       return jsonResponse(leerXmlFactura(fid));

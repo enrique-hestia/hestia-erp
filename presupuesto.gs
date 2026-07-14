@@ -366,7 +366,9 @@ function _presIngresosProy(tY, tQ) {
       var yy = parseInt(f.substring(0, 4), 10), mo = parseInt(f.substring(5, 7), 10);
       var qk = _presQKey(yy, _presQ(mo));
       var g = String(r.grupoU || '').trim() || String(r.categoria || '').trim() || '(Sin grupo)';
-      var s = String(r.categoria || '').trim() || g;
+      // Ingresos externos atribuidos: el sub-nivel se abre por DUEÑO (Origen
+      // externo). Los no-externos traen r.origen='' → sub = categoría (sin cambio).
+      var s = (r.origen && String(r.origen).trim()) ? String(r.origen).trim() : (String(r.categoria || '').trim() || g);
       var p = String(r.producto || '').trim() || s;
       var cant = Number(r.cantidad) || 0, imp = Number(r.total) || 0;
       if (!q[qk]) q[qk] = {}; if (!q[qk][g]) q[qk][g] = {}; if (!q[qk][g][s]) q[qk][g][s] = {};
