@@ -425,6 +425,24 @@ function doGet(e) {
       return jsonResponse(readDeclaraciones(declPer));
     }
 
+    // ── Nómina ──
+    if (action === 'empleados') {
+      if (typeof readEmpleados !== 'function') return jsonResponse({ ok: false, error: 'nomina.gs no desplegado' });
+      return jsonResponse(readEmpleados());
+    }
+    if (action === 'nominaMes') {
+      if (typeof readNominaMes !== 'function') return jsonResponse({ ok: false, error: 'nomina.gs no desplegado' });
+      return jsonResponse(readNominaMes((e && e.parameter.anio) || '', (e && e.parameter.mes) || ''));
+    }
+    if (action === 'nominaCfg') {
+      if (typeof nominaCfgRead !== 'function') return jsonResponse({ ok: false, error: 'nomina.gs no desplegado' });
+      return jsonResponse(nominaCfgRead());
+    }
+    if (action === 'misRecibos') {
+      if (typeof nominaMisRecibos !== 'function') return jsonResponse({ ok: false, error: 'nomina.gs no desplegado' });
+      return jsonResponse(nominaMisRecibos((e && e.parameter.token) || '', (e && e.parameter.anio) || '', (e && e.parameter.mes) || ''));
+    }
+
     if (action === 'buscarXmlAmplio') {
       var baIni = (e && e.parameter.fechaInicio) || '';
       var baFin = (e && e.parameter.fechaFin) || '';

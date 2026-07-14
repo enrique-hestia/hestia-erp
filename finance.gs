@@ -625,6 +625,19 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega declaraciones.gs en Apps Script y redespliega.'});
       return jsonResponse(subirDeclaracionPdf(body));
     }
+    // Nómina
+    if (body.action === 'saveEmpleado') {
+      if (typeof saveEmpleado !== 'function') return jsonResponse({ok:false, error:'Agrega nomina.gs en Apps Script y redespliega.'});
+      return jsonResponse(saveEmpleado(body));
+    }
+    if (body.action === 'deleteEmpleado') {
+      if (typeof deleteEmpleado !== 'function') return jsonResponse({ok:false, error:'Agrega nomina.gs en Apps Script y redespliega.'});
+      return jsonResponse(deleteEmpleado(body));
+    }
+    if (body.action === 'nominaCfgSave') {
+      if (typeof nominaCfgSave !== 'function') return jsonResponse({ok:false, error:'Agrega nomina.gs en Apps Script y redespliega.'});
+      return jsonResponse(nominaCfgSave(body));
+    }
     // Tareas programadas (scheduler)
     if (body.action === 'updateScheduledTask')     return jsonResponse(updateScheduledTask(body));
     if (body.action === 'setupScheduledTriggers')  return jsonResponse(setupScheduledTriggers());
