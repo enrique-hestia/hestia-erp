@@ -31,10 +31,12 @@
 
 var DECL_TAB = 'Declaraciones';
 var DECL_HEADERS = [
-  'ID', 'Periodo', 'Tipo', 'NumeroDeclaracion', 'FechaPresentacion', 'ImporteDeclarado',
+  'ID', 'Periodo', 'Tipo', 'TipoPresentacion', 'Consecutivo', 'NumeroDeclaracion', 'FechaPresentacion', 'ImporteDeclarado',
   'IngresosNominales', 'CoeficienteUtilidad', 'UtilidadFiscal', 'PerdidasAplicadas',
   'PTU', 'OtrasDeducciones', 'BaseGravable', 'TasaISR', 'ISRCausado',
   'PagosProvPrevios', 'RetencionesISR', 'OtrosAcreditamientos', 'ISRaCargo',
+  'DeclaracionPdfUrl', 'DeclaracionPdfNombre', 'DeclaracionPdfId',
+  'PagoPdfUrl', 'PagoPdfNombre', 'PagoPdfId',
   'Notas', 'Usuario', 'Actualizado'
 ];
 
@@ -45,14 +47,55 @@ function _declSheet() {
     sh = ss.insertSheet(DECL_TAB);
     sh.getRange(1, 1, 1, DECL_HEADERS.length).setValues([DECL_HEADERS]).setFontWeight('bold');
     sh.setFrozenRows(1);
-  } else {
-    // Si la hoja existe pero le faltan columnas nuevas, completarlas sin borrar datos.
-    var firstRow = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), DECL_HEADERS.length)).getValues()[0];
-    var faltan = false;
-    for (var i = 0; i < DECL_HEADERS.length; i++) { if (String(firstRow[i] || '') !== DECL_HEADERS[i]) faltan = true; }
-    if (faltan) sh.getRange(1, 1, 1, DECL_HEADERS.length).setValues([DECL_HEADERS]).setFontWeight('bold');
+    return sh;
+  }
+  // Hoja existente: APPEND de columnas nuevas al final (sin reordenar → no
+  // descuadra datos ya capturados; todo se lee/escribe por NOMBRE de columna).
+  var lastCol = Math.max(1, sh.getLastColumn());
+  var existing = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (v) { return String(v); });
+  var toAdd = [];
+  for (var i = 0; i < DECL_HEADERS.length; i++) {
+    if (existing.indexOf(DECL_HEADERS[i]) === -1) toAdd.push(DECL_HEADERS[i]);
+  }
+  if (toAdd.length) {
+    sh.getRange(1, existing.length + 1, 1, toAdd.length).setValues([toAdd]);
+    sh.getRange(1, 1, 1, existing.length + toAdd.length).setFontWeight('bold');
   }
   return sh;
+}
+
+// Carpeta de Drive para los PDF adjuntos de declaraciones (por año).
+function _declFolder(periodo) {
+  var rootIt = DriveApp.getFoldersByName('Declaraciones_Adjuntos');
+  var root = rootIt.hasNext() ? rootIt.next() : DriveApp.createFolder('Declaraciones_Adjuntos');
+  var m = String(periodo || '').match(/^(\d{4})/);
+  if (!m) return root;
+  var sub = root.getFoldersByName(m[1]);
+  return sub.hasNext() ? sub.next() : root.createFolder(m[1]);
+}
+
+// Sube un PDF (declaración o comprobante de pago) a Drive y devuelve su URL.
+// cual = 'declaracion' | 'pago'. Base64 (data URL o crudo). Máx 12 MB.
+function subirDeclaracionPdf(body) {
+  try {
+    if (!_tokenHasPermission(body.token || '', 'editar_ingresos')) {
+      return { ok: false, error: 'Sin autorización para adjuntar (editar_ingresos).' };
+    }
+    var name = String((body && body.filename) || 'declaracion.pdf').trim() || 'declaracion.pdf';
+    var mime = String((body && body.mimeType) || 'application/pdf');
+    var data = String((body && body.dataBase64) || '').replace(/^data:[^;]+;base64,/, '');
+    if (!data) return { ok: false, error: 'Archivo vacío.' };
+    var bytes = Utilities.base64Decode(data);
+    if (bytes.length > 12 * 1024 * 1024) return { ok: false, error: 'Archivo muy grande (máx 12 MB).' };
+    var per = String((body && body.periodo) || '');
+    var tipo = String((body && body.tipo) || '');
+    var cual = String((body && body.cual) || 'doc');
+    var pref = (per ? per + ' ' : '') + (tipo ? tipo + ' ' : '') + cual;
+    var blob = Utilities.newBlob(bytes, mime, pref + ' - ' + name);
+    var f = _declFolder(per).createFile(blob);
+    try { f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
+    return { ok: true, url: f.getUrl(), fileId: f.getId(), nombre: name };
+  } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
 function readDeclaraciones(periodo) {
@@ -93,7 +136,11 @@ function saveDeclaracion(body) {
     var periodo = String(d.Periodo || '').trim();
     var tipo = String(d.Tipo || 'ISR provisional').trim() || 'ISR provisional';
     if (!/^\d{4}-\d{2}$/.test(periodo)) return { ok: false, error: 'Periodo inválido (usa YYYY-MM).' };
-    var id = String(d.ID || (periodo + '|' + tipo));
+    // ID ÚNICO por registro: así una complementaria SIEMPRE es fila nueva y nunca
+    // sustituye la normal. Solo al EDITAR (ID presente) se actualiza esa fila.
+    var id = String(d.ID || '').trim();
+    var esNuevo = !id;
+    if (esNuevo) id = 'D' + new Date().getTime() + '-' + Math.floor(Math.random() * 10000);
 
     var sh = _declSheet();
     var data = sh.getDataRange().getValues();
@@ -105,7 +152,7 @@ function saveDeclaracion(body) {
     if (!email) email = String(d.Usuario || '');
     var stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'America/Mexico_City', 'yyyy-MM-dd HH:mm');
 
-    var numCols = { ImporteDeclarado:1, IngresosNominales:1, CoeficienteUtilidad:1, UtilidadFiscal:1,
+    var numCols = { Consecutivo:1, ImporteDeclarado:1, IngresosNominales:1, CoeficienteUtilidad:1, UtilidadFiscal:1,
       PerdidasAplicadas:1, PTU:1, OtrasDeducciones:1, BaseGravable:1, TasaISR:1, ISRCausado:1,
       PagosProvPrevios:1, RetencionesISR:1, OtrosAcreditamientos:1, ISRaCargo:1 };
     var vals = h.map(function (col) {
@@ -113,6 +160,7 @@ function saveDeclaracion(body) {
       if (col === 'ID') return id;
       if (col === 'Periodo') return periodo;
       if (col === 'Tipo') return tipo;
+      if (col === 'TipoPresentacion') return String(d.TipoPresentacion || 'Normal') || 'Normal';
       if (col === 'Usuario') return email;
       if (col === 'Actualizado') return stamp;
       var v = d[col];
@@ -121,17 +169,17 @@ function saveDeclaracion(body) {
       return v;
     });
 
+    // Upsert SOLO por ID (nunca por Periodo+Tipo → complementarias conviven).
     var foundRow = -1;
-    for (var i = 1; i < data.length; i++) {
-      var rid = String(data[i][idx('ID')] || '');
-      var rper = String(data[i][idx('Periodo')] || '');
-      var rtipo = String(data[i][idx('Tipo')] || '');
-      if (rid === id || (rper === periodo && rtipo === tipo)) { foundRow = i + 1; break; }
+    if (!esNuevo) {
+      for (var i = 1; i < data.length; i++) {
+        if (String(data[i][idx('ID')] || '') === id) { foundRow = i + 1; break; }
+      }
     }
     if (foundRow > 0) sh.getRange(foundRow, 1, 1, h.length).setValues([vals]);
     else sh.appendRow(vals);
 
-    try { logAudit(email || 'sistema', 'Declaraciones', foundRow > 0 ? 'Editar' : 'Crear', periodo + ' · ' + tipo, '', '', String(d.NumeroDeclaracion || '')); } catch (e) {}
+    try { logAudit(email || 'sistema', 'Declaraciones', foundRow > 0 ? 'Editar' : 'Crear', periodo + ' · ' + tipo + ' · ' + String(d.TipoPresentacion || 'Normal'), '', '', String(d.NumeroDeclaracion || '')); } catch (e) {}
     return { ok: true, id: id, actualizado: stamp, usuario: email };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }

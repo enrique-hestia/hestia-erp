@@ -620,6 +620,11 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega declaraciones.gs en Apps Script y redespliega.'});
       return jsonResponse(deleteDeclaracion(body));
     }
+    if (body.action === 'subirDeclaracionPdf') {
+      if (typeof subirDeclaracionPdf !== 'function')
+        return jsonResponse({ok:false, error:'Agrega declaraciones.gs en Apps Script y redespliega.'});
+      return jsonResponse(subirDeclaracionPdf(body));
+    }
     // Tareas programadas (scheduler)
     if (body.action === 'updateScheduledTask')     return jsonResponse(updateScheduledTask(body));
     if (body.action === 'setupScheduledTriggers')  return jsonResponse(setupScheduledTriggers());

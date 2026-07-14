@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.13.158 -->
+﻿<!-- app-build:2026.07.13.159 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -5479,7 +5479,13 @@ async function _ingDeclCargar(force){
 function _ingDeclRender(){
   var panel=document.getElementById('ing-decl-panel'); if(!panel) return;
   var per=_ingDeclCacheKey||_ingDeclPeriodo();
-  var items=_ingDeclCache||[]; var puede=_ingDeclPuede(); var h='';
+  var items=(_ingDeclCache||[]).slice().sort(function(a,b){
+    var ta=String(a.Tipo||''), tb=String(b.Tipo||''); if(ta!==tb) return ta<tb?-1:1;
+    var na=(String(a.TipoPresentacion||'Normal')==='Normal')?0:1, nb=(String(b.TipoPresentacion||'Normal')==='Normal')?0:1;
+    if(na!==nb) return na-nb; // normal primero, luego complementarias
+    return (parseInt(a.Consecutivo,10)||0)-(parseInt(b.Consecutivo,10)||0);
+  });
+  var puede=_ingDeclPuede(); var h='';
   var mesLbl=(typeof _ingMesNombre==='function')?_ingMesNombre(per):per;
   if(!items.length){
     h+='<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-bottom:8px">Aún no capturas la declaración de <b>'+mesLbl+'</b>.</div>';
@@ -5496,9 +5502,14 @@ function _ingDeclCard(it, puede){
   var esISR=String(it.Tipo||'').toLowerCase().indexOf('isr provisional')>-1;
   var id=String(it.ID||'').replace(/'/g,"\\'");
   function ln(lbl,val,op,strong){ return '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:10.5px;'+(strong?'font-weight:800;color:var(--text-primary,#111);border-top:1px solid var(--color-divider,#e5e7eb);margin-top:2px;padding-top:4px':'color:var(--text-secondary,#374151)')+'"><span>'+(op?op+' ':'')+lbl+'</span><span style="font-weight:700">'+val+'</span></div>'; }
-  var h='<div style="border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:12px 14px;margin-bottom:10px;background:var(--color-surface,#fafafa)">';
+  var esComp=String(it.TipoPresentacion||'Normal')==='Complementaria';
+  var cNum=parseInt(it.Consecutivo,10)||0;
+  var badge=esComp
+    ? '<span style="font-size:8.5px;font-weight:800;color:#b45309;background:rgba(180,83,9,.12);border-radius:5px;padding:1px 6px;margin-left:6px;vertical-align:middle">COMPLEMENTARIA'+(cNum?' '+cNum:'')+'</span>'
+    : '<span style="font-size:8.5px;font-weight:800;color:#166534;background:rgba(22,101,52,.10);border-radius:5px;padding:1px 6px;margin-left:6px;vertical-align:middle">NORMAL</span>';
+  var h='<div style="border:1px solid var(--color-divider,#e5e7eb);border-left:3px solid '+(esComp?'#b45309':'#166534')+';border-radius:10px;padding:12px 14px;margin-bottom:10px;background:var(--color-surface,#fafafa)">';
   h+='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'
-    +'<div><div style="font-size:12.5px;font-weight:800;color:var(--text-primary,#111)">'+_cxpEsc(it.Tipo||'Declaración')+'</div>'
+    +'<div><div style="font-size:12.5px;font-weight:800;color:var(--text-primary,#111)">'+_cxpEsc(it.Tipo||'Declaración')+badge+'</div>'
     +'<div style="font-size:10.5px;color:var(--text-secondary,#6b7280)">N.º '+_cxpEsc(it.NumeroDeclaracion||'—')+(it.FechaPresentacion?' · '+_cxpEsc(String(it.FechaPresentacion)):'')+'</div></div>'
     +'<div style="text-align:right"><div style="font-size:9px;color:var(--text-secondary,#9ca3af);text-transform:uppercase;font-weight:700">Importe declarado</div>'
     +'<div style="font-size:17px;font-weight:800;color:var(--color-primary,#c46a7a)">'+fmt(it.ImporteDeclarado)+'</div></div>'
@@ -5521,6 +5532,11 @@ function _ingDeclCard(it, puede){
     h+='</div>';
   }
   if(it.Notas) h+='<div style="margin-top:8px;font-size:10.5px;color:var(--text-secondary,#374151);background:var(--card-bg,#fff);border-radius:8px;padding:7px 9px;white-space:pre-wrap">📝 '+_cxpEsc(String(it.Notas))+'</div>';
+  var pdfs='';
+  var lk='display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:700;color:#0c4a6e;text-decoration:none;background:rgba(12,74,110,.07);border-radius:6px;padding:3px 9px';
+  if(it.DeclaracionPdfUrl) pdfs+='<a href="'+_cxpEsc(String(it.DeclaracionPdfUrl))+'" target="_blank" style="'+lk+'">📄 Declaración</a>';
+  if(it.PagoPdfUrl) pdfs+='<a href="'+_cxpEsc(String(it.PagoPdfUrl))+'" target="_blank" style="'+lk+'">🧾 Comprobante de pago</a>';
+  if(pdfs) h+='<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">'+pdfs+'</div>';
   h+='<div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center">'
     +'<span style="font-size:9px;color:var(--text-secondary,#9ca3af)">'+(it.Usuario?_cxpEsc(String(it.Usuario))+' · ':'')+_cxpEsc(String(it.Actualizado||''))+'</span>'
     +(puede?'<span><button onclick="_ingDeclEditar(\''+id+'\')" style="background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;padding:3px 10px;font-size:10px;font-weight:700;color:var(--text-primary,#374151);cursor:pointer;margin-right:6px">Editar</button>'
@@ -5528,7 +5544,17 @@ function _ingDeclCard(it, puede){
   +'</div></div>';
   return h;
 }
-function _ingDeclNueva(){ _ingDeclModal({ Periodo:_ingDeclPeriodo(), Tipo:'ISR provisional', TasaISR:30 }, false); }
+function _ingDeclNueva(){
+  var per=_ingDeclPeriodo(), tipo='ISR provisional';
+  var ex=(_ingDeclCache||[]).filter(function(x){ return String(x.Periodo)===per && String(x.Tipo)===tipo; });
+  var hayNormal=false, maxC=0;
+  ex.forEach(function(x){ if(String(x.TipoPresentacion||'Normal')==='Normal') hayNormal=true; var c=parseInt(x.Consecutivo,10)||0; if(c>maxC)maxC=c; });
+  var seed={ Periodo:per, Tipo:tipo, TasaISR:30 };
+  // Si ya existe la normal de este mes, la nueva se sugiere como Complementaria
+  // (para no pisar la normal). El usuario puede cambiarlo.
+  if(hayNormal){ seed.TipoPresentacion='Complementaria'; seed.Consecutivo=maxC+1; } else { seed.TipoPresentacion='Normal'; }
+  _ingDeclModal(seed, false);
+}
 function _ingDeclEditar(id){
   var it=(_ingDeclCache||[]).filter(function(x){return String(x.ID)===String(id);})[0];
   _ingDeclModal(it||{ Periodo:_ingDeclPeriodo(), Tipo:'ISR provisional', TasaISR:30 }, true);
@@ -5552,6 +5578,13 @@ function _ingDeclModal(it, esEdicion){
     +'<label style="font-size:10px;color:var(--text-secondary,#6b7280)">N.º de declaración (acuse)<br><input id="ingd-num" value="'+_cxpEsc(it.NumeroDeclaracion||'')+'" placeholder="folio del acuse SAT" style="width:100%;padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff)"></label>'
     +'<label style="font-size:10px;color:var(--text-secondary,#6b7280)">Fecha de presentación<br><input id="ingd-fecha" type="date" value="'+_cxpEsc(String(it.FechaPresentacion||''))+'" style="width:100%;padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff)"></label>'
   +'</div>';
+  // Normal vs Complementaria — la complementaria es un registro NUEVO; nunca
+  // sustituye ni borra la normal (se conserva todo el historial).
+  var pres=it.TipoPresentacion||'Normal';
+  f+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px">'
+    +'<label style="font-size:10px;color:var(--text-secondary,#6b7280)">Presentación<br><select id="ingd-pres" onchange="_ingDeclOnPres()" style="width:100%;padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff)"><option value="Normal"'+(pres==='Normal'?' selected':'')+'>Normal</option><option value="Complementaria"'+(pres==='Complementaria'?' selected':'')+'>Complementaria</option></select></label>'
+    +'<label id="ingd-consec-wrap" style="font-size:10px;color:var(--text-secondary,#6b7280);display:'+(pres==='Complementaria'?'block':'none')+'">N.º de complementaria<br><input id="ingd-consec" type="number" min="1" step="1" value="'+(it.Consecutivo?it.Consecutivo:'')+'" placeholder="1" style="width:100%;padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff)"></label>'
+  +'</div>';
   f+='<div id="ingd-calc" style="border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:11px 13px;margin-bottom:10px'+(tipo==='ISR provisional'?'':';display:none')+'">'
     +'<div style="font-size:9.5px;font-weight:700;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin-bottom:5px">Cómo llegué al número — pago provisional de ISR</div>'
     +rowI('Ingresos nominales acumulados', inp('ingd-ing', it.IngresosNominales))
@@ -5572,6 +5605,20 @@ function _ingDeclModal(it, esEdicion){
     +'<span style="font-size:12px;font-weight:800;color:var(--color-primary,#c46a7a)">Importe declarado (lo que pagaste)</span>'
     +'<input id="ingd-importe" type="number" step="0.01" value="'+(it.ImporteDeclarado!==undefined&&it.ImporteDeclarado!==''?it.ImporteDeclarado:'')+'" oninput="_ingDeclImporteTocado=true" style="width:160px;text-align:right;padding:7px 9px;border:2px solid var(--color-primary,#c46a7a);border-radius:7px;font-size:15px;font-weight:800;background:var(--card-bg,#fff)">'
   +'</div>';
+  function _pdfF(cual,label,url,nombre,fid){
+    return '<div style="border:1px dashed var(--color-divider,#cbd5e1);border-radius:8px;padding:8px 9px">'
+      +'<div style="font-size:10px;color:var(--text-secondary,#6b7280);margin-bottom:4px">'+label+'</div>'
+      +'<input type="hidden" id="ingd-'+cual+'-url" value="'+_cxpEsc(url||'')+'">'
+      +'<input type="hidden" id="ingd-'+cual+'-nombre" value="'+_cxpEsc(nombre||'')+'">'
+      +'<input type="hidden" id="ingd-'+cual+'-id" value="'+_cxpEsc(fid||'')+'">'
+      +'<input type="file" id="ingd-file-'+cual+'" accept="application/pdf,.pdf" onchange="_ingDeclSubirPdf(this,\''+cual+'\')" style="font-size:10px;width:100%">'
+      +'<div id="ingd-pdf-'+cual+'-status" style="font-size:10.5px;margin-top:4px"></div>'
+    +'</div>';
+  }
+  f+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:2px 0 10px">'
+    +_pdfF('declaracion','📄 Declaración (PDF)', it.DeclaracionPdfUrl, it.DeclaracionPdfNombre, it.DeclaracionPdfId)
+    +_pdfF('pago','🧾 Comprobante de pago (PDF)', it.PagoPdfUrl, it.PagoPdfNombre, it.PagoPdfId)
+  +'</div>';
   f+='<label style="font-size:10px;color:var(--text-secondary,#6b7280)">Notas (para consultar después)<br><textarea id="ingd-notas" rows="2" placeholder="ej. se aplicó pérdida de 2024, ajuste por…, retención del banco X…" style="width:100%;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11.5px;background:var(--card-bg,#fff);resize:vertical;box-sizing:border-box">'+_cxpEsc(String(it.Notas||''))+'</textarea></label>';
   f+='<div id="ingd-msg" style="font-size:10.5px;color:#dc2626;margin:6px 0;min-height:12px"></div>';
   f+='<div style="display:flex;gap:8px;margin-top:6px">'
@@ -5582,7 +5629,47 @@ function _ingDeclModal(it, esEdicion){
     +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px"><div style="font-weight:800;font-size:16px">📋 '+(esEdicion?'Editar':'Capturar')+' declaración</div>'
     +'<button onclick="_ingDeclCerrar()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-secondary,#9ca3af)">✕</button></div>'
     +f+'</div>';
-  _ingDeclOnTipo(); _ingDeclCalc();
+  _ingDeclOnTipo(); _ingDeclOnPres(); _ingDeclCalc();
+  _ingDeclPdfUI('declaracion'); _ingDeclPdfUI('pago');
+}
+function _ingDeclOnPres(){
+  var p=_ingDeclV('ingd-pres'); var w=document.getElementById('ingd-consec-wrap');
+  if(w) w.style.display=(p==='Complementaria')?'block':'none';
+}
+// Sube un PDF (declaración o pago) y guarda su URL en los campos ocultos del form.
+function _ingDeclSubirPdf(input, cual){
+  var file=input.files&&input.files[0]; if(!file) return;
+  var st=document.getElementById('ingd-pdf-'+cual+'-status');
+  if(file.size>12*1024*1024){ if(st) st.innerHTML='<span style="color:#dc2626">Máx 12 MB</span>'; input.value=''; return; }
+  if(st) st.innerHTML='<span class="ing-spinner ing-spinner-dark"></span>Subiendo…';
+  var reader=new FileReader();
+  reader.onload=async function(){
+    try{
+      var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({
+        action:'subirDeclaracionPdf', token:getToken(),
+        periodo:_ingDeclV('ingd-periodo'), tipo:_ingDeclV('ingd-tipo'), cual:cual,
+        filename:file.name, mimeType:file.type||'application/pdf', dataBase64:String(reader.result||'')
+      })});
+      var d=await r.json();
+      if(!d||!d.ok){ if(st) st.innerHTML='<span style="color:#dc2626">'+((d&&d.error)||'Error al subir')+'</span>'; return; }
+      var u=document.getElementById('ingd-'+cual+'-url'); if(u) u.value=d.url||'';
+      var n=document.getElementById('ingd-'+cual+'-nombre'); if(n) n.value=d.nombre||file.name;
+      var i=document.getElementById('ingd-'+cual+'-id'); if(i) i.value=d.fileId||'';
+      _ingDeclPdfUI(cual);
+    }catch(e){ if(st) st.innerHTML='<span style="color:#dc2626">Error: '+e.message+'</span>'; }
+  };
+  reader.readAsDataURL(file);
+}
+function _ingDeclPdfUI(cual){
+  var st=document.getElementById('ingd-pdf-'+cual+'-status'); if(!st) return;
+  var url=_ingDeclV('ingd-'+cual+'-url'), nombre=_ingDeclV('ingd-'+cual+'-nombre');
+  if(url) st.innerHTML='<a href="'+_cxpEsc(url)+'" target="_blank" style="color:#166534;font-weight:700;text-decoration:none">✓ '+_cxpEsc(nombre||'PDF adjunto')+'</a> <button type="button" onclick="_ingDeclQuitarPdf(\''+cual+'\')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:11px;padding:0 2px">quitar</button>';
+  else st.innerHTML='';
+}
+function _ingDeclQuitarPdf(cual){
+  ['url','nombre','id'].forEach(function(k){ var el=document.getElementById('ingd-'+cual+'-'+k); if(el) el.value=''; });
+  var inp=document.getElementById('ingd-file-'+cual); if(inp) inp.value='';
+  _ingDeclPdfUI(cual);
 }
 function _ingDeclOnTipo(){
   var t=_ingDeclV('ingd-tipo'); var calc=document.getElementById('ingd-calc');
@@ -5608,15 +5695,20 @@ async function _ingDeclGuardar(){
   var base=util-_ingDeclN('ingd-perd')-_ingDeclN('ingd-ptu')-_ingDeclN('ingd-otras');
   var tasa=_ingDeclN('ingd-tasa'); var causado=base*(tasa/100);
   var cargo=causado-_ingDeclN('ingd-pagosprev')-_ingDeclN('ingd-ret')-_ingDeclN('ingd-otrosacr');
+  var presT=_ingDeclV('ingd-pres')||'Normal';
   var decl={
     ID:_ingDeclV('ingd-id')||'', Periodo:per, Tipo:tipo,
+    TipoPresentacion:presT, Consecutivo:(presT==='Complementaria'?_ingDeclN('ingd-consec'):0),
     NumeroDeclaracion:_ingDeclV('ingd-num'), FechaPresentacion:_ingDeclV('ingd-fecha'),
     ImporteDeclarado:_ingDeclN('ingd-importe'),
     IngresosNominales:ing, CoeficienteUtilidad:coef, UtilidadFiscal:util,
     PerdidasAplicadas:_ingDeclN('ingd-perd'), PTU:_ingDeclN('ingd-ptu'), OtrasDeducciones:_ingDeclN('ingd-otras'),
     BaseGravable:base, TasaISR:tasa, ISRCausado:causado,
     PagosProvPrevios:_ingDeclN('ingd-pagosprev'), RetencionesISR:_ingDeclN('ingd-ret'), OtrosAcreditamientos:_ingDeclN('ingd-otrosacr'),
-    ISRaCargo:cargo, Notas:_ingDeclV('ingd-notas')
+    ISRaCargo:cargo,
+    DeclaracionPdfUrl:_ingDeclV('ingd-declaracion-url'), DeclaracionPdfNombre:_ingDeclV('ingd-declaracion-nombre'), DeclaracionPdfId:_ingDeclV('ingd-declaracion-id'),
+    PagoPdfUrl:_ingDeclV('ingd-pago-url'), PagoPdfNombre:_ingDeclV('ingd-pago-nombre'), PagoPdfId:_ingDeclV('ingd-pago-id'),
+    Notas:_ingDeclV('ingd-notas')
   };
   var btn=document.getElementById('ingd-save'); if(btn){ btn.disabled=true; btn.innerHTML='<span class="ing-spinner"></span>Guardando…'; }
   try{
