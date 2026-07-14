@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.13.159 -->
+﻿<!-- app-build:2026.07.13.160 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -5395,6 +5395,31 @@ function _ingPaintFacturado(xmlSet) {
           +'<span style="font-size:11px;font-weight:700;color:'+col+'">'+_ingFmtMon(b.monto)+'</span>'
         +'</div>';
       });
+      // Relación de las facturas timbradas en OTRO mes (ventas de este período
+      // cuyo CFDI se timbró fuera del período) — es lo que se declara en el mes
+      // del timbrado, no en éste. Datos del backend (opsFacturadasOtroMes).
+      var cross = (_ingFacResult && _ingFacResult.cfdiCruzados && _ingFacResult.cfdiCruzados.opsFacturadasOtroMes) || [];
+      var crossOut = cross.filter(function(o){ var m=String(o.xmlMes||''); return m && !(m>=minM && m<=maxM); });
+      if (crossOut.length) {
+        crossOut.sort(function(a,b){ var ma=String(a.xmlMes||''),mb=String(b.xmlMes||''); if(ma!==mb) return ma<mb?-1:1; return String(a.fecha||'')<String(b.fecha||'')?-1:1; });
+        var trs = crossOut.map(function(o){
+          var vinc = o.necesitaVincular ? ' <span style="color:#b45309" title="El folio está capturado pero falta enlazar el XML">⚠</span>' : '';
+          return '<tr style="border-top:1px solid var(--color-divider,#f0f0f0)">'
+            +'<td style="padding:3px 6px">'+_cxpEsc(o.paciente||'—')+'</td>'
+            +'<td style="padding:3px 6px;white-space:nowrap">'+_cxpEsc(o.folio||'—')+vinc+'</td>'
+            +'<td style="padding:3px 6px;white-space:nowrap">'+_cxpEsc(String(o.fecha||''))+'</td>'
+            +'<td style="padding:3px 6px;white-space:nowrap;color:#7c3aed">'+_cxpEsc(String(o.xmlFecha||''))+'</td>'
+            +'<td style="padding:3px 6px;text-align:right;white-space:nowrap;font-weight:700">'+_ingFmtMon(o.total)+'</td>'
+          +'</tr>';
+        }).join('');
+        var totCross = crossOut.reduce(function(s,o){ return s+(parseFloat(o.total)||0); }, 0);
+        hm += '<details style="margin:2px 16px 8px 30px"><summary style="cursor:pointer;font-size:10.5px;color:#7c3aed;font-weight:700">▸ Relación de facturas timbradas en otro mes ('+crossOut.length+') — se declaran en el mes del timbrado</summary>'
+          +'<div style="overflow-x:auto;margin-top:5px"><table style="width:100%;border-collapse:collapse;font-size:10px">'
+          +'<thead><tr style="color:var(--text-secondary,#9ca3af);text-align:left"><th style="padding:3px 6px;font-weight:700">Paciente</th><th style="padding:3px 6px;font-weight:700">Folio</th><th style="padding:3px 6px;font-weight:700">Fecha venta</th><th style="padding:3px 6px;font-weight:700">Timbrada</th><th style="padding:3px 6px;font-weight:700;text-align:right">Monto</th></tr></thead>'
+          +'<tbody>'+trs+'</tbody>'
+          +'<tfoot><tr style="border-top:2px solid var(--color-divider,#e5e7eb)"><td colspan="4" style="padding:4px 6px;font-weight:800">Total timbrado en otro mes</td><td style="padding:4px 6px;text-align:right;font-weight:800;color:#7c3aed">'+_ingFmtMon(totCross)+'</td></tr></tfoot>'
+          +'</table></div></details>';
+      }
     }
     mesEl.innerHTML = hm;
   }
