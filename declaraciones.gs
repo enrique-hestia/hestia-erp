@@ -64,15 +64,34 @@ function _declSheet() {
   return sh;
 }
 
-// Carpeta RAÍZ de los PDF de declaraciones. Configurable con la Script Property
-// DECL_FOLDER_ID (id o carpeta que dé el usuario) para que NO queden regados; si
-// no está configurada, usa/crea una sola carpeta "Declaraciones ERP".
+// Carpeta general de comprobantes de impuestos (la que dio el usuario). Se puede
+// sobreescribir con la Script Property DECL_FOLDER_ID.
+var DECL_DEFAULT_FOLDER_ID = '1VOPiH9NfraigIP54uwtPzVoYAgQgFXWl';
+
+// Carpeta RAÍZ de los PDF de declaraciones. Prioridad: Script Property
+// DECL_FOLDER_ID → carpeta por defecto de arriba → crea "Declaraciones ERP".
 function _declFolderRoot() {
   var pid = '';
   try { pid = PropertiesService.getScriptProperties().getProperty('DECL_FOLDER_ID') || ''; } catch (e) {}
+  if (!pid) pid = DECL_DEFAULT_FOLDER_ID;
   if (pid) { try { return DriveApp.getFolderById(pid); } catch (e) {} }
   var it = DriveApp.getFoldersByName('Declaraciones ERP');
   return it.hasNext() ? it.next() : DriveApp.createFolder('Declaraciones ERP');
+}
+
+// Nombre COHERENTE del PDF conforme al impuesto declarado (ignora el nombre
+// original del archivo): "<periodo> <impuesto> - <presentación> - <documento>.pdf"
+// documento = "Declaracion" | "Formato de pago".
+function _declNombrePdf(periodo, tipo, presentacion, consecutivo, cual) {
+  var doc = (String(cual) === 'pago') ? 'Formato de pago' : 'Declaracion';
+  var pres = (String(presentacion) === 'Complementaria')
+    ? ('Complementaria' + (consecutivo ? ' ' + consecutivo : ''))
+    : 'Normal';
+  var partes = [];
+  if (periodo) partes.push(String(periodo));
+  if (tipo) partes.push(String(tipo));
+  var base = partes.join(' ') + ' - ' + pres + ' - ' + doc;
+  return base.replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim() + '.pdf';
 }
 
 // Devuelve (creando si hace falta) la subcarpeta <raíz>/<año>/<mes> para dejar
@@ -117,11 +136,18 @@ function subirDeclaracionPdf(body) {
     var per = String((body && body.periodo) || '');
     var tipo = String((body && body.tipo) || '');
     var cual = String((body && body.cual) || 'doc');
-    var pref = (per ? per + ' ' : '') + (tipo ? tipo + ' ' : '') + cual;
-    var blob = Utilities.newBlob(bytes, mime, pref + ' - ' + name);
-    var f = _declFolder(per).createFile(blob);
+    var pres = String((body && body.presentacion) || 'Normal');
+    var consec = parseInt((body && body.consecutivo), 10) || 0;
+    // Nombre coherente conforme al impuesto (se omite el nombre original).
+    var fname = _declNombrePdf(per, tipo, pres, consec, cual);
+    var folder = _declFolder(per);
+    // Reemplazar el archivo previo con ese mismo nombre (re-subida) → sin duplicados.
+    var prev = folder.getFilesByName(fname);
+    while (prev.hasNext()) { try { prev.next().setTrashed(true); } catch (e) {} }
+    var blob = Utilities.newBlob(bytes, mime, fname);
+    var f = folder.createFile(blob);
     try { f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
-    return { ok: true, url: f.getUrl(), fileId: f.getId(), nombre: name };
+    return { ok: true, url: f.getUrl(), fileId: f.getId(), nombre: fname };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
