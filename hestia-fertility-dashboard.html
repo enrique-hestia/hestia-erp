@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.14.172 -->
+﻿<!-- app-build:2026.07.14.173 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -14815,7 +14815,7 @@ function presSaveLineMeta(tipo, i, val){
   L.meta=parseFloat(val)||0;
   _presRowUI(tipo,i); _presTotalsUI(tipo); _presGroupsUI(tipo);
   var s=getSession()||{};
-  fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMeta',periodo:_presData.siguiente.periodo,linea:_presLineaKey(tipo,L),metaIngreso:L.meta,usuario:s.email||''})}).catch(function(){});
+  fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMeta',periodo:_presData.siguiente.periodo,linea:_presLineaKey(tipo,L),metaIngreso:L.meta,usuario:s.email||''})}).then(function(){_presFlashSaved();}).catch(function(){});
 }
 function presUseLineProj(tipo, i){
   var L=_presLineasOf(tipo)[i]; if(!L) return;
@@ -14921,15 +14921,23 @@ function _presBuildEgresos(grupos, canEdit){
 }
 function presProdCant(key,val){ var p=_presProdMap[key]; if(!p)return; p._budCant=Math.max(0,Math.round(parseFloat(val)||0)); p._budImp=p._budCant*(p.precio||0);
   var im=document.getElementById(key+'-imp'); if(im)im.textContent=_presFM(p._budImp); _presProdDlUI(key); _presIngTotUI();
-  var s=getSession()||{}; fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMeta',periodo:_presData.siguiente.periodo,linea:p.producto,metaIngreso:p._budImp,usuario:s.email||''})}).catch(function(){}); }
+  var s=getSession()||{}; fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMeta',periodo:_presData.siguiente.periodo,linea:p.producto,metaIngreso:p._budImp,usuario:s.email||''})}).then(function(){_presFlashSaved();}).catch(function(){}); }
 function _presProdDlUI(key){ var p=_presProdMap[key]; if(!p)return; var dl=p.importeProy>0?(p._budImp-p.importeProy):null; var dc=document.getElementById(key+'-dl'); if(dc){dc.textContent=dl==null?'—':_presFM(dl);dc.style.color=dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b');} }
 function _presIngTotUI(){ var tot=0; Object.keys(_presProdMap).forEach(function(k){tot+=_presProdMap[k]._budImp;}); var el=document.getElementById('pr-ing-tot'); if(el)el.textContent=_presFM(tot);
   if(_presData&&_presData.siguiente&&_presData.siguiente.totales){ _presData.siguiente.totales.meta=tot; var sc=document.getElementById('pr-scen-meta'); if(sc)sc.textContent=tot>0?_presFM(tot):'—'; } }
 function presEgBud(key,val){ var l=_presEgMap[key]; if(!l)return; l.meta=parseFloat(val)||0; _presEgRowUI(key); _presEgTotUI();
-  var s=getSession()||{}; fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMeta',periodo:_presData.siguiente.periodo,linea:'EG:'+l.linea,metaIngreso:l.meta,usuario:s.email||''})}).catch(function(){}); }
+  var s=getSession()||{}; fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMeta',periodo:_presData.siguiente.periodo,linea:'EG:'+l.linea,metaIngreso:l.meta,usuario:s.email||''})}).then(function(){_presFlashSaved();}).catch(function(){}); }
 function _presEgRowUI(key){ var l=_presEgMap[key]; if(!l)return; var dl=l.proyeccion>0?((l.meta||0)-l.proyeccion):null; var dc=document.getElementById(key+'-dl'); if(dc){dc.textContent=dl==null?'—':_presFM(dl);dc.style.color=dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b');} }
 function _presEgTotUI(){ var tot=0; Object.keys(_presEgMap).forEach(function(k){tot+=_presEgMap[k].meta||0;}); var el=document.getElementById('pr-eg-tot'); if(el)el.textContent=tot>0?_presFM(tot):'—'; if(_presData&&_presData.egresos&&_presData.egresos.totales)_presData.egresos.totales.meta=tot; }
-function _presBatchSave(metas){ var s=getSession()||{}; fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMetasBatch',periodo:_presData.siguiente.periodo,metas:metas,usuario:s.email||''})}).catch(function(){}); }
+// Confirmación visible: el presupuesto se guarda solo al mover; esto lo hace notorio.
+function _presFlashSaved(){
+  var el=document.getElementById('pres-saved-toast');
+  if(!el){ el=document.createElement('div'); el.id='pres-saved-toast'; document.body.appendChild(el); }
+  el.textContent='✓ Guardado';
+  el.style.cssText='position:fixed;bottom:20px;right:20px;z-index:9000;background:#166534;color:#fff;padding:8px 16px;border-radius:10px;font-size:12.5px;font-weight:800;box-shadow:0 6px 20px rgba(0,0,0,.25);opacity:1;transition:opacity .5s';
+  clearTimeout(window._presSavedT); window._presSavedT=setTimeout(function(){ if(el) el.style.opacity='0'; },1400);
+}
+function _presBatchSave(metas){ var s=getSession()||{}; fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMetasBatch',periodo:_presData.siguiente.periodo,metas:metas,usuario:s.email||''})}).then(function(){_presFlashSaved();}).catch(function(){}); }
 function presMasterApply(tipo){ var pct=parseFloat((document.getElementById('pr-master-'+tipo)||{}).value)||0; var f=1+pct/100;
   if(tipo==='ing'&&_presGrouped()){ _presMasterApplyGrouped(f); return; }
   if(tipo==='ing'){ var metas=[]; Object.keys(_presProdMap).forEach(function(k){var p=_presProdMap[k]; p._budCant=Math.max(0,Math.round(p._budCant*f)); p._budImp=p._budCant*(p.precio||0); var ci=document.getElementById(k+'-c');if(ci)ci.value=p._budCant; var im=document.getElementById(k+'-imp');if(im)im.textContent=_presFM(p._budImp); _presProdDlUI(k); metas.push({linea:p.producto,metaIngreso:p._budImp});}); _presIngTotUI(); _presBatchSave(metas); }
@@ -24630,17 +24638,59 @@ function _recModalHTML(){
     +'<div id="rec-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(460px,94vw);padding:20px">'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div id="rec-modal-title" style="font-size:15px;font-weight:800">Nuevo recordatorio</div><button onclick="recCloseForm()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary,#6b7280)">×</button></div>'
     +'<div style="margin-bottom:12px"><label '+L+'>Título *</label><input id="rec-f-titulo" '+S+' placeholder="Ej. Recibir orden 1234"></div>'
-    +'<div style="margin-bottom:12px"><label '+L+'>Fecha *</label><input id="rec-f-fecha" type="date" '+S+' value="'+_recToday()+'"></div>'
+    +'<div style="margin-bottom:12px"><label '+L+'><span id="rec-f-fecha-lbl">Fecha *</span></label><input id="rec-f-fecha" type="date" '+S+' value="'+_recToday()+'"></div>'
+    +'<div style="margin-bottom:12px"><label '+L+'>🔁 Repetir</label>'
+    +'<select id="rec-f-recur" '+S+' onchange="recRecurToggle()">'
+    +'<option value="">No se repite (una sola vez)</option>'
+    +'<option value="diaria">Cada día</option>'
+    +'<option value="semanal">Cada semana</option>'
+    +'<option value="mensual">Cada mes (ej. AMEX el día 5)</option>'
+    +'<option value="anual">Cada año</option>'
+    +'</select></div>'
+    +'<div id="rec-f-recwrap" style="display:none;margin-bottom:12px"></div>'
     +'<div style="margin-bottom:14px"><label '+L+'>Detalle</label><textarea id="rec-f-detalle" '+S+' rows="2" style="resize:vertical"></textarea></div>'
     +'<div style="display:flex;gap:10px"><button id="rec-save-btn" onclick="recSaveForm()" style="flex:1;padding:12px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">Guardar</button>'
     +'<button onclick="recCloseForm()" style="padding:12px 20px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider);border-radius:10px;font-size:13px;cursor:pointer">Cancelar</button></div></div>';
 }
-var _recEditRow=null;
+var _recEditRow=null, _recRecDefaults={};
+function _recDowOpts(sel){ var o='',n=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'],i; for(i=0;i<7;i++){ o+='<option value="'+i+'"'+(String(sel)===String(i)?' selected':'')+'>'+n[i]+'</option>'; } return o; }
+function _recMesOpts(sel){ var o='',n=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'],i; for(i=1;i<=12;i++){ o+='<option value="'+i+'"'+(String(sel)===String(i)?' selected':'')+'>'+n[i-1]+'</option>'; } return o; }
+// Muestra los sub-campos según el tipo de repetición y ajusta la etiqueta de fecha.
+function recRecurToggle(){
+  var v=(document.getElementById('rec-f-recur')||{}).value||'';
+  var w=document.getElementById('rec-f-recwrap'); var lbl=document.getElementById('rec-f-fecha-lbl');
+  if(lbl) lbl.textContent = v ? 'Empieza desde *' : 'Fecha *';
+  if(!w) return;
+  var S='style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"';
+  var L='style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px"';
+  var HINT='style="font-size:10.5px;color:var(--text-secondary,#9ca3af);margin-top:5px;line-height:1.4"';
+  var dd=_recRecDefaults.recDia, mm=_recRecDefaults.recMes;
+  if(v==='mensual'){
+    w.innerHTML='<label '+L+'>Día del mes</label><input id="rec-f-recdia" type="number" min="1" max="31" value="'+(dd||1)+'" '+S+'>'
+      +'<div '+HINT+'>Se repone solo cada mes. Al marcar “Hecho” salta al mismo día del mes siguiente. Ej. día 5 = descargar movimientos de AMEX.</div>';
+    w.style.display='block';
+  } else if(v==='semanal'){
+    w.innerHTML='<label '+L+'>Día de la semana</label><select id="rec-f-recdia" '+S+'>'+_recDowOpts(dd===''||dd===undefined?1:dd)+'</select>'
+      +'<div '+HINT+'>Cada semana en ese día. Al marcar “Hecho” salta a la próxima semana.</div>';
+    w.style.display='block';
+  } else if(v==='anual'){
+    w.innerHTML='<div style="display:flex;gap:10px"><div style="flex:1"><label '+L+'>Día</label><input id="rec-f-recdia" type="number" min="1" max="31" value="'+(dd||1)+'" '+S+'></div>'
+      +'<div style="flex:1.4"><label '+L+'>Mes</label><select id="rec-f-recmes" '+S+'>'+_recMesOpts(mm||1)+'</select></div></div>'
+      +'<div '+HINT+'>Una vez al año en esa fecha.</div>';
+    w.style.display='block';
+  } else if(v==='diaria'){
+    w.innerHTML='<div '+HINT+'>Todos los días. Al marcar “Hecho” reaparece mañana.</div>';
+    w.style.display='block';
+  } else { w.innerHTML=''; w.style.display='none'; }
+}
 function recOpenForm(r){
   _recEditRow = (r&&r.rowNum) ? r.rowNum : null;
+  _recRecDefaults = { recDia:(r&&r.recDia!==undefined)?r.recDia:'', recMes:(r&&r.recMes!==undefined)?r.recMes:'' };
   var t=document.getElementById('rec-f-titulo'); if(t)t.value=(r&&r.titulo)||'';
   var de=document.getElementById('rec-f-detalle'); if(de)de.value=(r&&r.detalle)||'';
   var f=document.getElementById('rec-f-fecha'); if(f)f.value=(r&&r.fecha)||_recToday();
+  var rc=document.getElementById('rec-f-recur'); if(rc)rc.value=(r&&r.recurrencia)||'';
+  recRecurToggle();
   var ttl=document.getElementById('rec-modal-title'); if(ttl) ttl.textContent=_recEditRow?'Editar / reprogramar':'Nuevo recordatorio';
   document.getElementById('rec-ovl').style.display='block'; document.getElementById('rec-modal').style.display='block';
 }
@@ -24649,13 +24699,18 @@ async function recSaveForm(){
   var titulo=(document.getElementById('rec-f-titulo')||{}).value||'';
   var fecha=(document.getElementById('rec-f-fecha')||{}).value||'';
   var detalle=(document.getElementById('rec-f-detalle')||{}).value||'';
+  var recur=(document.getElementById('rec-f-recur')||{}).value||'';
+  var recDia='', recMes='';
+  if(recur==='mensual'||recur==='semanal'||recur==='anual'){ recDia=(document.getElementById('rec-f-recdia')||{}).value||''; }
+  if(recur==='anual'){ recMes=(document.getElementById('rec-f-recmes')||{}).value||''; }
   if(!titulo||!fecha){ alert('Título y fecha son obligatorios'); return; }
+  if((recur==='mensual') && (!recDia || +recDia<1 || +recDia>31)){ alert('Indica el día del mes (1–31)'); return; }
   var btn=document.getElementById('rec-save-btn'); if(btn){btn.disabled=true;btn.textContent='Guardando…';}
   var res, s=getSession()||{};
   if(_recEditRow){
-    try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'updateRecordatorio', rowNum:_recEditRow, titulo:titulo, fecha:fecha, detalle:detalle, reabrir:true, usuario:s.email||''})}); res=await r.json(); }catch(e){ res={ok:false,error:e.message}; }
+    try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'updateRecordatorio', rowNum:_recEditRow, titulo:titulo, fecha:fecha, detalle:detalle, recurrencia:recur, recDia:recDia, recMes:recMes, reabrir:true, usuario:s.email||''})}); res=await r.json(); }catch(e){ res={ok:false,error:e.message}; }
   } else {
-    res=await crearRecordatorio({titulo:titulo, fecha:fecha, detalle:detalle, origen:'manual'});
+    res=await crearRecordatorio({titulo:titulo, fecha:fecha, detalle:detalle, origen:'manual', recurrencia:recur, recDia:recDia, recMes:recMes});
   }
   if(res&&res.ok){ recCloseForm(); loadRecordatorios(); } else { alert('Error: '+((res&&res.error)||'')); if(btn){btn.disabled=false;btn.textContent='Guardar';} }
 }
@@ -24676,7 +24731,8 @@ window.crearRecordatorio = async function(opts){
   opts=opts||{}; var s=getSession()||{};
   try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveRecordatorio',
     usuario:s.email||'', titulo:opts.titulo||'Recordatorio', detalle:opts.detalle||'',
-    fecha:opts.fecha||'', origen:opts.origen||'manual', referencia:opts.referencia||''})});
+    fecha:opts.fecha||'', origen:opts.origen||'manual', referencia:opts.referencia||'',
+    recurrencia:opts.recurrencia||'', recDia:opts.recDia||'', recMes:opts.recMes||''})});
     return await r.json(); }catch(e){ return {ok:false, error:e.message}; }
 };
 // ofrecerRecordatorio(opts): muestra una tarjeta opt-in con fecha editable (Sí/No).
