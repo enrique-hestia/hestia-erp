@@ -32,7 +32,7 @@
 var NOMINA_CFG_KEY = 'NOMINA_CFG';
 function _nominaCfgDefault() {
   return {
-    isnTasa: 3,            // % Impuesto Sobre Nómina (configurable por estado)
+    isnTasa: 4,            // % ISN — CDMX: 4% desde 2025-01-01 (readNominaMes lo ajusta por periodo)
     isnBase: 'percepciones', // 'percepciones' (total) | 'gravado'
     isnExcluirAsimilados: true, // CDMX: el ISN aplica a sueldos/salarios, NO a asimilados
     cxpProveedor: 'Nómina',  // proveedor/beneficiario en Cuentas por Pagar
@@ -306,11 +306,13 @@ function readNominaMes(anio, mes) {
       if (esAsim) { netoAsim += e.neto; numAsim++; percAsim += e.totalPercepciones; }
       else { netoSueldos += e.neto; numSueldos++; percSueldos += e.totalPercepciones; }
     });
-    var isn = baseISN * ((parseFloat(cfg.isnTasa) || 0) / 100);
+    // CDMX: la tasa del ISN depende del periodo (3% hasta 2024, 4% desde 2025-01-01).
+    var isnTasaAplicada = (anio >= 2025) ? 4 : 3;
+    var isn = baseISN * (isnTasaAplicada / 100);
     return {
       ok: true, anio: anio, mes: mes, encontrada: true, empleados: empleados, recibos: recibos,
       totales: {
-        neto: totNeto, percepciones: totPercT, isnBase: baseISN, isnTasa: cfg.isnTasa, isn: isn,
+        neto: totNeto, percepciones: totPercT, isnBase: baseISN, isnTasa: isnTasaAplicada, isn: isn,
         isnExcluirAsimilados: !!cfg.isnExcluirAsimilados,
         numRecibos: recibos.length, numEmpleados: empleados.length,
         netoSueldos: netoSueldos, netoAsimilados: netoAsim, numSueldos: numSueldos, numAsimilados: numAsim,

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.13.167 -->
+﻿<!-- app-build:2026.07.13.168 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -23510,7 +23510,9 @@ function _nomRenderMes(){
     var tg=e.asimilado?_asi:_sue;
     tg.n++; tg.perc+=(e.totalPercepciones||0); tg.neto+=(e.neto||0); tg.grav+=(e.gravado||0);
   });
-  var _isnTasa=(t.isnTasa!=null?parseFloat(t.isnTasa):3)||0;
+  // Tasa del ISN por PERIODO en CDMX: 3% hasta 2024, 4% desde el 1-ene-2025.
+  // Se aplica automáticamente según el mes consultado (correcto para histórico y actual).
+  var _isnTasa=(parseInt(_nomAnio,10)>=2025)?4:3;
   var _usaGrav=!!(_nomCfg&&_nomCfg.isnBase==='gravado');
   var _excluir=!(_nomCfg&&_nomCfg.isnExcluirAsimilados===false); // default CDMX: excluir asimilados
   var _baseSue=_usaGrav?_sue.grav:_sue.perc;
@@ -23533,7 +23535,11 @@ function _nomRenderMes(){
 }
 // Caja del ISN: distingue claramente lo SUJETO (sueldos) de lo NO sujeto
 // (asimilados) y muestra el fundamento legal de CDMX.
-var _NOM_ISN_FUNDAMENTO='El Impuesto Sobre Nóminas de la Ciudad de México grava las erogaciones por <b>remuneraciones al trabajo personal subordinado</b> (relación laboral patrón–trabajador), conforme al <b>Código Fiscal de la CDMX</b>. Los <b>asimilados a salarios</b> (art. 94 LISR) reciben ese tratamiento solo para la retención del <b>ISR federal</b>, pero <b>no derivan de una relación de trabajo subordinado</b>, por lo que no son objeto del ISN. <i>Informativo, no es asesoría fiscal; confírmalo con tu contador según el tipo de asimilado.</i>';
+var _NOM_ISN_FUNDAMENTO='El <b>Impuesto Sobre Nóminas</b> de la Ciudad de México (<b>art. 156 del Código Fiscal de la CDMX</b>) grava las erogaciones por <b>remuneración al trabajo personal subordinado</b>, "independientemente de la designación que se les otorgue". '
+  +'Un <b>asimilado a salarios</b> (art. 94 LISR) recibe ese tratamiento solo para el cálculo/retención del <b>ISR federal</b> y, por sí solo, <b>no crea una relación de trabajo subordinado</b> (arts. 8 y 20 LFT); por eso, <b>como regla general, no causa ISN</b>. '
+  +'<b>Excepciones a revisar con tu contador:</b> el mismo art. 156 (fracción IX) <b>sí grava</b> los pagos a <b>administradores, comisarios y miembros de consejos</b> (aunque fiscalmente sean asimilados), y cualquier asimilado que en los hechos sea subordinado también causa ISN y puede ser reclasificado por la autoridad. '
+  +'<i>Informativo, no es asesoría fiscal.</i> '
+  +'Fuentes: <a href="https://leyes-mx.com/codigo_fiscal_ciudad_de_mexico/156.htm" target="_blank" style="color:#0c4a6e">Art. 156 CFCDMX</a> · <a href="https://idconline.mx/fiscal-contable/2019/08/19/asimilables-a-salarios-sujetos-del-isn" target="_blank" style="color:#0c4a6e">IDC: asimilados y el ISN</a>.';
 function _nomIsnBox(baseSue, baseAsi, baseISN, isn, tasa, excluir){
   function row(lbl,val,color,strike){ return '<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:11.5px;color:'+(color||'#374151')+'"><span>'+lbl+'</span><span style="font-weight:700'+(strike?';text-decoration:line-through;opacity:.55':'')+'">'+_nomFmt(val)+'</span></div>'; }
   return '<div style="margin-top:8px;padding:13px 16px;background:rgba(180,83,9,.06);border:1px solid rgba(180,83,9,.2);border-radius:12px">'
@@ -23543,7 +23549,7 @@ function _nomIsnBox(baseSue, baseAsi, baseISN, isn, tasa, excluir){
     +'<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0 0;margin-top:5px;border-top:1px solid rgba(180,83,9,.25);font-size:13px;font-weight:800;color:#92400e"><span>ISN a pagar = '+_nomFmt(baseISN)+' × '+tasa+'%</span><span>'+_nomFmt(isn)+'</span></div>'
     +'<details style="margin-top:8px"><summary style="cursor:pointer;font-size:10.5px;font-weight:700;color:#92400e">¿Por qué los asimilados a salarios no pagan ISN en CDMX?</summary>'
     +'<div style="font-size:10.5px;color:#6b7280;line-height:1.55;margin-top:6px">'+_NOM_ISN_FUNDAMENTO+'</div></details>'
-    +'<div style="margin-top:6px;font-size:9.5px;color:#b5875a">Validar → Cuentas por Pagar, bonos y "Mis recibos": en camino.</div>'
+    +'<div style="margin-top:7px;font-size:9.5px;color:#b5875a">Tasa CDMX aplicada automáticamente por periodo: <b>4%</b> desde el 1-ene-2025, <b>3%</b> antes. &nbsp;·&nbsp; Validar → Cuentas por Pagar, bonos y "Mis recibos": en camino.</div>'
   +'</div>';
 }
 // Tabla de empleados filtrada por tipo (sueldos vs asimilados), con subtotal.
