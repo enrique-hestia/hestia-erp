@@ -35,6 +35,8 @@ function _nominaCfgDefault() {
     isnTasa: 4,            // % ISN — CDMX: 4% desde 2025-01-01 (readNominaMes lo ajusta por periodo)
     isnBase: 'percepciones', // 'percepciones' (total) | 'gravado'
     isnExcluirAsimilados: true, // CDMX: el ISN aplica a sueldos/salarios, NO a asimilados
+    isnSubsidio: false,     // subsidio CDMX para empresas pequeñas (baja la tasa)
+    isnSubsidioPct: 1,      // puntos de reducción: 1 (micro ≤10) | 0.5 (pequeña 11–50)
     cxpProveedor: 'Nómina',  // proveedor/beneficiario en Cuentas por Pagar
     cxpCuentaContable: 'Sueldos y salarios'
   };
@@ -220,21 +222,31 @@ function _nomParseCfdi(xml) {
   var totSueldos = parseFloat(_nomAttr('TotalSueldos', pn)) || 0;
   var totGravado = parseFloat(_nomAttr('TotalGravado', pn)) || 0;
   var totExento = parseFloat(_nomAttr('TotalExento', pn)) || 0;
-  var primaVac = 0, aguinaldo = 0;
+  var primaVac = 0, aguinaldo = 0, percDet = [];
   var percRe = /<(\w+):Percepcion\b[^>]*>/g, pm;
   while ((pm = percRe.exec(nb))) {
     var seg = pm[0], tp = _nomAttr('TipoPercepcion', seg);
-    var imp = (parseFloat(_nomAttr('ImporteGravado', seg)) || 0) + (parseFloat(_nomAttr('ImporteExento', seg)) || 0);
+    var g = parseFloat(_nomAttr('ImporteGravado', seg)) || 0, ex = parseFloat(_nomAttr('ImporteExento', seg)) || 0;
+    var imp = g + ex;
+    percDet.push({ tipo: tp, clave: _nomAttr('Clave', seg), concepto: _nomAttr('Concepto', seg), gravado: g, exento: ex, importe: imp });
     if (tp === '021') primaVac += imp;
     if (tp === '002') aguinaldo += imp;
   }
   // Deducciones (ISR 002, IMSS 001)
-  var isr = 0, imss = 0;
+  var isr = 0, imss = 0, dedDet = [];
   var dedRe = /<(\w+):Deduccion\b[^>]*>/g, dm;
   while ((dm = dedRe.exec(nb))) {
     var ds = dm[0], td = _nomAttr('TipoDeduccion', ds), impo = parseFloat(_nomAttr('Importe', ds)) || 0;
+    dedDet.push({ tipo: td, clave: _nomAttr('Clave', ds), concepto: _nomAttr('Concepto', ds), importe: impo });
     if (td === '002') isr += impo;
     if (td === '001') imss += impo;
+  }
+  // Otros pagos (subsidio al empleo, etc.)
+  var otrosDet = [];
+  var opRe = /<(\w+):OtroPago\b[^>]*>/g, om;
+  while ((om = opRe.exec(nb))) {
+    var os = om[0];
+    otrosDet.push({ tipo: _nomAttr('TipoOtroPago', os), clave: _nomAttr('Clave', os), concepto: _nomAttr('Concepto', os), importe: parseFloat(_nomAttr('Importe', os)) || 0 });
   }
 
   var neto = totPerc + totOtros - totDed;
@@ -247,7 +259,8 @@ function _nomParseCfdi(xml) {
     fechaPago: fechaPago, fechaInicial: fechaIni, fechaFinal: fechaFin, numDias: numDias,
     totalPercepciones: totPerc, totalDeducciones: totDed, totalOtrosPagos: totOtros,
     sueldos: totSueldos, gravado: totGravado, exento: totExento,
-    primaVacacional: primaVac, aguinaldo: aguinaldo, isrRetenido: isr, imss: imss, neto: neto
+    primaVacacional: primaVac, aguinaldo: aguinaldo, isrRetenido: isr, imss: imss, neto: neto,
+    percepciones: percDet, deducciones: dedDet, otrosPagos: otrosDet
   };
 }
 
@@ -288,7 +301,11 @@ function readNominaMes(anio, mes) {
       e.aguinaldo += p.aguinaldo; e.isrRetenido += p.isrRetenido; e.imss += p.imss; e.neto += p.neto;
       e.detalle.push({ uuid: p.uuid, fecha: p.fecha, fechaPago: p.fechaPago, tipoNomina: p.tipoNomina,
         totalPercepciones: p.totalPercepciones, totalDeducciones: p.totalDeducciones, totalOtrosPagos: p.totalOtrosPagos,
-        neto: p.neto, fileUrl: p.fileUrl, fileId: p.fileId });
+        neto: p.neto, fileUrl: p.fileUrl, fileId: p.fileId,
+        // Detalle completo para el visor de recibo:
+        nombre: p.nombre, rfc: p.rfc, curp: p.curp, numEmpleado: p.numEmpleado, puesto: p.puesto, departamento: p.departamento,
+        periodicidad: p.periodicidad, fechaInicial: p.fechaInicial, fechaFinal: p.fechaFinal, numDias: p.numDias,
+        percepciones: p.percepciones, deducciones: p.deducciones, otrosPagos: p.otrosPagos });
     }
     var empleados = [];
     for (var k in porEmp) if (porEmp.hasOwnProperty(k)) empleados.push(porEmp[k]);
@@ -308,11 +325,18 @@ function readNominaMes(anio, mes) {
     });
     // CDMX: la tasa del ISN depende del periodo (3% hasta 2024, 4% desde 2025-01-01).
     var isnTasaAplicada = (anio >= 2025) ? 4 : 3;
-    var isn = baseISN * (isnTasaAplicada / 100);
+    // Subsidio CDMX para empresas pequeñas (solo cuando la tasa base es 4%): micro
+    // ≤10 empleados −1% (→3%), pequeña 11–50 −0.5% (→3.5%). Ya viene restado en isn.
+    var subsPct = (cfg.isnSubsidio && anio >= 2025) ? (parseFloat(cfg.isnSubsidioPct) || 0) : 0;
+    var isnTasaEfectiva = isnTasaAplicada - subsPct;
+    var isnSubsidioMonto = baseISN * (subsPct / 100);
+    var isn = baseISN * (isnTasaEfectiva / 100);
     return {
       ok: true, anio: anio, mes: mes, encontrada: true, empleados: empleados, recibos: recibos,
       totales: {
-        neto: totNeto, percepciones: totPercT, isnBase: baseISN, isnTasa: isnTasaAplicada, isn: isn,
+        neto: totNeto, percepciones: totPercT, isnBase: baseISN, isnTasa: isnTasaAplicada,
+        isnTasaEfectiva: isnTasaEfectiva, isnSubsidio: (!!cfg.isnSubsidio && anio >= 2025),
+        isnSubsidioPct: subsPct, isnSubsidioMonto: isnSubsidioMonto, isn: isn,
         isnExcluirAsimilados: !!cfg.isnExcluirAsimilados,
         numRecibos: recibos.length, numEmpleados: empleados.length,
         netoSueldos: netoSueldos, netoAsimilados: netoAsim, numSueldos: numSueldos, numAsimilados: numAsim,

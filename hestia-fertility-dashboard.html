@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.13.170 -->
+﻿<!-- app-build:2026.07.14.171 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -23599,11 +23599,15 @@ function _nomRenderMes(){
   var _baseSue=_usaGrav?_sue.grav:_sue.perc;
   var _baseAsi=_usaGrav?_asi.grav:_asi.perc;
   var _baseISN=_excluir?_baseSue:(_baseSue+_baseAsi);
-  var _isn=_baseISN*(_isnTasa/100);
+  // Subsidio de ISN CDMX (micro ≤10 empleados: −1% → 3%; pequeña 11-50: −0.5% → 3.5%).
+  // Solo aplica cuando la tasa base es 4% (2025+). El ISN a pagar ya lo trae restado.
+  var _subsPct=(_nomCfg&&_nomCfg.isnSubsidio&&_isnTasa===4)?(parseFloat(_nomCfg.isnSubsidioPct)||1):0;
+  var _isnTasaEfec=_isnTasa-_subsPct;
+  var _isn=_baseISN*(_isnTasaEfec/100); // ISN a pagar (efectivo, ya con subsidio)
   var _netoTot=_sue.neto+_asi.neto;
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:8px">'
     +_nomKpi('Neto pagado',_nomFmt(_netoTot),'#166534')+_nomKpi('Empleados',(_sue.n+_asi.n),'#0c4a6e')
-    +_nomKpi('Recibos',(t.numRecibos!=null?t.numRecibos:((d.recibos&&d.recibos.length)||0)),'#6b7280')+_nomKpi('ISN sueldos ('+_isnTasa+'%)',_nomFmt(_isn),'#b45309')+'</div>';
+    +_nomKpi('Recibos',(t.numRecibos!=null?t.numRecibos:((d.recibos&&d.recibos.length)||0)),'#6b7280')+_nomKpi('ISN sueldos ('+_isnTasaEfec+'%)',_nomFmt(_isn),'#b45309')+'</div>';
   h+=_nomValidBar();
   // División sueldos vs asimilados (el ISN de CDMX solo aplica a sueldos).
   h+='<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:16px;font-size:11px;color:#6b7280">'
@@ -23613,7 +23617,7 @@ function _nomRenderMes(){
   if(!d.empleados.length){ h+='<div style="padding:20px;color:#9ca3af">No se encontraron recibos de nómina (tipo N) en este mes.</div>'; body.innerHTML=h; return; }
   h+=_nomTablaEmp(d,false,'Sueldos y salarios','#166534');
   h+=_nomTablaEmp(d,true,'Asimilados a salarios','#7c3aed');
-  h+=_nomIsnBox(_baseSue,_baseAsi,_baseISN,_isn,_isnTasa,_excluir);
+  h+=_nomIsnBox(_baseSue,_baseAsi,_baseISN,_isnTasa,_excluir,_subsPct);
   body.innerHTML=h;
 }
 // Caja del ISN: distingue claramente lo SUJETO (sueldos) de lo NO sujeto
@@ -23623,16 +23627,29 @@ var _NOM_ISN_FUNDAMENTO='El <b>Impuesto Sobre Nóminas</b> de la Ciudad de Méxi
   +'<b>Excepciones a revisar con tu contador:</b> el mismo art. 156 (fracción IX) <b>sí grava</b> los pagos a <b>administradores, comisarios y miembros de consejos</b> (aunque fiscalmente sean asimilados), y cualquier asimilado que en los hechos sea subordinado también causa ISN y puede ser reclasificado por la autoridad. '
   +'<i>Informativo, no es asesoría fiscal.</i> '
   +'Fuentes: <a href="https://leyes-mx.com/codigo_fiscal_ciudad_de_mexico/156.htm" target="_blank" style="color:#0c4a6e">Art. 156 CFCDMX</a> · <a href="https://idconline.mx/fiscal-contable/2019/08/19/asimilables-a-salarios-sujetos-del-isn" target="_blank" style="color:#0c4a6e">IDC: asimilados y el ISN</a>.';
-function _nomIsnBox(baseSue, baseAsi, baseISN, isn, tasa, excluir){
+function _nomIsnBox(baseSue, baseAsi, baseISN, tasaBase, excluir, subsPct){
+  subsPct=subsPct||0;
+  var nominal=baseISN*(tasaBase/100), subsMonto=baseISN*(subsPct/100), tasaEfec=tasaBase-subsPct, aPagar=baseISN*(tasaEfec/100);
   function row(lbl,val,color,strike){ return '<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:11.5px;color:'+(color||'#374151')+'"><span>'+lbl+'</span><span style="font-weight:700'+(strike?';text-decoration:line-through;opacity:.55':'')+'">'+_nomFmt(val)+'</span></div>'; }
+  var calc;
+  if(subsPct>0){
+    calc='<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0 0;margin-top:5px;border-top:1px solid rgba(180,83,9,.25);font-size:11.5px;color:#92400e"><span>ISN calculado ('+tasaBase+'%)</span><span style="font-weight:700">'+_nomFmt(nominal)+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:11.5px;color:#166534"><span>− Subsidio CDMX (empresa pequeña, '+subsPct+'%)</span><span style="font-weight:700">−'+_nomFmt(subsMonto)+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0 0;margin-top:3px;border-top:2px solid rgba(180,83,9,.3);font-size:13.5px;font-weight:800;color:#92400e"><span>ISN a pagar ('+tasaEfec+'%)</span><span>'+_nomFmt(aPagar)+'</span></div>';
+  } else {
+    calc='<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0 0;margin-top:5px;border-top:1px solid rgba(180,83,9,.25);font-size:13.5px;font-weight:800;color:#92400e"><span>ISN a pagar = '+_nomFmt(baseISN)+' × '+tasaBase+'%</span><span>'+_nomFmt(aPagar)+'</span></div>';
+  }
+  var notaSubs=subsPct>0
+    ? 'Subsidio CDMX aplicado: pagas <b>'+tasaEfec+'%</b> (micro ≤10 empleados −1%; pequeña 11–50 −0.5%). Es automático al declarar el n.º de trabajadores, pero se <b>pierde si no declaras/pagas a tiempo</b> (a más tardar el día 17).'
+    : 'Si tu empresa es pequeña (≤50 empleados) activa el <b>subsidio</b> de CDMX en Configuración (baja al 3% micro / 3.5% pequeña).';
   return '<div style="margin-top:8px;padding:13px 16px;background:rgba(180,83,9,.06);border:1px solid rgba(180,83,9,.2);border-radius:12px">'
-    +'<div style="font-size:12px;font-weight:800;color:#92400e;margin-bottom:6px">Impuesto Sobre Nóminas — CDMX ('+tasa+'%)</div>'
+    +'<div style="font-size:12px;font-weight:800;color:#92400e;margin-bottom:6px">Impuesto Sobre Nóminas — CDMX ('+(subsPct>0?tasaEfec+'% con subsidio':tasaBase+'%')+')</div>'
     +row('✔ Sujeto a ISN — sueldos y salarios (base)', baseSue, '#166534')
     +row('✕ No sujeto — asimilados a salarios'+(excluir?' (excluidos)':' (incluidos por configuración)'), baseAsi, '#7c3aed', excluir)
-    +'<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0 0;margin-top:5px;border-top:1px solid rgba(180,83,9,.25);font-size:13px;font-weight:800;color:#92400e"><span>ISN a pagar = '+_nomFmt(baseISN)+' × '+tasa+'%</span><span>'+_nomFmt(isn)+'</span></div>'
+    +calc
     +'<details style="margin-top:8px"><summary style="cursor:pointer;font-size:10.5px;font-weight:700;color:#92400e">¿Por qué los asimilados a salarios no pagan ISN en CDMX?</summary>'
     +'<div style="font-size:10.5px;color:#6b7280;line-height:1.55;margin-top:6px">'+_NOM_ISN_FUNDAMENTO+'</div></details>'
-    +'<div style="margin-top:7px;font-size:9.5px;color:#b5875a">Tasa CDMX aplicada automáticamente por periodo: <b>4%</b> desde el 1-ene-2025, <b>3%</b> antes. &nbsp;·&nbsp; Captura <b>bonos</b> abriendo cada empleado; luego usa <b>«Validar y enviar a CxP»</b> arriba.</div>'
+    +'<div style="margin-top:7px;font-size:9.5px;color:#b5875a">Tasa CDMX por periodo: <b>4%</b> desde 2025, <b>3%</b> antes. '+notaSubs+'</div>'
   +'</div>';
 }
 // Tabla de empleados filtrada por tipo (sueldos vs asimilados), con subtotal.
@@ -23659,10 +23676,12 @@ function _nomTablaEmp(d, filtroAsim, titulo, color){
       +'<td style="padding:8px 6px;color:#9ca3af">'+(_nomExpanded[i]?'▾':'▸')+'</td></tr>';
     if(_nomExpanded[i]){
       var det='';
-      (e.detalle||[]).forEach(function(r){
+      (e.detalle||[]).forEach(function(r,j){
         det+='<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;font-size:11px;border-top:1px solid var(--color-divider,#f0f0f0)">'
           +'<span>'+_cxpEsc(r.fechaPago||r.fecha||'')+' · '+(r.tipoNomina==='E'?'Extraordinaria':'Ordinaria')+'</span>'
-          +'<span>Perc '+_nomFmt(r.totalPercepciones)+' · Ded '+_nomFmt(r.totalDeducciones)+' · <b style="color:#166534">Neto '+_nomFmt(r.neto)+'</b>'+(r.fileUrl?' · <a href="'+_cxpEsc(r.fileUrl)+'" target="_blank" onclick="event.stopPropagation()" style="color:#0c4a6e;font-weight:700">XML</a>':'')+'</span></div>';
+          +'<span>Perc '+_nomFmt(r.totalPercepciones)+' · Ded '+_nomFmt(r.totalDeducciones)+' · <b style="color:#166534">Neto '+_nomFmt(r.neto)+'</b>'
+          +' · <button onclick="event.stopPropagation();_nomVerRecibo('+i+','+j+')" style="background:none;border:none;color:var(--color-primary,#c46a7a);font-weight:700;cursor:pointer;font-size:11px;padding:0">👁 Ver</button>'
+          +(r.fileUrl?' · <a href="'+_cxpEsc(r.fileUrl)+'" target="_blank" onclick="event.stopPropagation()" style="color:#0c4a6e;font-weight:700">XML</a>':'')+'</span></div>';
       });
       if(e.primaVacacional>0) det+='<div style="font-size:10.5px;color:#7c3aed;padding:5px 0 2px">Prima vacacional del mes: '+_nomFmt(e.primaVacacional)+'</div>';
       if(e.aguinaldo>0) det+='<div style="font-size:10.5px;color:#7c3aed;padding:2px 0">Aguinaldo del mes: '+_nomFmt(e.aguinaldo)+'</div>';
@@ -23764,6 +23783,43 @@ async function _nomDelBono(bonoId){
     if(!d||!d.ok){ alert((d&&d.error)||'No se pudo quitar el bono.'); return; }
     await _nomReloadBonos(); _nomRenderMes();
   }catch(e){ alert('Error: '+e.message); }
+}
+/* ── Visor de recibo de nómina (formatea el CFDI) ── */
+function _nomVerRecibo(i,j){ try{ var e=(_nomData&&_nomData.empleados)?_nomData.empleados[i]:null; if(e&&e.detalle&&e.detalle[j]) _nomReciboModal(e.detalle[j]); }catch(x){} }
+function _misRecVer(j){ try{ if(_misRecData&&_misRecData.recibos&&_misRecData.recibos[j]) _nomReciboModal(_misRecData.recibos[j]); }catch(x){} }
+function _nomReciboModal(r){
+  if(!r) return;
+  var ov=document.getElementById('nom-rec-ov'); if(!ov){ ov=document.createElement('div'); ov.id='nom-rec-ov'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9750;display:flex;align-items:flex-start;justify-content:center;padding:24px 16px;overflow:auto';
+  function linea(concepto,clave,imp,color){ return '<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:11.5px;border-top:1px solid var(--color-divider,#f5f5f5)"><span style="color:var(--text-secondary,#374151)">'+(clave?'<span style="color:#9ca3af;font-size:9px">'+_cxpEsc(clave)+'</span> ':'')+_cxpEsc(concepto||'—')+'</span><span style="font-weight:700;color:'+(color||'#111')+'">'+_nomFmt(imp)+'</span></div>'; }
+  var perc=(r.percepciones||[]), ded=(r.deducciones||[]), otros=(r.otrosPagos||[]);
+  var h='<div style="background:var(--card-bg,#fff);color:var(--text-primary,#1a252f);border-radius:14px;padding:22px 24px;max-width:620px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.4)">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">'
+    +'<div><div style="font-size:16px;font-weight:800">Recibo de nómina</div><div style="font-size:11px;color:#6b7280">'+_cxpEsc(r.nombre||'')+(r.numEmpleado?' · N.º '+_cxpEsc(r.numEmpleado):'')+(r.puesto?' · '+_cxpEsc(r.puesto):'')+'</div></div>'
+    +'<button onclick="document.getElementById(\'nom-rec-ov\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af">✕</button></div>';
+  h+='<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:10.5px;color:#6b7280;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--color-divider,#e5e7eb)">'
+    +'<span>RFC: <b>'+_cxpEsc(r.rfc||'—')+'</b></span>'
+    +(r.curp?'<span>CURP: <b>'+_cxpEsc(r.curp)+'</b></span>':'')
+    +((r.fechaInicial||r.fechaFinal)?'<span>Periodo: <b>'+_cxpEsc(r.fechaInicial||'')+' a '+_cxpEsc(r.fechaFinal||'')+'</b></span>':'')
+    +(r.fechaPago?'<span>Pago: <b>'+_cxpEsc(r.fechaPago)+'</b></span>':'')
+    +(r.numDias?'<span>Días: <b>'+r.numDias+'</b></span>':'')
+    +'<span>'+(r.tipoNomina==='E'?'Extraordinaria':'Ordinaria')+'</span>'
+  +'</div>';
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">';
+  h+='<div><div style="font-size:11px;font-weight:800;color:#166534;margin-bottom:2px">Percepciones</div>';
+  if(perc.length) perc.forEach(function(x){ h+=linea(x.concepto,x.clave,x.importe,'#166534'); }); else h+='<div style="font-size:10.5px;color:#9ca3af">—</div>';
+  h+='<div style="display:flex;justify-content:space-between;padding:5px 0 0;margin-top:3px;border-top:2px solid var(--color-divider,#e5e7eb);font-size:12px;font-weight:800"><span>Total percepciones</span><span style="color:#166534">'+_nomFmt(r.totalPercepciones)+'</span></div></div>';
+  h+='<div><div style="font-size:11px;font-weight:800;color:#b45309;margin-bottom:2px">Deducciones</div>';
+  if(ded.length) ded.forEach(function(x){ h+=linea(x.concepto,x.clave,x.importe,'#b45309'); }); else h+='<div style="font-size:10.5px;color:#9ca3af">—</div>';
+  h+='<div style="display:flex;justify-content:space-between;padding:5px 0 0;margin-top:3px;border-top:2px solid var(--color-divider,#e5e7eb);font-size:12px;font-weight:800"><span>Total deducciones</span><span style="color:#b45309">'+_nomFmt(r.totalDeducciones)+'</span></div></div>';
+  h+='</div>';
+  if(otros.length){ h+='<div style="margin-top:12px"><div style="font-size:11px;font-weight:800;color:#7c3aed;margin-bottom:2px">Otros pagos</div>'; otros.forEach(function(x){ h+=linea(x.concepto,x.clave,x.importe,'#7c3aed'); }); h+='</div>'; }
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding:12px 14px;background:rgba(22,101,52,.07);border-radius:10px"><span style="font-size:13px;font-weight:800;color:#166534">Neto pagado</span><span style="font-size:18px;font-weight:800;color:#166534">'+_nomFmt(r.neto)+'</span></div>';
+  h+='<div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:9.5px;color:#9ca3af">'
+    +'<span style="word-break:break-all">UUID: '+_cxpEsc(r.uuid||'—')+'</span>'
+    +(r.fileUrl?'<a href="'+_cxpEsc(r.fileUrl)+'" target="_blank" style="color:#0c4a6e;font-weight:700;white-space:nowrap">Abrir XML ↗</a>':'')
+  +'</div></div>';
+  ov.innerHTML=h;
 }
 /* ── Catálogo de empleados ── */
 async function _nomCargarEmpleados(){
@@ -23880,7 +23936,11 @@ function _nomRenderCfg(d){
     +'<label style="font-size:11px;color:#6b7280">Tasa ISN (%)<br><input id="nom-c-isntasa" type="number" step="0.01" value="'+(c.isnTasa)+'"'+dis+' style="width:100%;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:13px;font-weight:700"></label>'
     +'<label style="font-size:11px;color:#6b7280">Base del ISN<br><select id="nom-c-isnbase"'+dis+' style="width:100%;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:13px"><option value="percepciones"'+(c.isnBase==='percepciones'?' selected':'')+'>Total de percepciones</option><option value="gravado"'+(c.isnBase==='gravado'?' selected':'')+'>Solo gravado</option></select></label>'
     +'</div>'
-    +'<label style="font-size:11.5px;color:#374151;display:flex;align-items:center;gap:7px;margin-bottom:18px"><input type="checkbox" id="nom-c-exasim" '+(c.isnExcluirAsimilados===false?'':'checked')+dis+'> Excluir <b style="margin:0 3px">asimilados a salarios</b> del ISN <span style="color:#9ca3af">(CDMX: el ISN solo aplica a sueldos/salarios)</span></label>'
+    +'<label style="font-size:11.5px;color:#374151;display:flex;align-items:center;gap:7px;margin-bottom:16px"><input type="checkbox" id="nom-c-exasim" '+(c.isnExcluirAsimilados===false?'':'checked')+dis+'> Excluir <b style="margin:0 3px">asimilados a salarios</b> del ISN <span style="color:#9ca3af">(CDMX: el ISN solo aplica a sueldos/salarios)</span></label>'
+    +'<div style="font-size:13px;font-weight:800;margin-bottom:8px">Subsidio de ISN (empresas pequeñas · CDMX)</div>'
+    +'<label style="font-size:11.5px;color:#374151;display:flex;align-items:center;gap:7px;margin-bottom:8px"><input type="checkbox" id="nom-c-subs" '+(c.isnSubsidio?'checked':'')+dis+'> Aplicar <b style="margin:0 3px">subsidio de ISN</b> (baja la tasa del 4% al 3% / 3.5%)</label>'
+    +'<label style="font-size:11px;color:#6b7280;display:block;margin-bottom:8px">Tamaño de empresa<br><select id="nom-c-subs-pct"'+dis+' style="width:100%;max-width:380px;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:13px"><option value="1"'+((parseFloat(c.isnSubsidioPct)||1)!==0.5?' selected':'')+'>Microempresa — hasta 10 empleados (−1% → 3%)</option><option value="0.5"'+((parseFloat(c.isnSubsidioPct)||1)===0.5?' selected':'')+'>Pequeña empresa — 11 a 50 (−0.5% → 3.5%)</option></select></label>'
+    +'<div style="font-size:9.5px;color:#9ca3af;margin-bottom:18px;line-height:1.5">CDMX (Reglas de Carácter General, Gaceta 31-ene-2025): micro ≤10 empleados paga <b>3%</b>, pequeña 11–50 paga <b>3.5%</b>. Es automático al declarar el n.º de trabajadores en el SAC, pero se <b>pierde si no declaras/pagas a tiempo</b> (día 17). Solo aplica desde 2025.</div>'
     +'<div style="font-size:13px;font-weight:800;margin-bottom:12px">Envío a Cuentas por Pagar (al validar)</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">'
     +'<label style="font-size:11px;color:#6b7280">Proveedor/beneficiario<br><input id="nom-c-prov" value="'+_cxpEsc(c.cxpProveedor||'')+'"'+dis+' style="width:100%;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:13px"></label>'
@@ -23893,7 +23953,7 @@ function _nomRenderCfg(d){
 }
 async function _nomCfgGuardar(){
   var g=function(id){ var el=document.getElementById(id); return el?el.value:''; };
-  var cfg={ isnTasa:parseFloat(g('nom-c-isntasa'))||0, isnBase:g('nom-c-isnbase'), isnExcluirAsimilados:(document.getElementById('nom-c-exasim')||{}).checked!==false, cxpProveedor:g('nom-c-prov'), cxpCuentaContable:g('nom-c-cta') };
+  var cfg={ isnTasa:parseFloat(g('nom-c-isntasa'))||0, isnBase:g('nom-c-isnbase'), isnExcluirAsimilados:(document.getElementById('nom-c-exasim')||{}).checked!==false, isnSubsidio:(document.getElementById('nom-c-subs')||{}).checked===true, isnSubsidioPct:parseFloat(g('nom-c-subs-pct'))||1, cxpProveedor:g('nom-c-prov'), cxpCuentaContable:g('nom-c-cta') };
   var msg=document.getElementById('nom-c-msg'), btn=document.getElementById('nom-c-save');
   if(btn){ btn.disabled=true; btn.innerHTML='<span class="ing-spinner"></span>Guardando…'; }
   try{
@@ -23965,14 +24025,14 @@ function _misRecRender(){
     +'<th style="padding:8px 6px">Fecha de pago</th><th style="padding:8px 6px">Tipo</th>'
     +'<th style="padding:8px 6px;text-align:right">Percepciones</th><th style="padding:8px 6px;text-align:right">Deducciones</th>'
     +'<th style="padding:8px 6px;text-align:right">Neto</th><th style="padding:8px 6px;text-align:center">XML</th></tr></thead><tbody>';
-  recs.forEach(function(r){
+  recs.forEach(function(r,j){
     h+='<tr style="border-bottom:1px solid var(--color-divider,#f0f0f0)">'
       +'<td style="padding:8px 6px">'+_cxpEsc(r.fechaPago||r.fecha||'')+'</td>'
       +'<td style="padding:8px 6px;color:#6b7280">'+(r.tipoNomina==='E'?'Extraordinaria':'Ordinaria')+'</td>'
       +'<td style="padding:8px 6px;text-align:right">'+_nomFmt(r.totalPercepciones)+'</td>'
       +'<td style="padding:8px 6px;text-align:right;color:#b45309">'+_nomFmt(r.totalDeducciones)+'</td>'
       +'<td style="padding:8px 6px;text-align:right;font-weight:800;color:#166534">'+_nomFmt(r.neto)+'</td>'
-      +'<td style="padding:8px 6px;text-align:center">'+(r.fileUrl?'<a href="'+_cxpEsc(r.fileUrl)+'" target="_blank" style="color:#0c4a6e;font-weight:700">Ver</a>':'—')+'</td></tr>';
+      +'<td style="padding:8px 6px;text-align:center;white-space:nowrap"><button onclick="_misRecVer('+j+')" style="background:none;border:none;color:var(--color-primary,#c46a7a);font-weight:700;cursor:pointer;font-size:11px">👁 Ver</button>'+(r.fileUrl?' · <a href="'+_cxpEsc(r.fileUrl)+'" target="_blank" style="color:#0c4a6e;font-weight:700">XML</a>':'')+'</td></tr>';
   });
   h+='</tbody></table></div>';
   root.innerHTML=_misRecShell(h);
