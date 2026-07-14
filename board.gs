@@ -195,6 +195,11 @@ function readBoardReport(fechaInicio, fechaFin){
     // Composición para donas
     var compIngresos=(sum.lineas||[]).filter(function(x){return x.tipo==='dato'&&x.grupo==='REVENUE'&&Math.abs(x.actual)>0.005;})
       .map(function(l){return {label:l.linea, valor:l.actual};}).sort(function(a,b){return b.valor-a.valor;});
+
+    // Desglose por ORIGEN de los ingresos de externos/agencias (drill-down; los
+    // subtotales por origen suman a su línea, no re-totalizan). Reusa los subitems
+    // que readSummary ya abre por origen (l2 = origen o "Externos (sin atribuir)").
+    var origenesExternos=_boardOrigenesExternos(sum.lineas);
     var compEgresos=[
       {label:'COGS', valor:_boardNum(m.cogs)},
       {label:'OpEx', valor:_boardNum(m.opex)},
@@ -206,6 +211,7 @@ function readBoardReport(fechaInicio, fechaFin){
       ok:true, periodo:sum.periodo, prev:sum.prev, tipoPeriodo:per,
       kpis:kpis, narrativa:narrativa, serie:serie, meta:meta,
       compIngresos:compIngresos, compEgresos:compEgresos, egresosDetalle:egresosDetalle,
+      origenesExternos:origenesExternos,
       presupuesto:presupuesto,
       lineas:sum.lineas, reconc:sum.reconc, amexCredito:sum.amexCredito, metricas:sum.metricas
     };
@@ -223,6 +229,34 @@ function _boardEsVentaGrupo(nombre){
   var n=String(nombre||'').toLowerCase();
   if(/estudio|medicamento|laborator|almacen|suplemento|extern/.test(n)) return false;
   return /alta|baja|surrogacy|reprovid|consulta/.test(n);
+}
+/* ¿Línea de Revenue de externos/agencias? (para el desglose por origen). */
+function _boardEsGrupoExterno(nombre){
+  var n=String(nombre||'').toLowerCase();
+  if(/extern/.test(n)) return true;
+  if(n==='agencias'||/reprovid|agencia/.test(n)) return true;
+  return false;
+}
+/* Desglose por ORIGEN de las líneas de externos/agencias, a partir de los
+   subitems que readSummary ya abre por origen. Devuelve
+   [{grupo, total, origenes:[{origen, valor, cantidad}]}] ordenado por monto.
+   Es un drill-down: la suma de origenes == total de la línea (no re-totaliza). */
+function _boardOrigenesExternos(lineas){
+  var out=[];
+  (lineas||[]).forEach(function(l){
+    if(l.tipo!=='dato'||l.grupo!=='REVENUE'||!_boardEsGrupoExterno(l.linea)) return;
+    if(Math.abs(_boardNum(l.actual))<=0.005) return;
+    var subs=[];
+    (l.subitems||[]).forEach(function(s){
+      if(Math.abs(_boardNum(s.actual))<=0.005) return;
+      subs.push({ origen:String(s.label||''), valor:_boardNum(s.actual), cantidad:_boardNum(s.cantidad) });
+    });
+    if(subs.length){
+      subs.sort(function(a,b){ return b.valor-a.valor; });
+      out.push({ grupo:String(l.linea||''), total:_boardNum(l.actual), origenes:subs });
+    }
+  });
+  return out.sort(function(a,b){ return b.total-a.total; });
 }
 function _boardSumQtyProy(grupos){
   var t=0; (grupos||[]).forEach(function(g){ if(_boardEsVentaGrupo(g.grupo)) t += _boardNum(g.cantProy); }); return t;

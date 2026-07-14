@@ -57,6 +57,16 @@ function _summaryAgenciaNombre(clave){
   for (var i=0;i<ags.length;i++){ var a=_sumNorm(ags[i]); if (a && n.indexOf(a) > -1) return ags[i]; }
   return '';
 }
+/* ¿Este grupo/categoría es de INGRESOS EXTERNOS? (mismo criterio que
+   _summaryDefaultClass y origenes.gs: contiene 'extern' o 'grupo', pero NO
+   el bucket genérico "(Sin grupo)"). Se usa para abrir el sub-nivel por
+   ORIGEN externo, igual que el presupuesto. */
+function _summaryEsExterno(clave){
+  var n = _sumNorm(clave);
+  if (n.indexOf('extern') > -1) return true;
+  if (n.indexOf('grupo') > -1 && n.indexOf('sin grupo') < 0) return true;
+  return false;
+}
 
 /* CRUD de AGENCIAS (Script Property). Cada agencia es también una LISTA DE PRECIOS
    en el catálogo (BD_Precios usa el nombre de la agencia como "lista"). */
@@ -546,12 +556,26 @@ function readSummary(fechaInicio, fechaFin) {
         // 3 niveles: Grupo (col U) → Subgrupo (categoría) → Producto
         var l1 = String(r.grupoU||'').trim() || String(r.categoria||'').trim() || '(Sin grupo)';
         var l2 = String(r.categoria||'').trim();
+        var _esExt = false;   // ¿ingreso de externos/agencia? → su sub-nivel se abre por ORIGEN
         // AGENCIAS: REPROVIDA (y futuras) se agrupan bajo "Agencias" → nombre de la agencia → items.
         // Ej: Agencias (l1) › REPROVIDA (l2 = nombre de la agencia) › productos.
         if (_summaryEsAgencia(l1) || _summaryEsAgencia(r.categoria)) {
           var _agNom = _summaryAgenciaNombre(l1) || _summaryAgenciaNombre(r.categoria)
                      || String(r.grupoU||'').trim() || String(r.categoria||'').trim();
           l1 = 'Agencias'; l2 = _agNom;   // Agencias › REPROVIDA (nombre canónico) › items
+          _esExt = true;
+        } else if (_summaryEsExterno(l1) || _summaryEsExterno(r.categoria)) {
+          _esExt = true;
+        }
+        // ATRIBUCIÓN POR ORIGEN (dueño externo). Consistente con el presupuesto
+        // (_presIngresosProy): los ingresos de externos/agencias abren su sub-nivel
+        // por r.origen. Sin origen → bucket genérico que no oculta nada:
+        //   · Agencias → conserva el nombre de la agencia (l2 actual).
+        //   · Externos → "Externos (sin atribuir)".
+        // Los NO-externos traen r.origen='' y no entran aquí (grupo sin cambio).
+        if (_esExt) {
+          var _org = String(r.origen||'').trim();
+          l2 = _org || (l1 === 'Agencias' ? l2 : 'Externos (sin atribuir)');
         }
         var prod = String(r.producto||'').trim() || l2 || '(sin producto)';
         var cant = Number(r.cantidad)||0; if(!cant) cant=1;
@@ -613,8 +637,10 @@ function readSummary(fechaInicio, fechaFin) {
         }
         var subitems;
         // Agencias SIEMPRE conserva el nivel del nombre de la agencia (aunque haya una sola),
-        // para que se vea "Agencias › REPROVIDA › items" y no se aplane.
-        if (subsArr.length <= 1 && l1.label !== 'Agencias'){
+        // para que se vea "Agencias › REPROVIDA › items" y no se aplane. Los EXTERNOS también
+        // conservan su sub-nivel por ORIGEN aunque haya uno solo (ej. "Ciclos Externos › Reprovida
+        // › items" o "› Externos (sin atribuir) › items"), para no perder la atribución.
+        if (subsArr.length <= 1 && l1.label !== 'Agencias' && !_summaryEsExterno(l1.label)){
           // Un solo subgrupo → mostrar productos directos (nivel 2 = producto)
           subitems = subsArr.length ? prodsOf(subsArr[0]) : [];
         } else {
@@ -715,10 +741,31 @@ function readEstadoResultadosMensual(fechaInicio, fechaFin){
     // Total del rango completo: orden canónico + totales + métricas
     var full=readSummary(fi, ff);
     if(!full.ok) return full;
-    var order=full.lineas.map(_erLineKey), rowsMap={};
-    full.lineas.forEach(function(l){ var k=_erLineKey(l);
+    // ¿La línea es Revenue de EXTERNOS/AGENCIAS? → se le abren sub-filas por ORIGEN.
+    function _erEsExtLinea(l){
+      return !!(l && l.tipo==='dato' && l.grupo==='REVENUE'
+                && (l.linea==='Agencias' || _summaryEsExterno(l.linea||l.label||'')));
+    }
+    function _erOrigKey(parentKey, origLabel){ return parentKey+'::'+String(origLabel||''); }
+    var order=[], rowsMap={};
+    full.lineas.forEach(function(l){
+      var k=_erLineKey(l);
       rowsMap[k]={ key:k, tipo:l.tipo, grupo:l.grupo||'', linea:l.linea||'',
-        label:l.label||l.linea||'', total:_erN(l.actual), valores:{} }; });
+        label:l.label||l.linea||'', total:_erN(l.actual), valores:{} };
+      order.push(k);
+      // Drill-down por ORIGEN bajo Externos/Agencias. Sub-filas informativas: su
+      // total es parte de la línea padre (NO se re-suma), como en el presupuesto.
+      if(_erEsExtLinea(l)){
+        (l.subitems||[]).forEach(function(s){
+          if(Math.abs(_erN(s.actual))<0.005) return;
+          var ck=_erOrigKey(k, s.label);
+          if(rowsMap[ck]) return;
+          rowsMap[ck]={ key:ck, tipo:'subdato', grupo:'REVENUE', linea:l.linea||'',
+            label:s.label||'', total:_erN(s.actual), valores:{}, parent:k };
+          order.push(ck);
+        });
+      }
+    });
     // Por mes
     var serie=[];
     months.forEach(function(mo){
@@ -727,7 +774,15 @@ function readEstadoResultadosMensual(fechaInicio, fechaFin){
       var rev=_erN(mm.revenue);
       var eg=(s&&s.ok&&s.reconc)?_erN(s.reconc.egresosPL):(_erN(mm.cogs)+_erN(mm.opex)+_erN(mm.ga)+_erN(mm.taxes));
       serie.push({ key:mo.key, label:mo.label, ingresos:rev, egresos:eg, utilidad:_erN(mm.netProfit) });
-      if(s&&s.ok){ s.lineas.forEach(function(l){ var k=_erLineKey(l); if(rowsMap[k]) rowsMap[k].valores[mo.key]=_erN(l.actual); }); }
+      if(s&&s.ok){ s.lineas.forEach(function(l){
+        var k=_erLineKey(l); if(rowsMap[k]) rowsMap[k].valores[mo.key]=_erN(l.actual);
+        if(_erEsExtLinea(l)){
+          (l.subitems||[]).forEach(function(su){
+            var ck=_erOrigKey(k, su.label);
+            if(rowsMap[ck]) rowsMap[ck].valores[mo.key]=_erN(su.actual);
+          });
+        }
+      }); }
     });
     var rows=order.map(function(k){ return rowsMap[k]; }).filter(Boolean);
     return { ok:true, periodo:{inicio:fi,fin:ff},
