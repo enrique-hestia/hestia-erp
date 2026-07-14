@@ -14893,6 +14893,8 @@ function _renderPresupuesto(){
       +'.pr-scen{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}'
       +'.pr-card{border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:14px}'
       +'.pr-card.base{border:2px solid var(--color-primary,#c46a7a)}'
+      +'.pr-card.sel{outline:2.5px solid var(--color-primary,#c46a7a);outline-offset:2px}'
+      +'.pr-card.pick{cursor:pointer}'
       +'.pr-tbl{width:100%;border-collapse:collapse;font-size:11.5px}'
       +'.pr-tbl th{padding:8px 10px;font-size:8.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);background:var(--color-surface,#fafafa);border-bottom:2px solid var(--color-divider,#d1d5db);text-align:right;white-space:nowrap}'
       +'.pr-tbl th:first-child{text-align:left}'
@@ -14993,22 +14995,30 @@ function _renderPresupuesto(){
     +'</div>'
     +'<div style="position:relative;height:250px"><canvas id="presChart"></canvas></div></div>');
 
-  // Proyección siguiente trimestre — escenarios (Conservador/Optimista con % editable sobre la Base)
-  var _escBase = tt.proyeccion||0;
+  // Proyección siguiente trimestre — escenarios (Conservador/Base/Optimista/Meta con % editable y persistente).
+  // Los %s y el escenario ACTIVO se guardan por periodo; la recomendación del modelo es solo la semilla.
+  var _escBase = tt.proyeccion||0;   // Base ya ajustada por el % vs recom guardado (viene del backend)
   var _ep = d.escenariosPct||{}; var _consP = (_ep.conservador!=null?_ep.conservador:10), _optP = (_ep.optimista!=null?_ep.optimista:8);
+  var _basePct = (_ep.basePct!=null?_ep.basePct:0);
+  var _selScen = (_ep.seleccionado||tt.seleccionado||'base');
   window._presEscPct = {conservador:_consP, optimista:_optP};
+  window._presBasePct = _basePct; window._presEscSel = _selScen;
+  window._presRecBase = (tt.recomendado!=null?tt.recomendado:_escBase);   // recomendación CRUDA (ancla del % vs recom)
   var _egP=(eg&&eg.proyeccion)||0; window._presEgProy=_egP;
-  window._presRecBase=_escBase;   // base recomendada del modelo (ancla para el % de ajuste de la Base)
   function _uHtml(id,ing){ var u=ing-_egP, p=u>=0; return '<div id="'+id+'" style="font-size:10.5px;font-weight:700;margin-top:4px;color:'+(p?'#166534':'#991b1b')+'">Utilidad '+(p?'':'−')+fM(Math.abs(u))+'</div>'; }
   function _escPctCtl(id,signo,val){ return canEdit
-    ? '<span style="white-space:nowrap">'+signo+'<input type="number" id="'+id+'" value="'+val+'" min="0" max="300" step="1" onchange="presSetEscenario(\''+(id==='pr-esc-cons'?'conservador':'optimista')+'\',this.value)" style="width:40px;text-align:right;border:1px solid var(--color-divider,#e5e7eb);border-radius:5px;padding:1px 3px;font-size:10px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">% vs base</span>'
+    ? '<span style="white-space:nowrap" onclick="event.stopPropagation()">'+signo+'<input type="number" id="'+id+'" value="'+val+'" min="0" max="300" step="1" onclick="event.stopPropagation()" onchange="presSetEscenario(\''+(id==='pr-esc-cons'?'conservador':'optimista')+'\',this.value)" style="width:40px;text-align:right;border:1px solid var(--color-divider,#e5e7eb);border-radius:5px;padding:1px 3px;font-size:10px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">% vs base</span>'
     : '<span>'+signo+val+'% vs base</span>'; }
-  h.push('<div class="pr-sc"><div class="pr-sh">Proyección '+sg.periodo+' · con base en el comportamiento de ventas <span style="font-size:10px;font-weight:400;color:var(--text-secondary,#9ca3af)">· ajusta los % de Conservador/Optimista según tu mercado · cada tarjeta muestra su utilidad (egresos proy. '+fM(_egP)+')</span></div>'
+  // Cabecera de tarjeta seleccionable: clic en la tarjeta = elegir ese escenario como el ACTIVO (el que usa el Board Deck).
+  function _scCls(key){ return 'pr-card'+(key==='base'?' base':'')+(canEdit?' pick':'')+(_selScen===key?' sel':''); }
+  function _scAttr(key){ return 'id="pr-card-'+key+'" class="'+_scCls(key)+'"'+(canEdit?' onclick="presSelectScenario(\''+key+'\')" title="Elegir «'+key+'» como escenario activo (el que se guarda y usa el Informe Ejecutivo)"':''); }
+  function _scBadge(key){ return '<div id="pr-sel-'+key+'" style="font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;margin-top:5px;color:'+(_selScen===key?'var(--color-primary,#c46a7a)':'var(--text-secondary,#c9c9c9)')+'">'+(_selScen===key?'● Activo':(canEdit?'Elegir':''))+'</div>'; }
+  h.push('<div class="pr-sc"><div class="pr-sh">Proyección '+sg.periodo+' · con base en el comportamiento de ventas <span style="font-size:10px;font-weight:400;color:var(--text-secondary,#9ca3af)">· ajusta los % y elige el escenario ACTIVO (clic en la tarjeta) · se guarda por trimestre · cada tarjeta muestra su utilidad (egresos proy. '+fM(_egP)+')</span></div>'
     +'<div class="pr-scen">'
-      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280);display:flex;align-items:center;justify-content:space-between;gap:5px">Conservador '+_escPctCtl('pr-esc-cons','−',_consP)+'</div><div id="pr-scen-cons" style="font-size:21px;font-weight:800">'+fM(_escBase*(1-_consP/100))+'</div>'+_uHtml('pr-scen-cons-u',_escBase*(1-_consP/100))+'</div>'
-      +'<div class="pr-card base"><div style="font-size:11px;color:var(--text-secondary,#6b7280);display:flex;align-items:center;justify-content:space-between;gap:5px">Base (esperado)'+(canEdit?' <span style="white-space:nowrap"><input type="number" id="pr-esc-base" value="0" step="1" onchange="presSetBasePct(this.value)" title="Ajusta la Base ± un % sobre el recomendado del modelo. Conservador, Optimista y la utilidad se recalculan al instante." style="width:44px;text-align:right;border:1px solid var(--color-divider,#e5e7eb);border-radius:5px;padding:1px 3px;font-size:10px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">% vs recom.</span>':'')+'</div><div id="pr-scen-base" style="font-size:21px;font-weight:800;color:var(--color-primary,#c46a7a)">'+fM(_escBase)+'</div>'+_uHtml('pr-scen-base-u',_escBase)+'</div>'
-      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280);display:flex;align-items:center;justify-content:space-between;gap:5px">Optimista '+_escPctCtl('pr-esc-opt','+',_optP)+'</div><div id="pr-scen-opt" style="font-size:21px;font-weight:800">'+fM(_escBase*(1+_optP/100))+'</div>'+_uHtml('pr-scen-opt-u',_escBase*(1+_optP/100))+'</div>'
-      +'<div class="pr-card"><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Meta capturada</div><div id="pr-scen-meta" style="font-size:21px;font-weight:800">'+(tt.meta>0?fM(tt.meta):'—')+'</div>'+(tt.meta>0?_uHtml('pr-scen-meta-u',tt.meta):'<div id="pr-scen-meta-u" style="font-size:10.5px;color:#9ca3af;margin-top:4px">Utilidad —</div>')+'</div>'
+      +'<div '+_scAttr('conservador')+'><div style="font-size:11px;color:var(--text-secondary,#6b7280);display:flex;align-items:center;justify-content:space-between;gap:5px">Conservador '+_escPctCtl('pr-esc-cons','−',_consP)+'</div><div id="pr-scen-cons" style="font-size:21px;font-weight:800">'+fM(_escBase*(1-_consP/100))+'</div>'+_uHtml('pr-scen-cons-u',_escBase*(1-_consP/100))+_scBadge('conservador')+'</div>'
+      +'<div '+_scAttr('base')+'><div style="font-size:11px;color:var(--text-secondary,#6b7280);display:flex;align-items:center;justify-content:space-between;gap:5px">Base (esperado)'+(canEdit?' <span style="white-space:nowrap" onclick="event.stopPropagation()"><input type="number" id="pr-esc-base" value="'+_basePct+'" step="1" onclick="event.stopPropagation()" onchange="presSetBasePct(this.value)" title="Ajusta la Base ± un % sobre el recomendado del modelo. Conservador, Optimista y la utilidad se recalculan al instante. Se guarda por trimestre." style="width:44px;text-align:right;border:1px solid var(--color-divider,#e5e7eb);border-radius:5px;padding:1px 3px;font-size:10px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">% vs recom.</span>':'')+'</div><div id="pr-scen-base" style="font-size:21px;font-weight:800;color:var(--color-primary,#c46a7a)">'+fM(_escBase)+'</div>'+_uHtml('pr-scen-base-u',_escBase)+_scBadge('base')+'</div>'
+      +'<div '+_scAttr('optimista')+'><div style="font-size:11px;color:var(--text-secondary,#6b7280);display:flex;align-items:center;justify-content:space-between;gap:5px">Optimista '+_escPctCtl('pr-esc-opt','+',_optP)+'</div><div id="pr-scen-opt" style="font-size:21px;font-weight:800">'+fM(_escBase*(1+_optP/100))+'</div>'+_uHtml('pr-scen-opt-u',_escBase*(1+_optP/100))+_scBadge('optimista')+'</div>'
+      +'<div '+_scAttr('meta')+'><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Meta capturada</div><div id="pr-scen-meta" style="font-size:21px;font-weight:800">'+(tt.meta>0?fM(tt.meta):'—')+'</div>'+(tt.meta>0?_uHtml('pr-scen-meta-u',tt.meta):'<div id="pr-scen-meta-u" style="font-size:10.5px;color:#9ca3af;margin-top:4px">Utilidad —</div>')+_scBadge('meta')+'</div>'
     +'</div>'
     +(function(){ var _egP=(eg&&eg.proyeccion)||0, _u=_escBase-_egP, _pos=_u>=0;
       return '<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:center;padding:10px 14px;border-radius:12px;background:'+(_pos?'rgba(22,101,52,.06)':'rgba(153,27,27,.06)')+';border:1px solid var(--color-divider,#e5e7eb)">'
@@ -15786,10 +15796,15 @@ function _presBuildIngresos(grupos, canEdit){
     h+='<tr style="background:var(--color-primary-hl,rgba(196,106,122,.06))"><td style="font-weight:800">'+_esc(G.grupo)+'</td><td></td><td></td><td></td><td style="font-weight:800;color:'+primary+'">'+fM(gImp)+'</td><td style="font-weight:700;color:var(--text-secondary,#9ca3af)">'+fM(gProy)+'</td><td></td></tr>';
     var multiSub=(G.subgrupos||[]).length>1;
     (G.subgrupos||[]).forEach(function(S){
-      if(multiSub){ var sImp=0; S.productos.forEach(function(p){sImp+=p._budImp;}); h+='<tr><td style="padding-left:18px;font-weight:700;color:#9c4f5f;font-size:10.5px;text-transform:uppercase">'+_esc(S.sub)+'</td><td></td><td></td><td></td><td style="font-weight:700">'+fM(sImp)+'</td><td></td><td></td></tr>'; }
+      // Etiqueta a nivel medio: externo con dueño → nombre del origen; sin dueño → "Externos — sin atribuir"
+      // (con pista para atribuirlo). El sub-encabezado se muestra si hay varios O si es un externo sin atribuir.
+      var _extSin=!!S.externoSinAtribuir, _subLbl=S.subLabel||S.sub, _showSub=multiSub||_extSin;
+      if(_showSub){ var sImp=0; S.productos.forEach(function(p){sImp+=p._budImp;});
+        var _lblHtml=_esc(_subLbl)+(_extSin?' <span style="font-weight:500;text-transform:none;color:var(--text-secondary,#9ca3af);font-size:9.5px" title="Ingresos de externos sin origen asignado. Atribúyelos en «Orígenes externos» → «Atribuir externos (histórico)» para ver de quién son.">· sin origen · atribuir en Orígenes externos</span>':'');
+        h+='<tr><td style="padding-left:18px;font-weight:700;color:'+(_extSin?'#b45309':'#9c4f5f')+';font-size:10.5px;text-transform:uppercase">'+_lblHtml+'</td><td></td><td></td><td></td><td style="font-weight:700">'+fM(sImp)+'</td><td></td><td></td></tr>'; }
       (S.productos||[]).forEach(function(p){
         var key='ip'+(kc++); _presProdMap[key]=p; var dl=p.importeProy>0?(p._budImp-p.importeProy):null;
-        h+='<tr><td style="padding-left:'+(multiSub?34:26)+'px;color:var(--text-secondary,#374151);max-width:190px;overflow:hidden;text-overflow:ellipsis" title="'+_esc(p.producto)+'">'+_esc(p.producto)+'</td>'
+        h+='<tr><td style="padding-left:'+(_showSub?34:26)+'px;color:var(--text-secondary,#374151);max-width:190px;overflow:hidden;text-overflow:ellipsis" title="'+_esc(p.producto)+'">'+_esc(p.producto)+'</td>'
           +'<td style="color:var(--text-secondary,#9ca3af)">'+(p.cantReciente||0)+'</td>'
           +'<td style="color:var(--text-secondary,#9ca3af)">'+fM(p.precio)+'</td>'
           +'<td style="text-align:right">'+(canEdit?'<input id="'+key+'-c" type="number" step="1" min="0" value="'+p._budCant+'" onchange="presProdCant(\''+key+'\',this.value)" style="width:62px;text-align:right;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;padding:5px 7px;font-size:11.5px">':p._budCant)+'</td>'
@@ -15851,6 +15866,7 @@ function _presBatchSave(metas){ var s=getSession()||{}; fetch(APPS_SCRIPT_URL,{m
 // + egresos con budget capturado (>0). Reusa savePresupuestoMetasBatch.
 async function presGuardarTodo(btn){
   if(!(_presData&&_presData.siguiente&&_presData.siguiente.periodo)) return;
+  try{ _presSaveProyeccion(); }catch(e){}   // guarda también los parámetros de proyección (escenarios) del panel
   var metas=[];
   Object.keys(_presProdMap).forEach(function(k){ var p=_presProdMap[k]; metas.push({linea:p.producto, metaIngreso:Math.round(p._budImp||0), metaCantidad:Math.max(0,Math.round(p._budCant||0))}); });
   Object.keys(_presEgMap).forEach(function(k){ var l=_presEgMap[k]; if((l.meta||0)>0) metas.push({linea:'EG:'+l.linea, metaIngreso:Math.round(l.meta)}); });
@@ -16021,9 +16037,43 @@ function presToggleMaestro(nivel, gi, checked, si){
   var s=getSession()||{};
   fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'presSetLock',key:key,movible:movible,usuario:s.email||''})}).catch(function(){});
 }
+// Sincroniza el modelo local (totales) con el escenario ACTIVO: recalcula Conservador/Optimista
+// desde la Base actual y fija proyeccionSeleccionada (lo que consume el Board Deck / Informe Ejecutivo).
+function _presSyncSel(){
+  var t=(_presData&&_presData.siguiente&&_presData.siguiente.totales)||null; if(!t) return;
+  var base=Number(t.proyeccion)||0;
+  var p=window._presEscPct||{}; var consP=Number(p.conservador)||0, optP=Number(p.optimista)||0;
+  t.conservador=Math.round(base*(1-consP/100)); t.optimista=Math.round(base*(1+optP/100));
+  var sel=window._presEscSel||'base'; t.seleccionado=sel;
+  t.proyeccionSeleccionada = sel==='conservador'?t.conservador : sel==='optimista'?t.optimista : sel==='meta'?(Number(t.meta)||0) : base;
+}
+// Persiste los PARÁMETROS de proyección (escenarios) por periodo. Mismo patrón que las metas:
+// POST → savePresupuestoProyeccion (fila __PROYECCION__ en Presupuesto_Metas). Guardado parcial-seguro.
+function _presSaveProyeccion(){
+  if(!(_presData&&_presData.siguiente&&_presData.siguiente.periodo)) return;
+  var p=window._presEscPct||{}, s=getSession()||{};
+  var body={ action:'savePresupuestoProyeccion', periodo:_presData.siguiente.periodo,
+    conservador:(p.conservador!=null?p.conservador:''),
+    optimista:(p.optimista!=null?p.optimista:''),
+    basePct:(window._presBasePct!=null?window._presBasePct:''),
+    seleccionado:(window._presEscSel||'base'),
+    usuario:s.email||'' };
+  if(_presData.escenariosPct){ var ep=_presData.escenariosPct; ep.conservador=p.conservador; ep.optimista=p.optimista; ep.basePct=window._presBasePct; ep.seleccionado=window._presEscSel; ep.esGuardado=true; }
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(body)}).then(function(){_presFlashSaved();}).catch(function(){});
+}
+// Elige el escenario ACTIVO (conservador|base|optimista|meta): resalta la tarjeta y lo persiste.
+function presSelectScenario(key){
+  if(['conservador','base','optimista','meta'].indexOf(key)<0) return;
+  window._presEscSel=key;
+  ['conservador','base','optimista','meta'].forEach(function(k){
+    var card=document.getElementById('pr-card-'+k); if(card){ if(k===key) card.classList.add('sel'); else card.classList.remove('sel'); }
+    var b=document.getElementById('pr-sel-'+k); if(b){ var on=(k===key); b.textContent=on?'● Activo':'Elegir'; b.style.color=on?'var(--color-primary,#c46a7a)':'var(--text-secondary,#c9c9c9)'; }
+  });
+  _presSyncSel(); _presSaveProyeccion();
+}
 // Base editable por % vs el recomendado del modelo (igual que Conservador/Optimista).
 // El número se muestra formateado; al mover el % se recalculan las 3 tarjetas, sus
-// utilidades y la barra "Utilidad esperada (con la Base)". Es un ajuste en vivo (what-if).
+// utilidades y la barra "Utilidad esperada (con la Base)". Se GUARDA por trimestre.
 function presSetBasePct(pct){
   pct=parseFloat(pct)||0;
   var recBase=Number(window._presRecBase)||0;
@@ -16040,8 +16090,9 @@ function presSetBasePct(pct){
   var u=base-egP, pos=u>=0;
   var bt=document.getElementById('pr-scen-base-total'); if(bt){ bt.textContent=(pos?'':'−')+_presFM(Math.abs(u)); bt.style.color=pos?'#166534':'#991b1b'; }
   var beq=document.getElementById('pr-scen-base-eq'); if(beq) beq.innerHTML='= ingresos base '+_presFM(base)+' − egresos proyectados '+_presFM(egP);
+  window._presBasePct=pct; _presSyncSel(); _presSaveProyeccion();
 }
-// Escenarios: Conservador/Optimista se recalculan como Base × (1 ∓ %). El % lo define el usuario (persiste).
+// Escenarios: Conservador/Optimista se recalculan como Base × (1 ∓ %). El % lo define el usuario y se GUARDA por trimestre.
 function presSetEscenario(tipo, val){
   var pct=Math.max(0, parseFloat(val)||0);
   var base=(_presData&&_presData.siguiente&&_presData.siguiente.totales&&_presData.siguiente.totales.proyeccion)||0;
@@ -16050,8 +16101,7 @@ function presSetEscenario(tipo, val){
   function setU(id,ing){ var u=ing-egP,p=u>=0; var e=document.getElementById(id); if(e){ e.textContent='Utilidad '+(p?'':'−')+_presFM(Math.abs(u)); e.style.color=p?'#166534':'#991b1b'; } }
   if(tipo==='conservador'){ var ing=base*(1-pct/100); var el=document.getElementById('pr-scen-cons'); if(el) el.textContent=_presFM(ing); setU('pr-scen-cons-u',ing); }
   else { var ing2=base*(1+pct/100); var e2=document.getElementById('pr-scen-opt'); if(e2) e2.textContent=_presFM(ing2); setU('pr-scen-opt-u',ing2); }
-  var body={action:'presSetEscenarios',usuario:(getSession()||{}).email||''}; body[tipo]=pct;
-  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(body)}).catch(function(){});
+  _presSyncSel(); _presSaveProyeccion();
 }
 // % maestro / cuadrar / proyección: solo mueven grupos Y subgrupos con el checkbox marcado (movible)
 function _presMasterApplyGrouped(f){
