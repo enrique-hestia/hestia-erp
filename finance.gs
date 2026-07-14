@@ -1793,6 +1793,10 @@ function migrateCxPFromEgresos() {
 var INGRESOS_SS_ID = '1x_TE_YxLOwnBXKV_lA3Ss_EOSu1p61uTdUmw2zh_6uc'; // Ingresos 2026
 var INGRESOS_SS_2025 = '17gNzXavMbQ8DhFEIxCqzCJ6z-wTZgIwL4ibEDyVKE2w';
 var INGRESOS_SS_2024 = '1Zx4QWulAgrrVBeI8nfTR10EiYL-l3crJsaZSYDbWSug';
+// ÚNICO PUNTO DE VERDAD del libro de ingresos por año. Para habilitar un año
+// nuevo (p.ej. 2027) SOLO agrega su id aquí — NO hardcodees INGRESOS_SS_ID en los
+// lectores; usa _ingIdDeAnio(anio). Así el historial siempre queda consultable.
+var INGRESOS_IDS = { 2026:INGRESOS_SS_ID, 2025:INGRESOS_SS_2025, 2024:INGRESOS_SS_2024 };
 var PRODUCTOS_SS_ID = '1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY';
 var PACIENTES_SS_ID = '1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio';
 
@@ -1802,8 +1806,18 @@ var PACIENTES_SS_ID = '1uoQU-vbefxWwaLxJyTFT25gj7Nr2223WISa3tqH-Rio';
 var EGRESOS_SS_2026 = '1iRjpYtkcqx-3NRwlVK-UYx09I0gVyiTDRtIA9X9RAQw';
 var EGRESOS_SS_2025 = '18Wf4tD6CYBMTGVLPkEw_5YOtJncOAAeCyfeKMe--M1g';
 var EGRESOS_SS_2024 = '18DOfh1CvMyY3ZntjXGEqw6mjzhhBYZkatygxvnck2Is';
+// ÚNICO PUNTO DE VERDAD del libro/pestaña de egresos por año. Para habilitar un
+// año nuevo SOLO agrega su id a EGRESOS_IDS y su pestaña a EGRESOS_TABS — NO
+// hardcodees EGRESOS_SS_2026/'Egresos2026' en los lectores; usa los helpers de abajo.
 var EGRESOS_TABS = { 2026:'Egresos2026', 2025:'Egresos2025', 2024:'Egresos2024' };
 var EGRESOS_IDS  = { 2026:EGRESOS_SS_2026, 2025:EGRESOS_SS_2025, 2024:EGRESOS_SS_2024 };
+
+/* ── Helpers año→libro (year-aware). Centralizan la resolución del spreadsheet
+   correcto según el año consultado. Cualquier lector/escritor de egresos o
+   ingresos DEBE pasar por aquí para no volver a quedar clavado en 2026. ── */
+function _egIdDeAnio(anio)  { anio = parseInt(anio, 10) || new Date().getFullYear(); return EGRESOS_IDS[anio]  || EGRESOS_SS_2026; }
+function _egTabDeAnio(anio) { anio = parseInt(anio, 10) || new Date().getFullYear(); return EGRESOS_TABS[anio] || ('Egresos' + anio); }
+function _ingIdDeAnio(anio) { anio = parseInt(anio, 10) || new Date().getFullYear(); return INGRESOS_IDS[anio] || INGRESOS_SS_ID; }
 // Carpetas raíz en G:\...\01 Administración y Finanzas\01 Contabilidad
 // Dentro de cada una se crean subcarpetas <Año>\<Mes> automáticamente.
 var EGRESOS_DRIVE_FACTURAS = '1t8--HM1xymgqGyBbIsI2jhMVCgQUBm9n'; // Contabilidad\Facturas Recibidas
@@ -1857,8 +1871,9 @@ function _egUpsertComisionesMP(anio, mes, usuario) {
     if (!anio || !mes) { lock.releaseLock(); return { ok: false, error: 'anio/mes' }; }
     var total = _mpComisionesDelMes(anio, mes);
     var per = anio + '-' + (mes < 10 ? '0' : '') + mes;
-    var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
-    var sh = ss.getSheetByName(EGRESOS_TABS[anio] || ('Egresos' + anio));
+    // year-aware: escribe en el LIBRO del año (antes abría 2026 y fallaba para 2025/2024).
+    var ss = SpreadsheetApp.openById(_egIdDeAnio(anio));
+    var sh = ss.getSheetByName(_egTabDeAnio(anio));
     if (!sh) { lock.releaseLock(); return { ok: false, error: 'Hoja Egresos' + anio + ' no encontrada' }; }
     var iTag = _egColEnsure(sh, 'mpcomid', 'MpComisionID');
     var data = sh.getDataRange().getValues();
@@ -2010,8 +2025,8 @@ function uploadEgresoPDF(payload) {
 function readEgresosData(anio) {
   try {
     anio = anio || new Date().getFullYear();
-    var ssId = EGRESOS_IDS[anio] || EGRESOS_SS_2026;
-    var tabName = EGRESOS_TABS[anio] || 'Egresos' + anio;
+    var ssId = _egIdDeAnio(anio);
+    var tabName = _egTabDeAnio(anio);
     var ss = SpreadsheetApp.openById(ssId);
     var sheet = null;
     var sheets = ss.getSheets();
@@ -2037,7 +2052,8 @@ function readEgresosData(anio) {
         iFPago=col('forma de pago'), iObs=col('observaciones'), iLinkFact=col('link factura'),
         iLinkPago=col('link pago'), iLinkCotiz=col('cotiz'),
         iUSD=col('usd'), iTC=col('tipo de cambio'), iEstatus=col('estatus'),
-        iRec=col('recurrente'), iDeveng=col('devengado');
+        iRec=col('recurrente'), iDeveng=col('devengado'),
+        iMpCom=col('mpcomid');  // etiqueta MPCOM-YYYY-MM de la partida automática de comisiones MP
 
     function num(v) { if (typeof v==='number') return v; var n=parseFloat(String(v||'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
     function dt(v) { if(!v)return''; if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0'); return String(v); }
@@ -2062,6 +2078,14 @@ function readEgresosData(anio) {
       var contable = iContable>-1 ? String(row[iContable]||'').trim() : '';
       var tipo = iTipo>-1 ? String(row[iTipo]||'').trim() : '';
       var fp = iFPago>-1 ? String(row[iFPago]||'').trim() : '';
+
+      // Partida AUTOMÁTICA: comisiones de Mercado Pago (recalculada sola con cada
+      // ingreso MP). Se detecta por la etiqueta MpComisionID = MPCOM-YYYY-MM y, si
+      // el lector no la expone, por Proveedor="Mercado Pago" + Subtipo="Comisiones"
+      // + Concepto que empieza con "Comisiones Mercado Pago". El frontend la marca
+      // con un badge "🔄 automática" y bloquea su edición manual.
+      var mpComId = iMpCom>-1 ? String(row[iMpCom]||'').trim() : '';
+      var esAuto = !!mpComId || (/^mercado\s*pago$/i.test(proveedor) && /^comisiones$/i.test(subtipo) && /^comisiones mercado pago/i.test(concepto));
 
       if (proveedor) provSet[proveedor] = 1;
       if (subtipo) subtipoSet[subtipo] = 1;
@@ -2097,7 +2121,9 @@ function readEgresosData(anio) {
         tipoCambio: iTC>-1 ? num(row[iTC]) : 0,
         estatus: iEstatus>-1 ? String(row[iEstatus]||'').trim() : '',
         recurrenteId: iRec>-1 ? String(row[iRec]||'').trim() : '',
-        mesDevengado: iDeveng>-1 ? (function(v){ if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0'); return String(v||'').trim(); })(row[iDeveng]) : ''
+        mesDevengado: iDeveng>-1 ? (function(v){ if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0'); return String(v||'').trim(); })(row[iDeveng]) : '',
+        mpComisionId: mpComId,
+        esAuto: esAuto
       });
     }
 
@@ -2731,9 +2757,12 @@ function _readFromBDIngresos(sheet) {
   };
 }
 
-function readIngresosData() {
+function readIngresosData(anio) {
   try {
-    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    // year-aware: lee del LIBRO de ingresos del año pedido (historial 2024/2025);
+    // sin año = año en curso. El anio se propaga al payload para que el frontend lo muestre.
+    anio = parseInt(anio, 10) || new Date().getFullYear();
+    var ss = SpreadsheetApp.openById(_ingIdDeAnio(anio));
 
     // Leer siempre de BD_Ingresos (fuente única)
     var bdSheet = null;
@@ -2742,7 +2771,9 @@ function readIngresosData() {
       if (allSheets[bi].getName() === BD_INGRESOS_TAB) { bdSheet = allSheets[bi]; break; }
     }
     if (bdSheet) {
-      return _readFromBDIngresos(bdSheet);
+      var _resBD = _readFromBDIngresos(bdSheet);
+      if (_resBD && typeof _resBD === 'object') _resBD.anio = String(anio); // año solicitado (no el de la 1a fila)
+      return _resBD;
     }
     // Fallback: leer de pestañas mensuales si BD_Ingresos no existe
     var MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
