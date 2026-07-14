@@ -328,3 +328,43 @@ function nominaMisRecibos(token, anio, mes) {
     return { ok: true, vinculado: true, empleado: { NumEmpleado: yo.NumEmpleado, Nombre: yo.Nombre, Puesto: yo.Puesto }, recibos: mios };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
+
+// ── Diagnóstico: correr desde el editor (selecciona nominaDiagnostico → Run) ──
+// Cuenta los XML de la carpeta de emitidos de un mes, los clasifica por tipo, y
+// corre readNominaMes IMPRIMIENDO el resultado en el registro de ejecución.
+// Cambia ANIO/MES abajo si quieres otro periodo.
+function nominaDiagnostico() {
+  var ANIO = 2026, MES = 6; // ← ajusta aquí el mes a validar
+  var out = ['== Diagnóstico Nómina ' + ANIO + '-' + (MES < 10 ? '0' : '') + MES + ' =='];
+  try {
+    if (typeof _facMonthFolder !== 'function') { out.push('ERROR: facturacion.gs no está en el proyecto (no encuentro _facMonthFolder).'); Logger.log(out.join('\n')); return; }
+    var mesTag = (MES < 10 ? '0' : '') + MES + ' ' + FAC_MESES_ABR[MES - 1];
+    var folder = _facMonthFolder(ANIO, MES);
+    if (!folder) {
+      out.push('❌ Carpeta NO encontrada: onefactureXMLs/HCL2307051Y6/emitidos/' + ANIO + '/' + mesTag);
+      out.push('   Revisa que los nombres de carpeta coincidan (¿la nómina se timbra ahí?).');
+      Logger.log(out.join('\n')); return;
+    }
+    out.push('✔ Carpeta: ' + folder.getName() + '  ' + folder.getUrl());
+    var files = folder.getFiles(), totXml = 0, tipos = {};
+    while (files.hasNext()) {
+      var f = files.next(); if (!/\.xml$/i.test(f.getName())) continue; totXml++;
+      var xml; try { xml = f.getBlob().getDataAsString('UTF-8'); } catch (e) { continue; }
+      var m = xml.match(/TipoDeComprobante\s*=\s*"?([A-Z])"?/);
+      var t = m ? m[1] : '?'; tipos[t] = (tipos[t] || 0) + 1;
+    }
+    out.push('XML en la carpeta: ' + totXml + '  · por tipo: ' + JSON.stringify(tipos) + '  (N = nómina)');
+    var r = readNominaMes(ANIO, MES);
+    out.push('readNominaMes.ok = ' + r.ok + (r.error ? ('  error=' + r.error) : ''));
+    if (r.ok) {
+      out.push('Recibos de nómina: ' + r.totales.numRecibos + '  ·  Empleados: ' + r.totales.numEmpleados);
+      out.push('Neto total: $' + (r.totales.neto || 0).toFixed(2) + '  ·  ISN (' + r.totales.isnTasa + '%): $' + (r.totales.isn || 0).toFixed(2));
+      (r.empleados || []).forEach(function (e) {
+        out.push('  • ' + (e.nombre || e.rfc || e.numEmpleado || '¿?') + '  | recibos=' + e.recibos +
+          ' | neto=$' + (e.neto || 0).toFixed(2) + ' | ISR=$' + (e.isrRetenido || 0).toFixed(2) +
+          (e.primaVacacional ? ' | primaVac=$' + e.primaVacacional.toFixed(2) : '') + (e.asimilado ? ' | ASIMILADO' : ''));
+      });
+    }
+  } catch (ex) { out.push('EXCEPCIÓN: ' + ex.message); }
+  Logger.log(out.join('\n'));
+}
