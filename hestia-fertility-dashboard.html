@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.14.182 -->
+﻿<!-- app-build:2026.07.14.183 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -30455,7 +30455,17 @@ function segGenerar(cfgOverride, isPreview){
   // Los productos vienen en español desde la operación; la carta debe salir 100%
   // en el idioma elegido. Si el backend falla, se usa el texto original (no bloquea).
   if(idioma!=='es' && !isPreview){
-    var origs=[]; rows.forEach(function(r){ if(r.desc && r.desc!=='—' && origs.indexOf(r.desc)<0) origs.push(r.desc); });
+    // 1) Traducción LOCAL (mapa curado en el frontend): funciona SIN backend/redeploy.
+    //    Aplica lo que conozca y junta lo que NO esté en el mapa para el backend.
+    var origs=[];
+    rows.forEach(function(r){
+      if(!r.desc || r.desc==='—') return;
+      var t=_segTradLocal(r.desc, idioma);
+      if(t){ r.desc=t; }
+      else if(origs.indexOf(r.desc)<0){ origs.push(r.desc); }
+    });
+    // 2) Los no mapeados se intentan por backend (LanguageApp) si está desplegado;
+    //    si falla, se quedan como están (no bloquea la carta).
     if(origs.length){
       var tok=encodeURIComponent(getToken());
       var url=APPS_SCRIPT_URL+'?action=traducir&lang='+encodeURIComponent(idioma)+'&textos='+encodeURIComponent(JSON.stringify(origs))+'&token='+tok+'&_t='+Date.now();
@@ -30467,6 +30477,44 @@ function segGenerar(cfgOverride, isPreview){
     }
   }
   _finish();
+}
+/* Traducción LOCAL de descripciones de servicio (sin depender del backend).
+   Claves normalizadas (minúsculas, sin acentos). Se elige la clave más larga
+   contenida en la descripción para máxima especificidad. */
+function _segNorm(s){ return String(s==null?'':s).toLowerCase()
+  .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i').replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').replace(/ñ/g,'n')
+  .replace(/[^a-z0-9]+/g,' ').replace(/^ | $/g,''); }
+var SEG_TRAD_MAP = {
+  en:{
+    'fertilizacion in vitro':'In Vitro Fertilization','fiv':'In Vitro Fertilization (IVF)','fiv icsi':'IVF with ICSI','icsi':'ICSI',
+    'histeroscopia':'Hysteroscopy','histeroscopia diagnostica':'Diagnostic Hysteroscopy','histeroscopia quirurgica':'Surgical Hysteroscopy',
+    'criopreservacion':'Cryopreservation','anualidad criopreservacion':'Cryopreservation Annuity','criopreservacion de embriones':'Embryo Cryopreservation','criopreservacion de ovulos':'Egg Cryopreservation',
+    'estimulacion ovarica controlada':'Controlled Ovarian Stimulation','estimulacion ovarica':'Ovarian Stimulation',
+    'transferencia de embriones':'Embryo Transfer','transferencia de embrion':'Embryo Transfer','transferencia embrionaria':'Embryo Transfer',
+    'consulta':'Consultation','consulta de valoracion':'Assessment Consultation','consulta subsecuente':'Follow-up Consultation','valoracion':'Assessment',
+    'almacenamiento':'Storage','ovodonacion':'Egg Donation','donacion de ovulos':'Egg Donation',
+    'inseminacion artificial':'Artificial Insemination','inseminacion intrauterina':'Intrauterine Insemination','induccion de ovulacion':'Ovulation Induction',
+    'biopsia embrionaria':'Embryo Biopsy','medicamentos':'Medications','medicamento':'Medication','laboratorio':'Laboratory',
+    'estudios':'Tests','estudio':'Test','ultrasonido':'Ultrasound','perfil hormonal':'Hormone Panel','espermatobioscopia':'Semen Analysis','seguimiento folicular':'Follicular Monitoring'
+  },
+  fr:{
+    'fertilizacion in vitro':'Fécondation in vitro','fiv':'Fécondation in vitro (FIV)','icsi':'ICSI','histeroscopia':'Hystéroscopie',
+    'criopreservacion':'Cryoconservation','anualidad criopreservacion':'Annuité de cryoconservation','estimulacion ovarica controlada':'Stimulation ovarienne contrôlée',
+    'transferencia de embriones':'Transfert d’embryons','consulta':'Consultation','almacenamiento':'Stockage','ovodonacion':'Don d’ovocytes','medicamentos':'Médicaments','laboratorio':'Laboratoire'
+  },
+  pt:{
+    'fertilizacion in vitro':'Fertilização in vitro','fiv':'Fertilização in vitro (FIV)','icsi':'ICSI','histeroscopia':'Histeroscopia',
+    'criopreservacion':'Criopreservação','anualidad criopreservacion':'Anuidade de criopreservação','estimulacion ovarica controlada':'Estimulação ovariana controlada',
+    'transferencia de embriones':'Transferência de embriões','consulta':'Consulta','almacenamiento':'Armazenamento','ovodonacion':'Doação de óvulos','medicamentos':'Medicamentos','laboratorio':'Laboratório'
+  }
+};
+function _segTradLocal(desc, idioma){
+  var m=SEG_TRAD_MAP[idioma]; if(!m) return null;
+  var k=_segNorm(desc); if(!k) return null;
+  if(m[k]) return m[k];
+  var best=null;
+  for(var key in m){ if(m.hasOwnProperty(key) && k.indexOf(key)>-1){ if(!best || key.length>best.length) best=key; } }
+  return best ? m[best] : null;
 }
 /* Construye y escribe la carta en la ventana ya abierta. Diseño = documento Word del
  * cliente: US Letter, márgenes de 1 pulgada, Calibri 11pt, acentos navy #2c5f8a,
