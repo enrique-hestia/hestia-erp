@@ -667,6 +667,12 @@ function doGet(e) {
         return jsonResponse({ ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.' });
       return jsonResponse(generarSuscripciones({ preview:true }));
     }
+    // Conciliación Mercado Pago (crío): estado actual usando SOLO las ligas persistidas.
+    if (action === 'conciliarCrioEstado') {
+      if (typeof conciliarSuscripcionesMP !== 'function')
+        return jsonResponse({ ok:false, error:'Actualiza cobranza.gs en Apps Script y redespliega.' });
+      return jsonResponse(conciliarSuscripcionesMP({ soloEstado:true, token: (e && e.parameter.token) || '' }));
+    }
     if (action === 'contarEgresosProveedor') {
       if (typeof contarEgresosProveedor !== 'function')
         return jsonResponse({ ok:false, error:'Actualiza providers.gs en Apps Script y redespliega.' });

@@ -28107,6 +28107,7 @@ function ecImprimir() {
  * Fuente: cobranza.gs (GET cuentasCobrar/suscripcionesCrio, POST registrarAbono/…)
  */
 var _ccData = null, _ccSus = null, _ccTab = 'saldos', _ccSeg = 'Todos', _ccSusF = 'Todos', _ccLoading = false, _ccSearch = '';
+var _ccMP = null, _ccMPFilter = 'Todos', _ccMPBusy = false;   // Conciliación Mercado Pago (crío)
 
 function ccFmt(n){ return '$' + (parseFloat(n)||0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function ccFmt0(n){ return '$' + (parseFloat(n)||0).toLocaleString('es-MX',{maximumFractionDigits:0}); }
@@ -28145,6 +28146,7 @@ function ccShell(){
     + '<div style="display:flex;gap:4px;border-bottom:2px solid var(--color-divider);margin-bottom:14px">'
       + '<button id="cc-tab-saldos" onclick="ccSetTab(\'saldos\')" class="cc-tab" style="padding:10px 18px;background:none;border:none;border-bottom:2px solid var(--color-primary);margin-bottom:-2px;font-size:13px;font-weight:700;cursor:pointer;color:var(--color-text)">Saldos por cobrar</button>'
       + '<button id="cc-tab-sus" onclick="ccSetTab(\'sus\')" class="cc-tab" style="padding:10px 18px;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;font-size:13px;font-weight:700;cursor:pointer;color:var(--color-text-muted)">Suscripciones Crío</button>'
+      + '<button id="cc-tab-mp" onclick="ccSetTab(\'mp\')" class="cc-tab" style="padding:10px 18px;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;font-size:13px;font-weight:700;cursor:pointer;color:var(--color-text-muted)">Conciliar MP</button>'
     + '</div>'
     + '<div id="cc-body"><div style="padding:50px;text-align:center;color:var(--color-text-muted);font-size:13px">Cargando…</div></div>'
     + '</div>';
@@ -28184,15 +28186,17 @@ function ccRenderKpis(){
 
 function ccSetTab(t){
   _ccTab=t;
-  var a=document.getElementById('cc-tab-saldos'), b=document.getElementById('cc-tab-sus');
+  var a=document.getElementById('cc-tab-saldos'), b=document.getElementById('cc-tab-sus'), c=document.getElementById('cc-tab-mp');
   if(a){ a.style.color=(t==='saldos'?'var(--color-text)':'var(--color-text-muted)'); a.style.borderBottomColor=(t==='saldos'?'var(--color-primary)':'transparent'); }
   if(b){ b.style.color=(t==='sus'?'var(--color-text)':'var(--color-text-muted)'); b.style.borderBottomColor=(t==='sus'?'var(--color-primary)':'transparent'); }
+  if(c){ c.style.color=(t==='mp'?'var(--color-text)':'var(--color-text-muted)'); c.style.borderBottomColor=(t==='mp'?'var(--color-primary)':'transparent'); }
   ccRenderBody();
+  if(t==='mp' && !_ccMP && !_ccMPBusy) ccMPLoadEstado();
 }
 
 function ccRenderBody(){
   var el=document.getElementById('cc-body'); if(!el) return;
-  el.innerHTML = _ccTab==='saldos' ? ccRenderSaldos() : ccRenderSus();
+  el.innerHTML = _ccTab==='saldos' ? ccRenderSaldos() : (_ccTab==='sus' ? ccRenderSus() : ccRenderMP());
 }
 
 /* ── Tab A: Saldos ── */
@@ -28296,6 +28300,188 @@ function ccRenderSus(){
   });
   h+='</tbody></table></div>';
   h+='<div style="font-size:11px;color:var(--color-text-muted);margin-top:10px;line-height:1.6">Año 1 gratis para pacientes Hestia (no externos). Anual: cubre 1 año desde el pago. Mensual: se debe el día 1 de cada mes. Tarifas y regla configurables en cobranza.gs.</div>';
+  return h;
+}
+
+/* ── Tab C: Conciliar Mercado Pago (suscripciones crío) ── */
+var CC_MP_BUCKETS = {
+  cobrando:        {label:'✅ Suscrito y cobrando', color:'#16a34a'},
+  mpAnioGratis:    {label:'⏳ Suscrito · año gratis', color:'#6366f1'},
+  pagoSinMP:       {label:'⚠️ Pagó pero sin MP',    color:'#b45309'},
+  anioGratisSinMP: {label:'⚠️ Año gratis sin MP',   color:'#a16207'},
+  faltaSinMP:      {label:'⚠️ Sin suscripción ni pago', color:'#c83c3c'},
+  sinMatchERP:     {label:'❓ En MP sin match ERP',  color:'#0e9aa7'}
+};
+// Estado actual usando SOLO las ligas ya guardadas (sin subir archivo).
+function ccMPLoadEstado(){
+  _ccMPBusy=true;
+  var tok=encodeURIComponent(getToken());
+  fetch(_ccApiBase()+'action=conciliarCrioEstado&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
+    .then(function(r){return r.json();}).then(function(d){ _ccMPBusy=false; _ccMP=d; if(_ccTab==='mp') ccRenderBody(); })
+    .catch(function(e){ _ccMPBusy=false; _ccMP={ok:false,error:String(e&&e.message||e)}; if(_ccTab==='mp') ccRenderBody(); });
+}
+// Normaliza una fila del export de MP a llaves snake_case (tolerante a mayúsculas/orden).
+function _ccMPNorm(row){
+  var o={}; for(var k in row){ o[String(k).toLowerCase().replace(/[^a-z0-9]/g,'')]=row[k]; }
+  function g(){ for(var i=0;i<arguments.length;i++){ var v=o[arguments[i]]; if(v!==undefined&&v!=='') return v; } return ''; }
+  return {
+    id:g('id'), payer_id:g('payerid'),
+    payer_first_name:g('payerfirstname','firstname','nombre'),
+    payer_last_name:g('payerlastname','lastname','apellido'),
+    status:g('status','estado'), reason:g('reason','motivo','razon'),
+    external_reference:g('externalreference','referencia'),
+    preapproval_plan_id:g('preapprovalplanid','planid'),
+    frequency:g('frequency'), frequency_type:g('frequencytype'),
+    transaction_amount:g('transactionamount','amount','monto'),
+    currency_id:g('currencyid'), start_date:g('startdate'),
+    next_payment_date:g('nextpaymentdate'), last_charge_date:g('lastchargedate'),
+    last_charge_amount:g('lastchargeamount'), charged_quantity:g('chargedquantity'),
+    pending_charge_quantity:g('pendingchargequantity'),
+    payer_email:g('payeremail','email','correo'), billing_status:g('billingstatus')
+  };
+}
+// Lee el archivo (CSV/xlsx) con SheetJS y lo manda a conciliar.
+function ccMPUpload(inputEl){
+  var file=inputEl.files&&inputEl.files[0]; if(!file){ return; }
+  _ccMPBusy=true;
+  var st=document.getElementById('cc-mp-status'); if(st) st.innerHTML='<span class="ing-spinner ing-spinner-dark"></span> Leyendo archivo…';
+  _loadSheetJS().then(function(){ return file.arrayBuffer(); }).then(function(buf){
+    var wb=XLSX.read(buf,{type:'array'});
+    var sheet=wb.Sheets[wb.SheetNames[0]];
+    var json=XLSX.utils.sheet_to_json(sheet,{defval:'',raw:false});
+    if(!json.length){ if(st) st.innerHTML='<span style="color:#c83c3c">El archivo no tiene filas de datos.</span>'; _ccMPBusy=false; return; }
+    var subs=json.map(_ccMPNorm).filter(function(s){ return s.payer_id||s.payer_first_name||s.payer_last_name; });
+    if(!subs.length){ if(st) st.innerHTML='<span style="color:#c83c3c">No reconocí las columnas (payer_id, payer_first_name…).</span>'; _ccMPBusy=false; return; }
+    if(st) st.innerHTML='<span class="ing-spinner ing-spinner-dark"></span> Conciliando '+subs.length+' suscriptor(es)…';
+    var s=getSession()||{};
+    return fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'conciliarSuscripcionesMP', suscriptores:subs, token:s.token||getToken(), usuario:s.email||''})})
+      .then(function(r){return r.json();}).then(function(d){
+        _ccMPBusy=false;
+        if(d&&d.ok){ _ccMP=d; if(st) st.innerHTML='<span style="color:#16a34a">✓ '+subs.length+' leídos · '+(d.updated||0)+' liga(s) actualizada(s)</span>'; ccRenderBody(); }
+        else { if(st) st.innerHTML='<span style="color:#c83c3c">'+ccEsc((d&&d.error)||'Error al conciliar')+'</span>'; }
+      });
+  }).catch(function(e){ _ccMPBusy=false; if(st) st.innerHTML='<span style="color:#c83c3c">'+ccEsc(e&&e.message||String(e))+'</span>'; });
+  inputEl.value='';
+}
+// Opciones <option> de pacientes de crío para el vínculo manual.
+function ccMPPacienteOptions(){
+  var seen={}, names=[];
+  ((_ccMP&&_ccMP.pacientes)||[]).forEach(function(p){ var n=p.nombre; if(n&&!seen[n]){ seen[n]=1; names.push(n); } });
+  names.sort();
+  return names.map(function(n){ return '<option value="'+ccEsc(n).replace(/"/g,'&quot;')+'">'+ccEsc(n)+'</option>'; }).join('');
+}
+// Botón de acción por paciente según su clasificación.
+function ccMPAccionHtml(p){
+  if(p.bucket==='cobrando') return '<span style="color:#16a34a;font-size:11px">Sin acción — cobra solo</span>';
+  if(p.bucket==='mpAnioGratis') return '<span style="color:#6366f1;font-size:11px">Sin acción — MP cobra'+(p.primerCobroMP?' el '+ccFch(p.primerCobroMP):' al terminar el año')+'</span>';
+  var f=p.accionFecha||'';
+  var motivo=(p.accion||'Cobrar suscripción crío manualmente').replace(/[\r\n]+/g,' ');
+  var h='<button onclick="ccMPRecordar('+ccQ(p.nombre)+','+ccQ(f)+','+ccQ(motivo)+')" style="padding:5px 10px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;color:var(--color-text)">🔔 Recordar cobro'+(f?' ('+ccFch(f)+')':'')+'</button>';
+  if(p.payerId) h+=' <button onclick="ccMPDesvincular('+ccQ(p.payerId)+','+ccQ(p.nombre)+')" title="Quitar la liga con Mercado Pago (no borra cobranza)" style="padding:5px 8px;background:none;border:1px solid var(--color-divider);border-radius:7px;font-size:11px;cursor:pointer;color:var(--color-text-muted)">⛌</button>';
+  return h;
+}
+function ccMPRecordar(nombre, fecha, motivo){
+  var f = (fecha && /^\d{4}-\d{2}-\d{2}/.test(fecha)) ? String(fecha).substring(0,10) : '';
+  if(typeof crearRecordatorio!=='function'){ alert('No disponible el módulo de recordatorios.'); return; }
+  crearRecordatorio({ titulo:'Cobrar suscripción crío — '+nombre, detalle:motivo||'Sin suscripción automática en Mercado Pago; cobrar manualmente.', fecha:f, origen:'cobranza-crio', referencia:nombre })
+    .then(function(res){ if(res&&res.ok){ setStatus('Recordatorio creado'+(res.fecha?' para '+res.fecha:'')); alert('🔔 Recordatorio creado'+(res.fecha?' para '+res.fecha:'')+'.'); } else { alert('No se pudo crear el recordatorio: '+((res&&res.error)||'error')); } })
+    .catch(function(e){ alert('Error: '+e.message); });
+}
+function ccMPVincular(idx, payerId){
+  var sel=document.getElementById('cc-mp-match-'+idx); if(!sel) return;
+  var nombre=sel.value; if(!nombre){ alert('Elige un paciente para vincular.'); return; }
+  var sm=(_ccMP&&_ccMP.sinMatch&&_ccMP.sinMatch[idx])||{};
+  var s=getSession()||{};
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'guardarLinkMP', paciente:nombre, payer_id:payerId, mp_status:sm.status||'', mp_plan:sm.plan||'', mp_monto:(sm.monto===undefined?'':sm.monto), mp_inicio:sm.inicio||'', mp_prox:sm.proxCobro||'', mp_ultcobro:sm.ultCobro||'', clase:sm.clase||'', token:s.token||getToken(), usuario:s.email||''})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d&&d.ok){
+        if(_ccMP&&_ccMP.sinMatch){ _ccMP.sinMatch.splice(idx,1); if(_ccMP.resumen) _ccMP.resumen.sinMatchERP=Math.max(0,(_ccMP.resumen.sinMatchERP||1)-1); }
+        if(_ccMP&&_ccMP.pacientes){ for(var i=0;i<_ccMP.pacientes.length;i++){ if(_ccMP.pacientes[i].nombre===nombre){ _ccMP.pacientes[i].payerId=payerId; } } }
+        setStatus('Vinculado '+nombre); ccRenderBody();
+      } else { alert('No se pudo vincular: '+((d&&d.error)||'error')); }
+    }).catch(function(e){ alert('Error de red: '+e.message); });
+}
+function ccMPDesvincular(payerId, nombre){
+  if(!confirm('¿Quitar la liga con Mercado Pago de '+nombre+'?\n\nNo borra nada de cobranza; solo la liga payer_id.')) return;
+  var s=getSession()||{};
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'desvincularLinkMP', payer_id:payerId, paciente:nombre, token:s.token||getToken(), usuario:s.email||''})})
+    .then(function(r){return r.json();}).then(function(d){ if(d&&d.ok){ setStatus('Liga quitada'); ccMPLoadEstado(); } else { alert('No se pudo: '+((d&&d.error)||'error')); } })
+    .catch(function(e){ alert('Error de red: '+e.message); });
+}
+function ccRenderMP(){
+  var d=_ccMP;
+  var canEdit=typeof hasPermission==='function' && hasPermission('editar_egresos');
+  var h='';
+  // Intro + uploader
+  h+='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px;padding:16px 18px;margin-bottom:14px">';
+  h+='<div style="font-size:13px;font-weight:700;color:var(--color-text);margin-bottom:4px">Conciliar con Mercado Pago</div>';
+  h+='<div style="font-size:12px;color:var(--color-text-muted);line-height:1.6;margin-bottom:'+(canEdit?'12px':'0')+'">Sube la exportación de <b>Suscriptores</b> de Mercado Pago (CSV o Excel). Se cruza contra las suscripciones de crío del ERP para saber quién se cobra <b>automáticamente</b> y quién <b>no</b>. La liga <code>payer_id ↔ paciente</code> se guarda aparte (no toca la base de cobranza) y re-subir el archivo solo actualiza el estatus, nunca duplica.</div>';
+  if(canEdit){
+    h+='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">';
+    h+='<label style="padding:9px 16px;background:var(--color-primary);color:#fff;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;display:inline-block">⬆ Subir archivo MP<input type="file" accept=".csv,.xlsx,.xls" onchange="ccMPUpload(this)" style="display:none"></label>';
+    h+='<button onclick="ccMPLoadEstado()" style="padding:9px 14px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;cursor:pointer;color:var(--color-text)">↻ Estado actual</button>';
+    h+='<span id="cc-mp-status" style="font-size:12px;color:var(--color-text-muted)"></span>';
+    h+='</div>';
+  }
+  h+='</div>';
+
+  if(!d){ h+='<div style="padding:40px;text-align:center;color:var(--color-text-muted)">Cargando estado…</div>'; return h; }
+  if(!d.ok){ h+='<div style="padding:24px;text-align:center;color:#c83c3c;font-size:13px">'+ccEsc(d.error||'No disponible')+'<br><br><button onclick="ccMPLoadEstado()" style="padding:8px 16px;border:1px solid var(--color-divider);border-radius:8px;background:none;cursor:pointer">Reintentar</button></div>'; return h; }
+
+  var r=d.resumen||{};
+  // chips de resumen (filtro)
+  h+='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">';
+  ['Todos','cobrando','mpAnioGratis','pagoSinMP','anioGratisSinMP','faltaSinMP'].forEach(function(b){
+    var on=_ccMPFilter===b;
+    var meta=b==='Todos'?{label:'Todos',color:'var(--color-primary)'}:CC_MP_BUCKETS[b];
+    var cnt=b==='Todos'?(d.pacientes||[]).length:(r[b]||0);
+    h+='<button onclick="_ccMPFilter=\''+b+'\';ccRenderBody()" style="padding:6px 12px;border:1px solid '+(on?meta.color:'var(--color-divider)')+';background:'+(on?meta.color:'transparent')+';color:'+(on?'#fff':'var(--color-text-muted)')+';border-radius:20px;font-size:11px;font-weight:600;cursor:pointer">'+meta.label+' ('+cnt+')</button>';
+  });
+  h+='</div>';
+
+  var list=(d.pacientes||[]).filter(function(p){ return _ccMPFilter==='Todos'||p.bucket===_ccMPFilter; });
+  if(_ccSearch&&_ccSearch.trim()){ var q=_ccSearch.toLowerCase(); list=list.filter(function(p){ return ((p.nombre||'')+' '+(p.mpStatus||'')+' '+(p.payerId||'')).toLowerCase().indexOf(q)>=0; }); }
+  if(!list.length){ h+='<div style="padding:34px;text-align:center;color:var(--color-text-muted);font-size:13px;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px">Sin pacientes en este filtro.</div>'; }
+  else {
+    h+='<div style="overflow-x:auto;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px">';
+    h+='<table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:960px">';
+    h+='<thead><tr style="border-bottom:2px solid var(--color-divider)">'+ccTh('Paciente','left')+ccTh('Clasificación','left')+ccTh('Estatus MP','left')+ccTh('Plan','left')+ccTh('Próximo cobro','left')+ccTh('Acción','left')+'</tr></thead><tbody>';
+    list.forEach(function(p,i){
+      var bg=i%2?'background:var(--color-surface-2)':'';
+      var meta=CC_MP_BUCKETS[p.bucket]||{label:p.bucket,color:'var(--color-text)'};
+      var proxTxt = p.bucket==='mpAnioGratis' ? (p.primerCobroMP?('MP: '+ccFch(p.primerCobroMP)):'—') : ccFch(p.proximoCobroERP);
+      h+='<tr style="border-bottom:1px solid var(--color-divider);'+bg+'">'
+        +'<td style="padding:9px 12px"><b>'+ccEsc(p.nombre)+'</b>'+(p.payerId?'<div style="font-size:9.5px;color:var(--color-text-muted)">MP payer '+ccEsc(p.payerId)+'</div>':'')+'</td>'
+        +'<td style="padding:9px 12px"><span style="background:'+meta.color+'1f;color:'+meta.color+';padding:3px 9px;border-radius:20px;font-size:10.5px;font-weight:700;white-space:nowrap">'+meta.label+'</span></td>'
+        +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+(p.mpStatus?ccEsc(p.mpStatus):'—')+'</td>'
+        +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccEsc(p.plan||'—')+'</td>'
+        +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+proxTxt+'</td>'
+        +'<td style="padding:9px 12px">'+ccMPAccionHtml(p)+'</td>'
+        +'</tr>';
+    });
+    h+='</tbody></table></div>';
+  }
+
+  // En MP sin match en el ERP → vínculo manual
+  if(d.sinMatch&&d.sinMatch.length){
+    h+='<div style="margin-top:18px;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px;overflow:hidden">';
+    h+='<div style="padding:12px 16px;border-bottom:1px solid var(--color-divider);font-size:13px;font-weight:700;color:var(--color-text)">❓ En Mercado Pago sin match en el ERP <span style="font-weight:500;color:var(--color-text-muted)">('+d.sinMatch.length+') — MP usa usuarios (ej. «zamicure»); vincula manualmente y la próxima vez es automático.</span></div>';
+    h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:820px"><thead><tr style="border-bottom:1px solid var(--color-divider)">'+ccTh('Usuario / nombre MP','left')+ccTh('Estatus','left')+ccTh('Plan','left')+ccTh('Monto','right')+ccTh('Vincular a paciente','left')+'</tr></thead><tbody>';
+    var opts=ccMPPacienteOptions();
+    d.sinMatch.forEach(function(m,i){
+      var bg=i%2?'background:var(--color-surface-2)':'';
+      h+='<tr style="border-bottom:1px solid var(--color-divider);'+bg+'">'
+        +'<td style="padding:8px 12px"><b>'+ccEsc(m.nombre||'—')+'</b><div style="font-size:9.5px;color:var(--color-text-muted)">payer '+ccEsc(m.payerId||'—')+(m.ref?' · ref '+ccEsc(m.ref):'')+'</div></td>'
+        +'<td style="padding:8px 12px;color:var(--color-text-muted)">'+ccEsc(m.status||'—')+'</td>'
+        +'<td style="padding:8px 12px;color:var(--color-text-muted)">'+ccEsc(m.plan||'—')+'</td>'
+        +'<td style="padding:8px 12px;text-align:right;color:var(--color-text-muted)">'+(m.monto?ccFmt(m.monto):'—')+'</td>'
+        +'<td style="padding:8px 12px">'+(canEdit?('<select id="cc-mp-match-'+i+'" style="'+_ccInputStyle()+';padding:6px 8px;max-width:220px"><option value="">— elegir —</option>'+opts+'</select> <button onclick="ccMPVincular('+i+','+ccQ(m.payerId||'')+')" style="padding:6px 11px;background:var(--color-primary);color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Vincular</button>'):'<span style="color:var(--color-text-muted);font-size:11px">Requiere permiso</span>')+'</td>'
+        +'</tr>';
+    });
+    h+='</tbody></table></div></div>';
+  }
+
+  h+='<div style="font-size:11px;color:var(--color-text-muted);margin-top:12px;line-height:1.6">Las ligas se guardan en la hoja <b>Suscripciones_MP</b> (payer_id ↔ paciente), aparte de <b>Cuentas_Cobrar</b>. Re-subir el archivo solo sincroniza el estatus; nunca duplica ni borra la base.</div>';
   return h;
 }
 
