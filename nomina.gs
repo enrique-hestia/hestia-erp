@@ -64,7 +64,36 @@ function nominaCfgSave(body) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
-// ── Catálogo de Empleados (hoja "Empleados" en SHEET_ID) ────────────────
+// ── Libro propio de Nómina ─────────────────────────────────────────────
+// Cada módulo en su propio spreadsheet para escalar. Si NOMINA_SS_ID no está
+// configurado, cae al libro principal (SHEET_ID) para no romper nada antes de migrar.
+function _nomBook() {
+  var id = '';
+  try { id = PropertiesService.getScriptProperties().getProperty('NOMINA_SS_ID') || ''; } catch (e) {}
+  if (id) { try { return SpreadsheetApp.openById(id); } catch (e) {} }
+  return SpreadsheetApp.openById(SHEET_ID);
+}
+// Crea el libro propio de Nómina y COPIA ahí las hojas existentes (las originales
+// quedan como respaldo en el libro principal). Correr una vez: setupNominaBook()
+function setupNominaBook() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var id = props.getProperty('NOMINA_SS_ID'), ss = null;
+    if (id) { try { ss = SpreadsheetApp.openById(id); } catch (e) { ss = null; } }
+    if (!ss) { ss = SpreadsheetApp.create('Nómina — Hestia Fertility'); props.setProperty('NOMINA_SS_ID', ss.getId()); }
+    var main = SpreadsheetApp.openById(SHEET_ID);
+    var migradas = [];
+    [NOM_EMP_TAB, NOM_MESES_TAB, NOM_BONOS_TAB].forEach(function (tab) {
+      var src = main.getSheetByName(tab);
+      if (src && !ss.getSheetByName(tab)) { src.copyTo(ss).setName(tab); migradas.push(tab); }
+    });
+    var def = ss.getSheetByName('Hoja 1') || ss.getSheetByName('Sheet1') || ss.getSheetByName('Hoja1');
+    if (def && ss.getSheets().length > 1) { try { ss.deleteSheet(def); } catch (e) {} }
+    return { ok: true, id: ss.getId(), url: ss.getUrl(), migradas: migradas };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// ── Catálogo de Empleados (hoja "Empleados" en el libro de Nómina) ──────
 var NOM_EMP_TAB = 'Empleados';
 var NOM_EMP_HEADERS = [
   'NumEmpleado', 'Nombre', 'RFC', 'CURP', 'NSS', 'Puesto', 'Departamento',
@@ -72,7 +101,7 @@ var NOM_EMP_HEADERS = [
   'Banco', 'CLABE', 'UsuarioEmail', 'Activo', 'Notas'
 ];
 function _nomEmpSheet() {
-  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var ss = _nomBook();
   var sh = ss.getSheetByName(NOM_EMP_TAB);
   if (!sh) {
     sh = ss.insertSheet(NOM_EMP_TAB);
@@ -527,7 +556,7 @@ function vincularEmpleadoUsuario(body) {
 var NOM_BONOS_TAB = 'Nomina_Bonos';
 var NOM_BONOS_HEADERS = ['BonoID', 'Periodo', 'NumEmpleado', 'Nombre', 'Concepto', 'Monto', 'Usuario', 'Fecha'];
 function _nomBonosSheet() {
-  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var ss = _nomBook();
   var sh = ss.getSheetByName(NOM_BONOS_TAB);
   if (!sh) {
     sh = ss.insertSheet(NOM_BONOS_TAB);
@@ -610,7 +639,7 @@ function _nomBonosDelMes(periodo) {
 var NOM_MESES_TAB = 'Nomina_Meses';
 var NOM_MESES_HEADERS = ['Periodo', 'Estado', 'FechaValidacion', 'Usuario', 'NumOrdenes', 'TotalNeto', 'Notas'];
 function _nomMesesSheet() {
-  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var ss = _nomBook();
   var sh = ss.getSheetByName(NOM_MESES_TAB);
   if (!sh) {
     sh = ss.insertSheet(NOM_MESES_TAB);
