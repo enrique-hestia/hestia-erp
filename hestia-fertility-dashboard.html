@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.13.166 -->
+﻿<!-- app-build:2026.07.13.167 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -23477,6 +23477,8 @@ async function _nomCargarMes(){
   body.innerHTML=_nomPeriodoBar()+'<div style="text-align:center;padding:40px;color:#9ca3af"><span class="ing-spinner ing-spinner-dark"></span>Leyendo CFDI de nómina en Drive…</div>';
   try{
     var tok=encodeURIComponent(getToken());
+    // Cargar config (tasa/base/excluir) para poder recalcular el ISN aquí mismo.
+    if(!_nomCfg){ try{ var rc=await fetch(APPS_SCRIPT_URL+'?action=nominaCfg&token='+tok); var dc=await rc.json(); if(dc&&dc.ok&&dc.cfg) _nomCfg=dc.cfg; }catch(_c){} }
     var r=await fetch(APPS_SCRIPT_URL+'?action=nominaMes&anio='+_nomAnio+'&mes='+_nomMes+'&token='+tok);
     _nomData=await r.json();
     _nomRenderMes();
@@ -23499,21 +23501,50 @@ function _nomRenderMes(){
   var d=_nomData, h=_nomPeriodoBar();
   if(!d||!d.ok){ h+=_nomBackendBanner(d&&d.error); body.innerHTML=h; return; }
   if(!d.encontrada){ h+='<div style="padding:24px;color:#9ca3af;text-align:center">No hay carpeta de CFDI para '+_nomMesNombre(_nomMes)+' '+_nomAnio+' todavía.</div>'; body.innerHTML=h; return; }
-  var t=d.totales;
+  var t=d.totales||{};
+  // El ISN se RECALCULA aquí (solo sueldos) a partir de d.empleados, para que sea
+  // correcto sin depender de la versión del backend desplegado. En CDMX el ISN
+  // grava solo el trabajo personal subordinado → los asimilados quedan fuera.
+  var _sue={n:0,perc:0,neto:0,grav:0}, _asi={n:0,perc:0,neto:0,grav:0};
+  (d.empleados||[]).forEach(function(e){
+    var tg=e.asimilado?_asi:_sue;
+    tg.n++; tg.perc+=(e.totalPercepciones||0); tg.neto+=(e.neto||0); tg.grav+=(e.gravado||0);
+  });
+  var _isnTasa=(t.isnTasa!=null?parseFloat(t.isnTasa):3)||0;
+  var _usaGrav=!!(_nomCfg&&_nomCfg.isnBase==='gravado');
+  var _excluir=!(_nomCfg&&_nomCfg.isnExcluirAsimilados===false); // default CDMX: excluir asimilados
+  var _baseSue=_usaGrav?_sue.grav:_sue.perc;
+  var _baseAsi=_usaGrav?_asi.grav:_asi.perc;
+  var _baseISN=_excluir?_baseSue:(_baseSue+_baseAsi);
+  var _isn=_baseISN*(_isnTasa/100);
+  var _netoTot=_sue.neto+_asi.neto;
   h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:8px">'
-    +_nomKpi('Neto pagado',_nomFmt(t.neto),'#166534')+_nomKpi('Empleados',t.numEmpleados,'#0c4a6e')
-    +_nomKpi('Recibos',t.numRecibos,'#6b7280')+_nomKpi('ISN sueldos ('+t.isnTasa+'%)',_nomFmt(t.isn),'#b45309')+'</div>';
-  // División sueldos vs asimilados (el ISN de CDMX solo aplica a sueldos).
+    +_nomKpi('Neto pagado',_nomFmt(_netoTot),'#166534')+_nomKpi('Empleados',(_sue.n+_asi.n),'#0c4a6e')
+    +_nomKpi('Recibos',(t.numRecibos!=null?t.numRecibos:((d.recibos&&d.recibos.length)||0)),'#6b7280')+_nomKpi('ISN sueldos ('+_isnTasa+'%)',_nomFmt(_isn),'#b45309')+'</div>';
   h+='<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:16px;font-size:11px;color:#6b7280">'
-    +'<span><span style="color:#166534;font-weight:800">●</span> Sueldos y salarios: <b>'+(t.numSueldos||0)+'</b> · '+_nomFmt(t.netoSueldos)+'</span>'
-    +'<span><span style="color:#7c3aed;font-weight:800">●</span> Asimilados a salarios: <b>'+(t.numAsimilados||0)+'</b> · '+_nomFmt(t.netoAsimilados)+'</span>'
+    +'<span><span style="color:#166534;font-weight:800">●</span> Sueldos y salarios: <b>'+_sue.n+'</b> · '+_nomFmt(_sue.neto)+'</span>'
+    +'<span><span style="color:#7c3aed;font-weight:800">●</span> Asimilados a salarios: <b>'+_asi.n+'</b> · '+_nomFmt(_asi.neto)+'</span>'
   +'</div>';
   if(!d.empleados.length){ h+='<div style="padding:20px;color:#9ca3af">No se encontraron recibos de nómina (tipo N) en este mes.</div>'; body.innerHTML=h; return; }
   h+=_nomTablaEmp(d,false,'Sueldos y salarios','#166534');
   h+=_nomTablaEmp(d,true,'Asimilados a salarios','#7c3aed');
-  var notaAsim=t.isnExcluirAsimilados?' Los <b>asimilados a salarios NO causan ISN</b> en CDMX, por eso la base excluye sus percepciones.':' (La base incluye asimilados según tu configuración.)';
-  h+='<div style="margin-top:6px;padding:10px 14px;background:rgba(180,83,9,.06);border-radius:10px;font-size:11px;color:#92400e">ISN del mes: <b>'+_nomFmt(t.isn)+'</b> = base '+_nomFmt(t.isnBase)+' × '+t.isnTasa+'% (solo sueldos).'+notaAsim+' &nbsp;·&nbsp; Validar → Cuentas por Pagar, bonos y "Mis recibos": en camino.</div>';
+  h+=_nomIsnBox(_baseSue,_baseAsi,_baseISN,_isn,_isnTasa,_excluir);
   body.innerHTML=h;
+}
+// Caja del ISN: distingue claramente lo SUJETO (sueldos) de lo NO sujeto
+// (asimilados) y muestra el fundamento legal de CDMX.
+var _NOM_ISN_FUNDAMENTO='El Impuesto Sobre Nóminas de la Ciudad de México grava las erogaciones por <b>remuneraciones al trabajo personal subordinado</b> (relación laboral patrón–trabajador), conforme al <b>Código Fiscal de la CDMX</b>. Los <b>asimilados a salarios</b> (art. 94 LISR) reciben ese tratamiento solo para la retención del <b>ISR federal</b>, pero <b>no derivan de una relación de trabajo subordinado</b>, por lo que no son objeto del ISN. <i>Informativo, no es asesoría fiscal; confírmalo con tu contador según el tipo de asimilado.</i>';
+function _nomIsnBox(baseSue, baseAsi, baseISN, isn, tasa, excluir){
+  function row(lbl,val,color,strike){ return '<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:11.5px;color:'+(color||'#374151')+'"><span>'+lbl+'</span><span style="font-weight:700'+(strike?';text-decoration:line-through;opacity:.55':'')+'">'+_nomFmt(val)+'</span></div>'; }
+  return '<div style="margin-top:8px;padding:13px 16px;background:rgba(180,83,9,.06);border:1px solid rgba(180,83,9,.2);border-radius:12px">'
+    +'<div style="font-size:12px;font-weight:800;color:#92400e;margin-bottom:6px">Impuesto Sobre Nóminas — CDMX ('+tasa+'%)</div>'
+    +row('✔ Sujeto a ISN — sueldos y salarios (base)', baseSue, '#166534')
+    +row('✕ No sujeto — asimilados a salarios'+(excluir?' (excluidos)':' (incluidos por configuración)'), baseAsi, '#7c3aed', excluir)
+    +'<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0 0;margin-top:5px;border-top:1px solid rgba(180,83,9,.25);font-size:13px;font-weight:800;color:#92400e"><span>ISN a pagar = '+_nomFmt(baseISN)+' × '+tasa+'%</span><span>'+_nomFmt(isn)+'</span></div>'
+    +'<details style="margin-top:8px"><summary style="cursor:pointer;font-size:10.5px;font-weight:700;color:#92400e">¿Por qué los asimilados a salarios no pagan ISN en CDMX?</summary>'
+    +'<div style="font-size:10.5px;color:#6b7280;line-height:1.55;margin-top:6px">'+_NOM_ISN_FUNDAMENTO+'</div></details>'
+    +'<div style="margin-top:6px;font-size:9.5px;color:#b5875a">Validar → Cuentas por Pagar, bonos y "Mis recibos": en camino.</div>'
+  +'</div>';
 }
 // Tabla de empleados filtrada por tipo (sueldos vs asimilados), con subtotal.
 function _nomTablaEmp(d, filtroAsim, titulo, color){
