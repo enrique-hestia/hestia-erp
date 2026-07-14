@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.13.163 -->
+﻿<!-- app-build:2026.07.13.164 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1027,6 +1027,8 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 <div id="view-novedades" class="view" style="display:none"><div id="nov-root"></div></div>
 <!-- Manual general ilustrado (guía de uso click-por-click de toda la app) -->
 <div id="view-manual" class="view" style="display:none"><div id="manual-root"></div></div>
+<!-- Nómina: lee CFDI de nómina emitidos por mes, desglose por empleado, ISN/vacaciones -->
+<div id="view-nomina" class="view" style="display:none"><div id="nom-root"></div></div>
 
 <!-- ══ VISTA: PRESUPUESTO ══ -->
 <div id="view-presupuesto" class="view" style="display:none">
@@ -12598,6 +12600,14 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     loadRecordatorios();
     return;
   }
+  // Nómina — lee CFDI de nómina emitidos por mes, desglose por empleado
+  if (viewId === 'nomina' || /^n[oó]mina$/i.test(String(viewId))) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _nomEl = document.getElementById('view-nomina');
+    if (_nomEl) _nomEl.style.display = '';
+    loadNomina();
+    return;
+  }
   // Cuentas por Pagar — reporte de vencimientos
   if (/cuentas?.por.?pagar|cxp|fin.cxp/i.test(viewId)) {
     document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
@@ -23419,6 +23429,246 @@ function _gfEnsureStyles(){
   var st=document.createElement('style'); st.id='gf-styles';
   st.textContent='.cxp-tbl{width:100%;border-collapse:collapse;font-size:12px}.cxp-tbl th{padding:8px 12px;font-size:9.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-secondary,#6b7280);background:var(--color-surface,#f3f4f6);border-bottom:1px solid var(--color-divider,#e5e7eb);white-space:nowrap;text-align:left}.cxp-tbl td{padding:8px 12px;border-bottom:1px solid var(--color-divider,#f5f5f5);color:var(--text-primary,#374151)}.cxp-tbl tr:last-child td{border-bottom:none}';
   document.head.appendChild(st);
+}
+
+/* ═══════════════════ NÓMINA ═══════════════════
+ * Lee CFDI de nómina emitidos por mes (backend nomina.gs) y desglosa por
+ * empleado; catálogo de Empleados (CRUD) y configuración (ISN, CxP). */
+var _nomTab='mes', _nomAnio=null, _nomMes=null, _nomData=null, _nomEmpleados=null, _nomCfg=null, _nomExpanded={};
+function _nomFmt(v){ return (typeof fmtMoney==='function') ? fmtMoney(Math.abs(Number(v)||0),'Egresos') : '$'+(Number(v)||0).toFixed(2); }
+function _nomMesNombre(m){ var M=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']; return M[(parseInt(m,10)||1)-1]||m; }
+function _nomPuede(){ return (typeof hasPermission==='function')?hasPermission('editar_egresos'):true; }
+function _nomEscQ(s){ return _cxpEsc(String(s==null?'':s).replace(/'/g,"\\'")); }
+function _nomBackendBanner(err){
+  return '<div style="background:rgba(220,38,38,.06);border:1px solid #fecaca;border-radius:10px;padding:14px 16px;font-size:12px;color:#991b1b;line-height:1.55">'
+    +'<b>⚠ El módulo de nómina aún no está publicado en el servidor.</b><br>'
+    +'En Apps Script: crea el archivo <b>nomina.gs</b> (pégalo del repo), confirma <b>core.gs</b> y <b>finance.gs</b>, y <b>Implementar → Administrar implementaciones → Versión nueva</b>.'
+    +(err?'<br><span style="color:#6b7280;font-size:10.5px">Detalle: '+_cxpEsc(String(err))+'</span>':'')
+  +'</div>';
+}
+function loadNomina(){
+  if(!_nomAnio||!_nomMes){
+    var d=(typeof currentFechaInicio==='string'&&currentFechaInicio)?new Date(currentFechaInicio+'T00:00:00'):new Date();
+    if(isNaN(d.getTime())) d=new Date();
+    _nomAnio=d.getFullYear(); _nomMes=d.getMonth()+1;
+  }
+  _nomShell();
+  if(_nomTab==='mes') _nomCargarMes();
+  else if(_nomTab==='catalogo') _nomCargarEmpleados();
+  else _nomCargarCfg();
+}
+function _nomTabSwitch(t){ _nomTab=t; loadNomina(); }
+function _nomShell(){
+  var root=document.getElementById('nom-root'); if(!root) return;
+  function tab(id,label){ return '<button onclick="_nomTabSwitch(\''+id+'\')" style="padding:8px 16px;border:none;background:'+(_nomTab===id?'var(--color-primary,#c46a7a)':'transparent')+';color:'+(_nomTab===id?'#fff':'var(--text-secondary,#6b7280)')+';border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">'+label+'</button>'; }
+  root.innerHTML='<div style="padding:18px 20px;max-width:1100px;margin:0 auto">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">'
+      +'<div style="font-size:22px;font-weight:800;color:var(--text-primary,#111)">🧾 Nómina</div>'
+      +'<div style="display:flex;gap:4px;background:var(--color-surface,#f3f4f6);padding:4px;border-radius:10px">'+tab('mes','Nómina del mes')+tab('catalogo','Empleados')+tab('config','Configuración')+'</div>'
+    +'</div><div id="nom-body"></div></div>';
+}
+/* ── Nómina del mes ── */
+async function _nomCargarMes(){
+  var body=document.getElementById('nom-body'); if(!body) return;
+  body.innerHTML=_nomPeriodoBar()+'<div style="text-align:center;padding:40px;color:#9ca3af"><span class="ing-spinner ing-spinner-dark"></span>Leyendo CFDI de nómina en Drive…</div>';
+  try{
+    var tok=encodeURIComponent(getToken());
+    var r=await fetch(APPS_SCRIPT_URL+'?action=nominaMes&anio='+_nomAnio+'&mes='+_nomMes+'&token='+tok);
+    _nomData=await r.json();
+    _nomRenderMes();
+  }catch(e){ body.innerHTML=_nomPeriodoBar()+'<div style="color:#dc2626;padding:20px">Error de conexión: '+_cxpEsc(e.message)+'</div>'; }
+}
+function _nomPeriodoBar(){
+  var b='background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;width:32px;height:32px;font-size:16px;cursor:pointer;color:var(--text-primary,#374151)';
+  return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">'
+    +'<button onclick="_nomNavMes(-1)" style="'+b+'">‹</button>'
+    +'<div style="font-size:17px;font-weight:800;min-width:170px;text-align:center;color:var(--text-primary,#111)">'+_nomMesNombre(_nomMes)+' '+_nomAnio+'</div>'
+    +'<button onclick="_nomNavMes(1)" style="'+b+'">›</button>'
+    +'<button onclick="_nomCargarMes()" style="margin-left:6px;background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:6px 12px;font-size:11.5px;font-weight:700;cursor:pointer;color:var(--color-primary,#c46a7a)">↻ Actualizar</button>'
+  +'</div>';
+}
+function _nomNavMes(d){ _nomMes+=d; if(_nomMes<1){_nomMes=12;_nomAnio--;} if(_nomMes>12){_nomMes=1;_nomAnio++;} _nomExpanded={}; _nomCargarMes(); }
+function _nomKpi(lbl,val,color){ return '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:12px 14px"><div style="font-size:20px;font-weight:800;color:'+color+'">'+val+'</div><div style="font-size:9.5px;color:#9ca3af;text-transform:uppercase;font-weight:700;margin-top:2px">'+lbl+'</div></div>'; }
+function _nomToggleEmp(i){ _nomExpanded[i]=!_nomExpanded[i]; _nomRenderMes(); }
+function _nomRenderMes(){
+  var body=document.getElementById('nom-body'); if(!body) return;
+  var d=_nomData, h=_nomPeriodoBar();
+  if(!d||!d.ok){ h+=_nomBackendBanner(d&&d.error); body.innerHTML=h; return; }
+  if(!d.encontrada){ h+='<div style="padding:24px;color:#9ca3af;text-align:center">No hay carpeta de CFDI para '+_nomMesNombre(_nomMes)+' '+_nomAnio+' todavía.</div>'; body.innerHTML=h; return; }
+  var t=d.totales;
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:18px">'
+    +_nomKpi('Neto pagado',_nomFmt(t.neto),'#166534')+_nomKpi('Empleados',t.numEmpleados,'#0c4a6e')
+    +_nomKpi('Recibos',t.numRecibos,'#6b7280')+_nomKpi('ISN ('+t.isnTasa+'%)',_nomFmt(t.isn),'#b45309')+'</div>';
+  if(!d.empleados.length){ h+='<div style="padding:20px;color:#9ca3af">No se encontraron recibos de nómina (tipo N) en este mes.</div>'; body.innerHTML=h; return; }
+  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+    +'<thead><tr style="text-align:left;color:#9ca3af;border-bottom:2px solid var(--color-divider,#e5e7eb);font-size:9.5px;text-transform:uppercase;font-weight:700">'
+    +'<th style="padding:8px 6px">Empleado</th><th style="padding:8px 6px">Puesto</th><th style="padding:8px 6px;text-align:center">Rec.</th>'
+    +'<th style="padding:8px 6px;text-align:right">Percepciones</th><th style="padding:8px 6px;text-align:right">Deducciones</th>'
+    +'<th style="padding:8px 6px;text-align:right">ISR</th><th style="padding:8px 6px;text-align:right">Neto</th><th></th></tr></thead><tbody>';
+  d.empleados.forEach(function(e,i){
+    h+='<tr style="border-bottom:1px solid var(--color-divider,#f0f0f0);cursor:pointer" onclick="_nomToggleEmp('+i+')">'
+      +'<td style="padding:8px 6px;font-weight:700;color:var(--text-primary,#111)">'+_cxpEsc(e.nombre||e.rfc||'¿?')+(e.asimilado?' <span style="font-size:8px;font-weight:800;color:#7c3aed;background:rgba(124,58,237,.1);border-radius:4px;padding:1px 5px;vertical-align:middle">ASIM</span>':'')+'</td>'
+      +'<td style="padding:8px 6px;color:#6b7280">'+_cxpEsc(e.puesto||'—')+'</td>'
+      +'<td style="padding:8px 6px;text-align:center">'+e.recibos+'</td>'
+      +'<td style="padding:8px 6px;text-align:right">'+_nomFmt(e.totalPercepciones)+'</td>'
+      +'<td style="padding:8px 6px;text-align:right;color:#b45309">'+_nomFmt(e.totalDeducciones)+'</td>'
+      +'<td style="padding:8px 6px;text-align:right;color:#6b7280">'+_nomFmt(e.isrRetenido)+'</td>'
+      +'<td style="padding:8px 6px;text-align:right;font-weight:800;color:#166534">'+_nomFmt(e.neto)+'</td>'
+      +'<td style="padding:8px 6px;color:#9ca3af">'+(_nomExpanded[i]?'▾':'▸')+'</td></tr>';
+    if(_nomExpanded[i]){
+      var det='';
+      (e.detalle||[]).forEach(function(r){
+        det+='<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;font-size:11px;border-top:1px solid var(--color-divider,#f0f0f0)">'
+          +'<span>'+_cxpEsc(r.fechaPago||r.fecha||'')+' · '+(r.tipoNomina==='E'?'Extraordinaria':'Ordinaria')+'</span>'
+          +'<span>Perc '+_nomFmt(r.totalPercepciones)+' · Ded '+_nomFmt(r.totalDeducciones)+' · <b style="color:#166534">Neto '+_nomFmt(r.neto)+'</b>'+(r.fileUrl?' · <a href="'+_cxpEsc(r.fileUrl)+'" target="_blank" onclick="event.stopPropagation()" style="color:#0c4a6e;font-weight:700">XML</a>':'')+'</span></div>';
+      });
+      if(e.primaVacacional>0) det+='<div style="font-size:10.5px;color:#7c3aed;padding:5px 0 2px">Prima vacacional del mes: '+_nomFmt(e.primaVacacional)+'</div>';
+      if(e.aguinaldo>0) det+='<div style="font-size:10.5px;color:#7c3aed;padding:2px 0">Aguinaldo del mes: '+_nomFmt(e.aguinaldo)+'</div>';
+      h+='<tr><td colspan="8" style="padding:6px 6px 12px 22px;background:var(--color-surface,#fafafa)"><div style="font-size:9.5px;color:#9ca3af;text-transform:uppercase;font-weight:700;padding-bottom:2px">Recibos</div>'+det+'</td></tr>';
+    }
+  });
+  h+='</tbody><tfoot><tr style="border-top:2px solid var(--color-divider,#e5e7eb);font-weight:800"><td colspan="6" style="padding:10px 6px">Total neto del mes</td><td style="padding:10px 6px;text-align:right;color:#166534">'+_nomFmt(t.neto)+'</td><td></td></tr></tfoot></table></div>';
+  h+='<div style="margin-top:14px;padding:10px 14px;background:rgba(180,83,9,.06);border-radius:10px;font-size:11px;color:#92400e">ISN del mes: <b>'+_nomFmt(t.isn)+'</b> = base '+_nomFmt(t.isnBase)+' × '+t.isnTasa+'%. &nbsp;·&nbsp; Validar → Cuentas por Pagar, bonos y "Mis recibos": en camino.</div>';
+  body.innerHTML=h;
+}
+/* ── Catálogo de empleados ── */
+async function _nomCargarEmpleados(){
+  var body=document.getElementById('nom-body'); if(!body) return;
+  body.innerHTML='<div style="text-align:center;padding:40px;color:#9ca3af"><span class="ing-spinner ing-spinner-dark"></span>Cargando empleados…</div>';
+  try{
+    var tok=encodeURIComponent(getToken());
+    var r=await fetch(APPS_SCRIPT_URL+'?action=empleados&token='+tok);
+    var d=await r.json();
+    _nomEmpleados=(d&&d.ok&&d.empleados)?d.empleados:[];
+    _nomRenderEmpleados(d);
+  }catch(e){ body.innerHTML='<div style="color:#dc2626;padding:20px">Error: '+_cxpEsc(e.message)+'</div>'; }
+}
+function _nomRenderEmpleados(d){
+  var body=document.getElementById('nom-body'); if(!body) return;
+  if(d&&!d.ok){ body.innerHTML=_nomBackendBanner(d.error); return; }
+  var puede=_nomPuede(), emps=_nomEmpleados||[], h='';
+  if(puede) h+='<div style="margin-bottom:12px"><button onclick="_nomEmpForm()" style="background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer">+ Nuevo empleado</button></div>';
+  if(!emps.length){ h+='<div style="padding:20px;color:#9ca3af">Aún no hay empleados. Agrégalos aquí, o márcalos como "empleado" desde la configuración de Usuarios.</div>'; body.innerHTML=h; return; }
+  h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+    +'<thead><tr style="text-align:left;color:#9ca3af;border-bottom:2px solid var(--color-divider,#e5e7eb);font-size:9.5px;text-transform:uppercase;font-weight:700">'
+    +'<th style="padding:8px 6px">N.º</th><th style="padding:8px 6px">Nombre</th><th style="padding:8px 6px">RFC</th><th style="padding:8px 6px">Puesto</th>'
+    +'<th style="padding:8px 6px">Ingreso</th><th style="padding:8px 6px;text-align:center">Vac.</th><th style="padding:8px 6px">Usuario</th><th style="padding:8px 6px;text-align:center">Activo</th><th></th></tr></thead><tbody>';
+  emps.forEach(function(e){
+    h+='<tr style="border-bottom:1px solid var(--color-divider,#f0f0f0)">'
+      +'<td style="padding:8px 6px;font-weight:700">'+_cxpEsc(e.NumEmpleado||'')+'</td>'
+      +'<td style="padding:8px 6px">'+_cxpEsc(e.Nombre||'')+(String(e.Tipo||'').toLowerCase().indexOf('asimil')>-1?' <span style="font-size:8px;font-weight:800;color:#7c3aed;background:rgba(124,58,237,.1);border-radius:4px;padding:1px 5px">ASIM</span>':'')+'</td>'
+      +'<td style="padding:8px 6px;color:#6b7280">'+_cxpEsc(e.RFC||'—')+'</td>'
+      +'<td style="padding:8px 6px">'+_cxpEsc(e.Puesto||'—')+'</td>'
+      +'<td style="padding:8px 6px;color:#6b7280">'+_cxpEsc(String(e.FechaIngreso||'—'))+'</td>'
+      +'<td style="padding:8px 6px;text-align:center">'+(e.diasVacaciones||0)+'</td>'
+      +'<td style="padding:8px 6px;color:#6b7280;font-size:10.5px">'+_cxpEsc(e.UsuarioEmail||'—')+'</td>'
+      +'<td style="padding:8px 6px;text-align:center">'+(e.Activo?'<span style="color:#166534">●</span>':'<span style="color:#9ca3af">○</span>')+'</td>'
+      +'<td style="padding:8px 6px;text-align:right">'+(puede?'<button onclick="_nomEmpForm(\''+_nomEscQ(e.NumEmpleado)+'\')" style="background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;padding:3px 9px;font-size:10px;font-weight:700;cursor:pointer">Editar</button>':'')+'</td></tr>';
+  });
+  h+='</tbody></table></div>';
+  body.innerHTML=h;
+}
+function _nomEmpForm(num){
+  var it=null;
+  if(num){ var arr=_nomEmpleados||[]; for(var i=0;i<arr.length;i++){ if(String(arr[i].NumEmpleado)===String(num)){ it=arr[i]; break; } } }
+  it=it||{};
+  var ov=document.getElementById('nom-emp-ov'); if(!ov){ ov=document.createElement('div'); ov.id='nom-emp-ov'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9700;display:flex;align-items:flex-start;justify-content:center;padding:24px 16px;overflow:auto';
+  function f(id,lbl,val,type){ return '<label style="font-size:10px;color:#6b7280">'+lbl+'<br><input id="'+id+'" '+(type?'type="'+type+'"':'')+' value="'+_cxpEsc(val==null?'':String(val))+'" style="width:100%;padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff);box-sizing:border-box"></label>'; }
+  var tipoSel='<label style="font-size:10px;color:#6b7280">Tipo<br><select id="nom-e-tipo" style="width:100%;padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff)"><option'+(String(it.Tipo||'')==='Sueldos'?' selected':'')+'>Sueldos</option><option'+(String(it.Tipo||'').toLowerCase().indexOf('asimil')>-1?' selected':'')+'>Asimilado</option></select></label>';
+  var activoChk='<label style="font-size:11px;color:#374151;display:flex;align-items:center;gap:6px;margin-top:14px"><input type="checkbox" id="nom-e-activo" '+(it.Activo===false?'':'checked')+'> Activo</label>';
+  var bodyF='<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">'
+    +f('nom-e-num','N.º de empleado *',it.NumEmpleado)+f('nom-e-nombre','Nombre completo',it.Nombre)
+    +f('nom-e-rfc','RFC',it.RFC)+f('nom-e-curp','CURP',it.CURP)
+    +f('nom-e-nss','NSS',it.NSS)+f('nom-e-puesto','Puesto',it.Puesto)
+    +f('nom-e-depto','Departamento',it.Departamento)+f('nom-e-ingreso','Fecha de ingreso',it.FechaIngreso,'date')
+    +f('nom-e-salario','Salario diario',it.SalarioDiario,'number')+f('nom-e-peri','Periodicidad',it.Periodicidad)
+    +tipoSel+f('nom-e-usuario','Usuario (email, si tiene acceso)',it.UsuarioEmail)
+    +f('nom-e-banco','Banco',it.Banco)+f('nom-e-clabe','CLABE',it.CLABE)
+    +'</div>'+activoChk
+    +'<div id="nom-e-msg" style="font-size:10.5px;color:#dc2626;margin:8px 0;min-height:12px"></div>'
+    +'<div style="display:flex;gap:8px;margin-top:6px;align-items:center">'
+      +'<button onclick="_nomEmpGuardar()" id="nom-e-save" style="background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:12.5px;font-weight:800;cursor:pointer">Guardar</button>'
+      +'<button onclick="document.getElementById(\'nom-emp-ov\').remove()" style="background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:9px 18px;font-size:12.5px;font-weight:700;color:#6b7280;cursor:pointer">Cancelar</button>'
+      +(num?'<button onclick="_nomEmpBorrar(\''+_nomEscQ(num)+'\')" style="margin-left:auto;background:none;border:1px solid #fecaca;border-radius:8px;padding:9px 14px;font-size:11.5px;font-weight:700;color:#dc2626;cursor:pointer">Borrar</button>':'')
+    +'</div>';
+  ov.innerHTML='<div style="background:var(--card-bg,#fff);color:var(--text-primary,#1a252f);border-radius:14px;padding:22px 24px;max-width:560px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.35)">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div style="font-weight:800;font-size:16px">'+(num?'Editar':'Nuevo')+' empleado</div>'
+    +'<button onclick="document.getElementById(\'nom-emp-ov\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af">✕</button></div>'+bodyF+'</div>';
+  if(num){ var ne=document.getElementById('nom-e-num'); if(ne) ne.readOnly=true; }
+}
+async function _nomEmpGuardar(){
+  var g=function(id){ var el=document.getElementById(id); return el?el.value:''; };
+  var num=g('nom-e-num').trim(); var msg=document.getElementById('nom-e-msg');
+  if(!num){ if(msg) msg.textContent='El número de empleado es obligatorio.'; return; }
+  var emp={ NumEmpleado:num, Nombre:g('nom-e-nombre'), RFC:g('nom-e-rfc').toUpperCase(), CURP:g('nom-e-curp').toUpperCase(),
+    NSS:g('nom-e-nss'), Puesto:g('nom-e-puesto'), Departamento:g('nom-e-depto'), FechaIngreso:g('nom-e-ingreso'),
+    SalarioDiario:g('nom-e-salario'), Periodicidad:g('nom-e-peri'), Tipo:g('nom-e-tipo'), UsuarioEmail:g('nom-e-usuario').toLowerCase(),
+    Banco:g('nom-e-banco'), CLABE:g('nom-e-clabe'), Activo:(document.getElementById('nom-e-activo')||{}).checked!==false };
+  var btn=document.getElementById('nom-e-save'); if(btn){ btn.disabled=true; btn.innerHTML='<span class="ing-spinner"></span>Guardando…'; }
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveEmpleado',token:getToken(),emp:emp})});
+    var d=await r.json();
+    if(!d||!d.ok){ if(msg) msg.textContent=(d&&d.error)||'No se pudo guardar'; if(btn){btn.disabled=false;btn.textContent='Guardar';} alert('No se guardó: '+((d&&d.error)||'error')); return; }
+    var ov=document.getElementById('nom-emp-ov'); if(ov) ov.remove();
+    _nomCargarEmpleados();
+  }catch(e){ if(msg) msg.textContent='Error: '+e.message; if(btn){btn.disabled=false;btn.textContent='Guardar';} }
+}
+async function _nomEmpBorrar(num){
+  if(!confirm('¿Borrar al empleado '+num+'? (No borra sus recibos ya timbrados.)')) return;
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'deleteEmpleado',token:getToken(),numEmpleado:num})});
+    var d=await r.json();
+    if(!d||!d.ok){ alert((d&&d.error)||'No se pudo borrar'); return; }
+    var ov=document.getElementById('nom-emp-ov'); if(ov) ov.remove();
+    _nomCargarEmpleados();
+  }catch(e){ alert('Error: '+e.message); }
+}
+/* ── Configuración ── */
+async function _nomCargarCfg(){
+  var body=document.getElementById('nom-body'); if(!body) return;
+  body.innerHTML='<div style="text-align:center;padding:40px;color:#9ca3af"><span class="ing-spinner ing-spinner-dark"></span>Cargando configuración…</div>';
+  try{
+    var tok=encodeURIComponent(getToken());
+    var r=await fetch(APPS_SCRIPT_URL+'?action=nominaCfg&token='+tok);
+    var d=await r.json();
+    _nomCfg=(d&&d.ok&&d.cfg)?d.cfg:null;
+    _nomRenderCfg(d);
+  }catch(e){ body.innerHTML='<div style="color:#dc2626;padding:20px">Error: '+_cxpEsc(e.message)+'</div>'; }
+}
+function _nomRenderCfg(d){
+  var body=document.getElementById('nom-body'); if(!body) return;
+  if(d&&!d.ok){ body.innerHTML=_nomBackendBanner(d.error); return; }
+  var c=_nomCfg||{isnTasa:3,isnBase:'percepciones',cxpProveedor:'Nómina',cxpCuentaContable:'Sueldos y salarios'};
+  var puede=_nomPuede(), dis=puede?'':' disabled';
+  var h='<div style="max-width:520px"><div style="font-size:13px;font-weight:800;margin-bottom:12px">Impuesto Sobre Nómina (ISN)</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">'
+    +'<label style="font-size:11px;color:#6b7280">Tasa ISN (%)<br><input id="nom-c-isntasa" type="number" step="0.01" value="'+(c.isnTasa)+'"'+dis+' style="width:100%;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:13px;font-weight:700"></label>'
+    +'<label style="font-size:11px;color:#6b7280">Base del ISN<br><select id="nom-c-isnbase"'+dis+' style="width:100%;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:13px"><option value="percepciones"'+(c.isnBase==='percepciones'?' selected':'')+'>Total de percepciones</option><option value="gravado"'+(c.isnBase==='gravado'?' selected':'')+'>Solo gravado</option></select></label>'
+    +'</div>'
+    +'<div style="font-size:13px;font-weight:800;margin-bottom:12px">Envío a Cuentas por Pagar (al validar)</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">'
+    +'<label style="font-size:11px;color:#6b7280">Proveedor/beneficiario<br><input id="nom-c-prov" value="'+_cxpEsc(c.cxpProveedor||'')+'"'+dis+' style="width:100%;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:13px"></label>'
+    +'<label style="font-size:11px;color:#6b7280">Cuenta contable<br><input id="nom-c-cta" value="'+_cxpEsc(c.cxpCuentaContable||'')+'"'+dis+' style="width:100%;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:13px"></label>'
+    +'</div>';
+  if(puede) h+='<button onclick="_nomCfgGuardar()" id="nom-c-save" style="background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:12.5px;font-weight:800;cursor:pointer">Guardar configuración</button>';
+  else h+='<div style="font-size:10.5px;color:#9ca3af">Solo lectura (necesitas permiso editar_egresos para cambiarla).</div>';
+  h+='<div id="nom-c-msg" style="font-size:11px;margin-top:8px"></div></div>';
+  body.innerHTML=h;
+}
+async function _nomCfgGuardar(){
+  var g=function(id){ var el=document.getElementById(id); return el?el.value:''; };
+  var cfg={ isnTasa:parseFloat(g('nom-c-isntasa'))||0, isnBase:g('nom-c-isnbase'), cxpProveedor:g('nom-c-prov'), cxpCuentaContable:g('nom-c-cta') };
+  var msg=document.getElementById('nom-c-msg'), btn=document.getElementById('nom-c-save');
+  if(btn){ btn.disabled=true; btn.innerHTML='<span class="ing-spinner"></span>Guardando…'; }
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'nominaCfgSave',token:getToken(),cfg:cfg})});
+    var d=await r.json();
+    if(!d||!d.ok){ if(msg){ msg.style.color='#dc2626'; msg.textContent=(d&&d.error)||'No se pudo guardar'; } if(btn){btn.disabled=false;btn.textContent='Guardar configuración';} return; }
+    _nomCfg=d.cfg;
+    if(msg){ msg.style.color='#166534'; msg.textContent='✓ Guardado.'; }
+    if(btn){ btn.disabled=false; btn.textContent='Guardar configuración'; }
+  }catch(e){ if(msg){ msg.style.color='#dc2626'; msg.textContent='Error: '+e.message; } if(btn){btn.disabled=false;btn.textContent='Guardar configuración';} }
 }
 
 function _renderGastosFijos(){
