@@ -709,6 +709,11 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(enviarDocumentoCorreo(body));
     }
+    if (body.action === 'enviarCorreoPago') {
+      if (typeof enviarCorreoPago !== 'function')
+        return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(enviarCorreoPago(body));
+    }
     if (body.action === 'saveSummaryConfig') {
       if (typeof saveSummaryConfig !== 'function')
         return jsonResponse({ok:false, error:'Agrega summary.gs al proyecto de Apps Script y redespliega.'});

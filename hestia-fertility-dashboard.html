@@ -7392,7 +7392,7 @@ function _renderEgresosERP() {
         ? '<span onclick="egViewPDF(\''+r.linkCotizacionUrl.replace(/'/g,"\\'")+'\',\'Cotización · '+provSafe+'\')" style="cursor:pointer;font-size:13px" title="Ver cotización">📋</span>'
         : '<span onclick="egOpenUpload('+r._rowNum+',\'cotizacion\',\''+provSafe+'\')" style="cursor:pointer;font-size:11px;color:var(--color-primary,#c46a7a)" title="Adjuntar cotización">＋</span>';
       var mailIcon = hasPermission('docs_enviar')
-        ? ' <span onclick="egEnviarCorreoRow(decodeURIComponent(\''+encodeURIComponent(JSON.stringify({proveedor:r.proveedor||'',concepto:r.concepto||'',monto:r.monto||0,fecha:(r.fecha||'').substring(0,10),pagado:!!r.pagado,linkFacturaUrl:r.linkFacturaUrl||'',linkPagoUrl:r.linkPagoUrl||''}))+'\'))" style="cursor:pointer;font-size:13px" title="Enviar documentos por correo (factura/pago adjuntos)">✉</span>'
+        ? ' <span onclick="egEnviarCorreoPago(decodeURIComponent(\''+encodeURIComponent(JSON.stringify({id:r.id||'',proveedor:r.proveedor||'',concepto:r.concepto||'',monto:r.monto||0,fecha:(r.fecha||'').substring(0,10),poliza:r.poliza||'',folio:r.id||'',pagado:!!r.pagado,linkFacturaUrl:r.linkFacturaUrl||'',linkPagoUrl:r.linkPagoUrl||''}))+'\'))" style="cursor:pointer;font-size:13px" title="Enviar correo de pago al proveedor (comprobante/factura adjuntos)">✉</span>'
         : '';
       var esCancel = r.estatus === 'Cancelada';
       // Partida AUTOMÁTICA (comisiones Mercado Pago): se recalcula sola con cada
@@ -18783,13 +18783,18 @@ function compEnviarCorreoRow(idx){
   if (_compData.fuente === 'pagos') {
     hfEnviarCorreo({
       tipoDoc: 'comprobante-pago',
+      sendAction: 'enviarCorreoPago',
+      titulo: '✉ Enviar correo de pago',
       para: '',
       referencia: (x.egreso ? x.egreso.proveedor+' · ' : '') + x.fileName,
       variables: {
+        empresa: 'Hestia Fertility',
         destinatario: x.egreso ? x.egreso.proveedor : '',
         proveedor: x.egreso ? x.egreso.proveedor : '',
+        concepto: x.egreso ? (x.egreso.concepto||'') : '',
         monto: x.egreso ? fmtM(x.egreso.monto) : '',
         fecha: (x.egreso && x.egreso.fecha) || x.fecha || '',
+        poliza: (x.egreso && x.egreso.poliza) || '',
         referencia: x.egreso ? (x.egreso.concepto||x.egreso.proveedor) : x.fileName
       },
       adjuntos: [{fileId:x.fileId, nombre:x.fileName}]
@@ -18846,7 +18851,7 @@ async function _correoLoadPlantillas(){
   _correoPlantillas = [
     {id:'factura-ingreso', nombre:'Factura de ingreso (paciente)', asunto:'Factura {{folio}} — Hestia Fertility', cuerpo:'Estimado(a) {{destinatario}}:\n\nLe compartimos su factura {{folio}} por {{monto}}, emitida el {{fecha}}.\n\nQuedamos atentos a cualquier aclaración.\n\nHestia Fertility · Administración'},
     {id:'factura-egreso', nombre:'Factura de egreso (proveedor)', asunto:'Factura {{folio}} recibida — Hestia Fertility', cuerpo:'Estimado proveedor:\n\nConfirmamos la recepción de la factura {{folio}} por {{monto}} con fecha {{fecha}}.\n\nQuedamos atentos a cualquier aclaración.\n\nHestia Fertility · Administración'},
-    {id:'comprobante-pago', nombre:'Comprobante de pago', asunto:'Comprobante de pago — Hestia Fertility · {{referencia}}', cuerpo:'Estimado proveedor:\n\nPor este medio le compartimos el comprobante de pago correspondiente a {{referencia}} por {{monto}}, liquidado el {{fecha}}.\n\nQuedamos atentos a cualquier aclaración.\n\nHestia Fertility · Administración'},
+    {id:'comprobante-pago', nombre:'Correo de pago (proveedor)', asunto:'Comprobante de pago — {{empresa}} · {{proveedor}}', cuerpo:'Estimado(a) {{proveedor}}:\n\nPor este medio le confirmamos el pago realizado por {{empresa}} correspondiente a:\n\n• Concepto: {{concepto}}\n• Importe: {{monto}}\n• Fecha de pago: {{fecha}}\n• Referencia / póliza: {{poliza}}\n• Folio interno: {{folio}}\n\nAdjuntamos el comprobante de pago para su registro.\n\nQuedamos atentos a cualquier aclaración.\n\nSaludos cordiales,\n{{empresa}} · Administración'},
     {id:'cotizacion', nombre:'Cotización', asunto:'Cotización — Hestia Fertility · {{referencia}}', cuerpo:'Estimado(a) {{destinatario}}:\n\nAdjuntamos la cotización solicitada ({{referencia}}).\n\nQuedamos a sus órdenes.\n\nHestia Fertility · Administración'},
     {id:'estado-cuenta', nombre:'Estado de cuenta', asunto:'Estado de cuenta — Hestia Fertility', cuerpo:'Estimado(a) {{destinatario}}:\n\nLe compartimos su estado de cuenta al {{fecha}}.\n\nQuedamos atentos a cualquier aclaración.\n\nHestia Fertility · Administración'}
   ];
@@ -18906,7 +18911,13 @@ async function hfEnviarCorreo(cfg){
   // salía transparente, encimado sobre la vista.
   _medsStyles();
   _correoCfg = cfg || {};
-  _correoCfg.variables = _correoCfg.variables || {};
+  // Defaults para que ningún placeholder {{...}} de la plantilla quede literal
+  // en un correo enviado (mail-merge): lo no provisto resuelve a '' y {{empresa}}
+  // cae a la marca. Los valores del llamador (cfg.variables) tienen prioridad.
+  _correoCfg.variables = Object.assign(
+    { empresa:'Hestia Fertility', proveedor:'', destinatario:'', paciente:'',
+      concepto:'', monto:'', fecha:'', folio:'', poliza:'', factura:'', linkPago:'', referencia:'' },
+    _correoCfg.variables || {});
   _correoCfg.adjuntos = _correoCfg.adjuntos || [];
   await _correoLoadPlantillas();
 
@@ -18923,12 +18934,12 @@ async function hfEnviarCorreo(cfg){
   }).join(' ');
 
   ovl.innerHTML = '<div class="mv-modal" style="width:min(560px,94vw);background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.35);max-height:88vh;overflow-y:auto;padding:24px" onclick="event.stopPropagation()">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div style="font-size:15px;font-weight:800">✉ Enviar documento por correo</div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div style="font-size:15px;font-weight:800">'+_medsEsc(_correoCfg.titulo||'✉ Enviar documento por correo')+'</div>'
     +'<button onclick="hfCorreoCerrar()" style="background:none;border:none;font-size:19px;cursor:pointer;color:#9ca3af">✕</button></div>'
     +'<div class="mv-field"><label class="mv-flbl">Plantilla <a href="javascript:void(0)" onclick="_correoToggleEditor()" style="font-weight:700;color:var(--color-primary,#c46a7a);margin-left:6px">✎ Editar plantillas</a></label>'
       +'<select class="mv-inp" id="correo-plantilla" onchange="_correoAplicarPlantilla()">'+plantillaOpts+'</select></div>'
     +'<div id="correo-editor" style="display:none;background:var(--color-surface,#fafafa);border:1px dashed var(--color-primary,#c46a7a);border-radius:8px;padding:10px 12px;margin-bottom:12px">'
-      +'<div style="font-size:10px;color:var(--text-secondary,#9ca3af);margin-bottom:6px">Editando la plantilla seleccionada — variables: {{destinatario}} {{folio}} {{monto}} {{fecha}} {{referencia}} {{proveedor}} {{paciente}}</div>'
+      +'<div style="font-size:10px;color:var(--text-secondary,#9ca3af);margin-bottom:6px">Editando la plantilla seleccionada — variables: {{proveedor}} {{empresa}} {{concepto}} {{monto}} {{fecha}} {{folio}} {{poliza}} {{factura}} {{linkPago}} {{referencia}} {{destinatario}} {{paciente}}</div>'
       +'<input class="mv-inp" id="correo-ed-asunto" placeholder="Asunto de la plantilla" style="margin-bottom:6px">'
       +'<textarea class="mv-inp" id="correo-ed-cuerpo" rows="5" placeholder="Cuerpo de la plantilla"></textarea>'
       +'<button class="mv-btn" style="margin-top:6px;padding:5px 14px;font-size:11px" onclick="_correoGuardarPlantilla(this)">Guardar plantilla</button>'
@@ -18958,8 +18969,11 @@ async function hfCorreoEnviar(){
   if (btn){ btn.disabled = true; btn.textContent = 'Enviando…'; }
   try {
     var s = getSession()||{};
+    // Correos de pago viajan por enviarCorreoPago (gateado por docs_enviar en
+    // backend); el resto por enviarDocumentoCorreo. Ambos usan el mismo motor.
+    var sendAction = _correoCfg.sendAction || 'enviarDocumentoCorreo';
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
-      action:'enviarDocumentoCorreo', para:para.trim(), cc:(document.getElementById('correo-cc')||{}).value||'',
+      action:sendAction, para:para.trim(), cc:(document.getElementById('correo-cc')||{}).value||'',
       asunto:asunto, cuerpo:cuerpo,
       adjuntos:(_correoCfg.adjuntos||[]).map(function(a){ return a.fileId; }),
       tipoDoc:(document.getElementById('correo-plantilla')||{}).value||'',
@@ -19035,6 +19049,67 @@ function egEnviarCorreoRow(jsonStr){
       fecha: r.fecha || '',
       referencia: r.concepto || r.proveedor || '',
       folio: 'adjunta'
+    },
+    adjuntos: adjuntos
+  });
+}
+
+/* ── Correo de PAGO desde una fila de Egresos ─────────────────
+   Rellena la plantilla de pago con los datos del egreso (proveedor, concepto,
+   monto, fecha, póliza, folio interno), adjunta el comprobante de pago y la
+   factura si están vinculados, y prefila el destinatario con el correo del
+   proveedor si está en el catálogo. Abre el diálogo de vista previa; NUNCA
+   envía solo — el usuario confirma con "Enviar". El envío usa enviarCorreoPago
+   (gateado por docs_enviar en el backend). */
+var _correoProvEmails = null;
+async function _correoProvEmail(nombre){
+  var key = String(nombre||'').trim().toLowerCase();
+  if (!key) return '';
+  if (!_correoProvEmails){
+    _correoProvEmails = {};
+    try {
+      var tok = encodeURIComponent(getToken());
+      var r = await fetch(APPS_SCRIPT_URL+'?action=proveedores&token='+tok+'&_t='+Date.now(), {redirect:'follow'});
+      var d = await r.json();
+      (d && d.rows || []).forEach(function(p){
+        var n = String(p.nombre||'').trim().toLowerCase();
+        if (n && p.email) _correoProvEmails[n] = String(p.email).trim();
+        var c = String(p.comercial||'').trim().toLowerCase();
+        if (c && p.email && !_correoProvEmails[c]) _correoProvEmails[c] = String(p.email).trim();
+      });
+    } catch(e){ /* catálogo no disponible → el usuario teclea el correo */ }
+  }
+  return _correoProvEmails[key] || '';
+}
+
+async function egEnviarCorreoPago(jsonStr){
+  var r; try { r = JSON.parse(jsonStr); } catch(e){ return; }
+  var fmtM = function(v){ return '$'+(Number(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  var adjuntos = [];
+  var idPago = _egDriveFileId(r.linkPagoUrl);
+  var idFact = _egDriveFileId(r.linkFacturaUrl);
+  if (idPago) adjuntos.push({fileId:idPago, nombre:'Comprobante de pago — '+(r.proveedor||'')});
+  if (idFact) adjuntos.push({fileId:idFact, nombre:'Factura — '+(r.proveedor||'')});
+  var para = '';
+  try { para = await _correoProvEmail(r.proveedor); } catch(e){}
+  hfEnviarCorreo({
+    tipoDoc: 'comprobante-pago',
+    sendAction: 'enviarCorreoPago',
+    titulo: '✉ Enviar correo de pago',
+    para: para,
+    referencia: r.concepto || r.proveedor || '',
+    variables: {
+      empresa: 'Hestia Fertility',
+      destinatario: r.proveedor || '',
+      proveedor: r.proveedor || '',
+      concepto: r.concepto || '',
+      monto: fmtM(r.monto),
+      fecha: r.fecha || '',
+      poliza: r.poliza || '',
+      folio: r.folio || r.id || '',
+      factura: r.linkFacturaUrl || '',
+      linkPago: r.linkPagoUrl || '',
+      referencia: r.concepto || r.proveedor || ''
     },
     adjuntos: adjuntos
   });
@@ -29486,12 +29561,13 @@ setTimeout(novCheckPopup, 2500);
       'Abre **Comprobantes**, elige año/mes con los chips. Verás las pestañas de Facturas recibidas, Comprobantes de pago y XML de egresos (SAT).',
       'El sistema cruza cada comprobante contra los egresos (RFC→proveedor + monto ±$0.50 + fecha ±45d) y marca vinculado / sugerido / múltiple / sin coincidencia. Con **⚡ Vincular sugeridos** los liga en lote.',
       'Pulsa el ícono de **ver** para abrir el **visor CFDI** (réplica con datos SAT y QR).',
-      'Para mandarlo por correo, usa el botón **✉ Enviar** en la fila (requiere permiso `docs_enviar`). Elige plantilla y destinatario; se envía por Gmail con el adjunto de Drive.'
+      'Para mandarlo por correo, usa el botón **✉ Enviar** en la fila (requiere permiso `docs_enviar`). Elige plantilla y destinatario; se envía por Gmail con el adjunto de Drive.',
+      'En **Egresos**, el ícono **✉** de cada fila abre **Enviar correo de pago**: rellena la plantilla de pago con proveedor, concepto, monto, fecha, póliza y folio, adjunta el comprobante de pago y la factura si están vinculados, y prefila el correo del proveedor si está en el catálogo. Siempre muestra vista previa (destinatario, asunto, mensaje) y solo envía al pulsar **Enviar** — nunca automático.'
     ],
     datos:{
-      hojas:['`Plantillas_Correo` (5 defaults, variables {{folio}} {{monto}} {{fecha}} {{destinatario}} {{proveedor}} {{referencia}})','Bitácora `Correos_Enviados`'],
+      hojas:['`Plantillas_Correo` (defaults editables; la plantilla de pago `comprobante-pago` admite {{proveedor}} {{empresa}} {{concepto}} {{monto}} {{fecha}} {{folio}} {{poliza}} {{factura}} {{linkPago}} {{referencia}} {{destinatario}})','Bitácora `Correos_Enviados`'],
       scriptProps:['Carpetas Drive: Facturas `1t8--HM1…`, Pagos `1D9H3nNI…`, XML SAT `1rIWggc…` (subcarpetas Enero…Diciembre)'],
-      funciones:['readComprobantesMes','vincularComprobanteEgreso','vincularComprobantesLote','compVerCfdi','_tplCfdiHTML','enviarDocumentoCorreo','hfEnviarCorreo'],
+      funciones:['readComprobantesMes','vincularComprobanteEgreso','vincularComprobantesLote','compVerCfdi','_tplCfdiHTML','enviarDocumentoCorreo','enviarCorreoPago','hfEnviarCorreo','egEnviarCorreoPago'],
       permisos:['docs_enviar'],
       nota:'`comprobantes.gs` requiere deploy + `configurarMenuComprobantes()` una vez. El primer envío pide autorizar el scope de Gmail.'
     }
@@ -30681,9 +30757,9 @@ setTimeout(novCheckPopup, 2500);
       { k:'Vincular (en una fila sugerida)', d:'Amarra ese comprobante al egreso que le corresponde.' }
     ],
     tips:[ 'El primer envío de correo pide autorizar el permiso de Gmail una sola vez.' ],
-    tech:{ hojas:['`Plantillas_Correo` (5 defaults, variables {{folio}} {{monto}} {{fecha}} {{destinatario}} {{proveedor}} {{referencia}})','Bitácora `Correos_Enviados`'],
+    tech:{ hojas:['`Plantillas_Correo` (defaults editables; la plantilla de pago `comprobante-pago` admite {{proveedor}} {{empresa}} {{concepto}} {{monto}} {{fecha}} {{folio}} {{poliza}} {{factura}} {{linkPago}} {{referencia}} {{destinatario}})','Bitácora `Correos_Enviados`'],
       props:['Carpetas Drive: Facturas `1t8--HM1…`, Pagos `1D9H3nNI…`, XML SAT `1rIWggc…` (subcarpetas Enero…Diciembre)'],
-      funciones:['readComprobantesMes','vincularComprobanteEgreso','vincularComprobantesLote','compVerCfdi','_tplCfdiHTML','enviarDocumentoCorreo','hfEnviarCorreo'],
+      funciones:['readComprobantesMes','vincularComprobanteEgreso','vincularComprobantesLote','compVerCfdi','_tplCfdiHTML','enviarDocumentoCorreo','enviarCorreoPago','hfEnviarCorreo','egEnviarCorreoPago'],
       permisos:['docs_enviar'],
       deploy:'`comprobantes.gs` requiere deploy + `configurarMenuComprobantes()` una vez.' } },
 

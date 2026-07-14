@@ -493,9 +493,9 @@ var CORREO_PLANTILLAS_DEFAULT = [
   ['factura-egreso', 'Factura de egreso (proveedor)',
    'Factura {{folio}} recibida — Hestia Fertility',
    'Estimado proveedor:\n\nConfirmamos la recepción de la factura {{folio}} por {{monto}} con fecha {{fecha}}.\n\nQuedamos atentos a cualquier aclaración.\n\nHestia Fertility · Administración'],
-  ['comprobante-pago', 'Comprobante de pago',
-   'Comprobante de pago — Hestia Fertility · {{referencia}}',
-   'Estimado proveedor:\n\nPor este medio le compartimos el comprobante de pago correspondiente a {{referencia}} por {{monto}}, liquidado el {{fecha}}.\n\nQuedamos atentos a cualquier aclaración.\n\nHestia Fertility · Administración'],
+  ['comprobante-pago', 'Correo de pago (proveedor)',
+   'Comprobante de pago — {{empresa}} · {{proveedor}}',
+   'Estimado(a) {{proveedor}}:\n\nPor este medio le confirmamos el pago realizado por {{empresa}} correspondiente a:\n\n• Concepto: {{concepto}}\n• Importe: {{monto}}\n• Fecha de pago: {{fecha}}\n• Referencia / póliza: {{poliza}}\n• Folio interno: {{folio}}\n\nAdjuntamos el comprobante de pago para su registro.\n\nQuedamos atentos a cualquier aclaración.\n\nSaludos cordiales,\n{{empresa}} · Administración'],
   ['cotizacion', 'Cotización',
    'Cotización — Hestia Fertility · {{referencia}}',
    'Estimado(a) {{destinatario}}:\n\nAdjuntamos la cotización solicitada ({{referencia}}).\n\nQuedamos a sus órdenes para cualquier duda.\n\nHestia Fertility · Administración'],
@@ -562,43 +562,96 @@ function savePlantillaCorreo(body) {
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
-function enviarDocumentoCorreo(body) {
-  try {
-    var para = String(body.para || '').trim();
-    var asunto = String(body.asunto || '').trim();
-    var cuerpo = String(body.cuerpo || '');
-    if (!para || !/^[^\s@]+@[^\s@]+\.[^\s@]+(\s*[,;]\s*[^\s@]+@[^\s@]+\.[^\s@]+)*$/.test(para))
-      return { ok: false, error: 'Destinatario inválido: "' + para + '"' };
-    if (!asunto) return { ok: false, error: 'El asunto es obligatorio' };
+// Núcleo de envío compartido por enviarDocumentoCorreo y enviarCorreoPago.
+// El asunto/cuerpo llegan YA interpolados desde el frontend (las variables
+// {{...}} se resuelven en la vista); aquí solo se validan, se adjuntan los
+// archivos reales de Drive y se manda con GmailApp desde la cuenta del sistema.
+function _correoEnviarCore(body) {
+  var para = String(body.para || '').trim();
+  var asunto = String(body.asunto || '').trim();
+  var cuerpo = String(body.cuerpo || '');
+  if (!para || !/^[^\s@]+@[^\s@]+\.[^\s@]+(\s*[,;]\s*[^\s@]+@[^\s@]+\.[^\s@]+)*$/.test(para))
+    return { ok: false, error: 'Destinatario inválido: "' + para + '"' };
+  if (!asunto) return { ok: false, error: 'El asunto es obligatorio' };
 
-    var adjuntos = body.adjuntos || [];
-    var blobs = [], nombres = [], fallidos = [];
-    for (var i = 0; i < Math.min(adjuntos.length, 8); i++) {
-      var fid = String(adjuntos[i] || '').trim();
-      if (!fid) continue;
-      try {
-        var f = DriveApp.getFileById(fid);
-        blobs.push(f.getBlob());
-        nombres.push(f.getName());
-      } catch (fe) { fallidos.push(fid); }
-    }
-    if (fallidos.length && !blobs.length)
-      return { ok: false, error: 'No se pudo leer ningún adjunto de Drive (' + fallidos.length + ' fallidos)' };
-
-    var opts = { name: 'Hestia Fertility' };
-    if (blobs.length) opts.attachments = blobs;
-    var cc = String(body.cc || '').trim();
-    if (cc) opts.cc = cc;
-    GmailApp.sendEmail(para, asunto, cuerpo, opts);
-
-    // Bitácora
+  var adjuntos = body.adjuntos || [];
+  var blobs = [], nombres = [], fallidos = [];
+  for (var i = 0; i < Math.min(adjuntos.length, 8); i++) {
+    var fid = String(adjuntos[i] || '').trim();
+    if (!fid) continue;
     try {
-      setupPlantillasCorreo();
-      var log = SpreadsheetApp.openById(SHEET_ID).getSheetByName(CORREO_LOG_TAB);
-      log.appendRow([new Date(), body.usuario || '', para, cc, asunto, body.tipoDoc || '', body.referencia || '', nombres.join(', ')]);
-    } catch (le) {}
-    try { logAudit(body.usuario || 'sistema', 'Correo', 'Enviar', body.referencia || '', '', '', para + ' | ' + asunto); } catch (ae) {}
+      var f = DriveApp.getFileById(fid);
+      blobs.push(f.getBlob());
+      nombres.push(f.getName());
+    } catch (fe) { fallidos.push(fid); }
+  }
+  if (fallidos.length && !blobs.length)
+    return { ok: false, error: 'No se pudo leer ningún adjunto de Drive (' + fallidos.length + ' fallidos)' };
 
-    return { ok: true, para: para, adjuntos: nombres.length, fallidos: fallidos.length };
+  var opts = { name: 'Hestia Fertility' };
+  if (blobs.length) opts.attachments = blobs;
+  var cc = String(body.cc || '').trim();
+  if (cc) opts.cc = cc;
+  // El envío real depende de que los permisos de Gmail estén autorizados en
+  // el deployment; si no lo están, GmailApp lanza y se reporta el motivo.
+  try {
+    GmailApp.sendEmail(para, asunto, cuerpo, opts);
+  } catch (se) {
+    var m = String(se && se.message || se);
+    if (/authoriz|permission|scope|OAuth|acceso|autoriz/i.test(m))
+      return { ok: false, error: 'No se pudo enviar: falta autorizar el acceso a Gmail en el deployment. Un administrador debe abrir el proyecto de Apps Script y conceder los permisos de correo. Detalle: ' + m };
+    return { ok: false, error: 'No se pudo enviar el correo: ' + m };
+  }
+
+  // Bitácora
+  try {
+    setupPlantillasCorreo();
+    var log = SpreadsheetApp.openById(SHEET_ID).getSheetByName(CORREO_LOG_TAB);
+    log.appendRow([new Date(), body.usuario || '', para, cc, asunto, body.tipoDoc || '', body.referencia || '', nombres.join(', ')]);
+  } catch (le) {}
+  try { logAudit(body.usuario || 'sistema', 'Correo', 'Enviar', body.referencia || '', '', '', para + ' | ' + asunto); } catch (ae) {}
+
+  return { ok: true, para: para, adjuntos: nombres.length, fallidos: fallidos.length };
+}
+
+function enviarDocumentoCorreo(body) {
+  try { return _correoEnviarCore(body); }
+  catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// ¿El usuario (por email) puede enviar correos del sistema? Se apoya en la
+// hoja Roles (permiso operativo `docs_enviar` o `*`; admin/director siempre).
+// Si el módulo de Usuarios no está configurado (modo abierto/dev), se permite.
+function _correoUsuarioPuedeEnviar(email) {
+  try {
+    email = String(email || '').trim();
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    if (!ss.getSheetByName('Usuarios')) return true;      // modo abierto
+    if (!email) return false;
+    var user = getUserRow(ss, email);
+    if (!user) return false;
+    var rol = String(user.rol || '').toLowerCase();
+    if (rol === 'admin' || rol === 'director') return true;
+    var perms = getRolConfig(ss, user.rol).permisosOperativos || [];
+    if (!perms.length) {   // rol sin permisos configurados → no restringir usuarios existentes
+      var restringidos = { socio:1, viewer:1, invitado:1, consulta:1, externo:1 };
+      return !restringidos[rol];
+    }
+    return perms.indexOf('*') !== -1 || perms.indexOf('docs_enviar') !== -1;
+  } catch (e) { return true; }   // ante error de config, no bloquear el envío intencional
+}
+
+// Correo de PAGO a un proveedor (o interno): mismo motor de envío, pero
+// gateado por permiso `docs_enviar` y marcado como 'comprobante-pago' en la
+// bitácora. El frontend ya arma asunto/cuerpo con la plantilla de pago y
+// adjunta el comprobante/ factura si existen. NUNCA se envía solo: el usuario
+// confirma en el diálogo antes de llamar aquí.
+function enviarCorreoPago(body) {
+  try {
+    if (!_correoUsuarioPuedeEnviar(body && body.usuario))
+      return { ok: false, error: 'No tienes permiso para enviar correos de pago (docs_enviar).' };
+    body = body || {};
+    body.tipoDoc = body.tipoDoc || 'comprobante-pago';
+    return _correoEnviarCore(body);
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
