@@ -1015,6 +1015,27 @@ function doPost(e) {
     }
     if (body.action === 'reporteProveedor')    return jsonResponse(readReporteProveedor(body));
     if (body.action === 'setupEgresosAnio')    return jsonResponse(setupEgresosAnio(body.anio));
+    // Conciliar pólizas con ContaDigital (poliza_concil.gs)
+    if (body.action === 'polizaConcilData') {
+      if (typeof polizaConcilData !== 'function')
+        return jsonResponse({ok:false, error:'Agrega poliza_concil.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(polizaConcilData(body));
+    }
+    if (body.action === 'asignarPolizasLote') {
+      if (typeof asignarPolizasLote !== 'function')
+        return jsonResponse({ok:false, error:'Agrega poliza_concil.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(asignarPolizasLote(body));
+    }
+    if (body.action === 'asignarPolizaEgreso') {
+      if (typeof asignarPolizaEgreso !== 'function')
+        return jsonResponse({ok:false, error:'Agrega poliza_concil.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(asignarPolizaEgreso(body));
+    }
+    if (body.action === 'asignarPolizaIngreso') {
+      if (typeof asignarPolizaIngreso !== 'function')
+        return jsonResponse({ok:false, error:'Agrega poliza_concil.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(asignarPolizaIngreso(body));
+    }
     return jsonResponse({error:'Accion desconocida: ' + body.action});
   } catch(ex) { return jsonResponse({error: ex.message}); }
 }

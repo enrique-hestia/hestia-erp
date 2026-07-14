@@ -991,6 +991,43 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 <!-- ══ VISTA: CONCILIACIÓN BANCARIA ══ -->
 <div id="view-conciliacion" class="view" style="display:none"></div>
 
+<!-- ══ VISTA: CONCILIAR PÓLIZAS (ContaDigital) ══ -->
+<div id="view-poliza-concil" class="view" style="display:none">
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-header">
+      <div>
+        <div class="card-title">Conciliar pólizas (ContaDigital)</div>
+        <div class="card-sub">Sube el export de pólizas de ContaDigital (crVisor.xlsx). Se cruzan contra los egresos e ingresos del ERP por número de factura, monto, fecha y nombre; las coincidencias casi idénticas asignan el Folio como Póliza.</div>
+      </div>
+    </div>
+    <div id="pcn-controls" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-top:6px">
+      <div>
+        <div style="font-size:var(--text-xs);font-weight:600;color:var(--color-text-muted,#9ca3af);margin-bottom:4px">Año</div>
+        <select id="pcn-anio" class="eg-sel" style="padding:7px 12px;border:1px solid var(--color-border);border-radius:var(--radius-md,8px);background:var(--color-surface);color:var(--color-text)"></select>
+      </div>
+      <div>
+        <div style="font-size:var(--text-xs);font-weight:600;color:var(--color-text-muted,#9ca3af);margin-bottom:4px">Mes</div>
+        <select id="pcn-mes" class="eg-sel" style="padding:7px 12px;border:1px solid var(--color-border);border-radius:var(--radius-md,8px);background:var(--color-surface);color:var(--color-text)">
+          <option value="0">Todo el año</option>
+          <option value="1">Enero</option><option value="2">Febrero</option><option value="3">Marzo</option>
+          <option value="4">Abril</option><option value="5">Mayo</option><option value="6">Junio</option>
+          <option value="7">Julio</option><option value="8">Agosto</option><option value="9">Septiembre</option>
+          <option value="10">Octubre</option><option value="11">Noviembre</option><option value="12">Diciembre</option>
+        </select>
+      </div>
+      <div>
+        <div style="font-size:var(--text-xs);font-weight:600;color:var(--color-text-muted,#9ca3af);margin-bottom:4px">Export ContaDigital (.xlsx)</div>
+        <input type="file" id="pcn-file" accept=".xlsx,.xls" onchange="pcnReconcile()"
+          style="font-size:var(--text-sm);padding:6px 4px;color:var(--color-text)">
+      </div>
+      <button class="btn btn-primary" onclick="pcnReconcile()" style="font-size:var(--text-xs);padding:8px 16px">Conciliar</button>
+    </div>
+  </div>
+  <div id="pcn-status" style="font-size:var(--text-sm);color:var(--color-text-muted,#9ca3af);margin-bottom:12px"></div>
+  <div id="pcn-summary"></div>
+  <div id="pcn-results"></div>
+</div>
+
 <!-- ══ VISTA: PROVEEDORES ══ -->
 <div id="view-proveedores" class="view" style="display:none">
   <div id="prov-root">
@@ -9785,6 +9822,530 @@ var _cbDrawerOpen  = false;
 var _cbPage        = 0;    // página actual (0-based)
 var _cbPageSize    = 50;   // movimientos por página
 
+/* ══════════════════════════════════════════════════════════════════════════
+   CONCILIAR PÓLIZAS (ContaDigital)
+   Parseo del export (crVisor.xlsx) + matching (factura#/monto/fecha/nombre) en el
+   frontend. El backend (poliza_concil.gs) solo provee los movimientos del ERP del
+   mes y escribe el Folio en la columna Póliza. Reutiliza _loadSheetJS().
+   ══════════════════════════════════════════════════════════════════════════ */
+var _pcnErp = null;      // { egresos:[], ingresos:[], totalEgresos, totalIngresos }
+var _pcnFile = null;     // { egr:[polRows], ing:[polRows] }
+var _pcnResult = null;   // buckets calculados
+
+function pcnInit() {
+  var selY = document.getElementById('pcn-anio');
+  if (selY && !selY.options.length) {
+    var yNow = new Date().getFullYear();
+    var html = '';
+    for (var y = yNow; y >= yNow - 2; y--) html += '<option value="' + y + '">' + y + '</option>';
+    selY.innerHTML = html;
+    selY.value = String(yNow);
+  }
+  var selM = document.getElementById('pcn-mes');
+  if (selM && !_pcnResult) selM.value = String(new Date().getMonth() + 1);
+  // Si ya hay un resultado calculado, re-pintarlo; si no, limpiar.
+  if (_pcnResult) { pcnRender(); }
+  else {
+    var st = document.getElementById('pcn-status'); if (st) st.textContent = '';
+    var su = document.getElementById('pcn-summary'); if (su) su.innerHTML = '';
+    var rs = document.getElementById('pcn-results'); if (rs) rs.innerHTML = '';
+  }
+}
+
+function _pcnEsc(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function _pcnMoney(n) {
+  var v = Number(n || 0);
+  return '$' + v.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function _pcnNum(v) {
+  if (typeof v === 'number') return v;
+  var n = parseFloat(String(v == null ? '' : v).replace(/[$,\s]/g, ''));
+  return isNaN(n) ? 0 : n;
+}
+// Igual que _facNormFolio / _pcnNormFolio del backend: solo el número (sin serie ni ceros).
+function _pcnNormFolio(s) {
+  var t = String(s == null ? '' : s).trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  var m = t.match(/^([A-Z]*)0*(\d+)$/);
+  if (m) return m[2];
+  return t;
+}
+// Clave de nombre normalizada (mayúsculas, sin acentos, alfanumérico + espacios).
+function _pcnNameKey(s) {
+  return String(s == null ? '' : s).toUpperCase()
+    .replace(/[ÁÀÄÂ]/g, 'A').replace(/[ÉÈËÊ]/g, 'E').replace(/[ÍÌÏÎ]/g, 'I')
+    .replace(/[ÓÒÖÔ]/g, 'O').replace(/[ÚÙÜÛ]/g, 'U').replace(/Ñ/g, 'N')
+    .replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+// Quita el prefijo "PROV EGR"/"PROV ING" del Concepto y devuelve el nombre.
+function _pcnStripConcepto(concepto) {
+  return String(concepto || '').replace(/^\s*prov\s+(egr|ing)\s*/i, '').trim();
+}
+// ¿los dos nombres comparten al menos un token significativo (>=3)? o uno contiene al otro.
+function _pcnNameMatch(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.replace(/ /g, '').indexOf(b.replace(/ /g, '')) > -1) return true;
+  if (b.replace(/ /g, '').indexOf(a.replace(/ /g, '')) > -1) return true;
+  var ta = a.split(' '), tb = b.split(' '), map = {};
+  for (var i = 0; i < ta.length; i++) if (ta[i].length >= 3) map[ta[i]] = 1;
+  for (var j = 0; j < tb.length; j++) if (tb[j].length >= 3 && map[tb[j]]) return true;
+  return false;
+}
+// Convierte una celda de fecha (Date | serial Excel | texto) a 'YYYY-MM-DD'.
+function _pcnCellDate(v) {
+  if (v == null || v === '') return '';
+  if (v instanceof Date && !isNaN(v)) {
+    return v.getFullYear() + '-' + ('0' + (v.getMonth() + 1)).slice(-2) + '-' + ('0' + v.getDate()).slice(-2);
+  }
+  if (typeof v === 'number' && isFinite(v)) {
+    var base = new Date(Date.UTC(1899, 11, 30));
+    base.setUTCDate(base.getUTCDate() + Math.floor(v));
+    return base.getUTCFullYear() + '-' + ('0' + (base.getUTCMonth() + 1)).slice(-2) + '-' + ('0' + base.getUTCDate()).slice(-2);
+  }
+  var s = String(v).trim();
+  var m = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+  if (m) return m[1] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[3]).slice(-2);
+  m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (m) return m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+  return '';
+}
+function _pcnDateDiffDays(a, b) {
+  if (!a || !b || a.length < 10 || b.length < 10) return 9999;
+  var da = new Date(a + 'T00:00:00Z'), db = new Date(b + 'T00:00:00Z');
+  if (isNaN(da) || isNaN(db)) return 9999;
+  return Math.abs(Math.round((da.getTime() - db.getTime()) / 86400000));
+}
+
+/* ── Parseo del workbook ContaDigital → { egr:[], ing:[] } ── */
+function _pcnParseWorkbook(wb) {
+  var sheet = wb.Sheets[wb.SheetNames[0]];
+  var rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' });
+  // Buscar la fila de headers (contiene Folio + Concepto + Total)
+  var hRow = -1, cols = {};
+  for (var r = 0; r < rows.length && r < 15; r++) {
+    var joined = rows[r].map(function (x) { return String(x || '').toLowerCase(); });
+    var hasFolio = false, hasConcepto = false, hasTotal = false;
+    for (var c = 0; c < joined.length; c++) {
+      if (joined[c].indexOf('folio') > -1) hasFolio = true;
+      if (joined[c].indexOf('concepto') > -1) hasConcepto = true;
+      if (joined[c].indexOf('total') > -1) hasTotal = true;
+    }
+    if (hasFolio && hasConcepto && hasTotal) { hRow = r; break; }
+  }
+  if (hRow < 0) return { ok: false, error: 'No se encontró la fila de encabezados (Folio/Concepto/Total). ¿Es el export de ContaDigital?' };
+  var hdr = rows[hRow];
+  for (var cc = 0; cc < hdr.length; cc++) {
+    var h = String(hdr[cc] || '').toLowerCase().trim();
+    if (h.indexOf('tipo') > -1 && cols.tipo == null) cols.tipo = cc;
+    else if (h.indexOf('fecha') > -1 && cols.fecha == null) cols.fecha = cc;
+    else if (h.indexOf('folio') > -1 && cols.folio == null) cols.folio = cc;
+    else if (h.indexOf('factura') > -1 && cols.factura == null) cols.factura = cc;
+    else if (h.indexOf('concepto') > -1 && cols.concepto == null) cols.concepto = cc;
+    else if (h.indexOf('total') > -1 && cols.total == null) cols.total = cc;
+  }
+  if (cols.folio == null || cols.concepto == null || cols.total == null)
+    return { ok: false, error: 'Faltan columnas Folio/Concepto/Total en el archivo.' };
+
+  var egr = [], ing = [];
+  for (var d = hRow + 1; d < rows.length; d++) {
+    var row = rows[d];
+    var concepto = String(row[cols.concepto] || '').trim();
+    if (!concepto) continue;
+    var side = null;
+    if (/^\s*prov\s+egr/i.test(concepto)) side = 'eg';
+    else if (/^\s*prov\s+ing/i.test(concepto)) side = 'ing';
+    else continue; // solo movimientos de proveedor (egr/ing)
+    var folio = String(row[cols.folio] == null ? '' : row[cols.folio]).trim();
+    if (!folio) continue;
+    var factura = cols.factura != null ? String(row[cols.factura] == null ? '' : row[cols.factura]).trim() : '';
+    var nombre = _pcnStripConcepto(concepto);
+    var item = {
+      folio: folio,
+      factura: factura,
+      facturaNorm: _pcnNormFolio(factura),
+      total: _pcnNum(row[cols.total]),
+      fecha: cols.fecha != null ? _pcnCellDate(row[cols.fecha]) : '',
+      nombre: nombre,
+      nombreKey: _pcnNameKey(nombre),
+      concepto: concepto
+    };
+    if (side === 'eg') egr.push(item); else ing.push(item);
+  }
+  return { ok: true, egr: egr, ing: ing };
+}
+
+/* ── Matching de un lado (file póliza rows vs erp movimientos) ──
+   Devuelve { auto:[], ambiguos:[], polizaSinMatch:[], yaConPoliza:[], erpSinPoliza:[] } ── */
+function _pcnMatchSide(side, polRows, erpRows) {
+  var cand = [];
+  for (var i = 0; i < erpRows.length; i++) {
+    var e = erpRows[i];
+    cand.push({ e: e, consumed: false });
+  }
+  var out = { auto: [], ambiguos: [], polizaSinMatch: [], yaConPoliza: [], erpSinPoliza: [] };
+
+  // Ordenar: primero las que traen factura (match fuerte por número) — para ingresos.
+  var order = polRows.slice();
+  order.sort(function (a, b) { return (b.facturaNorm ? 1 : 0) - (a.facturaNorm ? 1 : 0); });
+
+  for (var p = 0; p < order.length; p++) {
+    var P = order[p];
+    var scored = [];
+    for (var k = 0; k < cand.length; k++) {
+      if (cand[k].consumed) continue;
+      var E = cand[k].e;
+      var facturaMatch = !!(side === 'ing' && P.facturaNorm && E.factura && _pcnNormFolio(E.factura) === P.facturaNorm);
+      var montoDiff = Math.abs(P.total - E.monto);
+      var montoDiffF = (E.montoFact != null) ? Math.abs(P.total - E.montoFact) : montoDiff;
+      var tol = Math.max(1.0, 0.005 * Math.abs(P.total));
+      var montoExact = (montoDiff <= tol) || (montoDiffF <= tol);
+      var rel = Math.abs(P.total) > 0 ? Math.min(montoDiff, montoDiffF) / Math.abs(P.total) : (Math.min(montoDiff, montoDiffF) > 0 ? 1 : 0);
+      var montoClose = rel <= 0.02;
+      var dDiff = _pcnDateDiffDays(P.fecha, E.fecha);
+      var dateMatch = dDiff <= 5;
+      // La clave de nombre del movimiento ERP se deriva aqui (el backend solo manda nombre).
+      if (E._nk == null) E._nk = _pcnNameKey(E.nombre);
+      var nameMatch = _pcnNameMatch(P.nombreKey, E._nk);
+      // Para ser CANDIDATO se exige señal monetaria (o de factura#). Fecha/nombre solo
+      // refuerzan: por sí solas no bastan (evita "candidatos" espurios por cercanía de fecha).
+      if (!facturaMatch && !montoExact && !montoClose) continue;
+      var score = 0;
+      if (facturaMatch) score += 1000;
+      score += montoExact ? 100 : (montoClose ? 40 : 0);
+      score += dateMatch ? (side === 'eg' ? 30 : 20) : 0;
+      score += nameMatch ? (side === 'eg' ? 30 : 20) : 0;
+      scored.push({ k: k, E: E, score: score, facturaMatch: facturaMatch, montoExact: montoExact, montoClose: montoClose, dateMatch: dateMatch, nameMatch: nameMatch });
+    }
+    scored.sort(function (a, b) { return b.score - a.score; });
+
+    if (!scored.length) { out.polizaSinMatch.push(P); continue; }
+
+    var best = scored[0];
+    var facturaHits = 0;
+    for (var fh = 0; fh < scored.length; fh++) if (scored[fh].facturaMatch) facturaHits++;
+
+    // Criterio de auto-asignación (casi idéntico):
+    //   ingresos: 1 sola factura# igual y monto ~igual  · o  monto exacto+fecha+nombre único
+    //   egresos:  monto exacto + fecha + nombre, único (no hay factura# en egresos)
+    var strong = false;
+    if (side === 'ing') {
+      if (facturaHits === 1 && best.facturaMatch && (best.montoExact || best.montoClose)) strong = true;
+      else if (!best.facturaMatch && best.montoExact && best.dateMatch && best.nameMatch && (scored.length === 1 || scored[1].score < best.score)) strong = true;
+    } else {
+      if (best.montoExact && best.dateMatch && best.nameMatch && (scored.length === 1 || scored[1].score < best.score)) strong = true;
+    }
+
+    if (strong) {
+      cand[best.k].consumed = true;
+      var eHas = _pcnNormFolio(best.E.poliza || '');
+      var pFol = _pcnNormFolio(P.folio || '');
+      if (best.E.poliza && eHas) {
+        if (eHas === pFol) out.yaConPoliza.push({ polRow: P, erp: best.E, estado: 'ya' });
+        else out.ambiguos.push({ side: side, polRow: P, candidates: [best.E], conflict: true, erpPoliza: best.E.poliza });
+      } else {
+        out.auto.push({ side: side, poliza: P.folio, polRow: P, erp: best.E });
+      }
+    } else {
+      // ambiguo: mostrar hasta 4 candidatos (no se consumen; el usuario elige)
+      var cands = [];
+      for (var sc = 0; sc < scored.length && sc < 4; sc++) cands.push(scored[sc].E);
+      out.ambiguos.push({ side: side, polRow: P, candidates: cands, conflict: false });
+    }
+  }
+
+  // Movimientos ERP no consumidos: ya tenían póliza (✅) o sin póliza (⚠️)
+  for (var u = 0; u < cand.length; u++) {
+    if (cand[u].consumed) continue;
+    if (cand[u].e.poliza) out.yaConPoliza.push({ polRow: null, erp: cand[u].e, estado: 'ya' });
+    else out.erpSinPoliza.push(cand[u].e);
+  }
+  return out;
+}
+
+async function pcnReconcile() {
+  var fileInput = document.getElementById('pcn-file');
+  var st = document.getElementById('pcn-status');
+  if (!fileInput || !fileInput.files || !fileInput.files.length) {
+    if (st) st.textContent = 'Selecciona el archivo .xlsx de ContaDigital primero.';
+    return;
+  }
+  var anio = parseInt(document.getElementById('pcn-anio').value, 10) || new Date().getFullYear();
+  var mes = parseInt(document.getElementById('pcn-mes').value, 10) || 0;
+  if (st) st.innerHTML = '<span class="ing-spinner ing-spinner-dark"></span> Leyendo archivo y consultando ERP…';
+  try {
+    await _loadSheetJS();
+    var buf = await fileInput.files[0].arrayBuffer();
+    var wb = XLSX.read(buf, { type: 'array', cellDates: true });
+    var parsed = _pcnParseWorkbook(wb);
+    if (!parsed.ok) { if (st) st.textContent = parsed.error; return; }
+    _pcnFile = parsed;
+
+    var resp = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', redirect: 'follow',
+      body: JSON.stringify({ action: 'polizaConcilData', anio: anio, mes: mes, token: getToken() })
+    });
+    var erp = await resp.json();
+    if (!erp || !erp.ok) { if (st) st.textContent = 'No se pudieron leer los movimientos del ERP: ' + ((erp && erp.error) || 'error'); return; }
+    _pcnErp = erp;
+
+    var mEg = _pcnMatchSide('eg', parsed.egr, erp.egresos || []);
+    var mIng = _pcnMatchSide('ing', parsed.ing, erp.ingresos || []);
+
+    var egFile = 0, ingFile = 0;
+    for (var a = 0; a < parsed.egr.length; a++) egFile += parsed.egr[a].total;
+    for (var b = 0; b < parsed.ing.length; b++) ingFile += parsed.ing[b].total;
+
+    _pcnResult = {
+      anio: anio, mes: mes,
+      auto: mEg.auto.concat(mIng.auto),
+      ambiguos: mEg.ambiguos.concat(mIng.ambiguos),
+      polizaSinMatch: mEg.polizaSinMatch.map(function (x) { return { side: 'eg', p: x }; })
+        .concat(mIng.polizaSinMatch.map(function (x) { return { side: 'ing', p: x }; })),
+      yaConPoliza: mEg.yaConPoliza.map(function (x) { x.side = 'eg'; return x; })
+        .concat(mIng.yaConPoliza.map(function (x) { x.side = 'ing'; return x; })),
+      erpSinPoliza: mEg.erpSinPoliza.map(function (x) { return { side: 'eg', e: x }; })
+        .concat(mIng.erpSinPoliza.map(function (x) { return { side: 'ing', e: x }; })),
+      asignadas: [],
+      totals: {
+        egErp: erp.totalEgresos || 0, egFile: egFile,
+        ingErp: erp.totalIngresos || 0, ingFile: ingFile,
+        egPolCount: parsed.egr.length, ingPolCount: parsed.ing.length
+      }
+    };
+    if (st) st.textContent = '';
+    pcnRender();
+  } catch (ex) {
+    if (st) st.textContent = 'Error al conciliar: ' + ex.message;
+  }
+}
+
+function _pcnNombreMov(o) {
+  // Descripción legible de un movimiento ERP
+  if (o.opId) return _pcnEsc(o.opId + (o.nombre ? ' · ' + o.nombre : ''));
+  return _pcnEsc((o.id ? o.id + ' · ' : '') + (o.nombre || o.concepto || ''));
+}
+
+function pcnRender() {
+  if (!_pcnResult) return;
+  var R = _pcnResult;
+  var canEg = hasPermission('editar_egresos');
+  var canIng = hasPermission('editar_ingresos');
+
+  // ── Tarjetas de resumen ──
+  var okCount = R.yaConPoliza.length + R.asignadas.length;
+  var card = function (icon, label, n, color, sub) {
+    return '<div style="flex:1;min-width:140px;background:var(--color-surface);border:1px solid var(--color-border);border-left:4px solid ' + color + ';border-radius:var(--radius-md,8px);padding:12px 14px">' +
+      '<div style="font-size:22px;font-weight:700;color:' + color + '">' + icon + ' ' + n + '</div>' +
+      '<div style="font-size:var(--text-xs);color:var(--color-text-muted,#9ca3af);margin-top:2px">' + label + '</div>' +
+      (sub ? '<div style="font-size:11px;color:var(--color-text-muted,#9ca3af);margin-top:2px">' + sub + '</div>' : '') +
+      '</div>';
+  };
+  var summ = '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px">' +
+    card('✅', 'Con póliza', okCount, '#16a34a', R.asignadas.length ? ('recién: ' + R.asignadas.length) : 'ya la tenían') +
+    card('🟢', 'Por asignar (auto)', R.auto.length, '#0891b2', 'match casi idéntico') +
+    card('🔀', 'Ambiguos (manual)', R.ambiguos.length, '#7c3aed', 'requieren revisión') +
+    card('⚠️', 'ERP sin póliza', R.erpSinPoliza.length, '#d97706', 'sin match en ContaDigital') +
+    card('📄', 'Póliza sin match', R.polizaSinMatch.length, '#2563eb', 'en ContaDigital, no en ERP') +
+    '</div>';
+
+  // ── Cuadre por lado ──
+  var t = R.totals;
+  var cuadre = function (titulo, erpV, fileV, cnt) {
+    var diff = erpV - fileV;
+    var ok = Math.abs(diff) < 1;
+    return '<div style="flex:1;min-width:240px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius-md,8px);padding:12px 14px">' +
+      '<div style="font-weight:700;font-size:var(--text-sm);margin-bottom:6px">' + titulo + '</div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:var(--text-xs);color:var(--color-text-muted,#9ca3af)"><span>Σ ERP (mes)</span><span style="color:var(--color-text)">' + _pcnMoney(erpV) + '</span></div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:var(--text-xs);color:var(--color-text-muted,#9ca3af)"><span>Σ pólizas ContaDigital (' + cnt + ')</span><span style="color:var(--color-text)">' + _pcnMoney(fileV) + '</span></div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:var(--text-xs);margin-top:4px;border-top:1px dashed var(--color-border);padding-top:4px"><span style="font-weight:600">Diferencia</span><span style="font-weight:700;color:' + (ok ? '#16a34a' : '#d97706') + '">' + (ok ? '✓ cuadra' : _pcnMoney(diff)) + '</span></div>' +
+      '</div>';
+  };
+  summ += '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:6px">' +
+    cuadre('Egresos (PROV EGR)', t.egErp, t.egFile, t.egPolCount) +
+    cuadre('Ingresos (PROV ING)', t.ingErp, t.ingFile, t.ingPolCount) +
+    '</div>';
+  var suEl = document.getElementById('pcn-summary'); if (suEl) suEl.innerHTML = summ;
+
+  // ── Resultados ──
+  var out = '';
+
+  // Botón asignar automáticos (respetando permisos por lado)
+  var autoAsignables = R.auto.filter(function (x) { return x.side === 'eg' ? canEg : canIng; });
+  if (R.auto.length) {
+    var btnDis = autoAsignables.length ? '' : 'disabled style="opacity:.5;cursor:not-allowed"';
+    out += '<div class="card" style="margin-bottom:14px">';
+    out += '<div class="card-header"><div><div class="card-title">🟢 Por asignar automáticamente (' + R.auto.length + ')</div>' +
+      '<div class="card-sub">Match casi idéntico (factura# + monto). Se escribirá el Folio como Póliza.</div></div>' +
+      '<button class="btn btn-primary" onclick="pcnAssignAuto()" ' + btnDis + ' style="font-size:var(--text-xs);padding:8px 16px">Asignar automáticos (' + autoAsignables.length + ')</button>' +
+      '</div>';
+    if (!canEg || !canIng) out += '<div style="font-size:11px;color:#d97706;margin-bottom:6px">Sin permiso para ' + (!canEg ? 'egresos' : '') + (!canEg && !canIng ? ' ni ' : '') + (!canIng ? 'ingresos' : '') + ' — esas asignaciones están deshabilitadas.</div>';
+    out += '<div class="cap-table-wrap"><table class="services-table"><thead><tr>' +
+      '<th>Lado</th><th>Póliza→</th><th>Factura</th><th>Movimiento ERP</th><th>Fecha</th><th style="text-align:right">Monto</th><th></th></tr></thead><tbody>';
+    for (var i = 0; i < R.auto.length; i++) {
+      var A = R.auto[i];
+      var allow = A.side === 'eg' ? canEg : canIng;
+      out += '<tr>' +
+        '<td>' + (A.side === 'eg' ? 'Egreso' : 'Ingreso') + '</td>' +
+        '<td style="font-weight:700;color:#0891b2">' + _pcnEsc(A.poliza) + '</td>' +
+        '<td>' + _pcnEsc(A.polRow.factura || '—') + '</td>' +
+        '<td>' + _pcnNombreMov(A.erp) + '</td>' +
+        '<td>' + _pcnEsc(A.erp.fecha) + '</td>' +
+        '<td style="text-align:right">' + _pcnMoney(A.erp.monto) + '</td>' +
+        '<td>' + (allow ? '<button class="btn" onclick="pcnAssignOne(' + i + ')" style="font-size:11px;padding:4px 10px">Asignar</button>' : '<span style="font-size:11px;color:#d97706">sin permiso</span>') + '</td>' +
+        '</tr>';
+    }
+    out += '</tbody></table></div></div>';
+  }
+
+  // Ambiguos (manual)
+  if (R.ambiguos.length) {
+    out += '<div class="card" style="margin-bottom:14px">';
+    out += '<div class="card-header"><div><div class="card-title">🔀 Requieren confirmación (' + R.ambiguos.length + ')</div>' +
+      '<div class="card-sub">La póliza no coincide de forma inequívoca. Elige el movimiento correcto y asigna.</div></div></div>';
+    out += '<div class="cap-table-wrap"><table class="services-table"><thead><tr>' +
+      '<th>Lado</th><th>Póliza (Folio)</th><th>Factura</th><th>Nombre / Total ContaDigital</th><th>Candidato ERP</th><th></th></tr></thead><tbody>';
+    for (var m = 0; m < R.ambiguos.length; m++) {
+      var Amb = R.ambiguos[m];
+      var allowA = Amb.side === 'eg' ? canEg : canIng;
+      var sel = '<select id="pcn-amb-sel-' + m + '" style="max-width:260px;padding:5px 8px;border:1px solid var(--color-border);border-radius:6px;background:var(--color-surface);color:var(--color-text);font-size:11px">';
+      for (var c = 0; c < Amb.candidates.length; c++) {
+        var C = Amb.candidates[c];
+        sel += '<option value="' + c + '">' + _pcnNombreMov(C) + ' · ' + _pcnEsc(C.fecha) + ' · ' + _pcnMoney(C.monto) + (C.poliza ? ' · (pol ' + _pcnEsc(C.poliza) + ')' : '') + '</option>';
+      }
+      sel += '</select>';
+      out += '<tr' + (Amb.conflict ? ' style="background:rgba(217,119,6,.06)"' : '') + '>' +
+        '<td>' + (Amb.side === 'eg' ? 'Egreso' : 'Ingreso') + '</td>' +
+        '<td style="font-weight:700">' + _pcnEsc(Amb.polRow.folio) + (Amb.conflict ? '<div style="font-size:10px;color:#d97706">ERP ya tiene pol ' + _pcnEsc(Amb.erpPoliza) + '</div>' : '') + '</td>' +
+        '<td>' + _pcnEsc(Amb.polRow.factura || '—') + '</td>' +
+        '<td>' + _pcnEsc(Amb.polRow.nombre) + '<div style="font-size:11px;color:var(--color-text-muted,#9ca3af)">' + _pcnEsc(Amb.polRow.fecha) + ' · ' + _pcnMoney(Amb.polRow.total) + '</div></td>' +
+        '<td>' + sel + '</td>' +
+        '<td>' + (allowA ? '<button class="btn btn-primary" onclick="pcnAssignManual(' + m + ')" style="font-size:11px;padding:4px 10px">Asignar</button>' : '<span style="font-size:11px;color:#d97706">sin permiso</span>') + '</td>' +
+        '</tr>';
+    }
+    out += '</tbody></table></div></div>';
+  }
+
+  // ERP sin póliza
+  if (R.erpSinPoliza.length) {
+    out += '<div class="card" style="margin-bottom:14px">';
+    out += '<div class="card-header"><div><div class="card-title">⚠️ ERP sin póliza (' + R.erpSinPoliza.length + ')</div>' +
+      '<div class="card-sub">Movimientos del ERP sin match en ContaDigital. Revisa si falta capturar la póliza.</div></div></div>';
+    out += '<div class="cap-table-wrap"><table class="services-table"><thead><tr>' +
+      '<th>Lado</th><th>Movimiento</th><th>Fecha</th><th style="text-align:right">Monto</th></tr></thead><tbody>';
+    for (var w = 0; w < R.erpSinPoliza.length; w++) {
+      var W = R.erpSinPoliza[w];
+      out += '<tr><td>' + (W.side === 'eg' ? 'Egreso' : 'Ingreso') + '</td><td>' + _pcnNombreMov(W.e) + '</td><td>' + _pcnEsc(W.e.fecha) + '</td><td style="text-align:right">' + _pcnMoney(W.e.monto) + '</td></tr>';
+    }
+    out += '</tbody></table></div></div>';
+  }
+
+  // Póliza sin match
+  if (R.polizaSinMatch.length) {
+    out += '<div class="card" style="margin-bottom:14px">';
+    out += '<div class="card-header"><div><div class="card-title">📄 Pólizas sin match (' + R.polizaSinMatch.length + ')</div>' +
+      '<div class="card-sub">Están en ContaDigital pero no encontré el movimiento en el ERP.</div></div></div>';
+    out += '<div class="cap-table-wrap"><table class="services-table"><thead><tr>' +
+      '<th>Lado</th><th>Folio</th><th>Factura</th><th>Nombre</th><th>Fecha</th><th style="text-align:right">Total</th></tr></thead><tbody>';
+    for (var z = 0; z < R.polizaSinMatch.length; z++) {
+      var Z = R.polizaSinMatch[z], zp = Z.p;
+      out += '<tr><td>' + (Z.side === 'eg' ? 'Egreso' : 'Ingreso') + '</td><td>' + _pcnEsc(zp.folio) + '</td><td>' + _pcnEsc(zp.factura || '—') + '</td><td>' + _pcnEsc(zp.nombre) + '</td><td>' + _pcnEsc(zp.fecha) + '</td><td style="text-align:right">' + _pcnMoney(zp.total) + '</td></tr>';
+    }
+    out += '</tbody></table></div></div>';
+  }
+
+  if (!out) out = '<div style="padding:24px;text-align:center;color:var(--color-text-muted,#9ca3af);font-size:13px">Todo conciliado: no hay nada pendiente. ✅</div>';
+  var rsEl = document.getElementById('pcn-results'); if (rsEl) rsEl.innerHTML = out;
+}
+
+/* ── Aplicar TODAS las auto-asignaciones permitidas (batch) ── */
+async function pcnAssignAuto() {
+  if (!_pcnResult || !_pcnResult.auto.length) return;
+  var canEg = hasPermission('editar_egresos'), canIng = hasPermission('editar_ingresos');
+  var s = getSession(), usuario = s ? (s.email || '') : '';
+  var asign = [], usados = [];
+  for (var i = 0; i < _pcnResult.auto.length; i++) {
+    var A = _pcnResult.auto[i];
+    if (A.side === 'eg' && !canEg) continue;
+    if (A.side === 'ing' && !canIng) continue;
+    if (A.side === 'eg') asign.push({ side: 'egreso', rowNum: A.erp.rowNum, egId: A.erp.id, poliza: A.poliza });
+    else asign.push({ side: 'ingreso', opId: A.erp.opId, poliza: A.poliza });
+    usados.push(A);
+  }
+  if (!asign.length) return;
+  var st = document.getElementById('pcn-status');
+  if (st) st.innerHTML = '<span class="ing-spinner ing-spinner-dark"></span> Asignando ' + asign.length + ' pólizas…';
+  try {
+    var resp = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', redirect: 'follow',
+      body: JSON.stringify({ action: 'asignarPolizasLote', anio: _pcnResult.anio, asignaciones: asign, token: getToken(), usuario: usuario })
+    });
+    var res = await resp.json();
+    if (!res || !res.ok) { if (st) st.textContent = 'Error al asignar: ' + ((res && res.error) || 'error'); return; }
+    // Mover los aplicados a "asignadas" y sacarlos de auto
+    for (var u = 0; u < usados.length; u++) {
+      usados[u].erp.poliza = usados[u].poliza;
+      _pcnResult.asignadas.push(usados[u]);
+      var ix = _pcnResult.auto.indexOf(usados[u]);
+      if (ix > -1) _pcnResult.auto.splice(ix, 1);
+    }
+    if (st) st.textContent = 'Listo: ' + (res.okEgresos + res.okIngresos) + ' asignadas' + (res.fallidos ? (' · ' + res.fallidos + ' con error') : '') + '.';
+    pcnRender();
+  } catch (ex) { if (st) st.textContent = 'Error al asignar: ' + ex.message; }
+}
+
+/* ── Asignar UNA auto-asignación (fila individual) ── */
+async function pcnAssignOne(idx) {
+  if (!_pcnResult) return;
+  var A = _pcnResult.auto[idx];
+  if (!A) return;
+  await _pcnAssignSingle(A.side, A.erp, A.poliza, function () {
+    A.erp.poliza = A.poliza;
+    _pcnResult.asignadas.push(A);
+    var ix = _pcnResult.auto.indexOf(A);
+    if (ix > -1) _pcnResult.auto.splice(ix, 1);
+    pcnRender();
+  });
+}
+
+/* ── Asignar un ambiguo elegido por el usuario ── */
+async function pcnAssignManual(idx) {
+  if (!_pcnResult) return;
+  var Amb = _pcnResult.ambiguos[idx];
+  if (!Amb) return;
+  var selEl = document.getElementById('pcn-amb-sel-' + idx);
+  var ci = selEl ? parseInt(selEl.value, 10) : 0;
+  var cand = Amb.candidates[ci];
+  if (!cand) return;
+  await _pcnAssignSingle(Amb.side, cand, Amb.polRow.folio, function () {
+    cand.poliza = Amb.polRow.folio;
+    _pcnResult.asignadas.push({ side: Amb.side, poliza: Amb.polRow.folio, polRow: Amb.polRow, erp: cand });
+    _pcnResult.ambiguos.splice(idx, 1);
+    pcnRender();
+  });
+}
+
+async function _pcnAssignSingle(side, erp, poliza, onOk) {
+  var canEg = hasPermission('editar_egresos'), canIng = hasPermission('editar_ingresos');
+  if (side === 'eg' && !canEg) { alert('Sin permiso para editar egresos.'); return; }
+  if (side === 'ing' && !canIng) { alert('Sin permiso para editar ingresos.'); return; }
+  var s = getSession(), usuario = s ? (s.email || '') : '';
+  var st = document.getElementById('pcn-status');
+  if (st) st.innerHTML = '<span class="ing-spinner ing-spinner-dark"></span> Asignando póliza ' + _pcnEsc(poliza) + '…';
+  var body = (side === 'eg')
+    ? { action: 'asignarPolizaEgreso', anio: _pcnResult.anio, rowNum: erp.rowNum, egId: erp.id, poliza: poliza, token: getToken(), usuario: usuario }
+    : { action: 'asignarPolizaIngreso', anio: _pcnResult.anio, opId: erp.opId, poliza: poliza, token: getToken(), usuario: usuario };
+  try {
+    var resp = await fetch(APPS_SCRIPT_URL, { method: 'POST', redirect: 'follow', body: JSON.stringify(body) });
+    var res = await resp.json();
+    if (!res || !res.ok) { if (st) st.textContent = 'Error: ' + ((res && res.error) || 'error'); return; }
+    if (st) st.textContent = 'Póliza ' + poliza + ' asignada.';
+    if (onOk) onOk();
+  } catch (ex) { if (st) st.textContent = 'Error: ' + ex.message; }
+}
+
 async function loadConciliacionData() {
   var el = document.getElementById('view-conciliacion');
   if (!el) return;
@@ -13197,6 +13758,15 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     var _prEl = document.getElementById('view-productos-catalogo');
     if (_prEl) _prEl.style.display = '';
     loadProductosView(_isProdCatalog ? '' : _prodCatMatch, _isProdCatalog);
+    return;
+  }
+  // Conciliar pólizas con ContaDigital (va ANTES de la conciliación bancaria porque
+  // su id/fuente puede contener "concilia" y sería absorbido por el ruteo de bancos).
+  if (viewId === 'poliza-concil' || (_foundViewItem && /concil.*p[oó]liza|p[oó]liza.*concil|contadigital/i.test(String(_foundViewItem.fuente||'')+' '+String(_foundViewItem.label||'')))) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _pcnEl = document.getElementById('view-poliza-concil');
+    if (_pcnEl) _pcnEl.style.display = '';
+    pcnInit();
     return;
   }
   // Conciliación Bancaria
@@ -19700,6 +20270,8 @@ function navigateTo(viewId) {
   else if (viewId === 'nomina' || (_foundItem && /^n[oó]mina$/i.test(String(_foundItem.fuente||'')))) { displayId = 'nomina'; }
   else if (viewId === 'mis-recibos' || (_foundItem && /^mis.?recibos$/i.test(String(_foundItem.fuente||'')))) { displayId = 'mis-recibos'; }
   if (/concilia/i.test(viewId)) { displayId = 'conciliacion'; }
+  // Conciliar pólizas ContaDigital — gana sobre la conciliación bancaria de arriba
+  if (viewId === 'poliza-concil' || (_foundItem && /concil.*p[oó]liza|p[oó]liza.*concil|contadigital/i.test(String(_foundItem.fuente||'')+' '+String(_foundItem.label||'')))) { displayId = 'poliza-concil'; }
   // Productos: todas las sub-categorías usan view-productos-catalogo
   var _navProdKeys = ['producto','catalogo','tratamiento','medicamento','prod-med','estudio','consulta','surrogacy','reprovida','externo','grupomedico','grupo-medico'];
   var _navVidLow = viewId.toLowerCase();
