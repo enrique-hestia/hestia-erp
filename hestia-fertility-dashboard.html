@@ -8216,6 +8216,7 @@ function egDeleteConfirm() {
 
 function egOpenForm() {
   if (!_egEditRowNum) _egEditRowNum = null;
+  _egPendingFactura = null; // limpia cualquier factura seleccionada de una captura anterior
   var view = document.getElementById('eg-form-view');
   var content = document.getElementById('eg-form-content');
   if (!view || !content) return;
@@ -8250,10 +8251,11 @@ function egOpenForm() {
     +'<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:14px">Datos del egreso</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
     +'<div><label '+LBL+'>Fecha de pago <span style="font-weight:400;color:var(--text-secondary,#9ca3af)">(si ya se pagó)</span></label><input type="date" id="eg-fecha" '+S+'></div>'
-    +'<div><label '+LBL+'>Proveedor *</label><input id="eg-proveedor" list="prov-datalist" '+S+' placeholder="Nombre del proveedor" oninput="egSugerirClasif()" onchange="egSugerirClasif()"></div>'
-    +'<div><label '+LBL+'>Monto *</label><input type="number" id="eg-monto" '+S+' placeholder="0.00" step="0.01"></div>'
+    +'<div><label '+LBL+'>Proveedor * <a href="javascript:void(0)" onclick="egNuevoProveedor()" style="font-weight:700;color:var(--color-primary,#c46a7a);text-decoration:none">+ Nuevo</a></label><input id="eg-proveedor" list="prov-datalist" '+S+' placeholder="Nombre del proveedor" oninput="egSugerirClasif();_egDupCheck()" onchange="egSugerirClasif();_egDupCheck()"></div>'
+    +'<div><label '+LBL+'>Monto *</label><input type="number" id="eg-monto" '+S+' placeholder="0.00" step="0.01" oninput="_egDupCheck()"></div>'
     +'</div>'
     +'<div id="eg-clasif-banner" style="display:none;margin-bottom:14px"></div>'
+    +'<div id="eg-dup-notice" style="display:none;margin-bottom:14px"></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
     +'<div><label '+LBL+'>Contable</label><select id="eg-contable" '+S+'><option value="">— Seleccionar —</option>'+contOpts+'</select></div>'
     +'<div><label '+LBL+'>Tipo</label><select id="eg-tipo" '+S+'><option value="">— Seleccionar —</option>'+tipoOpts+'</select></div>'
@@ -8276,6 +8278,11 @@ function egOpenForm() {
     +'<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary,#9ca3af)" title="Se activa al subir comprobante de pago"><input type="checkbox" id="eg-chk-pag" class="eg-chk" disabled> Pagado <span style="font-size:9px">(auto: link pago)</span></label>'
     +'<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary,#9ca3af)" title="Se activa al capturar póliza"><input type="checkbox" id="eg-chk-cont" class="eg-chk" disabled> Contabilidad <span style="font-size:9px">(auto: póliza)</span></label>'
     +'</div>'
+    +'<div style="margin-bottom:14px"><label '+LBL+'>Factura <span style="font-weight:400;color:var(--text-secondary,#9ca3af)">(XML/PDF · opcional — se adjunta y marca Facturación al guardar)</span></label>'
+    +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+    +'<label style="display:inline-flex;align-items:center;gap:7px;padding:8px 14px;background:var(--color-surface,#f3f4f6);border:1.5px dashed var(--color-divider,#e5e7eb);border-radius:9px;font-size:12px;font-weight:600;cursor:pointer;color:var(--text-primary,#111)">📎 Subir factura<input type="file" accept=".pdf,.xml" style="display:none" onchange="egSelectFactura(this)"></label>'
+    +'<span id="eg-fact-name" style="font-size:11.5px;color:var(--text-secondary,#6b7280)"></span>'
+    +'</div></div>'
     +'<div><label '+LBL+'>Observaciones</label><textarea id="eg-obs" '+S+' rows="2" placeholder="Observaciones…" style="resize:vertical"></textarea></div>'
     +'</div>';
 
@@ -8373,6 +8380,117 @@ function egCloseForm() {
   _egEditRowNum = null;
 }
 
+// ── Alta de proveedor inline desde "Nuevo egreso" (reutiliza el modal central) ──
+// Abre el mismo formulario del catálogo de Proveedores como popup; al guardar,
+// escribe el nombre en el campo Proveedor y reevalúa clasificación + duplicados.
+function egNuevoProveedor(){
+  provOpenForm(null, function(p){
+    var inp = document.getElementById('eg-proveedor');
+    if (inp){ inp.value = p.nombre; }
+    try { egSugerirClasif(); } catch(e){}
+    try { _egDupCheck(); } catch(e){}
+  });
+}
+
+// ── Subir factura desde "Nuevo egreso" ──────────────────────────────
+// La factura se ADJUNTA al guardar (necesita que exista la fila/rowNum). Aquí
+// sólo se selecciona y se retiene en memoria; egSubmit la sube al terminar.
+var _egPendingFactura = null;
+function egSelectFactura(input){
+  var f = (input && input.files && input.files.length) ? input.files[0] : null;
+  var name = document.getElementById('eg-fact-name');
+  var chk = document.getElementById('eg-chk-fact');
+  if (!f){ _egPendingFactura = null; if(name) name.innerHTML=''; if(chk) chk.checked=false; return; }
+  if (f.size > 10*1024*1024){ alert('Archivo demasiado grande (máx 10MB)'); if(input) input.value=''; _egPendingFactura=null; if(name) name.innerHTML=''; if(chk) chk.checked=false; return; }
+  _egPendingFactura = f;
+  if (name) name.innerHTML = '✓ '+_esc(f.name)+' <a href="javascript:void(0)" onclick="egQuitarFactura()" style="color:var(--color-primary,#c46a7a);font-weight:700;margin-left:6px;text-decoration:none">quitar</a>';
+  if (chk) chk.checked = true; // reflejo visual: al guardar quedará facturado
+}
+function egQuitarFactura(){
+  _egPendingFactura = null;
+  var name = document.getElementById('eg-fact-name'); if(name) name.innerHTML='';
+  var chk = document.getElementById('eg-chk-fact'); if(chk) chk.checked=false;
+}
+// Sube un archivo de factura a la fila recién creada (misma acción uploadFile
+// que usa el dropzone genérico; enlaza el archivo y marca Facturación en la hoja).
+async function _egUploadFacturaTo(rowNum, file){
+  var base64 = await _fileToBase64(file);
+  var s = getSession()||{};
+  var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
+    action:'uploadFile', tipo:'factura', prefix:'EG-'+rowNum, rowNum:rowNum,
+    fileName:file.name, base64:base64, mimeType:file.type||'application/pdf',
+    usuario:s.email||'sistema'
+  })});
+  return await r.json();
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   DETECTOR DE PAGOS DUPLICADOS (advisory, NO bloquea el guardado)
+   Avisa si ya existe un pago al MISMO proveedor por un monto similar
+   (±1% o ±$1) dentro del mismo mes. Cubre el caso de re-programar un
+   pago que ya se hizo: los egresos (pagados y programados) viven en la
+   misma hoja Egresos, así que _egData.rows los contiene a todos.
+   ══════════════════════════════════════════════════════════════════ */
+function _dupNorm(s){ return String(s==null?'':s).trim().toLowerCase().replace(/\s+/g,' '); }
+function _dupMoney(v){ var n=parseFloat(String(v==null?'':v).replace(/[$,]/g,''))||0; return '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+// Busca en _egData.rows los pagos existentes que coinciden. selfRowNum: fila que
+// se está editando (se excluye para no auto-detectarse). mesRef: 'YYYY-MM' o ''.
+function _dupFindPagos(proveedor, monto, mesRef, selfRowNum){
+  var out = [];
+  if (!_egData || !_egData.rows) return out;
+  var pnorm = _dupNorm(proveedor);
+  var m = parseFloat(String(monto==null?'':monto).replace(/[$,]/g,''))||0;
+  if (!pnorm || !(m>0)) return out;
+  var tol = Math.max(1, m*0.01); // ±1% o ±$1, lo que sea mayor
+  for (var i=0;i<_egData.rows.length;i++){
+    var r = _egData.rows[i];
+    if (selfRowNum && r._rowNum === selfRowNum) continue;
+    if (String(r.estatus||'').toLowerCase() === 'cancelada') continue;
+    if (_dupNorm(r.proveedor) !== pnorm) continue;
+    var rm = parseFloat(r.monto)||0;
+    if (Math.abs(rm - m) > tol) continue;
+    var rd = ((r.fecha||r.vencimiento)||'').substring(0,7);
+    if (mesRef && rd && rd !== mesRef) continue;
+    out.push(r);
+  }
+  return out;
+}
+// Pinta el aviso dentro del div indicado. matches = filas de _dupFindPagos.
+function _dupRenderNotice(divId, matches){
+  var el = document.getElementById(divId);
+  if (!el) return;
+  if (!matches || !matches.length){ el.style.display='none'; el.innerHTML=''; return; }
+  var lis = matches.map(function(r){
+    var pagado = !!r.pagado;
+    var est = pagado ? 'Pagado' : 'Programado';
+    var col = pagado ? '#166534' : '#b45309';
+    var f = ((r.fecha||r.vencimiento)||'').substring(0,10) || '(sin fecha)';
+    return '<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-top:1px dotted rgba(180,83,9,.25);font-size:11.5px">'
+      + '<span style="color:var(--text-secondary,#6b7280)">'+_esc(f)+' · '+_esc(r.concepto||'—')+'</span>'
+      + '<span style="white-space:nowrap;font-weight:700">'+_dupMoney(r.monto)+' · <span style="color:'+col+'">'+est+'</span></span>'
+      + '</div>';
+  }).join('');
+  el.style.display = 'block';
+  el.innerHTML = '<div style="background:rgba(245,158,11,.09);border:1px solid rgba(245,158,11,.35);border-radius:10px;padding:10px 14px">'
+    + '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">'
+    +   '<div style="font-size:12.5px;font-weight:700;color:#b45309">⚠ Posible pago duplicado</div>'
+    +   '<button type="button" onclick="var e=this.closest(\'div\').parentNode;e.style.display=\'none\';" style="background:none;border:none;color:#b45309;font-size:15px;line-height:1;cursor:pointer" title="Ignorar aviso">✕</button>'
+    + '</div>'
+    + '<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin:2px 0 4px">Ya hay '+matches.length+' pago(s) a este proveedor por un monto similar este mes. Revísalos antes de volver a pagar.</div>'
+    + lis
+    + '</div>';
+}
+// Handler para el formulario "Nuevo egreso".
+function _egDupCheck(){
+  var prov = (document.getElementById('eg-proveedor')||{}).value||'';
+  var monto = (document.getElementById('eg-monto')||{}).value||'';
+  var fecha = (document.getElementById('eg-fecha')||{}).value||'';
+  var venc  = (document.getElementById('eg-venc')||{}).value||'';
+  var mesRef = ((fecha||venc)||'').substring(0,7) || (new Date().toISOString().substring(0,7));
+  var matches = _dupFindPagos(prov, monto, mesRef, _egEditRowNum||0);
+  _dupRenderNotice('eg-dup-notice', matches);
+}
+
 async function egSubmit() {
   var proveedor = (document.getElementById('eg-proveedor')||{}).value||'';
   var fecha = (document.getElementById('eg-fecha')||{}).value||'';
@@ -8455,6 +8573,16 @@ async function egSubmit() {
         if (banco && bankRow) {
           try { await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveBankRow',banco:banco,row:bankRow})}); } catch(be){}
         }
+      }
+      // Adjuntar la factura seleccionada a la fila recién creada (egreso o CxP: misma hoja).
+      // Enlaza el archivo y marca Facturación. Sólo en altas nuevas con rowNum.
+      if (!isEdit && _egPendingFactura && res.rowNum) {
+        if (btn) btn.textContent = 'Subiendo factura…';
+        try {
+          var up = await _egUploadFacturaTo(res.rowNum, _egPendingFactura);
+          if (!up || !up.ok) { try { setStatus('Egreso guardado, pero la factura no se pudo adjuntar: '+((up&&up.error)||'error'),'err'); } catch(_s){} }
+        } catch(fe){ try { setStatus('Egreso guardado, pero la factura no se pudo adjuntar: '+fe.message,'err'); } catch(_s2){} }
+        _egPendingFactura = null;
       }
       _swrDel('egresos');
       egCloseForm();
@@ -15956,7 +16084,35 @@ function _renderProveedores(){
 // que quien abrió el formulario desde otro lado (ej. el modal de Cuentas por
 // Pagar) reciba el proveedor recién creado sin acoplar este módulo a esos
 // llamadores.
+// Inyecta el CSS del modal de alta/edición de proveedor de forma idempotente.
+// IMPORTANTE: estos estilos (.pv-moverlay, .pv-modal, etc.) sólo existían dentro
+// del bloque #prov-styles que se crea al RENDERIZAR la vista de Proveedores. Si el
+// formulario se abría desde otro módulo (Egresos, Cuentas por Pagar, Órdenes de
+// Compra) sin haber visitado antes Proveedores, el overlay salía SIN posición fija
+// ni z-index (quedaba invisible/abajo del documento) — por eso "no hacía nada".
+// Ahora provOpenForm garantiza su propio CSS y funciona desde cualquier lugar.
+function _provEnsureModalStyles(){
+  if (document.getElementById('prov-modal-styles')) return;
+  if (document.getElementById('prov-styles')) return; // ya inyectados por la vista de Proveedores
+  var s = document.createElement('style'); s.id = 'prov-modal-styles';
+  s.textContent =
+    '.pv-btn{display:inline-flex;align-items:center;gap:6px;padding:10px 18px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(196,106,122,.25)}'
+    +'.pv-moverlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9998;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)}'
+    +'.pv-modal{background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);max-width:640px;width:95%;max-height:88vh;overflow:auto}'
+    +'.pv-mh{padding:16px 22px;border-bottom:1px solid var(--color-divider,#e5e7eb);display:flex;align-items:center;justify-content:space-between}'
+    +'.pv-mt{font-size:15px;font-weight:800;color:var(--text-primary,#111)}'
+    +'.pv-mb{padding:18px 22px;display:grid;grid-template-columns:1fr 1fr;gap:12px 14px}'
+    +'.pv-field{display:flex;flex-direction:column;gap:4px}'
+    +'.pv-field.full{grid-column:1/-1}'
+    +'.pv-flbl{font-size:10px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)}'
+    +'.pv-inp{border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:8px 10px;font-size:12.5px;color:var(--text-primary,#111);background:var(--color-surface,#fafafa)}'
+    +'.pv-mf{padding:14px 22px;border-top:1px solid var(--color-divider,#e5e7eb);display:flex;justify-content:flex-end;gap:10px}'
+    +'.pv-cancel{border:1.5px solid var(--color-divider,#e5e7eb);background:var(--card-bg,#fff);border-radius:9px;padding:9px 18px;font-size:12px;font-weight:600;cursor:pointer;color:var(--text-primary,#111)}'
+    +'@media(max-width:560px){.pv-mb{grid-template-columns:1fr}}';
+  document.head.appendChild(s);
+}
 function provOpenForm(row, onSaved){
+  _provEnsureModalStyles(); // garantiza el CSS del modal aunque no se haya abierto la vista de Proveedores
   _provEditRow = row || null;
   _provOnSaved = onSaved || null;
   var isEdit = !!row;
@@ -25718,9 +25874,10 @@ function _cxpBuildForm(data) {
   var subOpts = subVals.map(function(s){return '<option value="'+String(s).replace(/"/g,'&quot;')+'"'+(s===(data&&data.subtipo||'')?'selected':'')+'>'+s+'</option>';}).join('');
   var h = '<div style="padding:4px">'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'
-      + '<div><label '+LBL+'>Proveedor * <a href="javascript:void(0)" onclick="cxpNuevoProveedor()" style="font-weight:700;color:var(--color-primary,#c46a7a);text-decoration:none">+ Nuevo</a></label><input id="cxp-f-prov" list="prov-datalist" '+S+' placeholder="Nombre del proveedor" value="'+(data&&data.proveedor||'').replace(/"/g,'&quot;')+'"></div>'
-      + '<div><label '+LBL+'>Monto *</label><input type="number" id="cxp-f-monto" '+S+' placeholder="0.00" step="0.01" value="'+(data&&data.monto||'')+'" oninput="if(typeof cxpFormDivisaCalc===\'function\')cxpFormDivisaCalc()"></div>'
+      + '<div><label '+LBL+'>Proveedor * <a href="javascript:void(0)" onclick="cxpNuevoProveedor()" style="font-weight:700;color:var(--color-primary,#c46a7a);text-decoration:none">+ Nuevo</a></label><input id="cxp-f-prov" list="prov-datalist" '+S+' placeholder="Nombre del proveedor" value="'+(data&&data.proveedor||'').replace(/"/g,'&quot;')+'" oninput="_cxpDupCheck()" onchange="_cxpDupCheck()"></div>'
+      + '<div><label '+LBL+'>Monto *</label><input type="number" id="cxp-f-monto" '+S+' placeholder="0.00" step="0.01" value="'+(data&&data.monto||'')+'" oninput="if(typeof cxpFormDivisaCalc===\'function\')cxpFormDivisaCalc();_cxpDupCheck()"></div>'
     + '</div>'
+    + '<div id="cxp-dup-notice" style="display:none;margin-bottom:12px"></div>'
     + '<div style="margin-bottom:12px"><label '+LBL+'>Concepto *</label><input id="cxp-f-concepto" '+S+' placeholder="Descripción del gasto" value="'+(data&&data.concepto||'').replace(/"/g,'&quot;')+'"></div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">'
       + '<div><label '+LBL+'>Contable</label><select id="cxp-f-contable" '+S+'><option'+(data&&data.contable==='Gasto'?' selected':'')+'>Gasto</option><option'+(data&&data.contable==='Costo'?' selected':'')+'>Costo</option><option'+(data&&data.contable==='Crédito'?' selected':'')+'>Crédito</option></select></div>'
@@ -25764,6 +25921,39 @@ function cxpNuevoProveedor(){
   provOpenForm(null, function(p){
     var inp = document.getElementById('cxp-f-prov');
     if (inp) inp.value = p.nombre;
+    try { _cxpDupCheck(); } catch(e){}
+  });
+}
+
+// Detector de pagos duplicados en la captura/edición de CxP. Reutiliza el mismo
+// motor (_dupFindPagos / _dupRenderNotice) del formulario de Egresos. Como las
+// CxP y los egresos pagados viven en la MISMA hoja, _egData.rows los tiene a
+// todos → aquí se detecta el caso de re-programar un pago que ya se hizo.
+var _cxpDupSelfRow = 0; // fila que se está editando (0 = alta nueva)
+async function _dupEnsureEgresos(cb){
+  if (_egData && _egData.rows){ if(cb) cb(); return; }
+  try {
+    var anio = (currentFechaInicio ? parseInt(currentFechaInicio.substring(0,4),10) : new Date().getFullYear()) || new Date().getFullYear();
+    var tok = encodeURIComponent(getToken());
+    var resp = await fetch(APPS_SCRIPT_URL+'?action=egresos&anio='+anio+'&token='+tok, {redirect:'follow'});
+    var d = await resp.json();
+    if (d && !d.error){ _egData = d; }
+  } catch(e){}
+  if (cb) cb();
+}
+function _cxpDupCheck(){
+  var prov = (document.getElementById('cxp-f-prov')||{}).value||'';
+  var monto = (document.getElementById('cxp-f-monto')||{}).value||'';
+  var venc  = (document.getElementById('cxp-f-venc')||{}).value||'';
+  var mesRef = (venc||'').substring(0,7) || (new Date().toISOString().substring(0,7));
+  // Si aún no hay egresos cargados (se entró directo a CxP), los traemos en 2º plano.
+  _dupEnsureEgresos(function(){
+    var p2 = (document.getElementById('cxp-f-prov')||{}).value||'';
+    var m2 = (document.getElementById('cxp-f-monto')||{}).value||'';
+    var v2 = (document.getElementById('cxp-f-venc')||{}).value||'';
+    var mr2 = (v2||'').substring(0,7) || mesRef;
+    var matches = _dupFindPagos(p2, m2, mr2, _cxpDupSelfRow||0);
+    _dupRenderNotice('cxp-dup-notice', matches);
   });
 }
 
@@ -25795,6 +25985,7 @@ function _cxpLeerDivisa(montoRaw){
 }
 
 window.cxpOpenCapture = function() {
+  _cxpDupSelfRow = 0; // alta nueva
   var m=document.getElementById('cxp-pay-modal'),o=document.getElementById('cxp-pay-ovl');
   if(m)m.style.display='block'; if(o)o.style.display='block';
   var title = document.getElementById('cxp-pay-title');
@@ -25810,6 +26001,7 @@ window.cxpOpenCapture = function() {
 
 window.cxpOpenEdit = function(rowNum, jsonStr) {
   var data = typeof jsonStr==='string' ? JSON.parse(jsonStr) : jsonStr;
+  _cxpDupSelfRow = rowNum || (data&&data.rowNum) || 0; // excluir la fila que se edita
   var m=document.getElementById('cxp-pay-modal'),o=document.getElementById('cxp-pay-ovl');
   if(m)m.style.display='block'; if(o)o.style.display='block';
   var title = document.getElementById('cxp-pay-title');
