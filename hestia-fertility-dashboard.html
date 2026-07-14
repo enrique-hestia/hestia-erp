@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.13.164 -->
+﻿<!-- app-build:2026.07.13.165 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12600,8 +12600,11 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     loadRecordatorios();
     return;
   }
-  // Nómina — lee CFDI de nómina emitidos por mes, desglose por empleado
-  if (viewId === 'nomina' || /^n[oó]mina$/i.test(String(viewId))) {
+  // Nómina — vista propia (lee CFDI de nómina en Drive; NO es una hoja de datos).
+  // Se reconoce por id o por el fuente del item del menú (el item de la hoja Menu
+  // puede tener otro id y una fuente "Nomina" que NO es una hoja real → evita el
+  // fetch genérico que daba "Hoja Nomina no encontrada").
+  if (viewId === 'nomina' || /^n[oó]mina$/i.test(String(viewId)) || (_foundViewItem && /^n[oó]mina$/i.test(String(_foundViewItem.fuente||'')))) {
     document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
     var _nomEl = document.getElementById('view-nomina');
     if (_nomEl) _nomEl.style.display = '';
@@ -18881,6 +18884,7 @@ function navigateTo(viewId) {
   else if (viewId === 'novedades' || (_foundItem && /^novedades$/i.test(String(_foundItem.fuente||'')))) { displayId = 'novedades'; }
   else if (viewId === 'manual' || (_foundItem && /^manual$/i.test(String(_foundItem.fuente||'')))) { displayId = 'manual'; }
   else if (/cuentas?.?por.?cobrar/i.test(viewId) || (_foundItem && /por.?cobrar|cuentas.?cobrar/i.test(String(_foundItem.fuente||'')+' '+String(_foundItem.label||'')))) { displayId = 'cuentas-cobrar'; }
+  else if (viewId === 'nomina' || (_foundItem && /^n[oó]mina$/i.test(String(_foundItem.fuente||'')))) { displayId = 'nomina'; }
   if (/concilia/i.test(viewId)) { displayId = 'conciliacion'; }
   // Productos: todas las sub-categorías usan view-productos-catalogo
   var _navProdKeys = ['producto','catalogo','tratamiento','medicamento','prod-med','estudio','consulta','surrogacy','reprovida','externo','grupomedico','grupo-medico'];
