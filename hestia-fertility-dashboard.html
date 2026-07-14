@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.14.171 -->
+﻿<!-- app-build:2026.07.14.172 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -27538,29 +27538,65 @@ function ccCobrarSus(nombre, monto, plan){
       +'<b style="color:var(--color-text)">'+ccEsc(nombre)+'</b> · Suscripción '+ccEsc(plan)+'<br>Debe: <b style="color:#c83c3c">'+ccFmt(monto)+'</b></div>'
     +_ccField('Monto cobrado','<input id="cc-ab-monto" type="number" step="0.01" value="'+(monto||0)+'" style="'+_ccInputStyle()+'">')
     +_ccField('Fecha de pago','<input id="cc-ab-fecha" type="date" value="'+new Date().toISOString().substring(0,10)+'" style="'+_ccInputStyle()+'">')
-    +'<div style="display:flex;gap:10px">'
-      +'<div style="flex:1">'+_ccField('Forma de pago',_ccFormaPagoSel('cc-ab-fp'))+'</div>'
-      +'<div style="flex:1">'+_ccField('Banco',_ccBancoSel('cc-ab-bco'))+'</div>'
-    +'</div>'
+    +_ccField('Forma de pago (define el banco, igual que en Ingresos)','<select id="cc-ab-fp" style="'+_ccInputStyle()+'"><option>Transferencia</option><option>Santander</option><option>Efectivo</option><option>TDC</option><option>TDD</option><option>AMEX</option></select>')
+    +'<div style="font-size:10.5px;color:var(--color-text-muted);margin:-6px 0 12px">Transferencia/TDC/TDD/AMEX → Mercado Pago · Santander → Santander · Efectivo → Caja. Con TDC/TDD/AMEX se pedirá la comisión de Mercado Pago.</div>'
     +_ccField('Nota (opcional)','<input id="cc-ab-nota" type="text" value="Suscripción crío" style="'+_ccInputStyle()+'">');
   ccModal('Cobrar suscripción', body, function(){ ccGuardarAbono('', nombre, 'suscripcion'); }, 'Registrar cobro');
 }
 function ccGuardarAbono(op, paciente, tipo){
   var monto=parseFloat((document.getElementById('cc-ab-monto')||{}).value||'0')||0;
   if(monto<=0){ alert('Monto inválido'); return; }
+  var fecha=(document.getElementById('cc-ab-fecha')||{}).value||'';
+  var formaPago=(document.getElementById('cc-ab-fp')||{}).value||'';
+  var nota=(document.getElementById('cc-ab-nota')||{}).value||'';
   var btn=document.getElementById('cc-modal-save'); if(btn){ btn.textContent='Guardando…'; btn.disabled=true; }
   var s=getSession()||{};
   var payload={ action:'registrarAbono', op:op, paciente:paciente, monto:monto, tipo:tipo,
-    fecha:(document.getElementById('cc-ab-fecha')||{}).value||'',
-    formaPago:(document.getElementById('cc-ab-fp')||{}).value||'',
-    banco:(document.getElementById('cc-ab-bco')||{}).value||'',
-    nota:(document.getElementById('cc-ab-nota')||{}).value||'',
+    fecha:fecha, formaPago:formaPago, banco:'', nota:nota,
     token:s.token||getToken(), usuario:s.email||'' };
   fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(payload)})
     .then(function(r){return r.json();}).then(function(d){
-      if(d&&d.ok){ var m=document.getElementById('cc-modal'); if(m) m.remove(); ccLoad(true); }
+      if(d&&d.ok){
+        // Suscripción: además de extender la cobertura, registra el INGRESO real
+        // (BD_Ingresos) + su fila en conciliación bancaria + comisión MP — igual
+        // que capturar un ingreso. Otros abonos (saldo) no crean ingreso aquí.
+        if(tipo==='suscripcion'){ _ccCobrarSuscComoIngreso(paciente, monto, fecha, formaPago, nota); }
+        else { var m=document.getElementById('cc-modal'); if(m) m.remove(); ccLoad(true); }
+      }
       else { alert('No se pudo registrar: '+((d&&d.error)||'error')); if(btn){ btn.textContent='Reintentar'; btn.disabled=false; } }
     }).catch(function(e){ alert('Error de red: '+e.message); if(btn){ btn.textContent='Reintentar'; btn.disabled=false; } });
+}
+// Cobro de suscripción → ingreso real + conciliación (mismo flujo que Ingresos).
+async function _ccCobrarSuscComoIngreso(paciente, monto, fecha, formaPago, nota){
+  try{
+    formaPago = formaPago || 'Transferencia';
+    var comisionMP=0;
+    if(formaPago==='TDC'||formaPago==='TDD'||formaPago==='AMEX'){
+      var c=prompt('Comisión de Mercado Pago para este cobro con '+formaPago+' (déjala en 0 si no aplica):','0');
+      comisionMP=Math.abs(parseFloat(c)||0);
+    }
+    // 1) Ingreso en BD_Ingresos (una partida "Suscripción crío", pagada completa → sin CxC).
+    var payload={ action:'saveIngreso', paciente:paciente, fecha:fecha, formaPago:formaPago,
+      observaciones:(nota||'Suscripción crío'),
+      lineas:[{ categoria:'Almacenamiento', producto:(nota||'Suscripción crío'), pvp:monto, descuento:0, cantidad:1, pagado:monto, ciclo:'Almacenamiento' }],
+      pagado:monto, token:getToken() };
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify(payload)});
+    var res=await r.json();
+    if(!res||!res.ok){ alert('El cobro se marcó, pero no se pudo crear el ingreso: '+((res&&res.error)||'error')); }
+    else {
+      if(typeof _swrDel==='function') _swrDel('ingresos');
+      // 2) Fila bancaria (conciliación) según la forma de pago — idéntico a Ingresos.
+      var obs=(nota?nota+' · ':'')+'Px. '+paciente+(res.op?' ['+res.op+']':'');
+      var mesStr=(fecha||'').substring(0,7);
+      var banco='', bankRow=null;
+      if(formaPago==='Efectivo'){ banco='cajachica'; bankRow={ action:'saveCajaChicaIngreso', fecha:fecha, concepto:obs, entrada:monto }; }
+      else if(formaPago==='Santander'){ banco='santander'; bankRow=[fecha, monto, 0, 0, obs, 0, 0, '', '']; }
+      else { banco='mercadopago'; var com=((formaPago==='TDC'||formaPago==='TDD'||formaPago==='AMEX')&&comisionMP)?-Math.abs(comisionMP):0; bankRow=[mesStr, fecha, monto, com, 0, monto+com, 0, false, obs, 'CARGO']; }
+      if(banco&&bankRow){ try{ var bp=(banco==='cajachica')?bankRow:{ action:'saveBankRow', banco:banco, row:bankRow }; await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify(bp)}); }catch(be){} }
+    }
+  }catch(e){ console.warn('cobro susc→ingreso', e); }
+  var m=document.getElementById('cc-modal'); if(m) m.remove();
+  try{ ccLoad(true); }catch(e){}
 }
 /* ═══════════ DESCUENTOS POR AGENCIA — panel de configuración ═══════════
  * Cada agencia es distinta: aquí se configura SIN tocar código — la lista de
