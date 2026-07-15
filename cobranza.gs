@@ -1189,6 +1189,297 @@ function _cobAplicarCreditoFavor(paciente, monto) {
   return aplicado;
 }
 
+/* ═════════════ CONSUMO DE CRÉDITO POR "NOTA DE CRÉDITO" (ledger por OP) ═════════════
+ * 'Nota de Crédito' es una forma de pago del alta de ingresos: el paciente paga con
+ * el crédito a favor que ya tenía. Antes NO se descontaba de Creditos_Favor → el
+ * MISMO crédito se podía gastar infinitas veces. Este ledger arregla eso y hace el
+ * consumo IDEMPOTENTE por OP (indispensable: al editar una OP el backend reescribe
+ * las líneas y volvería a consumir el crédito de cero).
+ *
+ * Esquema Creditos_Consumo: Fecha | OP | Paciente | MontoNC | Aplicado | Excedente |
+ *                           Autorizado | Usuario | Timestamp
+ *   MontoNC   = NC declarada hoy en la OP (absoluto)
+ *   Aplicado  = cuánto se decrementó de verdad de Creditos_Favor por esta OP (acumulado)
+ *   Excedente = NC que rebasó el crédito disponible (solo >0 con autorización explícita)
+ * Va en hoja aparte para que los motores de deuda jamás lo lean como cargo.
+ */
+var COBRANZA_CONSUMO_NC = (typeof COBRANZA_CONSUMO_NC !== 'undefined') ? COBRANZA_CONSUMO_NC : 'Creditos_Consumo';
+function _cobEnsureConsumoNC() {
+  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+  var sh = ss.getSheetByName(COBRANZA_CONSUMO_NC);
+  if (!sh) {
+    sh = ss.insertSheet(COBRANZA_CONSUMO_NC);
+    sh.appendRow(['Fecha', 'OP', 'Paciente', 'MontoNC', 'Aplicado', 'Excedente', 'Autorizado', 'Usuario', 'Timestamp']);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+// Lo ya consumido por una OP → { rowNum, montoNC, aplicado, excedente } (ceros si no existe).
+function _cobConsumoNCPorOP(op) {
+  var out = { rowNum: -1, montoNC: 0, aplicado: 0, excedente: 0 };
+  op = String(op || '').trim(); if (!op) return out;
+  var sh = _cobEnsureConsumoNC();
+  var raw = sh.getDataRange().getValues();
+  for (var i = 1; i < raw.length; i++) {
+    if (String(raw[i][1] || '').trim() !== op) continue;
+    out.rowNum = i + 1; out.montoNC = _cobNum(raw[i][3]);
+    out.aplicado = _cobNum(raw[i][4]); out.excedente = _cobNum(raw[i][5]);
+    return out;
+  }
+  return out;
+}
+// ¿Esta OP ya consumió crédito por NC? (cuenta también el excedente autorizado:
+// una OP puede tener aplicado=0 y excedente>0 si el paciente no tenía crédito).
+function _cobOPTieneConsumoNC(op) {
+  var c = _cobConsumoNCPorOP(op);
+  return (c.aplicado + c.excedente) > 0.01;
+}
+// Upsert del renglón del ledger de esta OP (montoNC/aplicado/excedente ABSOLUTOS).
+function _cobRegistrarConsumoNC(op, paciente, montoNC, aplicado, excedente, autorizadoPor, usuario, fecha) {
+  var sh = _cobEnsureConsumoNC();
+  var prev = _cobConsumoNCPorOP(op);
+  var vals = [
+    fecha ? _cobStr(_cobD(fecha)) : _cobStr(_cobToday()), String(op || '').trim(), String(paciente || '').trim(),
+    _cobNum(montoNC), _cobNum(aplicado), _cobNum(excedente),
+    String(autorizadoPor || ''), String(usuario || ''), new Date()
+  ];
+  if (prev.rowNum > 0) sh.getRange(prev.rowNum, 1, 1, vals.length).setValues([vals]);
+  else sh.appendRow(vals);
+}
+/* Devuelve crédito a favor al paciente cuando una edición BAJA la NC de una OP.
+   No intenta "des-decrementar" los renglones FIFO originales (imposible saber
+   cuáles fueron): repone el monto como un renglón de crédito propio del paciente,
+   económicamente equivalente. Llave OP+':nc-rev' → nunca choca con el upsert por
+   OP de _cobRegistrarCreditoFavor, y es ACUMULATIVO (varias bajas suman). */
+function _cobRestituirCreditoFavor(op, paciente, monto) {
+  var add = _cobNum(monto); if (add <= 0.01) return 0;
+  var key = String(op || '').trim() + ':nc-rev';
+  var sh = _cobEnsureCreditos();
+  var raw = sh.getDataRange().getValues();
+  for (var r = 1; r < raw.length; r++) {
+    if (String(raw[r][1] || '').trim() !== key) continue;
+    sh.getRange(r + 1, 4).setValue(_cobNum(raw[r][3]) + add);
+    sh.getRange(r + 1, 5).setValue('credito-favor-nc-reverso');
+    return add;
+  }
+  sh.appendRow([_cobStr(_cobToday()), key, String(paciente || '').trim(), add, 'credito-favor-nc-reverso', '', new Date()]);
+  return add;
+}
+
+/* ── Aplicación NETA del consumo de NC de una OP (la usan saveIngreso y
+   updateIngresoConBancos). Idempotente: corre N veces con la misma NC → un solo
+   consumo. Devuelve { ok, aplicado, excedente, disponible, error }.
+   'validarSolo' = no escribe nada, solo dice si pasaría (para bloquear ANTES de
+   guardar las filas del ingreso).
+   El crédito SIEMPRE es del MISMO paciente: _cobCreditoFavorPaciente y
+   _cobAplicarCreditoFavor filtran por _cobKeyNom(paciente). ── */
+function _cobAplicarNCIngreso(op, paciente, montoNC, opts) {
+  opts = opts || {};
+  var nc = _cobNum(montoNC); if (nc < 0) nc = 0;
+  var prev = _cobConsumoNCPorOP(op);
+  var delta = nc - prev.aplicado - prev.excedente;   // lo que falta consumir (o devolver)
+
+  if (Math.abs(delta) <= 0.01) return { ok: true, aplicado: prev.aplicado, excedente: prev.excedente, disponible: _cobCreditoFavorPaciente(paciente).total, sinCambio: true };
+
+  // Baja de NC → devolver crédito al paciente.
+  if (delta < 0) {
+    if (opts.validarSolo) return { ok: true, aplicado: prev.aplicado, excedente: prev.excedente, disponible: _cobCreditoFavorPaciente(paciente).total, devolver: -delta };
+    var devolver = -delta;
+    // Primero se cancela el excedente autorizado (nunca salió de un crédito real),
+    // y solo el resto se repone como crédito del paciente.
+    var quitaExc = Math.min(prev.excedente, devolver);
+    var quitaApl = devolver - quitaExc;
+    if (quitaApl > 0.01) _cobRestituirCreditoFavor(op, paciente, quitaApl);
+    _cobRegistrarConsumoNC(op, paciente, nc, prev.aplicado - quitaApl, prev.excedente - quitaExc, '', opts.usuario, opts.fecha);
+    return { ok: true, aplicado: prev.aplicado - quitaApl, excedente: prev.excedente - quitaExc, devuelto: quitaApl, disponible: _cobCreditoFavorPaciente(paciente).total };
+  }
+
+  // Alza de NC → consumir 'delta' del crédito disponible.
+  var disp = _cobCreditoFavorPaciente(paciente).total;
+  if (delta > disp + 0.01) {
+    if (!opts.autorizarExcedente) {
+      return { ok: false, disponible: disp, requerido: delta,
+        error: 'El paciente "' + String(paciente || '').trim() + '" solo tiene $' + disp.toFixed(2) +
+               ' de crédito a favor y esta Nota de Crédito requiere $' + delta.toFixed(2) + '. Faltan $' + (delta - disp).toFixed(2) +
+               '. Corrige el monto o pide a un autorizado que lo apruebe (permiso autorizar_credito_excedido).' };
+    }
+    if (opts.validarSolo) return { ok: true, aplicado: prev.aplicado + disp, excedente: prev.excedente + (delta - disp), disponible: disp, autorizado: true };
+    var apl = _cobAplicarCreditoFavor(paciente, disp);
+    var exc = delta - apl;
+    _cobRegistrarConsumoNC(op, paciente, nc, prev.aplicado + apl, prev.excedente + exc, opts.autorizadoPor || opts.usuario || '', opts.usuario, opts.fecha);
+    return { ok: true, aplicado: prev.aplicado + apl, excedente: prev.excedente + exc, disponible: 0, autorizado: true, excedido: exc };
+  }
+
+  if (opts.validarSolo) return { ok: true, aplicado: prev.aplicado + delta, excedente: prev.excedente, disponible: disp };
+  var aplicado = _cobAplicarCreditoFavor(paciente, delta);
+  var faltante = delta - aplicado;   // carrera/redondeo: lo no aplicado queda como excedente
+  _cobRegistrarConsumoNC(op, paciente, nc, prev.aplicado + aplicado, prev.excedente + faltante, faltante > 0.01 ? (opts.autorizadoPor || opts.usuario || '') : '', opts.usuario, opts.fecha);
+  return { ok: true, aplicado: prev.aplicado + aplicado, excedente: prev.excedente + faltante, disponible: Math.max(0, disp - aplicado) };
+}
+
+/* ═════════════ AUDITORÍA DE NOTAS DE CRÉDITO (solo lectura) ═════════════
+ * Corre esta función DESDE EL EDITOR de Apps Script (Ejecutar → auditarNotasCredito)
+ * y lee el reporte en el Log (Ver → Registro de ejecución).
+ *
+ * Contexto: hasta el build que introdujo _cobAplicarNCIngreso, pagar con
+ * 'Nota de Crédito' NUNCA decrementaba Creditos_Favor → el mismo crédito se pudo
+ * gastar varias veces. Esta función NO corrige nada: solo compara, por paciente,
+ * el crédito generado contra la NC realmente usada en BD_Ingresos (todos los años)
+ * y marca a quién se le gastó crédito que no tenía.
+ */
+function auditarNotasCredito() {
+  try {
+    var FP_NC = 'nota de credito';
+    function _normFP(s) {
+      return String(s || '').trim().toLowerCase()
+        .replace(/[áàä]/g, 'a').replace(/[éèë]/g, 'e').replace(/[íìï]/g, 'i')
+        .replace(/[óòö]/g, 'o').replace(/[úùü]/g, 'u');
+    }
+
+    // 1) NC usada por OP en BD_Ingresos, en TODOS los libros (2024/2025/2026).
+    var porPac = {};   // keyNom → { paciente, generado, ncUsada, consumidoLedger, ops:[] }
+    function _pac(nom) {
+      var k = _cobKeyNom(nom);
+      if (!porPac[k]) porPac[k] = { paciente: String(nom || '').trim(), generado: 0, ncUsada: 0, consumidoLedger: 0, ops: [] };
+      return porPac[k];
+    }
+
+    var anios = [];
+    try { for (var a in INGRESOS_IDS) if (INGRESOS_IDS.hasOwnProperty(a)) anios.push(a); } catch (eA) { anios = []; }
+    if (!anios.length) anios = [String(new Date().getFullYear())];
+
+    var libros = {};   // ssId → [años] (varios años pueden compartir libro)
+    anios.forEach(function (an) {
+      var id = (typeof _ingIdDeAnio === 'function') ? _ingIdDeAnio(an) : INGRESOS_IDS[an];
+      if (!id) return;
+      if (!libros[id]) libros[id] = [];
+      libros[id].push(an);
+    });
+
+    Object.keys(libros).forEach(function (ssId) {
+      var sh;
+      try { sh = SpreadsheetApp.openById(ssId).getSheetByName(BD_INGRESOS_TAB); } catch (eO) { return; }
+      if (!sh || sh.getLastRow() < 2) return;
+      var lastCol = sh.getLastColumn();
+      var raw = sh.getDataRange().getValues();
+      var hdrs = raw[0].map(function (h) { return String(h).trim().toLowerCase(); });
+      var iPD = hdrs.indexOf('pagosdetalle');   // desglose de pago mixto (JSON)
+
+      for (var r = 1; r < raw.length; r++) {
+        var op = String(raw[r][0] || '').trim(); if (!op) continue;
+        var linea = _cobNum(raw[r][1]);
+        var nom = raw[r][3];
+        var fp = String(raw[r][12] || '');
+        var pagadoLinea = _cobNum(raw[r][10]);
+        var ncOp = 0;
+
+        // Pago MIXTO: el desglose vive solo en la línea 1 de la OP (JSON PagosDetalle).
+        var pd = (iPD > -1 && linea === 1) ? String(raw[r][iPD] || '').trim() : '';
+        if (pd) {
+          try {
+            var arr = JSON.parse(pd);
+            for (var p = 0; p < arr.length; p++) {
+              if (_normFP(arr[p].fp) === FP_NC) ncOp += _cobNum(arr[p].monto);
+            }
+          } catch (eJ) { /* JSON corrupto → se ignora, se reporta abajo por FormaPago */ }
+        } else if (_normFP(fp) === FP_NC) {
+          // Pago simple 100% NC: cada línea aporta su Pagado.
+          ncOp = pagadoLinea;
+        }
+        if (ncOp <= 0.01) continue;
+        var reg = _pac(nom);
+        reg.ncUsada += ncOp;
+        reg.ops.push({ op: op, monto: Math.round(ncOp * 100) / 100, libro: libros[ssId].join('/') });
+      }
+    });
+
+    // 2) Crédito GENERADO por paciente (Creditos_Favor: MontoCredito ya es el saldo
+    //    vivo; los renglones ':nc-rev' son reversos de NC, se marcan aparte).
+    var shCred = SpreadsheetApp.openById(INGRESOS_SS_ID).getSheetByName(COBRANZA_CREDITOS);
+    var vivoPorPac = {}, revPorPac = {};
+    if (shCred) {
+      var cr = shCred.getDataRange().getValues();
+      for (var i = 1; i < cr.length; i++) {
+        var m = _cobNum(cr[i][3]); if (m <= 0.01) continue;
+        var k = _cobKeyNom(cr[i][2]);
+        var esRev = String(cr[i][1] || '').indexOf(':nc-rev') > -1;
+        if (esRev) revPorPac[k] = (revPorPac[k] || 0) + m;
+        else vivoPorPac[k] = (vivoPorPac[k] || 0) + m;
+        _pac(cr[i][2]).generado += m;
+      }
+    }
+
+    // 3) Consumo YA registrado por el ledger nuevo (OPs guardadas después del fix).
+    var shCons = SpreadsheetApp.openById(INGRESOS_SS_ID).getSheetByName(COBRANZA_CONSUMO_NC);
+    if (shCons) {
+      var co = shCons.getDataRange().getValues();
+      for (var j = 1; j < co.length; j++) {
+        var kc = _cobKeyNom(co[j][2]); if (!kc) continue;
+        _pac(co[j][2]).consumidoLedger += _cobNum(co[j][4]) + _cobNum(co[j][5]);
+      }
+    }
+
+    // 4) Reporte.
+    var out = { ok: true, generadoAt: new Date(), pacientes: [], totales: { ncUsada: 0, creditoVivo: 0, noDescontado: 0, sospechosos: 0 } };
+    Object.keys(porPac).forEach(function (k) {
+      var p = porPac[k];
+      if (p.ncUsada <= 0.01) return;                 // solo interesa quien usó NC
+      var vivo = vivoPorPac[k] || 0;
+      // NC usada que el ledger NUEVO no registró = NC histórica nunca descontada.
+      var noDescontado = Math.max(0, p.ncUsada - p.consumidoLedger);
+      // ¿Se gastó más NC de la que jamás tuvo de crédito?
+      var excede = p.ncUsada > (p.generado + 0.01);
+      var rec = {
+        paciente: p.paciente,
+        creditoGenerado: Math.round(p.generado * 100) / 100,
+        creditoVivoHoy: Math.round(vivo * 100) / 100,
+        ncUsada: Math.round(p.ncUsada * 100) / 100,
+        ncYaDescontada: Math.round(p.consumidoLedger * 100) / 100,
+        ncNoDescontada: Math.round(noDescontado * 100) / 100,
+        excedeCredito: excede,
+        faltante: excede ? Math.round((p.ncUsada - p.generado) * 100) / 100 : 0,
+        ops: p.ops
+      };
+      out.pacientes.push(rec);
+      out.totales.ncUsada += rec.ncUsada;
+      out.totales.creditoVivo += rec.creditoVivoHoy;
+      out.totales.noDescontado += rec.ncNoDescontada;
+      if (excede) out.totales.sospechosos++;
+    });
+    out.pacientes.sort(function (a, b) { return b.ncUsada - a.ncUsada; });
+    ['ncUsada', 'creditoVivo', 'noDescontado'].forEach(function (t) { out.totales[t] = Math.round(out.totales[t] * 100) / 100; });
+
+    function _m(n) { return '$' + (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+    var L = [];
+    L.push('══════════ AUDITORÍA DE NOTAS DE CRÉDITO ══════════');
+    L.push('Generado: ' + out.generadoAt);
+    L.push('SOLO LECTURA — no se corrigió ningún dato.');
+    L.push('');
+    L.push('Pacientes que pagaron con Nota de Crédito: ' + out.pacientes.length);
+    L.push('NC usada (total):            ' + _m(out.totales.ncUsada));
+    L.push('NC nunca descontada:         ' + _m(out.totales.noDescontado) + '   ← el bug histórico');
+    L.push('Crédito a favor vivo hoy:    ' + _m(out.totales.creditoVivo));
+    L.push('Pacientes con NC > crédito:  ' + out.totales.sospechosos + (out.totales.sospechosos ? '   ⚠️ REVISAR' : ''));
+    L.push('');
+    if (!out.pacientes.length) L.push('No hay ninguna operación pagada con Nota de Crédito. Nada que revisar.');
+    out.pacientes.forEach(function (p) {
+      L.push('──────────────────────────────────────────');
+      L.push((p.excedeCredito ? '⚠️  ' : '    ') + p.paciente);
+      L.push('     crédito generado ' + _m(p.creditoGenerado) + ' · vivo hoy ' + _m(p.creditoVivoHoy));
+      L.push('     NC usada ' + _m(p.ncUsada) + '  (ya descontada ' + _m(p.ncYaDescontada) + ' · SIN descontar ' + _m(p.ncNoDescontada) + ')');
+      if (p.excedeCredito) L.push('     ⚠️ GASTÓ ' + _m(p.faltante) + ' DE CRÉDITO QUE NUNCA TUVO');
+      L.push('     OPs: ' + p.ops.map(function (o) { return o.op + ' ' + _m(o.monto); }).join(' · '));
+    });
+    L.push('══════════════════════════════════════════');
+    Logger.log(L.join('\n'));
+    out.reporte = L.join('\n');
+    return out;
+  } catch (ex) {
+    Logger.log('auditarNotasCredito ERROR: ' + ex.message);
+    return { ok: false, error: ex.message };
+  }
+}
+
 /* ═════════════ GENERACIÓN DE SUSCRIPCIONES (materializar por periodo) ═════════════
  * Espejo de Gastos Fijos: cada periodo vencido se materializa como un renglón en la
  * hoja Suscripciones_Crio (llave anti-duplicado paciente|plan|periodo + LockService).

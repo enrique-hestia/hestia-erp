@@ -243,9 +243,16 @@ function _cxpAbonosPorId(cxpId, soloActivos) {
     if (String(r[_cxpColIdx(hdrs, 'CxPId')]) !== String(cxpId)) continue;
     var reversado = r[_cxpColIdx(hdrs, 'Reversado')] === true || String(r[_cxpColIdx(hdrs, 'Reversado')]).toUpperCase() === 'TRUE';
     if (soloActivos && reversado) continue;
+    // fecha/formaPago/concepto/proveedor los necesita _egresoResyncBanco para
+    // reconstruir UNA fila bancaria por abono (multi-abono) sin colapsarlas.
+    var _f = r[_cxpColIdx(hdrs, 'Fecha')];
     out.push({
       _rowNum: i + 1, id: r[_cxpColIdx(hdrs, 'ID')], monto: Number(r[_cxpColIdx(hdrs, 'Monto')]) || 0,
       origen: String(r[_cxpColIdx(hdrs, 'Origen')] || 'pago'), creditoId: String(r[_cxpColIdx(hdrs, 'CreditoId')] || ''),
+      fecha: (_f instanceof Date) ? Utilities.formatDate(_f, 'America/Mexico_City', 'yyyy-MM-dd') : String(_f || '').substring(0, 10),
+      formaPago: String(r[_cxpColIdx(hdrs, 'FormaPago')] || ''),
+      concepto: String(r[_cxpColIdx(hdrs, 'Concepto')] || ''),
+      proveedor: String(r[_cxpColIdx(hdrs, 'Proveedor')] || ''),
       reversado: reversado
     });
   }
@@ -407,8 +414,11 @@ function aplicarAbonoCxP(body) {
       _registrarAbono({ cxpId: cxpId, proveedor: proveedor, concepto: concepto, monto: montoCredito, origen: 'credito', creditoId: creditoId, usuario: body.usuario || '', fecha: fechaPago });
     }
     if (montoPagoCash > 0) {
-      _registrarAbono({ cxpId: cxpId, proveedor: proveedor, concepto: concepto, monto: montoPagoCash, origen: 'pago', formaPago: formaPago, usuario: body.usuario || '', fecha: fechaPago });
-      _cxpRutearABanco(formaPago, montoPagoCash, fechaPago, concepto + ' · ' + proveedor + ' [Egreso #' + cxpId + ']');
+      // El tag lleva el ID del abono: '[Egreso #<cxpId>/<abonoId>]'. Antes todos los
+      // abonos de una orden compartían '[Egreso #<cxpId>]' y _egresoResyncBanco los
+      // colapsaba a UNA sola fila al editar (el banco real tenía N movimientos).
+      var _abId = _registrarAbono({ cxpId: cxpId, proveedor: proveedor, concepto: concepto, monto: montoPagoCash, origen: 'pago', formaPago: formaPago, usuario: body.usuario || '', fecha: fechaPago });
+      _cxpRutearABanco(formaPago, montoPagoCash, fechaPago, concepto + ' · ' + proveedor + ' [Egreso #' + cxpId + '/' + _abId + ']');
     }
 
     var nuevoSaldo = saldoActual - montoCredito - montoPagoCash;
