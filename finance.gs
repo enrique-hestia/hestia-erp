@@ -2624,14 +2624,32 @@ function saveEgreso(payload) {
    Columna de obs por banco: Santander idx4, AMEX idx3, Mercado Pago idx8. */
 function _egBankObsIdx(key) { return key === 'amex' ? 3 : (key === 'mercadopago' ? 8 : 4); }
 
+/* ¿Esta observación pertenece al egreso egId? Acepta las DOS formas del tag:
+     '[Egreso #123]'      → pago simple (pagarCxP)
+     '[Egreso #123/AB-7]' → un abono concreto de una orden multi-abono
+   OJO con los falsos positivos por prefijo: '#56' NO debe pegar con '#563'.
+   Por eso, tras el id, el siguiente carácter TIENE que ser '/' o ']'. */
+function _egBankTagMatch(obs, egId) {
+  var s = String(obs || '');
+  var pre = '[Egreso #' + egId;
+  var from = 0;
+  while (true) {
+    var at = s.indexOf(pre, from);
+    if (at < 0) return false;
+    var nxt = s.charAt(at + pre.length);
+    if (nxt === ']' || nxt === '/') return true;
+    from = at + pre.length;   // prefijo de otro id (#563) → seguir buscando
+  }
+}
+
 function _egBankDeleteByEgreso(key, egId) {
   try {
     var sheet = _bankSheetByKey(key); if (!sheet) return 0;
     var lr = sheet.getLastRow(); if (lr < 2) return 0;
     var obsIdx = _egBankObsIdx(key);
     var vals = sheet.getRange(2, 1, lr - 1, sheet.getLastColumn()).getValues();
-    var tag = '[Egreso #' + egId + ']', del = [];
-    for (var r = 0; r < vals.length; r++) { if (String(vals[r][obsIdx] || '').indexOf(tag) > -1) del.push(r + 2); }
+    var del = [];
+    for (var r = 0; r < vals.length; r++) { if (_egBankTagMatch(vals[r][obsIdx], egId)) del.push(r + 2); }
     for (var d = del.length - 1; d >= 0; d--) sheet.deleteRow(del[d]);
     return del.length;
   } catch (e) { Logger.log('_egBankDeleteByEgreso ' + key + ': ' + e.message); return 0; }
@@ -2664,8 +2682,8 @@ function _egCajaChicaDeleteByEgreso(egId) {
     if (!data.length) return 0;
     var headers = data[0].map(function(h){ return String(h).trim().toUpperCase(); });
     var iConc = headers.indexOf('CONCEPTO'); if (iConc < 0) return 0;
-    var tag = '[Egreso #' + egId + ']', del = [];
-    for (var r = 1; r < data.length; r++) { if (String(data[r][iConc] || '').indexOf(tag) > -1) del.push(r + 1); }
+    var del = [];
+    for (var r = 1; r < data.length; r++) { if (_egBankTagMatch(data[r][iConc], egId)) del.push(r + 1); }
     for (var d = del.length - 1; d >= 0; d--) sh.deleteRow(del[d]);
     return del.length;
   } catch (e) { Logger.log('_egCajaChicaDeleteByEgreso: ' + e.message); return 0; }
@@ -2715,10 +2733,35 @@ function _egresoResyncBanco(sheet, rowNum) {
     _egBankDeleteByEgreso('mercadopago', egId);
     _egCajaChicaDeleteByEgreso(egId);
 
-    // 2) RE-CREAR en el destino correcto si el egreso está PAGADO
+    // 2) RE-CREAR. El ledger Abonos_CxP manda: si la orden se pagó en VARIOS abonos,
+    // el banco real tiene VARIOS movimientos y hay que reconstruirlos uno por uno.
+    // Recrear una sola fila sintética con el monto total (lo que se hacía antes)
+    // colapsaba 2 movimientos reales en 1 y rompía la conciliación.
     var mesStr = fechaPago.substring(0, 7);
     var ref = concepto + ' · ' + proveedor + ' [Egreso #' + egId + ']';
-    if (pagado && monto > 0 && formaPago) {
+
+    var _abonos = [];
+    try { if (typeof _cxpAbonosPorId === 'function') _abonos = _cxpAbonosPorId(egId, true) || []; }
+    catch (eAb) { _abonos = []; Logger.log('_egresoResyncBanco abonos: ' + eAb.message); }
+
+    if (_abonos.length) {
+      // ── Orden con abonos (multi-abono o abono único): UNA FILA POR ABONO, cada
+      // una con su monto/forma de pago/fecha propios del ledger. Se re-rutea con
+      // _cxpRutearABanco — la MISMA función que las creó — para que la fila
+      // reconstruida sea idéntica a la original. Los abonos de Origen='credito'
+      // NO generan fila bancaria: son offset interno, no movimiento de dinero. ──
+      for (var ab = 0; ab < _abonos.length; ab++) {
+        var _a = _abonos[ab];
+        if (String(_a.origen || 'pago') === 'credito') continue;
+        var _aMonto = Number(_a.monto) || 0; if (_aMonto <= 0) continue;
+        var _aFP = _a.formaPago || formaPago; if (!_aFP) continue;
+        var _aFecha = _a.fecha || fechaPago;
+        var _aRef = (_a.concepto || concepto) + ' · ' + (_a.proveedor || proveedor) + ' [Egreso #' + egId + '/' + _a.id + ']';
+        try { _cxpRutearABanco(_aFP, _aMonto, _aFecha, _aRef); }
+        catch (eRt) { Logger.log('_egresoResyncBanco rutear abono ' + _a.id + ': ' + eRt.message); }
+      }
+    } else if (pagado && monto > 0 && formaPago) {
+      // ── Sin abonos = pago simple (la gran mayoría): comportamiento intacto. ──
       if (formaPago === 'Efectivo') {
         try {
           var ccSh = getCajaChicaSheet();
@@ -4437,6 +4480,36 @@ function _bdIngresosWritePagosDetalle(sheet, rowNum, pagos) {
   sheet.getRange(rowNum, col).setValue(JSON.stringify(compact));
 }
 
+/* ── 'Nota de Crédito' como forma de pago = el paciente paga con su crédito a
+   favor. NO rutea a banco (no es dinero que se mueve) pero SÍ tiene que
+   decrementar Creditos_Favor; si no, el mismo crédito se gasta infinitas veces.
+   Suma la NC declarada en el desglose de pagos. Acepta {formaPago} (payload del
+   frontend) y {fp} (formato compacto ya persistido en PagosDetalle). ── */
+var ING_FP_NOTA_CREDITO = 'Nota de Crédito';
+function _ingNormFP(s) {
+  return String(s || '').trim().toLowerCase()
+    .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i')
+    .replace(/[óòö]/g,'o').replace(/[úùü]/g,'u');
+}
+function _ingSumaNC(pagos, formaPagoPrincipal, pagadoTotal) {
+  var nc = 0, hubo = false;
+  if (pagos && pagos.length) {
+    for (var i = 0; i < pagos.length; i++) {
+      var fp = pagos[i].formaPago !== undefined ? pagos[i].formaPago : pagos[i].fp;
+      hubo = true;
+      if (_ingNormFP(fp) === _ingNormFP(ING_FP_NOTA_CREDITO)) {
+        var m = parseFloat(String(pagos[i].monto || '').replace(/[$,\s]/g,'')) || 0;
+        if (m > 0) nc += m;
+      }
+    }
+  }
+  // Sin desglose: pago simple 100% NC → toda la operación se pagó con crédito.
+  if (!hubo && _ingNormFP(formaPagoPrincipal) === _ingNormFP(ING_FP_NOTA_CREDITO)) {
+    nc = parseFloat(pagadoTotal) || 0;
+  }
+  return Math.round(nc * 100) / 100;
+}
+
 function saveIngreso(payload) {
   try {
     var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
@@ -4491,6 +4564,25 @@ function saveIngreso(payload) {
     if (pagadoOp > totalOP) pagadoOp = totalOP;   // sobrepago no se registra como pagado extra
     var _remPagado = pagadoOp;
 
+    // ── Nota de Crédito: VALIDAR ANTES de escribir nada (si no alcanza el crédito
+    // se aborta la venta entera; así no hay que revertir filas ya guardadas). ──
+    var _ncMonto = _ingSumaNC(payload.pagos, formaPago, pagadoOp);
+    var _ncAutoriza = false;
+    if (_ncMonto > 0.01) {
+      if (typeof _cobAplicarNCIngreso !== 'function') {
+        return {ok:false, error:'No se puede cobrar con Nota de Crédito: falta desplegar cobranza.gs (crédito a favor). Avisa al administrador.'};
+      }
+      if (!paciente || !String(paciente).trim()) {
+        return {ok:false, error:'Para pagar con Nota de Crédito hay que indicar el paciente (el crédito es de un paciente en particular).'};
+      }
+      // El excedente solo pasa si el usuario lo pidió EXPLÍCITAMENTE y su rol lo permite.
+      _ncAutoriza = (payload.autorizarExcedente === true || payload.autorizarExcedente === 'true')
+                    && _tokenHasPermission(payload.token || '', 'autorizar_credito_excedido');
+      var _ncChk = _cobAplicarNCIngreso(opId, paciente, _ncMonto,
+        { validarSolo: true, autorizarExcedente: _ncAutoriza, usuario: payload.usuario || '', fecha: fecha });
+      if (!_ncChk.ok) return {ok:false, error:_ncChk.error, creditoDisponible:_ncChk.disponible, ncRequerida:_ncChk.requerido, requiereAutorizacion:true};
+    }
+
     var rows = [];
     for (var li = 0; li < lineas.length; li++) {
       var l = lineas[li];
@@ -4538,6 +4630,30 @@ function saveIngreso(payload) {
     // Pago mixto: guardar el desglose de formas de pago en la primera línea
     try { _bdIngresosWritePagosDetalle(sheet, startRow, payload.pagos); } catch (ePag) {}
 
+    // ── Nota de Crédito: CONSUMIR el crédito a favor del paciente. Ya se validó
+    // arriba, así que aquí no debería fallar; si falla se avisa con 'warn' (la venta
+    // ya está escrita) para que quede visible en vez de perderse en silencio. NUNCA
+    // se corta el flujo: abajo faltan inventario, cuenta por cobrar y comisiones MP. ──
+    var _ncRes = null, _ncWarn = '';
+    if (_ncMonto > 0.01) {
+      try {
+        _ncRes = _cobAplicarNCIngreso(opId, paciente, _ncMonto,
+          { autorizarExcedente: _ncAutoriza, usuario: payload.usuario || '', autorizadoPor: payload.usuario || '', fecha: fecha });
+        if (_ncRes && _ncRes.ok) {
+          logAudit(payload.usuario || 'sistema', 'Ingresos', 'NotaCredito', opId, 'CreditoAplicado',
+            'disponible ' + Number(_ncChk.disponible || 0).toFixed(2),
+            'NC ' + _ncMonto.toFixed(2) + ' · aplicado ' + Number(_ncRes.aplicado || 0).toFixed(2) +
+            (Number(_ncRes.excedente || 0) > 0.01 ? ' · EXCEDIDO/AUTORIZADO ' + Number(_ncRes.excedente).toFixed(2) + ' por ' + (payload.usuario || '?') : ''));
+        } else {
+          _ncWarn = 'La operación se guardó, pero NO se pudo descontar el crédito a favor (' + ((_ncRes && _ncRes.error) || 'error desconocido') + '). Avisa al administrador.';
+          logAudit(payload.usuario || 'sistema', 'Ingresos', 'NotaCredito-ERROR', opId, 'CreditoAplicado', '', String((_ncRes && _ncRes.error) || 'sin detalle'));
+        }
+      } catch (eNC) {
+        _ncWarn = 'La operación se guardó, pero NO se pudo descontar el crédito a favor (' + eNC.message + '). Avisa al administrador.';
+        logAudit(payload.usuario || 'sistema', 'Ingresos', 'NotaCredito-ERROR', opId, 'CreditoAplicado', '', eNC.message);
+      }
+    }
+
     // Origen externo (dueño de un ingreso externo). Se escribe en su propia
     // columna APPENDED (creada si falta) → nunca desplaza columnas existentes.
     // Se replica en todas las líneas de la OP para que la atribución por dueño
@@ -4565,7 +4681,14 @@ function saveIngreso(payload) {
     // Partida automática de comisiones de Mercado Pago del mes del ingreso.
     try { _egRecalcComisionesMPFecha(fecha, ''); } catch(_mp) {}
     return {ok:true, op:opId, lineas:rows.length, total:totalOP,
-            pagado:pagadoOp, saldoGenerado:saldoGenerado, paciente:paciente};
+            pagado:pagadoOp, saldoGenerado:saldoGenerado, paciente:paciente,
+            warn: _ncWarn || undefined,
+            notaCredito: _ncMonto > 0.01 ? {
+              monto: _ncMonto,
+              aplicado: _ncRes ? _ncRes.aplicado : 0,
+              excedente: _ncRes ? _ncRes.excedente : 0,
+              creditoRestante: _ncRes ? _ncRes.disponible : 0
+            } : null};
   } catch(ex) {
     return {ok:false, error:ex.message};
   }
@@ -5675,6 +5798,27 @@ function updateIngresoConBancos(payload) {
     var origPagado  = origRows.reduce(function(s, r) { return s + (parseFloat(r[10]) || 0); }, 0);
     var origObsBank = (origObs ? origObs + ' · ' : '') + 'Px. ' + origPac;
 
+    // ── Nota de Crédito al EDITAR: se valida ANTES de tocar bancos/filas. El
+    // consumo es NETO contra lo ya consumido por esta OP (ledger Creditos_Consumo),
+    // así editar N veces la misma OP no vuelve a gastar el crédito, y bajar la NC
+    // se lo devuelve al paciente. ──
+    var _ncMontoU = _ingSumaNC(payload.pagos || payload._payments, payload.formaPago, payload.pagado);
+    var _ncPacU   = payload.paciente || origPac;
+    var _ncAutorizaU = false;
+    if (_ncMontoU > 0.01 || (typeof _cobOPTieneConsumoNC === 'function' && _cobOPTieneConsumoNC(opId))) {
+      if (typeof _cobAplicarNCIngreso !== 'function') {
+        return {ok:false, error:'No se puede editar una operación con Nota de Crédito: falta desplegar cobranza.gs (crédito a favor). Avisa al administrador.'};
+      }
+      if (_ncMontoU > 0.01 && !String(_ncPacU).trim()) {
+        return {ok:false, error:'Para pagar con Nota de Crédito hay que indicar el paciente (el crédito es de un paciente en particular).'};
+      }
+      _ncAutorizaU = (payload.autorizarExcedente === true || payload.autorizarExcedente === 'true')
+                     && _tokenHasPermission(payload.token || '', 'autorizar_credito_excedido');
+      var _ncChkU = _cobAplicarNCIngreso(opId, _ncPacU, _ncMontoU,
+        { validarSolo: true, autorizarExcedente: _ncAutorizaU, usuario: payload.usuario || '', fecha: payload.fecha || '' });
+      if (!_ncChkU.ok) return {ok:false, error:_ncChkU.error, creditoDisponible:_ncChkU.disponible, ncRequerida:_ncChkU.requerido, requiereAutorizacion:true};
+    }
+
     // IDEMPOTENTE: en Santander/MP se borran las filas de esta OP (se re-crean
     // limpias abajo, sin acumular reversos). Efectivo sí se reversa por su hoja.
     var _sanOpen = _bankOpening('santander');   // capturar apertura ANTES de borrar
@@ -5692,6 +5836,24 @@ function updateIngresoConBancos(payload) {
 
     var updateResult = updateIngreso(payload);
     if (!updateResult.ok) return updateResult;
+
+    // Nota de Crédito: aplicar el NETO ya validado arriba (consume de más o
+    // devuelve de menos). Nunca debe tumbar la edición ya escrita.
+    var _ncResU = null;
+    if (_ncMontoU > 0.01 || (typeof _cobOPTieneConsumoNC === 'function' && _cobOPTieneConsumoNC(opId))) {
+      try {
+        _ncResU = _cobAplicarNCIngreso(opId, _ncPacU, _ncMontoU,
+          { autorizarExcedente: _ncAutorizaU, usuario: payload.usuario || '', autorizadoPor: payload.usuario || '', fecha: payload.fecha || '' });
+        if (_ncResU && _ncResU.ok && !_ncResU.sinCambio) {
+          logAudit(payload.usuario || 'sistema', 'Ingresos', 'NotaCredito-Edicion', opId, 'CreditoAplicado',
+            'aplicado previo', 'NC ' + _ncMontoU.toFixed(2) + ' · aplicado ' + Number(_ncResU.aplicado || 0).toFixed(2) +
+            (Number(_ncResU.devuelto || 0) > 0.01 ? ' · DEVUELTO ' + Number(_ncResU.devuelto).toFixed(2) : '') +
+            (Number(_ncResU.excedente || 0) > 0.01 ? ' · EXCEDIDO/AUTORIZADO ' + Number(_ncResU.excedente).toFixed(2) + ' por ' + (payload.usuario || '?') : ''));
+        }
+      } catch (eNCU) {
+        logAudit(payload.usuario || 'sistema', 'Ingresos', 'NotaCredito-ERROR', opId, 'CreditoAplicado', '', eNCU.message);
+      }
+    }
 
     var payments = payload._payments || [{formaPago: payload.formaPago, monto: parseFloat(payload.pagado) || 0}];
     var newPac   = payload.paciente || '';
@@ -5767,6 +5929,17 @@ function deleteIngreso(payload) {
     var origObsBank = (origObs ? origObs + ' · ' : '') + 'Px. ' + origPac;
 
     _reverseIngresoBankTodos(opId, data[0], origRows, origFP, origFecha, origPagado, origObsBank);
+
+    // Borrar la OP libera el crédito a favor que su Nota de Crédito había
+    // consumido (NC = 0 → el neto devuelve todo al paciente). Idempotente.
+    try {
+      if (typeof _cobAplicarNCIngreso === 'function' && typeof _cobOPTieneConsumoNC === 'function'
+          && _cobOPTieneConsumoNC(opId)) {
+        var _ncDel = _cobAplicarNCIngreso(opId, origPac, 0, { usuario: payload.usuario || '', fecha: origFecha });
+        logAudit(payload.usuario || 'sistema', 'Ingresos', 'NotaCredito-Borrado', opId, 'CreditoDevuelto',
+          '', 'devuelto ' + Number((_ncDel && _ncDel.devuelto) || 0).toFixed(2) + ' a ' + origPac);
+      }
+    } catch (eNCD) { Logger.log('deleteIngreso NC: ' + eNCD.message); }
 
     for (var d = 0; d < rowNums.length; d++) {
       sheet.deleteRow(rowNums[d]);

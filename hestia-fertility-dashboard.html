@@ -7053,11 +7053,40 @@ async function _ingSaveAndBank(payload, comisionMP) {
     // 1. Guardar ingreso en BD_Ingresos
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(payload)});
     var res = await r.json();
+
+    // Nota de Crédito mayor al crédito a favor del paciente: el backend BLOQUEA.
+    // Solo quien tenga 'autorizar_credito_excedido' puede forzarlo, y queda auditado.
+    if (!res.ok && res.requiereAutorizacion) {
+      if (typeof hasPermission === 'function' && hasPermission('autorizar_credito_excedido')) {
+        var _falt = Math.max(0, (Number(res.ncRequerida)||0) - (Number(res.creditoDisponible)||0));
+        if (confirm('⚠️ NOTA DE CRÉDITO MAYOR AL CRÉDITO DISPONIBLE\n\n'
+          + 'Paciente: ' + payload.paciente + '\n'
+          + 'Crédito a favor disponible: ' + _ingMoney(res.creditoDisponible || 0) + '\n'
+          + 'Nota de Crédito solicitada: ' + _ingMoney(res.ncRequerida || 0) + '\n'
+          + 'Excedente SIN respaldo: ' + _ingMoney(_falt) + '\n\n'
+          + 'Tienes permiso para autorizarlo. Si continúas, se aplicará el crédito que sí existe\n'
+          + 'y el excedente quedará registrado a tu nombre en la auditoría.\n\n¿Autorizar y guardar?')) {
+          payload.autorizarExcedente = true;
+          r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(payload)});
+          res = await r.json();
+        } else {
+          if (btn) { btn.disabled = false; btn.textContent = 'Guardar operación'; }
+          return;
+        }
+      } else {
+        alert('No se puede guardar:\n\n' + (res.error || '')
+          + '\n\nSi el monto es correcto, pide a un autorizado (permiso «autorizar_credito_excedido») que lo apruebe.');
+        if (btn) { btn.disabled = false; btn.textContent = 'Guardar operación'; }
+        return;
+      }
+    }
+
     if (!res.ok) {
       alert('Error guardando ingreso: ' + (res.error || 'No se pudo guardar'));
       if (btn) { btn.disabled = false; btn.textContent = 'Guardar operación'; }
       return;
     }
+    if (res.warn) alert('⚠️ ' + res.warn);
 
     // 2. Auto-registrar movimiento bancario (solo operaciones nuevas, no ediciones)
     _swrDel('ingresos'); // invalidar caché para que recargue datos frescos
@@ -7580,16 +7609,16 @@ function _renderEgresosERP() {
       var _egRE = (typeof hasPermission==='function' && hasPermission('editar_egresos')) && !esCancel && !esAuto; // editable inline (nunca la partida automática)
       h.push('<tr id="eg-det-'+r._rowNum+'" style="display:none"><td colspan="'+egColSpanDet+'" style="padding:0;background:var(--color-surface,#fafafa)">'
         +(esAuto?'<div style="margin:10px 18px 0;padding:9px 12px;background:#e0f2fe;border:1px solid #7dd3fc;border-radius:8px;font-size:11px;color:#0369a1"><strong>🔄 Partida automática.</strong> Suma las comisiones cobradas por Mercado Pago del mes y se recalcula sola con cada ingreso de MP. No la edites a mano; si necesitas forzar el recálculo usa la acción «recalcComisionesMP».</div>':'')
-        +(_egRE?'<div style="padding:8px 18px 0;font-size:10px;color:var(--text-secondary,#9ca3af)">✏️ Edición rápida — cambia un campo y guarda solo (sin abrir «editar»); el total se actualiza al instante.</div>':'')
+        +(_egRE?'<div style="padding:8px 18px 0;font-size:10px;color:var(--text-secondary,#9ca3af)">✏️ Edición rápida — solo <strong>Póliza</strong>, <strong>Notas</strong> y <strong>Observaciones</strong>. Para cambiar monto, forma de pago, fecha o clasificación usa «editar» (así el movimiento bancario se recalcula bien).</div>':'')
         +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px 18px;padding:14px 18px;font-size:12px">'
-        +_egFld('Concepto completo', r._rowNum, 'concepto', r.concepto, 'text', _egRE)
+        +_egFld('Concepto completo', r._rowNum, 'concepto', r.concepto, 'text', false)
         +(_egComercial(r.proveedor)?'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Nombre comercial</div><div style="font-weight:600;color:var(--text-primary,#111)">'+_egComercial(r.proveedor)+'</div></div>':'')
-        +_egFld('Monto (MXN)', r._rowNum, 'monto', r.monto, 'money', _egRE)
-        +_egFld('Contable', r._rowNum, 'contable', r.contable, 'select', _egRE, ['Gasto','Costo','Crédito'])
-        +_egFld('Tipo', r._rowNum, 'tipo', r.tipo, 'select', _egRE, ['Fijo','Variable'])
-        +_egFld('Subtipo', r._rowNum, 'subtipo', r.subtipo, 'text', _egRE)
-        +_egFld('Forma de pago', r._rowNum, 'formaPago', r.formaPago, 'text', _egRE)
-        +_egFld('Vencimiento', r._rowNum, 'vencimiento', (r.vencimiento||'').substring(0,10), 'date', _egRE)
+        +_egFld('Monto (MXN)', r._rowNum, 'monto', r.monto, 'money', false)
+        +_egFld('Contable', r._rowNum, 'contable', r.contable, 'select', false, ['Gasto','Costo','Crédito'])
+        +_egFld('Tipo', r._rowNum, 'tipo', r.tipo, 'select', false, ['Fijo','Variable'])
+        +_egFld('Subtipo', r._rowNum, 'subtipo', r.subtipo, 'text', false)
+        +_egFld('Forma de pago', r._rowNum, 'formaPago', r.formaPago, 'text', false)
+        +_egFld('Vencimiento', r._rowNum, 'vencimiento', (r.vencimiento||'').substring(0,10), 'date', false)
         +_egFld('Póliza', r._rowNum, 'poliza', r.poliza, 'text', _egRE)
         +(hasUSD
           ?'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#0369a1">Monto USD</div><div style="font-weight:700;color:#0369a1">$'+Number(r.montoUSD).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' USD</div></div>'
@@ -22884,6 +22913,7 @@ var OP_PERMS_CATALOG = [
   {key:'bank_delete',      label:'Eliminar movimientos bancarios',   cat:'Conciliación Bancaria'},
   {key:'bank_liberado',    label:'Marcar liberado (MP)',             cat:'Conciliación Bancaria'},
   {key:'editar_ingresos',  label:'Editar operaciones de ingreso',    cat:'Ingresos'},
+  {key:'autorizar_credito_excedido', label:'Autorizar Nota de Crédito mayor al crédito a favor del paciente', cat:'Ingresos'},
   {key:'editar_egresos',   label:'Editar partidas de egreso',        cat:'Egresos'},
   {key:'borrar_egresos',   label:'Eliminar partidas de egreso',      cat:'Egresos'},
   {key:'abrir_periodo_presupuesto', label:'Abrir/cerrar periodos del presupuesto (supervisor)', cat:'Presupuesto'},
@@ -31501,7 +31531,7 @@ setTimeout(novCheckPopup, 2500);
       'Si aparece el memo **«Gasto que corresponde al periodo»** (teal), es el ajuste informativo por facturación vencida/devengado (ver «Facturación vencida»).'
     ],
     bloques:[
-      { h:'Nota de Crédito', p:'La forma de pago **«Nota de Crédito»** es un descuento **no fiscal**: no rutea a ningún banco y se excluye de lo facturado/pendiente por facturar. Aparece en su propio renglón para que cuadre.' }
+      { h:'Nota de Crédito', p:'La forma de pago **«Nota de Crédito»** es un descuento **no fiscal**: no rutea a ningún banco y se excluye de lo facturado/pendiente por facturar. Aparece en su propio renglón para que cuadre.\n\n**Consume el crédito a favor del paciente.** Al guardar, el monto pagado con Nota de Crédito se **descuenta** del saldo a favor que ese paciente tenga (hoja `Creditos_Favor`, FIFO). Si el paciente **no tiene crédito suficiente, el sistema NO deja guardar** y te dice cuánto tiene realmente disponible: corrige el monto o pide autorización.\n\n**Autorizar un excedente:** quien tenga el permiso `autorizar_credito_excedido` (Panel de Control → Roles) puede forzar una Nota de Crédito mayor al crédito disponible. Se le pide confirmación explícita, se aplica el crédito que sí existe y el excedente queda registrado a su nombre en la auditoría (`BD_Auditoria`) y en la hoja `Creditos_Consumo`.\n\nEditar o borrar la operación **devuelve** el crédito que ya no se usa (es idempotente: guardar la misma operación varias veces no gasta el crédito dos veces).' }
     ],
     datos:{
       funciones:['loadSummary','renderAll','_summaryReadIngresos','readEgresosData','gastoDevengado'],
@@ -31528,7 +31558,7 @@ setTimeout(novCheckPopup, 2500);
       hojas:['`BD_Ingresos` (INGRESOS_SS_ID): col C=Fecha, col 5=Producto, col 10=TotalPagar, col 11=Pagado, col U(20)=Grupo/línea, `PagosDetalle` (JSON multipago)','`BD_Productos`/`BD_Precios` (PRODUCTOS_SS_ID = 1eXsk…DdIAY) alimentan el dropdown de venta'],
       funciones:['saveIngreso','updateIngresoConBancos','_ingTodosProductos','readProductos','_cobRegistrarSaldoIngreso','_bankMpComisionDeOp'],
       permisos:['captura / bank_capture','editar_ingresos','borrar_ingresos'],
-      nota:'Formas de pago en `ING_FORMAS_PAGO`. «Nota de Crédito» NO rutea a banco (descuento no fiscal).'
+      nota:'Formas de pago en `ING_FORMAS_PAGO`. «Nota de Crédito» NO rutea a banco (descuento no fiscal) pero SÍ descuenta el crédito a favor del paciente; sin crédito suficiente no deja guardar (salvo permiso `autorizar_credito_excedido`).'
     },
     ejemplo:'Paciente con total $30,000 que abona $18,000 en Santander: al guardar sale el aviso «se generará un saldo de $12,000». Ese saldo aparece luego en **Cuentas por Cobrar** del paciente.'
   },
@@ -32103,7 +32133,7 @@ setTimeout(novCheckPopup, 2500);
         '**Aging** — antigüedad del adeudo por rangos (0-30 / 31-60 / 61-90 / +90 días).',
         '**FIFO** — los abonos pagan primero los periodos más viejos.',
         '**Devengado vs pagado** — base devengado = el gasto/ingreso del mes que corresponde; base pagado = cuando entró/salió el dinero.',
-        '**Nota de Crédito** — descuento **no fiscal** (no rutea a banco, no cuenta como facturado).',
+        '**Nota de Crédito** — descuento **no fiscal** (no rutea a banco, no cuenta como facturado). **Sí consume** el crédito a favor del paciente: si no le alcanza, el sistema no deja guardar.',
         '**OP** — número de operación (identifica una venta/ingreso).'
       ]},
       { h:'Estado de Resultados', lista:[
@@ -32591,7 +32621,7 @@ setTimeout(novCheckPopup, 2500);
     ],
     ejemplo:'Con ingresos $1,240,000 y egresos $820,000, la **utilidad** = $420,000 y el **margen** = 420,000 ÷ 1,240,000 = **33.9%**.',
     tips:[
-      'La forma de pago **«Nota de Crédito»** es un descuento **no fiscal**: no rutea a banco y se excluye de lo facturado.',
+      'La forma de pago **«Nota de Crédito»** es un descuento **no fiscal**: no rutea a banco y se excluye de lo facturado. Descuenta el crédito a favor del paciente; si no alcanza, no deja guardar (salvo permiso `autorizar_credito_excedido`).',
       'Los ingresos «sin fecha válida» se avisan aparte porque descuadran totales — corrige la fecha en Ingresos.'
     ],
     tech:{ funciones:['loadSummary','renderAll','_summaryReadIngresos','readEgresosData','gastoDevengado'],
@@ -32634,7 +32664,7 @@ setTimeout(novCheckPopup, 2500);
     ],
     ejemplo:'Paciente con total **$30,000** que abona **$18,000** en Santander: al guardar sale «se generará un saldo de **$12,000**». Ese saldo aparece luego en **Cuentas por Cobrar** del paciente.',
     tips:[
-      '**Nota de Crédito** como forma de pago NO rutea a banco (es descuento no fiscal).',
+      '**Nota de Crédito** como forma de pago NO rutea a banco (es descuento no fiscal), pero SÍ consume el crédito a favor del paciente.',
       'Antes de vincular una factura, compara el total de la operación contra el del XML: si no coinciden, el folio capturado probablemente no es el correcto.'
     ],
     tech:{ hojas:['`BD_Ingresos` (INGRESOS_SS_ID): col C=Fecha, col 5=Producto, col 10=TotalPagar, col 11=Pagado, col U(20)=Grupo/línea, `PagosDetalle` (JSON multipago)','`BD_Productos`/`BD_Precios` (PRODUCTOS_SS_ID = 1eXsk…DdIAY) alimentan el dropdown de venta'],
@@ -32680,7 +32710,7 @@ setTimeout(novCheckPopup, 2500);
       { k:'📄 (factura/XML)', d:'Ver o vincular la factura de ese egreso.' },
       { k:'🔗 (comprobante de pago)', d:'Ver o adjuntar el comprobante de la transferencia/pago.' },
       { k:'Desvincular', d:'Quita una factura vinculada por error para poder poner la correcta.' },
-      { k:'Expandir fila (▸)', d:'Abre la captura inline y la traza del dinero de esa partida.' },
+      { k:'Expandir fila (▸)', d:'Abre el detalle y la traza del dinero de esa partida. La edición rápida ahí solo permite **Póliza**, **Notas** y **Observaciones**: monto, forma de pago, fecha y clasificación se cambian con «✏ editar», porque esos campos recalculan el movimiento bancario (una orden pagada en varios abonos tiene varios movimientos y hay que reconstruirlos bien).' },
       { k:'✉ (enviar correo de pago)', d:'Rellena la plantilla de pago (proveedor/concepto/monto/fecha/póliza/folio), adjunta comprobante y factura si están vinculados, y pide confirmar antes de enviar — nunca automático.' },
       { k:'+ Nuevo proveedor (en la captura)', d:'Da de alta al proveedor sin salir del egreso.' },
       { k:'🧾 Conciliar pólizas', d:'Cruza el export de ContaDigital y asigna el Folio como Póliza (ver su sección).' }
@@ -33607,7 +33637,7 @@ setTimeout(novCheckPopup, 2500);
         '**Aging / Antigüedad** — qué tan viejo es el adeudo (0-30 / 31-60 / 61-90 / +90 días).',
         '**FIFO** — los abonos pagan primero los periodos más viejos.',
         '**Devengado vs pagado** — devengado = el gasto/ingreso del mes que corresponde; pagado = cuando entró/salió el dinero.',
-        '**Nota de Crédito** — descuento **no fiscal** (no rutea a banco, no cuenta como facturado).',
+        '**Nota de Crédito** — descuento **no fiscal** (no rutea a banco, no cuenta como facturado). **Sí consume** el crédito a favor del paciente: si no le alcanza, el sistema no deja guardar.',
         '**OP** — número de operación (identifica una venta/ingreso).'
       ]},
       { h:'Estado de Resultados', lista:[
