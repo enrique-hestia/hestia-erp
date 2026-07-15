@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.14.196 -->
+﻿<!-- app-build:2026.07.14.197 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4641,6 +4641,7 @@ async function ingOpenDrawer() {
   if (_ingHistBlock()) return; // año histórico → solo lectura
   if (!_ingEditMode) _ingEditMode = null; // reset cuando se abre como nuevo
   _ingLineCount = 0;
+  _ingSessionOps = [];   // la tanda de "Guardar y capturar otro" empieza aquí
   var view = document.getElementById('ing-form-view');
   var content = document.getElementById('ing-form-content');
   if (!view || !content) return;
@@ -4670,6 +4671,10 @@ async function ingOpenDrawer() {
     +'<button onclick="ingCloseDrawer()" style="display:flex;align-items:center;gap:6px;padding:8px 18px;background:var(--color-surface,#f3f4f6);color:var(--text-primary,#374151);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">'
       +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>Volver a Ingresos</button>'
     +'</div>';
+
+  // Folios capturados sin salir de la pantalla ("Guardar y capturar otro").
+  // Vacío por default; _ingRenderSessionOps() lo muestra en cuanto hay uno.
+  h += '<div id="ing-session-ops" style="display:none;margin:-8px 0 16px"></div>';
 
   // ── Sección: Datos del paciente ──
   h += '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:20px;margin-bottom:16px">';
@@ -4728,6 +4733,11 @@ async function ingOpenDrawer() {
     +'<div></div>'
     +'</div>';
   h += '<div id="ing-lines" style="display:flex;flex-direction:column;gap:0"></div>';
+  // Pista de atajos: la captura de una tanda se hace sin soltar el teclado.
+  h += '<div style="margin-top:8px;font-size:11px;line-height:1.6;color:var(--color-text-muted,#9ca3af)">'
+    +'⌨ <b>Enter</b> avanza de campo · <b>Enter</b> en Cant. o <b>Tab</b> al final de la última línea = nueva línea · '
+    +'<b>Ctrl+Enter</b> agrega línea · <b>Ctrl+Supr</b> borra la línea vacía'
+    +'</div>';
   // Total
   h += '<div style="display:flex;justify-content:flex-end;margin-top:12px;padding-top:12px;border-top:2px solid var(--text-primary,#111)">'
     +'<div style="display:flex;align-items:center;gap:20px">'
@@ -4801,6 +4811,10 @@ async function ingOpenDrawer() {
   // ── Footer sticky ──
   h += '<div style="display:flex;gap:12px;justify-content:flex-end;padding:16px 0">'
     +'<button onclick="ingCloseDrawer()" style="padding:10px 24px;background:var(--color-surface,#f3f4f6);color:var(--text-primary,#374151);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;font-size:13px;font-weight:600;cursor:pointer">Descartar</button>'
+    // "Guardar y capturar otro" solo en alta: al editar no hay tanda que seguir.
+    + (_ingEditMode ? '' :
+       '<button id="ing-save-new-btn" onclick="ingSubmit(true)" type="button" title="Guarda esta operación y deja el formulario listo para la siguiente (conserva Fecha y forma de pago)" style="padding:10px 24px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">'
+      +'Guardar y capturar otro</button>')
     +'<button id="ing-save-btn" onclick="ingSubmit()" style="padding:10px 28px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(196,106,122,.3)">'
       +'Guardar operación</button>'
     +'</div>';
@@ -4816,10 +4830,110 @@ async function ingOpenDrawer() {
   view.scrollTop = 0;
 }
 
-function ingCloseDrawer() {
+/* skipReload: lo usa _ingSaveAndBank, que ya recarga la lista por su cuenta.
+   Desde los botones (Descartar / Volver a Ingresos) se llama sin argumentos. */
+function ingCloseDrawer(skipReload) {
   var view = document.getElementById('ing-form-view');
   if (view) view.style.display = 'none';
   _ingEditMode = null;
+  // Con "Guardar y capturar otro" no se recarga la lista mientras el formulario
+  // está abierto (el re-render de #view-ingresos destruiría este mismo drawer),
+  // así que la lista de atrás quedó vieja → refrescarla al cerrar.
+  var hadSession = _ingSessionOps.length > 0;
+  _ingSessionOps = [];
+  if (hadSession && !skipReload && typeof loadIngresosERP === 'function') loadIngresosERP();
+}
+
+/* ── "Guardar y capturar otro": folios de la tanda ────────────────────
+   Se muestran como chips para que el usuario vea que SÍ se guardaron
+   (el formulario se limpia y no hay más confirmación visible). */
+var _ingSessionOps = [];
+
+function _ingRenderSessionOps() {
+  var el = document.getElementById('ing-session-ops');
+  if (!el) return;
+  if (!_ingSessionOps.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  var chips = _ingSessionOps.map(function(op){
+    var safe = String(op).replace(/'/g,"\\'").replace(/</g,'&lt;');
+    return '<button type="button" tabindex="-1" onclick="_ingOpenSessionOp(\''+safe+'\')" title="Abrir '+safe+'" '
+      +'style="padding:3px 9px;background:var(--card-bg,#fff);color:#166534;border:1px solid #86efac;border-radius:20px;'
+      +'font-size:10.5px;font-weight:700;cursor:pointer;font-family:inherit">'+safe+'</button>';
+  }).join('');
+  el.style.display = 'block';
+  el.innerHTML = '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:8px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px">'
+    +'<span style="font-size:10.5px;font-weight:700;color:#166534">✅ Capturados en esta sesión ('+_ingSessionOps.length+')</span>'
+    + chips
+    +'</div>';
+}
+
+/* Abrir un folio de la tanda. Cierra la captura en curso, así que si hay algo
+   escrito se pide confirmación antes de perderlo. */
+async function _ingOpenSessionOp(op) {
+  var pacVal = (document.getElementById('ing-paciente')||{}).value || '';
+  if ((pacVal.trim() || _ingAnyLineFilled())
+      && !confirm('Se descartará la captura en curso para abrir ' + op + '.\n\n¿Continuar?')) return;
+  ingCloseDrawer();          // recarga la lista (trae los folios nuevos)
+  await loadIngresosERP();   // asegura que _ingData ya tenga el OP antes de editar
+  ingEditOp(op);
+}
+
+/* Ambos botones de guardar comparten estado: nunca uno activo y el otro no. */
+function _ingSaveBtnsBusy(busy) {
+  var b1 = document.getElementById('ing-save-btn');
+  var b2 = document.getElementById('ing-save-new-btn');
+  if (b1) { b1.disabled = !!busy; b1.textContent = busy ? 'Guardando…' : 'Guardar operación'; }
+  if (b2) { b2.disabled = !!busy; b2.textContent = busy ? 'Guardando…' : 'Guardar y capturar otro'; b2.style.opacity = busy ? '.6' : '1'; }
+}
+
+/* Deja el formulario listo para la siguiente venta de la tanda.
+   Conserva SOLO lo que se repite al capturar en serie: la Fecha y la forma de
+   pago (no el monto, que cambia en cada venta). Todo lo demás se limpia. */
+function _ingResetForNext(op) {
+  if (op) _ingSessionOps.push(op);
+
+  // Paciente / fiscal / facturación
+  ['ing-paciente','ing-razon-social','ing-rfc-info','ing-obs','ing-factura','ing-poliza','ing-monto-fact']
+    .forEach(function(id){ var el = document.getElementById(id); if (el) el.value = ''; });
+  ['ing-chk-fact','ing-chk-conc','ing-chk-cont']
+    .forEach(function(id){ var el = document.getElementById(id); if (el) el.checked = false; });
+  _ingPacienteLista = 'General';
+  var listaEl = document.getElementById('ing-lista-label');
+  if (listaEl) listaEl.textContent = 'Lista: General';
+  var cicloEl = document.getElementById('ing-ciclo'); if (cicloEl) cicloEl.value = '';
+  var origEl  = document.getElementById('ing-f-origen'); if (origEl) origEl.value = '';
+  var ddEl    = document.getElementById('ing-pac-dd'); if (ddEl) ddEl.style.display = 'none';
+
+  // Adjunto de factura: es de la operación que ya se guardó, no de la siguiente
+  _ingPendingFacturaFile = null;
+  var fStat = document.getElementById('ing-fact-file-status'); if (fStat) fStat.textContent = '';
+  var fFile = document.getElementById('ing-fact-file');        if (fFile) fFile.value = '';
+
+  // Líneas: dejar una sola, vacía
+  var linesEl = document.getElementById('ing-lines');
+  if (linesEl) linesEl.innerHTML = '';
+  _ingLineCount = 0;
+  ingAddLine();
+
+  // Pagos: conservar la forma de pago de la 1ª línea, limpiar el monto y
+  // quitar los pagos extra (el desglose es propio de cada operación).
+  for (var i = 2; i <= _ingPayCount; i++) {
+    var extra = document.getElementById('ing-pay-'+i);
+    if (extra) extra.remove();
+  }
+  var m1 = document.getElementById('ing-fp-monto-1'); if (m1) m1.value = '';
+  ingCalcPayTotal();
+  ingCalcTotal();
+
+  _ingSaveBtnsBusy(false);
+  _ingRenderSessionOps();
+  _presFlashSaved('✅ Guardado ' + (op || '') + ' · listo para el siguiente');
+
+  var view = document.getElementById('ing-form-view');
+  if (view) view.scrollTop = 0;
+  setTimeout(function(){
+    var p = document.getElementById('ing-paciente');
+    if (p) { p.focus(); if (p.select) { try { p.select(); } catch(_e) {} } }
+  }, 0);
 }
 
 function _ingBuildProdDatalist(lineNum) {
@@ -4940,8 +5054,11 @@ function ingAddLine() {
     +'<input type="number" id="ing-desc-'+n+'" style="text-align:right;'+IS+'" placeholder="0" step="1" min="0" max="100" oninput="ingCalcTotal()">'
     +'<input type="number" id="ing-cant-'+n+'" style="text-align:center;'+IS+'" value="1" min="1" oninput="ingCalcTotal()">'
     +'<div id="ing-sub-'+n+'" style="text-align:right;font-weight:700;font-size:12px;color:var(--text-primary,#111)">$0.00</div>'
-    +(n>1?'<button onclick="ingRemoveLine('+n+')" style="font-size:16px;background:none;border:none;color:#dc2626;cursor:pointer;line-height:1;padding:0" title="Eliminar línea">×</button>':'<div></div>');
+    +(n>1?'<button onclick="ingRemoveLine('+n+')" type="button" tabindex="-1" style="font-size:16px;background:none;border:none;color:#dc2626;cursor:pointer;line-height:1;padding:0" title="Eliminar línea">×</button>':'<div></div>');
   el.appendChild(div);
+  // Captura por teclado (Enter avanza · Tab al final agrega línea · Ctrl+Enter agrega).
+  // Delegado en la fila: cubre los 5 campos sin ensuciar el HTML de cada input.
+  div.addEventListener('keydown', function(ev){ _ingLineKey(ev, n); });
   ingCalcTotal();
   // Auto-reparación: si el catálogo aún no cargó, está vacío, o cargó SIN precios,
   // (re)cárgalo fresco y vuelve a llenar el datalist de ESTA línea → los productos con
@@ -4961,6 +5078,163 @@ function ingRemoveLine(n) {
   var el = document.getElementById('ing-line-'+n);
   if (el) el.remove();
   ingCalcTotal();
+}
+
+/* ══════════════════════════════════════════════════════════════
+   CAPTURA POR TECLADO EN LAS LÍNEAS DE PRODUCTO
+   Patrón estándar de ERP (Odoo/SAP/Contpaqi): la mano no sale del
+   teclado durante una tanda de captura.
+     · Enter            → siguiente campo de la línea
+     · Enter en Cant.   → nueva línea (o baja a la siguiente si ya existe)
+     · Tab en Cant. de la ÚLTIMA línea → nueva línea (el tabulador no
+                          se «sale» de la tabla a media captura). Si la
+                          línea está vacía, Tab sale normal (escape).
+     · Ctrl+Enter / Alt+A → agrega línea desde cualquier campo
+     · Ctrl+Supr        → borra la línea si está vacía
+   Nada de esto altera el guardado: solo mueve el foco y reusa ingAddLine().
+   ══════════════════════════════════════════════════════════════ */
+var _ING_LINE_FIELDS = ['ing-cat-','ing-prod-','ing-pvp-','ing-desc-','ing-cant-'];
+
+function _ingFocusLineField(n, idx) {
+  var el = document.getElementById(_ING_LINE_FIELDS[idx] + n);
+  if (!el) return false;
+  el.focus();
+  // Seleccionar el contenido: reescribir un importe es más rápido que borrarlo.
+  if (el.select && el.tagName === 'INPUT' && el.type !== 'date') { try { el.select(); } catch(_e) {} }
+  return true;
+}
+
+/* Número de la última línea que sigue viva en el DOM (puede haber huecos
+   si el usuario borró líneas intermedias). */
+function _ingLastLineNum() {
+  for (var i = _ingLineCount; i >= 1; i--) { if (document.getElementById('ing-line-'+i)) return i; }
+  return 0;
+}
+
+/* Primera línea viva después de n (0 si n es la última). */
+function _ingNextLineNum(n) {
+  for (var i = n+1; i <= _ingLineCount; i++) { if (document.getElementById('ing-line-'+i)) return i; }
+  return 0;
+}
+
+/* Línea viva anterior a n (0 si no hay). */
+function _ingPrevLineNum(n) {
+  for (var i = n-1; i >= 1; i--) { if (document.getElementById('ing-line-'+i)) return i; }
+  return 0;
+}
+
+/* Una línea está «vacía» si no tiene producto ni precio: no vale la pena
+   crear otra debajo ni bloquear la salida del tabulador. */
+function _ingLineIsEmpty(n) {
+  var prod = (document.getElementById('ing-prod-'+n)||{}).value || '';
+  var pvp  = (document.getElementById('ing-pvp-'+n)||{}).value || '';
+  return !prod.trim() && !(parseFloat(pvp) || 0);
+}
+
+/* ¿Hay algo capturado en alguna línea? (para avisar antes de descartar) */
+function _ingAnyLineFilled() {
+  for (var i = 1; i <= _ingLineCount; i++) {
+    if (!document.getElementById('ing-line-'+i)) continue;
+    if (!_ingLineIsEmpty(i)) return true;
+  }
+  return false;
+}
+
+/* Agrega una línea y deja el cursor en su primer campo (Categoría).
+   El foco va en setTimeout 0 porque ingAddLine() puede disparar una recarga
+   asíncrona del catálogo que reescribe el datalist de la línea recién creada. */
+function _ingAddLineAndFocus() {
+  ingAddLine();
+  var n = _ingLineCount;
+  setTimeout(function(){ _ingFocusLineField(n, 0); }, 0);
+  return n;
+}
+
+/* Enter en el buscador de producto: si lo tecleado no es un producto exacto,
+   toma el PRIMER resultado que coincida (misma lógica de filtrado que el
+   datalist: primero dentro de la categoría elegida). Así Enter «selecciona»
+   aunque el usuario no haya bajado con las flechas al desplegable nativo. */
+function _ingProdEnterResolve(n) {
+  var inp = document.getElementById('ing-prod-'+n);
+  if (!inp) return;
+  var val = (inp.value || '').trim();
+  if (!val) return;
+  var pool = (_ingProductos && _ingProductos.length) ? _ingProductos : (_ingTodosProductos || []);
+  var catEl  = document.getElementById('ing-cat-'+n);
+  var selCat = catEl ? catEl.value : '';
+  // ¿Ya es un producto exacto? → dejar que ingOnProdSearch haga lo suyo.
+  var exact = pool.filter(function(p){ return p.descripcion === val && (!selCat || p.categoria === selCat); });
+  if (!exact.length) {
+    var low = val.toLowerCase();
+    var cands = pool.filter(function(p){
+      if (p.activo === false) return false;
+      if (selCat && p.categoria !== selCat) return false;
+      return (p.descripcion||'').toLowerCase().indexOf(low) > -1;
+    });
+    // Sin coincidencias dentro de la categoría → buscar en todo el catálogo.
+    if (!cands.length && selCat) {
+      cands = pool.filter(function(p){
+        return p.activo !== false && (p.descripcion||'').toLowerCase().indexOf(low) > -1;
+      });
+    }
+    if (cands.length) inp.value = cands[0].descripcion;
+    // Si no hay ninguna, se respeta lo tecleado (comportamiento de siempre).
+  }
+  ingOnProdSearch(n);
+}
+
+/* Enter/Tab al final de la línea n: baja a la siguiente o crea una nueva. */
+function _ingAdvanceFromLine(n) {
+  var next = _ingNextLineNum(n);
+  if (next) { _ingFocusLineField(next, 0); return; }
+  if (_ingLineIsEmpty(n)) return;   // línea vacía al final → no acumular vacías
+  _ingAddLineAndFocus();
+}
+
+function _ingLineKey(e, n) {
+  var k  = e.key;
+  var id = (e.target && e.target.id) ? e.target.id : '';
+  if (!id) return;
+
+  // Ctrl+Enter / Alt+A → agregar línea desde cualquier campo
+  if ((k === 'Enter' && (e.ctrlKey || e.metaKey)) || ((k === 'a' || k === 'A') && e.altKey)) {
+    e.preventDefault();
+    _ingAddLineAndFocus();
+    return;
+  }
+
+  // Ctrl+Supr → borrar la línea si está vacía (la línea 1 no se borra: es la base)
+  if (k === 'Delete' && e.ctrlKey) {
+    if (n > 1 && _ingLineIsEmpty(n)) {
+      e.preventDefault();
+      var prev = _ingPrevLineNum(n);
+      ingRemoveLine(n);
+      if (prev) setTimeout(function(){ _ingFocusLineField(prev, 0); }, 0);
+    }
+    return;
+  }
+
+  if (k === 'Enter') {
+    // Enter NUNCA hace submit ni recarga: dentro de la tabla solo navega.
+    e.preventDefault();
+    if (id === 'ing-prod-'+n) _ingProdEnterResolve(n);
+    if (id === 'ing-cant-'+n) { _ingAdvanceFromLine(n); return; }
+    // Cualquier otro campo → siguiente campo de la misma línea
+    for (var i = 0; i < _ING_LINE_FIELDS.length - 1; i++) {
+      if (id === _ING_LINE_FIELDS[i] + n) { _ingFocusLineField(n, i+1); return; }
+    }
+    return;
+  }
+
+  // Tab en Cant. de la ÚLTIMA línea → crea la siguiente en vez de salirse de
+  // la tabla. Si la línea está vacía, Tab sale normal (es la puerta de salida).
+  // Shift+Tab siempre navega hacia atrás con el comportamiento nativo.
+  if (k === 'Tab' && !e.shiftKey && id === 'ing-cant-'+n) {
+    if (n === _ingLastLineNum() && !_ingLineIsEmpty(n)) {
+      e.preventDefault();
+      _ingAddLineAndFocus();
+    }
+  }
 }
 
 function ingOpenProdModal(n, isNew) {
@@ -6663,6 +6937,12 @@ var _ING_TOUR = [
   {el:'button[onclick="ingOpenDrawer()"]',
    title:'Registrar operación',
    body:'Abre el formulario de captura: buscas o das de alta al paciente, agregas productos/servicios (con botón ✏ para editar el producto seleccionado o "Nuevo producto" para darlo de alta sin salir de la venta), formas de pago (incluye cálculo automático de comisión si pagan con Mercado Pago) y datos de facturación.'},
+  {el:'button[onclick="ingOpenDrawer()"]',
+   title:'Capturar sin soltar el teclado',
+   body:'Dentro del formulario, los artículos se capturan sin mouse: <b>Enter</b> avanza de campo, y <b>Enter</b> en <b>Cant.</b> (o <b>Tab</b> al final de la última línea) crea la línea siguiente y deja el cursor listo en ella. <b>Ctrl+Enter</b> agrega línea desde donde estés y <b>Ctrl+Supr</b> borra una línea vacía. En el buscador de producto puedes teclear para filtrar y <b>Enter</b> toma la primera coincidencia.'},
+  {el:'button[onclick="ingOpenDrawer()"]',
+   title:'Guardar y capturar otro',
+   body:'Al pie del formulario hay dos botones. <b>Guardar operación</b> guarda y te regresa a la lista, como siempre. <b>Guardar y capturar otro</b> guarda igual pero <b>no te saca</b>: limpia el formulario dejando la <b>Fecha</b> y la <b>forma de pago</b> (lo que se repite en una tanda), y el cursor vuelve al campo de paciente. Los folios que vas guardando aparecen como chips verdes arriba — da clic en uno para abrirlo.'},
   {el:null, before:function(){ ingSwitchTab('facturacion'); },
    title:'Pestaña Facturación',
    body:'Aquí resuelves la pregunta "¿qué ventas ya tienen su factura en regla?". Tiene 3 secciones que se usan en orden: <b>1) Conciliación</b>, <b>2) Documentos faltantes</b> y <b>3) Reporte ContaDigital</b>. Solo analiza el periodo que tengas activo en el filtro Del/Al principal.'},
@@ -6742,6 +7022,28 @@ function ingShowManual(){
     +tr(['Formas de pago','Puedes dividir el cobro en varias formas de pago. Si seleccionas Mercado Pago, calcula automáticamente la comisión de la plataforma antes de guardar'])
     +tr(['Facturación y datos / CFDI','Monto a facturar, moneda, folio, y el panel de ISR declarado (para el cálculo del cierre mensual)'],true)
     +'</tbody></table>'
+
+    +h3('Captura rápida por teclado (artículos)')
+    +p('Las líneas de producto están pensadas para capturarse <b>sin tocar el mouse</b>. El orden del tabulador es Categoría → Producto → P.V.P. → Desc. % → Cant., y los botones de la fila (✏ editar producto, × eliminar) están fuera del recorrido para que no interrumpan.')
+    +'<table style="width:100%;border-collapse:collapse;margin-bottom:14px"><thead><tr style="background:'+S+'">'+th('Atajo')+th('Qué hace')+'</tr></thead><tbody>'
+    +tr([code('Enter'),'Avanza al siguiente campo de la línea'])
+    +tr([code('Enter')+' en Cant.','Baja a la línea siguiente; si estás en la última, crea una nueva y pone el cursor en ella'])
+    +tr([code('Tab')+' en Cant. (última línea)','Igual que Enter: crea la línea siguiente en vez de salirse de la tabla. Si la línea está vacía, Tab sale normal'])
+    +tr([code('Ctrl+Enter')+' / '+code('Alt+A'),'Agrega una línea desde cualquier campo'])
+    +tr([code('Ctrl+Supr'),'Borra la línea si está vacía (la primera nunca se borra)'])
+    +tr([code('Shift+Tab'),'Retrocede, con el comportamiento normal del navegador'],true)
+    +'</tbody></table>'
+    +p('En el buscador de <b>Producto</b> puedes escribir para filtrar: <b>Enter</b> toma la <b>primera coincidencia</b> del catálogo (buscando primero dentro de la categoría elegida) y llena solo el precio de lista del paciente. Si lo que escribiste no coincide con ningún producto, se respeta el texto tal cual.')
+
+    +h3('Guardar y capturar otro')
+    +p('El pie del formulario tiene <b>dos</b> botones de guardado:')
+    +'<table style="width:100%;border-collapse:collapse;margin-bottom:14px"><thead><tr style="background:'+S+'">'+th('Botón')+th('Qué hace')+'</tr></thead><tbody>'
+    +tr(['Guardar operación','Guarda y regresa a la lista de Ingresos. Es el comportamiento de siempre'])
+    +tr(['Guardar y capturar otro','Guarda igual (con su movimiento bancario y su comisión MP), pero <b>no sale de la pantalla</b>: limpia el formulario y lo deja listo para la venta siguiente'],true)
+    +'</tbody></table>'
+    +p('Al capturar otro se <b>conservan la Fecha y la forma de pago</b> — es lo que casi siempre se repite dentro de una tanda — y se limpia todo lo demás (paciente, razón social, artículos, montos, folio, observaciones y checks fiscales). El cursor vuelve solo al campo de <b>Paciente</b>.')
+    +p('Cada folio guardado aparece como un <b>chip verde</b> («Capturados en esta sesión: OP-00123, OP-00124…») en la parte de arriba del formulario, para tener la certeza de que sí se registraron. Da clic en un chip para abrir esa operación (si tienes una captura a medias, te pide confirmación antes de descartarla). Al cerrar la captura, la lista de Ingresos se refresca sola con todo lo de la tanda.')
+    +p('<b>Si el guardado falla</b> (error del servidor o de conexión), el formulario <b>no se limpia</b>: la captura se conserva completa para corregir y reintentar. Este botón no aparece al editar una operación existente, porque ahí no hay tanda que seguir.')
 
     +h2('Pestaña Facturación')
     +p('Reconcilia los XML de facturas emitidas (guardados en Drive) contra tus operaciones de Ingresos. <b>Solo trabaja sobre el rango de fechas Del/Al</b> que tengas activo en el filtro principal de la pantalla — cambia el periodo ahí antes de analizar.')
@@ -6955,7 +7257,14 @@ function _ingCollectPayload() {
   };
 }
 
-async function ingSubmit() {
+/* saveNew=true → "Guardar y capturar otro": al terminar NO se sale de la
+   captura, se limpia el formulario y se queda listo para la siguiente venta.
+   El flag vive a nivel módulo porque el guardado puede pasar por el modal de
+   comisión MP (ingConfirmComision) antes de llegar a _ingSaveAndBank. */
+var _ingSaveNew = false;
+
+async function ingSubmit(saveNew) {
+  _ingSaveNew = !!saveNew && !_ingEditMode;   // en edición no aplica
   var payload = _ingCollectPayload();
   if (!payload) return;
 
@@ -7046,8 +7355,7 @@ async function ingConfirmComision() {
 }
 
 async function _ingSaveAndBank(payload, comisionMP) {
-  var btn = document.getElementById('ing-save-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+  _ingSaveBtnsBusy(true);
 
   try {
     // 1. Guardar ingreso en BD_Ingresos
@@ -7070,20 +7378,21 @@ async function _ingSaveAndBank(payload, comisionMP) {
           r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(payload)});
           res = await r.json();
         } else {
-          if (btn) { btn.disabled = false; btn.textContent = 'Guardar operación'; }
+          _ingSaveBtnsBusy(false);
           return;
         }
       } else {
         alert('No se puede guardar:\n\n' + (res.error || '')
           + '\n\nSi el monto es correcto, pide a un autorizado (permiso «autorizar_credito_excedido») que lo apruebe.');
-        if (btn) { btn.disabled = false; btn.textContent = 'Guardar operación'; }
+        _ingSaveBtnsBusy(false);
         return;
       }
     }
 
     if (!res.ok) {
+      // Falló: NO se limpia nada — la captura se conserva tal cual para corregir.
       alert('Error guardando ingreso: ' + (res.error || 'No se pudo guardar'));
-      if (btn) { btn.disabled = false; btn.textContent = 'Guardar operación'; }
+      _ingSaveBtnsBusy(false);
       return;
     }
     if (res.warn) alert('⚠️ ' + res.warn);
@@ -7091,7 +7400,7 @@ async function _ingSaveAndBank(payload, comisionMP) {
     // 2. Auto-registrar movimiento bancario (solo operaciones nuevas, no ediciones)
     _swrDel('ingresos'); // invalidar caché para que recargue datos frescos
     if (payload.action === 'updateIngreso' || payload.action === 'updateIngresoConBancos') {
-      ingCloseDrawer();
+      ingCloseDrawer(true);
       loadIngresosERP();
       return;
     }
@@ -7157,12 +7466,21 @@ async function _ingSaveAndBank(payload, comisionMP) {
     if (res.saldoGenerado && res.saldoGenerado > 0.5) {
       _ingAvisoCxC(res.paciente || payload.paciente || '', res.op || '', res.saldoGenerado);
     }
-    // 5. Cerrar y refrescar
-    ingCloseDrawer();
+    // 5. "Guardar y capturar otro": quedarse en la captura, lista para la
+    //    siguiente venta. OJO: NO se llama loadIngresosERP() aquí — re-renderiza
+    //    #view-ingresos, que CONTIENE este drawer, y lo destruiría a media
+    //    captura. La lista se refresca sola al cerrar (ver ingCloseDrawer).
+    if (_ingSaveNew) {
+      _ingResetForNext(res.op || '');
+      return;
+    }
+    // 6. Cerrar y refrescar
+    ingCloseDrawer(true);
     loadIngresosERP();
   } catch(e) {
+    // Falló la conexión: NO se limpia nada — la captura se conserva.
     alert('Error de conexión: ' + e.message);
-    if (btn) { btn.disabled = false; btn.textContent = 'Guardar operación'; }
+    _ingSaveBtnsBusy(false);
   }
 }
 
@@ -32489,16 +32807,18 @@ setTimeout(novCheckPopup, 2500);
   },
 
   { id:'ingresos', group:'operacion', icon:'💵', title:'Ingresos (captura y pago parcial)',
-    keywords:'ingresos venta captura cobro pago mixto multipago mercado pago comision factura banco pago parcial cuenta por cobrar nota credito producto',
+    keywords:'ingresos venta captura cobro pago mixto multipago mercado pago comision factura banco pago parcial cuenta por cobrar nota credito producto teclado atajos enter tab agregar linea captura rapida guardar y capturar otro tanda folios sesion',
     intro:'**Ingresos** es donde se captura cada venta/cobro a paciente. Cada operación (OP) puede tener varias líneas de producto y **varias formas de pago**, cada una ruteada a su banco. Incluye una pestaña de **Facturación** para conciliar los CFDI contra las ventas.',
     pasos:[
       'Abre **Ingresos → + Nuevo** (formulario estilo Odoo).',
-      'Elige el/los **productos** (salen del catálogo `BD_Productos`) con cantidad y precio; captura al paciente.',
+      'Elige el/los **productos** (salen del catálogo `BD_Productos`) con cantidad y precio; captura al paciente. Las líneas se capturan **sin mouse**: `Enter` avanza de campo y `Enter` en **Cant.** (o `Tab` al final de la última línea) crea la línea siguiente.',
       'Registra la(s) **forma(s) de pago**. Si son varias (pago mixto), cada monto se rutea a su banco (Santander, AMEX, Mercado Pago, Caja Chica…). Si es **Mercado Pago**, se pide la **comisión** en un modal.',
       'Si el paciente paga **menos del total** (pago parcial), el sistema te avisa antes de guardar y la diferencia queda como **cuenta por cobrar** (aparece en Cobranza). No se pierde el rastro.',
-      'Guarda. El movimiento bancario se crea automáticamente y queda listo para conciliar.'
+      'Guarda con **Guardar operación** (regresa a la lista) o con **Guardar y capturar otro** (se queda en la captura para la siguiente venta). El movimiento bancario se crea automáticamente y queda listo para conciliar.'
     ],
     bloques:[
+      { h:'Atajos de teclado en los artículos', p:'La tabla de productos se captura sin soltar el teclado. Orden del tabulador: **Categoría → Producto → P.V.P. → Desc. % → Cant.** (los botones ✏ y × de la fila quedan fuera del recorrido).\n\n· `Enter` → siguiente campo.\n· `Enter` en **Cant.** → baja a la línea siguiente; en la última, **crea una nueva** y enfoca su primer campo.\n· `Tab` en **Cant.** de la última línea → igual que Enter (el tabulador no se sale de la tabla a media captura). Si la línea está vacía, `Tab` sale normal: esa es la puerta de salida.\n· `Ctrl+Enter` o `Alt+A` → agrega línea desde cualquier campo.\n· `Ctrl+Supr` → borra la línea si está vacía.\n\nEn el buscador de **Producto**, escribe para filtrar y `Enter` toma la **primera coincidencia** (busca primero dentro de la categoría elegida).' },
+      { h:'Guardar y capturar otro', p:'Botón secundario al pie del formulario, para capturar **en tanda** sin volver a la lista entre venta y venta.\n\nGuarda exactamente igual que «Guardar operación» (mismo movimiento bancario, misma comisión MP, mismo aviso de cuenta por cobrar), pero **no sale de la pantalla**: limpia el formulario **conservando la Fecha y la forma de pago** — lo que se repite en una tanda — y devuelve el cursor al campo de **Paciente**.\n\nLos folios guardados se van listando como **chips verdes** («Capturados en esta sesión») arriba del formulario; dando clic se abre esa operación. Al cerrar la captura, la lista de Ingresos se refresca sola.\n\n**Si el guardado falla, el formulario NO se limpia** — la captura se conserva para corregir y reintentar. El botón no aparece en modo edición.' },
       { h:'Pago parcial → Cuenta por Cobrar', p:'`saveIngreso` reparte el pago real por líneas; si `Pagado < Total`, el saldo se **registra** en la hoja `Cuentas_Cobrar` (llama `_cobRegistrarSaldoIngreso`) y devuelve `saldoGenerado`. El frontend confirma antes de guardar y muestra el aviso `_ingAvisoCxC`. Pago completo = igual que siempre.' },
       { h:'Pago mixto', p:'El desglose de pagos vive en la columna dinámica `PagosDetalle` (JSON `[{fp,monto}]`) de la primera línea de la OP. La lista muestra «FP1 + FP2»; al editar o borrar, el reverso bancario reversa **cada** forma por su monto.' },
       { h:'Facturación (pestaña dentro de Ingresos)', p:'Concilia los XML de Drive contra `BD_Ingresos` por folio/nombre/monto, detecta duplicados, permite subir un XML suelto y asignarlo a una OP, y genera el reporte **ContaDigital** (Ya facturado / Pendiente por facturar). Cualquier lector por OP fusiona los campos de **todas** las líneas (Factura#/URL puede vivir en una línea que no es la primera).' }
@@ -33648,14 +33968,17 @@ setTimeout(novCheckPopup, 2500);
       { k:'🗑 (en la fila)', d:'Borra la operación y revierte su movimiento bancario (pide confirmar).' },
       { k:'Campo «Núm. factura» (en la fila)', d:'Captura el folio de la factura de esa venta.' },
       { k:'Ver factura', d:'Aparece cuando ya está vinculada: abre el XML/PDF.' },
-      { k:'+ producto / línea (dentro del formulario)', d:'Agrega otra línea a la misma venta.' },
-      { k:'Guardar (formulario)', d:'Registra la venta y crea el movimiento bancario.' },
+      { k:'+ producto / línea (dentro del formulario)', d:'Agrega otra línea a la misma venta. Con el teclado: Enter en Cant. (o Tab al final de la última línea) crea la siguiente; Ctrl+Enter agrega desde cualquier campo.' },
+      { k:'Guardar operación (formulario)', d:'Registra la venta, crea el movimiento bancario y regresa a la lista.' },
+      { k:'Guardar y capturar otro (formulario)', d:'Guarda igual, pero se queda en la captura: limpia el formulario dejando Fecha y forma de pago, y enfoca el campo de paciente. Los folios de la tanda salen como chips verdes arriba.' },
       { k:'🔗 Vincular todo automáticamente (pestaña Facturación)', d:'Liga de un jalón los folios ya localizados y las sugerencias sin ambigüedad.' }
     ],
     ejemplo:'Paciente con total **$30,000** que abona **$18,000** en Santander: al guardar sale «se generará un saldo de **$12,000**». Ese saldo aparece luego en **Cuentas por Cobrar** del paciente.',
     tips:[
       '**Nota de Crédito** como forma de pago NO rutea a banco (es descuento no fiscal), pero SÍ consume el crédito a favor del paciente.',
-      'Antes de vincular una factura, compara el total de la operación contra el del XML: si no coinciden, el folio capturado probablemente no es el correcto.'
+      'Antes de vincular una factura, compara el total de la operación contra el del XML: si no coinciden, el folio capturado probablemente no es el correcto.',
+      'Para capturar **en tanda**: usa **Guardar y capturar otro** y no sueltes el teclado — `Enter` avanza de campo, `Enter` en **Cant.** abre la línea siguiente, `Ctrl+Enter` agrega línea y `Ctrl+Supr` borra la vacía. La Fecha y la forma de pago se conservan entre venta y venta.',
+      'En el buscador de producto no hace falta el nombre exacto: escribe un pedazo y `Enter` toma la primera coincidencia de la categoría elegida.'
     ],
     tech:{ hojas:['`BD_Ingresos` (INGRESOS_SS_ID): col C=Fecha, col 5=Producto, col 10=TotalPagar, col 11=Pagado, col U(20)=Grupo/línea, `PagosDetalle` (JSON multipago)','`BD_Productos`/`BD_Precios` (PRODUCTOS_SS_ID = 1eXsk…DdIAY) alimentan el dropdown de venta'],
       funciones:['saveIngreso','updateIngresoConBancos','_ingTodosProductos','readProductos','_cobRegistrarSaldoIngreso','_bankMpComisionDeOp','ingEditOp','ingDeleteOp'],
