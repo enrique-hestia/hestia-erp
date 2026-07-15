@@ -4548,7 +4548,28 @@ function updateIngreso(payload) {
     } catch(ae) {}
 
     try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch(e) {}
-    return {ok:true, op:opId, lineas:rows.length, total:totalOP, edited:true};
+
+    // ── Diferencia de pago al EDITAR → Cuenta por Cobrar (idempotente por OP) ──
+    // Si el nuevo total supera lo pagado, la diferencia se vuelve un adeudo del
+    // paciente (upsert del renglón auto-ingreso: editar de nuevo NO apila otro).
+    // Si ahora se pagó de más (nuevoTotal < pagado) se marca saldo a favor: solo
+    // se informa (NO se hace devolución automática) y se cierra cualquier adeudo.
+    // Solo actúa cuando el formulario mandó 'pagado' (si no vino, no inventamos deuda).
+    var _pagadoDefUpd = (payload.pagado !== undefined && payload.pagado !== null && String(payload.pagado) !== '');
+    var _saldoGenUpd = 0, _saldoFavorUpd = 0;
+    if (_pagadoDefUpd) {
+      _saldoGenUpd   = Math.max(0, totalOP - totalPagadoForm);
+      _saldoFavorUpd = Math.max(0, totalPagadoForm - totalOP);
+      if (typeof _cobRegistrarSaldoIngreso === 'function') {
+        try { _cobRegistrarSaldoIngreso(opId, paciente, (lineas[0] && lineas[0].categoria) || '', _saldoGenUpd, fecha); } catch (eAR) {}
+      }
+    }
+    // Recalcula la partida de comisiones MP del mes (por si cambió el monto).
+    try { _egRecalcComisionesMPFecha(fecha, ''); } catch(_mp) {}
+
+    return {ok:true, op:opId, lineas:rows.length, total:totalOP, edited:true,
+            pagado: _pagadoDefUpd ? totalPagadoForm : null,
+            saldoGenerado: _saldoGenUpd, saldoAFavor: _saldoFavorUpd};
   } catch(ex) {
     return {ok:false, error:ex.message};
   }
