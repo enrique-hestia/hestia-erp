@@ -2315,20 +2315,25 @@ function desvincularLinkMP(body) {
 // Inicializa la hoja de ligas MP (idempotente).
 function setupConciliacionMP() { _mpEnsureSheet(); return { ok: true, version: COBRANZA_MP_VER, tab: COBRANZA_MP }; }
 
-/* ════════════════════ Traducción de textos dinámicos ════════════════════
- * Traduce descripciones de servicio (español → idioma destino) para la
- * Carta de Seguro / Insurance Reimbursement Letter, de modo que la carta
- * NO muestre nombres de productos en español dentro de una carta en inglés.
+/* ════════════════════ SUGERIDOR de traducciones ═════════════════════════
+ * ⚠ ESTO YA NO ES LA AUTORIDAD. Solo SUGIERE.
+ *
+ * La traducción con la que se imprime un documento vive en el CATÁLOGO
+ * (BD_Productos, columna Descripcion_<LANG> — ver traducciones.gs). Esta
+ * función solo propone un texto para que un humano lo confirme o corrija
+ * al capturar el producto o desde la pantalla de bloqueo de impresión.
  *
  *   traducirTextos({ lang:'en'|'fr'|'pt', textos:[...] | '["..",".."]' })
- *     → { ok:true, lang, textos:{ original: traducido, ... } }
+ *     → { ok:true, lang, textos:{ original: sugerencia, ... }, faltan:[...] }
  *
- * - Mapa curado (SEG_TRAD_OVERRIDES) para términos de fertilidad, para que
- *   la terminología médica quede correcta (LanguageApp a veces la falla).
- * - Cache en CacheService (6 h) por texto normalizado + idioma → menos
- *   llamadas a LanguageApp y respuesta instantánea en repeticiones.
- * - Batch: procesa toda la lista en una sola llamada.
- * - Nunca lanza: si algo falla, devuelve el texto original (no bloquea).
+ * - `textos` trae SOLO lo que se pudo traducir de verdad.
+ * - `faltan` trae lo que NO se pudo: el llamador debe pedirle al humano que
+ *   lo escriba. NUNCA se devuelve el español como si fuera traducción — ese
+ *   passthrough mudo era la causa de las cartas mitad inglés / mitad español.
+ * - SEG_TRAD_OVERRIDES: términos de fertilidad curados a mano. Hoy sirven de
+ *   SEMILLA del catálogo (migrarTraduccionesProductos) y de sugerencia; ya no
+ *   deciden lo que se imprime.
+ * - Cache en CacheService (6 h) por texto normalizado + idioma.
  */
 var SEG_TRAD_OVERRIDES = {
   en: {
@@ -2421,11 +2426,18 @@ function traducirTextos(body) {
     if (typeof textos === 'string') { try { textos = JSON.parse(textos); } catch (e) { textos = textos ? [textos] : []; } }
     if (!textos || !textos.length) return { ok: true, lang: lang, textos: {} };
 
-    var out = {};
-    // Español o idioma no soportado por el traductor → passthrough (texto original).
-    if (lang === 'es' || (lang !== 'en' && lang !== 'fr' && lang !== 'pt')) {
+    var out = {}, faltan = [];
+    // Español: el texto original YA está en español, no hay nada que traducir.
+    if (lang === 'es') {
       for (var p = 0; p < textos.length; p++) out[textos[p]] = textos[p];
-      return { ok: true, lang: lang, textos: out };
+      return { ok: true, lang: lang, textos: out, faltan: [] };
+    }
+    // Idioma que el traductor no soporta: se dice, NO se devuelve el español
+    // haciéndolo pasar por traducción. Un passthrough mudo aquí es exactamente
+    // lo que producía cartas en inglés con los servicios en español.
+    if (lang !== 'en' && lang !== 'fr' && lang !== 'pt') {
+      return { ok: false, lang: lang, error: 'Idioma no soportado por el sugeridor: ' + lang,
+               textos: {}, faltan: textos.slice() };
     }
 
     var over = SEG_TRAD_OVERRIDES[lang] || {};
@@ -2445,14 +2457,20 @@ function traducirTextos(body) {
     }
 
     // Traduce los pendientes (uno por uno; LanguageApp no admite lote real).
+    // Si LanguageApp falla o devuelve vacío, el texto NO se resuelve: se reporta
+    // en `faltan`. ANTES se hacía `if (!tr) tr = pend[j]`, que devolvía el
+    // español disfrazado de traducción y el documento salía mitad y mitad sin
+    // que nadie se enterara. Ese fallback mudo se eliminó a propósito.
     for (var j = 0; j < pend.length; j++) {
       var tr = '';
       try { tr = LanguageApp.translate(pend[j], 'es', lang); } catch (e2) { tr = ''; }
-      if (!tr) tr = pend[j];
+      tr = String(tr || '').trim();
+      // Si el traductor devuelve exactamente lo mismo que entró, no tradujo nada.
+      if (!tr || _segTrNorm(tr) === _segTrNorm(pend[j])) { faltan.push(pend[j]); continue; }
       out[pend[j]] = tr;
       if (cache) { try { cache.put(pendKey[j], tr, 21600); } catch (e3) {} }
     }
-    return { ok: true, lang: lang, textos: out };
+    return { ok: true, lang: lang, textos: out, faltan: faltan };
   } catch (ex) {
     return { ok: false, error: ex.message };
   }
