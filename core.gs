@@ -463,6 +463,19 @@ function doGet(e) {
       if (typeof readBonos !== 'function') return jsonResponse({ ok: false, error: 'nomina.gs no desplegado — redespliega core.gs/finance.gs/nomina.gs' });
       return jsonResponse(readBonos((e && e.parameter.anio) || '', (e && e.parameter.mes) || ''));
     }
+    // ── Nómina F5: periodos (semanal/quincenal/mensual), captura y SBC ──
+    if (action === 'nominaPeriodos') {
+      if (typeof readNominaPeriodos !== 'function') return jsonResponse({ ok: false, error: 'nomina.gs (F5) no desplegado — redespliega core.gs/finance.gs/nomina.gs y corre setupNominaPeriodos()' });
+      return jsonResponse(readNominaPeriodos((e && e.parameter.anio) || '', (e && e.parameter.tipo) || ''));
+    }
+    if (action === 'nominaCaptura') {
+      if (typeof readNominaCaptura !== 'function') return jsonResponse({ ok: false, error: 'nomina.gs (F5) no desplegado — redespliega core.gs/finance.gs/nomina.gs y corre setupNominaPeriodos()' });
+      return jsonResponse(readNominaCaptura((e && e.parameter.periodoId) || ''));
+    }
+    if (action === 'nominaSBC') {
+      if (typeof readNominaSBC !== 'function') return jsonResponse({ ok: false, error: 'nomina.gs (F5) no desplegado — redespliega core.gs/finance.gs/nomina.gs y corre setupNominaPeriodos()' });
+      return jsonResponse(readNominaSBC((e && e.parameter.anio) || ''));
+    }
 
     if (action === 'buscarXmlAmplio') {
       var baIni = (e && e.parameter.fechaInicio) || '';

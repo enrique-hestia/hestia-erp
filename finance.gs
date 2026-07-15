@@ -686,6 +686,35 @@ function doPost(e) {
       if (typeof deleteBono !== 'function') return jsonResponse({ok:false, error:'Agrega/actualiza nomina.gs en Apps Script y redespliega.'});
       return jsonResponse(deleteBono(body));
     }
+    // ── Nómina F5: periodos, captura por empleado×periodo, conciliación XML, SBC ──
+    if (body.action === 'nominaGenerarPeriodos') {
+      if (typeof nominaGenerarPeriodos !== 'function') return jsonResponse({ok:false, error:'Actualiza nomina.gs (F5) en Apps Script, redespliega y corre setupNominaPeriodos().'});
+      return jsonResponse(nominaGenerarPeriodos(body));
+    }
+    if (body.action === 'nominaPeriodoSave') {
+      if (typeof nominaPeriodoSave !== 'function') return jsonResponse({ok:false, error:'Actualiza nomina.gs (F5) en Apps Script, redespliega y corre setupNominaPeriodos().'});
+      return jsonResponse(nominaPeriodoSave(body));
+    }
+    if (body.action === 'nominaPeriodoEstatus') {
+      if (typeof nominaPeriodoEstatus !== 'function') return jsonResponse({ok:false, error:'Actualiza nomina.gs (F5) en Apps Script, redespliega y corre setupNominaPeriodos().'});
+      return jsonResponse(nominaPeriodoEstatus(body));
+    }
+    if (body.action === 'saveNominaCaptura') {
+      if (typeof saveNominaCaptura !== 'function') return jsonResponse({ok:false, error:'Actualiza nomina.gs (F5) en Apps Script, redespliega y corre setupNominaPeriodos().'});
+      return jsonResponse(saveNominaCaptura(body));
+    }
+    if (body.action === 'nominaConciliarPeriodo') {
+      if (typeof nominaConciliarPeriodo !== 'function') return jsonResponse({ok:false, error:'Actualiza nomina.gs (F5) en Apps Script, redespliega y corre setupNominaPeriodos().'});
+      return jsonResponse(nominaConciliarPeriodo(body));
+    }
+    if (body.action === 'nominaValidarPeriodo') {
+      if (typeof nominaValidarPeriodo !== 'function') return jsonResponse({ok:false, error:'Actualiza nomina.gs (F5) en Apps Script, redespliega y corre setupNominaPeriodos().'});
+      return jsonResponse(nominaValidarPeriodo(body));
+    }
+    if (body.action === 'saveNominaSBC') {
+      if (typeof saveNominaSBC !== 'function') return jsonResponse({ok:false, error:'Actualiza nomina.gs (F5) en Apps Script, redespliega y corre setupNominaPeriodos().'});
+      return jsonResponse(saveNominaSBC(body));
+    }
     // Tareas programadas (scheduler)
     if (body.action === 'updateScheduledTask')     return jsonResponse(updateScheduledTask(body));
     if (body.action === 'setupScheduledTriggers')  return jsonResponse(setupScheduledTriggers());

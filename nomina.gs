@@ -38,7 +38,72 @@ function _nominaCfgDefault() {
     isnSubsidio: false,     // subsidio CDMX para empresas pequeñas (baja la tasa)
     isnSubsidioPct: 1,      // puntos de reducción: 1 (micro ≤10) | 0.5 (pequeña 11–50)
     cxpProveedor: 'Nómina',  // proveedor/beneficiario en Cuentas por Pagar
-    cxpCuentaContable: 'Sueldos y salarios'
+    cxpCuentaContable: 'Sueldos y salarios',
+
+    // ── Estimado de deducciones (F5) ────────────────────────────────────
+    // NO es un motor fiscal. El despacho timbra; el CFDI trae la verdad. Esto
+    // sólo sirve para VER el neto aproximado antes de timbrar, y siempre se
+    // rotula como "estimado" en la UI. Cuando llega el XML, el real lo pisa.
+    estimModo: 'historico',  // 'historico' (ratio real del propio empleado) | 'pct' (fijo)
+    estimIsrPct: 10,         // % indicativo sobre percepciones — AJÚSTALO a tu realidad
+    estimImssPct: 2.5,       // % indicativo sobre percepciones — AJÚSTALO a tu realidad
+    periodicidadDefault: 'quincenal', // si el empleado no la tiene fijada
+
+    // ── Exentos configurables (F5-D) ────────────────────────────────────
+    // Los topes en UMA cambian cada año → viven aquí, NO en el código. El ERP no
+    // aplica reglas fiscales por su cuenta: mientras topeUMA sea 0 el concepto se
+    // muestra como "sin configurar" y no se calcula nada.
+    umaPorAnio: {},          // {'2026': 113.14} — lo fija el usuario
+    exentos: [
+      { clave: 'despensa',    concepto: 'Despensa',          topeUMA: 0, base: 'periodo', notas: '' },
+      { clave: 'primaVac',    concepto: 'Prima vacacional',  topeUMA: 0, base: 'anual',   notas: '' },
+      { clave: 'aguinaldo',   concepto: 'Aguinaldo',         topeUMA: 0, base: 'anual',   notas: '' },
+      { clave: 'gasolina',    concepto: 'Vales de gasolina', topeUMA: 0, base: 'periodo', notas: '' },
+      { clave: 'fondoAhorro', concepto: 'Fondo de ahorro',   topeUMA: 0, base: 'anual',   notas: '' },
+      { clave: 'prevSocial',  concepto: 'Previsión social',  topeUMA: 0, base: 'anual',   notas: '' }
+    ],
+
+    // ── Catálogo de conceptos (F5-2/3) ──────────────────────────────────
+    // Nombres tomados del catálogo CFDI de nómina para que EMPATEN con el XML
+    // al conciliar. Es CONFIGURABLE: el usuario agrega los que falten sin tocar
+    // código. `flag` es sólo una etiqueta (G=gravado, E=exento, PS=previsión
+    // social, ''=lo define el despacho); NO dispara ningún cálculo aquí — el
+    // gravado/exento exacto llega del CFDI.
+    conceptos: [
+      { clave: 'sueldo',      concepto: 'Sueldo',                      grupo: 'percepcion', flag: 'G',  activo: true },
+      { clave: 'bono',        concepto: 'Bono',                        grupo: 'percepcion', flag: 'G',  activo: true },
+      { clave: 'bonoProd',    concepto: 'Bono de Productividad',       grupo: 'percepcion', flag: 'G',  activo: true },
+      { clave: 'premioAsis',  concepto: 'Premio de asistencia',        grupo: 'percepcion', flag: 'G',  activo: true },
+      { clave: 'premioPunt',  concepto: 'Premio de puntualidad',       grupo: 'percepcion', flag: 'G',  activo: true },
+      { clave: 'comisiones',  concepto: 'Comisiones',                  grupo: 'percepcion', flag: 'G',  activo: true },
+      { clave: 'despensa',    concepto: 'Despensa',                    grupo: 'percepcion', flag: 'PS', activo: true },
+      { clave: 'gasolina',    concepto: 'Vales de gasolina',           grupo: 'percepcion', flag: 'PS', activo: true },
+      { clave: 'restaurante', concepto: 'Vales de restaurante',        grupo: 'percepcion', flag: 'PS', activo: true },
+      { clave: 'transporte',  concepto: 'Transporte',                  grupo: 'percepcion', flag: 'PS', activo: true },
+      { clave: 'fondoAhorro', concepto: 'Fondo de ahorro',             grupo: 'percepcion', flag: 'PS', activo: true },
+      { clave: 'prevSocial',  concepto: 'Previsión social',            grupo: 'percepcion', flag: 'PS', activo: true },
+      { clave: 'primaVac',    concepto: 'Prima vacacional',            grupo: 'percepcion', flag: '',   activo: true },
+      { clave: 'vacPagadas',  concepto: 'Días de vacaciones pagadas',  grupo: 'percepcion', flag: '',   activo: true },
+      { clave: 'aguinaldo',   concepto: 'Aguinaldo',                   grupo: 'percepcion', flag: '',   activo: true },
+      { clave: 'hrExtraDob',  concepto: 'Horas extras dobles',         grupo: 'percepcion', flag: '',   activo: true },
+      { clave: 'hrExtraTri',  concepto: 'Horas extras triples',        grupo: 'percepcion', flag: '',   activo: true },
+      { clave: 'primaDom',    concepto: 'Prima dominical',             grupo: 'percepcion', flag: '',   activo: true },
+      { clave: 'diasFest',    concepto: 'Días festivos',               grupo: 'percepcion', flag: '',   activo: true },
+      { clave: 'isr',         concepto: 'ISR',                         grupo: 'deduccion',  flag: '',   activo: true },
+      { clave: 'subsEmpleo',  concepto: 'Subsidio para el empleo',     grupo: 'deduccion',  flag: '',   activo: true },
+      { clave: 'imss',        concepto: 'IMSS',                        grupo: 'deduccion',  flag: '',   activo: true },
+      { clave: 'infonavit',   concepto: 'INFONAVIT',                   grupo: 'deduccion',  flag: '',   activo: true },
+      { clave: 'prestamos',   concepto: 'PRESTAMOS',                   grupo: 'deduccion',  flag: '',   activo: true },
+      { clave: 'fonacot',     concepto: 'FONACOT',                     grupo: 'deduccion',  flag: '',   activo: true },
+      { clave: 'pensionAlim', concepto: 'PENSION ALIMENTICIA',         grupo: 'deduccion',  flag: '',   activo: true },
+      { clave: 'anticipos',   concepto: 'ANTICIPO SUELDOS',            grupo: 'deduccion',  flag: '',   activo: true },
+      { clave: 'cajaAhorro',  concepto: 'CAJA DE AHORRO',              grupo: 'deduccion',  flag: '',   activo: true },
+      { clave: 'cuotaSind',   concepto: 'CUOTA SINDICAL',              grupo: 'deduccion',  flag: '',   activo: true },
+      { clave: 'fondoAhorroD',concepto: 'FONDO DE AHORRO',             grupo: 'deduccion',  flag: '',   activo: true },
+      { clave: 'incapacidad', concepto: 'Descuento por incapacidad',   grupo: 'deduccion',  flag: '',   activo: true },
+      { clave: 'ausentismo',  concepto: 'Ausencia (Ausentismo)',       grupo: 'deduccion',  flag: '',   activo: true },
+      { clave: 'otrosDesc',   concepto: 'OTROS DESCUENTOS',            grupo: 'deduccion',  flag: '',   activo: true }
+    ]
   };
 }
 function _nominaCfg() {
@@ -95,9 +160,11 @@ function setupNominaBook() {
 
 // ── Catálogo de Empleados (hoja "Empleados" en el libro de Nómina) ──────
 var NOM_EMP_TAB = 'Empleados';
+// 'Departamento' es el "Área" de la hoja del usuario (lo llena también el CFDI).
+// 'FechaNacimiento' se agrega en F5 (append-safe: _nomEmpSheet añade lo que falte).
 var NOM_EMP_HEADERS = [
   'NumEmpleado', 'Nombre', 'RFC', 'CURP', 'NSS', 'Puesto', 'Departamento',
-  'FechaIngreso', 'SalarioDiario', 'SBC', 'Periodicidad', 'Tipo',
+  'FechaIngreso', 'FechaNacimiento', 'SalarioDiario', 'SBC', 'Periodicidad', 'Tipo',
   'Banco', 'CLABE', 'UsuarioEmail', 'Activo', 'Notas'
 ];
 function _nomEmpSheet() {
@@ -128,7 +195,9 @@ function readEmpleados() {
       for (var c = 0; c < h.length; c++) o[String(h[c])] = data[i][c];
       if (!o.NumEmpleado && !o.Nombre) continue;
       if (o.FechaIngreso instanceof Date) o.FechaIngreso = Utilities.formatDate(o.FechaIngreso, Session.getScriptTimeZone() || 'America/Mexico_City', 'yyyy-MM-dd');
+      if (o.FechaNacimiento instanceof Date) o.FechaNacimiento = Utilities.formatDate(o.FechaNacimiento, Session.getScriptTimeZone() || 'America/Mexico_City', 'yyyy-MM-dd');
       o.Activo = (String(o.Activo).toLowerCase() !== 'no' && String(o.Activo).toLowerCase() !== 'false' && o.Activo !== false);
+      o.Periodicidad = _nomPeriodicidadNorm(o.Periodicidad);
       o.diasVacaciones = _nomDiasVacaciones(_nomAntiguedadAnios(o.FechaIngreso));
       out.push(o);
     }
@@ -772,4 +841,784 @@ function nominaValidarMes(body) {
     return { ok: true, periodo: per, creadas: creadas, duplicadas: dups, totalNeto: totalNeto,
       numEmpleados: data.empleados.length, bonosTotal: bonos.total, detalle: detalle };
   } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * F5 — Periodos de nómina (semanal/quincenal/mensual, MIXTO por empleado),
+ * captura por empleado×periodo, exentos configurables y control de SBC.
+ *
+ * Qué NO es: un motor fiscal. El despacho del usuario timbra. Aquí el ISR/IMSS
+ * que se muestra antes de timbrar es un ESTIMADO rotulado como tal; cuando llega
+ * el CFDI (_nomParseCfdi / readNominaMes) el dato REAL lo reemplaza y se calcula
+ * la Diferencia. En reportes MANDA el real.
+ *
+ * Hojas nuevas (libro NOMINA_SS_ID, se crean solas al primer uso):
+ *   - "Nomina_Periodos" : PeriodoID | Tipo | FechaInicio | FechaFin | FechaPago |
+ *                         Estatus | Notas | CreadoEn | CreadoPor
+ *   - "Nomina_Captura"  : una fila por empleado × periodo (percepciones + estimado
+ *                         + real del CFDI + diferencia + pago)
+ *   - "Nomina_SBC"      : SBC por empleado y bimestre + casilla "Presentado"
+ *
+ * Rutas (registrar en core.gs GET / finance.gs POST):
+ *   GET  nominaPeriodos&anio=&tipo=        → readNominaPeriodos(anio, tipo)
+ *   GET  nominaCaptura&periodoId=          → readNominaCaptura(periodoId)
+ *   GET  nominaSBC&anio=                   → readNominaSBC(anio)
+ *   POST nominaGenerarPeriodos {token, anio, tipo}
+ *   POST nominaPeriodoSave     {token, periodo}
+ *   POST nominaPeriodoEstatus  {token, periodoId, estatus}
+ *   POST saveNominaCaptura     {token, periodoId, filas}
+ *   POST nominaConciliarPeriodo{token, periodoId}
+ *   POST nominaValidarPeriodo  {token, periodoId, forzar}
+ *   POST saveNominaSBC         {token, anio, bimestre, numEmpleado, sbc, presentado, notas}
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+var NOM_PERIODICIDADES = ['semanal', 'quincenal', 'mensual'];
+var NOM_SBC_BIMESTRES = 6; // IMSS: 6 bimestres al año (ene-feb … nov-dic)
+
+function _nom2(n) { n = parseInt(n, 10) || 0; return (n < 10 ? '0' : '') + n; }
+function _nomD2S(d) { return d.getFullYear() + '-' + _nom2(d.getMonth() + 1) + '-' + _nom2(d.getDate()); }
+function _nomNum(v) { var x = parseFloat(String(v == null ? 0 : v).replace(/[$,\s]/g, '')); return isNaN(x) ? 0 : x; }
+function _nomPeriodicidadNorm(v) {
+  var s = String(v || '').trim().toLowerCase();
+  if (s.indexOf('quincen') > -1 || s === 'q' || s === '15') return 'quincenal';
+  if (s.indexOf('seman') > -1 || s === 's' || s === '7') return 'semanal';
+  if (s.indexOf('mens') > -1 || s === 'm' || s === '30') return 'mensual';
+  return ''; // vacío = usa el default de config
+}
+// Días nominales que paga cada periodicidad (para sembrar el sueldo base).
+function _nomDiasPeriodicidad(tipo) {
+  tipo = _nomPeriodicidadNorm(tipo);
+  if (tipo === 'semanal') return 7;
+  if (tipo === 'mensual') return 30;
+  return 15; // quincenal
+}
+function _nomCfgSafe() { try { return _nominaCfg(); } catch (e) { return _nominaCfgDefault(); } }
+
+// ── A. Generador de periodos ───────────────────────────────────────────
+// Devuelve (sin escribir) todos los periodos de un tipo para un año.
+//  - mensual   : MEN-2026-01 … MEN-2026-12  (día 1 → último del mes)
+//  - quincenal : QNA-2026-01-1 (1–15) y QNA-2026-01-2 (16–fin) → 24 al año
+//  - semanal   : SEM-2026-01 … lunes→domingo, arrancando en el lunes de la
+//                semana que contiene el 1-ene (cobertura completa, sin traslape)
+function _nomGenPeriodos(tipo, anio) {
+  anio = parseInt(anio, 10);
+  tipo = _nomPeriodicidadNorm(tipo);
+  var out = [];
+  if (!anio || !tipo) return out;
+  if (tipo === 'mensual') {
+    for (var m = 1; m <= 12; m++) {
+      var ini = new Date(anio, m - 1, 1), fin = new Date(anio, m, 0);
+      out.push({ periodoId: 'MEN-' + anio + '-' + _nom2(m), tipo: 'mensual',
+        fechaInicio: _nomD2S(ini), fechaFin: _nomD2S(fin), fechaPago: _nomD2S(fin) });
+    }
+    return out;
+  }
+  if (tipo === 'quincenal') {
+    for (var q = 1; q <= 12; q++) {
+      var f15 = new Date(anio, q - 1, 15), fm = new Date(anio, q, 0);
+      out.push({ periodoId: 'QNA-' + anio + '-' + _nom2(q) + '-1', tipo: 'quincenal',
+        fechaInicio: _nomD2S(new Date(anio, q - 1, 1)), fechaFin: _nomD2S(f15), fechaPago: _nomD2S(f15) });
+      out.push({ periodoId: 'QNA-' + anio + '-' + _nom2(q) + '-2', tipo: 'quincenal',
+        fechaInicio: _nomD2S(new Date(anio, q - 1, 16)), fechaFin: _nomD2S(fm), fechaPago: _nomD2S(fm) });
+    }
+    return out;
+  }
+  // semanal
+  var d0 = new Date(anio, 0, 1), dow = d0.getDay();       // 0=domingo
+  var back = (dow === 0 ? 6 : dow - 1);                    // retrocede al lunes
+  var cur = new Date(anio, 0, 1 - back), n = 1;
+  while (cur.getFullYear() <= anio && n <= 54) {
+    var ffin = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 6);
+    out.push({ periodoId: 'SEM-' + anio + '-' + _nom2(n), tipo: 'semanal',
+      fechaInicio: _nomD2S(cur), fechaFin: _nomD2S(ffin), fechaPago: _nomD2S(ffin) });
+    cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 7);
+    n++;
+  }
+  return out;
+}
+
+// Crea la hoja con sus headers, o AÑADE (append-safe) los que falten si la hoja
+// ya existía de una versión anterior. No reordena ni toca los datos existentes.
+function _nomSheetEnsure(tab, headers) {
+  var ss = _nomBook();
+  var sh = ss.getSheetByName(tab);
+  if (!sh) {
+    sh = ss.insertSheet(tab);
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    return sh;
+  }
+  var last = Math.max(1, sh.getLastColumn());
+  var ex = sh.getRange(1, 1, 1, last).getValues()[0].map(function (v) { return String(v); });
+  var add = [];
+  for (var i = 0; i < headers.length; i++) if (ex.indexOf(headers[i]) === -1) add.push(headers[i]);
+  if (add.length) {
+    sh.getRange(1, ex.length + 1, 1, add.length).setValues([add]);
+    sh.getRange(1, 1, 1, ex.length + add.length).setFontWeight('bold');
+  }
+  return sh;
+}
+
+var NOM_PER_TAB = 'Nomina_Periodos';
+// TipoNomina (ORDINARIA/EXTRAORDINARIA) va al FINAL para no mover las columnas
+// posicionales que ya usa el código (Estatus=6, Notas=7).
+var NOM_PER_HEADERS = ['PeriodoID', 'Tipo', 'FechaInicio', 'FechaFin', 'FechaPago', 'Estatus', 'Notas', 'CreadoEn', 'CreadoPor', 'TipoNomina'];
+var NOM_TIPOS_NOMINA = ['ORDINARIA', 'EXTRAORDINARIA'];
+function _nomTipoNominaNorm(v) {
+  var s = String(v || '').trim().toUpperCase();
+  return (s.indexOf('EXTRA') > -1) ? 'EXTRAORDINARIA' : 'ORDINARIA';
+}
+function _nomPerSheet() { return _nomSheetEnsure(NOM_PER_TAB, NOM_PER_HEADERS); }
+function _nomPerRow2Obj(t) {
+  return {
+    periodoId: String(t[0] || ''), tipo: _nomPeriodicidadNorm(t[1]) || String(t[1] || ''),
+    fechaInicio: _nomFechaStr(t[2]), fechaFin: _nomFechaStr(t[3]), fechaPago: _nomFechaStr(t[4]),
+    estatus: String(t[5] || 'borrador').toLowerCase(), notas: String(t[6] || ''),
+    creadoEn: _nomFechaStr(t[7]), creadoPor: String(t[8] || ''),
+    tipoNomina: _nomTipoNominaNorm(t[9]),
+    // Días para cálculo (la plantilla del despacho los llama así): 15 en quincena.
+    diasCalculo: _nomDiasPeriodicidad(_nomPeriodicidadNorm(t[1]))
+  };
+}
+function readNominaPeriodos(anio, tipo) {
+  try {
+    var sh = _nomPerSheet();
+    var data = sh.getDataRange().getValues();
+    var fa = String(anio || '').trim(), ft = _nomPeriodicidadNorm(tipo);
+    var out = [];
+    for (var i = 1; i < data.length; i++) {
+      if (!String(data[i][0] || '').trim()) continue;
+      var o = _nomPerRow2Obj(data[i]);
+      if (fa && String(o.fechaInicio || '').substring(0, 4) !== fa) continue;
+      if (ft && o.tipo !== ft) continue;
+      out.push(o);
+    }
+    out.sort(function (a, b) { return String(a.fechaInicio).localeCompare(String(b.fechaInicio)) || String(a.periodoId).localeCompare(String(b.periodoId)); });
+    return { ok: true, anio: fa, tipo: ft, periodos: out };
+  } catch (ex) { return { ok: false, error: ex.message, periodos: [] }; }
+}
+function _nomPerGet(periodoId) {
+  var sh = _nomPerSheet();
+  var data = sh.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0] || '').trim() === String(periodoId || '').trim()) {
+      var o = _nomPerRow2Obj(data[i]); o._row = i + 1; return o;
+    }
+  }
+  return null;
+}
+// Genera (idempotente) los periodos faltantes de un tipo para un año.
+function nominaGenerarPeriodos(body) {
+  try {
+    if (!_tokenHasPermission(body.token || '', 'editar_egresos')) return { ok: false, error: 'Sin autorización (editar_egresos).' };
+    var anio = parseInt(body.anio, 10), tipo = _nomPeriodicidadNorm(body.tipo);
+    if (!anio) return { ok: false, error: 'anio requerido' };
+    if (!tipo) return { ok: false, error: 'tipo debe ser semanal, quincenal o mensual' };
+    var gen = _nomGenPeriodos(tipo, anio);
+    if (!gen.length) return { ok: false, error: 'No se pudieron generar periodos.' };
+    var sh = _nomPerSheet();
+    var data = sh.getDataRange().getValues();
+    var ex = {};
+    for (var i = 1; i < data.length; i++) ex[String(data[i][0] || '').trim()] = 1;
+    var usuario = ''; try { usuario = verifyToken(body.token || '') || ''; } catch (e) {}
+    var nuevos = [], ahora = new Date();
+    gen.forEach(function (p) {
+      if (ex[p.periodoId]) return;
+      // El calendario del año es nómina ORDINARIA; las extraordinarias se crean
+      // sueltas con "Nuevo periodo".
+      nuevos.push([p.periodoId, p.tipo, p.fechaInicio, p.fechaFin, p.fechaPago, 'borrador', '', ahora, usuario, 'ORDINARIA']);
+    });
+    if (nuevos.length) sh.getRange(sh.getLastRow() + 1, 1, nuevos.length, NOM_PER_HEADERS.length).setValues(nuevos);
+    try { logAudit(usuario || 'sistema', 'Nómina', 'GenerarPeriodos', tipo + ' ' + anio, '', '', String(nuevos.length)); } catch (x) {}
+    return { ok: true, anio: anio, tipo: tipo, creados: nuevos.length, existentes: gen.length - nuevos.length, total: gen.length };
+  } catch (ex2) { return { ok: false, error: ex2.message }; }
+}
+// Alta/edición manual de UN periodo (botón "Nuevo periodo").
+function nominaPeriodoSave(body) {
+  try {
+    if (!_tokenHasPermission(body.token || '', 'editar_egresos')) return { ok: false, error: 'Sin autorización (editar_egresos).' };
+    var p = body.periodo || {};
+    var id = String(p.periodoId || '').trim();
+    var tipo = _nomPeriodicidadNorm(p.tipo);
+    if (!tipo) return { ok: false, error: 'tipo debe ser semanal, quincenal o mensual' };
+    var ini = String(p.fechaInicio || '').substring(0, 10), fin = String(p.fechaFin || '').substring(0, 10);
+    if (!ini || !fin) return { ok: false, error: 'FechaInicio y FechaFin son obligatorias.' };
+    if (fin < ini) return { ok: false, error: 'La fecha final no puede ser anterior a la inicial.' };
+    var tipoNom = _nomTipoNominaNorm(p.tipoNomina);
+    if (!id) id = (tipoNom === 'EXTRAORDINARIA' ? 'EXT-' : '') + tipo.substring(0, 3).toUpperCase() + '-' + ini.replace(/-/g, '') + '-' + fin.replace(/-/g, '');
+    var usuario = ''; try { usuario = verifyToken(body.token || '') || ''; } catch (e) {}
+    var sh = _nomPerSheet();
+    var cur = _nomPerGet(id);
+    var row = [id, tipo, ini, fin, String(p.fechaPago || fin).substring(0, 10),
+      String(p.estatus || (cur ? cur.estatus : 'borrador')).toLowerCase(), String(p.notas || ''),
+      cur ? (cur.creadoEn || new Date()) : new Date(), cur ? (cur.creadoPor || usuario) : usuario, tipoNom];
+    if (cur) sh.getRange(cur._row, 1, 1, NOM_PER_HEADERS.length).setValues([row]);
+    else sh.appendRow(row);
+    try { logAudit(usuario || 'sistema', 'Nómina', cur ? 'EditarPeriodo' : 'CrearPeriodo', id, '', '', tipo + ' ' + ini + '→' + fin); } catch (x) {}
+    return { ok: true, periodoId: id, creado: !cur };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+// borrador → validada → pagada
+function nominaPeriodoEstatus(body) {
+  try {
+    if (!_tokenHasPermission(body.token || '', 'editar_egresos')) return { ok: false, error: 'Sin autorización (editar_egresos).' };
+    var id = String(body.periodoId || '').trim();
+    var est = String(body.estatus || '').toLowerCase();
+    if (!id) return { ok: false, error: 'periodoId requerido' };
+    if (['borrador', 'validada', 'pagada'].indexOf(est) === -1) return { ok: false, error: 'estatus debe ser borrador, validada o pagada' };
+    var p = _nomPerGet(id);
+    if (!p) return { ok: false, error: 'Periodo no encontrado: ' + id };
+    var sh = _nomPerSheet();
+    sh.getRange(p._row, 6).setValue(est);
+    var usuario = ''; try { usuario = verifyToken(body.token || '') || ''; } catch (e) {}
+    try { logAudit(usuario || 'sistema', 'Nómina', 'EstatusPeriodo', id, p.estatus, est, ''); } catch (x) {}
+    return { ok: true, periodoId: id, estatus: est };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// ── B/C. Captura por empleado × periodo ────────────────────────────────
+var NOM_CAP_TAB = 'Nomina_Captura';
+// TotalGravado/TotalExento van al final (append-safe). Los llena EXACTO el CFDI
+// al conciliar; en captura manual quedan en 0 = "lo define el timbrado".
+var NOM_CAP_HEADERS = ['PeriodoID', 'EmpleadoID', 'SueldoBase', 'Bonos', 'ValesDespensa', 'Combustible',
+  'PrimaVacacional', 'OtrasPercepciones', 'TotalPercepciones', 'ISR_Estimado', 'IMSS_Estimado',
+  'OtrasDeducciones', 'NetoEstimado', 'ISR_Real', 'IMSS_Real', 'NetoReal', 'UUID_CFDI',
+  'Diferencia', 'Pagado', 'FechaPago', 'ActualizadoEn', 'TotalGravado', 'TotalExento',
+  'TotalRetenciones', 'TotalOtrasDeducciones'];
+var NOM_CAP_PERCEP = ['SueldoBase', 'Bonos', 'ValesDespensa', 'Combustible', 'PrimaVacacional', 'OtrasPercepciones'];
+function _nomCapSheet() { return _nomSheetEnsure(NOM_CAP_TAB, NOM_CAP_HEADERS); }
+
+// ── Desglose por concepto (gravado/exento) ─────────────────────────────
+// Una fila por concepto × empleado × periodo. Hoy lo llena el CFDI al conciliar
+// (que trae el gravado/exento EXACTO por concepto, ya parseado en _nomParseCfdi).
+var NOM_DET_TAB = 'Nomina_Captura_Det';
+var NOM_DET_HEADERS = ['PeriodoID', 'EmpleadoID', 'Grupo', 'Clave', 'Concepto', 'Importe',
+  'Gravado', 'Exento', 'Origen', 'ActualizadoEn'];
+function _nomDetSheet() { return _nomSheetEnsure(NOM_DET_TAB, NOM_DET_HEADERS); }
+// Desglose guardado de un periodo → { empleadoId: [ {..} ] }
+function _nomDetDelPeriodo(periodoId) {
+  var sh = _nomDetSheet();
+  var data = sh.getDataRange().getValues();
+  var out = {};
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0] || '').trim() !== String(periodoId)) continue;
+    var k = String(data[i][1] || '').trim();
+    if (!out[k]) out[k] = [];
+    out[k].push({ grupo: String(data[i][2] || ''), clave: String(data[i][3] || ''), concepto: String(data[i][4] || ''),
+      importe: _nomNum(data[i][5]), gravado: _nomNum(data[i][6]), exento: _nomNum(data[i][7]), origen: String(data[i][8] || '') });
+  }
+  return out;
+}
+// Reemplaza el desglose de un empleado/periodo (borra el anterior y escribe el nuevo).
+function _nomDetReemplaza(periodoId, empleadoId, lineas, origen) {
+  var sh = _nomDetSheet();
+  var data = sh.getDataRange().getValues();
+  for (var i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][0] || '').trim() === String(periodoId) && String(data[i][1] || '').trim() === String(empleadoId)) sh.deleteRow(i + 1);
+  }
+  if (!lineas || !lineas.length) return 0;
+  var ahora = new Date();
+  var rows = lineas.map(function (l) {
+    return [periodoId, empleadoId, l.grupo || '', l.clave || '', l.concepto || '',
+      _nomNum(l.importe), _nomNum(l.gravado), _nomNum(l.exento), origen || 'CFDI', ahora];
+  });
+  sh.getRange(sh.getLastRow() + 1, 1, rows.length, NOM_DET_HEADERS.length).setValues(rows);
+  return rows.length;
+}
+// Suma de percepciones de una fila.
+function _nomCapPercepciones(f) {
+  var t = 0;
+  for (var i = 0; i < NOM_CAP_PERCEP.length; i++) t += _nomNum(f[NOM_CAP_PERCEP[i]]);
+  return t;
+}
+// Recalcula TotalPercepciones + estimado + neto de UNA fila.
+// hist: {isr, imss, n} — ratios reales históricos del propio empleado (opcional).
+// El estimado NUNCA pisa al real: si la fila ya tiene UUID_CFDI, NetoReal manda.
+function _nomCapCalcFila(f, cfg, hist) {
+  cfg = cfg || _nomCfgSafe();
+  var perc = _nomCapPercepciones(f);
+  f.TotalPercepciones = perc;
+  f.OtrasDeducciones = _nomNum(f.OtrasDeducciones);
+  var tieneCfdi = !!String(f.UUID_CFDI || '');
+  // Una fila YA CONCILIADA CONGELA su estimado: el estimado sólo tiene sentido
+  // como "lo que creías ANTES de timbrar", y es contra ése que se mide la
+  // Diferencia. Recalcularlo aquí sería circular (el histórico del empleado ya
+  // incluye ESTE mismo CFDI) y haría desaparecer la diferencia sola.
+  var congelado = tieneCfdi && f._estimGuardado;
+  if (congelado) {
+    f.ISR_Estimado = _nomNum(f.ISR_Estimado);
+    f.IMSS_Estimado = _nomNum(f.IMSS_Estimado);
+    f.NetoEstimado = _nomNum(f.NetoEstimado);
+    f.estimFuente = 'congelado';
+    f.estimIsrPctEfec = perc > 0 ? (f.ISR_Estimado / perc * 100) : 0;
+    f.estimImssPctEfec = perc > 0 ? (f.IMSS_Estimado / perc * 100) : 0;
+  } else {
+    var usaHist = (String(cfg.estimModo || 'historico') === 'historico' && hist && hist.n > 0);
+    var isrPct = usaHist ? hist.isr : (_nomNum(cfg.estimIsrPct) / 100);
+    var imssPct = usaHist ? hist.imss : (_nomNum(cfg.estimImssPct) / 100);
+    f.ISR_Estimado = perc * isrPct;
+    f.IMSS_Estimado = perc * imssPct;
+    f.NetoEstimado = perc - f.ISR_Estimado - f.IMSS_Estimado - f.OtrasDeducciones;
+    f.estimFuente = usaHist ? 'historico' : 'pct';
+    // % efectivos usados — el front los reutiliza para recalcular en vivo sin ir al servidor.
+    f.estimIsrPctEfec = isrPct * 100;
+    f.estimImssPctEfec = imssPct * 100;
+  }
+  // Diferencia sólo tiene sentido cuando ya hay CFDI.
+  f.Diferencia = tieneCfdi ? (_nomNum(f.NetoReal) - f.NetoEstimado) : 0;
+  f.conCfdi = tieneCfdi;
+  f.NetoFinal = tieneCfdi ? _nomNum(f.NetoReal) : f.NetoEstimado; // el REAL manda
+  return f;
+}
+// Aplica el CFDI a la fila: el real reemplaza al estimado y se calcula Diferencia.
+function _nomCapAplicaCfdi(f, r) {
+  f.ISR_Real = _nomNum(r.isrRetenido);
+  f.IMSS_Real = _nomNum(r.imss);
+  f.NetoReal = (r.neto != null) ? _nomNum(r.neto)
+    : (_nomNum(r.totalPercepciones) + _nomNum(r.totalOtrosPagos) - _nomNum(r.totalDeducciones));
+  f.UUID_CFDI = String(r.uuid || '');
+  // Gravado/exento EXACTO del CFDI (el ERP no lo calcula: lo timbró el despacho).
+  f.TotalGravado = _nomNum(r.gravado);
+  f.TotalExento = _nomNum(r.exento);
+  // Estructura de totales de la plantilla: retenciones (ISR+IMSS) vs otras deducciones.
+  f.TotalRetenciones = _nomNum(r.isrRetenido) + _nomNum(r.imss);
+  f.TotalOtrasDeducciones = _nomNum(r.totalDeducciones) - f.TotalRetenciones;
+  if (f.TotalOtrasDeducciones < 0) f.TotalOtrasDeducciones = 0;
+  f.Diferencia = _nomNum(f.NetoReal) - _nomNum(f.NetoEstimado);
+  f.conCfdi = true;
+  f.NetoFinal = _nomNum(f.NetoReal);
+  return f;
+}
+function _nomCapRow2Obj(t, h) {
+  var o = {};
+  for (var c = 0; c < h.length; c++) o[String(h[c])] = t[c];
+  o.PeriodoID = String(o.PeriodoID || '');
+  o.EmpleadoID = String(o.EmpleadoID || '');
+  o.UUID_CFDI = String(o.UUID_CFDI || '');
+  o.Pagado = (o.Pagado === true || String(o.Pagado).toLowerCase() === 'sí' || String(o.Pagado).toLowerCase() === 'si' || String(o.Pagado).toLowerCase() === 'true');
+  o.FechaPago = _nomFechaStr(o.FechaPago);
+  // Marca que el estimado viene de la hoja (ya se calculó antes de timbrar):
+  // _nomCapCalcFila lo CONGELA si la fila ya tiene CFDI, para no recalcularlo
+  // con un histórico que ya contiene este mismo recibo.
+  o._estimGuardado = (o.NetoEstimado !== '' && o.NetoEstimado !== null && o.NetoEstimado !== undefined);
+  return o;
+}
+// Ratios reales históricos por empleado (sólo filas ya conciliadas con CFDI).
+function _nomCapHistorico() {
+  var sh = _nomCapSheet();
+  var data = sh.getDataRange().getValues();
+  if (data.length < 2) return {};
+  var h = data[0].map(function (v) { return String(v); });
+  var iEmp = h.indexOf('EmpleadoID'), iPer = h.indexOf('TotalPercepciones'),
+      iIsr = h.indexOf('ISR_Real'), iImss = h.indexOf('IMSS_Real'), iUuid = h.indexOf('UUID_CFDI');
+  var acc = {};
+  for (var i = 1; i < data.length; i++) {
+    if (iUuid < 0 || !String(data[i][iUuid] || '')) continue;
+    var k = String(data[i][iEmp] || '').trim(); if (!k) continue;
+    var p = _nomNum(data[i][iPer]); if (p <= 0) continue;
+    if (!acc[k]) acc[k] = { perc: 0, isr: 0, imss: 0, n: 0 };
+    acc[k].perc += p; acc[k].isr += _nomNum(data[i][iIsr]); acc[k].imss += _nomNum(data[i][iImss]); acc[k].n++;
+  }
+  var out = {};
+  for (var k2 in acc) if (acc.hasOwnProperty(k2)) {
+    var a = acc[k2];
+    out[k2] = { isr: a.perc > 0 ? (a.isr / a.perc) : 0, imss: a.perc > 0 ? (a.imss / a.perc) : 0, n: a.n };
+  }
+  return out;
+}
+// Empleados que caen en ESTE periodo: los que tienen esa periodicidad (mixto).
+function _nomEmpleadosDePeriodicidad(tipo, cfg) {
+  var def = _nomPeriodicidadNorm((cfg || _nomCfgSafe()).periodicidadDefault) || 'quincenal';
+  var emps = (readEmpleados().empleados || []);
+  return emps.filter(function (e) {
+    if (!e.Activo) return false;
+    var p = _nomPeriodicidadNorm(e.Periodicidad) || def;
+    return p === tipo;
+  });
+}
+// Devuelve la captura del periodo: filas guardadas + las que faltan sembradas
+// (en memoria, no escribe) para los empleados de esa periodicidad.
+function readNominaCaptura(periodoId) {
+  try {
+    var id = String(periodoId || '').trim();
+    if (!id) return { ok: false, error: 'periodoId requerido' };
+    var per = _nomPerGet(id);
+    if (!per) return { ok: false, error: 'Periodo no encontrado: ' + id };
+    var cfg = _nomCfgSafe();
+    var sh = _nomCapSheet();
+    var data = sh.getDataRange().getValues();
+    var h = data[0].map(function (v) { return String(v); });
+    var guardadas = {};
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0] || '').trim() !== id) continue;
+      var o = _nomCapRow2Obj(data[i], h);
+      guardadas[o.EmpleadoID] = o;
+    }
+    var hist = _nomCapHistorico();
+    var det = _nomDetDelPeriodo(id);
+    var emps = _nomEmpleadosDePeriodicidad(per.tipo, cfg);
+    var dias = _nomDiasPeriodicidad(per.tipo);
+    var filas = [];
+    emps.forEach(function (e) {
+      var key = String(e.NumEmpleado || '').trim();
+      var f = guardadas[key];
+      if (!f) {
+        f = { PeriodoID: id, EmpleadoID: key, SueldoBase: _nomNum(e.SalarioDiario) * dias,
+          Bonos: 0, ValesDespensa: 0, Combustible: 0, PrimaVacacional: 0, OtrasPercepciones: 0,
+          OtrasDeducciones: 0, ISR_Real: 0, IMSS_Real: 0, NetoReal: 0, UUID_CFDI: '',
+          Pagado: false, FechaPago: '', _nueva: true };
+      }
+      // Datos del catálogo (CLAVE=NumEmpleado, CURP/RFC/NSS/PUESTO/DEPTO/SBC).
+      f.Nombre = e.Nombre; f.Puesto = e.Puesto; f.Departamento = e.Departamento;
+      f.RFC = e.RFC; f.CURP = e.CURP; f.NSS = e.NSS;
+      f.Banco = e.Banco; f.CLABE = e.CLABE; f.SBC = _nomNum(e.SBC); f.Tipo = e.Tipo;
+      f.SalarioDiario = _nomNum(e.SalarioDiario);
+      f.Periodicidad = _nomPeriodicidadNorm(e.Periodicidad) || _nomPeriodicidadNorm(cfg.periodicidadDefault) || 'quincenal';
+      _nomCapCalcFila(f, cfg, hist[key]);
+      f.detalleCfdi = det[key] || [];
+      filas.push(f);
+    });
+    // Filas guardadas de empleados que ya no están activos / cambiaron de periodicidad:
+    // se conservan visibles para no perder histórico.
+    for (var k in guardadas) if (guardadas.hasOwnProperty(k)) {
+      var yaEsta = false;
+      for (var z = 0; z < filas.length; z++) { if (filas[z].EmpleadoID === k) { yaEsta = true; break; } }
+      if (yaEsta) continue;
+      var hf = guardadas[k]; hf.Nombre = hf.Nombre || k; hf.huerfana = true;
+      _nomCapCalcFila(hf, cfg, hist[k]);
+      hf.detalleCfdi = det[k] || [];
+      filas.push(hf);
+    }
+    filas.sort(function (a, b) { return String(a.Nombre || '').localeCompare(String(b.Nombre || '')); });
+    // Totales con la estructura de la plantilla del despacho: Total de ingresos
+    // (gravados/exentos) · Total de retenciones · Total otras deducciones · TOTAL A PAGAR.
+    var t = { percepciones: 0, isrEst: 0, imssEst: 0, netoEst: 0, isrReal: 0, imssReal: 0, netoReal: 0,
+      netoFinal: 0, diferencia: 0, conCfdi: 0, numEmpleados: filas.length,
+      totalIngresos: 0, totalIngresosGravados: 0, totalIngresosExentos: 0,
+      totalRetenciones: 0, totalOtrasDeducciones: 0, totalAPagar: 0, totalPagado: 0 };
+    filas.forEach(function (f) {
+      t.percepciones += f.TotalPercepciones; t.isrEst += f.ISR_Estimado; t.imssEst += f.IMSS_Estimado;
+      t.netoEst += f.NetoEstimado; t.netoFinal += f.NetoFinal;
+      t.totalIngresos += f.TotalPercepciones;
+      t.totalIngresosGravados += _nomNum(f.TotalGravado);
+      t.totalIngresosExentos += _nomNum(f.TotalExento);
+      t.totalRetenciones += f.conCfdi ? _nomNum(f.TotalRetenciones) : (f.ISR_Estimado + f.IMSS_Estimado);
+      t.totalOtrasDeducciones += f.conCfdi ? _nomNum(f.TotalOtrasDeducciones) : _nomNum(f.OtrasDeducciones);
+      t.totalAPagar += f.NetoFinal;                      // TOTAL A PAGAR (real si hay CFDI)
+      if (f.Pagado) t.totalPagado += f.NetoFinal;        // TOTAL PAGADO
+      if (f.conCfdi) { t.conCfdi++; t.isrReal += _nomNum(f.ISR_Real); t.imssReal += _nomNum(f.IMSS_Real); t.netoReal += _nomNum(f.NetoReal); t.diferencia += _nomNum(f.Diferencia); }
+    });
+    return { ok: true, periodo: per, filas: filas, totales: t, conceptos: cfg.conceptos || [],
+      estimModo: cfg.estimModo, estimIsrPct: cfg.estimIsrPct, estimImssPct: cfg.estimImssPct,
+      soloLectura: (per.estatus === 'pagada') };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+// Guarda (upsert) las filas capturadas del periodo. Bloquea si ya está pagada.
+function saveNominaCaptura(body) {
+  try {
+    if (!_tokenHasPermission(body.token || '', 'editar_egresos')) return { ok: false, error: 'Sin autorización (editar_egresos).' };
+    var id = String(body.periodoId || '').trim();
+    if (!id) return { ok: false, error: 'periodoId requerido' };
+    var per = _nomPerGet(id);
+    if (!per) return { ok: false, error: 'Periodo no encontrado: ' + id };
+    if (per.estatus === 'pagada' && !body.forzar) return { ok: false, error: 'El periodo ' + id + ' ya está PAGADO: la captura es de solo lectura.' };
+    var filas = body.filas || [];
+    if (!filas.length) return { ok: false, error: 'No hay filas que guardar.' };
+    var cfg = _nomCfgSafe(), hist = _nomCapHistorico();
+    var lock = LockService.getScriptLock();
+    if (!lock.tryLock(20000)) return { ok: false, error: 'No se pudo obtener el bloqueo, intenta de nuevo' };
+    var guardadas = 0;
+    try {
+      var sh = _nomCapSheet();
+      var data = sh.getDataRange().getValues();
+      var h = data[0].map(function (v) { return String(v); });
+      var rowByEmp = {};
+      for (var i = 1; i < data.length; i++) {
+        if (String(data[i][0] || '').trim() !== id) continue;
+        rowByEmp[String(data[i][1] || '').trim()] = i + 1;
+      }
+      var nuevas = [], actualizadas = 0, ahora = new Date();
+      filas.forEach(function (inc) {
+        var emp = String(inc.EmpleadoID || '').trim();
+        if (!emp) return;
+        var prev = rowByEmp[emp] ? _nomCapRow2Obj(data[rowByEmp[emp] - 1], h) : {};
+        var f = {
+          PeriodoID: id, EmpleadoID: emp,
+          SueldoBase: _nomNum(inc.SueldoBase), Bonos: _nomNum(inc.Bonos),
+          ValesDespensa: _nomNum(inc.ValesDespensa), Combustible: _nomNum(inc.Combustible),
+          PrimaVacacional: _nomNum(inc.PrimaVacacional), OtrasPercepciones: _nomNum(inc.OtrasPercepciones),
+          OtrasDeducciones: _nomNum(inc.OtrasDeducciones),
+          // El real NO se captura a mano: viene del CFDI (se conserva si ya estaba).
+          ISR_Real: _nomNum(prev.ISR_Real), IMSS_Real: _nomNum(prev.IMSS_Real),
+          NetoReal: _nomNum(prev.NetoReal), UUID_CFDI: String(prev.UUID_CFDI || ''),
+          // Si la fila ya tiene CFDI, se arrastra el estimado ORIGINAL para que
+          // _nomCapCalcFila lo congele (la Diferencia se mide contra ése).
+          ISR_Estimado: prev.ISR_Estimado, IMSS_Estimado: prev.IMSS_Estimado,
+          NetoEstimado: prev.NetoEstimado, _estimGuardado: !!prev._estimGuardado,
+          // Gravado/exento y el corte retenciones/otras deducciones los fija el
+          // CFDI: no se capturan a mano, se conservan.
+          TotalGravado: _nomNum(prev.TotalGravado), TotalExento: _nomNum(prev.TotalExento),
+          TotalRetenciones: _nomNum(prev.TotalRetenciones), TotalOtrasDeducciones: _nomNum(prev.TotalOtrasDeducciones),
+          Pagado: (inc.Pagado === undefined) ? !!prev.Pagado : !!inc.Pagado,
+          FechaPago: String(inc.FechaPago || prev.FechaPago || '').substring(0, 10)
+        };
+        _nomCapCalcFila(f, cfg, hist[emp]);
+        var row = h.map(function (col) {
+          if (col === 'ActualizadoEn') return ahora;
+          var v = f[col];
+          return (v === undefined || v === null) ? '' : v;
+        });
+        if (rowByEmp[emp]) { sh.getRange(rowByEmp[emp], 1, 1, h.length).setValues([row]); actualizadas++; }
+        else nuevas.push(row);
+        guardadas++;
+      });
+      if (nuevas.length) sh.getRange(sh.getLastRow() + 1, 1, nuevas.length, h.length).setValues(nuevas);
+      var usuario = ''; try { usuario = verifyToken(body.token || '') || ''; } catch (e) {}
+      try { logAudit(usuario || 'sistema', 'Nómina', 'GuardarCaptura', id, '', '', nuevas.length + ' nuevas, ' + actualizadas + ' act.'); } catch (x) {}
+    } finally { lock.releaseLock(); }
+    return { ok: true, periodoId: id, guardadas: guardadas };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+// Trae los CFDI que cubren el periodo y REEMPLAZA el estimado con el dato real.
+// Avisa de las diferencias contra lo estimado.
+function nominaConciliarPeriodo(body) {
+  try {
+    if (!_tokenHasPermission(body.token || '', 'editar_egresos')) return { ok: false, error: 'Sin autorización (editar_egresos).' };
+    var id = String(body.periodoId || '').trim();
+    if (!id) return { ok: false, error: 'periodoId requerido' };
+    var per = _nomPerGet(id);
+    if (!per) return { ok: false, error: 'Periodo no encontrado: ' + id };
+    // Meses que toca el periodo (una quincena vive en 1 mes; una semana puede cruzar 2).
+    var meses = {}, ini = String(per.fechaInicio || ''), fin = String(per.fechaFin || per.fechaInicio || '');
+    [ini, fin].forEach(function (d) { if (d) meses[d.substring(0, 7)] = 1; });
+    var recibos = [], errores = [];
+    for (var ym in meses) if (meses.hasOwnProperty(ym)) {
+      var a = parseInt(ym.substring(0, 4), 10), m = parseInt(ym.substring(5, 7), 10);
+      var r = readNominaMes(a, m);
+      if (!r.ok) { errores.push(ym + ': ' + r.error); continue; }
+      (r.recibos || []).forEach(function (x) { recibos.push(x); });
+    }
+    // Sólo los recibos cuyo periodo de pago cae dentro del periodo capturado.
+    // Si el CFDI no trae FechaInicialPago, se usa FechaPago.
+    var enRango = recibos.filter(function (r) {
+      var d = String(r.fechaInicial || r.fechaPago || r.fecha || '').substring(0, 10);
+      if (!d) return false;
+      return d >= ini && d <= fin;
+    });
+    // Agrupa por empleado (varios recibos en el mismo periodo se suman).
+    var porEmp = {};
+    enRango.forEach(function (r) {
+      var k = String(r.numEmpleado || '').trim() || String(r.rfc || '').trim();
+      if (!k) return;
+      if (!porEmp[k]) porEmp[k] = { isrRetenido: 0, imss: 0, neto: 0, totalPercepciones: 0, totalDeducciones: 0,
+        totalOtrosPagos: 0, gravado: 0, exento: 0, uuid: '', n: 0, lineas: [] };
+      var e = porEmp[k];
+      e.isrRetenido += _nomNum(r.isrRetenido); e.imss += _nomNum(r.imss); e.neto += _nomNum(r.neto);
+      e.totalPercepciones += _nomNum(r.totalPercepciones); e.totalDeducciones += _nomNum(r.totalDeducciones);
+      e.totalOtrosPagos += _nomNum(r.totalOtrosPagos);
+      e.gravado += _nomNum(r.gravado); e.exento += _nomNum(r.exento);
+      e.uuid = e.uuid ? (e.uuid + ' ' + r.uuid) : String(r.uuid || ''); e.n++;
+      // Desglose por concepto con su gravado/exento tal cual viene del XML.
+      (r.percepciones || []).forEach(function (p) {
+        e.lineas.push({ grupo: 'percepcion', clave: p.clave || p.tipo, concepto: p.concepto,
+          importe: _nomNum(p.importe), gravado: _nomNum(p.gravado), exento: _nomNum(p.exento) });
+      });
+      (r.deducciones || []).forEach(function (dd) {
+        e.lineas.push({ grupo: 'deduccion', clave: dd.clave || dd.tipo, concepto: dd.concepto, importe: _nomNum(dd.importe), gravado: 0, exento: 0 });
+      });
+      (r.otrosPagos || []).forEach(function (op) {
+        e.lineas.push({ grupo: 'otroPago', clave: op.clave || op.tipo, concepto: op.concepto, importe: _nomNum(op.importe), gravado: 0, exento: 0 });
+      });
+    });
+    var cur = readNominaCaptura(id);
+    if (!cur.ok) return cur;
+    var cfg = _nomCfgSafe(), hist = _nomCapHistorico();
+    var lock = LockService.getScriptLock();
+    if (!lock.tryLock(20000)) return { ok: false, error: 'No se pudo obtener el bloqueo, intenta de nuevo' };
+    var conciliadas = 0, sinCfdi = 0, difs = [], sumDif = 0;
+    try {
+      var sh = _nomCapSheet();
+      var data = sh.getDataRange().getValues();
+      var h = data[0].map(function (v) { return String(v); });
+      var rowByEmp = {};
+      for (var i = 1; i < data.length; i++) {
+        if (String(data[i][0] || '').trim() !== id) continue;
+        rowByEmp[String(data[i][1] || '').trim()] = i + 1;
+      }
+      var nuevas = [], ahora = new Date();
+      cur.filas.forEach(function (f) {
+        var k = String(f.EmpleadoID || '').trim();
+        var r = porEmp[k];
+        if (!r) { sinCfdi++; return; }
+        _nomCapCalcFila(f, cfg, hist[k]);   // fija el estimado (se congela al conciliar)
+        var estAntes = f.NetoEstimado;
+        _nomCapAplicaCfdi(f, r);            // el REAL pisa al estimado
+        try { _nomDetReemplaza(id, k, r.lineas, 'CFDI'); } catch (xd) {} // desglose gravado/exento
+        conciliadas++;
+        if (Math.abs(f.Diferencia) >= 0.01) {
+          sumDif += f.Diferencia;
+          difs.push({ empleado: f.Nombre || k, numEmpleado: k, estimado: estAntes, real: f.NetoReal, diferencia: f.Diferencia });
+        }
+        var row = h.map(function (col) {
+          if (col === 'ActualizadoEn') return ahora;
+          var v = f[col];
+          return (v === undefined || v === null) ? '' : v;
+        });
+        if (rowByEmp[k]) sh.getRange(rowByEmp[k], 1, 1, h.length).setValues([row]);
+        else nuevas.push(row);
+      });
+      if (nuevas.length) sh.getRange(sh.getLastRow() + 1, 1, nuevas.length, h.length).setValues(nuevas);
+      var usuario = ''; try { usuario = verifyToken(body.token || '') || ''; } catch (e) {}
+      try { logAudit(usuario || 'sistema', 'Nómina', 'ConciliarPeriodo', id, '', '', conciliadas + ' con CFDI, ' + difs.length + ' con diferencia'); } catch (x) {}
+    } finally { lock.releaseLock(); }
+    return { ok: true, periodoId: id, conciliadas: conciliadas, sinCfdi: sinCfdi,
+      recibosEnRango: enRango.length, diferencias: difs, sumaDiferencias: sumDif, errores: errores };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+// Valida el periodo capturado → una orden de pago por empleado en CxP.
+// Usa el NETO REAL si ya hay CFDI; si no, el estimado (y lo dice en las notas).
+// Idempotente por NominaID = NOM-<periodoId>-<empleado>, igual que el flujo mensual.
+function nominaValidarPeriodo(body) {
+  try {
+    if (!_tokenHasPermission(body.token || '', 'editar_egresos')) return { ok: false, error: 'Sin autorización para validar nómina (editar_egresos).' };
+    var id = String(body.periodoId || '').trim();
+    if (!id) return { ok: false, error: 'periodoId requerido' };
+    var per = _nomPerGet(id);
+    if (!per) return { ok: false, error: 'Periodo no encontrado: ' + id };
+    if (per.estatus !== 'borrador' && !body.forzar) {
+      return { ok: false, yaValidada: true, periodoId: id, estatus: per.estatus,
+        error: 'El periodo ' + id + ' ya está ' + per.estatus + '. Vuelve a enviar si quieres generar las órdenes faltantes.' };
+    }
+    var cap = readNominaCaptura(id);
+    if (!cap.ok) return cap;
+    if (!cap.filas.length) return { ok: false, error: 'No hay empleados capturados en ' + id + '.' };
+    var cfg = _nomCfgSafe();
+    var ss = SpreadsheetApp.openById(EGRESOS_SS_2026);
+    var egSh = ss.getSheetByName(EGRESOS_TABS[2026] || 'Egresos2026');
+    if (!egSh) return { ok: false, error: 'Hoja Egresos2026 no encontrada.' };
+    var iNom1 = _egColEnsure(egSh, 'nominaid', 'NominaID');
+    var usuario = ''; try { usuario = verifyToken(body.token || '') || ''; } catch (e) {}
+    var creadas = 0, dups = 0, total = 0, detalle = [], estimadas = 0;
+    cap.filas.forEach(function (f) {
+      var monto = _nomNum(f.NetoFinal);
+      if (monto <= 0) return;
+      total += monto;
+      if (!f.conCfdi) estimadas++;
+      var clave = String(f.EmpleadoID || '').replace(/[^A-Za-z0-9_\-]/g, '');
+      var nominaId = 'NOM-' + id + '-' + clave;
+      var notas = 'Nómina ' + id + ' (' + per.tipo + ' ' + per.fechaInicio + '→' + per.fechaFin + ') · '
+        + (f.conCfdi ? ('neto CFDI real ' + monto.toFixed(2)) : ('NETO ESTIMADO ' + monto.toFixed(2) + ' — pendiente de CFDI'));
+      var r = _nomAppendCxP(egSh, iNom1, {
+        periodo: String(per.fechaPago || per.fechaFin || '').substring(0, 7),
+        nominaId: nominaId, proveedor: cfg.cxpProveedor || 'Nómina', contable: 'Gasto', subtipo: 'Nómina',
+        concepto: 'Nómina ' + id + ' — ' + (f.Nombre || clave),
+        monto: monto, notas: notas, vencimiento: per.fechaPago || per.fechaFin
+      }, usuario);
+      if (r.ok) { creadas++; detalle.push({ empleado: f.Nombre || clave, monto: monto, id: nominaId, estimado: !f.conCfdi }); }
+      else if (r.dup) dups++;
+    });
+    var shP = _nomPerSheet();
+    shP.getRange(per._row, 6).setValue('validada');
+    shP.getRange(per._row, 7).setValue((creadas + dups) + ' orden(es) en CxP · ' + creadas + ' nuevas' + (estimadas ? (' · ' + estimadas + ' con neto ESTIMADO') : ''));
+    try { CacheService.getScriptCache().remove('gas_egresos_v1_2026'); } catch (e) {}
+    return { ok: true, periodoId: id, creadas: creadas, duplicadas: dups, total: total,
+      estimadas: estimadas, numEmpleados: cap.filas.length, detalle: detalle };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// ── E. SBC + control bimestral ─────────────────────────────────────────
+var NOM_SBC_TAB = 'Nomina_SBC';
+var NOM_SBC_HEADERS = ['Anio', 'Bimestre', 'NumEmpleado', 'SBC', 'Presentado', 'FechaPresentado', 'Usuario', 'Notas'];
+function _nomSbcSheet() {
+  var ss = _nomBook();
+  var sh = ss.getSheetByName(NOM_SBC_TAB);
+  if (!sh) {
+    sh = ss.insertSheet(NOM_SBC_TAB);
+    sh.getRange(1, 1, 1, NOM_SBC_HEADERS.length).setValues([NOM_SBC_HEADERS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+function _nomSbcKey(anio, bim, num) { return String(anio) + '|' + String(bim) + '|' + String(num).trim(); }
+// Tablero: empleados × bimestres del año, con SBC y casilla "Presentado".
+function readNominaSBC(anio) {
+  try {
+    var a = parseInt(anio, 10) || (new Date()).getFullYear();
+    var sh = _nomSbcSheet();
+    var data = sh.getDataRange().getValues();
+    var map = {};
+    for (var i = 1; i < data.length; i++) {
+      if (parseInt(data[i][0], 10) !== a) continue;
+      var bim = parseInt(data[i][1], 10), num = String(data[i][2] || '').trim();
+      if (!bim || !num) continue;
+      map[_nomSbcKey(a, bim, num)] = {
+        sbc: _nomNum(data[i][3]),
+        presentado: (data[i][4] === true || String(data[i][4]).toLowerCase() === 'sí' || String(data[i][4]).toLowerCase() === 'si' || String(data[i][4]).toLowerCase() === 'true'),
+        fechaPresentado: _nomFechaStr(data[i][5]), usuario: String(data[i][6] || ''), notas: String(data[i][7] || '')
+      };
+    }
+    var emps = (readEmpleados().empleados || []).filter(function (e) { return e.Activo; });
+    var filas = emps.map(function (e) {
+      var num = String(e.NumEmpleado || '').trim();
+      var bims = [];
+      for (var b = 1; b <= NOM_SBC_BIMESTRES; b++) {
+        var c = map[_nomSbcKey(a, b, num)];
+        bims.push({ bimestre: b, sbc: c ? c.sbc : _nomNum(e.SBC), presentado: c ? c.presentado : false,
+          fechaPresentado: c ? c.fechaPresentado : '', notas: c ? c.notas : '', capturado: !!c });
+      }
+      return { numEmpleado: num, nombre: e.Nombre, puesto: e.Puesto, departamento: e.Departamento,
+        sbcCatalogo: _nomNum(e.SBC), periodicidad: e.Periodicidad, bimestres: bims };
+    });
+    var pend = 0, pres = 0;
+    filas.forEach(function (f) { f.bimestres.forEach(function (b) { if (b.presentado) pres++; else pend++; }); });
+    return { ok: true, anio: a, numBimestres: NOM_SBC_BIMESTRES, filas: filas,
+      totales: { presentados: pres, pendientes: pend, empleados: filas.length } };
+  } catch (ex) { return { ok: false, error: ex.message, filas: [] }; }
+}
+function saveNominaSBC(body) {
+  try {
+    if (!_tokenHasPermission(body.token || '', 'editar_egresos')) return { ok: false, error: 'Sin autorización (editar_egresos).' };
+    var a = parseInt(body.anio, 10), b = parseInt(body.bimestre, 10);
+    var num = String(body.numEmpleado || '').trim();
+    if (!a || !b || !num) return { ok: false, error: 'anio, bimestre y numEmpleado requeridos' };
+    if (b < 1 || b > NOM_SBC_BIMESTRES) return { ok: false, error: 'bimestre debe ser 1–' + NOM_SBC_BIMESTRES };
+    var presentado = !!body.presentado;
+    var usuario = ''; try { usuario = verifyToken(body.token || '') || ''; } catch (e) {}
+    var sh = _nomSbcSheet();
+    var data = sh.getDataRange().getValues();
+    var found = -1;
+    for (var i = 1; i < data.length; i++) {
+      if (parseInt(data[i][0], 10) === a && parseInt(data[i][1], 10) === b && String(data[i][2] || '').trim() === num) { found = i + 1; break; }
+    }
+    var prev = found > 0 ? data[found - 1] : null;
+    var sbc = (body.sbc === undefined || body.sbc === null || body.sbc === '') ? (prev ? _nomNum(prev[3]) : 0) : _nomNum(body.sbc);
+    var row = [a, b, num, sbc, presentado, presentado ? (String(body.fechaPresentado || '').substring(0, 10) || new Date()) : '', usuario, String(body.notas || (prev ? prev[7] : '') || '')];
+    if (found > 0) sh.getRange(found, 1, 1, NOM_SBC_HEADERS.length).setValues([row]);
+    else sh.appendRow(row);
+    try { logAudit(usuario || 'sistema', 'Nómina', 'SBC', num + ' ' + a + '-B' + b, '', '', 'SBC ' + sbc + (presentado ? ' · presentado' : ' · pendiente')); } catch (x) {}
+    return { ok: true, anio: a, bimestre: b, numEmpleado: num, sbc: sbc, presentado: presentado };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+// Crea las hojas nuevas de F5 y genera los periodos del año en curso.
+// Correr UNA vez desde el editor de Apps Script tras desplegar.
+function setupNominaPeriodos() {
+  try {
+    _nomPerSheet(); _nomCapSheet(); _nomDetSheet(); _nomSbcSheet(); _nomEmpSheet();
+    var anio = (new Date()).getFullYear();
+    var sh = _nomPerSheet();
+    var data = sh.getDataRange().getValues();
+    var ex = {};
+    for (var i = 1; i < data.length; i++) ex[String(data[i][0] || '').trim()] = 1;
+    var nuevos = [], ahora = new Date();
+    NOM_PERIODICIDADES.forEach(function (t) {
+      _nomGenPeriodos(t, anio).forEach(function (p) {
+        if (ex[p.periodoId]) return;
+        nuevos.push([p.periodoId, p.tipo, p.fechaInicio, p.fechaFin, p.fechaPago, 'borrador', '', ahora, 'setup', 'ORDINARIA']);
+      });
+    });
+    if (nuevos.length) sh.getRange(sh.getLastRow() + 1, 1, nuevos.length, NOM_PER_HEADERS.length).setValues(nuevos);
+    return { ok: true, anio: anio, periodosCreados: nuevos.length,
+      hojas: [NOM_PER_TAB, NOM_CAP_TAB, NOM_DET_TAB, NOM_SBC_TAB], libro: _nomBook().getUrl() };
+  } catch (ex2) { return { ok: false, error: ex2.message }; }
 }
