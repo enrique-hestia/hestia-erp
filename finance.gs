@@ -4632,19 +4632,24 @@ function saveIngreso(payload) {
     // se aborta la venta entera; así no hay que revertir filas ya guardadas). ──
     var _ncMonto = _ingSumaNC(payload.pagos, formaPago, pagadoOp);
     var _ncAutoriza = false;
+    // Estas validaciones ABORTAN la venta y ocurren DENTRO de la ventana del lock
+    // del folio (_opLock, tomado antes de _getNextOP). Hay que liberarlo en CADA
+    // salida: si no, se queda tomado el resto de la ejecución y bloquea los
+    // guardados siguientes. (GAS lo suelta al terminar, pero explícito es correcto.)
+    function _abortNC(o) { try { _opLock.releaseLock(); } catch (eL) {} return o; }
     if (_ncMonto > 0.01) {
       if (typeof _cobAplicarNCIngreso !== 'function') {
-        return {ok:false, error:'No se puede cobrar con Nota de Crédito: falta desplegar cobranza.gs (crédito a favor). Avisa al administrador.'};
+        return _abortNC({ok:false, error:'No se puede cobrar con Nota de Crédito: falta desplegar cobranza.gs (crédito a favor). Avisa al administrador.'});
       }
       if (!paciente || !String(paciente).trim()) {
-        return {ok:false, error:'Para pagar con Nota de Crédito hay que indicar el paciente (el crédito es de un paciente en particular).'};
+        return _abortNC({ok:false, error:'Para pagar con Nota de Crédito hay que indicar el paciente (el crédito es de un paciente en particular).'});
       }
       // El excedente solo pasa si el usuario lo pidió EXPLÍCITAMENTE y su rol lo permite.
       _ncAutoriza = (payload.autorizarExcedente === true || payload.autorizarExcedente === 'true')
                     && _tokenHasPermission(payload.token || '', 'autorizar_credito_excedido');
       var _ncChk = _cobAplicarNCIngreso(opId, paciente, _ncMonto,
         { validarSolo: true, autorizarExcedente: _ncAutoriza, usuario: payload.usuario || '', fecha: fecha });
-      if (!_ncChk.ok) return {ok:false, error:_ncChk.error, creditoDisponible:_ncChk.disponible, ncRequerida:_ncChk.requerido, requiereAutorizacion:true};
+      if (!_ncChk.ok) return _abortNC({ok:false, error:_ncChk.error, creditoDisponible:_ncChk.disponible, ncRequerida:_ncChk.requerido, requiereAutorizacion:true});
     }
 
     var rows = [];
