@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.14.188 -->
+﻿<!-- app-build:2026.07.14.189 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -16186,23 +16186,41 @@ function _presBatchSave(metas){ var s=getSession()||{}; fetch(APPS_SCRIPT_URL,{m
 // + egresos con budget capturado (>0). Reusa savePresupuestoMetasBatch.
 async function presGuardarTodo(btn){
   if(!(_presData&&_presData.siguiente&&_presData.siguiente.periodo)) return;
-  try{ _presSaveProyeccion(); }catch(e){}   // guarda también los parámetros de proyección (escenarios) del panel
   var metas=[];
-  Object.keys(_presProdMap).forEach(function(k){ var p=_presProdMap[k]; metas.push({linea:p.producto, metaIngreso:Math.round(p._budImp||0), metaCantidad:Math.max(0,Math.round(p._budCant||0))}); });
+  // Ingresos: en la VISTA AGRUPADA viven en _presGrupoMap (grupo→sub→productos);
+  // en la vista plana en _presProdMap. Antes solo leía _presProdMap → en agrupada
+  // no guardaba nada.
+  if(_presGrouped() && _presGrupoMap && _presGrupoMap.length){
+    _presGrupoMap.forEach(function(G){ (G.subs||[]).forEach(function(S){ (S.prods||[]).forEach(function(p){
+      metas.push({linea:p.producto, metaIngreso:Math.round(p._budImp||0), metaCantidad:Math.max(0,Math.round(p._budCant||0))});
+    }); }); });
+  } else {
+    Object.keys(_presProdMap).forEach(function(k){ var p=_presProdMap[k]; metas.push({linea:p.producto, metaIngreso:Math.round(p._budImp||0), metaCantidad:Math.max(0,Math.round(p._budCant||0))}); });
+  }
   Object.keys(_presEgMap).forEach(function(k){ var l=_presEgMap[k]; if((l.meta||0)>0) metas.push({linea:'EG:'+l.linea, metaIngreso:Math.round(l.meta)}); });
-  if(!metas.length){ _presFlashSaved('Nada que guardar'); return; }
   var s=getSession()||{};
   var old=btn?btn.innerHTML:null, oldbg=btn?btn.style.background:'';
   if(btn){ btn.disabled=true; btn.innerHTML='Guardando…'; }
   try{
-    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'savePresupuestoMetasBatch',periodo:_presData.siguiente.periodo,metas:metas,usuario:s.email||''})});
-    var res=await r.json();
-    if(!(res&&res.ok)) throw new Error((res&&res.error)||'no se pudo guardar');
+    // 1) Parámetros de proyección (escenarios). Devuelve false si el backend no lo soporta.
+    var proyOk = await _presSaveProyeccion();
+    // 2) Metas por línea (cantidades/importes) del periodo.
+    var res={ok:true};
+    if(metas.length){
+      var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'savePresupuestoMetasBatch',periodo:_presData.siguiente.periodo,metas:metas,usuario:s.email||''})});
+      res=await r.json();
+    }
+    if(!(res&&res.ok)) throw new Error((res&&res.error)||'redeploy');
+    if(proyOk===false) throw new Error('redeploy-proy');
     _presFlashSaved('💾 Presupuesto guardado · '+metas.length+' líneas');
     if(btn){ btn.innerHTML='✓ Guardado'; btn.style.background='#0f5132'; setTimeout(function(){ btn.innerHTML=old; btn.style.background='#166534'; btn.disabled=false; },1900); }
   }catch(e){
-    if(btn){ btn.innerHTML='⚠ Error'; btn.style.background='#991b1b'; setTimeout(function(){ btn.innerHTML=old; btn.style.background=oldbg||'#166534'; btn.disabled=false; },2200); }
-    else alert('No se pudo guardar el presupuesto: '+(e.message||e));
+    var msg=(e&&e.message)||'';
+    var esRedeploy = /redeploy|redespleg|actualiza|no se pudo/i.test(msg);
+    if(btn){ btn.innerHTML='⚠ No se guardó'; btn.style.background='#991b1b'; setTimeout(function(){ btn.innerHTML=old; btn.style.background=oldbg||'#166534'; btn.disabled=false; },2600); }
+    alert(esRedeploy
+      ? 'El presupuesto NO se guardó.\n\nEl guardado necesita que se REDESPLIEGUE el backend (presupuesto.gs + finance.gs, versión nueva en Apps Script). Mientras no se redespliegue, los cambios no se persisten y al reconsultar vuelven al estimado.'
+      : 'No se pudo guardar el presupuesto: '+msg);
   }
 }
 function presMasterApply(tipo){ var pct=parseFloat((document.getElementById('pr-master-'+tipo)||{}).value)||0; var f=1+pct/100;
@@ -16379,7 +16397,12 @@ function _presSaveProyeccion(){
     seleccionado:(window._presEscSel||'base'),
     usuario:s.email||'' };
   if(_presData.escenariosPct){ var ep=_presData.escenariosPct; ep.conservador=p.conservador; ep.optimista=p.optimista; ep.basePct=window._presBasePct; ep.seleccionado=window._presEscSel; ep.esGuardado=true; }
-  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(body)}).then(function(){_presFlashSaved();}).catch(function(){});
+  // Devuelve una promesa true/false para que "Guardar presupuesto" pueda avisar si el
+  // backend aún no está desplegado (antes era fire-and-forget → fallaba en silencio).
+  return fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(body)})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if(d&&d.ok){ _presFlashSaved(); return true; } return false; })
+    .catch(function(){ return false; });
 }
 // Elige el escenario ACTIVO (conservador|base|optimista|meta): resalta la tarjeta y lo persiste.
 function presSelectScenario(key){
