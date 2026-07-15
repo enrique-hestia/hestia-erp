@@ -817,6 +817,14 @@ function readEstadoCuentaPaciente(pacienteNombre) {
     var totalFacturado = totalGeneral;
     var saldoNeto = totalFacturado - totalPagado;
 
+    // Crédito a favor PERSISTIDO (hoja Creditos_Favor) — es la cifra canónica y
+    // aplicable (se decrementa al usarla en "Cobrar / Abonar"), no el saldoNeto<0.
+    var creditoFavor = 0;
+    try {
+      if (typeof _cobCreditoFavorPaciente === 'function')
+        creditoFavor = (_cobCreditoFavorPaciente(pacienteNombre) || {}).total || 0;
+    } catch (eCF) {}
+
     return {
       ok: true,
       paciente: String(pacienteNombre).trim(),
@@ -829,7 +837,8 @@ function readEstadoCuentaPaciente(pacienteNombre) {
       porCategoria: porCategoria,
       porAnio: porAnio,
       saldoPendiente: saldoPendiente,
-      deudaDetalle: deudaDetalle
+      deudaDetalle: deudaDetalle,
+      creditoFavor: creditoFavor
     };
   } catch(ex) {
     return { ok: false, error: ex.message };
