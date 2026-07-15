@@ -415,8 +415,26 @@ function _presCrecCantTotal(map, refY, refQ) {
    agrupada como el Board Deck (columna U → categoría → producto).
    Reutiliza helpers de summary.gs (_summaryReadIngresos, _summaryRevOrden,
    _sumOrdIn, SUMMARY_SUBGROUP_ORDER, SUMMARY_PRODUCT_ORDER). ───────────── */
+/* Etiqueta CANÓNICA de un grupo de ingresos — MISMA lógica que summary.gs
+   (_summaryEsAgencia / _summaryEsExterno / _sumNorm), para que Presupuesto, Summary
+   y Board hablen la misma taxonomía.
+   Antes la columna U viajaba CRUDA (solo .trim()): "Externos" y "EXTERNOS" eran dos
+   grupos distintos que la tabla pintaba idénticos (grupo duplicado en pantalla).
+   `reg` es el registro clave-normalizada → etiqueta de display: la primera variante
+   vista gana, así el nombre mostrado sigue siendo legible (no se aplasta a minúsculas). */
+function _presCanonGrupo(l1, categoria, reg) {
+  try {
+    if (typeof _summaryEsAgencia === 'function' && (_summaryEsAgencia(l1) || _summaryEsAgencia(categoria))) return 'Agencias';
+    if (typeof _summaryEsExterno === 'function' && (_summaryEsExterno(l1) || _summaryEsExterno(categoria))) return 'Externos';
+  } catch (e) {}
+  var k = (typeof _sumNorm === 'function') ? _sumNorm(l1) : String(l1 || '').trim().toLowerCase();
+  if (!reg) return l1;
+  if (!reg[k]) reg[k] = l1;
+  return reg[k];
+}
 function _presIngresosProy(tY, tQ) {
   var q = {}, qCantTot = {}, origenSub = {};   // origenSub[gs] = true si el sub proviene de un ORIGEN externo atribuido
+  var gReg = {};   // registro norm→display: deduplica la columna U ("Externos" == "EXTERNOS")
   var thisYear = new Date().getFullYear();
   for (var y = thisYear - 2; y <= thisYear; y++) {
     var rows; try { rows = _summaryReadIngresos(y); } catch (e) { rows = []; }
@@ -424,11 +442,23 @@ function _presIngresosProy(tY, tQ) {
       var f = (r.fecha || '').substring(0, 10); if (f.length < 7) return;
       var yy = parseInt(f.substring(0, 4), 10), mo = parseInt(f.substring(5, 7), 10);
       var qk = _presQKey(yy, _presQ(mo));
-      var g = String(r.grupoU || '').trim() || String(r.categoria || '').trim() || '(Sin grupo)';
+      // Taxonomía CANÓNICA, alineada con summary.gs (_summaryEsAgencia/_summaryEsExterno):
+      // agencias → "Agencias" (sub = nombre de la agencia u origen); externos → "Externos";
+      // el resto conserva su nombre pero se deduplica sin distinguir mayúsculas.
+      var _l1 = String(r.grupoU || '').trim() || String(r.categoria || '').trim() || '(Sin grupo)';
+      var _l2 = String(r.categoria || '').trim();
+      var g = _presCanonGrupo(_l1, r.categoria, gReg);
+      if (g === 'Agencias') {
+        var _agN = ''; try { _agN = _summaryAgenciaNombre(_l1) || _summaryAgenciaNombre(r.categoria); } catch (e) {}
+        _l2 = _agN || _l2 || _l1;   // Agencias › REPROVIDA (nombre canónico) › items
+      }
       // Ingresos externos atribuidos: el sub-nivel se abre por DUEÑO (Origen
       // externo). Los no-externos traen r.origen='' → sub = categoría (sin cambio).
-      var _tieneOrigen = !!(r.origen && String(r.origen).trim());
-      var s = _tieneOrigen ? String(r.origen).trim() : (String(r.categoria || '').trim() || g);
+      var _org = String(r.origen || '').trim();
+      var _tieneOrigen = !!_org;
+      var s = (g === 'Agencias') ? (_org || _l2 || g)
+            : (g === 'Externos') ? (_org || 'Externos — sin atribuir')
+            : (_l2 || g);
       if (_tieneOrigen) origenSub[g + '' + s] = true;   // este sub SÍ tiene dueño (origen) atribuido
       var p = String(r.producto || '').trim() || s;
       var cant = Number(r.cantidad) || 0, imp = Number(r.total) || 0;
@@ -504,16 +534,20 @@ function readPresupuesto(periodo) {
     var nx = _presNextQ(curY, curQ);
     var tgtY = nx.y, tgtQ = nx.q;
     // Permite consultar un trimestre específico (histórico o futuro): periodo = 'YYYY-Qn'
-    var esHistorico = false;
+    var esHistorico = false, _pedido = false;
     if (periodo && /^\d{4}-Q[1-4]$/.test(String(periodo).trim())) {
       var pm = String(periodo).trim().match(/^(\d{4})-Q([1-4])$/);
-      tgtY = parseInt(pm[1], 10); tgtQ = parseInt(pm[2], 10);
+      tgtY = parseInt(pm[1], 10); tgtQ = parseInt(pm[2], 10); _pedido = true;
       // histórico = SOLO si el trimestre YA TERMINÓ. El trimestre EN CURSO y los
       // futuros son editables (permite ajustar el Q actual apenas empezado).
       // Un periodo ABIERTO manualmente (candado) también se vuelve editable.
       esHistorico = ((tgtY < curY) || (tgtY === curY && tgtQ < curQ)) && !_presPeriodoAbierto(String(periodo).trim());
     }
-    var perActual = _presQKey(curY, curQ);
+    // El tablero de META sigue al trimestre CONSULTADO. Antes quedaba clavado al
+    // trimestre en curso por reloj e ignoraba `periodo` → se veía Q3 arriba y Q4 abajo.
+    // Sin `periodo` se conserva el comportamiento por defecto (Q en curso arriba).
+    var actY = _pedido ? tgtY : curY, actQ = _pedido ? tgtQ : curQ;
+    var perActual = _presQKey(actY, actQ);
     var perSig = _presQKey(tgtY, tgtQ);
     // Motor nuevo: ingresos por producto (cantidad × precio real), agrupado como Board Deck
     var ingProd = _presIngresosProy(tgtY, tgtQ);
@@ -557,17 +591,25 @@ function readPresupuesto(periodo) {
     });
     lineasProy.sort(function (a, b) { return b.proyeccion - a.proyeccion; });
 
-    // ── Trimestre en curso: pace ──
-    var qStart = new Date(curY, (curQ - 1) * 3, 1);
-    var qEnd = new Date(curY, curQ * 3, 0);
+    // ── Trimestre del tablero (el CONSULTADO): pace ──
+    var qStart = new Date(actY, (actQ - 1) * 3, 1);
+    var qEnd = new Date(actY, actQ * 3, 0);
     var diasTotales = Math.round((qEnd - qStart) / 86400000) + 1;
-    var diasTransc = Math.min(Math.max(Math.round((hoy - qStart) / 86400000) + 1, 1), diasTotales);
+    var _hoy0 = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+    var _esFuturo = _hoy0 < qStart;   // trimestre por comenzar: no hay avance que medir
+    var _esPasado = _hoy0 > qEnd;     // trimestre cerrado: transcurrió completo
+    var diasTransc = _esFuturo ? 0 : (_esPasado ? diasTotales
+      : Math.min(Math.max(Math.round((_hoy0 - qStart) / 86400000) + 1, 1), diasTotales));
     var realActual = (histQ[perActual] && histQ[perActual].__total) || 0;
-    var fraccion = diasTransc / diasTotales;
-    var proyCierre = fraccion > 0 ? realActual / fraccion : realActual;
+    var fraccion = diasTotales > 0 ? diasTransc / diasTotales : 0;
+    // Sin días transcurridos NO hay proyección de cierre (extrapolar de 0 no significa nada):
+    // el semáforo "vas / no vas", la proyección de cierre y la brecha no aplican todavía.
+    var proyCierre = _esFuturo ? null : (fraccion > 0 ? realActual / fraccion : realActual);
     var metaActualTotal = (metas[perActual] && metas[perActual].__total) || 0;
-    var cumplimiento = metaActualTotal > 0 ? proyCierre / metaActualTotal : null;
-    var semaforo = cumplimiento === null ? 'sin-meta' : (cumplimiento >= 1 ? 'verde' : (cumplimiento >= 0.9 ? 'amarillo' : 'rojo'));
+    var cumplimiento = (_esFuturo || proyCierre === null) ? null
+      : (metaActualTotal > 0 ? proyCierre / metaActualTotal : null);
+    var semaforo = _esFuturo ? 'futuro'
+      : (cumplimiento === null ? 'sin-meta' : (cumplimiento >= 1 ? 'verde' : (cumplimiento >= 0.9 ? 'amarillo' : 'rojo')));
 
     // ── Egresos POR LÍNEA (subtipo) con el mismo modelo ratchet ──
     var egHistQ = egQ.q;
@@ -609,9 +651,37 @@ function readPresupuesto(periodo) {
       delete S.subs; return S;
     }).sort(function (a, b) { return a.orden - b.orden; });
     var egProy = egTotProy;
-    // Ingresos proyectados = la MISMA cifra que muestra la tarjeta (por producto: cantidad × precio),
-    // no la proyección vieja por línea. Antes el margen usaba totProy y salía inconsistente (negativo).
-    var _ingProyTot = ingProd.totalImporte || totProy;
+
+    // ── Parámetros de PROYECCIÓN (escenarios) guardados por periodo ──
+    // La recomendación del modelo (ingProd.totalImporte) es solo la SEMILLA. Si el usuario
+    // guardó su Base % / Conservador % / Optimista % y el escenario activo, esos MANDAN.
+    // Va ANTES del margen a propósito: el margen DEBE derivar del escenario activo.
+    var _proyCfg = (metas[perSig] && metas[perSig]._proyeccion) || null;
+    var _escSeed = _presEscenariosCfg();
+    var _consP  = (_proyCfg && _proyCfg.conservador != null) ? _proyCfg.conservador : _escSeed.conservador;
+    var _optP   = (_proyCfg && _proyCfg.optimista  != null) ? _proyCfg.optimista  : _escSeed.optimista;
+    var _basePct = (_proyCfg && _proyCfg.basePct   != null) ? _proyCfg.basePct    : 0;
+    var _recomBase = ingProd.totalImporte || totProy;                              // recomendación cruda del modelo
+    var _baseAjust = Math.round(_recomBase * (1 + (_basePct || 0) / 100));         // Base con el % vs recom del usuario
+    var _consAmt   = Math.round(_baseAjust * (1 - (_consP || 0) / 100));
+    var _optAmt    = Math.round(_baseAjust * (1 + (_optP  || 0) / 100));
+    var _metaTot   = (metas[perSig] && metas[perSig].__total) || 0;
+    // Escenario activo: el guardado manda; si no hay pero sí hay meta capturada, se implica 'meta'; si no, 'base'.
+    var _selScen = (_proyCfg && _proyCfg.seleccionado) ? _proyCfg.seleccionado : (_metaTot > 0 ? 'meta' : 'base');
+    var _proySel = _selScen === 'conservador' ? _consAmt
+                 : _selScen === 'optimista'   ? _optAmt
+                 : _selScen === 'meta'        ? _metaTot
+                 : _baseAjust;
+
+    // ════ FUENTE ÚNICA DE VERDAD de la pantalla ════
+    //   INGRESO_DEL_PERIODO = proyeccionSeleccionada (el escenario ACTIVO)
+    //   EGRESO_DEL_PERIODO  = egresos.proyeccion
+    //   UTILIDAD            = INGRESO − EGRESO
+    //   MARGEN %            = UTILIDAD / INGRESO
+    // Antes el margen usaba la recomendación CRUDA del modelo (ingProd.totalImporte) y el
+    // escenario se resolvía 35 líneas DESPUÉS → la Ganancia ignoraba el % de la Base y el
+    // escenario elegido (se mostraba la utilidad del recomendado, no la del escenario activo).
+    var _ingProyTot = _proySel;
     var margenProy = _ingProyTot - egProy;
     var margenPct = _ingProyTot > 0 ? (margenProy / _ingProyTot) * 100 : 0;
 
@@ -637,26 +707,6 @@ function readPresupuesto(periodo) {
     // ── Tendencia mensual (income + egresos) para la gráfica ──
     var tendencia = _presTendencia(histM, egQ.m || {}, tgtY, tgtQ, _ingProyTot, egProy);
 
-    // ── Parámetros de PROYECCIÓN (escenarios) guardados por periodo ──
-    // La recomendación del modelo (ingProd.totalImporte) es solo la SEMILLA. Si el usuario
-    // guardó su Base % / Conservador % / Optimista % y el escenario activo, esos MANDAN.
-    var _proyCfg = (metas[perSig] && metas[perSig]._proyeccion) || null;
-    var _escSeed = _presEscenariosCfg();
-    var _consP  = (_proyCfg && _proyCfg.conservador != null) ? _proyCfg.conservador : _escSeed.conservador;
-    var _optP   = (_proyCfg && _proyCfg.optimista  != null) ? _proyCfg.optimista  : _escSeed.optimista;
-    var _basePct = (_proyCfg && _proyCfg.basePct   != null) ? _proyCfg.basePct    : 0;
-    var _recomBase = ingProd.totalImporte || totProy;                              // recomendación cruda del modelo
-    var _baseAjust = Math.round(_recomBase * (1 + (_basePct || 0) / 100));         // Base con el % vs recom del usuario
-    var _consAmt   = Math.round(_baseAjust * (1 - (_consP || 0) / 100));
-    var _optAmt    = Math.round(_baseAjust * (1 + (_optP  || 0) / 100));
-    var _metaTot   = (metas[perSig] && metas[perSig].__total) || 0;
-    // Escenario activo: el guardado manda; si no hay pero sí hay meta capturada, se implica 'meta'; si no, 'base'.
-    var _selScen = (_proyCfg && _proyCfg.seleccionado) ? _proyCfg.seleccionado : (_metaTot > 0 ? 'meta' : 'base');
-    var _proySel = _selScen === 'conservador' ? _consAmt
-                 : _selScen === 'optimista'   ? _optAmt
-                 : _selScen === 'meta'        ? _metaTot
-                 : _baseAjust;
-
     return {
       ok: true,
       _setup: metasInfo._setup,
@@ -669,6 +719,8 @@ function readPresupuesto(periodo) {
       actual: {
         periodo: perActual, meta: metaActualTotal, realAcumulado: realActual,
         diasTranscurridos: diasTransc, diasTotales: diasTotales,
+        // esFuturo: el Q aún no arranca → sin semáforo, sin proyección de cierre, sin brecha.
+        esFuturo: _esFuturo, esPasado: _esPasado,
         proyeccionCierre: proyCierre, cumplimientoPct: cumplimiento, semaforo: semaforo
       },
       periodoConsultado: perSig,

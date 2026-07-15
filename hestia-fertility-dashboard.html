@@ -15263,8 +15263,12 @@ function _renderPresupuesto(){
     verde:    {c:'#166534', bg:'rgba(16,185,129,.12)', dot:'#16a34a', txt:'Vas a llegar a la meta'},
     amarillo: {c:'#b45309', bg:'rgba(245,158,11,.15)', dot:'#f59e0b', txt:'Vas justo — riesgo de no llegar'},
     rojo:     {c:'#991b1b', bg:'rgba(239,68,68,.12)',  dot:'#ef4444', txt:'No vas a llegar a la meta'},
-    'sin-meta':{c:'#6b7280',bg:'rgba(107,114,128,.12)',dot:'#9ca3af', txt:'Captura una meta para evaluar el avance'}
+    'sin-meta':{c:'#6b7280',bg:'rgba(107,114,128,.12)',dot:'#9ca3af', txt:'Captura una meta para evaluar el avance'},
+    // Trimestre por comenzar: no hay días transcurridos, así que "vas / no vas",
+    // la proyección de cierre y la brecha no aplican todavía.
+    futuro:   {c:'#6b7280', bg:'rgba(107,114,128,.12)', dot:'#9ca3af', txt:'Trimestre por comenzar — aún no hay avance que medir'}
   };
+  var _esFut = !!a.esFuturo;
   var sem = semCfg[a.semaforo] || semCfg['sin-meta'];
   var pctReal = a.meta>0 ? Math.max(Math.min(a.realAcumulado/a.meta,1.15),0) : 0;
   var pctMeta = 1;
@@ -15275,7 +15279,8 @@ function _renderPresupuesto(){
   h.push('<div class="pr-hdr"><div>'
     +'<div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility · Finanzas</div>'
     +'<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Presupuesto y meta</h1>'
-    +'<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">Trimestre en curso '+a.periodo+' · proyección '+sg.periodo+' · modelo estacional con piso creciente</div>'
+    // El tablero sigue al trimestre CONSULTADO (ya no siempre es "el trimestre en curso").
+    +'<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">'+(a.esFuturo?'Trimestre '+a.periodo+' (por comenzar)':(a.esPasado?'Trimestre '+a.periodo+' (cerrado)':'Trimestre en curso '+a.periodo))+' · proyección '+sg.periodo+' · modelo estacional con piso creciente</div>'
     +'</div>'
     +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
     +(canEdit?'<button class="pr-btn" onclick="presOpenMeta()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Fijar / editar meta</button>':'')
@@ -15288,16 +15293,19 @@ function _renderPresupuesto(){
     +'</div>');
 
   // Hero semáforo + simulador interactivo (trimestre en curso)
-  var _baseMeta = a.meta>0 ? a.meta : (a.proyeccionCierre||0);
+  // En un trimestre por comenzar no hay proyección de cierre: el ancla del simulador
+  // (y del rango del slider) es la proyección del escenario ACTIVO.
+  var _proySelHero = (tt.proyeccionSeleccionada!=null ? Number(tt.proyeccionSeleccionada) : (Number(tt.proyeccion)||0));
+  var _baseMeta = a.meta>0 ? a.meta : (_esFut ? _proySelHero : (a.proyeccionCierre||0));
   var _simMin = Math.round(Math.max(a.realAcumulado||0, 1));
-  var _simMax = Math.round(Math.max(_baseMeta*1.6, (a.proyeccionCierre||0)*1.4, (a.realAcumulado||0)*1.3, _simMin+1));
-  window._presSim = { real:a.realAcumulado||0, diasT:a.diasTranscurridos||0, diasTot:a.diasTotales||0, proyCierre:a.proyeccionCierre||0, savedMeta:a.meta||0, periodo:a.periodo };
+  var _simMax = Math.round(Math.max(_baseMeta*1.6, (a.proyeccionCierre||0)*1.4, (a.realAcumulado||0)*1.3, _proySelHero*1.4, _simMin+1));
+  window._presSim = { real:a.realAcumulado||0, diasT:a.diasTranscurridos||0, diasTot:a.diasTotales||0, proyCierre:a.proyeccionCierre||0, savedMeta:a.meta||0, periodo:a.periodo, esFuturo:_esFut };
   h.push('<div class="pr-hero" style="flex-direction:column;align-items:stretch">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">'
       +'<div style="display:flex;align-items:center;gap:10px"><span id="pr-sem-dot" style="width:11px;height:11px;border-radius:50%;background:'+sem.dot+'"></span>'
         +'<span id="pr-sem-txt" style="font-size:15px;font-weight:700;color:var(--text-primary,#111)">'+sem.txt+'</span>'
-        +'<span style="font-size:11px;color:var(--text-secondary,#9ca3af)">'+a.periodo+' · día '+a.diasTranscurridos+' de '+a.diasTotales+'</span></div>'
-      +'<span id="pr-sem-pill" class="pr-pill" style="background:'+sem.bg+';color:'+sem.c+'">'+(a.cumplimientoPct!=null?Math.round(a.cumplimientoPct*100)+'% proyectado':'sin meta')+'</span>'
+        +'<span style="font-size:11px;color:var(--text-secondary,#9ca3af)">'+a.periodo+' · '+(_esFut?'aún no comienza':'día '+a.diasTranscurridos+' de '+a.diasTotales)+'</span></div>'
+      +'<span id="pr-sem-pill" class="pr-pill" style="background:'+sem.bg+';color:'+sem.c+'">'+(_esFut?'sin avance aún':(a.cumplimientoPct!=null?Math.round(a.cumplimientoPct*100)+'% proyectado':'sin meta'))+'</span>'
     +'</div>'
     +'<div class="pr-bar"><div id="pr-bar-fill" style="position:absolute;left:0;top:0;bottom:0;width:'+(pctReal*100).toFixed(0)+'%;background:'+sem.dot+';border-radius:999px;transition:width .12s ease"></div>'
       +'<div style="position:absolute;left:100%;top:-3px;bottom:-3px;width:2px;background:var(--text-primary,#111);transform:translateX(-2px)"></div></div>'
@@ -15316,13 +15324,15 @@ function _renderPresupuesto(){
     +'</div>'
     +'</div>');
 
-  // KPIs
+  // KPIs — en un trimestre por comenzar, "proyección de cierre" y "brecha" NO aplican
+  // (no hay días transcurridos de los que extrapolar): se muestran en blanco con nota.
   var brecha = (a.proyeccionCierre||0) - (a.meta||0);
+  var _naNota = '<div style="font-size:9.5px;color:var(--text-secondary,#9ca3af);margin-top:2px">no aplica · el trimestre no ha comenzado</div>';
   h.push('<div class="pr-kstrip">'
     +'<div class="pr-ks"><div class="pr-ks-l">Meta del trimestre</div><div class="pr-ks-v">'+(a.meta>0?fM(a.meta):'—')+'</div></div>'
     +'<div class="pr-ks"><div class="pr-ks-l">Real acumulado</div><div class="pr-ks-v">'+fM(a.realAcumulado)+'</div></div>'
-    +'<div class="pr-ks"><div class="pr-ks-l">Proyección de cierre</div><div class="pr-ks-v" style="color:'+sem.c+'">'+fM(a.proyeccionCierre)+'</div></div>'
-    +'<div class="pr-ks"><div class="pr-ks-l">Brecha vs meta</div><div class="pr-ks-v" style="color:'+(brecha>=0?'#166534':'#991b1b')+'">'+(a.meta>0?fM(brecha):'—')+'</div></div>'
+    +'<div class="pr-ks"><div class="pr-ks-l">Proyección de cierre</div><div class="pr-ks-v" style="color:'+(_esFut?'#9ca3af':sem.c)+'">'+(_esFut?'—':fM(a.proyeccionCierre))+'</div>'+(_esFut?_naNota:'')+'</div>'
+    +'<div class="pr-ks"><div class="pr-ks-l">Brecha vs meta</div><div class="pr-ks-v" style="color:'+(_esFut?'#9ca3af':(brecha>=0?'#166534':'#991b1b'))+'">'+(_esFut?'—':(a.meta>0?fM(brecha):'—'))+'</div>'+(_esFut?_naNota:'')+'</div>'
     +'</div>');
 
   // Histórico de metas por trimestre (racha meta vs real) — se carga aparte
@@ -15354,6 +15364,17 @@ function _renderPresupuesto(){
   window._presBasePct = _basePct; window._presEscSel = _selScen;
   window._presRecBase = (tt.recomendado!=null?tt.recomendado:_escBase);   // recomendación CRUDA (ancla del % vs recom)
   var _egP=(eg&&eg.proyeccion)||0; window._presEgProy=_egP;
+  window._presPer = sg.periodo;
+  // ══ FUENTE ÚNICA DE VERDAD de la pantalla ══
+  //   INGRESO = escenario ACTIVO (proyeccionSeleccionada) · EGRESO = eg.proyeccion
+  //   UTILIDAD = INGRESO − EGRESO · MARGEN % = UTILIDAD / INGRESO
+  // Ningún widget puede mostrar ingreso/utilidad/margen que no derive de estas 4 líneas.
+  // (fallback local por si el backend aún no está redesplegado y no manda proyeccionSeleccionada)
+  var _ingSel = (tt.proyeccionSeleccionada!=null) ? Number(tt.proyeccionSeleccionada)
+    : (_selScen==='conservador' ? _escBase*(1-_consP/100)
+     : _selScen==='optimista'   ? _escBase*(1+_optP/100)
+     : _selScen==='meta'        ? (Number(tt.meta)||0)
+     : _escBase);
   function _uHtml(id,ing){ var u=ing-_egP, p=u>=0; return '<div id="'+id+'" style="font-size:10.5px;font-weight:700;margin-top:4px;color:'+(p?'#166534':'#991b1b')+'">Utilidad '+(p?'':'−')+fM(Math.abs(u))+'</div>'; }
   function _escPctCtl(id,signo,val){ return canEdit
     ? '<span style="white-space:nowrap" onclick="event.stopPropagation()">'+signo+'<input type="number" id="'+id+'" value="'+val+'" min="0" max="300" step="1" onclick="event.stopPropagation()" onchange="presSetEscenario(\''+(id==='pr-esc-cons'?'conservador':'optimista')+'\',this.value)" style="width:40px;text-align:right;border:1px solid var(--color-divider,#e5e7eb);border-radius:5px;padding:1px 3px;font-size:10px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">% vs base</span>'
@@ -15369,11 +15390,13 @@ function _renderPresupuesto(){
       +'<div '+_scAttr('optimista')+'><div style="font-size:11px;color:var(--text-secondary,#6b7280);display:flex;align-items:center;justify-content:space-between;gap:5px">Optimista '+_escPctCtl('pr-esc-opt','+',_optP)+'</div><div id="pr-scen-opt" style="font-size:21px;font-weight:800">'+fM(_escBase*(1+_optP/100))+'</div>'+_uHtml('pr-scen-opt-u',_escBase*(1+_optP/100))+_scBadge('optimista')+'</div>'
       +'<div '+_scAttr('meta')+'><div style="font-size:11px;color:var(--text-secondary,#6b7280)">Meta capturada</div><div id="pr-scen-meta" style="font-size:21px;font-weight:800">'+(tt.meta>0?fM(tt.meta):'—')+'</div>'+(tt.meta>0?_uHtml('pr-scen-meta-u',tt.meta):'<div id="pr-scen-meta-u" style="font-size:10.5px;color:#9ca3af;margin-top:4px">Utilidad —</div>')+_scBadge('meta')+'</div>'
     +'</div>'
-    +(function(){ var _egP=(eg&&eg.proyeccion)||0, _u=_escBase-_egP, _pos=_u>=0;
-      return '<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:center;padding:10px 14px;border-radius:12px;background:'+(_pos?'rgba(22,101,52,.06)':'rgba(153,27,27,.06)')+';border:1px solid var(--color-divider,#e5e7eb)">'
-        +'<span style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">'+(_pos?'💰 Utilidad esperada':'⚠ Pérdida esperada')+' (con la Base)</span>'
-        +'<span id="pr-scen-base-total" style="font-size:22px;font-weight:800;color:'+(_pos?'#166534':'#991b1b')+'">'+(_pos?'':'−')+fM(Math.abs(_u))+'</span>'
-        +'<span id="pr-scen-base-eq" style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">= ingresos base '+fM(_escBase)+' − egresos proyectados '+fM(_egP)+'</span>'
+    // Barra de utilidad del escenario ACTIVO (antes decía "(con la Base)" hard-codeado y
+    // mostraba SIEMPRE la utilidad de la Base aunque el escenario activo fuera otro).
+    +(function(){ var _u=_ingSel-_egP, _pos=_u>=0;
+      return '<div id="pr-scen-sel-box" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:center;padding:10px 14px;border-radius:12px;background:'+(_pos?'rgba(22,101,52,.06)':'rgba(153,27,27,.06)')+';border:1px solid var(--color-divider,#e5e7eb)">'
+        +'<span id="pr-scen-sel-lbl" style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">'+(_pos?'💰 Utilidad esperada':'⚠ Pérdida esperada')+' ('+_presScenCon(_selScen)+')</span>'
+        +'<span id="pr-scen-sel-total" style="font-size:22px;font-weight:800;color:'+(_pos?'#166534':'#991b1b')+'">'+(_pos?'':'−')+fM(Math.abs(_u))+'</span>'
+        +'<span id="pr-scen-sel-eq" style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">= ingresos '+_presScenNombre(_selScen).toLowerCase()+' '+fM(_ingSel)+' − egresos proyectados '+fM(_egP)+'</span>'
       +'</div>'; })()
     +'</div>');
 
@@ -15415,22 +15438,32 @@ function _renderPresupuesto(){
     +'<div style="font-size:10.5px;color:var(--text-secondary,#9ca3af);margin-top:8px;line-height:1.6">Ingresos = <b>cantidad × precio promedio real</b> (importe = cant × precio). Capturas por <b>cantidad</b>; el importe sale del precio promedio. El checkbox <b>% maestro</b> por grupo/subgrupo decide si ese bucket <b>se mueve</b> (con % maestro / cuadrar) o queda <b>fijo</b> en tu número. Precio unitario = importe ÷ cantidad realizada.</div>'
   +'</div>');
 
-  // Egresos + ganancia/pérdida proyectada
-  var _mrg = Number(eg.margenProyectado)||0; var _mrgPos = _mrg>=0;
+  // Egresos + ganancia/pérdida proyectada — TODO derivado del escenario ACTIVO.
+  // Antes el KPI de ingresos usaba tt.proyeccion (= Base) y la utilidad venía de
+  // eg.margenProyectado (calculado sobre el recomendado CRUDO) → el margen ignoraba
+  // el escenario. Ahora se calcula aquí desde las 4 líneas de la fuente única.
+  var _mrg = _ingSel - _egP; var _mrgPos = _mrg>=0;
+  var _mrgPct = _ingSel>0 ? (_mrg/_ingSel)*100 : 0;
   var _mrgCol = _mrgPos ? '#166534' : '#991b1b'; var _mrgLbl = _mrgPos ? 'Ganancia proyectada' : 'Pérdida proyectada';
+  var _mrgBg = _mrgPos?'rgba(22,101,52,.06)':'rgba(153,27,27,.06)';
   h.push('<div class="pr-kstrip">'
-    +'<div class="pr-ks"><div class="pr-ks-l">Ingresos proyectados '+sg.periodo+'</div><div class="pr-ks-v" style="color:#166534">'+fM(tt.proyeccion)+'</div></div>'
-    +'<div class="pr-ks"><div class="pr-ks-l">Egresos proyectados</div><div class="pr-ks-v" style="color:#991b1b">'+fM(eg.proyeccion)+'</div></div>'
-    +'<div class="pr-ks" style="background:'+(_mrgPos?'rgba(22,101,52,.06)':'rgba(153,27,27,.06)')+'"><div class="pr-ks-l">'+_mrgLbl+'</div><div class="pr-ks-v" style="color:'+_mrgCol+'">'+(_mrgPos?'':'−')+fM(Math.abs(_mrg))+'</div><div style="font-size:9.5px;color:var(--text-secondary,#9ca3af);margin-top:2px">ingresos − egresos</div></div>'
-    +'<div class="pr-ks" style="background:'+(_mrgPos?'rgba(22,101,52,.06)':'rgba(153,27,27,.06)')+'"><div class="pr-ks-l">% sobre ingresos</div><div class="pr-ks-v" style="color:'+_mrgCol+'">'+(Number(eg.margenPct)||0).toFixed(1)+'%</div></div>'
+    +'<div class="pr-ks"><div class="pr-ks-l" id="pr-ks-ing-l">Ingresos proyectados '+sg.periodo+' · '+_presScenCon(_selScen)+'</div><div class="pr-ks-v" id="pr-ks-ing" style="color:#166534">'+fM(_ingSel)+'</div></div>'
+    +'<div class="pr-ks"><div class="pr-ks-l">Egresos proyectados</div><div class="pr-ks-v" id="pr-ks-eg" style="color:#991b1b">'+fM(_egP)+'</div></div>'
+    +'<div class="pr-ks" id="pr-ks-u-c" style="background:'+_mrgBg+'"><div class="pr-ks-l" id="pr-ks-u-l">'+_mrgLbl+'</div><div class="pr-ks-v" id="pr-ks-u" style="color:'+_mrgCol+'">'+(_mrgPos?'':'−')+fM(Math.abs(_mrg))+'</div><div style="font-size:9.5px;color:var(--text-secondary,#9ca3af);margin-top:2px">ingresos − egresos</div></div>'
+    +'<div class="pr-ks" id="pr-ks-pct-c" style="background:'+_mrgBg+'"><div class="pr-ks-l">% sobre ingresos</div><div class="pr-ks-v" id="pr-ks-pct" style="color:'+_mrgCol+'">'+_mrgPct.toFixed(1)+'%</div></div>'
     +'</div>');
 
   if (!tt.meta || tt.meta<=0){
-    h.push('<div style="font-size:11.5px;color:var(--text-secondary,#9ca3af);background:var(--color-surface,#fafafa);border:1px dashed var(--color-divider,#e0e0e0);border-radius:10px;padding:12px 14px">Aún no hay meta para '+sg.periodo+'. El modelo sugiere <b style="color:var(--color-primary,#c46a7a)">'+fM(tt.proyeccion)+'</b> — usa <b>Fijar / editar meta</b> para aceptarla o ajustarla y activar el semáforo.</div>');
+    // El número crudo del modelo se rotula SIEMPRE como "recomendado del modelo", nunca como "proyectado".
+    h.push('<div style="font-size:11.5px;color:var(--text-secondary,#9ca3af);background:var(--color-surface,#fafafa);border:1px dashed var(--color-divider,#e0e0e0);border-radius:10px;padding:12px 14px">Aún no hay meta para '+sg.periodo+'. El <b>recomendado del modelo</b> es <b style="color:var(--color-primary,#c46a7a)">'+fM(tt.recomendado!=null?tt.recomendado:_escBase)+'</b> — usa <b>Fijar / editar meta</b> para aceptarlo o ajustarlo y activar el semáforo.</div>');
   }
 
   h.push('</div>');
   root.innerHTML = h.join('');
+  // Reconcilia el primer pintado por la MISMA vía que los updates (fuente única de verdad):
+  // _presSyncSel fija conservador/optimista/proyeccionSeleccionada y _presDerivedUI repinta
+  // tarjetas + barra + KPIs. Así el render inicial no puede divergir de lo que se ve al editar.
+  try { _presSyncSel(); _presDerivedUI(); } catch(e){}
   try { presSimUpdate(); } catch(e){}
   try { loadHistoricoMetas(); } catch(e){}
   setTimeout(function(){ if(typeof _tourStart==='function') _tourStart(_PRES_TOUR,'hestia_tour_pres_v3'); },700);
@@ -15531,7 +15564,7 @@ async function presGruposConfigOpen(){
   var ovl=document.createElement('div'); ovl.id='pres-grp-ovl'; ovl.className='pr-mov';
   ovl.onclick=function(e){ if(e.target===ovl) ovl.remove(); };
   ovl.innerHTML='<div class="pr-modal" style="max-width:920px;width:96%" onclick="event.stopPropagation()">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:15px 20px;border-bottom:1px solid var(--color-divider,#e5e7eb)"><div><div style="font-size:15px;font-weight:800">Grupos del Presupuesto</div><div style="font-size:11px;color:#9ca3af">Arrastra productos a un grupo/subgrupo, o usa el menú de cada tarjeta. Lo que quede en «Sin agrupar» se omite de la meta.</div></div><button onclick="document.getElementById(\'pres-grp-ovl\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280">×</button></div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:15px 20px;border-bottom:1px solid var(--color-divider,#e5e7eb)"><div><div style="font-size:15px;font-weight:800">Grupos del Presupuesto</div><div style="font-size:11px;color:#9ca3af">Arrastra productos a un grupo/subgrupo, o usa el menú de cada tarjeta. Lo que quede en «Sin agrupar» se muestra en el bucket «Sin grupo» del reporte (sigue contando en el total y en la meta).</div></div><button onclick="document.getElementById(\'pres-grp-ovl\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280">×</button></div>'
     +'<div id="pge-board" style="padding:14px 18px;max-height:66vh;overflow:auto"><div style="padding:44px 16px;text-align:center;color:#9ca3af;font-size:13px">'+(typeof hestiaLoader==='function'?hestiaLoader('Cargando productos y grupos…'):'Cargando productos y grupos…')+'</div></div>'
     +'<div style="display:flex;gap:10px;padding:13px 20px;border-top:1px solid var(--color-divider,#e5e7eb)"><div id="pge-msg" style="margin-right:auto;font-size:11px;align-self:center;color:#9ca3af"></div><button class="pr-btn" onclick="presGruposConfigSave()">Guardar grupos</button><button onclick="document.getElementById(\'pres-grp-ovl\').remove()" style="padding:10px 18px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider,#e5e7eb);border-radius:9px;cursor:pointer">Cancelar</button></div>'
     +'</div>';
@@ -15545,10 +15578,11 @@ async function presGruposConfigOpen(){
   var grupos=(existing.grupos||[]).map(function(g){ return {nombre:g.nombre, incluirMaestro:g.incluirMaestro!==false, subs:(g.subs||[]).map(function(s){return {nombre:s};})}; });
   var ruta={}, er=(existing.productoARuta||{});
   Object.keys(er).forEach(function(pn){ ruta[pn]={grupo:er[pn].grupo||'', sub:er[pn].sub||''}; });
-  // Arranca VACÍO: todos los productos en el pool (se omiten). El usuario mete solo lo que quiera.
+  // Arranca VACÍO: todos los productos en el pool. No se omiten — se muestran juntos en el
+  // bucket «Sin grupo» del reporte; agrupar solo cambia cómo se presentan.
   var seeded=!(existing.grupos&&existing.grupos.length);
   window._presGE={prods:prods, grupos:grupos, ruta:ruta, seeded:seeded};
-  if(seeded){ var m=document.getElementById('pge-msg'); if(m) m.textContent='Empieza vacío: mete al presupuesto SOLO lo que quieras; el resto se omite. Usa «Autollenar» si quieres precargar por categoría.'; }
+  if(seeded){ var m=document.getElementById('pge-msg'); if(m) m.textContent='Empieza vacío: agrupa lo que quieras; el resto aparece junto en «Sin grupo». Usa «Autollenar» si quieres precargar por categoría.'; }
   _presGERender();
 }
 function _presGEProds(grupo,sub){ return (window._presGE.prods||[]).filter(function(p){ var r=window._presGE.ruta[p.producto]; if(!r||!r.grupo) return grupo===''; return r.grupo===grupo && (sub==null || (r.sub||'')===sub); }); }
@@ -15566,7 +15600,7 @@ function _presGEAutofill(){ var GE=window._presGE; if(!GE) return;
   GE.prods.forEach(function(p){ var r=GE.ruta[p.producto]; if(r&&r.grupo) return; var gn=(typeof _presClasificar==='function')?_presClasificar(p.producto):'Otros'; _presGEEnsureGrupo(gn); GE.ruta[p.producto]={grupo:gn,sub:''}; });
   _presGERender();
 }
-function _presGEClear(){ if(!confirm('¿Mandar TODOS los productos a «Sin agrupar»? Se omitirán del presupuesto.')) return; window._presGE.ruta={}; _presGERender(); }
+function _presGEClear(){ if(!confirm('¿Mandar TODOS los productos a «Sin agrupar»? Seguirán en el presupuesto, juntos en el bucket «Sin grupo».')) return; window._presGE.ruta={}; _presGERender(); }
 function _presGEAssignSelect(prod){
   var GE=window._presGE, r=GE.ruta[prod]||{grupo:'',sub:''};
   var existentes={};
@@ -15581,9 +15615,12 @@ function _presGEAssignSelect(prod){
 }
 function _presGECard(prod,inGroup){
   var enc=encodeURIComponent(prod);
-  return '<div draggable="true" ondragstart="_presGEDrag(event,\''+enc+'\')" style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;padding:4px 7px;font-size:11px;margin-bottom:5px;cursor:grab;display:flex;align-items:center;gap:5px">'
-    +'<span style="color:#c9c9c9;font-size:12px">⋮⋮</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+_esc(prod)+'">'+_esc(prod)+'</span>'
-    +(inGroup ? '<button onclick="_presGEAssign(\''+enc+'\',\'\')" title="Quitar del grupo" style="border:none;background:none;color:#9ca3af;cursor:pointer;font-size:13px;line-height:1">×</button>' : _presGEAssignSelect(prod))
+  // Nombre COMPLETO (wrap, sin ellipsis): los conceptos se truncaban y no se distinguía
+  // cuál era cuál (varios comparten prefijo). align-items:flex-start para que el asa y el
+  // botón queden arriba cuando el nombre ocupa varias líneas.
+  return '<div draggable="true" ondragstart="_presGEDrag(event,\''+enc+'\')" style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;padding:4px 7px;font-size:11px;margin-bottom:5px;cursor:grab;display:flex;align-items:flex-start;gap:5px">'
+    +'<span style="color:#c9c9c9;font-size:12px;flex-shrink:0;line-height:1.35">⋮⋮</span><span style="flex:1;min-width:0;overflow-wrap:anywhere;word-break:break-word;line-height:1.35" title="'+_esc(prod)+'">'+_esc(prod)+'</span>'
+    +(inGroup ? '<button onclick="_presGEAssign(\''+enc+'\',\'\')" title="Quitar del grupo" style="border:none;background:none;color:#9ca3af;cursor:pointer;font-size:13px;line-height:1;flex-shrink:0">×</button>' : _presGEAssignSelect(prod))
     +'</div>';
 }
 function _presGEZone(gEnc,sEnc,cards){
@@ -15596,24 +15633,47 @@ function _presGERender(){
   var poolCount=GE.prods.filter(function(p){ var r=GE.ruta[p.producto]; return !r||!r.grupo; }).length;
   var gruposHtml=(GE.grupos||[]).map(function(G){
     var gEnc=encodeURIComponent(G.nombre);
-    // Productos del grupo, agrupados por Ciclo Alta/Baja (solo lectura) — el subgrupo se arma solo
-    var prodsInG=_presGEProds(G.nombre,null);
-    var byC={}, cOrder=[]; prodsInG.forEach(function(p){ var c=p.grupoU||'(Sin ciclo)'; if(!byC[c]){byC[c]=[];cOrder.push(c);} byC[c].push(p); });
-    var inner=cOrder.map(function(c){ return '<div style="font-size:9px;font-weight:700;text-transform:uppercase;color:#9c4f5f;margin:5px 0 3px">'+_esc(c)+'</div>'+byC[c].map(function(p){ return _presGECard(p.producto,true); }).join(''); }).join('');
-    return '<div style="background:var(--color-surface,#fafafa);border:1px solid var(--color-divider,#e5e7eb);border-radius:11px;padding:10px;width:236px;box-sizing:border-box">'
-      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;gap:6px">'
-        +'<div style="font-weight:800;font-size:12.5px;cursor:text;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" onclick="_presGERename(\''+gEnc+'\')" title="Clic para renombrar">📁 '+_esc(G.nombre)+'</div>'
+    var subs=(G.subs||[]);
+    // ── Subgrupos MANUALES: cada uno con su propia zona de drop, renombrar y eliminar.
+    // Antes solo existía UNA zona con sEnc='' → todo se guardaba con sub:'' y la columna
+    // Subgrupo de la hoja quedaba vacía (el "subgrupo" visible era el fallback al Ciclo col U).
+    var subsHtml=subs.map(function(S){
+      var sEnc=encodeURIComponent(S.nombre);
+      var cards=_presGEProds(G.nombre,S.nombre).map(function(p){ return _presGECard(p.producto,true); }).join('');
+      return '<div style="margin-top:7px">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;gap:4px;margin-bottom:3px">'
+          +'<div style="font-size:9.5px;font-weight:800;color:#9c4f5f;cursor:text;flex:1;min-width:0;overflow-wrap:anywhere" onclick="_presGERenameSub(\''+gEnc+'\',\''+sEnc+'\')" title="Clic para renombrar el subgrupo">↳ '+_esc(S.nombre)+'</div>'
+          +'<button onclick="_presGEDelSub(\''+gEnc+'\',\''+sEnc+'\')" title="Eliminar subgrupo (sus productos vuelven al grupo)" style="border:none;background:none;color:#9ca3af;cursor:pointer;font-size:13px;line-height:1;flex-shrink:0">×</button>'
+        +'</div>'
+        +_presGEZone(gEnc,sEnc,cards)
+      +'</div>';
+    }).join('');
+    // ── Productos del grupo SIN subgrupo. Si el grupo no tiene subgrupos manuales se
+    // muestran agrupados por Ciclo Alta/Baja (solo lectura), como hasta ahora.
+    var directos=_presGEProds(G.nombre,'');
+    var inner;
+    if(subs.length){ inner=directos.map(function(p){ return _presGECard(p.producto,true); }).join(''); }
+    else {
+      var byC={}, cOrder=[]; directos.forEach(function(p){ var c=p.grupoU||'(Sin ciclo)'; if(!byC[c]){byC[c]=[];cOrder.push(c);} byC[c].push(p); });
+      inner=cOrder.map(function(c){ return '<div style="font-size:9px;font-weight:700;color:#9c4f5f;margin:5px 0 3px">'+_esc(c)+'</div>'+byC[c].map(function(p){ return _presGECard(p.producto,true); }).join(''); }).join('');
+    }
+    return '<div style="background:var(--color-surface,#fafafa);border:1px solid var(--color-divider,#e5e7eb);border-radius:11px;padding:10px;width:250px;box-sizing:border-box">'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:7px;gap:6px">'
+        +'<div style="font-weight:800;font-size:12.5px;cursor:text;flex:1;min-width:0;overflow-wrap:anywhere;line-height:1.3" onclick="_presGERename(\''+gEnc+'\')" title="Clic para renombrar">📁 '+_esc(G.nombre)+'</div>'
         +'<div style="display:flex;gap:5px;align-items:center;flex-shrink:0">'
           +'<label style="font-size:9.5px;display:inline-flex;align-items:center;gap:3px;cursor:pointer" title="Incluir en % maestro"><input type="checkbox" '+(G.incluirMaestro!==false?'checked':'')+' onchange="_presGEToggleMaestro(\''+gEnc+'\')" style="accent-color:#c46a7a">%m</label>'
           +'<button onclick="_presGEDelGrupo(\''+gEnc+'\')" title="Eliminar grupo" style="border:none;background:none;color:#9ca3af;cursor:pointer;font-size:15px;line-height:1">×</button>'
         +'</div></div>'
+      +(subs.length?'<div style="font-size:9px;font-weight:700;color:#9ca3af;margin-bottom:3px">SIN SUBGRUPO</div>':'')
       +_presGEZone(gEnc,'',inner)
+      +subsHtml
+      +'<button onclick="_presGENewSub(\''+gEnc+'\')" title="Crear un subgrupo dentro de este grupo" style="margin-top:8px;width:100%;font-size:10.5px;font-weight:700;padding:5px 8px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1px dashed var(--color-primary,#c46a7a);border-radius:7px;cursor:pointer">+ Subgrupo</button>'
       +'</div>';
   }).join('');
-  board.innerHTML='<div style="font-size:11px;color:#6b7280;margin-bottom:10px;background:rgba(196,106,122,.06);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:7px 10px">Mete al presupuesto <b>solo lo que quieras</b>. Dentro de cada grupo, los productos se separan <b>automáticamente por Ciclo Alta/Baja</b> como subgrupos.</div>'
+  board.innerHTML='<div style="font-size:11px;color:#6b7280;margin-bottom:10px;background:rgba(196,106,122,.06);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:7px 10px">Organiza los productos como quieras. Crea <b>subgrupos</b> con <b>+ Subgrupo</b> y arrastra productos a cada uno (clic en su nombre para renombrar). Si un grupo no tiene subgrupos, sus productos se separan <b>automáticamente por Ciclo Alta/Baja</b>. Lo que quede en <b>«Sin agrupar»</b> no se pierde: aparece como bucket <b>«Sin grupo»</b> en el reporte.</div>'
     +'<div style="display:grid;grid-template-columns:250px 1fr;gap:12px;align-items:start">'
     +'<div style="background:var(--color-surface,#fafafa);border:1px solid var(--color-divider,#e5e7eb);border-radius:11px;padding:10px">'
-      +'<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:#6b7280;margin-bottom:7px;display:flex;justify-content:space-between">Sin agrupar · se omiten<span style="color:#9ca3af">'+poolCount+'</span></div>'
+      +'<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:#6b7280;margin-bottom:7px;display:flex;justify-content:space-between" title="No se omiten: se muestran en el bucket «Sin grupo» del reporte y cuentan en el total y en la meta.">Sin agrupar · van a «Sin grupo»<span style="color:#9ca3af">'+poolCount+'</span></div>'
       +_presGEZone('','',poolCards)
     +'</div>'
     +'<div><div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px;align-items:center">'
@@ -15641,8 +15701,16 @@ function _presGENewSub(gEnc){ var gn=decodeURIComponent(gEnc); var n=prompt('Nom
   G.subs=G.subs||[]; G.subs.push({nombre:n}); _presGERender(); }
 function _presGEDelSub(gEnc,sEnc){ var gn=decodeURIComponent(gEnc), sn=decodeURIComponent(sEnc); var GE=window._presGE;
   var G=GE.grupos.filter(function(g){return g.nombre===gn;})[0]; if(!G) return;
+  if(!confirm('¿Eliminar el subgrupo «'+sn+'»? Sus productos vuelven al grupo «'+gn+'» (sin subgrupo).')) return;
   G.subs=(G.subs||[]).filter(function(s){return s.nombre!==sn;});
   Object.keys(GE.ruta).forEach(function(pn){ var r=GE.ruta[pn]; if(r.grupo===gn && (r.sub||'')===sn) r.sub=''; }); _presGERender(); }
+// Renombrar subgrupo (inline): arrastra consigo la ruta de sus productos.
+function _presGERenameSub(gEnc,sEnc){ var gn=decodeURIComponent(gEnc), sn=decodeURIComponent(sEnc); var GE=window._presGE;
+  var G=GE.grupos.filter(function(g){return g.nombre===gn;})[0]; if(!G) return;
+  var n=prompt('Renombrar subgrupo:', sn); if(!n) return; n=n.trim(); if(!n||n===sn) return;
+  if((G.subs||[]).some(function(s){return s.nombre===n;})){ alert('Ya existe un subgrupo con ese nombre en «'+gn+'».'); return; }
+  G.subs.forEach(function(s){ if(s.nombre===sn) s.nombre=n; });
+  Object.keys(GE.ruta).forEach(function(pn){ var r=GE.ruta[pn]; if(r.grupo===gn && (r.sub||'')===sn) r.sub=n; }); _presGERender(); }
 async function presGruposConfigSave(){
   var GE=window._presGE; if(!GE) return;
   var body=(GE.grupos||[]).map(function(G,gi){
@@ -15816,6 +15884,26 @@ async function presCostosSave(){
 function presSimUpdate(){
   var s=window._presSim, sl=document.getElementById('pr-sim'); if(!s||!sl) return;
   var t=parseFloat(sl.value)||0, fM=_presFM;
+  function _set(id,fn){ var e=document.getElementById(id); if(e) fn(e); }
+  // Trimestre por comenzar: sin días transcurridos NO hay pace que evaluar. No se toca el
+  // semáforo (extrapolar de 0 daría siempre "no vas a llegar"); se compara meta simulada
+  // contra la proyección del escenario ACTIVO, que es lo único que aplica todavía.
+  if(s.esFuturo){
+    var proy=0; try{ var _t=_presData&&_presData.siguiente&&_presData.siguiente.totales;
+      proy=_t?Number(_t.proyeccionSeleccionada!=null?_t.proyeccionSeleccionada:_t.proyeccion)||0:0; }catch(e){}
+    _set('pr-bar-fill',function(e){ e.style.width='0%'; });
+    _set('pr-bar-meta',function(e){ e.textContent=fM(t); });
+    _set('pr-bar-real',function(e){ e.textContent='Real acumulado '+fM(s.real); });
+    _set('pr-sim-val',function(e){ e.textContent=fM(t); });
+    _set('pr-sim-out',function(e){
+      e.innerHTML= proy>0
+        ? 'Trimestre por comenzar: todavía no hay avance que medir. Meta simulada <b>'+fM(t)+'</b> vs proyección del escenario activo <b>'+fM(proy)+'</b> — '
+          +(t<=proy ? '<b style="color:#166534">la proyección la cubre</b> (holgura '+fM(proy-t)+').'
+                    : '<b style="color:#991b1b">quedaría corta por '+fM(t-proy)+'</b>.')
+        : 'Trimestre por comenzar: todavía no hay avance que medir. Meta simulada <b>'+fM(t)+'</b>.';
+    });
+    return;
+  }
   var pctReal = t>0 ? Math.min(s.real/t,1) : 0;
   var gap = t - s.real;
   var diasRest = Math.max(s.diasTot - s.diasT, 0);
@@ -16194,8 +16282,19 @@ function presProdCant(key,val){ var p=_presProdMap[key]; if(!p)return; p._budCan
   var im=document.getElementById(key+'-imp'); if(im)im.textContent=_presFM(p._budImp); _presProdDlUI(key); _presIngTotUI();
   var s=getSession()||{}; fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMeta',periodo:_presData.siguiente.periodo,linea:p.producto,metaIngreso:p._budImp,metaCantidad:p._budCant,usuario:s.email||''})}).then(function(){_presFlashSaved();}).catch(function(){}); }
 function _presProdDlUI(key){ var p=_presProdMap[key]; if(!p)return; var dl=p.importeProy>0?(p._budImp-p.importeProy):null; var dc=document.getElementById(key+'-dl'); if(dc){dc.textContent=dl==null?'—':_presFM(dl);dc.style.color=dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b');} }
+/* Total de la tabla de ingresos + total de META del periodo.
+   _presProdMap DEBE contener TODOS los productos (agrupados + "Sin grupo"): la vista
+   agrupada renderiza un bucket automático con los no agrupados, así el TOTAL de la tabla
+   es igual al KPI de ingresos por construcción y la meta nunca pierde lo que no se ve.
+   Antes la vista agrupada solo mapeaba los productos agrupados → tocar UNA cantidad
+   desplomaba "Meta capturada" (perdía los ~98 sin grupo) y ese número corrupto viajaba
+   al Board Deck cuando Meta era el escenario activo. */
 function _presIngTotUI(){ var tot=0; Object.keys(_presProdMap).forEach(function(k){tot+=_presProdMap[k]._budImp;}); var el=document.getElementById('pr-ing-tot'); if(el)el.textContent=_presFM(tot);
-  if(_presData&&_presData.siguiente&&_presData.siguiente.totales){ _presData.siguiente.totales.meta=tot; var sc=document.getElementById('pr-scen-meta'); if(sc)sc.textContent=tot>0?_presFM(tot):'—'; } }
+  if(_presData&&_presData.siguiente&&_presData.siguiente.totales){
+    _presData.siguiente.totales.meta=tot;
+    // Si Meta es el escenario ACTIVO, el ingreso/utilidad/margen dependen de este total.
+    _presSyncSel(); _presDerivedUI();
+  } }
 function presEgBud(key,val){ var l=_presEgMap[key]; if(!l)return; l.meta=parseFloat(val)||0; _presEgRowUI(key); _presEgTotUI();
   var s=getSession()||{}; fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMeta',periodo:_presData.siguiente.periodo,linea:'EG:'+l.linea,metaIngreso:l.meta,usuario:s.email||''})}).then(function(){_presFlashSaved();}).catch(function(){}); }
 function _presEgRowUI(key){ var l=_presEgMap[key]; if(!l)return; var dl=l.proyeccion>0?((l.meta||0)-l.proyeccion):null; var dc=document.getElementById(key+'-dl'); if(dc){dc.textContent=dl==null?'—':_presFM(dl);dc.style.color=dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b');} }
@@ -16268,33 +16367,59 @@ function presApplyProjAll(tipo){
 /* ══ Vista AGRUPADA de captura de ingresos (D2, anidada grupo→subgrupo) ══
    Colapsa los productos en los buckets/subgrupos definidos en ⚙ Grupos.
    Se captura la meta por IMPORTE a nivel grupo O subgrupo; se reparte
-   proporcional a sus productos. Productos sin grupo se ocultan (se omiten).
+   proporcional a sus productos.
+   Los productos SIN grupo NO se ocultan: caen en un bucket automático «Sin grupo»
+   editable como cualquier otro, de modo que el TOTAL de la tabla == KPI de ingresos
+   POR CONSTRUCCIÓN (antes quedaban fuera del total pero sí contaban en el KPI y en la
+   meta → la tabla nunca cuadraba con el KPI y la meta se corrompía al editar).
    El % maestro / cuadrar solo mueven grupos con "incluir en % maestro". */
+var PRES_SIN_GRUPO='Sin grupo';
 function _presBuildIngresosGrouped(grupos, canEdit){
   _presProdMap={}; _presGrupoMap=[];
   var fM=_presFM, primary='var(--color-primary,#c46a7a)', kc=0;
   var cfg=window._presGruposCfg||{grupos:[],productoARuta:{}};
   var rutaDe=cfg.productoARuta||{};
-  var allByName={};
+  var allByName={}, allOrder=[];
   (grupos||[]).forEach(function(G){ (G.subgrupos||[]).forEach(function(S){ (S.productos||[]).forEach(function(p){
     p._budCant=_presRestoreCant(p); p._budImp=p._budCant*(p.precio||0);
     p._ciclo=String(G.grupo||'').trim()||'(Sin ciclo)'; // Ciclo Alta/Baja (col U) → subgrupo automático
+    if(!allByName[p.producto]) allOrder.push(p.producto);
     allByName[p.producto]=p;
   }); }); });
-  var usados={}, totCant=0, totImp=0, totProy=0, hayBucket=false;
+  var usados={}, totCant=0, totImp=0, totProy=0;
   function pp(imp,cant){ return cant>0 ? fM(imp/cant) : '—'; }
-  var h='<div style="overflow-x:auto"><table class="pr-tbl"><thead><tr><th>Grupo / Subgrupo (Ciclo)</th><th>Cant. budget</th><th>Precio prom.</th><th>Importe budget</th><th>Proyección</th><th>Δ vs proy.</th><th style="text-align:center">% maestro</th></tr></thead><tbody>';
+  // ── 1) Buckets configurados en ⚙ Grupos ──
+  var buckets=[];
   (cfg.grupos||[]).forEach(function(gc){
     var gn=gc.nombre;
-    // Subgrupo = Ciclo Alta/Baja del producto (automático). Un sub manual guardado tiene prioridad.
+    // Si el grupo tiene subgrupos MANUALES, esos mandan y lo que no tenga sub cae en
+    // «Sin subgrupo». Solo cuando NO hay subgrupos manuales se usa el fallback al Ciclo (col U).
+    var subsManual=(gc.subs||[]).map(function(s){return String(s||'').trim();}).filter(Boolean);
+    var tieneSubs=!!subsManual.length;
     var subMap={}, subOrder=[];
+    subsManual.forEach(function(sn){ if(!subMap[sn]){ subMap[sn]=[]; subOrder.push(sn); } });
     Object.keys(rutaDe).forEach(function(pn){
       var r=rutaDe[pn]; if(r.grupo!==gn) return; var p=allByName[pn]; if(!p) return; usados[pn]=1;
-      var sk=(r.sub&&String(r.sub).trim())||p._ciclo;
+      var sk=(r.sub&&String(r.sub).trim())||(tieneSubs?'Sin subgrupo':p._ciclo);
       if(!subMap[sk]){ subMap[sk]=[]; subOrder.push(sk); } subMap[sk].push(p);
     });
+    subOrder=subOrder.filter(function(s){ return (subMap[s]||[]).length; });   // sin productos → no se pinta
     var allProds=[]; subOrder.forEach(function(s){ (subMap[s]||[]).forEach(function(p){ allProds.push(p); }); });
-    if(!allProds.length) return; hayBucket=true;
+    if(!allProds.length) return;
+    buckets.push({nombre:gn, incluirMaestro:gc.incluirMaestro!==false, subMap:subMap, subOrder:subOrder, allProds:allProds});
+  });
+  // ── 2) Bucket automático «Sin grupo»: TODO lo que no quedó en un grupo configurado ──
+  var sinG=[]; allOrder.forEach(function(pn){ if(!usados[pn]) sinG.push(allByName[pn]); });
+  if(sinG.length){
+    var sMap={}, sOrd=[];
+    sinG.forEach(function(p){ var sk=p._ciclo; if(!sMap[sk]){ sMap[sk]=[]; sOrd.push(sk); } sMap[sk].push(p); });
+    buckets.push({nombre:PRES_SIN_GRUPO, incluirMaestro:true, subMap:sMap, subOrder:sOrd, allProds:sinG, auto:true});
+  }
+  var hayBucket=buckets.length>0;
+  var h='<div style="overflow-x:auto"><table class="pr-tbl"><thead><tr><th>Grupo / Subgrupo (Ciclo)</th><th>Cant. budget</th><th>Precio prom.</th><th>Importe budget</th><th>Proyección</th><th>Δ vs proy.</th><th style="text-align:center">% maestro</th></tr></thead><tbody>';
+  buckets.forEach(function(gc){
+    var gn=gc.nombre;
+    var subMap=gc.subMap, subOrder=gc.subOrder, allProds=gc.allProds;
     allProds.forEach(function(p){ var key='ip'+(kc++); _presProdMap[key]=p; p._gk=key; });
     var gi=_presGrupoMap.length, incl=gc.incluirMaestro!==false, locks=window._presLocks||{};
     var gMov=(gn in locks)?(locks[gn]!==false):incl;
@@ -16302,7 +16427,8 @@ function _presBuildIngresosGrouped(grupos, canEdit){
     totCant+=gCant; totImp+=gImp; totProy+=gProy; var dl=gProy>0?(gImp-gProy):null;
     var multiSub=subOrder.length>1;
     h+='<tr style="background:var(--color-primary-hl,rgba(196,106,122,.06))">'
-      +'<td style="font-weight:800">'+_esc(gn)+' <span style="color:#c9c9c9;font-weight:400;font-size:10px">· '+allProds.length+' item'+(allProds.length!==1?'s':'')+'</span></td>'
+      +'<td style="font-weight:800">'+_esc(gn)+' <span style="color:#c9c9c9;font-weight:400;font-size:10px">· '+allProds.length+' item'+(allProds.length!==1?'s':'')+'</span>'
+        +(gc.auto?' <span style="font-weight:500;font-size:9.5px;color:#b45309" title="Productos que no están asignados a ningún grupo. Se incluyen en el total y en la meta (no se omiten); si quieres organizarlos, usa ⚙ Grupos.">· sin asignar · organízalos en ⚙ Grupos</span>':'')+'</td>'
       +'<td style="text-align:right">'+(canEdit
           ? '<input id="pgi-'+gi+'-c" type="number" step="1" min="0" value="'+gCant+'" onchange="presGrupoCant('+gi+',this.value)" style="width:74px;text-align:right;border:1.5px solid var(--color-primary,#c46a7a);border-radius:7px;padding:6px 8px;font-size:12px;font-weight:700;background:var(--color-surface,#fafafa)">'
           : '<b>'+gCant+'</b>')+'</td>'
@@ -16323,7 +16449,9 @@ function _presBuildIngresosGrouped(grupos, canEdit){
       var sCant=0,sImp=0,sProy=0; prods.forEach(function(p){ sCant+=p._budCant; sImp+=p._budImp; sProy+=p.importeProy||0; });
       var sdl=sProy>0?(sImp-sProy):null;
       h+='<tr style="background:rgba(0,0,0,.015)">'
-        +'<td style="padding-left:22px;font-weight:700;color:#9c4f5f;font-size:10.5px;text-transform:uppercase">↳ '+_esc(s)+' <span style="color:#c9c9c9;font-weight:400;text-transform:none">· '+prods.length+'</span></td>'
+        // Sin text-transform:uppercase: aplastaba las variantes de la columna U ("Externos"
+        // vs "EXTERNOS") haciéndolas idénticas en pantalla y escondiendo el grupo duplicado.
+        +'<td style="padding-left:22px;font-weight:700;color:#9c4f5f;font-size:10.5px">↳ '+_esc(s)+' <span style="color:#c9c9c9;font-weight:400">· '+prods.length+'</span></td>'
         +'<td style="text-align:right">'+(canEdit
             ? '<input id="pgs-'+gi+'-'+si+'-c" type="number" step="1" min="0" value="'+sCant+'" onchange="presSubCant('+gi+','+si+',this.value)" style="width:66px;text-align:right;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;padding:5px 7px;font-size:11.5px">'
             : sCant)+'</td>'
@@ -16337,10 +16465,9 @@ function _presBuildIngresosGrouped(grupos, canEdit){
     });
     _presGrupoMap.push({nombre:gn, incluirMaestro:incl, movible:gMov, gi:gi, multiSub:multiSub, subs:subsModel, allProds:allProds});
   });
-  var ocultos=0; Object.keys(allByName).forEach(function(pn){ if(!usados[pn]) ocultos++; });
   if(!hayBucket) h+='<tr><td colspan="7" style="text-align:center;padding:1.6rem;color:var(--text-secondary,#9ca3af)">No hay productos asignados a grupos todavía. Usa <b>⚙ Grupos</b> para configurarlos.</td></tr>';
+  // El TOTAL incluye TODOS los productos (agrupados + «Sin grupo») → cuadra con el KPI de ingresos.
   h+='<tr style="border-top:2px solid var(--color-divider,#d1d5db)"><td style="font-weight:800">TOTAL</td><td style="text-align:right;font-weight:800">'+totCant+'</td><td></td><td id="pr-ing-tot" style="font-weight:800;color:'+primary+'">'+fM(totImp)+'</td><td style="font-weight:800;color:var(--text-secondary,#9ca3af)">'+fM(totProy)+'</td><td></td><td></td></tr></tbody></table></div>';
-  if(ocultos>0) h+='<div style="font-size:11px;color:var(--text-secondary,#9ca3af);margin-top:8px">Vista agrupada activa · '+ocultos+' producto(s) sin grupo están ocultos. Configúralos en <b>⚙ Grupos</b>.</div>';
   return h;
 }
 function _presProdDetailRow(p,fM,pad){
@@ -16433,6 +16560,50 @@ function _presSaveProyeccion(){
     .then(function(d){ if(d&&d.ok){ _presFlashSaved(); return true; } return false; })
     .catch(function(){ return false; });
 }
+// Nombre legible del escenario activo (para rotular dinámicamente, nunca hard-codeado).
+function _presScenNombre(k){ return k==='conservador'?'Conservador':k==='optimista'?'Optimista':k==='meta'?'Meta':'Base'; }
+function _presScenCon(k){ return k==='conservador'?'con el Conservador':k==='optimista'?'con el Optimista':k==='meta'?'con la Meta':'con la Base'; }
+/* Repinta TODO lo derivado desde la fuente única de verdad (_presData.siguiente.totales
+   + window._presEgProy): las 4 tarjetas de escenario con su utilidad, la barra del
+   escenario activo y los 4 KPIs. Llamar SIEMPRE después de _presSyncSel().
+   Antes cada handler repintaba a mano solo algunos nodos: presSetBasePct refrescaba
+   pr-scen-* pero NUNCA los KPIs (pr-ks-*) → los 4 KPIs quedaban congelados al mover el %. */
+function _presDerivedUI(){
+  var t=(_presData&&_presData.siguiente&&_presData.siguiente.totales)||null; if(!t) return;
+  var egP=Number(window._presEgProy)||0, fM=_presFM;
+  function set(id,fn){ var e=document.getElementById(id); if(e) fn(e); }
+  function setU(id,ing){ set(id,function(e){ var u=ing-egP,p=u>=0; e.textContent='Utilidad '+(p?'':'−')+fM(Math.abs(u)); e.style.color=p?'#166534':'#991b1b'; }); }
+  var base=Number(t.proyeccion)||0, cons=Number(t.conservador)||0, opt=Number(t.optimista)||0, meta=Number(t.meta)||0;
+  // Tarjetas de escenario
+  set('pr-scen-base',function(e){ e.textContent=fM(base); }); setU('pr-scen-base-u',base);
+  set('pr-scen-cons',function(e){ e.textContent=fM(cons); }); setU('pr-scen-cons-u',cons);
+  set('pr-scen-opt', function(e){ e.textContent=fM(opt);  }); setU('pr-scen-opt-u',opt);
+  set('pr-scen-meta',function(e){ e.textContent=meta>0?fM(meta):'—'; });
+  if(meta>0) setU('pr-scen-meta-u',meta);
+  else set('pr-scen-meta-u',function(e){ e.textContent='Utilidad —'; e.style.color='#9ca3af'; });
+  // ── Fuente única: INGRESO = escenario activo, EGRESO, UTILIDAD, MARGEN ──
+  var sel=t.seleccionado||'base';
+  var ing=Number(t.proyeccionSeleccionada); if(!isFinite(ing)) ing=base;
+  var u=ing-egP, pos=u>=0, pct=ing>0?(u/ing)*100:0;
+  var col=pos?'#166534':'#991b1b', bg=pos?'rgba(22,101,52,.06)':'rgba(153,27,27,.06)';
+  // Barra del escenario activo
+  set('pr-scen-sel-box',function(e){ e.style.background=bg; });
+  set('pr-scen-sel-lbl',function(e){ e.textContent=(pos?'💰 Utilidad esperada':'⚠ Pérdida esperada')+' ('+_presScenCon(sel)+')'; });
+  set('pr-scen-sel-total',function(e){ e.textContent=(pos?'':'−')+fM(Math.abs(u)); e.style.color=col; });
+  set('pr-scen-sel-eq',function(e){ e.textContent='= ingresos '+_presScenNombre(sel).toLowerCase()+' '+fM(ing)+' − egresos proyectados '+fM(egP); });
+  // KPIs
+  set('pr-ks-ing-l',function(e){ e.textContent='Ingresos proyectados '+(window._presPer||'')+' · '+_presScenCon(sel); });
+  set('pr-ks-ing',function(e){ e.textContent=fM(ing); });
+  set('pr-ks-eg',function(e){ e.textContent=fM(egP); });
+  set('pr-ks-u-l',function(e){ e.textContent=pos?'Ganancia proyectada':'Pérdida proyectada'; });
+  set('pr-ks-u',function(e){ e.textContent=(pos?'':'−')+fM(Math.abs(u)); e.style.color=col; });
+  set('pr-ks-u-c',function(e){ e.style.background=bg; });
+  set('pr-ks-pct',function(e){ e.textContent=pct.toFixed(1)+'%'; e.style.color=col; });
+  set('pr-ks-pct-c',function(e){ e.style.background=bg; });
+  // El modelo local es lo que consume el Board Deck: mantenlo alineado con la pantalla.
+  if(_presData.egresos){ _presData.egresos.margenProyectado=u; _presData.egresos.margenPct=pct; }
+  try{ presSimUpdate(); }catch(e){}
+}
 // Elige el escenario ACTIVO (conservador|base|optimista|meta): resalta la tarjeta y lo persiste.
 function presSelectScenario(key){
   if(['conservador','base','optimista','meta'].indexOf(key)<0) return;
@@ -16441,7 +16612,7 @@ function presSelectScenario(key){
     var card=document.getElementById('pr-card-'+k); if(card){ if(k===key) card.classList.add('sel'); else card.classList.remove('sel'); }
     var b=document.getElementById('pr-sel-'+k); if(b){ var on=(k===key); b.textContent=on?'● Activo':'Elegir'; b.style.color=on?'var(--color-primary,#c46a7a)':'var(--text-secondary,#c9c9c9)'; }
   });
-  _presSyncSel(); _presSaveProyeccion();
+  _presSyncSel(); _presDerivedUI(); _presSaveProyeccion();
 }
 // Base editable por % vs el recomendado del modelo (igual que Conservador/Optimista).
 // El número se muestra formateado; al mover el % se recalculan las 3 tarjetas, sus
@@ -16449,31 +16620,19 @@ function presSelectScenario(key){
 function presSetBasePct(pct){
   pct=parseFloat(pct)||0;
   var recBase=Number(window._presRecBase)||0;
-  var base=recBase*(1+pct/100);
-  if(_presData&&_presData.siguiente&&_presData.siguiente.totales) _presData.siguiente.totales.proyeccion=base;
-  var egP=Number(window._presEgProy)||0;
-  var p=window._presEscPct||{conservador:10,optimista:8};
-  var consP=Number(p.conservador)||0, optP=Number(p.optimista)||0;
-  function setU(id,ing){ var u=ing-egP,pos=u>=0; var e=document.getElementById(id); if(e){ e.textContent='Utilidad '+(pos?'':'−')+_presFM(Math.abs(u)); e.style.color=pos?'#166534':'#991b1b'; } }
-  var b=document.getElementById('pr-scen-base'); if(b) b.textContent=_presFM(base); setU('pr-scen-base-u',base);
-  var cons=base*(1-consP/100), opt=base*(1+optP/100);
-  var ec=document.getElementById('pr-scen-cons'); if(ec) ec.textContent=_presFM(cons); setU('pr-scen-cons-u',cons);
-  var eo=document.getElementById('pr-scen-opt'); if(eo) eo.textContent=_presFM(opt); setU('pr-scen-opt-u',opt);
-  var u=base-egP, pos=u>=0;
-  var bt=document.getElementById('pr-scen-base-total'); if(bt){ bt.textContent=(pos?'':'−')+_presFM(Math.abs(u)); bt.style.color=pos?'#166534':'#991b1b'; }
-  var beq=document.getElementById('pr-scen-base-eq'); if(beq) beq.innerHTML='= ingresos base '+_presFM(base)+' − egresos proyectados '+_presFM(egP);
-  window._presBasePct=pct; _presSyncSel(); _presSaveProyeccion();
+  // Math.round: MISMO redondeo que el backend (_baseAjust). Sin él la Base quedaba
+  // fraccionaria (7,970,848.677 vs 7,970,849) y ese número viajaba al Board Deck.
+  if(_presData&&_presData.siguiente&&_presData.siguiente.totales) _presData.siguiente.totales.proyeccion=Math.round(recBase*(1+pct/100));
+  window._presBasePct=pct;
+  // _presSyncSel recalcula Conservador/Optimista/proyeccionSeleccionada desde la Base;
+  // _presDerivedUI repinta tarjetas + barra + los 4 KPIs (antes los KPIs no se tocaban).
+  _presSyncSel(); _presDerivedUI(); _presSaveProyeccion();
 }
 // Escenarios: Conservador/Optimista se recalculan como Base × (1 ∓ %). El % lo define el usuario y se GUARDA por trimestre.
 function presSetEscenario(tipo, val){
   var pct=Math.max(0, parseFloat(val)||0);
-  var base=(_presData&&_presData.siguiente&&_presData.siguiente.totales&&_presData.siguiente.totales.proyeccion)||0;
-  var egP=Number(window._presEgProy)||0;
   window._presEscPct=window._presEscPct||{}; window._presEscPct[tipo]=pct;
-  function setU(id,ing){ var u=ing-egP,p=u>=0; var e=document.getElementById(id); if(e){ e.textContent='Utilidad '+(p?'':'−')+_presFM(Math.abs(u)); e.style.color=p?'#166534':'#991b1b'; } }
-  if(tipo==='conservador'){ var ing=base*(1-pct/100); var el=document.getElementById('pr-scen-cons'); if(el) el.textContent=_presFM(ing); setU('pr-scen-cons-u',ing); }
-  else { var ing2=base*(1+pct/100); var e2=document.getElementById('pr-scen-opt'); if(e2) e2.textContent=_presFM(ing2); setU('pr-scen-opt-u',ing2); }
-  _presSyncSel(); _presSaveProyeccion();
+  _presSyncSel(); _presDerivedUI(); _presSaveProyeccion();
 }
 // % maestro / cuadrar / proyección: solo mueven grupos Y subgrupos con el checkbox marcado (movible)
 function _presMasterApplyGrouped(f){
@@ -16788,7 +16947,7 @@ var _PRES_TOUR = [
    body:'<b>Proyecta cuánto vas a facturar y gastar el próximo trimestre</b> con base en tu historial real, y le da seguimiento al trimestre en curso.<br><br><b>De dónde salen los números:</b> los <b>datos reales</b> vienen de tus <b>Ingresos</b> y <b>Egresos</b> (no se inventan); el <b>motor</b> calcula la proyección con esos datos; y la <b>meta y los %</b> los defines tú. Te muestro cada parte — reabre este tutorial con el botón <b>?</b> cuando quieras.'},
   {el:'.pr-hero',
    title:'Semáforo de avance',
-   body:'Del trimestre EN CURSO: ¿vas a llegar a tu meta al ritmo actual? <span style="color:#166534;font-weight:700">Verde</span> = sí · <span style="color:#b45309;font-weight:700">Amarillo</span> = riesgo · <span style="color:#991b1b;font-weight:700">Rojo</span> = no. El % es tu <i>proyección de cierre ÷ meta</i>.<br><br><b>Ejemplo:</b> día 9 de 92 (9.8% del tiempo) con $442,886 registrados → proyección de cierre = 442,886 ÷ (9/92) = <b>$4,527,279</b>. Contra una meta de $7,973,522 = <b>57% → 🔴</b>.'},
+   body:'Del trimestre que estás consultando: ¿vas a llegar a tu meta al ritmo actual? <span style="color:#166534;font-weight:700">Verde</span> = sí · <span style="color:#b45309;font-weight:700">Amarillo</span> = riesgo · <span style="color:#991b1b;font-weight:700">Rojo</span> = no. El % es tu <i>proyección de cierre ÷ meta</i>.<br><br><b>Ejemplo:</b> día 9 de 92 (9.8% del tiempo) con $442,886 registrados → proyección de cierre = 442,886 ÷ (9/92) = <b>$4,527,279</b>. Contra una meta de $7,973,522 = <b>57% → 🔴</b>.<br><br>Si eliges un trimestre que <b>aún no comienza</b>, el semáforo (y la proyección de cierre y la brecha) se apagan: todavía no hay avance que medir, así que solo verás <b>meta vs proyección</b>.'},
   {el:'#pr-sim',
    title:'Simulador (el slider)',
    body:'Arrástralo para jugar con distintas metas <b>sin guardar nada</b>. Te dice la brecha que falta, cuánto necesitas facturar por día en lo que resta y el cierre proyectado. Si te gusta una cifra, <b>"Guardar como meta"</b> la fija.'},
@@ -16800,10 +16959,10 @@ var _PRES_TOUR = [
    body:'<b>Líneas sólidas</b> = tu historial real. <b>Punteadas</b> = la proyección del próximo trimestre. Rosa = ingresos, café = egresos. Los checkboxes de arriba ocultan/muestran cada una.'},
   {el:'.pr-scen',
    title:'Escenarios del próximo trimestre',
-   body:'<b>Base (esperado)</b> = la proyección del modelo con tu historial real (no editable). <b>Conservador</b> y <b>Optimista</b> se calculan como Base <b>∓ un % que TÚ defines</b> (edítalos en las tarjetas según cómo veas tu mercado — el 12% ya no está fijo). <b>Meta capturada</b> = la que fijas más abajo.<br><br><b>Ejemplo:</b> Base $8,051,108 con Conservador −10% y Optimista +5% → <b>$7,245,997</b> y <b>$8,453,663</b>.'},
+   body:'<b>Base (esperado)</b> = el <b>recomendado del modelo</b> (tu historial real) ± el <b>% vs recom.</b> que tú ajustes. <b>Conservador</b> y <b>Optimista</b> se calculan como Base <b>∓ un % que TÚ defines</b>. <b>Meta capturada</b> = la que fijas más abajo.<br><br><b>Lo más importante:</b> haz clic en una tarjeta para elegir el <b>escenario ACTIVO</b> (● Activo). Ese escenario es el que manda: de él salen los <b>Ingresos proyectados</b>, la <b>Ganancia</b> y el <b>% de margen</b> de los KPIs, la barra de utilidad y el <b>Informe Ejecutivo</b>. Si cambias de escenario o mueves un %, todo se recalcula al instante.<br><br><b>Ejemplo:</b> Base $8,051,108 con Conservador −10% y Optimista +5% → <b>$7,245,997</b> y <b>$8,453,663</b>.'},
   {el:'button[onclick="presGruposConfigOpen()"]',
    title:'⚙ Grupos — LO PRIMERO que debes hacer',
-   body:'Aquí eliges <b>qué productos entran al presupuesto</b>. Se abre un tablero: arrastra (o usa el menú de cada tarjeta) para meter productos a un <b>grupo</b> (ej. "Tratamientos"). <b>Lo que dejes en «Sin agrupar» se omite</b> — no se cuenta. Dentro de cada grupo, los productos se separan solos por <b>Ciclo Alta/Baja</b> (eso es el subgrupo, automático). "✨ Autollenar" te lo precarga por categoría para que solo ajustes.'},
+   body:'Aquí <b>organizas</b> los productos del presupuesto. Se abre un tablero: arrastra (o usa el menú de cada tarjeta) para meter productos a un <b>grupo</b> (ej. "Tratamientos"). <b>Nada se pierde:</b> lo que dejes en «Sin agrupar» aparece junto en el bucket <b>«Sin grupo»</b> del reporte y <b>sí cuenta</b> en el total y en la meta (por eso el TOTAL de la tabla siempre cuadra con el KPI de ingresos). Dentro de un grupo puedes crear <b>subgrupos</b> con <b>+ Subgrupo</b> (arrastra productos a cada uno; clic en su nombre para renombrar); si no creas ninguno, se separan solos por <b>Ciclo Alta/Baja</b>. "✨ Autollenar" te lo precarga por categoría para que solo ajustes.'},
   {el:'.pr-tbl',
    title:'La tabla de captura (por CANTIDAD)',
    body:'Solo aparecen <b>tus grupos y sus subgrupos (Alta/Baja)</b>, no los productos sueltos. Capturas por <b>cantidad</b> y el sistema pone el <b>importe automático</b> = cantidad × <i>precio promedio real</i>. La suma del grupo = suma de sus subgrupos. La columna <b>Δ vs proy.</b> compara tu número contra lo que estima el modelo.<br><br><b>Ejemplo:</b> IVF a precio promedio $75,000; si pones cantidad <b>20</b> → importe = 20 × 75,000 = <b>$1,500,000</b>. Tú solo mueves cuántos, no los pesos.'},
@@ -16908,10 +17067,10 @@ function presShowManual(){
     +'</tbody></table>'
     +'<div style="background:var(--color-primary-hl,rgba(196,106,122,.08));border:1px solid '+DV+';border-radius:10px;padding:13px 15px;margin-bottom:12px;font-size:12px;line-height:1.7;color:'+TP+'"><b>Ejemplo:</b> si la Base es <b>$8,051,108</b> y pones Conservador <b>−10%</b> y Optimista <b>+5%</b> → Conservador = 8,051,108 × 0.90 = <b>$7,245,997</b> · Optimista = 8,051,108 × 1.05 = <b>$8,453,663</b>. Ajusta esos % a lo que sea realista para tu negocio.</div>'
 
-    +h2('⚙ Grupos — decide QUÉ entra al presupuesto')
-    +p('Es el primer paso. Abre un tablero con todos tus productos en una columna <b>«Sin agrupar»</b>. Metes al presupuesto <b>solo lo que quieras</b> — arrastrando la tarjeta a un grupo o eligiéndolo en el menú de cada producto. <b>Lo que dejes sin agrupar se omite por completo</b> (no se busca su costo ni se suma, aunque pertenezca a una categoría grande).')
-    +p('Dentro de cada grupo, los productos se separan <b>solos por Ciclo Alta/Baja</b> — ése es el subgrupo, automático (no lo capturas a mano). Botones útiles: <b>+ Nuevo grupo</b>, <b>✨ Autollenar por categoría</b> (precarga todo y luego podas) y <b>🧹 Vaciar</b>. El checkbox <b>%m</b> de cada grupo marca si se mueve con las herramientas en bloque.')
-    +p('El total del presupuesto es la <b>suma únicamente de lo que agrupaste</b>.')
+    +h2('⚙ Grupos — organiza CÓMO se ve el presupuesto')
+    +p('Abre un tablero con todos tus productos en una columna <b>«Sin agrupar»</b>. Arrastra la tarjeta a un grupo (o elígelo en el menú de cada producto) para organizarlos como quieras. <b>Nada se omite:</b> lo que dejes sin agrupar se muestra junto en el bucket <b>«Sin grupo»</b> del reporte, editable como cualquier otro, y <b>sigue contando</b> en el total y en la meta. Agrupar cambia <b>cómo se presenta</b> el presupuesto, no cuánto suma.')
+    +p('<b>Subgrupos:</b> dentro de un grupo, <b>+ Subgrupo</b> crea uno; arrastra productos a su zona, haz clic en su nombre para <b>renombrarlo</b> y usa <b>×</b> para <b>eliminarlo</b> (sus productos vuelven al grupo). Si un grupo <b>no</b> tiene subgrupos manuales, sus productos se separan <b>solos por Ciclo Alta/Baja</b>. Otros botones: <b>+ Nuevo grupo</b>, <b>✨ Autollenar por categoría</b> y <b>🧹 Vaciar</b>. El checkbox <b>%m</b> de cada grupo marca si se mueve con las herramientas en bloque.')
+    +p('El <b>TOTAL de la tabla siempre es igual al KPI de ingresos</b>: incluye lo agrupado y lo que está en «Sin grupo».')
 
     +h2('La tabla de captura (por cantidad)')
     +p('Ya con tus grupos, la tabla muestra <b>solo grupos y sus subgrupos (Alta/Baja)</b> — los productos quedan colapsados. Capturas por <b>cantidad</b> y el importe se calcula solo.')
@@ -16944,7 +17103,7 @@ function presShowManual(){
 
     +h2('Flujo de trabajo recomendado')
     +'<ol style="margin:0 0 14px;padding-left:18px;font-size:12.5px;line-height:2;color:'+TS+'">'
-      +'<li><b>Primero, ⚙ Grupos:</b> mete al presupuesto solo los productos que quieras contemplar (o usa Autollenar y poda). Lo demás se omite.</li>'
+      +'<li><b>Primero, ⚙ Grupos:</b> organiza tus productos en grupos y subgrupos (o usa Autollenar y poda). Lo que no agrupes no se pierde: aparece junto en «Sin grupo» y sigue contando.</li>'
       +'<li>En la tabla, ajusta la <b>cantidad</b> de cada grupo/subgrupo; el importe sale solo con el precio promedio.</li>'
       +'<li>Usa <b>% maestro</b> o <b>Cuadrar a $</b> para mover todo en bloque; <b>desmarca el checkbox</b> de los buckets que quieras dejar fijos en tu número.</li>'
       +'<li>Fija la <b>meta total</b> con «Fijar / editar meta» — enciende el semáforo.</li>'
