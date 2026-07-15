@@ -25573,7 +25573,7 @@ function _gfEnsureStyles(){
 /* ═══════════════════ NÓMINA ═══════════════════
  * Lee CFDI de nómina emitidos por mes (backend nomina.gs) y desglosa por
  * empleado; catálogo de Empleados (CRUD) y configuración (ISN, CxP). */
-var _nomTab='mes', _nomAnio=null, _nomMes=null, _nomData=null, _nomEmpleados=null, _nomCfg=null, _nomExpanded={};
+var _nomTab='captura', _nomAnio=null, _nomMes=null, _nomData=null, _nomEmpleados=null, _nomCfg=null, _nomExpanded={};
 var _nomEstado=null, _nomBonos=null; // estado de validación del mes + bonos capturados
 function _nomFmt(v){ return (typeof fmtMoney==='function') ? fmtMoney(Math.abs(Number(v)||0),'Egresos') : '$'+(Number(v)||0).toFixed(2); }
 function _nomMesNombre(m){ var M=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']; return M[(parseInt(m,10)||1)-1]||m; }
@@ -25594,17 +25594,20 @@ function loadNomina(){
   }
   _nomShell();
   if(_nomTab==='mes') _nomCargarMes();
+  else if(_nomTab==='captura') _nomCargarCaptura();
+  else if(_nomTab==='sbc') _nomCargarSbc();
   else if(_nomTab==='catalogo') _nomCargarEmpleados();
   else _nomCargarCfg();
 }
 function _nomTabSwitch(t){ _nomTab=t; loadNomina(); }
 function _nomShell(){
   var root=document.getElementById('nom-root'); if(!root) return;
-  function tab(id,label){ return '<button onclick="_nomTabSwitch(\''+id+'\')" style="padding:8px 16px;border:none;background:'+(_nomTab===id?'var(--color-primary,#c46a7a)':'transparent')+';color:'+(_nomTab===id?'#fff':'var(--text-secondary,#6b7280)')+';border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">'+label+'</button>'; }
-  root.innerHTML='<div style="padding:18px 20px;max-width:1100px;margin:0 auto">'
+  function tab(id,label){ return '<button onclick="_nomTabSwitch(\''+id+'\')" style="padding:8px 14px;border:none;background:'+(_nomTab===id?'var(--color-primary,#c46a7a)':'transparent')+';color:'+(_nomTab===id?'#fff':'var(--text-secondary,#6b7280)')+';border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">'+label+'</button>'; }
+  root.innerHTML='<div style="padding:18px 20px;max-width:1320px;margin:0 auto">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">'
       +'<div style="font-size:22px;font-weight:800;color:var(--text-primary,#111)">🧾 Nómina</div>'
-      +'<div style="display:flex;gap:4px;background:var(--color-surface,#f3f4f6);padding:4px;border-radius:10px">'+tab('mes','Nómina del mes')+tab('catalogo','Empleados')+tab('config','Configuración')+'</div>'
+      +'<div style="display:flex;gap:4px;background:var(--color-surface,#f3f4f6);padding:4px;border-radius:10px;flex-wrap:wrap">'
+        +tab('captura','Captura por periodo')+tab('mes','Nómina del mes (CFDI)')+tab('sbc','SBC')+tab('catalogo','Empleados')+tab('config','Configuración')+'</div>'
     +'</div><div id="nom-body"></div></div>';
 }
 /* ── Nómina del mes ── */
@@ -25902,13 +25905,18 @@ function _nomRenderEmpleados(d){
   h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
     +'<thead><tr style="text-align:left;color:#9ca3af;border-bottom:2px solid var(--color-divider,#e5e7eb);font-size:9.5px;text-transform:uppercase;font-weight:700">'
     +'<th style="padding:8px 6px">N.º</th><th style="padding:8px 6px">Nombre</th><th style="padding:8px 6px">RFC</th><th style="padding:8px 6px">Puesto</th>'
+    +'<th style="padding:8px 6px">Periodicidad</th><th style="padding:8px 6px;text-align:right">SBC</th>'
     +'<th style="padding:8px 6px">Ingreso</th><th style="padding:8px 6px;text-align:center">Vac.</th><th style="padding:8px 6px">Usuario</th><th style="padding:8px 6px;text-align:center">Activo</th><th></th></tr></thead><tbody>';
+  var _perDef=(_nomCfg&&_nomPeriNorm(_nomCfg.periodicidadDefault))||'quincenal';
   emps.forEach(function(e){
+    var _pn=_nomPeriNorm(e.Periodicidad);
     h+='<tr style="border-bottom:1px solid var(--color-divider,#f0f0f0)">'
       +'<td style="padding:8px 6px;font-weight:700">'+_cxpEsc(e.NumEmpleado||'')+'</td>'
       +'<td style="padding:8px 6px">'+_cxpEsc(e.Nombre||'')+(String(e.Tipo||'').toLowerCase().indexOf('asimil')>-1?' <span style="font-size:8px;font-weight:800;color:#7c3aed;background:rgba(124,58,237,.1);border-radius:4px;padding:1px 5px">ASIM</span>':'')+'</td>'
       +'<td style="padding:8px 6px;color:#6b7280">'+_cxpEsc(e.RFC||'—')+'</td>'
       +'<td style="padding:8px 6px">'+_cxpEsc(e.Puesto||'—')+'</td>'
+      +'<td style="padding:8px 6px">'+(_pn?('<span style="font-size:9.5px;font-weight:800;color:#0c4a6e;background:rgba(12,74,110,.08);border-radius:4px;padding:2px 6px">'+_nomTipoLbl(_pn)+'</span>'):('<span title="Sin fijar: usa el default de Configuración" style="font-size:9.5px;color:#9ca3af">'+_nomTipoLbl(_perDef)+' (default)</span>'))+'</td>'
+      +'<td style="padding:8px 6px;text-align:right;color:#6b7280">'+(_nomCapNum(e.SBC)?_nomFmt(e.SBC):'—')+'</td>'
       +'<td style="padding:8px 6px;color:#6b7280">'+_cxpEsc(String(e.FechaIngreso||'—'))+'</td>'
       +'<td style="padding:8px 6px;text-align:center">'+(e.diasVacaciones||0)+'</td>'
       +'<td style="padding:8px 6px;color:#6b7280;font-size:10.5px">'+_cxpEsc(e.UsuarioEmail||'—')+'</td>'
@@ -25927,12 +25935,19 @@ function _nomEmpForm(num){
   function f(id,lbl,val,type){ return '<label style="font-size:10px;color:#6b7280">'+lbl+'<br><input id="'+id+'" '+(type?'type="'+type+'"':'')+' value="'+_cxpEsc(val==null?'':String(val))+'" style="width:100%;padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff);box-sizing:border-box"></label>'; }
   var tipoSel='<label style="font-size:10px;color:#6b7280">Tipo<br><select id="nom-e-tipo" style="width:100%;padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff)"><option'+(String(it.Tipo||'')==='Sueldos'?' selected':'')+'>Sueldos</option><option'+(String(it.Tipo||'').toLowerCase().indexOf('asimil')>-1?' selected':'')+'>Asimilado</option></select></label>';
   var activoChk='<label style="font-size:11px;color:#374151;display:flex;align-items:center;gap:6px;margin-top:14px"><input type="checkbox" id="nom-e-activo" '+(it.Activo===false?'':'checked')+'> Activo</label>';
+  // Periodicidad: define EN QUÉ PERIODO cae este empleado. Se puede mezclar
+  // (unos quincenal, otros semanal/mensual) — cada periodo agrupa a los suyos.
+  var _pk=(typeof _nomPeriNorm==='function')?_nomPeriNorm(it.Periodicidad):String(it.Periodicidad||'').toLowerCase();
+  function _po(v,l){ return '<option value="'+v+'"'+(_pk===v?' selected':'')+'>'+l+'</option>'; }
+  var periSel='<label style="font-size:10px;color:#6b7280">Periodicidad de pago<br><select id="nom-e-peri" style="width:100%;padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
+    +_po('quincenal','Quincenal')+_po('semanal','Semanal')+_po('mensual','Mensual')+'</select></label>';
   var bodyF='<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">'
     +f('nom-e-num','N.º de empleado *',it.NumEmpleado)+f('nom-e-nombre','Nombre completo',it.Nombre)
     +f('nom-e-rfc','RFC',it.RFC)+f('nom-e-curp','CURP',it.CURP)
     +f('nom-e-nss','NSS',it.NSS)+f('nom-e-puesto','Puesto',it.Puesto)
-    +f('nom-e-depto','Departamento',it.Departamento)+f('nom-e-ingreso','Fecha de ingreso',it.FechaIngreso,'date')
-    +f('nom-e-salario','Salario diario',it.SalarioDiario,'number')+f('nom-e-peri','Periodicidad',it.Periodicidad)
+    +f('nom-e-depto','Área / Departamento',it.Departamento)+f('nom-e-nac','Fecha de nacimiento',it.FechaNacimiento,'date')
+    +f('nom-e-ingreso','Fecha de ingreso',it.FechaIngreso,'date')+f('nom-e-salario','Salario diario',it.SalarioDiario,'number')
+    +f('nom-e-sbc','SBC (salario base de cotización)',it.SBC,'number')+periSel
     +tipoSel+f('nom-e-usuario','Usuario (email, si tiene acceso)',it.UsuarioEmail)
     +f('nom-e-banco','Banco',it.Banco)+f('nom-e-clabe','CLABE',it.CLABE)
     +'</div>'+activoChk
@@ -25952,8 +25967,10 @@ async function _nomEmpGuardar(){
   var num=g('nom-e-num').trim(); var msg=document.getElementById('nom-e-msg');
   if(!num){ if(msg) msg.textContent='El número de empleado es obligatorio.'; return; }
   var emp={ NumEmpleado:num, Nombre:g('nom-e-nombre'), RFC:g('nom-e-rfc').toUpperCase(), CURP:g('nom-e-curp').toUpperCase(),
-    NSS:g('nom-e-nss'), Puesto:g('nom-e-puesto'), Departamento:g('nom-e-depto'), FechaIngreso:g('nom-e-ingreso'),
-    SalarioDiario:g('nom-e-salario'), Periodicidad:g('nom-e-peri'), Tipo:g('nom-e-tipo'), UsuarioEmail:g('nom-e-usuario').toLowerCase(),
+    NSS:g('nom-e-nss'), Puesto:g('nom-e-puesto'), Departamento:g('nom-e-depto'),
+    FechaNacimiento:g('nom-e-nac'), FechaIngreso:g('nom-e-ingreso'),
+    SalarioDiario:g('nom-e-salario'), SBC:g('nom-e-sbc'), Periodicidad:g('nom-e-peri'),
+    Tipo:g('nom-e-tipo'), UsuarioEmail:g('nom-e-usuario').toLowerCase(),
     Banco:g('nom-e-banco'), CLABE:g('nom-e-clabe'), Activo:(document.getElementById('nom-e-activo')||{}).checked!==false };
   var btn=document.getElementById('nom-e-save'); if(btn){ btn.disabled=true; btn.innerHTML='<span class="ing-spinner"></span>Guardando…'; }
   try{
@@ -25991,7 +26008,7 @@ function _nomRenderCfg(d){
   if(d&&!d.ok){ body.innerHTML=_nomBackendBanner(d.error); return; }
   var c=_nomCfg||{isnTasa:3,isnBase:'percepciones',cxpProveedor:'Nómina',cxpCuentaContable:'Sueldos y salarios'};
   var puede=_nomPuede(), dis=puede?'':' disabled';
-  var h='<div style="max-width:520px"><div style="font-size:13px;font-weight:800;margin-bottom:12px">Impuesto Sobre Nómina (ISN)</div>'
+  var h='<div style="max-width:720px"><div style="font-size:13px;font-weight:800;margin-bottom:12px">Impuesto Sobre Nómina (ISN)</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">'
     +'<label style="font-size:11px;color:#6b7280">Tasa ISN (%)<br><input id="nom-c-isntasa" type="number" step="0.01" value="'+(c.isnTasa)+'"'+dis+' style="width:100%;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:13px;font-weight:700"></label>'
     +'<label style="font-size:11px;color:#6b7280">Base del ISN<br><select id="nom-c-isnbase"'+dis+' style="width:100%;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:13px"><option value="percepciones"'+(c.isnBase==='percepciones'?' selected':'')+'>Total de percepciones</option><option value="gravado"'+(c.isnBase==='gravado'?' selected':'')+'>Solo gravado</option></select></label>'
@@ -26005,15 +26022,149 @@ function _nomRenderCfg(d){
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">'
     +'<label style="font-size:11px;color:#6b7280">Proveedor/beneficiario<br><input id="nom-c-prov" value="'+_cxpEsc(c.cxpProveedor||'')+'"'+dis+' style="width:100%;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:13px"></label>'
     +'<label style="font-size:11px;color:#6b7280">Cuenta contable<br><input id="nom-c-cta" value="'+_cxpEsc(c.cxpCuentaContable||'')+'"'+dis+' style="width:100%;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:13px"></label>'
-    +'</div>';
+    +'</div>'
+    +_nomCfgEstimHTML(c,dis)+_nomCfgExentosHTML(c,dis)+_nomCfgConceptosHTML(c,dis);
   if(puede) h+='<button onclick="_nomCfgGuardar()" id="nom-c-save" style="background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:12.5px;font-weight:800;cursor:pointer">Guardar configuración</button>';
   else h+='<div style="font-size:10.5px;color:#9ca3af">Solo lectura (necesitas permiso editar_egresos para cambiarla).</div>';
   h+='<div id="nom-c-msg" style="font-size:11px;margin-top:8px"></div></div>';
   body.innerHTML=h;
 }
+/* ── Config: estimado de deducciones (NO es un motor fiscal) ── */
+function _nomCfgEstimHTML(c,dis){
+  var modo=String(c.estimModo||'historico');
+  var i='width:100%;padding:7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:13px;font-weight:700;background:var(--card-bg,#fff);color:var(--text-primary,#111)';
+  return '<div style="font-size:13px;font-weight:800;margin-bottom:6px">Estimado de deducciones (captura por periodo)</div>'
+    +'<div style="font-size:10.5px;color:#6b7280;line-height:1.55;margin-bottom:10px;padding:9px 12px;background:rgba(180,83,9,.06);border:1px solid rgba(180,83,9,.2);border-radius:9px">'
+      +'<b style="color:#92400e">Esto NO calcula impuestos.</b> Tu despacho timbra la nómina y el <b>CFDI trae la verdad</b>. '
+      +'Estos % sólo sirven para ver un <b>neto aproximado</b> antes de timbrar; cuando traes el CFDI, el dato real reemplaza al estimado y el ERP te muestra la diferencia. Ajústalos a tu realidad.</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:18px">'
+    +'<label style="font-size:11px;color:#6b7280">Cómo estimar<br><select id="nom-c-estmodo"'+dis+' style="'+i+'"><option value="historico"'+(modo==='historico'?' selected':'')+'>Histórico real del empleado</option><option value="pct"'+(modo==='pct'?' selected':'')+'>% fijo para todos</option></select></label>'
+    +'<label style="font-size:11px;color:#6b7280">ISR estimado (%)<br><input id="nom-c-estisr" type="number" step="0.01" value="'+(c.estimIsrPct!=null?c.estimIsrPct:10)+'"'+dis+' style="'+i+'"></label>'
+    +'<label style="font-size:11px;color:#6b7280">IMSS estimado (%)<br><input id="nom-c-estimss" type="number" step="0.01" value="'+(c.estimImssPct!=null?c.estimImssPct:2.5)+'"'+dis+' style="'+i+'"></label>'
+    +'</div>'
+    +'<div style="font-size:9.5px;color:#9ca3af;margin-top:-10px;margin-bottom:18px;line-height:1.5">Con <b>Histórico real</b>, cada empleado usa su propia proporción ISR/percepciones de los periodos que ya tienen CFDI; si aún no tiene historial, se usan los % de arriba. Es lo más honesto que se puede hacer sin implementar las tablas del SAT.</div>'
+    +'<label style="font-size:11px;color:#6b7280;display:block;margin-bottom:18px">Periodicidad por defecto <span style="color:#9ca3af">(para empleados sin periodicidad fijada)</span><br>'
+    +'<select id="nom-c-peridef"'+dis+' style="'+i+';max-width:280px"><option value="quincenal"'+(_nomPeriNorm(c.periodicidadDefault)!=='semanal'&&_nomPeriNorm(c.periodicidadDefault)!=='mensual'?' selected':'')+'>Quincenal</option><option value="semanal"'+(_nomPeriNorm(c.periodicidadDefault)==='semanal'?' selected':'')+'>Semanal</option><option value="mensual"'+(_nomPeriNorm(c.periodicidadDefault)==='mensual'?' selected':'')+'>Mensual</option></select></label>';
+}
+/* ── Config: exentos en UMA (topes que cambian cada año) ──
+ * Deliberadamente vacíos: el ERP no inventa reglas fiscales. El usuario/su
+ * contador fija la UMA del año y el tope en UMA de cada concepto. */
+function _nomCfgExentosHTML(c,dis){
+  var ex=(c.exentos&&c.exentos.length)?c.exentos:[];
+  var uma=c.umaPorAnio||{}, y=(new Date()).getFullYear();
+  var anios=[y+1,y,y-1,y-2];
+  var i='padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111);box-sizing:border-box';
+  var h='<div style="font-size:13px;font-weight:800;margin-bottom:6px">Exentos (topes en UMA)</div>'
+    +'<div style="font-size:10.5px;color:#6b7280;line-height:1.55;margin-bottom:10px;padding:9px 12px;background:rgba(12,74,110,.05);border:1px solid rgba(12,74,110,.15);border-radius:9px">'
+      +'Los topes exentos <b>cambian cada año</b>, por eso viven aquí y no en el código. '
+      +'Captura la <b>UMA diaria</b> del año y el tope en UMA de cada concepto <b>según te lo confirme tu contador</b>. '
+      +'Mientras un tope esté en <b>0</b>, el ERP lo muestra como «sin configurar» y <b>no calcula nada</b> con él.</div>'
+    +'<div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:5px">UMA diaria por año</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:14px">';
+  anios.forEach(function(a){
+    h+='<label style="font-size:10px;color:#9ca3af">'+a+'<br><input id="nom-c-uma-'+a+'" type="number" step="0.01" placeholder="0.00" value="'+(uma[a]!=null?uma[a]:'')+'"'+dis+' style="'+i+';width:100%"></label>';
+  });
+  h+='</div><div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:5px">Topes por concepto</div>'
+    +'<div style="overflow-x:auto;border:1px solid var(--color-divider,#e5e7eb);border-radius:9px;margin-bottom:18px"><table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+    +'<thead><tr style="color:#9ca3af;background:var(--color-surface,#f9fafb);font-size:9px;text-transform:uppercase;font-weight:700;text-align:left">'
+    +'<th style="padding:7px 8px">Concepto</th><th style="padding:7px 6px;text-align:right">Tope (UMA)</th><th style="padding:7px 6px">Base</th><th style="padding:7px 6px">Notas</th></tr></thead><tbody>';
+  ex.forEach(function(x,n){
+    h+='<tr style="border-top:1px solid var(--color-divider,#f0f0f0)">'
+      +'<td style="padding:5px 8px;font-weight:700;color:var(--text-primary,#111)">'+_cxpEsc(x.concepto||x.clave||'')+'<input type="hidden" id="nom-c-ex-k-'+n+'" value="'+_cxpEsc(x.clave||'')+'"><input type="hidden" id="nom-c-ex-c-'+n+'" value="'+_cxpEsc(x.concepto||'')+'"></td>'
+      +'<td style="padding:4px 6px;text-align:right"><input id="nom-c-ex-t-'+n+'" type="number" step="0.01" value="'+(_nomCapNum(x.topeUMA)||0)+'"'+dis+' style="'+i+';width:90px;text-align:right"></td>'
+      +'<td style="padding:4px 6px"><select id="nom-c-ex-b-'+n+'"'+dis+' style="'+i+'"><option value="periodo"'+(String(x.base||'periodo')==='periodo'?' selected':'')+'>Por periodo</option><option value="anual"'+(String(x.base||'')==='anual'?' selected':'')+'>Anual</option></select></td>'
+      +'<td style="padding:4px 6px"><input id="nom-c-ex-n-'+n+'" value="'+_cxpEsc(x.notas||'')+'" placeholder="ej. lo que te confirme tu contador"'+dis+' style="'+i+';width:100%"></td></tr>';
+  });
+  if(!ex.length) h+='<tr><td colspan="4" style="padding:12px;color:#9ca3af;font-size:11px">Sin conceptos. Se crean solos al guardar la configuración por primera vez tras desplegar nomina.gs (F5).</td></tr>';
+  h+='</tbody></table></div>';
+  h+='<div style="font-size:9.5px;color:#9ca3af;margin-top:-10px;margin-bottom:18px;line-height:1.5"><b>Pendiente:</b> hoy estos topes son informativos — el ERP los guarda y los muestra, pero <b>no separa gravado/exento por su cuenta</b>. La separación real la hace tu despacho al timbrar y llega en el CFDI.</div>';
+  return h;
+}
+/* ── Config: catálogo de conceptos (nombres del CFDI de nómina) ──
+ * Editable: el usuario agrega los que le falten sin tocar código. El `flag`
+ * es sólo una etiqueta (G/E/PS); NO dispara cálculos — el gravado/exento
+ * exacto lo trae el CFDI. */
+function _nomCfgConceptosHTML(c,dis){
+  var arr=(c.conceptos&&c.conceptos.length)?c.conceptos:[];
+  var i='padding:5px 6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111);box-sizing:border-box';
+  var h='<div style="font-size:13px;font-weight:800;margin-bottom:6px">Catálogo de conceptos <span style="font-size:10px;font-weight:600;color:#9ca3af">('+arr.length+')</span></div>'
+    +'<div style="font-size:10.5px;color:#6b7280;line-height:1.55;margin-bottom:10px;padding:9px 12px;background:rgba(12,74,110,.05);border:1px solid rgba(12,74,110,.15);border-radius:9px">'
+      +'Los nombres vienen del <b>catálogo CFDI de nómina</b> para que <b>empaten con el XML</b> al conciliar. '
+      +'Agrega los que te falten sin tocar código. La bandera (<b>G</b> gravado · <b>E</b> exento · <b>PS</b> previsión social) es <b>sólo una etiqueta tuya</b>: '
+      +'no calcula nada — el gravado/exento exacto lo trae el CFDI.</div>'
+    +'<div style="max-height:340px;overflow:auto;border:1px solid var(--color-divider,#e5e7eb);border-radius:9px;margin-bottom:8px"><table style="width:100%;border-collapse:collapse;font-size:11.5px">'
+    +'<thead><tr style="color:#9ca3af;background:var(--color-surface,#f9fafb);font-size:9px;text-transform:uppercase;font-weight:700;text-align:left;position:sticky;top:0">'
+    +'<th style="padding:6px 8px">Concepto</th><th style="padding:6px 6px">Grupo</th><th style="padding:6px 6px">Bandera</th><th style="padding:6px 6px;text-align:center">Activo</th><th></th></tr></thead><tbody>';
+  arr.forEach(function(x,n){
+    var gr=String(x.grupo||'percepcion');
+    h+='<tr style="border-top:1px solid var(--color-divider,#f0f0f0)">'
+      +'<td style="padding:4px 8px"><input id="nom-c-cn-c-'+n+'" value="'+_cxpEsc(x.concepto||'')+'"'+dis+' style="'+i+';width:100%"><input type="hidden" id="nom-c-cn-k-'+n+'" value="'+_cxpEsc(x.clave||'')+'"></td>'
+      +'<td style="padding:4px 6px"><select id="nom-c-cn-g-'+n+'"'+dis+' style="'+i+'"><option value="percepcion"'+(gr==='percepcion'?' selected':'')+'>Percepción</option><option value="deduccion"'+(gr==='deduccion'?' selected':'')+'>Deducción</option><option value="otroPago"'+(gr==='otroPago'?' selected':'')+'>Otro pago</option></select></td>'
+      +'<td style="padding:4px 6px"><select id="nom-c-cn-f-'+n+'"'+dis+' style="'+i+'"><option value=""'+(!x.flag?' selected':'')+'>— lo define el despacho</option><option value="G"'+(x.flag==='G'?' selected':'')+'>G — gravado</option><option value="E"'+(x.flag==='E'?' selected':'')+'>E — exento</option><option value="PS"'+(x.flag==='PS'?' selected':'')+'>PS — previsión social</option></select></td>'
+      +'<td style="padding:4px 6px;text-align:center"><input type="checkbox" id="nom-c-cn-a-'+n+'" '+(x.activo===false?'':'checked')+dis+'></td>'
+      +'<td style="padding:4px 6px;text-align:right">'+(dis?'':'<button onclick="_nomCfgConceptoQuitar('+n+')" title="Quitar concepto" style="background:none;border:none;color:#dc2626;font-weight:800;cursor:pointer;font-size:12px">✕</button>')+'</td></tr>';
+  });
+  if(!arr.length) h+='<tr><td colspan="5" style="padding:12px;color:#9ca3af;font-size:11px">Sin conceptos. Se crean solos al desplegar nomina.gs (F5) y abrir esta pantalla.</td></tr>';
+  h+='</tbody></table></div>';
+  if(!dis) h+='<button onclick="_nomCfgConceptoAgregar()" style="background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;padding:6px 12px;font-size:11.5px;font-weight:700;cursor:pointer;color:var(--color-primary,#c46a7a);margin-bottom:18px">+ Agregar concepto</button>';
+  h+='<div style="font-size:9.5px;color:#9ca3af;margin-bottom:18px;line-height:1.5"><b>Pendiente:</b> hoy la rejilla de captura usa las 6 columnas base (sueldo, bonos, despensa, combustible, prima vacacional, otras). Estos conceptos ya se guardan y el <b>desglose gravado/exento por concepto llega completo del CFDI</b>; capturar a mano concepto por concepto queda para la siguiente iteración.</div>';
+  return h;
+}
+// Los cambios se llevan en memoria (_nomCfg) y se persisten con "Guardar configuración".
+function _nomCfgLeeConceptos(){
+  var arr=(_nomCfg&&_nomCfg.conceptos)||[];
+  return arr.map(function(x,n){
+    var g=function(id){ var el=document.getElementById(id); return el?el.value:undefined; };
+    var a=document.getElementById('nom-c-cn-a-'+n);
+    return { clave:(g('nom-c-cn-k-'+n)!==undefined?g('nom-c-cn-k-'+n):x.clave)||x.clave,
+      concepto:(g('nom-c-cn-c-'+n)!==undefined?g('nom-c-cn-c-'+n):x.concepto),
+      grupo:(g('nom-c-cn-g-'+n)!==undefined?g('nom-c-cn-g-'+n):x.grupo)||'percepcion',
+      flag:(g('nom-c-cn-f-'+n)!==undefined?g('nom-c-cn-f-'+n):x.flag)||'',
+      activo:a?!!a.checked:(x.activo!==false) };
+  });
+}
+function _nomCfgConceptoAgregar(){
+  var nom=prompt('Nombre del concepto (usa el nombre del catálogo CFDI de nómina para que empate con el XML):','');
+  if(!nom||!nom.trim()) return;
+  if(!_nomCfg) _nomCfg={};
+  _nomCfg.conceptos=_nomCfgLeeConceptos();
+  var clave=nom.trim().toLowerCase().replace(/[^a-z0-9]+/g,'').substring(0,18)||('c'+_nomCfg.conceptos.length);
+  _nomCfg.conceptos.push({ clave:clave, concepto:nom.trim(), grupo:'percepcion', flag:'', activo:true });
+  _nomRenderCfg({ok:true});
+}
+function _nomCfgConceptoQuitar(n){
+  if(!_nomCfg||!_nomCfg.conceptos) return;
+  var arr=_nomCfgLeeConceptos();
+  if(!confirm('¿Quitar el concepto "'+(arr[n]&&arr[n].concepto)+'" del catálogo?\n\n(No borra nada de los periodos ya capturados.)')) return;
+  arr.splice(n,1); _nomCfg.conceptos=arr;
+  _nomRenderCfg({ok:true});
+}
 async function _nomCfgGuardar(){
   var g=function(id){ var el=document.getElementById(id); return el?el.value:''; };
   var cfg={ isnTasa:parseFloat(g('nom-c-isntasa'))||0, isnBase:g('nom-c-isnbase'), isnExcluirAsimilados:(document.getElementById('nom-c-exasim')||{}).checked!==false, isnSubsidio:(document.getElementById('nom-c-subs')||{}).checked===true, isnSubsidioPct:parseFloat(g('nom-c-subs-pct'))||1, cxpProveedor:g('nom-c-prov'), cxpCuentaContable:g('nom-c-cta') };
+  // Estimado (F5)
+  if(document.getElementById('nom-c-estmodo')){
+    cfg.estimModo=g('nom-c-estmodo');
+    cfg.estimIsrPct=parseFloat(g('nom-c-estisr'))||0;
+    cfg.estimImssPct=parseFloat(g('nom-c-estimss'))||0;
+    cfg.periodicidadDefault=g('nom-c-peridef')||'quincenal';
+  }
+  // Exentos configurables (F5-D)
+  var _prev=(_nomCfg&&_nomCfg.exentos)||[];
+  if(_prev.length&&document.getElementById('nom-c-ex-k-0')){
+    cfg.exentos=_prev.map(function(x,n){
+      return { clave:g('nom-c-ex-k-'+n)||x.clave, concepto:g('nom-c-ex-c-'+n)||x.concepto,
+        topeUMA:parseFloat(g('nom-c-ex-t-'+n))||0, base:g('nom-c-ex-b-'+n)||'periodo', notas:g('nom-c-ex-n-'+n)||'' };
+    });
+  }
+  var _uma={}, _y=(new Date()).getFullYear();
+  [_y+1,_y,_y-1,_y-2].forEach(function(a){
+    var el=document.getElementById('nom-c-uma-'+a); if(!el) return;
+    var v=parseFloat(el.value); if(!isNaN(v)&&v>0) _uma[a]=v;
+  });
+  if(document.getElementById('nom-c-uma-'+_y)) cfg.umaPorAnio=_uma;
+  // Catálogo de conceptos (F5-2)
+  if(_nomCfg&&_nomCfg.conceptos&&document.getElementById('nom-c-cn-c-0')) cfg.conceptos=_nomCfgLeeConceptos();
   var msg=document.getElementById('nom-c-msg'), btn=document.getElementById('nom-c-save');
   if(btn){ btn.disabled=true; btn.innerHTML='<span class="ing-spinner"></span>Guardando…'; }
   try{
@@ -26024,6 +26175,533 @@ async function _nomCfgGuardar(){
     if(msg){ msg.style.color='#166534'; msg.textContent='✓ Guardado.'; }
     if(btn){ btn.disabled=false; btn.textContent='Guardar configuración'; }
   }catch(e){ if(msg){ msg.style.color='#dc2626'; msg.textContent='Error: '+e.message; } if(btn){btn.disabled=false;btn.textContent='Guardar configuración';} }
+}
+
+/* ═══════════════════ NÓMINA · CAPTURA POR PERIODO (F5) ═══════════════════
+ * El corazón del módulo: sustituye la hoja de Excel del usuario.
+ * - Periodicidad MIXTA: cada periodo agrupa SÓLO a los empleados de esa
+ *   periodicidad (semanal / quincenal / mensual).
+ * - Las deducciones que se ven antes de timbrar son un ESTIMADO (siempre
+ *   rotulado). El motor fiscal es el despacho: cuando llega el CFDI, el dato
+ *   REAL reemplaza al estimado y se resalta la Diferencia.
+ * - Un periodo pagado es de SOLO LECTURA (historial consultable). */
+var _nomCapAnio=null, _nomCapTipo='quincenal', _nomCapPeriodos=[], _nomCapPeriodoId='';
+var _nomCapData=null, _nomCapDirty=false;
+var _NOM_CAP_CAMPOS=['SueldoBase','Bonos','ValesDespensa','Combustible','PrimaVacacional','OtrasPercepciones','OtrasDeducciones'];
+var _NOM_CAP_LBL={SueldoBase:'Sueldo base',Bonos:'Bonos',ValesDespensa:'Vales despensa',Combustible:'Combustible',PrimaVacacional:'Prima vac.',OtrasPercepciones:'Otras perc.',OtrasDeducciones:'Otras ded.'};
+function _nomCapNum(v){ var x=parseFloat(String(v==null?0:v).replace(/[$,\s]/g,'')); return isNaN(x)?0:x; }
+function _nomTipoLbl(t){ return t==='semanal'?'Semanal':(t==='mensual'?'Mensual':'Quincenal'); }
+// Espeja _nomPeriodicidadNorm del backend (nomina.gs): tolera lo ya capturado
+// a mano ("Quincenal", "15", "semanal"…). Vacío = usa el default de config.
+function _nomPeriNorm(v){
+  var s=String(v||'').trim().toLowerCase();
+  if(s.indexOf('quincen')>-1||s==='q'||s==='15') return 'quincenal';
+  if(s.indexOf('seman')>-1||s==='s'||s==='7') return 'semanal';
+  if(s.indexOf('mens')>-1||s==='m'||s==='30') return 'mensual';
+  return '';
+}
+function _nomEstBadge(est){
+  var c={borrador:['#b45309','#f59e0b','Borrador'],validada:['#0c4a6e','#0284c7','Validada'],pagada:['#166534','#166534','Pagada']}[String(est||'borrador').toLowerCase()]||['#6b7280','#9ca3af',String(est)];
+  return '<span style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:800;color:'+c[0]+'"><span style="width:8px;height:8px;border-radius:50%;background:'+c[1]+'"></span>'+c[2]+'</span>';
+}
+async function _nomCargarCaptura(){
+  var body=document.getElementById('nom-body'); if(!body) return;
+  if(!_nomCapAnio){
+    var d=(typeof currentFechaInicio==='string'&&currentFechaInicio)?new Date(currentFechaInicio+'T00:00:00'):new Date();
+    if(isNaN(d.getTime())) d=new Date();
+    _nomCapAnio=d.getFullYear();
+  }
+  body.innerHTML='<div style="text-align:center;padding:40px;color:#9ca3af"><span class="ing-spinner ing-spinner-dark"></span>Cargando periodos…</div>';
+  try{
+    var tok=encodeURIComponent(getToken());
+    if(!_nomCfg){ try{ var rc=await fetch(APPS_SCRIPT_URL+'?action=nominaCfg&token='+tok); var dc=await rc.json(); if(dc&&dc.ok&&dc.cfg) _nomCfg=dc.cfg; }catch(_c){} }
+    var r=await fetch(APPS_SCRIPT_URL+'?action=nominaPeriodos&anio='+_nomCapAnio+'&tipo='+_nomCapTipo+'&token='+tok);
+    var d=await r.json();
+    if(!d||!d.ok){ body.innerHTML=_nomCapBar()+_nomBackendBanner(d&&d.error); return; }
+    _nomCapPeriodos=d.periodos||[];
+    if(!_nomCapPeriodos.length){ _nomCapPeriodoId=''; _nomCapData=null; _nomRenderCaptura(); return; }
+    var ids=_nomCapPeriodos.map(function(p){ return p.periodoId; });
+    if(!_nomCapPeriodoId||ids.indexOf(_nomCapPeriodoId)<0) _nomCapPeriodoId=_nomCapPeriodoActual();
+    await _nomCapCargarPeriodo();
+  }catch(e){ body.innerHTML='<div style="color:#dc2626;padding:20px">Error de conexión: '+_cxpEsc(e.message)+'</div>'; }
+}
+// Periodo que contiene HOY; si no, el último que ya empezó; si no, el primero.
+function _nomCapPeriodoActual(){
+  var hoy=new Date(), s=hoy.getFullYear()+'-'+(hoy.getMonth()<9?'0':'')+(hoy.getMonth()+1)+'-'+(hoy.getDate()<10?'0':'')+hoy.getDate();
+  var cand='';
+  for(var i=0;i<_nomCapPeriodos.length;i++){
+    var p=_nomCapPeriodos[i];
+    if(s>=p.fechaInicio&&s<=p.fechaFin) return p.periodoId;
+    if(p.fechaInicio<=s) cand=p.periodoId;
+  }
+  return cand||_nomCapPeriodos[0].periodoId;
+}
+async function _nomCapCargarPeriodo(){
+  var body=document.getElementById('nom-body'); if(!body) return;
+  if(!_nomCapPeriodoId){ _nomCapData=null; _nomRenderCaptura(); return; }
+  body.innerHTML=_nomCapBar()+'<div style="text-align:center;padding:40px;color:#9ca3af"><span class="ing-spinner ing-spinner-dark"></span>Cargando captura…</div>';
+  try{
+    var tok=encodeURIComponent(getToken());
+    var r=await fetch(APPS_SCRIPT_URL+'?action=nominaCaptura&periodoId='+encodeURIComponent(_nomCapPeriodoId)+'&token='+tok);
+    _nomCapData=await r.json(); _nomCapDirty=false;
+    _nomRenderCaptura();
+  }catch(e){ body.innerHTML=_nomCapBar()+'<div style="color:#dc2626;padding:20px">Error: '+_cxpEsc(e.message)+'</div>'; }
+}
+function _nomCapSetTipo(t){ if(_nomCapDirty&&!confirm('Hay cambios sin guardar en este periodo. ¿Descartarlos?')) return; _nomCapTipo=t; _nomCapPeriodoId=''; _nomCargarCaptura(); }
+function _nomCapSetAnio(a){ if(_nomCapDirty&&!confirm('Hay cambios sin guardar en este periodo. ¿Descartarlos?')) return; _nomCapAnio=parseInt(a,10)||_nomCapAnio; _nomCapPeriodoId=''; _nomCargarCaptura(); }
+function _nomCapSetPeriodo(id){ if(_nomCapDirty&&!confirm('Hay cambios sin guardar en este periodo. ¿Descartarlos?')){ var s=document.getElementById('nom-cap-per'); if(s) s.value=_nomCapPeriodoId; return; } _nomCapPeriodoId=id; _nomCapCargarPeriodo(); }
+function _nomCapNavPeriodo(d){
+  var ids=_nomCapPeriodos.map(function(p){ return p.periodoId; });
+  var i=ids.indexOf(_nomCapPeriodoId); if(i<0) return;
+  var n=i+d; if(n<0||n>=ids.length) return;
+  _nomCapSetPeriodo(ids[n]);
+}
+// Barra: año + periodicidad + selector de periodo + nuevo periodo.
+function _nomCapBar(){
+  var anios=[], y=(new Date()).getFullYear();
+  for(var a=y+1;a>=y-6;a--) anios.push(a);
+  var selA='<select onchange="_nomCapSetAnio(this.value)" style="padding:6px 8px;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
+    +anios.map(function(a){ return '<option value="'+a+'"'+(a===_nomCapAnio?' selected':'')+'>'+a+'</option>'; }).join('')+'</select>';
+  function tb(t){ return '<button onclick="_nomCapSetTipo(\''+t+'\')" style="padding:6px 12px;border:none;border-radius:7px;font-size:11.5px;font-weight:700;cursor:pointer;background:'+(_nomCapTipo===t?'var(--color-primary,#c46a7a)':'transparent')+';color:'+(_nomCapTipo===t?'#fff':'var(--text-secondary,#6b7280)')+'">'+_nomTipoLbl(t)+'</button>'; }
+  var selP='';
+  if(_nomCapPeriodos.length){
+    selP='<button onclick="_nomCapNavPeriodo(-1)" style="background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;width:30px;height:30px;font-size:15px;cursor:pointer;color:var(--text-primary,#374151)">‹</button>'
+      +'<select id="nom-cap-per" onchange="_nomCapSetPeriodo(this.value)" style="padding:6px 8px;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;min-width:250px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
+      +_nomCapPeriodos.map(function(p){
+        var mark=p.estatus==='pagada'?' ✔':(p.estatus==='validada'?' •':'');
+        return '<option value="'+_cxpEsc(p.periodoId)+'"'+(p.periodoId===_nomCapPeriodoId?' selected':'')+'>'+_cxpEsc(p.periodoId+'  ·  '+p.fechaInicio+' → '+p.fechaFin+mark)+'</option>';
+      }).join('')+'</select>'
+      +'<button onclick="_nomCapNavPeriodo(1)" style="background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;width:30px;height:30px;font-size:15px;cursor:pointer;color:var(--text-primary,#374151)">›</button>';
+  }
+  var acc='';
+  if(_nomPuede()) acc='<button onclick="_nomCapNuevoPeriodo()" style="margin-left:auto;background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:6px 12px;font-size:11.5px;font-weight:700;cursor:pointer;color:var(--color-primary,#c46a7a)">+ Nuevo periodo</button>';
+  return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">'
+    +selA+'<div style="display:flex;gap:3px;background:var(--color-surface,#f3f4f6);padding:3px;border-radius:9px">'+tb('semanal')+tb('quincenal')+tb('mensual')+'</div>'
+    +selP+acc+'</div>';
+}
+function _nomRenderCaptura(){
+  var body=document.getElementById('nom-body'); if(!body) return;
+  var h=_nomCapBar();
+  if(!_nomCapPeriodos.length){
+    h+='<div style="padding:30px 24px;text-align:center;background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px">'
+      +'<div style="font-size:32px;margin-bottom:8px">🗓️</div>'
+      +'<div style="font-weight:800;color:var(--text-primary,#111);margin-bottom:4px">No hay periodos '+_nomTipoLbl(_nomCapTipo).toLowerCase()+'es para '+_nomCapAnio+'.</div>'
+      +'<div style="font-size:12px;color:#9ca3af;margin-bottom:14px">Genera el calendario del año de una vez '+(_nomCapTipo==='quincenal'?'(24 quincenas: 1–15 y 16–fin)':(_nomCapTipo==='semanal'?'(semanas lunes→domingo)':'(12 meses)'))+'.</div>'
+      +(_nomPuede()?'<button onclick="_nomCapGenerar()" id="nom-cap-gen" style="background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:12.5px;font-weight:800;cursor:pointer">Generar periodos '+_nomTipoLbl(_nomCapTipo).toLowerCase()+'es de '+_nomCapAnio+'</button>':'<span style="font-size:11px;color:#9ca3af">Necesitas permiso editar_egresos.</span>')
+    +'</div>';
+    body.innerHTML=h; return;
+  }
+  var d=_nomCapData;
+  if(!d||!d.ok){ h+=_nomBackendBanner(d&&d.error); body.innerHTML=h; return; }
+  var per=d.periodo||{}, filas=d.filas||[], ro=!!d.soloLectura, puede=_nomPuede()&&!ro;
+  // Cabecera del periodo + estatus
+  h+='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;padding:12px 14px;border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;background:var(--card-bg,#fff)">'
+    +'<div><div style="font-size:14px;font-weight:800;color:var(--text-primary,#111)">'+_cxpEsc(per.periodoId||'')+' <span style="font-size:11px;font-weight:600;color:#9ca3af">'+_nomTipoLbl(per.tipo)+'</span>'
+      +(String(per.tipoNomina||'ORDINARIA')==='EXTRAORDINARIA'?' <span style="font-size:8.5px;font-weight:800;color:#7c3aed;background:rgba(124,58,237,.1);border-radius:4px;padding:2px 6px;vertical-align:middle">EXTRAORDINARIA</span>':' <span style="font-size:8.5px;font-weight:700;color:#9ca3af;background:var(--color-surface,#f3f4f6);border-radius:4px;padding:2px 6px;vertical-align:middle">ORDINARIA</span>')+'</div>'
+    +'<div style="font-size:11px;color:#6b7280">'+_cxpEsc(per.fechaInicio||'')+' → '+_cxpEsc(per.fechaFin||'')+(per.fechaPago?(' · pago '+_cxpEsc(per.fechaPago)):'')
+      +(per.diasCalculo?(' · '+Number(per.diasCalculo).toFixed(2)+' días para cálculo'):'')+' · '+filas.length+' empleado(s) '+_nomTipoLbl(per.tipo).toLowerCase()+'es</div></div>'
+    +'<div style="margin-left:auto;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+_nomEstBadge(per.estatus)+_nomCapAcciones(per,ro)+'</div>'
+  +'</div>';
+  if(ro) h+='<div style="margin-bottom:12px;padding:9px 13px;background:rgba(22,101,52,.06);border:1px solid #bbf7d0;border-radius:9px;font-size:11.5px;color:#166534"><b>Periodo pagado — solo lectura.</b> Es historial: para corregir algo, reábrelo a borrador.</div>';
+  if(!filas.length){
+    h+='<div style="padding:26px;text-align:center;color:#9ca3af;background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px">'
+      +'Ningún empleado activo tiene periodicidad <b>'+_nomTipoLbl(per.tipo).toLowerCase()+'</b>.<br>'
+      +'<span style="font-size:11.5px">Ajusta la <b>Periodicidad</b> de cada empleado en la pestaña <b>Empleados</b> (puedes mezclar: unos quincenal, otros semanal o mensual).</span></div>';
+    body.innerHTML=h; return;
+  }
+  var hayCfdi=(d.totales&&d.totales.conCfdi>0);
+  // KPIs
+  h+='<div id="nom-cap-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:10px">'+_nomCapKpisHTML()+'</div>';
+  // Aviso: el estimado NO es fiscal
+  h+='<div style="margin-bottom:12px;padding:9px 13px;background:rgba(180,83,9,.06);border:1px solid rgba(180,83,9,.2);border-radius:9px;font-size:11px;color:#92400e;line-height:1.5">'
+    +'<b>ISR / IMSS son un ESTIMADO</b> ('+(d.estimModo==='historico'?'histórico real de cada empleado, con % de respaldo':'% fijo de configuración')+'), sólo para ver el neto antes de timbrar. '
+    +'<b>La verdad es el CFDI</b> que emite tu despacho: pulsa «⟳ Traer CFDI» y el dato real reemplaza al estimado. Ajusta los % en <b>Configuración</b>.</div>';
+  h+=_nomCapTablaHTML(filas,hayCfdi,puede);
+  if(puede) h+='<div style="display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap">'
+    +'<button onclick="_nomCapGuardar()" id="nom-cap-save" style="background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:12.5px;font-weight:800;cursor:pointer">Guardar captura</button>'
+    +'<span id="nom-cap-msg" style="font-size:11.5px;color:#9ca3af"></span></div>';
+  body.innerHTML=h;
+}
+function _nomCapAcciones(per,ro){
+  if(!_nomPuede()) return '<span style="font-size:10.5px;color:#9ca3af">Solo lectura (falta editar_egresos)</span>';
+  var b='border:1px solid var(--color-divider,#e5e7eb);background:none;border-radius:8px;padding:6px 12px;font-size:11.5px;font-weight:700;cursor:pointer';
+  var h='<button onclick="_nomCapConciliar()" id="nom-cap-conc" style="'+b+';color:#0c4a6e">⟳ Traer CFDI (real)</button>';
+  var est=String(per.estatus||'borrador');
+  if(est==='borrador') h+='<button onclick="_nomCapValidar(false)" id="nom-cap-val" style="background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:800;cursor:pointer">✓ Validar y enviar a CxP</button>';
+  else if(est==='validada') h+='<button onclick="_nomCapValidar(true)" style="'+b+';color:var(--color-primary,#c46a7a)">↻ Órdenes faltantes</button>'
+    +'<button onclick="_nomCapEstatus(\'pagada\')" style="background:#166534;color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12px;font-weight:800;cursor:pointer">Marcar pagada</button>';
+  if(est!=='borrador') h+='<button onclick="_nomCapEstatus(\'borrador\')" style="'+b+';color:#6b7280">Reabrir</button>';
+  return h;
+}
+function _nomCapKpisHTML(){
+  var t=(_nomCapData&&_nomCapData.totales)||{};
+  var h=_nomKpi('Percepciones',_nomFmt(t.percepciones||0),'#0c4a6e')
+    +_nomKpi('Neto estimado',_nomFmt(t.netoEst||0),'#b45309')
+    +_nomKpi('Neto a pagar'+((t.conCfdi>0)?' (real manda)':''),_nomFmt(t.netoFinal||0),'#166534')
+    +_nomKpi('Con CFDI',(t.conCfdi||0)+' / '+(t.numEmpleados||0),(t.conCfdi>0?'#166534':'#9ca3af'));
+  if(t.conCfdi>0&&Math.abs(t.diferencia||0)>=0.01) h+=_nomKpi('Diferencia vs estimado',((t.diferencia>0?'+':'')+_nomFmt(t.diferencia)),(Math.abs(t.diferencia)>=1?'#dc2626':'#6b7280'));
+  return h;
+}
+function _nomCapTablaHTML(filas,hayCfdi,puede){
+  var dis=puede?'':' disabled';
+  var inp='width:82px;padding:4px 6px;border:1px solid var(--color-divider,#e5e7eb);border-radius:5px;font-size:11.5px;text-align:right;background:var(--card-bg,#fff);color:var(--text-primary,#111)';
+  var h='<div style="overflow-x:auto;border:1px solid var(--color-divider,#e5e7eb);border-radius:12px"><table style="width:100%;border-collapse:collapse;font-size:11.5px;min-width:1150px">'
+    +'<thead><tr style="text-align:right;color:#9ca3af;background:var(--color-surface,#f9fafb);border-bottom:2px solid var(--color-divider,#e5e7eb);font-size:9px;text-transform:uppercase;font-weight:700">'
+    +'<th style="padding:8px 8px;text-align:left;position:sticky;left:0;background:var(--color-surface,#f9fafb)">Empleado</th>';
+  _NOM_CAP_CAMPOS.slice(0,6).forEach(function(c){ h+='<th style="padding:8px 5px">'+_NOM_CAP_LBL[c]+'</th>'; });
+  h+='<th style="padding:8px 5px;color:#0c4a6e">Total perc.</th>'
+    +'<th style="padding:8px 5px;color:#b45309">ISR est.</th><th style="padding:8px 5px;color:#b45309">IMSS est.</th>'
+    +'<th style="padding:8px 5px">Otras ded.</th><th style="padding:8px 5px;color:#b45309">Neto estimado</th>';
+  if(hayCfdi) h+='<th style="padding:8px 5px;color:#166534">Gravado</th><th style="padding:8px 5px;color:#166534">Exento</th>'
+    +'<th style="padding:8px 5px;color:#166534">ISR real</th><th style="padding:8px 5px;color:#166534">IMSS real</th>'
+    +'<th style="padding:8px 5px;color:#166534">Neto real</th><th style="padding:8px 5px">Dif.</th><th style="padding:8px 5px"></th>';
+  h+='</tr></thead><tbody>';
+  filas.forEach(function(f,i){
+    var cc=!!f.conCfdi;
+    h+='<tr id="nom-cap-r-'+i+'" style="border-bottom:1px solid var(--color-divider,#f0f0f0);text-align:right">'
+      +'<td style="padding:6px 8px;text-align:left;position:sticky;left:0;background:var(--card-bg,#fff)">'
+        +'<div style="font-weight:700;color:var(--text-primary,#111);white-space:nowrap">'+_cxpEsc(f.Nombre||f.EmpleadoID||'')+(f.huerfana?' <span title="Ya no está activo o cambió de periodicidad; se conserva por historial" style="font-size:8px;font-weight:800;color:#b45309;background:rgba(180,83,9,.1);border-radius:4px;padding:1px 4px">HIST</span>':'')+'</div>'
+        +'<div style="font-size:9.5px;color:#9ca3af;white-space:nowrap">'+_cxpEsc(f.EmpleadoID||'')+(f.Puesto?(' · '+_cxpEsc(f.Puesto)):'')+'</div></td>';
+    _NOM_CAP_CAMPOS.slice(0,6).forEach(function(c){
+      h+='<td style="padding:4px 5px"><input id="nc-'+i+'-'+c+'" type="number" step="0.01" value="'+_nomCapNum(f[c])+'" oninput="_nomCapRow('+i+')"'+dis+' style="'+inp+'"></td>';
+    });
+    h+='<td id="nc-'+i+'-tp" style="padding:6px 5px;font-weight:800;color:#0c4a6e">'+_nomFmt(f.TotalPercepciones)+'</td>'
+      +'<td id="nc-'+i+'-isre" style="padding:6px 5px;color:#b45309">'+_nomFmt(f.ISR_Estimado)+'</td>'
+      +'<td id="nc-'+i+'-imsse" style="padding:6px 5px;color:#b45309">'+_nomFmt(f.IMSS_Estimado)+'</td>'
+      +'<td style="padding:4px 5px"><input id="nc-'+i+'-OtrasDeducciones" type="number" step="0.01" value="'+_nomCapNum(f.OtrasDeducciones)+'" oninput="_nomCapRow('+i+')"'+dis+' style="'+inp+'"></td>'
+      +'<td id="nc-'+i+'-neto" style="padding:6px 5px;font-weight:800;color:#b45309">'+_nomFmt(f.NetoEstimado)+'</td>';
+    if(_nomCapData&&_nomCapData.totales&&_nomCapData.totales.conCfdi>0){
+      if(cc){
+        var dif=_nomCapNum(f.Diferencia), dcol=Math.abs(dif)>=1?'#dc2626':'#9ca3af';
+        h+='<td style="padding:6px 5px;color:#166534">'+_nomFmt(f.TotalGravado)+'</td><td style="padding:6px 5px;color:#166534">'+_nomFmt(f.TotalExento)+'</td>'
+          +'<td style="padding:6px 5px;color:#166534">'+_nomFmt(f.ISR_Real)+'</td><td style="padding:6px 5px;color:#166534">'+_nomFmt(f.IMSS_Real)+'</td>'
+          +'<td style="padding:6px 5px;font-weight:800;color:#166534" title="'+_cxpEsc(f.UUID_CFDI||'')+'">'+_nomFmt(f.NetoReal)+'</td>'
+          +'<td style="padding:6px 5px;font-weight:800;color:'+dcol+';'+(Math.abs(dif)>=1?'background:rgba(220,38,38,.07)':'')+'">'+(Math.abs(dif)<0.01?'—':((dif>0?'+':'−')+_nomFmt(dif)))+'</td>'
+          +'<td style="padding:6px 5px">'+((f.detalleCfdi&&f.detalleCfdi.length)?'<button onclick="_nomCapDesglose('+i+')" title="Desglose por concepto (gravado/exento) del CFDI" style="background:none;border:none;color:var(--color-primary,#c46a7a);font-weight:700;cursor:pointer;font-size:10.5px;padding:0;white-space:nowrap">▸ desglose</button>':'')+'</td>';
+      } else {
+        h+='<td colspan="7" style="padding:6px 5px;text-align:center;font-size:10px;color:#9ca3af">sin CFDI todavía</td>';
+      }
+    }
+    h+='</tr>';
+  });
+  h+='</tbody><tfoot><tr style="border-top:2px solid var(--color-divider,#e5e7eb);font-weight:800;text-align:right;background:var(--color-surface,#f9fafb)">'
+    +'<td style="padding:9px 8px;text-align:left;position:sticky;left:0;background:var(--color-surface,#f9fafb)">Total</td>'
+    +'<td colspan="6"></td><td id="nom-cap-t-tp" style="padding:9px 5px;color:#0c4a6e"></td>'
+    +'<td id="nom-cap-t-isre" style="padding:9px 5px;color:#b45309"></td><td id="nom-cap-t-imsse" style="padding:9px 5px;color:#b45309"></td>'
+    +'<td></td><td id="nom-cap-t-neto" style="padding:9px 5px;color:#b45309"></td>'
+    +(hayCfdi?'<td id="nom-cap-t-grav" style="padding:9px 5px;color:#166534"></td><td id="nom-cap-t-exen" style="padding:9px 5px;color:#166534"></td>'
+      +'<td colspan="2"></td><td id="nom-cap-t-real" style="padding:9px 5px;color:#166534"></td><td id="nom-cap-t-dif" style="padding:9px 5px"></td><td></td>':'')
+  +'</tr></tfoot></table></div>';
+  if(hayCfdi){
+    var T=(_nomCapData&&_nomCapData.totales)||{};
+    h+='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:11px;color:#6b7280">'
+      +'<span>Total de ingresos: <b style="color:#0c4a6e">'+_nomFmt(T.totalIngresos||0)+'</b></span>'
+      +'<span>Gravados: <b>'+_nomFmt(T.totalIngresosGravados||0)+'</b></span>'
+      +'<span>Exentos: <b>'+_nomFmt(T.totalIngresosExentos||0)+'</b></span>'
+      +'<span>Total de retenciones: <b style="color:#b45309">'+_nomFmt(T.totalRetenciones||0)+'</b></span>'
+      +'<span>Otras deducciones: <b style="color:#b45309">'+_nomFmt(T.totalOtrasDeducciones||0)+'</b></span>'
+      +'<span>TOTAL A PAGAR: <b style="color:#166534">'+_nomFmt(T.totalAPagar||0)+'</b></span>'
+      +'<span>Total pagado: <b>'+_nomFmt(T.totalPagado||0)+'</b></span>'
+      +'<span style="color:#9ca3af">El gravado/exento lo trae el CFDI (lo separa tu despacho, no el ERP).</span></div>';
+  }
+  setTimeout(_nomCapTotales,0);
+  return h;
+}
+// Desglose por concepto de un recibo timbrado: importe / gravado / exento tal
+// cual viene del XML (el ERP no calcula la separación, sólo la almacena).
+function _nomCapDesglose(i){
+  var f=(_nomCapData&&_nomCapData.filas)?_nomCapData.filas[i]:null;
+  if(!f||!f.detalleCfdi) return;
+  var ov=document.getElementById('nom-det-ov'); if(!ov){ ov=document.createElement('div'); ov.id='nom-det-ov'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9750;display:flex;align-items:flex-start;justify-content:center;padding:24px 16px;overflow:auto';
+  var perc=f.detalleCfdi.filter(function(x){ return x.grupo==='percepcion'; });
+  var ded=f.detalleCfdi.filter(function(x){ return x.grupo==='deduccion'; });
+  var otros=f.detalleCfdi.filter(function(x){ return x.grupo==='otroPago'; });
+  var h='<div style="background:var(--card-bg,#fff);color:var(--text-primary,#1a252f);border-radius:14px;padding:22px 24px;max-width:660px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.4)">'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px">'
+    +'<div><div style="font-size:16px;font-weight:800">Desglose del CFDI</div>'
+    +'<div style="font-size:11px;color:#6b7280">'+_cxpEsc(f.Nombre||'')+' · '+_cxpEsc(f.EmpleadoID||'')+' · '+_cxpEsc(_nomCapPeriodoId)+'</div></div>'
+    +'<button onclick="document.getElementById(\'nom-det-ov\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af">✕</button></div>'
+    +'<div style="font-size:10px;color:#9ca3af;margin-bottom:12px">Gravado y exento tal cual los timbró tu despacho. El ERP los almacena; no los calcula.</div>';
+  function tabla(titulo,arr,color,conSplit){
+    if(!arr.length) return '';
+    var t='<div style="font-size:11px;font-weight:800;color:'+color+';margin:10px 0 3px">'+titulo+'</div>'
+      +'<table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="color:#9ca3af;font-size:9px;text-transform:uppercase;font-weight:700;text-align:right">'
+      +'<th style="padding:4px 6px;text-align:left">Concepto</th><th style="padding:4px 6px">Importe</th>'
+      +(conSplit?'<th style="padding:4px 6px">Gravado</th><th style="padding:4px 6px">Exento</th>':'')+'</tr></thead><tbody>';
+    var ti=0,tg=0,te=0;
+    arr.forEach(function(x){
+      ti+=Number(x.importe)||0; tg+=Number(x.gravado)||0; te+=Number(x.exento)||0;
+      t+='<tr style="border-top:1px solid var(--color-divider,#f5f5f5);text-align:right">'
+        +'<td style="padding:4px 6px;text-align:left">'+(x.clave?'<span style="color:#9ca3af;font-size:9px">'+_cxpEsc(x.clave)+'</span> ':'')+_cxpEsc(x.concepto||'—')+'</td>'
+        +'<td style="padding:4px 6px;font-weight:700">'+_nomFmt(x.importe)+'</td>'
+        +(conSplit?('<td style="padding:4px 6px;color:#b45309">'+(x.gravado?_nomFmt(x.gravado):'—')+'</td><td style="padding:4px 6px;color:#166534">'+(x.exento?_nomFmt(x.exento):'—')+'</td>'):'')+'</tr>';
+    });
+    t+='</tbody><tfoot><tr style="border-top:2px solid var(--color-divider,#e5e7eb);font-weight:800;text-align:right">'
+      +'<td style="padding:5px 6px;text-align:left">Total</td><td style="padding:5px 6px">'+_nomFmt(ti)+'</td>'
+      +(conSplit?('<td style="padding:5px 6px;color:#b45309">'+_nomFmt(tg)+'</td><td style="padding:5px 6px;color:#166534">'+_nomFmt(te)+'</td>'):'')+'</tr></tfoot></table>';
+    return t;
+  }
+  h+=tabla('Percepciones',perc,'#166534',true)+tabla('Deducciones',ded,'#b45309',false)+tabla('Otros pagos',otros,'#7c3aed',false);
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding:12px 14px;background:rgba(22,101,52,.07);border-radius:10px">'
+    +'<span style="font-size:13px;font-weight:800;color:#166534">Total a pagar (neto real)</span><span style="font-size:18px;font-weight:800;color:#166534">'+_nomFmt(f.NetoReal)+'</span></div>'
+    +'<div style="margin-top:8px;font-size:9.5px;color:#9ca3af;word-break:break-all">UUID: '+_cxpEsc(f.UUID_CFDI||'—')+'</div></div>';
+  ov.innerHTML=h;
+}
+// Recalcula UNA fila en vivo (mismo cálculo que el backend: % efectivo por fila).
+function _nomCapRow(i){
+  var d=_nomCapData; if(!d||!d.filas||!d.filas[i]) return;
+  var f=d.filas[i];
+  var g=function(c){ var el=document.getElementById('nc-'+i+'-'+c); return el?_nomCapNum(el.value):0; };
+  var perc=0;
+  _NOM_CAP_CAMPOS.slice(0,6).forEach(function(c){ f[c]=g(c); perc+=f[c]; });
+  f.OtrasDeducciones=g('OtrasDeducciones');
+  f.TotalPercepciones=perc;
+  f.ISR_Estimado=perc*(_nomCapNum(f.estimIsrPctEfec)/100);
+  f.IMSS_Estimado=perc*(_nomCapNum(f.estimImssPctEfec)/100);
+  f.NetoEstimado=perc-f.ISR_Estimado-f.IMSS_Estimado-f.OtrasDeducciones;
+  if(f.conCfdi) f.Diferencia=_nomCapNum(f.NetoReal)-f.NetoEstimado;
+  f.NetoFinal=f.conCfdi?_nomCapNum(f.NetoReal):f.NetoEstimado;
+  var set=function(id,v){ var el=document.getElementById(id); if(el) el.textContent=v; };
+  set('nc-'+i+'-tp',_nomFmt(f.TotalPercepciones)); set('nc-'+i+'-isre',_nomFmt(f.ISR_Estimado));
+  set('nc-'+i+'-imsse',_nomFmt(f.IMSS_Estimado)); set('nc-'+i+'-neto',_nomFmt(f.NetoEstimado));
+  _nomCapDirty=true;
+  _nomCapTotales();
+}
+function _nomCapTotales(){
+  var d=_nomCapData; if(!d||!d.filas) return;
+  var t={percepciones:0,isrEst:0,imssEst:0,netoEst:0,netoFinal:0,netoReal:0,diferencia:0,conCfdi:0,numEmpleados:d.filas.length,
+    totalIngresos:0,totalIngresosGravados:0,totalIngresosExentos:0,totalRetenciones:0,totalOtrasDeducciones:0,totalAPagar:0,totalPagado:0};
+  d.filas.forEach(function(f){
+    t.percepciones+=_nomCapNum(f.TotalPercepciones); t.isrEst+=_nomCapNum(f.ISR_Estimado);
+    t.imssEst+=_nomCapNum(f.IMSS_Estimado); t.netoEst+=_nomCapNum(f.NetoEstimado); t.netoFinal+=_nomCapNum(f.NetoFinal);
+    t.totalIngresos+=_nomCapNum(f.TotalPercepciones);
+    t.totalIngresosGravados+=_nomCapNum(f.TotalGravado); t.totalIngresosExentos+=_nomCapNum(f.TotalExento);
+    t.totalRetenciones+=f.conCfdi?_nomCapNum(f.TotalRetenciones):(_nomCapNum(f.ISR_Estimado)+_nomCapNum(f.IMSS_Estimado));
+    t.totalOtrasDeducciones+=f.conCfdi?_nomCapNum(f.TotalOtrasDeducciones):_nomCapNum(f.OtrasDeducciones);
+    t.totalAPagar+=_nomCapNum(f.NetoFinal);
+    if(f.Pagado) t.totalPagado+=_nomCapNum(f.NetoFinal);
+    if(f.conCfdi){ t.conCfdi++; t.netoReal+=_nomCapNum(f.NetoReal); t.diferencia+=_nomCapNum(f.Diferencia); }
+  });
+  d.totales=t;
+  var set=function(id,v){ var el=document.getElementById(id); if(el) el.textContent=v; };
+  set('nom-cap-t-tp',_nomFmt(t.percepciones)); set('nom-cap-t-isre',_nomFmt(t.isrEst));
+  set('nom-cap-t-imsse',_nomFmt(t.imssEst)); set('nom-cap-t-neto',_nomFmt(t.netoEst));
+  set('nom-cap-t-real',_nomFmt(t.netoReal));
+  set('nom-cap-t-grav',_nomFmt(t.totalIngresosGravados)); set('nom-cap-t-exen',_nomFmt(t.totalIngresosExentos));
+  var dif=document.getElementById('nom-cap-t-dif');
+  if(dif){ dif.textContent=(Math.abs(t.diferencia)<0.01?'—':((t.diferencia>0?'+':'−')+_nomFmt(t.diferencia))); dif.style.color=Math.abs(t.diferencia)>=1?'#dc2626':'#9ca3af'; }
+  var k=document.getElementById('nom-cap-kpis'); if(k) k.innerHTML=_nomCapKpisHTML();
+}
+async function _nomCapGuardar(){
+  var d=_nomCapData; if(!d||!d.filas||!d.filas.length) return;
+  var btn=document.getElementById('nom-cap-save'), msg=document.getElementById('nom-cap-msg');
+  if(btn){ btn.disabled=true; btn.innerHTML='<span class="ing-spinner"></span>Guardando…'; }
+  var filas=d.filas.map(function(f){
+    var o={EmpleadoID:f.EmpleadoID};
+    _NOM_CAP_CAMPOS.forEach(function(c){ o[c]=_nomCapNum(f[c]); });
+    return o;
+  });
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveNominaCaptura',token:getToken(),periodoId:_nomCapPeriodoId,filas:filas})});
+    var res=await r.json();
+    if(btn){ btn.disabled=false; btn.textContent='Guardar captura'; }
+    if(!res||!res.ok){ if(msg){ msg.style.color='#dc2626'; msg.textContent=(res&&res.error)||'No se pudo guardar.'; } return; }
+    _nomCapDirty=false;
+    if(msg){ msg.style.color='#166534'; msg.textContent='✓ Guardado ('+res.guardadas+' empleado(s)).'; }
+  }catch(e){ if(btn){ btn.disabled=false; btn.textContent='Guardar captura'; } if(msg){ msg.style.color='#dc2626'; msg.textContent='Error: '+e.message; } }
+}
+async function _nomCapGenerar(){
+  var btn=document.getElementById('nom-cap-gen'); if(btn){ btn.disabled=true; btn.innerHTML='<span class="ing-spinner"></span>Generando…'; }
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'nominaGenerarPeriodos',token:getToken(),anio:_nomCapAnio,tipo:_nomCapTipo})});
+    var d=await r.json();
+    if(!d||!d.ok){ alert((d&&d.error)||'No se pudieron generar los periodos.'); if(btn){ btn.disabled=false; btn.textContent='Reintentar'; } return; }
+    _nomCargarCaptura();
+  }catch(e){ alert('Error: '+e.message); if(btn){ btn.disabled=false; btn.textContent='Reintentar'; } }
+}
+async function _nomCapConciliar(){
+  var btn=document.getElementById('nom-cap-conc'); if(btn){ btn.disabled=true; btn.innerHTML='<span class="ing-spinner"></span>Leyendo CFDI…'; }
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'nominaConciliarPeriodo',token:getToken(),periodoId:_nomCapPeriodoId})});
+    var d=await r.json();
+    if(!d||!d.ok){ alert((d&&d.error)||'No se pudo conciliar con los CFDI.'); if(btn){ btn.disabled=false; btn.textContent='⟳ Traer CFDI (real)'; } return; }
+    var m='CFDI del periodo '+_nomCapPeriodoId+':\n\n'
+      +'• '+d.conciliadas+' empleado(s) con recibo timbrado — el dato REAL reemplazó al estimado.\n'
+      +'• '+d.sinCfdi+' sin CFDI todavía (siguen con estimado).\n';
+    if(d.diferencias&&d.diferencias.length){
+      m+='\n⚠ '+d.diferencias.length+' con diferencia contra lo estimado:\n';
+      d.diferencias.slice(0,12).forEach(function(x){ m+='   · '+x.empleado+': estimado '+_nomFmt(x.estimado)+' → real '+_nomFmt(x.real)+'  ('+(x.diferencia>0?'+':'−')+_nomFmt(x.diferencia)+')\n'; });
+      if(d.diferencias.length>12) m+='   … y '+(d.diferencias.length-12)+' más.\n';
+      m+='\nDiferencia neta total: '+(d.sumaDiferencias>0?'+':'−')+_nomFmt(d.sumaDiferencias);
+    } else if(d.conciliadas) m+='\n✓ Sin diferencias contra lo estimado.';
+    if(d.errores&&d.errores.length) m+='\n\nAvisos: '+d.errores.join(' · ');
+    alert(m);
+    _nomCapCargarPeriodo();
+  }catch(e){ alert('Error: '+e.message); if(btn){ btn.disabled=false; btn.textContent='⟳ Traer CFDI (real)'; } }
+}
+async function _nomCapValidar(forzar){
+  var d=_nomCapData; if(!d||!d.ok||!d.filas||!d.filas.length) return;
+  if(_nomCapDirty&&!confirm('Hay cambios sin guardar; se validará lo ÚLTIMO GUARDADO.\n\n¿Continuar de todos modos?')) return;
+  var t=d.totales||{}, sinCfdi=(t.numEmpleados||0)-(t.conCfdi||0);
+  var msg;
+  if(forzar) msg='Volver a enviar '+_nomCapPeriodoId+': se generarán SÓLO las órdenes que falten (no se duplican).\n\n¿Continuar?';
+  else msg='Se creará UNA orden de pago por empleado en Cuentas por Pagar para '+_nomCapPeriodoId+'.\n\n'
+    +(t.numEmpleados||0)+' empleado(s) · Total '+_nomFmt(t.netoFinal||0)+'\n'
+    +(sinCfdi>0?('\n⚠ '+sinCfdi+' sin CFDI: se enviarán con el NETO ESTIMADO (queda anotado en la orden).\n'):'')
+    +'\n¿Continuar?';
+  if(!confirm(msg)) return;
+  var btn=document.getElementById('nom-cap-val'); if(btn){ btn.disabled=true; btn.innerHTML='<span class="ing-spinner"></span>Enviando…'; }
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'nominaValidarPeriodo',token:getToken(),periodoId:_nomCapPeriodoId,forzar:!!forzar})});
+    var res=await r.json();
+    if(!res||!res.ok){
+      if(res&&res.yaValidada){ if(confirm((res.error||'Ya validada.')+'\n\n¿Generar las órdenes faltantes ahora?')) return _nomCapValidar(true); _nomCapCargarPeriodo(); return; }
+      alert((res&&res.error)||'No se pudo validar el periodo.'); _nomCapCargarPeriodo(); return;
+    }
+    alert('✓ Periodo validado.\n'+res.creadas+' orden(es) nuevas en Cuentas por Pagar'+(res.duplicadas?(' · '+res.duplicadas+' ya existían'):'')
+      +'\nTotal '+_nomFmt(res.total)+(res.estimadas?('\n\n⚠ '+res.estimadas+' con neto ESTIMADO (sin CFDI): al timbrar, usa «⟳ Traer CFDI» y revisa la diferencia.'):''));
+    _nomCapCargarPeriodo();
+  }catch(e){ alert('Error: '+e.message); _nomCapCargarPeriodo(); }
+}
+async function _nomCapEstatus(est){
+  var q={pagada:'¿Marcar '+_nomCapPeriodoId+' como PAGADA? La captura queda de solo lectura.',borrador:'¿Reabrir '+_nomCapPeriodoId+' a borrador para poder editarlo?'}[est]||'¿Cambiar el estatus?';
+  if(!confirm(q)) return;
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'nominaPeriodoEstatus',token:getToken(),periodoId:_nomCapPeriodoId,estatus:est})});
+    var d=await r.json();
+    if(!d||!d.ok){ alert((d&&d.error)||'No se pudo cambiar el estatus.'); return; }
+    _nomCargarCaptura();
+  }catch(e){ alert('Error: '+e.message); }
+}
+// Alta manual de un periodo suelto (ej. una nómina extraordinaria).
+function _nomCapNuevoPeriodo(){
+  var ov=document.getElementById('nom-per-ov'); if(!ov){ ov=document.createElement('div'); ov.id='nom-per-ov'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9700;display:flex;align-items:flex-start;justify-content:center;padding:24px 16px;overflow:auto';
+  var st='width:100%;padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111);box-sizing:border-box';
+  ov.innerHTML='<div style="background:var(--card-bg,#fff);color:var(--text-primary,#1a252f);border-radius:14px;padding:22px 24px;max-width:480px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.35)">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="font-weight:800;font-size:16px">Nuevo periodo</div>'
+    +'<button onclick="document.getElementById(\'nom-per-ov\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af">✕</button></div>'
+    +'<div style="font-size:11px;color:#9ca3af;margin-bottom:14px;line-height:1.5">Para el calendario normal del año usa «Generar periodos». Esto es para un periodo suelto (ej. una nómina extraordinaria o un corte irregular).</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">'
+      +'<label style="font-size:10px;color:#6b7280">Periodicidad<br><select id="nom-p-tipo" style="'+st+'"><option value="semanal"'+(_nomCapTipo==='semanal'?' selected':'')+'>Semanal</option><option value="quincenal"'+(_nomCapTipo==='quincenal'?' selected':'')+'>Quincenal</option><option value="mensual"'+(_nomCapTipo==='mensual'?' selected':'')+'>Mensual</option></select></label>'
+      +'<label style="font-size:10px;color:#6b7280">Tipo de nómina<br><select id="nom-p-tiponom" style="'+st+'"><option value="ORDINARIA">Ordinaria</option><option value="EXTRAORDINARIA">Extraordinaria</option></select></label>'
+      +'<label style="font-size:10px;color:#6b7280">ID (opcional, se genera solo)<br><input id="nom-p-id" style="'+st+'"></label>'
+      +'<label style="font-size:10px;color:#6b7280">Fecha inicio *<br><input id="nom-p-ini" type="date" style="'+st+'"></label>'
+      +'<label style="font-size:10px;color:#6b7280">Fecha fin *<br><input id="nom-p-fin" type="date" style="'+st+'"></label>'
+      +'<label style="font-size:10px;color:#6b7280">Fecha de pago<br><input id="nom-p-pago" type="date" style="'+st+'"></label>'
+      +'<label style="font-size:10px;color:#6b7280">Notas<br><input id="nom-p-notas" style="'+st+'"></label>'
+    +'</div>'
+    +'<div id="nom-p-msg" style="font-size:10.5px;color:#dc2626;margin:8px 0;min-height:12px"></div>'
+    +'<div style="display:flex;gap:8px"><button onclick="_nomPerGuardar()" id="nom-p-save" style="background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:12.5px;font-weight:800;cursor:pointer">Crear periodo</button>'
+    +'<button onclick="document.getElementById(\'nom-per-ov\').remove()" style="background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:9px 18px;font-size:12.5px;font-weight:700;color:#6b7280;cursor:pointer">Cancelar</button></div></div>';
+}
+async function _nomPerGuardar(){
+  var g=function(id){ var el=document.getElementById(id); return el?el.value:''; };
+  var msg=document.getElementById('nom-p-msg');
+  var p={ periodoId:g('nom-p-id').trim(), tipo:g('nom-p-tipo'), tipoNomina:g('nom-p-tiponom')||'ORDINARIA',
+    fechaInicio:g('nom-p-ini'), fechaFin:g('nom-p-fin'), fechaPago:g('nom-p-pago'), notas:g('nom-p-notas') };
+  if(!p.fechaInicio||!p.fechaFin){ if(msg) msg.textContent='Fecha de inicio y fin son obligatorias.'; return; }
+  if(p.fechaFin<p.fechaInicio){ if(msg) msg.textContent='La fecha final no puede ser anterior a la inicial.'; return; }
+  var btn=document.getElementById('nom-p-save'); if(btn){ btn.disabled=true; btn.innerHTML='<span class="ing-spinner"></span>Creando…'; }
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'nominaPeriodoSave',token:getToken(),periodo:p})});
+    var d=await r.json();
+    if(!d||!d.ok){ if(msg) msg.textContent=(d&&d.error)||'No se pudo crear.'; if(btn){ btn.disabled=false; btn.textContent='Crear periodo'; } return; }
+    var ov=document.getElementById('nom-per-ov'); if(ov) ov.remove();
+    _nomCapTipo=p.tipo; _nomCapAnio=parseInt(String(p.fechaInicio).substring(0,4),10)||_nomCapAnio; _nomCapPeriodoId=d.periodoId;
+    _nomCargarCaptura();
+  }catch(e){ if(msg) msg.textContent='Error: '+e.message; if(btn){ btn.disabled=false; btn.textContent='Crear periodo'; } }
+}
+
+/* ═══════════════════ NÓMINA · SBC POR BIMESTRE (F5-E) ═══════════════════
+ * Tablero equivalente al bloque amarillo de la hoja del usuario: SBC por
+ * empleado y casilla "Presentado SBC" por bimestre. */
+var _nomSbcAnio=null, _nomSbcData=null;
+function _nomSbcBimLbl(b){ return ['1er','2do','3er','4to','5to','6to'][b-1]||('B'+b); }
+function _nomSbcBimMeses(b){ return ['Ene–Feb','Mar–Abr','May–Jun','Jul–Ago','Sep–Oct','Nov–Dic'][b-1]||''; }
+async function _nomCargarSbc(){
+  var body=document.getElementById('nom-body'); if(!body) return;
+  if(!_nomSbcAnio) _nomSbcAnio=(new Date()).getFullYear();
+  body.innerHTML='<div style="text-align:center;padding:40px;color:#9ca3af"><span class="ing-spinner ing-spinner-dark"></span>Cargando SBC…</div>';
+  try{
+    var tok=encodeURIComponent(getToken());
+    var r=await fetch(APPS_SCRIPT_URL+'?action=nominaSBC&anio='+_nomSbcAnio+'&token='+tok);
+    _nomSbcData=await r.json();
+    _nomRenderSbc();
+  }catch(e){ body.innerHTML='<div style="color:#dc2626;padding:20px">Error: '+_cxpEsc(e.message)+'</div>'; }
+}
+function _nomSbcSetAnio(a){ _nomSbcAnio=parseInt(a,10)||_nomSbcAnio; _nomCargarSbc(); }
+function _nomRenderSbc(){
+  var body=document.getElementById('nom-body'); if(!body) return;
+  var d=_nomSbcData;
+  var anios=[], y=(new Date()).getFullYear(); for(var a=y+1;a>=y-6;a--) anios.push(a);
+  var h='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">'
+    +'<select onchange="_nomSbcSetAnio(this.value)" style="padding:6px 8px;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
+    +anios.map(function(x){ return '<option value="'+x+'"'+(x===_nomSbcAnio?' selected':'')+'>'+x+'</option>'; }).join('')+'</select>'
+    +'<div style="font-size:13px;font-weight:800;color:var(--text-primary,#111)">Salario Base de Cotización · presentación bimestral al IMSS</div>'
+    +'<button onclick="_nomCargarSbc()" style="margin-left:auto;background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:6px 12px;font-size:11.5px;font-weight:700;cursor:pointer;color:var(--color-primary,#c46a7a)">↻ Actualizar</button></div>';
+  if(!d||!d.ok){ h+=_nomBackendBanner(d&&d.error); body.innerHTML=h; return; }
+  var filas=d.filas||[], nb=d.numBimestres||6, puede=_nomPuede();
+  if(!filas.length){ h+='<div style="padding:24px;color:#9ca3af;text-align:center">No hay empleados activos. Agrégalos en la pestaña <b>Empleados</b>.</div>'; body.innerHTML=h; return; }
+  var t=d.totales||{};
+  h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:12px">'
+    +_nomKpi('Empleados',t.empleados||0,'#0c4a6e')+_nomKpi('SBC presentados',t.presentados||0,'#166534')+_nomKpi('Pendientes',t.pendientes||0,(t.pendientes?'#b45309':'#9ca3af'))+'</div>';
+  h+='<div style="margin-bottom:12px;padding:9px 13px;background:rgba(180,83,9,.06);border:1px solid rgba(180,83,9,.2);border-radius:9px;font-size:11px;color:#92400e;line-height:1.5">'
+    +'El <b>SBC</b> por defecto viene del catálogo de Empleados; puedes sobrescribirlo por bimestre si cambió. La casilla <b>Presentado</b> es tu control interno de que ya se presentó el aviso al IMSS — el ERP no lo presenta.</div>';
+  h+='<div style="overflow-x:auto;border:1px solid var(--color-divider,#e5e7eb);border-radius:12px"><table style="width:100%;border-collapse:collapse;font-size:11.5px;min-width:900px">'
+    +'<thead><tr style="color:#9ca3af;background:var(--color-surface,#f9fafb);border-bottom:2px solid var(--color-divider,#e5e7eb);font-size:9px;text-transform:uppercase;font-weight:700">'
+    +'<th style="padding:8px;text-align:left;position:sticky;left:0;background:var(--color-surface,#f9fafb)">Empleado</th>'
+    +'<th style="padding:8px 5px;text-align:right">SBC catálogo</th>';
+  for(var b=1;b<=nb;b++) h+='<th style="padding:8px 5px;text-align:center">'+_nomSbcBimLbl(b)+'<div style="font-size:8px;font-weight:600;color:#c9cdd3">'+_nomSbcBimMeses(b)+'</div></th>';
+  h+='</tr></thead><tbody>';
+  filas.forEach(function(f,i){
+    h+='<tr style="border-bottom:1px solid var(--color-divider,#f0f0f0)">'
+      +'<td style="padding:6px 8px;position:sticky;left:0;background:var(--card-bg,#fff)"><div style="font-weight:700;color:var(--text-primary,#111);white-space:nowrap">'+_cxpEsc(f.nombre||f.numEmpleado||'')+'</div>'
+      +'<div style="font-size:9.5px;color:#9ca3af;white-space:nowrap">'+_cxpEsc(f.numEmpleado||'')+(f.departamento?(' · '+_cxpEsc(f.departamento)):'')+'</div></td>'
+      +'<td style="padding:6px 5px;text-align:right;color:#6b7280">'+_nomFmt(f.sbcCatalogo)+'</td>';
+    f.bimestres.forEach(function(bm){
+      var bg=bm.presentado?'rgba(22,101,52,.07)':(bm.capturado?'rgba(245,158,11,.07)':'transparent');
+      h+='<td style="padding:5px 4px;text-align:center;background:'+bg+'">'
+        +'<input id="sbc-'+i+'-'+bm.bimestre+'-v" type="number" step="0.01" value="'+_nomCapNum(bm.sbc)+'"'+(puede?'':' disabled')+' style="width:74px;padding:3px 5px;border:1px solid var(--color-divider,#e5e7eb);border-radius:5px;font-size:11px;text-align:right;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
+        +'<label style="display:flex;align-items:center;justify-content:center;gap:4px;margin-top:3px;font-size:9px;color:'+(bm.presentado?'#166534':'#9ca3af')+';font-weight:700;cursor:'+(puede?'pointer':'default')+'">'
+        +'<input type="checkbox" id="sbc-'+i+'-'+bm.bimestre+'-p" '+(bm.presentado?'checked':'')+(puede?'':' disabled')+' onchange="_nomSbcGuardar('+i+','+bm.bimestre+')"> Presentado</label>'
+        +(bm.presentado&&bm.fechaPresentado?'<div style="font-size:8px;color:#9ca3af;margin-top:1px">'+_cxpEsc(bm.fechaPresentado)+'</div>':'')
+      +'</td>';
+    });
+    h+='</tr>';
+  });
+  h+='</tbody></table></div>';
+  if(puede) h+='<div style="font-size:10.5px;color:#9ca3af;margin-top:8px">El SBC se guarda al marcar/desmarcar «Presentado» o al salir del campo. <button onclick="_nomSbcGuardarTodo()" style="background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;padding:5px 11px;font-size:11px;font-weight:700;cursor:pointer;color:var(--color-primary,#c46a7a);margin-left:6px">Guardar todos los SBC</button> <span id="nom-sbc-msg"></span></div>';
+  body.innerHTML=h;
+}
+async function _nomSbcGuardar(i,b){
+  var d=_nomSbcData; if(!d||!d.filas||!d.filas[i]) return;
+  var f=d.filas[i];
+  var vEl=document.getElementById('sbc-'+i+'-'+b+'-v'), pEl=document.getElementById('sbc-'+i+'-'+b+'-p');
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveNominaSBC',token:getToken(),anio:_nomSbcAnio,bimestre:b,numEmpleado:f.numEmpleado,sbc:vEl?_nomCapNum(vEl.value):0,presentado:pEl?!!pEl.checked:false})});
+    var res=await r.json();
+    if(!res||!res.ok){ alert((res&&res.error)||'No se pudo guardar el SBC.'); return; }
+    _nomCargarSbc();
+  }catch(e){ alert('Error: '+e.message); }
+}
+async function _nomSbcGuardarTodo(){
+  var d=_nomSbcData; if(!d||!d.filas) return;
+  var msg=document.getElementById('nom-sbc-msg'); if(msg){ msg.style.color='#9ca3af'; msg.textContent='Guardando…'; }
+  var errs=0;
+  for(var i=0;i<d.filas.length;i++){
+    for(var b=1;b<=(d.numBimestres||6);b++){
+      var vEl=document.getElementById('sbc-'+i+'-'+b+'-v'), pEl=document.getElementById('sbc-'+i+'-'+b+'-p');
+      if(!vEl) continue;
+      try{
+        var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveNominaSBC',token:getToken(),anio:_nomSbcAnio,bimestre:b,numEmpleado:d.filas[i].numEmpleado,sbc:_nomCapNum(vEl.value),presentado:pEl?!!pEl.checked:false})});
+        var res=await r.json(); if(!res||!res.ok) errs++;
+      }catch(e){ errs++; }
+    }
+  }
+  if(msg){ msg.style.color=errs?'#dc2626':'#166534'; msg.textContent=errs?('✕ '+errs+' error(es).'):'✓ Guardado.'; }
+  if(!errs) _nomCargarSbc();
 }
 
 /* ═══════════════════ MIS RECIBOS (autoservicio del empleado) ═══════════════════
