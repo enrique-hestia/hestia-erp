@@ -2603,6 +2603,149 @@ function saveEgreso(payload) {
   }
 }
 
+/* ══════════════════════════════════════════════════════════════
+   SINCRONÍA BANCARIA AL EDITAR UN EGRESO
+   ──────────────────────────────────────────────────────────────
+   El PAGO (pagarCxP) crea el movimiento bancario y lo etiqueta en su
+   columna de observaciones con "[Egreso #<id>]" (ref = concepto · proveedor
+   [Egreso #id]). Si el egreso se EDITA (forma de pago / monto / fecha) hay
+   que MOVER ese movimiento: se borra la fila etiquetada en TODOS los destinos
+   (Santander/AMEX/Mercado Pago + Caja Chica) y se re-crea en el correcto según
+   la forma de pago actual, reutilizando el MISMO saveBankRow del pago.
+   Idempotente: editar N veces deja UNA sola fila por egreso.
+   Columna de obs por banco: Santander idx4, AMEX idx3, Mercado Pago idx8. */
+function _egBankObsIdx(key) { return key === 'amex' ? 3 : (key === 'mercadopago' ? 8 : 4); }
+
+function _egBankDeleteByEgreso(key, egId) {
+  try {
+    var sheet = _bankSheetByKey(key); if (!sheet) return 0;
+    var lr = sheet.getLastRow(); if (lr < 2) return 0;
+    var obsIdx = _egBankObsIdx(key);
+    var vals = sheet.getRange(2, 1, lr - 1, sheet.getLastColumn()).getValues();
+    var tag = '[Egreso #' + egId + ']', del = [];
+    for (var r = 0; r < vals.length; r++) { if (String(vals[r][obsIdx] || '').indexOf(tag) > -1) del.push(r + 2); }
+    for (var d = del.length - 1; d >= 0; d--) sheet.deleteRow(del[d]);
+    return del.length;
+  } catch (e) { Logger.log('_egBankDeleteByEgreso ' + key + ': ' + e.message); return 0; }
+}
+
+/* Saldo de apertura de AMEX (antes de la fila 2), para recomputar sin perderlo. */
+function _amexOpening() {
+  try {
+    var sheet = _bankSheetByKey('amex'); if (!sheet || sheet.getLastRow() < 2) return 0;
+    var r2 = sheet.getRange(2, 1, 1, 3).getValues()[0];
+    return (parseFloat(r2[2]) || 0) - (parseFloat(r2[1]) || 0); // saldo2 − cargo2
+  } catch (e) { return 0; }
+}
+/* AMEX: saldo col C(idx2) = apertura + Σ(cargo col B idx1). _bankRecompute NO
+   cubre AMEX (su rama "else" es lógica de MP), por eso este helper propio. */
+function _bankRecomputeAmex(opening) {
+  try {
+    var sheet = _bankSheetByKey('amex'); if (!sheet) return;
+    var lr = sheet.getLastRow(); if (lr < 2) return;
+    var v = sheet.getRange(2, 1, lr - 1, 3).getValues(), run = Number(opening) || 0, out = [];
+    for (var i = 0; i < v.length; i++) { run += (parseFloat(v[i][1]) || 0); out.push([run]); }
+    sheet.getRange(2, 3, out.length, 1).setValues(out);
+  } catch (e) { Logger.log('_bankRecomputeAmex: ' + e.message); }
+}
+
+function _egCajaChicaDeleteByEgreso(egId) {
+  try {
+    var sh = getCajaChicaSheet();
+    var data = sh.getDataRange().getValues();
+    if (!data.length) return 0;
+    var headers = data[0].map(function(h){ return String(h).trim().toUpperCase(); });
+    var iConc = headers.indexOf('CONCEPTO'); if (iConc < 0) return 0;
+    var tag = '[Egreso #' + egId + ']', del = [];
+    for (var r = 1; r < data.length; r++) { if (String(data[r][iConc] || '').indexOf(tag) > -1) del.push(r + 1); }
+    for (var d = del.length - 1; d >= 0; d--) sh.deleteRow(del[d]);
+    return del.length;
+  } catch (e) { Logger.log('_egCajaChicaDeleteByEgreso: ' + e.message); return 0; }
+}
+
+/* Re-sincroniza el movimiento bancario de un egreso a partir del estado FINAL
+   de su fila (rowNum), tras haberla editado. Reproduce el ruteo de pagarCxP. */
+function _egresoResyncBanco(sheet, rowNum) {
+  try {
+    var lastCol = sheet.getLastColumn();
+    var row = sheet.getRange(rowNum, 1, 1, lastCol).getValues()[0];
+    var hdrs = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h){
+      return String(h).trim().toLowerCase()
+        .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i').replace(/[óòö]/g,'o').replace(/[úùü]/g,'u');
+    });
+    function col(name){ for (var c=0;c<hdrs.length;c++) if (hdrs[c].indexOf(name)>-1) return c; return -1; }
+    var egId = String(row[0] || '').trim();
+    if (!egId) return;
+
+    var iForma = col('forma');
+    var iEgresos = col('egresos'), iProv = col('proveedor'), iConc = col('concepto'), iPagado = col('pagado');
+    // fecha de pago: 'fecha'+'pago', si no, 'fecha' que no sea venc/factura (igual que pagarCxP)
+    var iFecha = (function(){
+      for (var c=0;c<hdrs.length;c++){ if (hdrs[c].indexOf('fecha')>-1 && hdrs[c].indexOf('pago')>-1) return c; }
+      for (var c2=0;c2<hdrs.length;c2++){ if (hdrs[c2].indexOf('fecha')>-1 && hdrs[c2].indexOf('venc')<0 && hdrs[c2].indexOf('factur')<0) return c2; }
+      return 1;
+    })();
+
+    var formaPago = iForma>-1 ? String(row[iForma]||'').trim() : '';
+    var monto = iEgresos>-1 ? (parseFloat(String(row[iEgresos]||'').replace(/[$,\s]/g,''))||0) : 0;
+    var pgVal = iPagado>-1 ? row[iPagado] : false;
+    var pagado = (pgVal === true || String(pgVal).toLowerCase()==='true' || String(pgVal).toUpperCase()==='VERDADERO');
+    var proveedor = iProv>-1 ? String(row[iProv]||'') : '';
+    var concepto = iConc>-1 ? String(row[iConc]||'') : '';
+    var fechaRaw = iFecha>-1 ? row[iFecha] : '';
+    var fechaPago = (fechaRaw instanceof Date)
+      ? Utilities.formatDate(fechaRaw, 'America/Mexico_City', 'yyyy-MM-dd')
+      : String(fechaRaw||'').substring(0,10);
+
+    // Aperturas ANTES de borrar (para recomputar sin perder saldo inicial)
+    var _sanOpen = _bankOpening('santander');
+    var _amexOpen = _amexOpening();
+
+    // 1) BORRAR el movimiento previo en TODOS los destinos (idempotente)
+    _egBankDeleteByEgreso('santander', egId);
+    _egBankDeleteByEgreso('amex', egId);
+    _egBankDeleteByEgreso('mercadopago', egId);
+    _egCajaChicaDeleteByEgreso(egId);
+
+    // 2) RE-CREAR en el destino correcto si el egreso está PAGADO
+    var mesStr = fechaPago.substring(0, 7);
+    var ref = concepto + ' · ' + proveedor + ' [Egreso #' + egId + ']';
+    if (pagado && monto > 0 && formaPago) {
+      if (formaPago === 'Efectivo') {
+        try {
+          var ccSh = getCajaChicaSheet();
+          var ccData = ccSh.getDataRange().getValues();
+          var ccHdr  = ccData[0].map(function(h){ return String(h).trim().toUpperCase(); });
+          var ciF = ccHdr.indexOf('FECHA'), ciC = ccHdr.indexOf('CONCEPTO'), ciS = ccHdr.indexOf('SALIDA');
+          var ccRow = -1;
+          for (var ci = 1; ci < ccData.length; ci++) {
+            if (!String(ccData[ci][ciF]||'').trim() && !String(ccData[ci][ciC]||'').trim()) { ccRow = ci + 1; break; }
+          }
+          if (ccRow === -1) ccRow = ccSh.getLastRow() + 1;
+          ccSh.getRange(ccRow, ciF+1).setValue(fechaPago);
+          ccSh.getRange(ccRow, ciC+1).setValue(ref);
+          ccSh.getRange(ccRow, ciS+1).setValue(monto);
+          SpreadsheetApp.flush();
+        } catch(ccErr) { Logger.log('_egresoResyncBanco caja: ' + ccErr.message); }
+      } else if (formaPago === 'Santander' || formaPago === 'Transferencia') {
+        saveBankRow('santander', [fechaPago, 0, monto, 0, ref, '', '', '', '']);
+      } else if (formaPago === 'AMEX') {
+        saveBankRow('amex', [fechaPago, monto, 0, ref, '', '', '', '', mesStr]);
+      } else if (formaPago === 'Mercado Pago' || formaPago === 'TDC' || formaPago === 'TDD') {
+        saveBankRow('mercadopago', [mesStr, fechaPago, -monto, 0, 0, -monto, 0, true, ref, 'PAGO']);
+      }
+    }
+
+    // 3) Recomputar saldos corridos de los bancos afectados
+    _bankRecompute('santander', _sanOpen);
+    _bankRecomputeAmex(_amexOpen);
+    _bankRecompute('mercadopago', 0);
+
+    // Partida automática de comisiones MP del mes (por si cambió algo en MP)
+    try { _egRecalcComisionesMPFecha(fechaPago, ''); } catch(_mp) {}
+  } catch (ex) { Logger.log('_egresoResyncBanco: ' + ex.message); }
+}
+
 function updateEgresoField(payload) {
   try {
     var anio = payload.anio || new Date().getFullYear();
@@ -2665,7 +2808,10 @@ function updateEgresoField(payload) {
           payload.proveedor+' · '+payload.concepto, '', '$'+(colMap.egresos||0));
       } catch(ae){}
 
-      return {ok:true, rowNum:rowNum, edited:true};
+      // Mover el movimiento bancario si cambió forma de pago / monto / fecha.
+      try { _egresoResyncBanco(sheet, rowNum); } catch(bErr){ Logger.log('resync egreso (form): '+bErr.message); }
+
+      return {ok:true, rowNum:rowNum, edited:true, bankSynced:true};
     }
 
     // Modo 2: campos individuales (checkboxes inline)
@@ -2696,7 +2842,15 @@ function updateEgresoField(payload) {
       }
     }
 
-    return {ok:true, rowNum:rowNum};
+    // Si la edición inline tocó algo que afecta al banco (forma de pago, monto,
+    // pagado o fecha) → mover/re-sincronizar el movimiento bancario.
+    var _bankTouch = ('forma de pago' in fields) || ('egresos' in fields) ||
+                     ('pagado' in fields) || ('fecha' in fields);
+    if (_bankTouch) {
+      try { _egresoResyncBanco(sheet, rowNum); } catch(bErr){ Logger.log('resync egreso (inline): '+bErr.message); }
+    }
+
+    return {ok:true, rowNum:rowNum, bankSynced:_bankTouch};
   } catch(ex) {
     return {ok:false, error:ex.message};
   }
