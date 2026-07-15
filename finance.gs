@@ -633,6 +633,22 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Actualiza cobranza.gs en Apps Script y redespliega.'});
       return jsonResponse(cobDescCfgSave(body));
     }
+    // ── IDENTIFICAR PACIENTES (ponerle nombre a los cobros "No localizado") ──
+    if (body.action === 'asignarPacienteNoLocalizado') {
+      if (typeof asignarPacienteNoLocalizado !== 'function')
+        return jsonResponse({ok:false, error:'Agrega identificar.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(asignarPacienteNoLocalizado(body));
+    }
+    if (body.action === 'buscarPacientesSimilares') {
+      if (typeof buscarPacientesSimilares !== 'function')
+        return jsonResponse({ok:false, error:'Agrega identificar.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(buscarPacientesSimilares(body));
+    }
+    if (body.action === 'altaPacienteRapida') {
+      if (typeof altaPacienteRapida !== 'function')
+        return jsonResponse({ok:false, error:'Agrega identificar.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(altaPacienteRapida(body));
+    }
     // Declaraciones fiscales (captura manual persistente)
     if (body.action === 'saveDeclaracion') {
       if (typeof saveDeclaracion !== 'function')
