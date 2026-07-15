@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.14.196 -->
+﻿<!-- app-build:2026.07.14.197 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -10101,6 +10101,9 @@ function isConfigFuente(id) {
 var _cfChart       = null;
 var _cfActiveBanco = 'santander';
 var _cfLiveData    = null;
+// Fila que se está editando en el drawer de Flujo de Efectivo (null = alta nueva).
+var _cfEditRowNum  = null;
+var _cfEditMov     = null;   // movimiento original (para no perder campos que el form no captura)
 
 /* Carga datos reales del API y llama a renderCashFlow */
 async function loadCashFlowData() {
@@ -11078,20 +11081,47 @@ window.cbUpdateRow = async function() {
   var btn = document.getElementById('cb-save-btn');
   if (btn) { btn.disabled=true; btn.textContent='Actualizando…'; }
   try {
-    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'updateBankRow', banco:_cbActiveBanco, rowNum:_cbEditRowNum, row:row})});
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'updateBankRow', banco:_cbActiveBanco, rowNum:_cbEditRowNum, row:row, token:getToken()})});
     var res = await r.json();
     if (res.ok) { _cbEditRowNum=null; cbCloseDrawer(); loadConciliacionData(); loadCashFlowData(); }
     else { alert('Error: '+(res.error||'No se pudo actualizar')); if(btn){btn.disabled=false;btn.textContent='Actualizar movimiento';} }
   } catch(e) { alert('Error de conexión'); if(btn){btn.disabled=false;btn.textContent='Actualizar movimiento';} }
 };
 
-/* ── Borrar fila ───────────────────────────────────────── */
-window.cbDeleteRow = async function(banco, rowNum) {
+/* ── Amarre con OP / Egreso ────────────────────────────────
+   Los movimientos que nacen de una operación o de un egreso llevan una
+   etiqueta en Observaciones que es lo que amarra la conciliación:
+     '[OP-01176]'         → ingreso (sincronía por OP)
+     '[OP #1176]'         → cobro/abono de cobranza
+     '[Egreso #661]'      → pago de una CxP
+     '[Egreso #661/AB-7]' → un abono concreto de una orden multi-abono
+   Si borras la fila, esa OP/egreso queda sin su contraparte en el banco, así
+   que hay que avisar ANTES de borrar. Devuelve la etiqueta o '' si no tiene. */
+function _bankTagInfo(obs) {
+  var s = String(obs || '');
+  var m = s.match(/\[Egreso #[^\]]+\]/) || s.match(/\[OP #[^\]]+\]/) || s.match(/\[OP-[^\]]+\]/);
+  return m ? m[0] : '';
+}
+/* La etiqueta no vive en el mismo campo en los tres bancos (Santander/AMEX la
+   llevan en Referencia, Mercado Pago en Observaciones), así que se busca en
+   todos los campos de texto del movimiento. */
+function _bankTagText(m) {
+  if (!m) return '';
+  return _bankTagInfo((m.referencia||'')+' '+(m.observaciones||'')+' '+(m.notas||''));
+}
+
+/* ── Borrar fila — compartido por Conciliación y Flujo de Efectivo ── */
+window.cbDeleteRow = async function(banco, rowNum, obs) {
   if (!hasPermission('bank_delete')) { alert('No tienes permisos para eliminar movimientos.'); return; }
   if (!rowNum) return;
-  if (!confirm('¿Eliminar este movimiento?\n\nEsta acción no se puede deshacer.')) return;
+  var tag = _bankTagInfo(obs);
+  var msg = tag
+    ? 'Este movimiento está ligado a ' + tag + '.\n\nSi lo borras, la conciliación de esa operación queda huérfana '
+      + '(la OP/egreso seguirá marcada como pagada, pero ya no tendrá su movimiento en el banco).\n\n¿Continuar?'
+    : '¿Eliminar este movimiento?\n\nEsta acción no se puede deshacer.';
+  if (!confirm(msg)) return;
   try {
-    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'deleteBankRow', banco:banco, rowNum:rowNum})});
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'deleteBankRow', banco:banco, rowNum:rowNum, token:getToken()})});
     var res = await r.json();
     if (res.ok) { loadConciliacionData(); loadCashFlowData(); }
     else { alert('Error al eliminar: '+(res.error||'Intenta de nuevo')); }
@@ -11413,9 +11443,10 @@ function renderConciliacion(data) {
     movsPage.forEach(function(m) {
       var rn = m.rowNum || 0;
       var mj = encodeURIComponent(JSON.stringify(m));
+      var mtag = encodeURIComponent(_bankTagText(m));
       var actCells = '<td style="text-align:center;white-space:nowrap">'
         +(hasPermission('bank_edit')?'<button class="cb-act-btn cb-act-edit" title="Editar" onclick="event.stopPropagation();cbEditRow(\''+aB.id+'\','+rn+',decodeURIComponent(\''+mj+'\'))">✎</button>':'')
-        +(hasPermission('bank_delete')?'<button class="cb-act-btn cb-act-del"  title="Eliminar" onclick="event.stopPropagation();cbDeleteRow(\''+aB.id+'\','+rn+')">✕</button>':'')
+        +(hasPermission('bank_delete')?'<button class="cb-act-btn cb-act-del"  title="Eliminar" onclick="event.stopPropagation();cbDeleteRow(\''+aB.id+'\','+rn+',decodeURIComponent(\''+mtag+'\'))">✕</button>':'')
         +'</td>';
       var detColSpan = aB.id==='santander'?7 : aB.id==='amex'?8 : 9;
       hh.push('<tr class="cb-row" id="cb-r-'+aB.id+'-'+rn+'" onclick="cbToggleDet(\''+aB.id+'\','+rn+')" title="Clic para ver el detalle completo">');
@@ -11798,6 +11829,9 @@ function renderCashFlow(data) {
       +'.cf-pl-row{display:flex;align-items:center;justify-content:space-between;padding:7px 14px;border-bottom:1px solid #fef3c7;font-size:11.5px}'
       +'.cf-pl-row:last-child{border-bottom:none}'
       +'.cf-empty{text-align:center;padding:36px 16px;color:var(--text-secondary,#9ca3af);font-size:13px}'
+      +'.cf-act-btn{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;border:none;cursor:pointer;font-size:12px;transition:background .15s}'
+      +'.cf-act-edit{background:rgba(59,130,246,.1);color:#2563eb}.cf-act-edit:hover{background:rgba(59,130,246,.2)}'
+      +'.cf-act-del{background:rgba(220,38,38,.08);color:#dc2626;margin-left:3px}.cf-act-del:hover{background:rgba(220,38,38,.18)}'
       +'.cf-side{display:flex;flex-direction:column;gap:13px}'
       +'.cf-sc{background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;overflow:hidden}'
       +'.cf-sh{padding:13px 15px 10px;border-bottom:1px solid var(--color-divider,#f0f0f0);font-size:13px;font-weight:700;color:var(--text-primary,#111)}'
@@ -12021,28 +12055,41 @@ function renderCashFlow(data) {
     var f=m.fecha||'';
     return (!currentFechaInicio||f>=currentFechaInicio)&&(!currentFechaFin||f<=currentFechaFin);
   });
+  // Editar/borrar por rengl\u00f3n \u2014 mismos permisos que en Conciliaci\u00f3n.
+  var cfCanEd = hasPermission('bank_edit'), cfCanDel = hasPermission('bank_delete');
+  var cfActTh = (cfCanEd||cfCanDel) ? '<th style="text-align:center;width:66px"></th>' : '';
+  function cfActTd(m){
+    if(!cfCanEd&&!cfCanDel) return '';
+    var rn=m.rowNum||0;
+    if(!rn) return '<td></td>';
+    var mj=encodeURIComponent(JSON.stringify(m)), mtag=encodeURIComponent(_bankTagText(m));
+    return '<td style="text-align:center;white-space:nowrap">'
+      +(cfCanEd?'<button class="cf-act-btn cf-act-edit" title="Editar" onclick="event.stopPropagation();cfEditRow(\''+aB.id+'\','+rn+',decodeURIComponent(\''+mj+'\'))">\u270e</button>':'')
+      +(cfCanDel?'<button class="cf-act-btn cf-act-del" title="Eliminar" onclick="event.stopPropagation();cbDeleteRow(\''+aB.id+'\','+rn+',decodeURIComponent(\''+mtag+'\'))">\u2715</button>':'')
+      +'</td>';
+  }
   if(aB.id==='santander'){
-    hh.push('<thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Dep\u00f3sito</th><th>Retiro</th><th>Saldo</th><th>P\u00f3liza</th></tr></thead><tbody>');
+    hh.push('<thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Dep\u00f3sito</th><th>Retiro</th><th>Saldo</th><th>P\u00f3liza</th>'+cfActTh+'</tr></thead><tbody>');
     movs.forEach(function(m){
       hh.push('<tr><td>'+fD(m.fecha)+'</td><td><span class="cf-chip cc-'+(m.tipo||'ret')+'">'+(m.tipo==='deposito'?'Dep\u00f3sito':'Retiro')+'</span></td>'
         +'<td style="max-width:190px;overflow:hidden;text-overflow:ellipsis">'+tr32(m.referencia)+'</td>'
         +'<td>'+(m.deposito>0?'<span style="color:#16a34a">$'+Math.round(m.deposito).toLocaleString('en-US')+'</span>':'\u2014')+'</td>'
         +'<td>'+(m.retiro>0?'<span style="color:#dc2626">$'+Math.round(m.retiro).toLocaleString('en-US')+'</span>':'\u2014')+'</td>'
         +'<td style="font-weight:600">$'+Math.round(m.saldo).toLocaleString('en-US')+'</td>'
-        +'<td style="color:var(--text-secondary,#9ca3af);font-size:11px">'+(m.poliza||'\u2014')+'</td></tr>');
+        +'<td style="color:var(--text-secondary,#9ca3af);font-size:11px">'+(m.poliza||'\u2014')+'</td>'+cfActTd(m)+'</tr>');
     });
   } else if(aB.id==='amex'){
-    hh.push('<thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>USD</th><th>Saldo</th><th>P\u00f3liza</th></tr></thead><tbody>');
+    hh.push('<thead><tr><th>Fecha</th><th>Tipo</th><th>Concepto</th><th>Importe</th><th>USD</th><th>Saldo</th><th>P\u00f3liza</th>'+cfActTh+'</tr></thead><tbody>');
     movs.forEach(function(m){
       hh.push('<tr><td>'+fD(m.fecha)+'</td><td><span class="cf-chip cc-'+(m.tipo||'cargo')+'">'+(m.tipo==='pago'?'Pago':'Cargo')+'</span></td>'
         +'<td style="max-width:190px;overflow:hidden;text-overflow:ellipsis">'+tr32(m.referencia)+'</td>'
         +'<td>'+fN(m.monto)+'</td>'
         +'<td style="color:var(--text-secondary,#9ca3af);font-size:11px">'+(m.usd?'$'+m.usd.toFixed(2)+' USD':'\u2014')+'</td>'
         +'<td style="font-weight:600">$'+Math.round(m.saldo).toLocaleString('en-US')+'</td>'
-        +'<td style="color:var(--text-secondary,#9ca3af);font-size:11px">'+(m.poliza||'\u2014')+'</td></tr>');
+        +'<td style="color:var(--text-secondary,#9ca3af);font-size:11px">'+(m.poliza||'\u2014')+'</td>'+cfActTd(m)+'</tr>');
     });
   } else {
-    hh.push('<thead><tr><th>Fecha</th><th>Tipo</th><th>Descripci\u00f3n</th><th>Cobro</th><th>Comisi\u00f3n</th><th>Neto</th><th style="text-align:center">Liberado</th></tr></thead><tbody>');
+    hh.push('<thead><tr><th>Fecha</th><th>Tipo</th><th>Descripci\u00f3n</th><th>Cobro</th><th>Comisi\u00f3n</th><th>Neto</th><th style="text-align:center">Liberado</th>'+cfActTh+'</tr></thead><tbody>');
     movs.forEach(function(m){
       var chkCls='cf-chk'+(m.liberado?' on':'');
       var rn=m.rowNum||0;
@@ -12054,9 +12101,10 @@ function renderCashFlow(data) {
         +'<td style="color:#dc2626;font-size:11px">'+(m.comisiones?'($'+Math.abs(Math.round(m.comisiones)).toLocaleString('en-US')+')':'\u2014')+'</td>'
         +'<td style="font-weight:600;color:#16a34a">$'+Math.round(Math.abs(m.totalVenta||m.monto||0)).toLocaleString('en-US')+'</td>'
         +'<td style="text-align:center"><div class="'+chkCls+'" data-orig="'+(m.liberado?1:0)+'" onclick="cfToggleLibLocal(this,'+rn+')" title="'+(m.liberado?'Marcar como NO liberado':'Marcar como liberado')+'">'+(m.liberado?'\u2713':'')+'</div></td>'
+        +cfActTd(m)
         +'</tr>');
     });
-    if(!movs.length) hh.push('<tr><td colspan="7"><div class="cf-empty">Sin movimientos \u00b7 <a href="javascript:cfOpenDrawer()" style="color:var(--color-primary,#c46a7a)">Capturar primero \u2192</a></div></td></tr>');
+    if(!movs.length) hh.push('<tr><td colspan="'+(cfActTh?8:7)+'"><div class="cf-empty">Sin movimientos \u00b7 <a href="javascript:cfOpenDrawer()" style="color:var(--color-primary,#c46a7a)">Capturar primero \u2192</a></div></td></tr>');
     hh.push('</tbody></table></div>');
     // Secci\u00f3n "Por liberar"
     var porLib=(mp.porLiberar||0);
@@ -12147,6 +12195,7 @@ function renderCashFlow(data) {
   window.cfSB_reassign = true; // marker, cfToggleLib is global
   window.cfOpenDrawer = function(banco){
     if(banco) _cfActiveBanco=banco;
+    _cfEditRowNum=null; _cfEditMov=null; // alta nueva: el drawer siempre abre limpio
     document.getElementById('cf-ovl').classList.add('open');
     document.getElementById('cf-drw').classList.add('open');
     cfDRf();
@@ -12168,8 +12217,12 @@ function renderCashFlow(data) {
     var nm=nmMap[_cfActiveBanco]||_cfActiveBanco;
     var sb=document.getElementById('cf-dsave');
     if(sb)sb.textContent='Guardar en '+nm;
+    var dt=document.querySelector('#cf-drw .cf-dtl');
+    if(dt)dt.textContent='Nuevo movimiento';
   }
-  window.cfDB = function(btn){_cfActiveBanco=btn.dataset.banco;cfDRf();};
+  // Cambiar de banco reinicia el alta: la fila que se editaba pertenece a OTRA
+  // pestaña y su forma de columnas no aplica al banco nuevo.
+  window.cfDB = function(btn){_cfActiveBanco=btn.dataset.banco;_cfEditRowNum=null;_cfEditMov=null;cfDRf();};
   window.cfMPCalc = function(){
     var c=parseFloat(document.getElementById('cf-cobro').value)||0;
     var imp=parseFloat(document.getElementById('cf-importe-com').value)||0;
@@ -12182,23 +12235,78 @@ function renderCashFlow(data) {
     var pe=document.getElementById('cf-pct-com');if(pe)pe.value=pct.toFixed(4);
     var ne2=document.getElementById('cf-total-venta');if(ne2)ne2.value=ne.toFixed(2);
   };
+  // Un solo punto de entrada del footer: si hay fila en edici\u00f3n actualiza, si no
+  // da de alta. As\u00ed el bot\u00f3n nunca queda apuntando a la acci\u00f3n equivocada.
   window.cfSubmit = async function(){
+    var editRn=_cfEditRowNum;
+    if(editRn && !hasPermission('bank_edit')){ alert('No tienes permisos para editar movimientos.'); return; }
     var row=cfCollectRow(_cfActiveBanco);if(!row)return;
+    // El form de MP no captura "Liberado" (col H) y cfCollectRow lo manda en
+    // false: al EDITAR hay que conservar el valor original o se des-libera solo.
+    if(editRn && _cfActiveBanco==='mercadopago' && _cfEditMov) row[7]=!!_cfEditMov.liberado;
     var btn=document.getElementById('cf-dsave');
     var orig=btn.textContent;
-    btn.textContent='Guardando\u2026';btn.disabled=true;
+    btn.textContent=editRn?'Actualizando\u2026':'Guardando\u2026';btn.disabled=true;
+    var payload=editRn
+      ? {action:'updateBankRow',banco:_cfActiveBanco,rowNum:editRn,row:row,token:getToken()}
+      : {action:'saveBankRow',banco:_cfActiveBanco,row:row};
     try{
-      var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveBankRow',banco:_cfActiveBanco,row:row})});
+      var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify(payload)});
       var res=await r.json();
+      if(!res.ok){ btn.textContent=orig;btn.disabled=false;alert('Error: '+(res.error||'No se pudo guardar')); return; }
+      _cfEditRowNum=null; _cfEditMov=null;
       cfCloseDrawer();
       var t=document.createElement('div');
-      t.style.cssText='position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,.25);color:#fff;background:'+(res.ok?'#111':'#991b1b');
-      t.textContent=res.ok?'\u2713 Guardado \u00b7 Saldo: $'+Math.round(res.newSaldo).toLocaleString('en-US'):'\u2717 '+(res.error||'Error');
+      t.style.cssText='position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,.25);color:#fff;background:#111';
+      t.textContent=editRn?'\u2713 Movimiento actualizado \u00b7 saldos recalculados'
+                          :'\u2713 Guardado \u00b7 Saldo: $'+Math.round(res.newSaldo).toLocaleString('en-US');
       document.body.appendChild(t);setTimeout(function(){t.remove();},4000);
-      if(res.ok)loadCashFlowData();
+      loadCashFlowData();
     }catch(e){btn.textContent=orig;btn.disabled=false;alert('Error: '+e.message);}
   };
 }
+
+/* \u2500\u2500 Editar movimiento desde Flujo de Efectivo \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+   Re\u00fasa el drawer de captura de ESTA vista (cfBuildForm/cfCollectRow) en vez
+   de duplicar formulario: solo lo abre, lo pre-llena y marca la fila en
+   edici\u00f3n para que cfSubmit mande updateBankRow. Borrar re\u00fasa cbDeleteRow. */
+window.cfEditRow = function(banco, rowNum, movJson){
+  if (!hasPermission('bank_edit')) { alert('No tienes permisos para editar movimientos.'); return; }
+  if (!rowNum) { alert('Sin n\u00famero de fila. Recarga los datos e intenta de nuevo.'); return; }
+  cfOpenDrawer(banco);      // resetea el form y deja _cfEditRowNum en null\u2026
+  _cfEditRowNum = rowNum;   // \u2026por eso la fila se marca DESPU\u00c9S de abrir
+  var dt = document.querySelector('#cf-drw .cf-dtl');
+  if (dt) dt.textContent = 'Editar movimiento \u2014 ' + ({santander:'Santander',mercadopago:'Mercado Pago',amex:'AMEX'}[banco]||banco);
+  var sb = document.getElementById('cf-dsave');
+  if (sb) sb.textContent = 'Actualizar movimiento';
+  try {
+    var m = typeof movJson==='string' ? JSON.parse(movJson) : movJson;
+    _cfEditMov = m;
+    function sv(id,v){ var e=document.getElementById(id); if(e) e.value=(v===0?'0':(v||'')); }
+    sv('cf-fecha', (m.fecha||'').substring(0,10));
+    if (banco==='santander') {
+      var dep=parseFloat(m.deposito||0);
+      sv('cf-tipo', dep>0?'deposito':'retiro');
+      sv('cf-monto', dep>0?dep:Math.abs(parseFloat(m.retiro||0)));
+      sv('cf-referencia', m.referencia||'');
+      sv('cf-usd', m.depositoUSD||m.usd||0); sv('cf-tc', m.tipoCambio||0);
+      sv('cf-poliza', m.poliza||''); sv('cf-obs', m.observaciones||'');
+    } else if (banco==='amex') {
+      var mv=parseFloat(m.monto||0);
+      sv('cf-tipo', mv<0?'pago':'cargo');
+      sv('cf-monto', mv);
+      sv('cf-referencia', m.referencia||'');
+      sv('cf-usd', m.usd||0); sv('cf-tc', m.tipoCambio||0);
+      sv('cf-notas', m.notas||''); sv('cf-poliza', m.poliza||''); sv('cf-mes', m.mes||'');
+    } else {
+      sv('cf-tipo', m.tipo==='ABONO'?'ABONO':'CARGO');
+      sv('cf-cobro', parseFloat(m.cobro||0));
+      sv('cf-importe-com', Math.abs(parseFloat(m.comisiones||0)));
+      sv('cf-mes', m.mes||''); sv('cf-obs', m.observaciones||'');
+      if (typeof cfMPCalc==='function') cfMPCalc();
+    }
+  } catch(ex) { console.warn('cfEditRow parse error', ex); }
+};
 
 
 /* ── Liberar movimiento MP — compartido por CF y Conciliación ── */
@@ -24395,7 +24503,7 @@ function renderCxP(data) {
       + '<option value="contable"'+(_cxpState.group==='contable'?' selected':'')+'>Contable</option>'
       + '<option value="proveedor"'+(_cxpState.group==='proveedor'?' selected':'')+'>Proveedor</option>'
       + '</select></div>'
-    + '<div class="cxp-fg" style="flex:1;min-width:170px"><label>Buscar</label><input class="cxp-srch" id="cxp-srch" placeholder="Proveedor o concepto…" value="'+(_cxpState.buscar||'').replace(/"/g,'&quot;')+'" oninput="_cxpSearch(this.value)"></div>'
+    + '<div class="cxp-fg" style="flex:1;min-width:170px"><label>Buscar</label><input class="cxp-srch" id="cxp-srch" placeholder="Proveedor, comercial o concepto…" value="'+(_cxpState.buscar||'').replace(/"/g,'&quot;')+'" oninput="_cxpSearch(this.value)"></div>'
     + '</div>';
 
   html += '<div class="cxp-kg" id="cxp-kpis"></div>';
@@ -24438,7 +24546,8 @@ function _cxpEndOfMonth(){ var d=new Date(); return new Date(d.getFullYear(), d.
 function _cxpFilteredRows(){
   var f=_cxpState||{}, all=window._cxpAllRows||[];
   return all.filter(function(r){
-    if (f.buscar){ var q=f.buscar.toLowerCase(); if((r.proveedor||'').toLowerCase().indexOf(q)===-1 && (r.concepto||'').toLowerCase().indexOf(q)===-1 && (r.subtipo||'').toLowerCase().indexOf(q)===-1) return false; }
+    // Busca por razón social Y por nombre comercial (el proveedor se conoce por cualquiera de los dos).
+    if (f.buscar){ var q=f.buscar.toLowerCase(); if((r.proveedor||'').toLowerCase().indexOf(q)===-1 && _cxpComercial(r.proveedor).toLowerCase().indexOf(q)===-1 && (r.concepto||'').toLowerCase().indexOf(q)===-1 && (r.subtipo||'').toLowerCase().indexOf(q)===-1) return false; }
     var v=(r.vencimiento||'').substring(0,10);
     if (v){ if (f.fechaIni && v < f.fechaIni) return false; if (f.fechaFin && v > f.fechaFin) return false; }
     return true; // las filas sin vencimiento siempre se muestran (siguen pendientes)
@@ -24507,6 +24616,13 @@ function _cxpTableHTML(rows){
   return html;
 }
 function _cxpApply(){
+  // El nombre comercial vive en el catálogo de Proveedores: si aún no llegó, se
+  // pide una sola vez y se re-pinta (igual que en Egresos). Mientras tanto la
+  // tabla muestra la razón social, nunca un hueco.
+  if(!window._cxpProvTried && (window._proveedores||[]).length===0 && typeof preloadProveedores==='function'){
+    window._cxpProvTried=true;
+    preloadProveedores().then(function(){ window._egProvMapCache=null; if(document.getElementById('cxp-tbody')) _cxpApply(); }).catch(function(){});
+  }
   var rows=_cxpFilteredRows(), R=_cxpResumen(rows);
   var k=document.getElementById('cxp-kpis'); if(k)k.innerHTML=_cxpKpiHTML(R);
   var t=document.getElementById('cxp-total'); if(t)t.innerHTML=_cxpTotalHTML(R,rows.length);
@@ -24537,6 +24653,50 @@ window._cxpToggleGrp=function(gi){
   if(c) c.textContent=hide?'▸':'▾';
 };
 
+/* ── CxP: nombre comercial ────────────────────────────────
+   La tabla guarda la RAZÓN SOCIAL (así se factura), pero el equipo reconoce al
+   proveedor por su nombre COMERCIAL. Sale del catálogo de Proveedores (hoja
+   Proveedores, col 'Nombre comercial' → providers.gs PROV_HEADERS), que ya está
+   precargado en window._proveedores; se reúsa _egComercial() —el mismo mapa que
+   usa Egresos— en vez de re-mapear aquí. Sin comercial capturado, cae a la
+   razón social sola (sin renglón vacío). */
+function _cxpComercial(prov){
+  try { return (typeof _egComercial==='function') ? _egComercial(prov) : ''; }
+  catch(e) { return ''; }
+}
+function _cxpProvCell(prov){
+  // _cxpEsc solo escapa '<'; aquí el texto también va dentro de title="…", así
+  // que hay que escapar comillas o un nombre con " parte el atributo.
+  function a(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  var p = String(prov||''), com = _cxpComercial(p);
+  var ell = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+  if (!com || com.toLowerCase() === p.trim().toLowerCase())
+    return '<div style="font-weight:600;color:var(--text-primary,#111);'+ell+'" title="'+a(p)+'">'+a(p)+'</div>';
+  // Comercial como principal + razón social abajo en chico (así se lee en Egresos).
+  return '<div style="font-weight:600;color:var(--text-primary,#111);'+ell+'" title="'+a(com)+'">'+a(com)+'</div>'
+    + '<div style="font-size:9.5px;color:var(--text-secondary,#9ca3af);'+ell+'" title="'+a(p)+'">'+a(p)+'</div>';
+}
+
+/* ── CxP: monto de la fila para la suma de seleccionados ──
+   El monto principal (saldoPendiente, o monto si no hay abonos) YA viene en MXN
+   —por eso la tabla le pone la etiqueta "MXN" a las filas en USD y muestra el
+   US$ aparte—, así que se suma directo, sin convertir. */
+function _cxpRowMXN(row){
+  var v = (row.saldoPendiente!=null) ? row.saldoPendiente : row.monto;
+  return parseFloat(v)||0;
+}
+/* Equivalente en USD de lo que sigue PENDIENTE. Sin abonos es el US$ capturado
+   tal cual; con abono parcial se deriva del TC para que cuadre con el MXN que
+   se está sumando (el montoUSD original es por el total, no por el saldo). */
+function _cxpRowUSD(row){
+  if ((row.divisa||'MXN')!=='USD') return 0;
+  var mxn=_cxpRowMXN(row), full=parseFloat(row.monto)||0;
+  var usd=parseFloat(row.montoUSD)||0, tc=parseFloat(row.tipoCambio)||0;
+  if (usd>0 && Math.abs(mxn-full)<0.01) return usd;
+  if (tc>0) return mxn/tc;
+  return usd;
+}
+
 function _cxpBuildNewRows(rows) {
   if (!rows.length) return '<tr><td colspan="9" class="cxp-empty">🎉 Sin cuentas pendientes — todo al corriente</td></tr>';
   function fMXN(v){ return '$'+(parseFloat(v)||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
@@ -24555,9 +24715,10 @@ function _cxpBuildNewRows(rows) {
       ? '<span onclick="egViewPDF(decodeURIComponent(\''+encodeURIComponent(row.linkFacturaUrl)+'\'),\'Factura · '+row.proveedor.replace(/'/g,"\\'")+'\')" style="cursor:pointer;color:#166534;font-weight:800" title="Ver factura">✓</span>'
       : (row.facturacion ? '✓' : '—');
     return '<tr'+rowCls+'>'
-      + '<td style="padding:8px"><input type="checkbox" class="cxp-row-cb" data-rn="'+row.rowNum+'" onchange="_cxpCbChange()"></td>'
+      + '<td style="padding:8px"><input type="checkbox" class="cxp-row-cb" data-rn="'+row.rowNum+'"'
+        + ' data-mxn="'+_cxpRowMXN(row)+'" data-usd="'+_cxpRowUSD(row)+'" onchange="_cxpCbChange()"></td>'
       + '<td>'+badge+'</td>'
-      + '<td style="font-weight:600;color:var(--text-primary,#111)">'+row.proveedor+'</td>'
+      + '<td style="max-width:180px">'+_cxpProvCell(row.proveedor)+'</td>'
       + '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis" title="'+row.concepto+'">'+row.concepto+'</td>'
       + '<td style="font-size:11px;color:var(--text-secondary,#6b7280)">'+row.subtipo+'</td>'
       + '<td style="text-align:right;font-weight:700;font-size:13px">'+fMXN(row.saldoPendiente!=null?row.saldoPendiente:row.monto)+(row.divisa==='USD'?' <span style="font-size:9px;color:#0369a1;font-weight:800">MXN</span>':'')
@@ -24596,13 +24757,41 @@ window.cxpFactura = function(rowNum, prov, url) {
 };
 
 // ── CxP: selección y edición masiva de montos ──
+/* Suma de lo seleccionado — INFORMATIVA: no dispara nada, solo cuenta.
+   Los montos se leen de data-mxn/data-usd del checkbox (los pone la fila al
+   pintarse), así funciona igual agrupado, filtrado o sin agrupar. */
+function _cxpSelTotals(){
+  var t={n:0, mxn:0, usd:0, nUsd:0};
+  var cbs=document.querySelectorAll('.cxp-row-cb:checked');
+  for(var i=0;i<cbs.length;i++){
+    var cb=cbs[i];
+    t.n++;
+    t.mxn+=parseFloat(cb.dataset.mxn)||0;
+    var u=parseFloat(cb.dataset.usd)||0;
+    if(u>0){ t.usd+=u; t.nUsd++; }
+  }
+  return t;
+}
+function _cxpSelLabel(t){
+  if(!t.n) return '';
+  // El total va en un recuadro aparte para que se lea de un golpe.
+  var tot='Total: '+_cxpFM(t.mxn)+(t.nUsd>0?' MXN':'');
+  // Si hay partidas en USD, el total SIGUE siendo MXN (el monto principal ya
+  // está en MXN); el US$ se desglosa aparte para que se vea de dónde viene.
+  var usd=t.nUsd>0 ? '<span style="font-weight:600;opacity:.85;margin-left:7px">incluye US$ '
+      +t.usd.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</span>' : '';
+  return '<span>'+t.n+' partida'+(t.n===1?'':'s')+' seleccionada'+(t.n===1?'':'s')+'</span>'
+    + '<span style="display:inline-flex;align-items:baseline;margin-left:9px;padding:3px 11px;border-radius:7px;'
+    + 'background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.28)">'
+    + '<b style="font-size:14px;font-weight:800">'+tot+'</b>'+usd+'</span>';
+}
 function _cxpCbChange(){
   var cbs=document.querySelectorAll('.cxp-row-cb');
   var sel=[]; cbs.forEach(function(cb){if(cb.checked)sel.push(parseInt(cb.dataset.rn));});
   var bar=document.getElementById('cxp-bulk-bar');
   if(bar){bar.style.display=sel.length?'flex':'none';}
   var cnt=document.getElementById('cxp-bulk-cnt');
-  if(cnt)cnt.textContent=sel.length+' partida'+(sel.length===1?'':'s')+' seleccionada'+(sel.length===1?'':'s');
+  if(cnt)cnt.innerHTML=_cxpSelLabel(_cxpSelTotals());
   var all=document.getElementById('cxp-cb-all');
   if(all){ all.checked=sel.length===cbs.length&&cbs.length>0; all.indeterminate=sel.length>0&&sel.length<cbs.length; }
 }
@@ -32266,6 +32455,18 @@ function notaGenerar(){
  * aviso emergente (1 vez por versión) para quien tenga acceso a esas áreas.
  * Cada entrada puede llevar `perm`: si el usuario no lo tiene, se oculta. */
 var NOVEDADES=[
+  { build:'2026.07.15', fecha:'15 jul 2026', area:'Finanzas', icon:'🏦',
+    titulo:'Editar y borrar movimientos desde Flujo de Efectivo',
+    puntos:['En «Flujo de Efectivo», la tabla de últimos movimientos ya tiene ✎ (editar) y ✕ (eliminar) en cada renglón: antes solo se podía agregar y había que irse a Conciliación para corregir.','Los botones salen SOLO si tienes permiso: ✎ requiere «Editar movimientos bancarios» (bank_edit) y ✕ «Eliminar movimientos bancarios» (bank_delete). Son permisos distintos de «Capturar» a propósito: corregir o borrar dinero ya registrado pesa más que capturarlo.','El permiso ahora se valida también en el SERVIDOR, no solo escondiendo el botón.','Al editar o borrar, los saldos del banco se recalculan solos.','Si el movimiento está ligado a una operación o a un egreso (etiquetas [OP-…], [OP #…] o [Egreso #…]), el sistema te avisa ANTES de borrarlo: esa conciliación quedaría huérfana.'],
+    comoUsar:['Finanzas → Flujo de Efectivo, elige la pestaña del banco.','En el renglón: ✎ para corregir (se abre el mismo formulario de captura, ya pre-llenado) o ✕ para eliminar.','Si no ves los botones, pide a un administrador los permisos en Panel de Control → Gestión de Roles.'] },
+  { build:'2026.07.15', fecha:'15 jul 2026', area:'Egresos', icon:'🏭',
+    titulo:'Cuentas por pagar: ahora se ve el nombre comercial',
+    puntos:['La columna Proveedor de «Detalle de cuentas por pagar» muestra el nombre COMERCIAL arriba (el de todos los días) y la razón social abajo en chico.','Sale del catálogo de Proveedores. Si un proveedor no tiene comercial capturado, se ve nada más su razón social — no queda hueco.','El buscador encuentra por cualquiera de los dos nombres.'],
+    comoUsar:['Egresos → Cuentas por Pagar: la columna Proveedor ya viene así.','¿Falta un comercial? Captúralo en Catálogos → Proveedores y aparece aquí.'] },
+  { build:'2026.07.15', fecha:'15 jul 2026', area:'Egresos', icon:'🧮',
+    titulo:'Cuentas por pagar: suma de lo seleccionado',
+    puntos:['Al palomear partidas, la barra azul ahora muestra «N partidas seleccionadas · Total: $X» en un recuadro bien visible.','Es SOLO informativo: no cambia montos ni dispara nada. Sirve para saber cuánto suma un grupo de pagos antes de decidir.','Si hay partidas en dólares, el total sigue en MXN (el monto ya está convertido) y aparte se desglosa cuánto US$ incluye.'],
+    comoUsar:['Egresos → Cuentas por Pagar: palomea las partidas que quieras sumar.','Lee el total en la barra azul de abajo; con «✕ Limpiar» quitas la selección.'] },
   { build:'2026.07.15', fecha:'15 jul 2026', area:'Nómina', icon:'🧾',
     titulo:'Nómina por periodos: captura, CFDI y pago por periodo',
     puntos:['La nómina ahora se trabaja POR PERIODO (semanal, quincenal o mensual) y la periodicidad es MIXTA: la define cada empleado en su ficha, así que puedes tener gente quincenal, semanal y mensual al mismo tiempo.','Hay periodos ORDINARIOS (los del calendario normal) y EXTRAORDINARIOS (aguinaldo, finiquitos, pagos especiales): conviven sin desplazarse.','Capturas por empleado lo que le toca; el ISR/IMSS que ves antes de timbrar es un ESTIMADO para presupuestar.','Cuando el despacho timbra, el XML CORRIGE al estimado: entra el neto REAL y se marca la Diferencia. En reportes manda el real.','El ERP NO calcula impuestos: el despacho timbra y el CFDI es la verdad.','Nueva pestaña SBC: empleados × 6 bimestres, con el SBC y casilla «Presentado» para el control del IMSS.','Puedes abrir el historial de CUALQUIER periodo (pasado o futuro) con su captura y su estatus.','⚠ IMPORTANTE: validar a Cuentas por Pagar es POR PERIODO. La vista «Nómina del mes (CFDI)» quedó solo para consultar y conciliar — ya no envía nada a CxP. Antes convivían dos vías que no se deduplicaban entre sí y se podía pagar dos veces al mismo empleado.'],
@@ -32513,7 +32714,7 @@ setTimeout(novCheckPopup, 2500);
   },
 
   { id:'egresos', group:'operacion', icon:'💳', title:'Egresos y Cuentas por Pagar (CxP)',
-    keywords:'egresos gasto cxp cuentas por pagar proveedor pagar credito abono cancelar devolucion moneda extranjera usd tipo de cambio clasificacion auto factura pago correo de pago duplicado nuevo proveedor inline poliza conciliar subir factura enviar',
+    keywords:'egresos gasto cxp cuentas por pagar proveedor pagar credito abono cancelar devolucion moneda extranjera usd tipo de cambio clasificacion auto factura pago correo de pago duplicado nuevo proveedor inline poliza conciliar subir factura enviar nombre comercial razon social buscar seleccionar checkbox suma total seleccionado informativo',
     intro:'**Egresos** son los gastos ya pagados; **Cuentas por Pagar (CxP)** son los que aún no. Físicamente viven en la misma hoja `Egresos2026`: una fila con `PAGADO=TRUE` es un egreso; sin pagar es una CxP. Incluye créditos de proveedor, abonos parciales, cancelación y moneda extranjera.',
     pasos:[
       'Registra un gasto en **CxP → + Nuevo** (proveedor, contable/tipo/subtipo, monto, vencimiento). Al capturar el proveedor, el sistema **recomienda** la clasificación (histórica 💡 o fija 📌); pulsa «Aplicar».',
@@ -32526,6 +32727,8 @@ setTimeout(novCheckPopup, 2500);
       { h:'Créditos y abonos de proveedor', p:'Al cancelar una orden ya pagada se genera un **crédito** en `Creditos_Proveedor` (no se pierde el dinero). Se aplica a otra orden vía `aplicarAbonoCxP`, con blindaje: un crédito solo se aplica a órdenes del **mismo** proveedor. Botón admin **🔧 Reparar créditos cruzados** para el caso histórico.' },
       { h:'Moneda extranjera', p:'CxP acepta **Divisa MXN/USD + tipo de cambio**; guarda el monto ya en MXN (USD×TC) para cuadrar totales y conserva Divisa/Monto USD/TC en la fila. Al pagar se aplica el USD con el TC real.' },
       { h:'Regresar a programación (↩)', p:'Si una CxP vino de un **gasto fijo** (tiene `RecurrenteID`) y no está pagada, el botón **↩** la borra y el gasto fijo reaparece «por programar» para recapturarlo por el monto correcto.' },
+      { h:'Nombre comercial en la tabla', p:'La columna **Proveedor** de «Detalle de cuentas por pagar» muestra el **nombre comercial** arriba y la **razón social** abajo en chico. El comercial sale del catálogo de **Proveedores** (columna `Nombre comercial`); si ese proveedor no lo tiene capturado, se muestra solo la razón social. El **buscador** de la vista encuentra por **cualquiera de los dos**.' },
+      { h:'Suma de lo seleccionado (informativa)', p:'Al palomear partidas, la barra azul muestra «**N partidas seleccionadas · Total: $X**». Es **solo informativo**: no cambia montos ni dispara acciones — sirve para ver cuánto suma un grupo de pagos antes de decidir. El monto que se suma es el **saldo pendiente** (o el monto si no hay abonos) y **ya está en MXN**, también en las partidas en dólares. Si hay partidas USD seleccionadas, además se desglosa «incluye US$ …» (con abono parcial, el US$ se calcula con el TC sobre lo que sigue pendiente).' },
       { h:'Herramientas de la fila (✉ correo, factura, pólizas)', p:'Cada egreso tiene **✉ Enviar correo de pago** (rellena la plantilla con proveedor/concepto/monto/fecha/póliza/folio, adjunta el comprobante de pago y la factura si están vinculados, prefila el correo del proveedor y **siempre pide confirmar** antes de enviar — nunca automático), **📄** para subir/ver la factura y **🔗** el comprobante de pago. El botón **+ Nuevo proveedor** dentro de la captura da de alta al proveedor sin salir del egreso. Al capturar, si ya hay un pago al **mismo proveedor por un monto similar en el mes** (±1% o ±$1) aparece **⚠ Posible pago duplicado** (solo avisa, no bloquea). Para cruzar contra contabilidad, usa **🧾 Conciliar pólizas** (ver su propia sección).' }
     ],
     datos:{
@@ -32951,16 +33154,22 @@ setTimeout(novCheckPopup, 2500);
   },
 
   { id:'flujo', group:'cfo', icon:'💧', title:'Flujo de Efectivo',
-    keywords:'flujo efectivo caja bancos entradas salidas saldo cuentas por cobrar panel liquidez',
-    intro:'El **Flujo de Efectivo** muestra el movimiento de caja/bancos del periodo (entradas, salidas, saldo). Incluye un **panel de Cuentas por Cobrar** para ver de un vistazo lo que está por entrar.',
+    keywords:'flujo efectivo caja bancos entradas salidas saldo cuentas por cobrar panel liquidez editar borrar movimiento conciliacion permiso bank_edit bank_delete amarre op egreso huerfana',
+    intro:'El **Flujo de Efectivo** muestra el movimiento de caja/bancos del periodo (entradas, salidas, saldo). Incluye un **panel de Cuentas por Cobrar** para ver de un vistazo lo que está por entrar. Desde la tabla de movimientos también puedes **capturar, corregir y eliminar** movimientos del banco (con permiso).',
     pasos:[
       'Abre **Finanzas → CFO → Flujo de Efectivo**.',
       'Revisa entradas/salidas y el saldo por banco.',
-      'Consulta el panel **Cuentas por Cobrar** (resumen de adeudos) con su buscador.'
+      'Consulta el panel **Cuentas por Cobrar** (resumen de adeudos) con su buscador.',
+      'En **… últimos movimientos**: «+ Agregar» captura, **✎** corrige y **✕** elimina el renglón.'
+    ],
+    bloques:[
+      { h:'Editar / borrar un movimiento', p:'**✎** abre el mismo formulario de captura de esta vista, ya pre-llenado; al guardar se recalcula el saldo corrido del banco. **✕** elimina el renglón y también recalcula. Es la misma operación que ya existía en **Conciliación bancaria** — ahora no tienes que cambiar de vista para corregir.' },
+      { h:'Permisos (son dos, distintos de capturar)', p:'**✎** requiere `bank_edit` («Editar movimientos bancarios») y **✕** requiere `bank_delete` («Eliminar movimientos bancarios»). NO basta con `bank_capture`: corregir o borrar dinero ya registrado es más delicado que capturarlo, por eso van aparte (ej. el rol *operador* puede editar pero no borrar). Si no tienes el permiso, el botón ni aparece — y el servidor **también** lo valida, así que no se puede saltar el botón.' },
+      { h:'Ojo: movimientos amarrados', p:'Los movimientos que nacen de una operación o de un egreso llevan una etiqueta en su concepto/observaciones: `[OP-01176]`, `[OP #1176]` o `[Egreso #661]`. Es lo que amarra la conciliación. Si intentas borrar uno de esos, el sistema te **avisa antes**: la OP/egreso seguiría marcada como pagada pero ya no tendría su movimiento en el banco (conciliación huérfana).' }
     ],
     datos:{
-      funciones:['readBanksData','readEstadoCobranza'],
-      nota:'El panel de Cuentas por Cobrar dentro de Flujo se agregó en el build .140 (buscador incluido).'
+      funciones:['readBanksData','readEstadoCobranza','saveBankRow','updateBankRow','deleteBankRow','_recalcSaldos'],
+      nota:'El panel de Cuentas por Cobrar dentro de Flujo se agregó en el build .140 (buscador incluido). Editar/borrar desde Flujo se agregó en el build .197, reusando el backend y los permisos que ya usaba Conciliación; en ese build se agregó también la validación de permiso en el servidor (antes updateBankRow/deleteBankRow no la tenían).'
     }
   },
 
@@ -33685,7 +33894,8 @@ setTimeout(novCheckPopup, 2500);
       'Para **cancelar** usa **⊘** (está en CxP y en Egresos, porque lo pagado vive en Egresos).'
     ],
     buttons:[
-      { k:'Buscar por nombre comercial', d:'Localiza al proveedor por su nombre corto de todos los días.' },
+      { k:'Buscar por nombre comercial', d:'Localiza al proveedor por su nombre corto de todos los días (también busca por razón social).' },
+      { k:'Casilla de selección (por fila)', d:'Palomea partidas para verlas sumadas en la barra azul. El total es solo informativo; desde ahí también puedes fijar monto o eliminar las seleccionadas.' },
       { k:'Año (selector)', d:'Cambia entre 2026 / 2025 / 2024 para ver el histórico.' },
       { k:'+ Nuevo', d:'Captura un gasto (proveedor, contable/tipo/subtipo, monto, vencimiento).' },
       { k:'Aplicar (clasificación recomendada)', d:'Acepta la categoría que el sistema propone para ese proveedor.' },
@@ -33707,6 +33917,8 @@ setTimeout(novCheckPopup, 2500);
     ],
     bloques:[
       { h:'Cancelación: crédito vs devolución', p:'El modal de cancelar tiene dos modos: **crédito** (default) deja saldo a favor del proveedor sin tocar bancos; **devolución** registra una ENTRADA al banco/caja. La fila queda **tachada con badge CANCELADA** (referencia histórica, excluida de totales). La **traza del dinero** se ve al expandir la fila.' },
+      { h:'Nombre comercial en la columna Proveedor', p:'La tabla muestra el **nombre comercial** arriba (el de todos los días) y la **razón social** abajo en chico — porque el proveedor se factura con razón social pero se reconoce por el comercial. Sale del catálogo de **Proveedores** (columna `Nombre comercial`); si no está capturado, se ve solo la razón social. El **buscador** encuentra por **cualquiera de los dos**.' },
+      { h:'Suma de lo seleccionado (solo informativa)', p:'Al palomear partidas, la barra azul muestra «**N partidas seleccionadas · Total: $X**» en un recuadro. **No cambia nada**: solo te dice cuánto suma ese grupo antes de decidir. Suma el **saldo pendiente** (o el monto si no hay abonos), que **ya está en MXN** incluso en las partidas en dólares; si hay USD seleccionados, desglosa además «incluye US$ …».' },
       { h:'Moneda extranjera', p:'CxP acepta **Divisa MXN/USD + tipo de cambio**; guarda el monto ya en pesos (USD × TC) para cuadrar totales. Al pagar aplica el USD con el TC real.' },
       { h:'Correo de pago, factura y aviso de duplicado', p:'El icono **✉** de cada fila abre **Enviar correo de pago**: rellena la plantilla con proveedor/concepto/monto/fecha/póliza/folio, adjunta el comprobante de pago y la factura si están vinculados, prefila el correo del proveedor y **siempre pide confirmar** antes de enviar. Con **+ Nuevo proveedor** das de alta al proveedor sin salir de la captura. Al capturar, si ya hay un pago al **mismo proveedor por un monto similar en el mes** (±1% o ±$1) aparece **⚠ Posible pago duplicado** (solo avisa, no bloquea). Para cruzar contra contabilidad, **🧾 Conciliar pólizas** (tiene su propia sección).' }
     ],
@@ -34434,23 +34646,29 @@ setTimeout(novCheckPopup, 2500);
       deploy:'`presupuesto.gs` requiere deploy (usa helpers de summary.gs).' } },
 
   { id:'flujo', group:'cfo', icon:'💧', title:'Flujo de Efectivo',
-    keywords:'flujo efectivo caja bancos entradas salidas saldo cuentas por cobrar panel liquidez',
-    para:'El **Flujo de Efectivo** muestra el movimiento de caja/bancos del periodo (entradas, salidas, saldo). Incluye un **panel de Cuentas por Cobrar** para ver de un vistazo lo que está por entrar.',
+    keywords:'flujo efectivo caja bancos entradas salidas saldo cuentas por cobrar panel liquidez editar borrar eliminar movimiento permiso bank_edit bank_delete amarre op egreso huerfana conciliacion',
+    para:'El **Flujo de Efectivo** muestra el movimiento de caja/bancos del periodo (entradas, salidas, saldo). Incluye un **panel de Cuentas por Cobrar** para ver de un vistazo lo que está por entrar. Desde la tabla de movimientos puedes **capturar, corregir (✎) y eliminar (✕)** movimientos del banco, si tienes permiso.',
     where:'Menú → Finanzas → **CFO → Flujo de Efectivo**.',
     mock:{ title:'Flujo de Efectivo', crumb:'Finanzas › CFO › Flujo de Efectivo', period:'Julio 2026',
       cards:[ {label:'Entradas', val:'$1.24M'}, {label:'Salidas', val:'$0.82M'}, {label:'Saldo', val:'$0.42M'}, {label:'Por cobrar', val:'$0.20M', n:1} ],
-      note:'Cada banco muestra su saldo. El panel **Cuentas por Cobrar** trae su propio **buscador**.',
-      callouts:[ {n:1,text:'Panel **Cuentas por Cobrar** (resumen de adeudos) con buscador — lo que está por entrar.'} ] },
-    steps:[ 'Abre **Finanzas → CFO → Flujo de Efectivo**.', 'Revisa entradas/salidas y saldo por banco.', 'Consulta el panel **Cuentas por Cobrar** con su buscador.' ],
+      toolbar:[ {t:'btn', label:'+ Agregar', pri:true, n:2} ],
+      note:'Cada banco muestra su saldo. El panel **Cuentas por Cobrar** trae su propio **buscador**. En cada renglón de movimientos: **✎** editar y **✕** eliminar.',
+      callouts:[ {n:1,text:'Panel **Cuentas por Cobrar** (resumen de adeudos) con buscador — lo que está por entrar.'},
+                 {n:2,text:'**+ Agregar** captura; en cada renglón **✎** corrige y **✕** elimina (según tus permisos).'} ] },
+    steps:[ 'Abre **Finanzas → CFO → Flujo de Efectivo**.', 'Revisa entradas/salidas y saldo por banco.', 'Consulta el panel **Cuentas por Cobrar** con su buscador.', 'Para corregir un movimiento: **✎** en su renglón, ajusta y «Actualizar movimiento».' ],
     buttons:[
       { k:'Pestañas por banco', d:'Cambian entre Santander, AMEX, Mercado Pago…' },
       { k:'+ Nuevo / + Agregar movimiento', d:'Captura una entrada o salida en ese banco (con permiso).' },
+      { k:'✎ Editar (por renglón)', d:'Abre el formulario ya pre-llenado y actualiza el movimiento; recalcula el saldo del banco. Requiere el permiso «Editar movimientos bancarios» (bank_edit).' },
+      { k:'✕ Eliminar (por renglón)', d:'Borra el movimiento y recalcula el saldo. Requiere «Eliminar movimientos bancarios» (bank_delete). Si el movimiento está amarrado a una OP o a un egreso, avisa antes.' },
       { k:'Buscar (panel Cuentas por Cobrar)', d:'Localiza rápido a un deudor dentro del resumen de adeudos.' }
     ],
-    tips:[ 'El panel de Cuentas por Cobrar te deja ver lo que está por entrar sin salir del Flujo.' ],
-    tech:{ funciones:['readBanksData','readEstadoCobranza'],
-      permisos:['cf_capture'],
-      nota:'El panel de Cuentas por Cobrar dentro de Flujo se agregó en el build .140.' } },
+    tips:[ 'El panel de Cuentas por Cobrar te deja ver lo que está por entrar sin salir del Flujo.',
+      'Editar y borrar son permisos **aparte** de capturar: corregir dinero ya registrado pesa más que capturarlo. Si no ves ✎ o ✕, pide el permiso en Panel de Control → Gestión de Roles.',
+      'Antes de borrar un movimiento con etiqueta `[OP-…]` o `[Egreso #…]`, piénsalo: esa OP/egreso quedaría marcada como pagada pero sin su movimiento en el banco.' ],
+    tech:{ funciones:['readBanksData','readEstadoCobranza','saveBankRow','updateBankRow','deleteBankRow','_recalcSaldos'],
+      permisos:['cf_capture','bank_capture','bank_edit','bank_delete'],
+      nota:'El panel de Cuentas por Cobrar dentro de Flujo se agregó en el build .140. Editar/borrar desde Flujo se agregó en el build .197 reusando el backend y los permisos de Conciliación; ese build agregó además el gate de permiso en el SERVIDOR para updateBankRow/deleteBankRow (requiere redeploy de finance.gs).' } },
 
   { id:'devengado', group:'cfo', icon:'📅', title:'Facturación vencida / devengado',
     keywords:'devengado facturacion vencida vianto laboratorio pagado corresponde mes informativo offset',
