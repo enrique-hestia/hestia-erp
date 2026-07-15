@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.14.200 -->
+﻿<!-- app-build:2026.07.14.201 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1093,6 +1093,56 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 <!-- ══ VISTA: ATRIBUIR EXTERNOS (histórico) — asigna origen a ingresos externos ya capturados ══ -->
 <div id="view-atribuir-externos" class="view" style="display:none"><div id="atrib-root"></div></div>
 <!-- Manual general ilustrado (guía de uso click-por-click de toda la app) -->
+<!-- Identificar pacientes. OJO: debe vivir DENTRO de .app como todas las
+     demas vistas. Estuvo en la raiz del body y se mostraba FUERA del layout
+     (pantalla en blanco) aunque el ruteo y el permiso estaban bien. -->
+<div id="view-identificar" class="view" style="display:none">
+  <div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e2dc);border-radius:12px;padding:1rem 1.15rem;margin-bottom:1rem">
+    <div style="display:flex;align-items:flex-start;gap:10px">
+      <span style="font-size:1.3rem;line-height:1.2">🪪</span>
+      <div style="flex:1">
+        <div style="font-weight:700;color:var(--text-primary,#28251d);margin-bottom:3px">Cobros que llegaron sin nombre</div>
+        <div style="font-size:0.78rem;color:var(--text-secondary,#7a7670);line-height:1.5">
+          Cuando una paciente paga desde la <b>página de citas</b>, Mercado Pago no nos manda su nombre y el cobro entra como
+          <b>“No localizado”</b>. Búscalo por <b>fecha y monto</b>, y ponle el nombre de tu paciente.
+          Esto <b>solo cambia el nombre</b>: no mueve productos, montos ni la conciliación bancaria.
+        </div>
+      </div>
+      <div style="text-align:right;white-space:nowrap">
+        <div id="idp-contador" style="font-size:1.5rem;font-weight:800;color:var(--color-primary,#c46a7a);line-height:1">—</div>
+        <div style="font-size:0.66rem;color:var(--text-secondary,#7a7670)">pendientes</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e2dc);border-radius:12px;padding:0.85rem 1.15rem;margin-bottom:1rem;display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
+    <div>
+      <label style="display:block;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670);margin-bottom:4px">Año</label>
+      <select id="idp-anio" onchange="idpCargar()" style="padding:7px 9px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.82rem;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)"></select>
+    </div>
+    <div>
+      <label style="display:block;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670);margin-bottom:4px">Desde</label>
+      <input id="idp-f-ini" type="date" onchange="idpRender()" style="padding:7px 9px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.82rem;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)">
+    </div>
+    <div>
+      <label style="display:block;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670);margin-bottom:4px">Hasta</label>
+      <input id="idp-f-fin" type="date" onchange="idpRender()" style="padding:7px 9px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.82rem;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)">
+    </div>
+    <div>
+      <label style="display:block;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670);margin-bottom:4px">Monto desde</label>
+      <input id="idp-m-min" type="number" step="0.01" placeholder="0.00" oninput="idpRender()" style="width:110px;padding:7px 9px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.82rem;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)">
+    </div>
+    <div>
+      <label style="display:block;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670);margin-bottom:4px">Monto hasta</label>
+      <input id="idp-m-max" type="number" step="0.01" placeholder="0.00" oninput="idpRender()" style="width:110px;padding:7px 9px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.82rem;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)">
+    </div>
+    <button onclick="idpLimpiarFiltros()" style="padding:7px 12px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;background:transparent;color:var(--text-secondary,#7a7670);font-size:0.78rem;font-weight:600;cursor:pointer">Limpiar</button>
+    <button onclick="idpCargar()" style="padding:7px 12px;border:none;border-radius:8px;background:var(--color-primary,#c46a7a);color:#fff;font-size:0.78rem;font-weight:700;cursor:pointer">Actualizar</button>
+  </div>
+
+  <div id="idp-lista" style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e2dc);border-radius:12px;overflow:hidden"></div>
+</div>
+
 <div id="view-manual" class="view" style="display:none"><div id="manual-root"></div></div>
 <!-- Nómina: lee CFDI de nómina emitidos por mes, desglose por empleado, ISN/vacaciones -->
 <div id="view-nomina" class="view" style="display:none"><div id="nom-root"></div></div>
@@ -24052,52 +24102,6 @@ function initTheme() {
      NO carga nada de Ingresos: su único fetch es ?action=noLocalizados, que
      devuelve OP, fecha, monto y método. Nada más.
      ══════════════════════════════════════════════════════════════════════ -->
-<div id="view-identificar" class="view" style="display:none">
-  <div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e2dc);border-radius:12px;padding:1rem 1.15rem;margin-bottom:1rem">
-    <div style="display:flex;align-items:flex-start;gap:10px">
-      <span style="font-size:1.3rem;line-height:1.2">🪪</span>
-      <div style="flex:1">
-        <div style="font-weight:700;color:var(--text-primary,#28251d);margin-bottom:3px">Cobros que llegaron sin nombre</div>
-        <div style="font-size:0.78rem;color:var(--text-secondary,#7a7670);line-height:1.5">
-          Cuando una paciente paga desde la <b>página de citas</b>, Mercado Pago no nos manda su nombre y el cobro entra como
-          <b>“No localizado”</b>. Búscalo por <b>fecha y monto</b>, y ponle el nombre de tu paciente.
-          Esto <b>solo cambia el nombre</b>: no mueve productos, montos ni la conciliación bancaria.
-        </div>
-      </div>
-      <div style="text-align:right;white-space:nowrap">
-        <div id="idp-contador" style="font-size:1.5rem;font-weight:800;color:var(--color-primary,#c46a7a);line-height:1">—</div>
-        <div style="font-size:0.66rem;color:var(--text-secondary,#7a7670)">pendientes</div>
-      </div>
-    </div>
-  </div>
-
-  <div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e2dc);border-radius:12px;padding:0.85rem 1.15rem;margin-bottom:1rem;display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
-    <div>
-      <label style="display:block;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670);margin-bottom:4px">Año</label>
-      <select id="idp-anio" onchange="idpCargar()" style="padding:7px 9px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.82rem;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)"></select>
-    </div>
-    <div>
-      <label style="display:block;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670);margin-bottom:4px">Desde</label>
-      <input id="idp-f-ini" type="date" onchange="idpRender()" style="padding:7px 9px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.82rem;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)">
-    </div>
-    <div>
-      <label style="display:block;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670);margin-bottom:4px">Hasta</label>
-      <input id="idp-f-fin" type="date" onchange="idpRender()" style="padding:7px 9px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.82rem;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)">
-    </div>
-    <div>
-      <label style="display:block;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670);margin-bottom:4px">Monto desde</label>
-      <input id="idp-m-min" type="number" step="0.01" placeholder="0.00" oninput="idpRender()" style="width:110px;padding:7px 9px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.82rem;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)">
-    </div>
-    <div>
-      <label style="display:block;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670);margin-bottom:4px">Monto hasta</label>
-      <input id="idp-m-max" type="number" step="0.01" placeholder="0.00" oninput="idpRender()" style="width:110px;padding:7px 9px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.82rem;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)">
-    </div>
-    <button onclick="idpLimpiarFiltros()" style="padding:7px 12px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;background:transparent;color:var(--text-secondary,#7a7670);font-size:0.78rem;font-weight:600;cursor:pointer">Limpiar</button>
-    <button onclick="idpCargar()" style="padding:7px 12px;border:none;border-radius:8px;background:var(--color-primary,#c46a7a);color:#fff;font-size:0.78rem;font-weight:700;cursor:pointer">Actualizar</button>
-  </div>
-
-  <div id="idp-lista" style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e2dc);border-radius:12px;overflow:hidden"></div>
-</div>
 
 <script>
 /* ══════════════════════════════════════════════════════════════════════════
@@ -24116,13 +24120,19 @@ function idpToast(msg) {
 function idpInit() {
   var sel = document.getElementById('idp-anio');
   if (sel && !sel.options.length) {
+    // "Todos" va PRIMERO y es el default: un cobro sin nombre de hace meses sigue
+    // sin nombre hoy. Arrancar filtrado por el año en curso escondía justo lo que
+    // hay que limpiar. El año queda como filtro opcional, no como recorte previo.
+    var oT = document.createElement('option');
+    oT.value = 'todos'; oT.textContent = 'Todos los años';
+    sel.appendChild(oT);
     var hoy = new Date().getFullYear();
     for (var a = hoy; a >= hoy - 2; a--) {
       var o = document.createElement('option');
       o.value = String(a); o.textContent = String(a);
       sel.appendChild(o);
     }
-    sel.value = String(hoy);
+    sel.value = 'todos';
   }
   idpCargar();
 }
@@ -24208,12 +24218,12 @@ function idpRender() {
     + '<th style="text-align:right;padding:10px 14px"></th></tr></thead><tbody>';
   for (var i = 0; i < rows.length; i++) {
     var p = rows[i];
-    h += '<tr id="idp-row-' + _escH(p.op) + '" style="border-bottom:1px solid var(--color-divider,#f0eeea)">'
+    h += '<tr id="idp-row-' + _escH(String(p.anio||'') + '-' + p.op) + '" style="border-bottom:1px solid var(--color-divider,#f0eeea)">'
       + '<td style="padding:11px 14px;color:var(--text-primary,#28251d)">' + _escH(p.fecha || '—') + '</td>'
       + '<td style="padding:11px 14px;text-align:right;font-weight:700;color:var(--text-primary,#28251d)">' + fmtMXN(p.monto) + '</td>'
       + '<td style="padding:11px 14px;color:var(--text-secondary,#7a7670)">' + _escH(p.metodoPago || '—') + '</td>'
       + '<td style="padding:11px 14px;text-align:right">'
-      + '<button onclick="idpIdentificar(\'' + _escJs(p.op) + '\')" style="padding:6px 14px;border:none;border-radius:7px;background:var(--color-primary,#c46a7a);color:#fff;font-size:0.76rem;font-weight:700;cursor:pointer">Identificar</button>'
+      + '<button onclick="idpIdentificar(\'' + _escJs(p.op) + '\',\'' + _escJs(String(p.anio||'')) + '\')" style="padding:6px 14px;border:none;border-radius:7px;background:var(--color-primary,#c46a7a);color:#fff;font-size:0.76rem;font-weight:700;cursor:pointer">Identificar</button>'
       + '</td></tr>';
   }
   h += '</tbody></table>';
@@ -24223,23 +24233,25 @@ function idpRender() {
 /* Abre el buscador de pacientes que ya existe (el de captura de ingresos) y
    arma el gancho para que nos entregue el nombre a NOSOTROS y no al
    formulario de ingresos. Ver ingSelectPacientePopup. */
-function idpIdentificar(op) {
+function idpIdentificar(op, anio) {
   _idpOpEnCurso = op;
-  window._idpPickCb = function(nombre) { idpAsignar(op, nombre); };
+  window._idpPickCb = function(nombre) { idpAsignar(op, nombre, anio); };
   if (typeof ingBuscarPacientePopup === 'function') ingBuscarPacientePopup();
 }
 var _idpOpEnCurso = '';
 
-async function idpAsignar(op, nombre) {
+async function idpAsignar(op, nombre, anio) {
   if (!op || !nombre) return;
   try {
     var s = (typeof getSession === 'function') ? getSession() : null;
-    var selA = document.getElementById('idp-anio');
+    // El año viene de LA FILA, no del selector: con "Todos los años" el selector
+    // no dice nada, y los folios se repiten entre libros (OP-00050 existe en 2025
+    // y en 2026). Mandar el año equivocado buscaría en el libro que no es.
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body: JSON.stringify({
       action: 'asignarPacienteNoLocalizado',
       token: getToken(),
       op: op, paciente: nombre,
-      anio: selA ? selA.value : '',
+      anio: anio || '',
       usuario: s ? (s.email || s.nombre || '') : ''
     })});
     var d = await r.json();
@@ -24250,8 +24262,12 @@ async function idpAsignar(op, nombre) {
       if (d && d.yaIdentificada) idpCargar();
       return;
     }
-    // Fuera de la lista + contador al día, sin recargar todo.
-    _idpData = _idpData.filter(function(p){ return p.op !== op; });
+    // Fuera de la lista + contador al día, sin recargar todo. Compara año+OP: con
+    // "Todos los años" hay folios repetidos entre libros y quitar solo por OP
+    // desaparecería también el homónimo de otro año, que sigue sin nombre.
+    _idpData = _idpData.filter(function(p){
+      return !(p.op === op && String(p.anio||'') === String(anio||''));
+    });
     idpRender();
     idpToast('✓ ' + nombre);
   } catch (e) {

@@ -241,6 +241,12 @@ function _identNum(v) {
    Deliberadamente nada más: esta respuesta es todo lo que verá alguien que
    no tiene permiso de Ingresos.
    Filtros: anio, fechaIni, fechaFin (YYYY-MM-DD), montoMin, montoMax.
+
+   El DEFAULT es TODOS los años (anio vacío o 'todos'): el usuario pidió
+   explícitamente que este módulo NO dependa del filtro de fecha, porque hay que
+   poder asignar "todos los que falten" — un cobro sin nombre de hace 8 meses
+   sigue sin nombre hoy, y filtrarlo por el año en curso lo escondía. Los filtros
+   son AYUDAS para encontrar el propio cobro, no un recorte por defecto.
    ══════════════════════════════════════════════════════════════════════ */
 function listarNoLocalizados(params) {
   try {
@@ -248,11 +254,43 @@ function listarNoLocalizados(params) {
     if (!_tokenHasPermission(params.token || '', 'identificar_pacientes'))
       return { ok: false, error: 'Sin autorización (identificar_pacientes).' };
 
-    var anio = parseInt(params.anio, 10) || new Date().getFullYear();
-    var sh = _identSheetIngresos(anio);
-    if (!sh) return { ok: false, error: 'BD_Ingresos no encontrada para ' + anio + '.' };
+    // Años a barrer: uno concreto, o TODOS los libros de ingresos conocidos.
+    var anioReq = String(params.anio || '').replace(/^\s+|\s+$/g, '').toLowerCase();
+    var anios = [];
+    if (anioReq && anioReq !== 'todos') {
+      var n = parseInt(anioReq, 10);
+      if (n) anios.push(n);
+    }
+    if (!anios.length) {
+      // INGRESOS_IDS (finance.gs) = { 2026:…, 2025:…, 2024:… }. Al abrir un año
+      // nuevo basta agregarlo allí; aquí no hay nada que tocar.
+      try {
+        for (var y in INGRESOS_IDS) { var yy = parseInt(y, 10); if (yy) anios.push(yy); }
+      } catch (eY) {}
+      if (!anios.length) anios.push(new Date().getFullYear());
+      anios.sort(function (a, b) { return b - a; });   // más reciente primero
+    }
 
-    var data = sh.getDataRange().getValues();
+    // Cada fila viaja con SU año. Es imprescindible: los folios se generan por
+    // libro (_getNextOP barre la hoja del año), así que "OP-00050" puede existir
+    // en 2025 y en 2026. Sin el año, asignarPacienteNoLocalizado —que abre el
+    // libro de body.anio— buscaría en el libro equivocado, o peor, le pondría el
+    // nombre a la OP homónima de otro año. Por eso la llave de agrupación es
+    // anio|op y cada pendiente devuelve su anio.
+    var filas = [];
+    var aniosLeidos = [];
+    for (var ai = 0; ai < anios.length; ai++) {
+      var shA = null;
+      // Un año sin libro/hoja NO debe tumbar la lista completa: se salta.
+      try { shA = _identSheetIngresos(anios[ai]); } catch (eSh) { shA = null; }
+      if (!shA) continue;
+      var d = shA.getDataRange().getValues();
+      for (var di = 1; di < d.length; di++) filas.push({ r: d[di], anio: anios[ai] });
+      aniosLeidos.push(anios[ai]);
+    }
+    if (!aniosLeidos.length)
+      return { ok: false, error: 'No se pudo leer BD_Ingresos de ningún año (' + anios.join(', ') + ').', pendientes: [] };
+
     var fIni = String(params.fechaIni || '').substring(0, 10);
     var fFin = String(params.fechaFin || '').substring(0, 10);
     var mMin = (params.montoMin === '' || params.montoMin === undefined || params.montoMin === null)
@@ -262,22 +300,23 @@ function listarNoLocalizados(params) {
     if (mMin !== null && isNaN(mMin)) mMin = null;
     if (mMax !== null && isNaN(mMax)) mMax = null;
 
-    // Agrupar por OP: una operación son varias líneas; la paciente ve UNA fila.
+    // Agrupar por año|OP: una operación son varias líneas; ella ve UNA fila.
     var ops = {}, orden = [];
-    for (var i = 1; i < data.length; i++) {
-      var r = data[i];
+    for (var i = 0; i < filas.length; i++) {
+      var r = filas[i].r, anioFila = filas[i].anio;
       var op = String(r[0] || '').replace(/^\s+|\s+$/g, '');
       if (!op) continue;
       if (!_identEsNoLocalizado(r[IDENT_PAC_COL - 1])) continue;
 
-      if (!ops[op]) {
-        ops[op] = { op: op, fecha: _identFecha(r[2]), monto: 0, metodoPago: '' };
-        orden.push(op);
+      var key = anioFila + '|' + op;
+      if (!ops[key]) {
+        ops[key] = { op: op, anio: anioFila, fecha: _identFecha(r[2]), monto: 0, metodoPago: '' };
+        orden.push(key);
       }
-      ops[op].monto += _identNum(r[9]);                       // TotalPagar
+      ops[key].monto += _identNum(r[9]);                      // TotalPagar
       var fp = String(r[12] || '').replace(/^\s+|\s+$/g, ''); // FormaPago
-      if (fp && ops[op].metodoPago.indexOf(fp) === -1)
-        ops[op].metodoPago = ops[op].metodoPago ? (ops[op].metodoPago + ' + ' + fp) : fp;
+      if (fp && ops[key].metodoPago.indexOf(fp) === -1)
+        ops[key].metodoPago = ops[key].metodoPago ? (ops[key].metodoPago + ' + ' + fp) : fp;
     }
 
     var out = [];
@@ -287,12 +326,12 @@ function listarNoLocalizados(params) {
       if (fFin && o.fecha && o.fecha > fFin) continue;
       if (mMin !== null && o.monto < mMin) continue;
       if (mMax !== null && o.monto > mMax) continue;
-      out.push({ op: o.op, fecha: o.fecha, monto: Math.round(o.monto * 100) / 100, metodoPago: o.metodoPago });
+      out.push({ op: o.op, anio: o.anio, fecha: o.fecha, monto: Math.round(o.monto * 100) / 100, metodoPago: o.metodoPago });
     }
     // Más recientes primero: es donde ella va a reconocer a su paciente.
     out.sort(function (a, b) { return a.fecha < b.fecha ? 1 : (a.fecha > b.fecha ? -1 : 0); });
 
-    return { ok: true, anio: String(anio), pendientes: out, total: out.length };
+    return { ok: true, anios: aniosLeidos, pendientes: out, total: out.length };
   } catch (ex) {
     return { ok: false, error: ex.message, pendientes: [] };
   }
