@@ -234,12 +234,13 @@ function _cobReadAbonos() {
       if (!out.susByPac[kp]) out.susByPac[kp] = [];
       out.susByPac[kp].push(rec);
     } else {
-      // 'abono-op' = abono del botón "Cobrar / Abonar" de una OP (finance.abonarIngreso).
-      // Ese flujo YA subió Pagado en BD_Ingresos y recomputó el renglón auto-ingreso de
-      // Cuentas_Cobrar (MontoCargo = Facturado − Pagado). Por eso NO se resta otra vez
-      // por OP aquí: haría doble conteo del mismo cobro. Queda en 'rows' (historial/traza
-      // y "Mis abonos"); el saldo canónico vive en el MontoCargo del renglón auto-ingreso.
-      if (op && tipo !== 'abono-op') out.byOp[op] = (out.byOp[op] || 0) + monto;
+      // 'abono-op'    = abono del botón "Cobrar / Abonar" de una OP (finance.abonarIngreso).
+      // 'abono-cargo' = abono a un cargo explícito de Cuentas_Cobrar (cobranza.abonarCargo).
+      // Ambos flujos YA dejaron el saldo canónico escrito en el MontoCargo del renglón de
+      // Cuentas_Cobrar ('abono-op' lo recomputa como Facturado − Pagado; 'abono-cargo' lo
+      // decrementa directo). Por eso NO se restan otra vez por OP aquí: sería doble conteo
+      // del mismo cobro. Quedan en 'rows' (historial/traza y "Mis abonos").
+      if (op && tipo !== 'abono-op' && tipo !== 'abono-cargo') out.byOp[op] = (out.byOp[op] || 0) + monto;
       var kp2 = _cobKeyNom(pac);
       if (!out.byPac[kp2]) out.byPac[kp2] = 0;
       out.byPac[kp2] += monto;
@@ -413,6 +414,10 @@ function _cobBuildSaldos() {
   }
   var itemsByOp = _cobMasked() ? {} : _cobItemsForOps(opsNeeded);
   var itemsByPac = _cobMasked() ? {} : _cobItemsForPacientes(pacsNeeded);
+  // Crédito a favor disponible por paciente — lo consume el botón "Cobrar / Abonar"
+  // (ruta auto-ingreso → abonarIngreso). Nunca debe tumbar la vista.
+  var credByPac = {};
+  try { credByPac = _cobReadCreditos().byPac || {}; } catch (eCr) { credByPac = {}; }
   var out = [];
   for (var ci = 0; ci < cargos.rows.length; ci++) {
     var cg = cargos.rows[ci];
@@ -431,8 +436,18 @@ function _cobBuildSaldos() {
       else if (cg.op && itemsByOp[cg.op]) det = itemsByOp[cg.op]; // por OP
       else det = itemsByPac[_cobKeyNom(cg.paciente)] || [];       // por paciente (ej. REPROVIDA)
     }
+    // ¿Cómo se cobra este renglón? Lo decide quién MANDA sobre su MontoCargo:
+    //   auto=true  → lo escribe _cobRegistrarSaldoIngreso (Facturado − Pagado de la OP).
+    //                Cobrar = abonarIngreso (sube Pagado; el MontoCargo se recomputa solo).
+    //                Decrementarlo a mano aquí sería inútil: la próxima edición del ingreso
+    //                lo reescribe y el abono se perdería.
+    //   auto=false → cargo explícito (saldo inicial / cargo a crédito, con OP o sin ella).
+    //                No hay Pagado que subir: el MontoCargo ES el residual → abonarCargo.
+    var esAuto = String(cg.nota || '').toLowerCase().indexOf('auto-ingreso') > -1 && !!cg.op;
     out.push({
       origen: 'registro', rowNum: cg.rowNum, op: cg.op || '—',
+      auto: esAuto,
+      credito: esAuto ? (credByPac[_cobKeyNom(cg.paciente)] || 0) : 0,
       paciente: _cobMasked() ? (cg.op ? _privPaciente(cg.op) : 'Paciente') : cg.paciente,
       segmento: _cobSegmento(cg.categoria, cg.concepto),
       categoria: cg.categoria, concepto: cg.concepto || cg.estatus || 'Saldo',
@@ -1100,6 +1115,228 @@ function cargarSaldoInicial(body) {
     return { ok: true, version: COBRANZA_VER, fecha: fecha, monto: monto };
   } catch (ex) {
     return { ok: false, error: ex.message, version: COBRANZA_VER };
+  }
+}
+
+/* ═════════ COBRAR / ABONAR un CARGO EXPLÍCITO de Cuentas_Cobrar ═════════
+ * Hermano de finance.abonarIngreso, para los renglones que NO nacen de una venta con
+ * pago parcial: saldos iniciales y cargos a crédito (ej. REPROVIDA), con o sin OP.
+ * Ahí NO hay Pagado que subir en BD_Ingresos (no hay líneas propias en la venta): el
+ * saldo canónico ES el MontoCargo del renglón (Motor A de saldos explícitos), así que
+ * abonar = decrementar ese MontoCargo. Atómico (LockService):
+ *   1) Cuentas_Cobrar → MontoCargo −= abono. Si llega a ~0 se cierra (Estatus 'Pagado')
+ *      y sale de la lista (_cobBuildSaldos salta 'pagado'; _cobReadCargos salta monto 0).
+ *   2) Abonos_Cobrar → historial con tipo 'abono-cargo'. Ese tipo NO se resta por OP en
+ *      _cobReadAbonos: el saldo YA bajó en el MontoCargo → restarlo otra vez sería doble
+ *      conteo (justo lo que pasa con los abonos viejos tipo 'saldo').
+ *   3) Conciliación bancaria → UN movimiento de INGRESO por el efectivo, ruteado por forma
+ *      de pago con el MISMO mapa que un ingreso (_abonoRutearABanco), etiquetado
+ *      [CxC #<fila>] — no [OP #…]: este dinero no pertenece a ninguna OP.
+ * Cuentas_Cobrar no tiene columna ID estable → tras tomar el lock se RE-LEE y RE-VALIDA el
+ * renglón (paciente, concepto y saldo esperados) antes de escribir: si alguien borró filas
+ * entre el render y el guardado, el rowNum apuntaría a OTRA cuenta. Se rechaza en vez de
+ * abonarle al renglón equivocado. Ese mismo candado hace que un doble clic no duplique.
+ */
+function abonarCargo(body) {
+  try {
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'editar_ingresos'))
+      return { ok: false, error: 'Sin autorización para cobrar/abonar (requiere el permiso editar_ingresos).' };
+    // Fail-closed ante deploy parcial: si falta el ruteo a bancos NO se escribe nada
+    // (si no, el saldo bajaría y el dinero jamás llegaría a conciliación — el bug original).
+    if (typeof _abonoRutearABanco !== 'function')
+      return { ok: false, error: 'Actualiza finance.gs en Apps Script y redespliega (falta _abonoRutearABanco).' };
+    var rn = parseInt(body.rowNum, 10);
+    if (!rn || rn < 2) return { ok: false, error: 'Fila inválida' };
+    var monto = _cobNum(body.monto);
+    if (monto <= 0.01) return { ok: false, error: 'Nada que abonar (monto en 0).' };
+    var formaPago = String(body.formaPago || 'Transferencia').trim();
+    var comisionMP = Math.abs(_cobNum(body.comisionMP));
+    var fecha = body.fecha ? _cobStr(_cobD(body.fecha)) : _cobStr(_cobToday());
+    var usuario = String(body.usuario || '');
+
+    var lock = LockService.getScriptLock();
+    if (!lock.tryLock(20000)) return { ok: false, error: 'Sistema ocupado, reintenta en un momento.' };
+    try {
+      var sh = SpreadsheetApp.openById(INGRESOS_SS_ID).getSheetByName(COBRANZA_CARGOS);
+      if (!sh) return { ok: false, error: 'No se encontró la hoja ' + COBRANZA_CARGOS };
+      if (rn > sh.getLastRow()) return { ok: false, error: 'Esa cuenta por cobrar ya no existe. Recarga la lista y reintenta.' };
+      var lc = Math.max(sh.getLastColumn(), 1);
+      var hdr = sh.getRange(1, 1, 1, lc).getValues()[0].map(function (x) { return String(x).trim().toLowerCase(); });
+      var hi = function (name, def) { var k = hdr.indexOf(name); return k > -1 ? k : def; };
+      var iOp = hi('op', 1), iPac = hi('paciente', 2), iConc = hi('concepto', 4),
+          iMonto = hi('montocargo', 5), iEst = hi('estatus', 6), iNota = hi('nota', 7);
+      var row = sh.getRange(rn, 1, 1, lc).getValues()[0];
+
+      // ── RE-VALIDACIÓN del renglón (sin ID estable, la fila pudo moverse o borrarse) ──
+      var saldoActual = _cobNum(row[iMonto]);
+      var estActual = _cobLower(row[iEst]);
+      if (estActual === 'pagado' || estActual === 'cancelado')
+        return { ok: false, error: 'Esa cuenta por cobrar ya está ' + estActual + '. Recarga la lista.' };
+      if (String(row[iNota] || '').toLowerCase().indexOf('auto-ingreso') > -1)
+        return { ok: false, error: 'Ese saldo viene de la venta ' + String(row[iOp] || '') + ': cóbralo con "Cobrar / Abonar" para que suba el Pagado de la venta.' };
+      if (body.paciente != null && String(body.paciente) !== '' && _cobKeyNom(body.paciente) !== _cobKeyNom(row[iPac]))
+        return { ok: false, error: 'La cuenta por cobrar cambió (otro paciente). Recarga la lista y reintenta.' };
+      if (body.concepto != null && String(body.concepto) !== '' && _cobLower(body.concepto) !== _cobLower(row[iConc]))
+        return { ok: false, error: 'La cuenta por cobrar cambió (otro concepto). Recarga la lista y reintenta.' };
+      if (body.saldoEsperado != null && String(body.saldoEsperado) !== '' && Math.abs(_cobNum(body.saldoEsperado) - saldoActual) > 0.01)
+        return { ok: false, error: 'El saldo cambió (ahora es ' + saldoActual.toFixed(2) + '). Recarga la lista y reintenta.' };
+      if (monto > saldoActual + 0.01)
+        return { ok: false, error: 'El abono (' + monto.toFixed(2) + ') supera el saldo de la cuenta (' + saldoActual.toFixed(2) + '). Ajusta el monto.' };
+
+      var paciente = String(row[iPac] || '').trim();
+      var opRef = String(row[iOp] || '').trim();
+      var nuevoSaldo = saldoActual - monto; if (nuevoSaldo < 0) nuevoSaldo = 0;
+
+      // 1) Saldo canónico: decrementa el MontoCargo y cierra el renglón si quedó en 0.
+      sh.getRange(rn, iMonto + 1).setValue(nuevoSaldo);
+      if (nuevoSaldo <= 0.01) sh.getRange(rn, iEst + 1).setValue('Pagado');
+
+      // 2) Historial del abono (tipo 'abono-cargo' → no se resta otra vez).
+      try {
+        registrarAbono({ op: opRef, paciente: paciente, monto: monto, tipo: 'abono-cargo',
+          formaPago: formaPago, fecha: fecha, usuario: usuario,
+          nota: String(body.nota || '') || ('Abono a cuenta por cobrar [CxC #' + rn + ']') });
+      } catch (eA) {}
+
+      // 3) Movimiento bancario por el efectivo cobrado, etiquetado [CxC #<fila>].
+      var bancoInfo = _abonoRutearABanco('', paciente, monto, formaPago, fecha, comisionMP,
+        'Cobro/abono cuenta por cobrar · Px. ' + paciente + ' [CxC #' + rn + ']');
+
+      try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch (e) {}
+      if (typeof logAudit === 'function') {
+        try { logAudit(usuario || 'sistema', 'Cobranza', 'Abonar cuenta por cobrar', 'CxC #' + rn, 'MontoCargo',
+                saldoActual.toFixed(2), nuevoSaldo.toFixed(2) + ' (abono ' + monto.toFixed(2) + ' · ' + formaPago + ')'); } catch (ae) {}
+      }
+
+      return { ok: true, version: COBRANZA_VER, rowNum: rn, paciente: paciente, op: opRef,
+               abonado: monto, saldoAntes: saldoActual, saldo: nuevoSaldo,
+               cerrado: (nuevoSaldo <= 0.01), formaPago: formaPago, banco: bancoInfo };
+    } finally { lock.releaseLock(); }
+  } catch (ex) {
+    return { ok: false, error: ex.message, version: COBRANZA_VER };
+  }
+}
+
+/* ═════════ AUDITORÍA: abonos huérfanos del flujo viejo (SOLO LECTURA) ═════════
+ * Correr A MANO desde el editor de Apps Script. NO repara nada, NO escribe nada:
+ * solo reporta qué quedó descuadrado por el bug del botón "Abono" de Cuentas por Cobrar.
+ *
+ * El bug: ese botón llamaba a registrarAbono(), que únicamente hacía appendRow en
+ * Abonos_Cobrar con tipo 'saldo'. NUNCA subía el Pagado de BD_Ingresos ni creaba el
+ * movimiento bancario. O sea: el abono quedó anotado, pero el dinero no entró a ningún
+ * libro. Todo abono con tipo 'saldo' es sospechoso y sale listado aquí.
+ *
+ * Efecto colateral que hay que entender al leer el reporte:
+ *   · Abono tipo 'saldo' CON OP  → _cobReadAbonos SÍ lo resta por OP, así que el saldo en
+ *     pantalla SÍ bajó… aunque el Pagado nunca subió y el banco nunca lo vio. El adeudo
+ *     se ve saldado y el dinero no está en ninguna cuenta: descuadre silencioso.
+ *   · Abono tipo 'saldo' SIN OP  → nunca se restó de nada (_cobBuildSaldos fuerza abo=0
+ *     cuando el cargo no trae OP), así que además el saldo jamás bajó: el paciente sigue
+ *     apareciendo debiendo lo mismo por más abonos que se le hayan registrado.
+ *
+ * "Banco" es una BÚSQUEDA HEURÍSTICA por texto (la OP en las Observaciones de Santander /
+ * Mercado Pago / AMEX / Caja Chica). Un "sí" no prueba que ese movimiento sea este abono
+ * (pudo ser el cobro original de la venta); un "no" sí es señal fuerte de que faltó.
+ * Verifica a mano antes de tocar nada.
+ */
+function auditarAbonosHuerfanos() {
+  var L = [];
+  function log(s) { L.push(s); try { Logger.log(s); } catch (e) {} }
+  try {
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var shAb = ss.getSheetByName(COBRANZA_ABONOS);
+    if (!shAb) return 'No existe la hoja ' + COBRANZA_ABONOS + ' — nada que auditar.';
+
+    // ── OPs de BD_Ingresos: Facturado / Pagado por OP ──
+    var opInfo = {};
+    try {
+      var shIn = ss.getSheetByName(BD_INGRESOS_TAB);
+      if (shIn) {
+        var din = shIn.getDataRange().getValues();
+        var HI = din[0].map(function (x) { return _cobLower(x); });
+        var hcI = function () { for (var a = 0; a < arguments.length; a++) { var k = HI.indexOf(arguments[a]); if (k > -1) return k; } return -1; };
+        var jOp = hcI('op'); if (jOp < 0) jOp = 0;
+        var jTot = hcI('totalpagar', 'total a pagar', 'total'), jPag = hcI('pagado');
+        for (var r = 1; r < din.length; r++) {
+          var o = String(din[r][jOp] || '').trim(); if (!o) continue;
+          if (!opInfo[o]) opInfo[o] = { total: 0, pagado: 0 };
+          opInfo[o].total += _cobNum(din[r][jTot]);
+          opInfo[o].pagado += (jPag > -1 ? _cobNum(din[r][jPag]) : 0);
+        }
+      }
+    } catch (eI) { log('! No se pudo leer BD_Ingresos: ' + eI.message); }
+
+    // ── Texto de las observaciones de todos los bancos (búsqueda heurística) ──
+    var bankTxt = [];
+    try {
+      if (typeof _bankSheetByKey === 'function' && typeof _bankObsIdx === 'function') {
+        var keys = ['santander', 'mercadopago', 'amex'];
+        for (var b = 0; b < keys.length; b++) {
+          var shB = null;
+          try { shB = _bankSheetByKey(keys[b]); } catch (eB0) { shB = null; }
+          if (!shB) continue;
+          var lrB = shB.getLastRow(); if (lrB < 2) continue;
+          var idx = _bankObsIdx(keys[b]);
+          var valsB = shB.getRange(2, 1, lrB - 1, shB.getLastColumn()).getValues();
+          for (var vb = 0; vb < valsB.length; vb++) bankTxt.push(String(valsB[vb][idx] || ''));
+        }
+      }
+      if (typeof getCajaChicaSheet === 'function') {
+        var shC = getCajaChicaSheet();
+        if (shC && shC.getLastRow() > 1) {
+          var valsC = shC.getRange(2, 1, shC.getLastRow() - 1, shC.getLastColumn()).getValues();
+          for (var vc = 0; vc < valsC.length; vc++) {
+            for (var cc = 0; cc < valsC[vc].length; cc++) {
+              var cel = String(valsC[vc][cc] || ''); if (cel.length > 3) bankTxt.push(cel);
+            }
+          }
+        }
+      }
+    } catch (eB) { log('! No se pudieron leer los bancos: ' + eB.message); }
+    var bankBlob = bankTxt.join('  ');
+
+    // ── Barrido de Abonos_Cobrar ──
+    var raw = shAb.getDataRange().getValues();
+    var nTot = 0, nSaldo = 0, sumSaldo = 0, sumSinBanco = 0, nSinBanco = 0, nSinOp = 0, sumSinOp = 0;
+    var det = [];
+    for (var i = 1; i < raw.length; i++) {
+      var rr = raw[i];
+      var monto = _cobNum(rr[3]); if (monto <= 0) continue;
+      nTot++;
+      var tipo = _cobLower(rr[6]);
+      if (tipo !== 'saldo') continue;              // 'abono-op' / 'abono-cargo' / 'suscripcion' = flujos sanos
+      nSaldo++; sumSaldo += monto;
+      var op = String(rr[1] || '').trim();
+      var pac = String(rr[2] || '').trim();
+      var fec = _cobStr(_cobD(rr[0]));
+      var enBanco = false;
+      if (op) enBanco = bankBlob.indexOf(op) > -1;
+      else if (pac) enBanco = bankBlob.indexOf(pac) > -1;
+      if (!enBanco) { nSinBanco++; sumSinBanco += monto; }
+      var oi = op ? opInfo[op] : null;
+      var pagTxt;
+      if (!op) { pagTxt = 'sin OP'; nSinOp++; sumSinOp += monto; }
+      else if (!oi) pagTxt = 'OP no está en BD_Ingresos';
+      else pagTxt = 'Facturado ' + oi.total.toFixed(2) + ' / Pagado ' + oi.pagado.toFixed(2) +
+                    ' / residual ' + Math.max(0, oi.total - oi.pagado).toFixed(2);
+      det.push('  fila ' + (i + 1) + ' · ' + fec + ' · ' + (op || '(sin OP)') + ' · ' + (pac || '(sin paciente)') +
+               ' · $' + monto.toFixed(2) + ' · ' + pagTxt + ' · banco: ' + (enBanco ? 'quizá sí' : 'NO ENCONTRADO'));
+    }
+
+    log('═══ AUDITORÍA DE ABONOS HUÉRFANOS (solo lectura) ═══');
+    log('Abonos en ' + COBRANZA_ABONOS + ': ' + nTot + ' con monto > 0.');
+    log('Del flujo VIEJO (tipo "saldo"): ' + nSaldo + ' por $' + sumSaldo.toFixed(2) + '.');
+    log('  · Sin movimiento bancario localizable: ' + nSinBanco + ' por $' + sumSinBanco.toFixed(2) + '.');
+    log('  · Sin OP (su saldo NUNCA bajó, siguen apareciendo como deuda): ' + nSinOp + ' por $' + sumSinOp.toFixed(2) + '.');
+    log('  · Con OP: el saldo en pantalla SÍ bajó (se resta en _cobReadAbonos), pero el Pagado');
+    log('    de BD_Ingresos no subió y el banco no vio el dinero → descuadre silencioso.');
+    log('Los tipos "abono-op" y "abono-cargo" son de los flujos nuevos y NO se listan.');
+    log(nSaldo ? '─── Detalle ───' : 'Sin abonos del flujo viejo: nada que reconciliar.');
+    for (var d = 0; d < det.length; d++) log(det[d]);
+    log('═══ Fin. Nada se modificó. Verifica a mano antes de corregir. ═══');
+    return L.join('\n');
+  } catch (ex) {
+    return 'Error en la auditoría: ' + ex.message + '\n' + L.join('\n');
   }
 }
 
