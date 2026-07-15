@@ -866,6 +866,11 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega cxp_creditos.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(cancelarOrdenCxP(body));
     }
+    if (body.action === 'cancelarVenta') {
+      if (typeof cancelarVenta !== 'function')
+        return jsonResponse({ok:false, error:'Agrega cancelacion.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(cancelarVenta(body));
+    }
     if (body.action === 'revertirAbonosDeOrden') {
       if (typeof revertirAbonosDeOrden !== 'function')
         return jsonResponse({ok:false, error:'Actualiza cxp_creditos.gs en Apps Script y redespliega.'});
@@ -1984,6 +1989,45 @@ function _ingColEnsure(sh, want, headerText) {
   sh.getRange(1, lastCol + 1).setFontWeight('bold').setBackground('#f3f4f6');
   return lastCol + 1;
 }
+
+/* ¿La celda de la columna 'Cancelada' de BD_Ingresos marca una venta cancelada?
+   Una venta cancelada NO suma en ningún reporte (mismo criterio que la fila
+   histórica 'Cancelada' de Egresos, board.gs:47 / semanal.gs:87).
+   Vive aquí (finance.gs siempre está desplegado) para que TODOS los lectores
+   —summary, analisis, presupuesto, facturacion— la puedan llamar sin depender
+   de que cancelacion.gs esté cargado. Ver cancelacion.gs.
+   Tolerante a la forma en que la hoja devuelva el booleano: casilla real (true),
+   texto 'TRUE'/'VERDADERO' (hoja en español) o el literal 'Cancelada'. */
+function _ingEsCancelada(v) {
+  if (v === true) return true;
+  var s = String(v == null ? '' : v).trim().toUpperCase();
+  return s === 'TRUE' || s === 'VERDADERO' || s === 'SI' || s === 'SÍ' || s === 'CANCELADA';
+}
+
+/* ¿La OP está cancelada? (busca la columna Cancelada por ENCABEZADO; si la hoja
+   todavía no la tiene, nada está cancelado → false).
+   Se usa para BLOQUEAR editar/borrar una venta cancelada: updateIngresoConBancos
+   BORRA las filas de banco de la OP (_bankDeleteByOp) — sobre una venta ya
+   cancelada eso destruiría el reverso y resucitaría el cobro. */
+function _ingOPCancelada(sheet, opId) {
+  try {
+    if (!sheet || !opId) return false;
+    var lc = sheet.getLastColumn(), lr = sheet.getLastRow();
+    if (lc < 1 || lr < 2) return false;
+    var hdr = sheet.getRange(1, 1, 1, lc).getValues()[0]
+      .map(function (h) { return String(h).trim().toLowerCase(); });
+    var iC = -1;
+    for (var c = 0; c < hdr.length; c++) { if (hdr[c] === 'cancelada') { iC = c; break; } }
+    if (iC < 0) return false;
+    var vals = sheet.getRange(2, 1, lr - 1, lc).getValues();
+    for (var r = 0; r < vals.length; r++) {
+      if (String(vals[r][0] || '').trim() !== String(opId).trim()) continue;
+      if (_ingEsCancelada(vals[r][iC])) return true;
+    }
+    return false;
+  } catch (e) { return false; }
+}
+
 var EGRESOS_MESES_FOLDER = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 // ── Partida automática de COMISIONES DE MERCADO PAGO ────────────────────
@@ -3123,13 +3167,17 @@ function _readFromBDIngresos(sheet) {
 
   // FacturaRFC/FacturaUUID/PagosDetalle se agregaron después (columnas dinámicas, no posición fija)
   var hdrs0 = raw[0]||[];
-  var idxFacRFC = -1, idxFacUUID = -1, idxPagosDet = -1, idxOrigen = -1;
+  var idxFacRFC = -1, idxFacUUID = -1, idxPagosDet = -1, idxOrigen = -1, idxCancel = -1, idxCancelData = -1;
   for (var hci=0; hci<hdrs0.length; hci++) {
     var h0=String(hdrs0[hci]).trim();
     if (h0==='FacturaRFC') idxFacRFC=hci;
     if (h0==='FacturaUUID') idxFacUUID=hci;
     if (h0==='PagosDetalle') idxPagosDet=hci;
     if (h0.toLowerCase().indexOf('origenexterno')>-1) idxOrigen=hci;
+    // Cancelación (cancelacion.gs). Comparación EXACTA: 'Cancelada' y
+    // 'CancelacionData' son columnas distintas y no deben confundirse.
+    if (h0.toLowerCase()==='cancelada') idxCancel=hci;
+    if (h0.toLowerCase()==='cancelaciondata') idxCancelData=hci;
   }
 
   var MESES_MAP = {'01':'Enero','02':'Febrero','03':'Marzo','04':'Abril','05':'Mayo','06':'Junio',
@@ -3149,9 +3197,13 @@ function _readFromBDIngresos(sheet) {
     var mesName = MESES_MAP[mesNum] || '';
     var mesIdx = MESES_IDX[mesName]; if (mesIdx === undefined) mesIdx = -1;
     var totalLinea = num(r[9]);
+    // Venta cancelada: SÍ se envía al frontend (la tabla debe mostrarla tachada
+    // y con badge — ese registro es justo lo que se quiere conservar), pero NO
+    // suma en ningún KPI ni resumen (ver el bloque de KPIs más abajo).
+    var _cancelada = (idxCancel>-1) && _ingEsCancelada(r[idxCancel]);
 
     if (!opTotals[op]) opTotals[op] = 0;
-    opTotals[op] += totalLinea;
+    if (!_cancelada) opTotals[op] += totalLinea;
 
     // BD_Ingresos cols: OP(0),Linea(1),Fecha(2),Paciente(3),Cat(4),Prod(5),
     // PVP(6),Desc(7),Cant(8),TotalPagar(9),Pagado(10),MontoFactMes(11),
@@ -3192,7 +3244,14 @@ function _readFromBDIngresos(sheet) {
         try { var arr = JSON.parse(s); return (arr && arr.length) ? arr : null; } catch(e){ return null; }
       })(),
       mes: mesName,
-      mesIdx: mesIdx
+      mesIdx: mesIdx,
+      cancelada: _cancelada,
+      cancelacion: (function(){
+        if (!_cancelada || idxCancelData<0) return null;
+        var s = String(r[idxCancelData]||'').trim();
+        if (!s) return null;
+        try { return JSON.parse(s); } catch(e){ return null; }
+      })()
     });
   }
 
@@ -3201,6 +3260,7 @@ function _readFromBDIngresos(sheet) {
   var catMap={},fpMap={},mesMap={};
   for (var ai=0;ai<allRows.length;ai++){
     var ar=allRows[ai];
+    if (ar.cancelada) continue;   // cancelada → no suma en KPIs, top-N ni resumen mensual
     totalAnual+=ar.totalPagar; totalPagado+=ar.pagado;
     if(ar.totalPagar>0){cP++;sP+=ar.totalPagar;}
     var c=ar.categoria||'Sin categoría';
@@ -3221,8 +3281,8 @@ function _readFromBDIngresos(sheet) {
   var rmArr=[];for(var mk in mesMap)rmArr.push(mesMap[mk]);
   rmArr.sort(function(a,b){return a.mesIdx-b.mesIdx;});
 
-  // Operaciones únicas para contar
-  var uniqueOps={};for(var ui=0;ui<allRows.length;ui++)uniqueOps[allRows[ui].id]=true;
+  // Operaciones únicas para contar (las canceladas no son operaciones del negocio)
+  var uniqueOps={};for(var ui=0;ui<allRows.length;ui++){if(allRows[ui].cancelada)continue;uniqueOps[allRows[ui].id]=true;}
   var numOps=Object.keys(uniqueOps).length;
 
   return {
@@ -5933,6 +5993,10 @@ function updateIngresoConBancos(payload) {
       if (sheets[i].getName() === BD_INGRESOS_TAB) { sheet = sheets[i]; break; }
     }
     if (!sheet) return {ok:false, error:'BD_Ingresos no encontrada'};
+    // Venta cancelada: NO se edita (esta ruta borra y re-crea las filas de banco
+    // de la OP → borraría el reverso de la cancelación y resucitaría el cobro).
+    if (_ingOPCancelada(sheet, opId))
+      return {ok:false, error:'La operación ' + opId + ' está cancelada: no se puede editar. Su registro de cancelación es histórico.'};
 
     var data = sheet.getDataRange().getValues();
     var origRows = [];
@@ -6058,6 +6122,9 @@ function deleteIngreso(payload) {
       if (sheets[i].getName() === BD_INGRESOS_TAB) { sheet = sheets[i]; break; }
     }
     if (!sheet) return {ok:false, error:'BD_Ingresos no encontrada'};
+    // Venta cancelada: NO se borra. Su registro es justamente lo que hay que conservar.
+    if (_ingOPCancelada(sheet, opId))
+      return {ok:false, error:'La operación ' + opId + ' está cancelada: su registro de cancelación no se borra.'};
 
     var data = sheet.getDataRange().getValues();
     var origRows = [];

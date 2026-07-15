@@ -85,10 +85,19 @@ function _anReadBDIngresos() {
     if (!sh) return null;
     var raw = sh.getDataRange().getValues();
     // cols: OP(0),Linea(1),Fecha(2),Paciente(3),Cat(4),Prod(5),PVP(6),Desc(7),Cant(8),TotalPagar(9),...
+    // 'Cancelada' se agregó DESPUÉS y va al final (cancelacion.gs): se localiza por
+    // encabezado, nunca por posición fija.
+    var _iCancel = -1;
+    var _h0 = raw[0] || [];
+    for (var _hc = 0; _hc < _h0.length; _hc++) {
+      if (String(_h0[_hc]).trim().toLowerCase() === 'cancelada') { _iCancel = _hc; break; }
+    }
     var byCatYear = {}, byProd = {}, byPaciente = {}, byMonth = {}, opSet = {};
     for (var r = 1; r < raw.length; r++) {
       var row = raw[r];
       var op = String(row[0]||'').trim(); if (!op) continue;
+      // Venta cancelada → no suma en mix/productos/pacientes/meses.
+      if (_iCancel > -1 && typeof _ingEsCancelada === 'function' && _ingEsCancelada(row[_iCancel])) continue;
       var f = row[2]; var d = (f instanceof Date) ? f : new Date(f);
       if (!d || isNaN(d.getTime())) continue;
       var y = d.getFullYear(), mo = d.getMonth()+1;

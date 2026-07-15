@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.14.201 -->
+﻿<!-- app-build:2026.07.14.202 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2891,7 +2891,7 @@ function _renderIngresosERP() {
       _opsMap[opId] = { id:opId, fecha:r.fecha, paciente:r.paciente, formaPago:r.formaPago,
         items:[], total:0, pagado:0, cats:[],
         factura:'', poliza:'', facturacion:false, conciliacion:false, contabilidad:false, archivoURL:'',
-        razonSocial:'', facturaRFC:'', facturaUUID:'' };
+        razonSocial:'', facturaRFC:'', facturaUUID:'', cancelada:false, cancelacion:null };
       _opsOrder.push(opId);
     }
     var op = _opsMap[opId];
@@ -2909,6 +2909,9 @@ function _renderIngresosERP() {
     if (r.facturaRFC)   op.facturaRFC   = r.facturaRFC;
     if (r.facturaUUID)  op.facturaUUID  = r.facturaUUID;
     if (r.pagosDetalle && r.pagosDetalle.length) op.pagosDetalle = r.pagosDetalle;
+    // Venta cancelada (cancelacion.gs): basta con que una línea lo traiga.
+    if (r.cancelada)    op.cancelada    = true;
+    if (r.cancelacion)  op.cancelacion  = r.cancelacion;
   });
 
   // Orden (clic en encabezado). Por defecto: OP descendente (más reciente arriba).
@@ -2929,7 +2932,7 @@ function _renderIngresosERP() {
     +'<div style="overflow-x:auto;max-height:65vh;overflow-y:auto">'
     +'<table class="ing-tbl"><thead><tr>'
     +'<th style="width:30px"></th>'+_ingTh('fecha','Fecha')+_ingTh('op','OP')+_ingTh('paciente','Paciente')+'<th>Categoría</th><th>Items</th>'+_ingTh('total','Total',' style="text-align:right"')+_ingTh('pagado','Pagado',' style="text-align:right"')+'<th>F. Pago</th><th style="min-width:120px">Estado fiscal</th>'
-    +((hasPermission('editar_ingresos')||hasPermission('borrar_ingresos'))?'<th style="width:80px">Acciones</th>':'')
+    +(_ingHasActions()?'<th style="width:80px">Acciones</th>':'')
     +'</tr></thead><tbody>');
 
   if(pageOps.length){
@@ -2962,23 +2965,33 @@ function _renderIngresosERP() {
         // Tiene factura pero no tiene póliza → pendiente de contabilizar
         _badges += '<span title="Facturado pero sin póliza contable — pendiente de registrar en contabilidad" style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px;background:#fef3c7;color:#92400e;border:1px solid #fcd34d;cursor:default;white-space:nowrap">⚠ Sin póliza</span>';
       }
-      if (!_badges) _badges = '<span style="font-size:9px;color:var(--text-secondary,#d1d5db)">—</span>';
-      h.push('<tr class="ing-op-row" onclick="ingToggleOp(\''+safeId+'\')">'
+      // ── Venta CANCELADA: se muestra tachada y con badge. NO desaparece: ese
+      //    registro es justamente lo que hay que conservar (ver cancelacion.gs).
+      if (op.cancelada) {
+        var _cInfo = op.cancelacion || {};
+        _badges = '<span title="Venta cancelada'
+          +(_cInfo.motivo?' — '+_cxpEsc(_cInfo.motivo):'')
+          +(_cInfo.fechaHora?' · '+_cxpEsc(_cInfo.fechaHora):'')
+          +(_cInfo.usuario?' · por '+_cxpEsc(_cInfo.usuario):'')
+          +'" style="font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px;background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;cursor:default;white-space:nowrap">⊘ CANCELADA</span>';
+      } else if (!_badges) _badges = '<span style="font-size:9px;color:var(--text-secondary,#d1d5db)">—</span>';
+      var _cancStyle = op.cancelada ? 'opacity:.62;text-decoration:line-through;text-decoration-color:#dc2626' : '';
+      h.push('<tr class="ing-op-row"'+(op.cancelada?' style="background:#fef2f2"':'')+' onclick="ingToggleOp(\''+safeId+'\')">'
         +'<td style="text-align:center"><span class="ing-op-toggle" id="ing-tog-'+safeId+'">▶</span></td>'
-        +'<td style="color:var(--text-secondary,#6b7280)">'+((op.fecha||'').substring(0,10)||'—')+'</td>'
-        +'<td style="font-family:monospace;font-size:10px;color:var(--color-primary,#c46a7a);font-weight:700">'+opId+'</td>'
-        +'<td style="font-weight:600;color:var(--text-primary,#111);max-width:180px;overflow:hidden;text-overflow:ellipsis">'+(op.paciente||'—')+'</td>'
+        +'<td style="color:var(--text-secondary,#6b7280);'+_cancStyle+'">'+((op.fecha||'').substring(0,10)||'—')+'</td>'
+        +'<td style="font-family:monospace;font-size:10px;color:var(--color-primary,#c46a7a);font-weight:700;'+_cancStyle+'">'+opId+'</td>'
+        +'<td style="font-weight:600;color:var(--text-primary,#111);max-width:180px;overflow:hidden;text-overflow:ellipsis;'+_cancStyle+'">'+(op.paciente||'—')+'</td>'
         +'<td style="font-size:10.5px;max-width:160px;overflow:hidden;text-overflow:ellipsis;color:var(--text-secondary,#374151)">'+catText+'</td>'
         +'<td style="text-align:center"><span class="ing-items-badge">'+op.items.length+'</span></td>'
-        +'<td style="font-weight:700">'+fC(op.total)+'</td>'
-        +'<td style="font-weight:600;color:'+(isPaid?'#166534':'#b45309')+'">'+fC(op.pagado)+'</td>'
+        +'<td style="font-weight:700;'+_cancStyle+'">'+fC(op.total)+'</td>'
+        +'<td style="font-weight:600;color:'+(op.cancelada?'#9ca3af':(isPaid?'#166534':'#b45309'))+';'+_cancStyle+'">'+fC(op.pagado)+'</td>'
         +'<td style="font-size:10.5px;color:var(--text-secondary,#6b7280)">'+(op.pagosDetalle&&op.pagosDetalle.length>1
             ?('<span title="'+op.pagosDetalle.map(function(p){return _cxpEsc(p.fp)+' '+fC(p.monto);}).join(' + ')+'" style="font-weight:700;color:#0c4a6e">'+op.pagosDetalle.map(function(p){return _cxpEsc(p.fp);}).join(' + ')+'</span>')
             :(op.formaPago||'—'))+'</td>'
         +'<td id="ing-badges-'+safeId+'" style="white-space:nowrap">'+_badges+'</td>'
-        +((hasPermission('editar_ingresos')||hasPermission('borrar_ingresos'))?'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'+(_ingReadOnly()?'<span style="font-size:10px;color:#9ca3af" title="Histórico (solo lectura)">🕮 histórico</span>':((hasPermission('editar_ingresos')?'<button class="btn-edit-row" onclick="ingEditOp(\''+opId.replace(/'/g,"\\'")+'\')">✎ Editar</button>':'')+(hasPermission('borrar_ingresos')?'<button class="btn-delete-row" onclick="ingDeleteOp(\''+opId.replace(/'/g,"\\'")+'\')">🗑</button>':'')))+'</td>':'')
+        +(_ingHasActions()?'<td style="text-align:center;white-space:nowrap" onclick="event.stopPropagation()">'+(_ingReadOnly()?'<span style="font-size:10px;color:#9ca3af" title="Histórico (solo lectura)">🕮 histórico</span>':_ingRowActions(op,opId))+'</td>':'')
         +'</tr>');
-      var colSpan = (hasPermission('editar_ingresos')||hasPermission('borrar_ingresos')) ? 11 : 10;
+      var colSpan = _ingHasActions() ? 11 : 10;
       // Fila expandible con detalle de líneas
       var _fiscalInputStyle='width:80px;padding:3px 7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11.5px;font-weight:700;background:var(--card-bg,#fff);color:var(--text-primary,#111)';
       var _fiscalBar = '<div style="display:flex;align-items:center;gap:12px;padding:7px 14px;background:var(--color-surface,#f3f4f6);border-bottom:1px solid var(--color-divider,#e5e7eb);flex-wrap:wrap">'
@@ -4651,6 +4664,33 @@ function ingEditOp(opId) {
 }
 
 
+/* ── Acciones por renglón de operación ───────────────────────────────────
+   CANCELAR y BORRAR conviven a propósito, y no son lo mismo:
+     ⊘ Cancelar (permiso cancelar_ingresos) → la venta REAL que se deshace.
+       Deja registro, mueve el banco y genera el comprobante de la paciente.
+       Es la vía normal y la que casi todos deben usar.
+     🗑 Borrar  (permiso borrar_ingresos, en la práctica admin) → destruye la
+       fila. Sigue existiendo SOLO para basura de captura (un renglón mal
+       tecleado, una prueba), donde no hay nada que rastrear. El backend ya
+       impide borrar una venta cancelada: su registro no se destruye.
+   ─────────────────────────────────────────────────────────────────────── */
+function _ingHasActions() {
+  return hasPermission('editar_ingresos') || hasPermission('borrar_ingresos') || hasPermission('cancelar_ingresos');
+}
+function _ingRowActions(op, opId) {
+  var q = opId.replace(/'/g, "\\'");
+  // Ya cancelada: no se edita ni se borra (el backend también lo rechaza).
+  // Lo único que tiene sentido es reimprimir el comprobante de la paciente.
+  if (op && op.cancelada) {
+    return '<button class="btn-edit-row" title="Reimprimir el comprobante de cancelación para la paciente" onclick="ingCancelPrintFromRow(\''+q+'\')">🖨 Comprobante</button>';
+  }
+  var b = '';
+  if (hasPermission('editar_ingresos'))   b += '<button class="btn-edit-row" onclick="ingEditOp(\''+q+'\')">✎ Editar</button>';
+  if (hasPermission('cancelar_ingresos')) b += '<button class="btn-delete-row" style="background:#fff7ed;border-color:#fdba74;color:#c2410c" title="Cancelar la venta (deja registro y genera el comprobante para la paciente)" onclick="ingCancelOp(\''+q+'\')">⊘ Cancelar</button>';
+  if (hasPermission('borrar_ingresos'))   b += '<button class="btn-delete-row" title="Borrar el renglón (solo para errores de captura: NO deja registro)" onclick="ingDeleteOp(\''+q+'\')">🗑</button>';
+  return b;
+}
+
 async function ingDeleteOp(opId) {
   if (_ingHistBlock()) return; // año histórico → solo lectura
   if (!hasPermission('borrar_ingresos')) { alert('No tienes permisos para borrar operaciones.'); return; }
@@ -4691,6 +4731,209 @@ function ingDeleteConfirm() {
 function ingDeleteCancel() {
   var modal = document.getElementById('modal-ing-delete');
   if (modal) modal.style.display = 'none';
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CANCELAR VENTA — registro + reverso de banco + comprobante a la paciente
+   Backend: cancelacion.gs (cancelarVenta). Ver ese archivo para el modelo.
+   ═══════════════════════════════════════════════════════════════════════ */
+var _ingCancelOp = null;      // OP en curso en el modal
+var _ingCancelFile = null;    // evidencia elegida (opcional)
+
+/* Formato de dinero para el modal y el comprobante. OJO: el fC() que usa la tabla
+   es local a _renderIngresosERP y NO se ve desde aquí; se usa el fmtMoney global
+   con el área Ingresos, que es exactamente lo que aquel hace por dentro. */
+function _ingFC(v) {
+  try { return fmtMoney(Math.abs(Number(v) || 0), 'Ingresos'); }
+  catch (e) { return '$' + (Number(v) || 0).toFixed(2); }
+}
+
+function _ingOpById(opId) {
+  try {
+    // La vista Ingresos vive en _ingData (no en sheetsData): ahí están las líneas
+    // del año seleccionado, ya con los campos cancelada/cancelacion del backend.
+    var rows = (_ingData && _ingData.rows) || [];
+    var out = { id: opId, paciente: '', fecha: '', total: 0, pagado: 0, formaPago: '', productos: [], cancelada: false, cancelacion: null };
+    rows.forEach(function (r) {
+      if (String(r.id) !== String(opId)) return;
+      out.paciente = out.paciente || r.paciente;
+      out.fecha = out.fecha || r.fecha;
+      out.formaPago = out.formaPago || r.formaPago;
+      out.total += r.totalPagar || 0;
+      out.pagado += r.pagado || 0;
+      if (r.producto) out.productos.push({ producto: r.producto, cantidad: r.cantidad || 1, total: r.totalPagar || 0 });
+      if (r.cancelada) out.cancelada = true;
+      if (r.cancelacion) out.cancelacion = r.cancelacion;
+    });
+    return out;
+  } catch (e) { return null; }
+}
+
+function ingCancelOp(opId) {
+  if (_ingHistBlock()) return;                       // año histórico → solo lectura
+  if (!hasPermission('cancelar_ingresos')) { alert('No tienes permisos para cancelar ventas. Solicita al administrador el permiso cancelar_ingresos.'); return; }
+  var op = _ingOpById(opId);
+  if (!op) { alert('No se encontró la operación ' + opId); return; }
+  if (op.cancelada) { alert('La operación ' + opId + ' ya está cancelada.'); return; }
+  _ingCancelOp = op; _ingCancelFile = null;
+
+  document.getElementById('ing-can-op').textContent = opId;
+  document.getElementById('ing-can-pac').textContent = op.paciente || '—';
+  document.getElementById('ing-can-desc').textContent = op.productos.map(function (p) { return p.producto; }).join(', ') || '—';
+  document.getElementById('ing-can-fecha').textContent = (op.fecha || '').substring(0, 10) || '—';
+  document.getElementById('ing-can-pagado').textContent = _ingFC(op.pagado);
+  document.getElementById('ing-can-motivo').value = '';
+  document.getElementById('ing-can-opbanco').value = '';
+  // Precargado con lo que la paciente pagó, editable.
+  document.getElementById('ing-can-importe').value = op.pagado ? op.pagado.toFixed(2) : '';
+  document.getElementById('ing-can-medio').value = op.formaPago || '';
+  document.getElementById('ing-can-file').value = '';
+  document.getElementById('ing-can-filename').textContent = '';
+  document.getElementById('ing-can-err').style.display = 'none';
+  document.getElementById('ing-can-step1').style.display = 'block';
+  document.getElementById('ing-can-step2').style.display = 'none';
+  var m = document.getElementById('modal-ing-cancel');
+  if (m) m.style.display = 'flex';
+}
+
+function ingCancelClose() {
+  var m = document.getElementById('modal-ing-cancel');
+  if (m) m.style.display = 'none';
+  _ingCancelOp = null; _ingCancelFile = null;
+}
+
+function ingCancelFilePick(input) {
+  var f = input.files && input.files[0];
+  if (!f) { _ingCancelFile = null; document.getElementById('ing-can-filename').textContent = ''; return; }
+  if (f.size > 8 * 1024 * 1024) { alert('La evidencia no puede pesar más de 8 MB.'); input.value = ''; return; }
+  _ingCancelFile = f;
+  document.getElementById('ing-can-filename').textContent = '📎 ' + f.name;
+}
+
+function _ingCanErr(msg) {
+  var e = document.getElementById('ing-can-err');
+  e.textContent = msg; e.style.display = 'block';
+}
+
+/* Paso 1 → 2: confirmar ANTES de escribir, mostrando qué se va a cancelar. */
+function ingCancelReview() {
+  var motivo = String(document.getElementById('ing-can-motivo').value || '').trim();
+  if (motivo.length < 5) { _ingCanErr('El motivo es obligatorio: explica por qué se cancela (mínimo 5 caracteres).'); return; }
+  var imp = parseFloat(String(document.getElementById('ing-can-importe').value || '').replace(/[$,\s]/g, ''));
+  if (isNaN(imp) || imp < 0) { _ingCanErr('Indica el importe a devolver a la paciente.'); return; }
+  document.getElementById('ing-can-err').style.display = 'none';
+  var op = _ingCancelOp || {};
+  document.getElementById('ing-can-rev').innerHTML =
+    '<div style="font-size:12.5px;line-height:1.9">'
+    + '<div><strong>Operación:</strong> ' + _cxpEsc(op.id || '') + '</div>'
+    + '<div><strong>Paciente:</strong> ' + _cxpEsc(op.paciente || '—') + '</div>'
+    + '<div><strong>Venta:</strong> ' + _cxpEsc(op.productos.map(function (p) { return p.producto; }).join(', ') || '—') + '</div>'
+    + '<div><strong>Motivo:</strong> ' + _cxpEsc(motivo) + '</div>'
+    + '<div><strong>Importe a devolver:</strong> <span style="color:#b91c1c;font-weight:800">' + _ingFC(imp) + '</span></div>'
+    + '<div><strong>Evidencia:</strong> ' + (_ingCancelFile ? _cxpEsc(_ingCancelFile.name) : '<span style="color:#9ca3af">sin archivo</span>') + '</div>'
+    + '</div>';
+  document.getElementById('ing-can-step1').style.display = 'none';
+  document.getElementById('ing-can-step2').style.display = 'block';
+}
+function ingCancelBack() {
+  document.getElementById('ing-can-step2').style.display = 'none';
+  document.getElementById('ing-can-step1').style.display = 'block';
+}
+
+function _ingFileToB64(file) {
+  return new Promise(function (res, rej) {
+    var fr = new FileReader();
+    fr.onload = function () { res(String(fr.result).split(',')[1] || ''); };
+    fr.onerror = function () { rej(new Error('No se pudo leer el archivo')); };
+    fr.readAsDataURL(file);
+  });
+}
+
+async function ingCancelConfirm() {
+  var btn = document.getElementById('ing-can-confirm-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Cancelando…'; }
+  try {
+    var op = _ingCancelOp || {};
+    var s = getSession() || {};
+    var body = {
+      action: 'cancelarVenta', token: getToken(), usuario: s.email || s.nombre || '',
+      op: op.id, anio: parseInt(_ingAnioSel, 10) || new Date().getFullYear(),
+      motivo: String(document.getElementById('ing-can-motivo').value || '').trim(),
+      opBanco: String(document.getElementById('ing-can-opbanco').value || '').trim(),
+      importeDevolver: parseFloat(String(document.getElementById('ing-can-importe').value || '').replace(/[$,\s]/g, '')) || 0,
+      medioPago: String(document.getElementById('ing-can-medio').value || '').trim()
+    };
+    if (_ingCancelFile) {
+      body.evidenciaBase64 = await _ingFileToB64(_ingCancelFile);
+      body.evidenciaNombre = _ingCancelFile.name;
+      body.evidenciaMime = _ingCancelFile.type || 'application/octet-stream';
+    }
+    var res = await fetch(APPS_SCRIPT_URL, { method: 'POST', body: JSON.stringify(body) }).then(function (r) { return r.json(); });
+    if (!res.ok) { _ingCanErr('Error al cancelar: ' + (res.error || 'no se pudo cancelar')); ingCancelBack(); return; }
+    ingCancelClose();
+    if (res.evidenciaError) alert('La venta se canceló, pero la evidencia no se pudo subir: ' + res.evidenciaError);
+    if (res.bancosError) alert('La venta se canceló, pero hubo un problema al registrar el movimiento en bancos: ' + res.bancosError);
+    // Comprobante para la paciente, listo para enviar por correo.
+    ingCancelPrint(op, res.cancelacion || {});
+    loadIngresosERP();
+  } catch (err) {
+    _ingCanErr('Error de conexión: ' + err.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Sí, cancelar la venta'; }
+  }
+}
+
+/* Reimprimir desde el renglón ya cancelado (sin volver a escribir nada). */
+function ingCancelPrintFromRow(opId) {
+  var op = _ingOpById(opId);
+  if (!op) { alert('No se encontró la operación ' + opId); return; }
+  if (!op.cancelacion) { alert('Esta operación está cancelada pero no tiene expediente de cancelación guardado (se canceló antes de que existiera el comprobante).'); return; }
+  ingCancelPrint(op, op.cancelacion);
+}
+
+/* ── COMPROBANTE PARA LA PACIENTE ─────────────────────────────────────────
+   Reusa el sistema de plantillas que ya existe: hfReportPrint('cancelacion', d)
+   con el contrato d estándar (kpis/cols/rows/totalLabel/totalValue/nota) →
+   hereda plantilla elegible, marca de agua, firma y datos de la clínica.
+
+   SIN COMISIONES, a propósito: la paciente ve UN importe limpio — el que ella
+   pagó y va a recibir de vuelta. El cargo de Mercado Pago, la comisión y el
+   desglose "Anulación de cargo" son asunto de la clínica y de su banco, y van
+   en la conciliación (fila REVERSO), NO en este documento.
+   ─────────────────────────────────────────────────────────────────────── */
+function ingCancelPrint(op, info) {
+  info = info || {};
+  var hoy = new Date().toISOString().substring(0, 10);
+  var imp = (info.importeDevolver != null) ? info.importeDevolver : (op.pagado || 0);
+  var medio = info.medioPago || op.formaPago || '';
+  var desc = (op.productos && op.productos.length)
+    ? op.productos.map(function (p) { return p.producto; }).join(', ')
+    : 'Servicio contratado';
+
+  var rows = [];
+  rows.push(['Operación', op.id || '—']);
+  rows.push(['Descripción', desc]);
+  rows.push(['Fecha de la operación', (info.fechaVenta || op.fecha || '').substring(0, 10) || '—']);
+  if (info.opBanco) rows.push(['N.º de operación', info.opBanco]);
+  if (medio) rows.push(['Medio de pago', medio]);
+  rows.push(['Fecha de cancelación', (info.fechaHora || hoy).substring(0, 10)]);
+
+  hfReportPrint('cancelacion', {
+    title: 'Comprobante de cancelación',
+    subject: info.paciente || op.paciente || '',
+    period: 'Emitido el ' + hoy,
+    generado: 'Hestia ERP · ' + hoy + (info.usuario ? ' · ' + info.usuario : ''),
+    kpis: [{ value: _ingFC(imp), label: 'Importe a devolver', sub: 'Reembolso en proceso' }],
+    cols: ['Concepto', 'Detalle'],
+    rows: rows,
+    totalLabel: 'Importe a devolver',
+    totalValue: _ingFC(imp),
+    nota: 'Su cancelación está confirmada. El reembolso por ' + _ingFC(imp)
+        + ' ya fue procesado por Hestia Fertility y se encuentra en trámite ante la institución bancaria emisora de su medio de pago. '
+        + 'El tiempo en que el importe se vea reflejado en su estado de cuenta depende exclusivamente de su banco '
+        + 'y suele tomar entre 5 y 20 días hábiles. No se requiere ninguna gestión adicional de su parte. '
+        + 'Agradecemos su confianza y quedamos a sus órdenes para cualquier aclaración.'
+  });
 }
 
 async function ingOpenDrawer() {
@@ -22366,6 +22609,7 @@ var _REPORT_TYPES=[
   {id:'cobranza',      label:'Cobranza (estado por paciente)', defaultTpl:'celula'},
   {id:'seguro',        label:'Carta de Seguro (formato fijo)', defaultTpl:'celula', fijo:true},
   {id:'nota',          label:'Nota / Recibo (no fiscal, formato fijo)', defaultTpl:'celula', fijo:true},
+  {id:'cancelacion',   label:'Comprobante de cancelaci\xf3n (paciente)', defaultTpl:'celula'},
   {id:'orden-compra',  label:'Orden de compra',            defaultTpl:'editorial'},
   {id:'inventario-mov',label:'Movimientos de inventario',  defaultTpl:'vida'},
   {id:'ingresos-res',  label:'Resumen de ingresos',        defaultTpl:'ejecutivo'},
@@ -23662,6 +23906,12 @@ var OP_PERMS_CATALOG = [
   {key:'bank_delete',      label:'Eliminar movimientos bancarios',   cat:'Conciliación Bancaria'},
   {key:'bank_liberado',    label:'Marcar liberado (MP)',             cat:'Conciliación Bancaria'},
   {key:'editar_ingresos',  label:'Editar operaciones de ingreso',    cat:'Ingresos'},
+  /* Permiso APARTE de editar_ingresos a propósito: cancelar una venta mueve
+     dinero hacia afuera (dispara el reembolso a la paciente y el reverso en el
+     banco) y la retira de todos los reportes. Editar corrige un dato; cancelar
+     deshace la venta. Al ser un permiso nuevo, de entrada SOLO admin/director
+     pueden cancelar hasta que se otorgue aquí explícitamente. */
+  {key:'cancelar_ingresos', label:'Cancelar ventas (deja registro, reversa el banco y emite el comprobante de la paciente)', cat:'Ingresos'},
   {key:'autorizar_credito_excedido', label:'Autorizar Nota de Crédito mayor al crédito a favor del paciente', cat:'Ingresos'},
   /* Permiso MÍNIMO a propósito: NO da acceso a Ingresos. Solo deja ponerle
      nombre a un cobro que quedó como "No localizado" (la página de citas cobra
@@ -33227,6 +33477,10 @@ function notaGenerar(){
  * aviso emergente (1 vez por versión) para quien tenga acceso a esas áreas.
  * Cada entrada puede llevar `perm`: si el usuario no lo tiene, se oculta. */
 var NOVEDADES=[
+  { build:'2026.07.15', fecha:'15 jul 2026', area:'Ingresos', icon:'⊘', perm:'cancelar_ingresos',
+    titulo:'Cancelar una venta: ahora queda registro (y la paciente recibe su comprobante)',
+    puntos:['Antes, deshacer una venta solo se podía con el bote de basura: BORRABA la operación y no quedaba rastro de qué se vendió, por qué se deshizo ni quién lo hizo. Para dinero eso no sirve.','Nuevo botón «⊘ Cancelar» en cada operación de Ingresos. La venta NO se borra: queda marcada como cancelada, tachada y con badge rojo en la tabla. Ese registro es justamente el punto.','Se pide MOTIVO (obligatorio), N.º de operación del banco, importe a devolver (viene precargado con lo que la paciente pagó) y, si quieres, EVIDENCIA (archivo, se guarda en Drive).','Antes de escribir nada te muestra qué se va a cancelar para que confirmes.','El dinero SÍ se refleja en bancos: Mercado Pago nos debita la devolución en el acto, así que se agrega un movimiento de REVERSO que baja el neto real de la cuenta (incluida la comisión que MP devuelve). La fila del cobro original queda intacta: así la conciliación cuadra renglón por renglón contra el estado de cuenta.','Si el cobro fue por Santander o Efectivo, el reverso sale de ese banco o de la caja.','La venta cancelada deja de sumar en Ingresos, Estado de Resultados, Board Deck, Presupuesto, Resumen Semanal y Análisis, y ya no aparece como pendiente por facturar.','Su saldo por cobrar se cierra solo: una venta que ya no existe no puede seguir cobrándose.','Al confirmar se abre el COMPROBANTE para la paciente, listo para enviar por correo: dice que su cancelación está confirmada y que el reembolso quedó en manos de su banco. Muestra UN importe limpio, sin comisiones.','Una venta cancelada ya no se puede editar ni borrar, y cancelarla dos veces no duplica nada.','Es un permiso NUEVO y aparte de «editar ingresos»: de entrada solo admin/director pueden cancelar. Dáselo a quien corresponda en Panel de Control → Gestión de Roles.'],
+    comoUsar:['Ingresos → localiza la operación → botón «⊘ Cancelar».','Captura el motivo (obligatorio), el N.º de operación y confirma el importe a devolver.','Adjunta evidencia si la tienes y pulsa «Continuar →».','Revisa el resumen y pulsa «Sí, cancelar la venta»: se abre el comprobante para imprimir o enviar a la paciente.','¿Necesitas reimprimirlo después? El renglón cancelado tiene el botón «🖨 Comprobante».'] },
   { build:'2026.07.15', fecha:'15 jul 2026', area:'Ingresos', icon:'🪪',
     titulo:'Identificar pacientes: ponerle nombre a los cobros «No localizado»',
     puntos:['Cuando una paciente paga desde la PÁGINA DE CITAS, Mercado Pago no nos manda su nombre: el cobro entra al ERP con el paciente en «No localizado».','Quien cobró (vendedora o enfermera) es la única que sabe de quién es ese pago — pero no tiene acceso a Ingresos, y no debe tenerlo.','Nueva vista «Identificar pacientes»: muestra SOLO los cobros sin nombre, con fecha, monto y método de pago. Nada más: ni productos, ni otras pacientes, ni importes de nadie más.','Solo cambia el NOMBRE. No mueve productos, ni montos, ni comisiones, ni la conciliación bancaria — ahí no se toca nada.','Ya identificado, deja de aparecer en la lista. Si otra persona lo identificó primero, el sistema avisa y no lo deja encimar: solo se pueden nombrar cobros que siguen sin nombre.','Si la paciente no existe todavía, se da de alta ahí mismo. Si el nombre se parece 90% o más a alguien que ya existe, el ERP pregunta «¿Es la misma persona?» y muestra los parecidos con su porcentaje.','Si de verdad son dos personas distintas con casi los mismos apellidos (sí pasa), eliges «No, es otra persona» y se da de alta igual. Nunca te bloquea.','Todo queda en auditoría: quién identificó qué cobro, cuándo y con qué nombre.'],
@@ -33508,12 +33762,38 @@ setTimeout(novCheckPopup, 2500);
       { h:'Facturación (pestaña dentro de Ingresos)', p:'Concilia los XML de Drive contra `BD_Ingresos` por folio/nombre/monto, detecta duplicados, permite subir un XML suelto y asignarlo a una OP, y genera el reporte **ContaDigital** (Ya facturado / Pendiente por facturar). Cualquier lector por OP fusiona los campos de **todas** las líneas (Factura#/URL puede vivir en una línea que no es la primera).' }
     ],
     datos:{
-      hojas:['`BD_Ingresos` (INGRESOS_SS_ID): col C=Fecha, col 5=Producto, col 10=TotalPagar, col 11=Pagado, col U(20)=Grupo/línea, `PagosDetalle` (JSON multipago)','`BD_Productos`/`BD_Precios` (PRODUCTOS_SS_ID = 1eXsk…DdIAY) alimentan el dropdown de venta'],
-      funciones:['saveIngreso','updateIngresoConBancos','_ingTodosProductos','readProductos','_cobRegistrarSaldoIngreso','_bankMpComisionDeOp'],
-      permisos:['captura / bank_capture','editar_ingresos','borrar_ingresos'],
+      hojas:['`BD_Ingresos` (INGRESOS_SS_ID): col C=Fecha, col 5=Producto, col 10=TotalPagar, col 11=Pagado, col U(20)=Grupo/línea, `PagosDetalle` (JSON multipago), `Cancelada` + `CancelacionData` (JSON del expediente, al final de la hoja)','`BD_Productos`/`BD_Precios` (PRODUCTOS_SS_ID = 1eXsk…DdIAY) alimentan el dropdown de venta'],
+      funciones:['saveIngreso','updateIngresoConBancos','_ingTodosProductos','readProductos','_cobRegistrarSaldoIngreso','_bankMpComisionDeOp','cancelarVenta','_ingEsCancelada','_ingOPCancelada'],
+      permisos:['captura / bank_capture','editar_ingresos','borrar_ingresos','cancelar_ingresos'],
       nota:'Formas de pago en `ING_FORMAS_PAGO`. «Nota de Crédito» NO rutea a banco (descuento no fiscal) pero SÍ descuenta el crédito a favor del paciente; sin crédito suficiente no deja guardar (salvo permiso `autorizar_credito_excedido`).'
     },
     ejemplo:'Paciente con total $30,000 que abona $18,000 en Santander: al guardar sale el aviso «se generará un saldo de $12,000». Ese saldo aparece luego en **Cuentas por Cobrar** del paciente.'
+  },
+
+  { id:'ingresos-cancelar', group:'operacion', icon:'⊘', title:'Cancelar una venta (registro, reverso de banco y comprobante)',
+    keywords:'cancelar venta cancelacion ingreso devolucion reembolso comprobante paciente motivo evidencia reverso mercado pago comision anulacion importe a devolver numero de operacion borrar operacion tachada badge cancelada registro traza imprimir correo',
+    intro:'**Cancelar** es la forma correcta de deshacer una venta: deja registro, mueve el dinero en el banco y le entrega a la paciente un comprobante. **No es lo mismo que borrar.** El bote de basura (🗑) destruye la fila y no deja rastro — existe solo para basura de captura. Para una venta real, siempre **⊘ Cancelar**.',
+    pasos:[
+      'Ve a **Ingresos → Detalle de operaciones** y localiza la venta. Pulsa **⊘ Cancelar** (requiere el permiso `cancelar_ingresos`).',
+      'Captura el **motivo** (obligatorio: sin él no deja cancelar), el **N.º de operación** del banco/Mercado Pago y el **importe a devolver** (viene precargado con lo que la paciente pagó; es editable).',
+      'Adjunta **evidencia** si la tienes (opcional): el archivo se guarda en Drive, en `Contabilidad\\Pagos\\<Año>\\<Mes>`.',
+      'Pulsa **Continuar →**: verás un resumen de lo que se va a cancelar **antes** de que se escriba nada. Confirma con **Sí, cancelar la venta**.',
+      'Se abre el **comprobante para la paciente**, listo para imprimir o enviar por correo. Para reimprimirlo después, el renglón cancelado tiene el botón **🖨 Comprobante**.'
+    ],
+    bloques:[
+      { h:'La venta no se borra: se marca', p:'La operación queda **tachada y con badge ⊘ CANCELADA** en la tabla, y ahí se queda. Ese registro es el objetivo de toda la función: se guarda el **motivo**, **quién** canceló, **cuándo**, el **N.º de operación**, el **importe a devolver** y la **evidencia**. Todo queda además en la auditoría (`BD_Auditoria`).\n\nUna venta cancelada **ya no se puede editar ni borrar** (el servidor lo rechaza, no solo la pantalla). Cancelarla dos veces **no duplica nada**: el sistema avisa que ya estaba cancelada y te deja reimprimir el comprobante.' },
+      { h:'Sí afecta bancos: se agrega un REVERSO', p:'A la clínica el dinero **se le va en el acto**: Mercado Pago debita la devolución al procesarla. Que la paciente tarde días en ver el abono en su tarjeta es asunto de su banco emisor.\n\nPor eso la cancelación **agrega un movimiento de reverso** — no borra el cobro original. La fila del CARGO se queda intacta porque es historia real, y el reverso la neutraliza. Así la conciliación cuadra **renglón por renglón** contra el estado de cuenta.\n\nMercado Pago también **devuelve la comisión**, así que el reverso la refleja: de un cobro de $1,800 con $73.08 de comisión, lo que baja de la cuenta es el **neto de $1,726.92** (Cobro −1,800 · Comisiones +73.08 · Tipo `REVERSO`).\n\nSi el cobro fue por **Santander** el reverso es un retiro; si fue **Efectivo**, una salida de caja chica.' },
+      { h:'Qué deja de contar', p:'La venta cancelada **deja de sumar** en Ingresos (totales, ticket promedio, top categorías), **Estado de Resultados (P&L)**, **Board Deck**, **Presupuesto**, **Resumen Semanal** y **Análisis**. Tampoco aparece ya como **pendiente por facturar**.\n\nSu **saldo por cobrar se cierra solo**: una venta que ya no existe no puede seguir apareciendo como deuda de la paciente.' },
+      { h:'El comprobante de la paciente: sin comisiones', p:'El documento le dice a la paciente que su **cancelación está confirmada** y que el reembolso quedó **en trámite ante su institución bancaria** — dejando claro que el tiempo depende del banco, no de la clínica.\n\nMuestra **UN solo importe limpio**: el que ella pagó y va a recibir. **No lleva** el cargo de Mercado Pago, ni la comisión, ni el desglose «Anulación de cargo». Eso es información de la clínica y vive en la conciliación, no en un documento para la paciente.\n\nSale por el mismo sistema de plantillas que los demás reportes: puedes elegir plantilla, marca de agua y firma desde **Panel de Control → Formato de reportes**.' },
+      { h:'Cancelar ≠ borrar (y por qué el permiso es aparte)', p:'`cancelar_ingresos` es un permiso **distinto** de `editar_ingresos` a propósito: editar corrige un dato, cancelar **deshace la venta y saca dinero**. Al ser nuevo, de entrada **solo admin/director** pueden cancelar hasta que se otorgue en **Panel de Control → Gestión de Roles**.\n\n`borrar_ingresos` (🗑) se mantiene aparte para errores de captura, donde no hay nada que rastrear.' }
+    ],
+    tecnico:{
+      hojas:['`BD_Ingresos`: columnas `Cancelada` (TRUE) y `CancelacionData` (JSON con motivo/usuario/fechaHora/opBanco/importeDevolver/medioPago/evidenciaUrl/bancos). Se crean solas al final de la hoja (`_ingColEnsure`), nunca por posición fija.','Hoja `Mercado Pago` (BANKS_SS_ID): fila nueva con `Tipo=REVERSO` y la obs `Cancelación · Px. … [OP-…]`','`Cuentas_Cobrar`: el cargo `auto-ingreso` de la OP queda en MontoCargo 0 y Estatus `Cancelado`'],
+      funciones:['cancelarVenta (cancelacion.gs)','_canReversarBancos','_canCerrarCxCobrar','_ingEsCancelada (finance.gs)','_ingOPCancelada (finance.gs)','ingCancelOp / ingCancelConfirm / ingCancelPrint (frontend)'],
+      permisos:['cancelar_ingresos'],
+      nota:'`cancelacion.gs` es un archivo NUEVO: hay que agregarlo al proyecto de Apps Script y redesplegar. Sigue el mismo patrón que la cancelación de órdenes de Egresos (`cancelarOrdenCxP`). NUNCA llama a `updateIngresoConBancos` (esa función borra y re-crea filas de banco).'
+    },
+    ejemplo:'Venta de $1,800 cobrada con Visa por Mercado Pago (comisión $73.08). Se cancela: la fila queda tachada con badge CANCELADA, en Mercado Pago aparece un REVERSO que baja $1,726.92 del saldo (la comisión también se devuelve), el total de Ingresos baja $1,800 y la paciente recibe un comprobante que dice «Importe a devolver: $1,800.00 — reembolso en proceso ante su institución bancaria».'
   },
 
   { id:'egresos', group:'operacion', icon:'💳', title:'Egresos y Cuentas por Pagar (CxP)',
@@ -34682,12 +34962,12 @@ setTimeout(novCheckPopup, 2500);
       tabs:[ {label:'Lista', active:true}, {label:'Facturación', n:5} ],
       toolbar:[ {t:'search', label:'Buscar paciente / OP…'}, {t:'btn', label:'+ Nuevo', pri:true, n:1} ],
       table:{ cols:['OP','Paciente','Producto','Total','Pagado','Formas de pago',{label:'',n:4}],
-        rows:[ ['OP-1042','A. López','Ciclo FIV Alta','$30,000',{label:'$18,000',n:3},{label:'Santander + AMEX',n:2},{raw:'<span class="hfm-mini">✎ · 🗑</span>'}],
-               ['OP-1041','B. Ruiz','Consulta','$1,200','$1,200','Efectivo','✎ · 🗑'] ] },
+        rows:[ ['OP-1042','A. López','Ciclo FIV Alta','$30,000',{label:'$18,000',n:3},{label:'Santander + AMEX',n:2},{raw:'<span class="hfm-mini">✎ · ⊘ · 🗑</span>'}],
+               ['OP-1041','B. Ruiz','Consulta','$1,200','$1,200','Efectivo','✎ · ⊘ · 🗑'] ] },
       callouts:[ {n:1,text:'**+ Nuevo** abre el formulario (estilo Odoo): eliges productos, cantidad, precio y paciente.'},
                  {n:2,text:'**Formas de pago**: si son varias (pago mixto), cada monto se rutea a su banco. Mercado Pago pide su **comisión** en un modal.'},
                  {n:3,text:'Si **Pagado < Total**, el sistema avisa antes de guardar y la diferencia queda como **cuenta por cobrar**.'},
-                 {n:4,text:'**✎ Editar** corrige la operación · **🗑** la borra (revierte su movimiento bancario).'},
+                 {n:4,text:'**✎ Editar** corrige la operación · **⊘ Cancelar** deshace la venta dejando registro y comprobante (lo normal) · **🗑** borra la fila sin dejar rastro (solo errores de captura).'},
                  {n:5,text:'Pestaña **Facturación**: concilia los XML/CFDI contra las ventas (ver «Comprobantes»).'} ] },
     steps:[
       'Abre **Ingresos → + Nuevo**.',
@@ -34702,7 +34982,9 @@ setTimeout(novCheckPopup, 2500);
       { k:'Pestaña Facturación', d:'Concilia los XML/CFDI contra tus ventas.' },
       { k:'+ Nuevo', d:'Abre el formulario para capturar una venta.' },
       { k:'✎ Editar (en la fila)', d:'Corrige productos, montos o formas de pago de esa operación.' },
-      { k:'🗑 (en la fila)', d:'Borra la operación y revierte su movimiento bancario (pide confirmar).' },
+      { k:'⊘ Cancelar (en la fila)', d:'Deshace la venta DEJANDO REGISTRO: pide motivo (obligatorio) y evidencia, reversa el dinero en el banco y genera el comprobante para la paciente. Es la vía normal para una venta real. Requiere el permiso cancelar_ingresos.' },
+      { k:'🗑 (en la fila)', d:'Borra la fila y revierte su movimiento bancario, SIN dejar rastro. Solo para errores de captura: para una venta real usa ⊘ Cancelar.' },
+      { k:'🖨 Comprobante (en una fila cancelada)', d:'Reimprime el comprobante de cancelación de la paciente. Aparece en lugar de Editar/Borrar: una venta cancelada ya no se toca.' },
       { k:'Campo «Núm. factura» (en la fila)', d:'Captura el folio de la factura de esa venta.' },
       { k:'Ver factura', d:'Aparece cuando ya está vinculada: abre el XML/PDF.' },
       { k:'+ producto / línea (dentro del formulario)', d:'Agrega otra línea a la misma venta. Con el teclado: Enter en Cant. (o Tab al final de la última línea) crea la siguiente; Ctrl+Enter agrega desde cualquier campo.' },
@@ -34718,9 +35000,52 @@ setTimeout(novCheckPopup, 2500);
       'En el buscador de producto no hace falta el nombre exacto: escribe un pedazo y `Enter` toma la primera coincidencia de la categoría elegida.'
     ],
     tech:{ hojas:['`BD_Ingresos` (INGRESOS_SS_ID): col C=Fecha, col 5=Producto, col 10=TotalPagar, col 11=Pagado, col U(20)=Grupo/línea, `PagosDetalle` (JSON multipago)','`BD_Productos`/`BD_Precios` (PRODUCTOS_SS_ID = 1eXsk…DdIAY) alimentan el dropdown de venta'],
-      funciones:['saveIngreso','updateIngresoConBancos','_ingTodosProductos','readProductos','_cobRegistrarSaldoIngreso','_bankMpComisionDeOp','ingEditOp','ingDeleteOp'],
-      permisos:['editar_ingresos','borrar_ingresos','bank_capture'],
+      funciones:['saveIngreso','updateIngresoConBancos','_ingTodosProductos','readProductos','_cobRegistrarSaldoIngreso','_bankMpComisionDeOp','ingEditOp','ingDeleteOp','ingCancelOp'],
+      permisos:['editar_ingresos','borrar_ingresos','cancelar_ingresos','bank_capture'],
       nota:'Formas de pago en `ING_FORMAS_PAGO`. El pago parcial llama `_cobRegistrarSaldoIngreso` (hoja `Cuentas_Cobrar`). El desglose de pago mixto vive en `PagosDetalle` (JSON) de la primera línea.' } },
+
+  { id:'ingresos-cancelar', group:'operacion', icon:'⊘', title:'Cancelar una venta',
+    keywords:'cancelar venta cancelacion ingreso devolucion reembolso comprobante paciente motivo evidencia reverso mercado pago comision importe a devolver numero de operacion borrar tachada badge cancelada registro imprimir correo banco',
+    para:'**Cancelar** es cómo se deshace una venta real: deja registro de qué pasó, mueve el dinero en el banco y le da a la paciente un comprobante para su correo. **No es borrar.** El bote 🗑 destruye la fila sin dejar rastro y existe solo para errores de captura.',
+    where:'Menú → Finanzas → **Ingresos** → botón **⊘ Cancelar** en el renglón de la operación.',
+    mock:{ title:'Cancelar venta', crumb:'Finanzas › Ingresos › Cancelar', period:'OP-1042',
+      table:{ cols:['Campo','Valor'],
+        rows:[ ['Paciente','A. López'],
+               ['Venta','Ciclo FIV Alta'],
+               [{label:'Motivo *',n:1},'La paciente canceló el tratamiento'],
+               [{label:'N.º de operación',n:2},'118829304773'],
+               [{label:'Importe a devolver *',n:3},'$1,800.00'],
+               [{label:'Evidencia',n:4},'📎 correo-paciente.pdf'] ] },
+      callouts:[ {n:1,text:'**Motivo obligatorio**: sin él no deja cancelar. Es el corazón del registro — explica *por qué* se deshizo la venta.'},
+                 {n:2,text:'**N.º de operación** del banco/Mercado Pago: sale impreso en el comprobante de la paciente.'},
+                 {n:3,text:'**Importe a devolver**: viene precargado con lo que la paciente pagó. Es lo que ella verá en el comprobante (sin comisiones).'},
+                 {n:4,text:'**Evidencia** (opcional): el archivo se guarda en Drive junto al expediente de la cancelación.'} ] },
+    steps:[
+      'En **Ingresos**, localiza la venta y pulsa **⊘ Cancelar**.',
+      'Captura el **motivo** (obligatorio), el **N.º de operación** y confirma el **importe a devolver**.',
+      'Adjunta **evidencia** si la tienes y pulsa **Continuar →**.',
+      'Revisa el resumen de lo que se va a cancelar y pulsa **Sí, cancelar la venta**.',
+      'Se abre el **comprobante de la paciente**: imprímelo o envíaselo por correo.'
+    ],
+    buttons:[
+      { k:'⊘ Cancelar (en la fila)', d:'Abre este modal. Requiere el permiso cancelar_ingresos.' },
+      { k:'Continuar →', d:'Valida el motivo y el importe, y te muestra el resumen ANTES de escribir nada.' },
+      { k:'Sí, cancelar la venta', d:'Marca la venta como cancelada, agrega el reverso en el banco, cierra su saldo por cobrar y abre el comprobante.' },
+      { k:'🖨 Comprobante (fila cancelada)', d:'Reimprime el comprobante cuando lo necesites. Sustituye a Editar/Borrar: una venta cancelada ya no se modifica.' }
+    ],
+    ejemplo:'Venta de **$1,800** con Visa por Mercado Pago (comisión $73.08). Al cancelar: el renglón queda **tachado con badge ⊘ CANCELADA**, en Mercado Pago entra un **REVERSO de −$1,726.92** (el neto real, porque MP también devuelve la comisión), el total de Ingresos baja **$1,800** y la paciente recibe un comprobante que dice **«Importe a devolver: $1,800.00»** y que el reembolso está en trámite ante su banco.',
+    tips:[
+      'La venta **no desaparece**: queda tachada y con badge. Ese registro es el objetivo de toda la función.',
+      'El dinero **sí sale del banco al cancelar**, porque Mercado Pago nos lo debita en el acto. Que la paciente lo vea en su tarjeta días después depende de su banco emisor, no de la clínica.',
+      'La fila del cobro original **no se borra**: se le agrega un reverso que la neutraliza. Así la conciliación cuadra renglón por renglón contra el estado de cuenta.',
+      'El comprobante de la paciente **nunca lleva comisiones**: ella ve un solo importe limpio. La comisión es asunto de la clínica y vive en la conciliación.',
+      'Cancelar dos veces **no duplica nada**: el sistema avisa que ya estaba cancelada y te deja reimprimir el comprobante.',
+      '¿No ves el botón? `cancelar_ingresos` es un permiso aparte de «editar ingresos» a propósito. Pídelo en **Panel de Control → Gestión de Roles**.'
+    ],
+    tech:{ hojas:['`BD_Ingresos`: columnas `Cancelada` + `CancelacionData` (JSON), creadas al final de la hoja con `_ingColEnsure`','Hoja `Mercado Pago` (BANKS_SS_ID): fila `Tipo=REVERSO` con Cobro −1800 / Comisiones +73.08 / TotalVenta −1726.92','`Cuentas_Cobrar`: el cargo de la OP queda en 0 con Estatus `Cancelado`'],
+      funciones:['cancelarVenta (cancelacion.gs)','_canReversarBancos','_canCerrarCxCobrar','_ingEsCancelada','_ingOPCancelada','ingCancelOp','ingCancelPrint'],
+      permisos:['cancelar_ingresos'],
+      nota:'`cancelacion.gs` es un archivo NUEVO: agrégalo al proyecto de Apps Script y redespliega. Mismo patrón que `cancelarOrdenCxP` (cancelación de órdenes de Egresos). El comprobante sale por `hfReportPrint(\'cancelacion\', …)`, así que hereda plantilla/marca de agua/firma de Panel de Control → Formato de reportes.' } },
 
   { id:'egresos', group:'operacion', icon:'💳', title:'Egresos y Cuentas por Pagar (CxP)',
     keywords:'egresos gasto cxp cuentas por pagar proveedor pagar credito abono cancelar cancelacion devolucion moneda extranjera usd tipo de cambio clasificacion factura pago fact cont checkbox nombre comercial año historico editar borrar correo de pago enviar duplicado nuevo proveedor inline conciliar poliza',
@@ -36093,6 +36418,80 @@ setTimeout(novCheckPopup, 2500);
     <div style="display:flex;gap:10px;justify-content:center">
       <button onclick="ingDeleteCancel()" style="padding:9px 22px;border:1.5px solid var(--color-border);border-radius:8px;background:var(--color-surface);color:var(--color-text);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Cancelar</button>
       <button id="ing-del-confirm-btn" onclick="ingDeleteConfirm()" style="padding:9px 22px;border:none;border-radius:8px;background:#b91c1c;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Sí, borrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: CANCELAR VENTA (registro + reverso de banco + comprobante) -->
+<div id="modal-ing-cancel" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:3000;align-items:center;justify-content:center">
+  <div style="background:var(--color-surface-2);border-radius:14px;padding:26px 26px 22px;max-width:520px;width:94%;max-height:92vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+    <h3 style="margin:0 0 4px;font-size:17px;color:var(--color-text)">⊘ Cancelar venta</h3>
+    <p style="margin:0 0 16px;font-size:12px;color:var(--color-text-muted)">
+      La venta <strong>no se borra</strong>: queda registrada como cancelada. Se reversa el
+      movimiento en el banco y se genera el comprobante para la paciente.
+    </p>
+
+    <div style="background:var(--color-surface);border-radius:9px;padding:11px 13px;margin-bottom:15px;font-size:12px;line-height:1.85;color:var(--color-text)">
+      <div><strong>Operación:</strong> <span id="ing-can-op" style="font-family:monospace"></span></div>
+      <div><strong>Paciente:</strong> <span id="ing-can-pac"></span></div>
+      <div><strong>Venta:</strong> <span id="ing-can-desc"></span></div>
+      <div><strong>Fecha:</strong> <span id="ing-can-fecha"></span> · <strong>Pagado:</strong> <span id="ing-can-pagado"></span></div>
+    </div>
+
+    <div id="ing-can-step1">
+      <label style="display:block;font-size:11.5px;font-weight:700;color:var(--color-text);margin-bottom:5px">Motivo de la cancelación <span style="color:#b91c1c">*</span></label>
+      <textarea id="ing-can-motivo" rows="3" placeholder="¿Por qué se cancela esta venta? (obligatorio)"
+        style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-border);border-radius:8px;font-size:12.5px;font-family:inherit;background:var(--color-surface);color:var(--color-text);resize:vertical"></textarea>
+
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <div style="flex:1">
+          <label style="display:block;font-size:11.5px;font-weight:700;color:var(--color-text);margin-bottom:5px">N.º de operación</label>
+          <input id="ing-can-opbanco" type="text" placeholder="Ref. del banco / Mercado Pago"
+            style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-border);border-radius:8px;font-size:12.5px;font-family:inherit;background:var(--color-surface);color:var(--color-text)">
+        </div>
+        <div style="flex:1">
+          <label style="display:block;font-size:11.5px;font-weight:700;color:var(--color-text);margin-bottom:5px">Importe a devolver <span style="color:#b91c1c">*</span></label>
+          <input id="ing-can-importe" type="text" inputmode="decimal"
+            style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-border);border-radius:8px;font-size:12.5px;font-weight:700;font-family:inherit;background:var(--color-surface);color:var(--color-text)">
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <label style="display:block;font-size:11.5px;font-weight:700;color:var(--color-text);margin-bottom:5px">Medio de pago <span style="font-weight:400;color:var(--color-text-muted)">(aparece en el comprobante)</span></label>
+        <input id="ing-can-medio" type="text" placeholder="Ej. Visa ···· 3933"
+          style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-border);border-radius:8px;font-size:12.5px;font-family:inherit;background:var(--color-surface);color:var(--color-text)">
+      </div>
+
+      <div style="margin-top:12px">
+        <label style="display:block;font-size:11.5px;font-weight:700;color:var(--color-text);margin-bottom:5px">Evidencia <span style="font-weight:400;color:var(--color-text-muted)">(opcional — se guarda en Drive)</span></label>
+        <input id="ing-can-file" type="file" accept=".pdf,.jpg,.jpeg,.png,.xml,.eml,.msg" onchange="ingCancelFilePick(this)"
+          style="width:100%;box-sizing:border-box;font-size:11.5px;color:var(--color-text)">
+        <div id="ing-can-filename" style="font-size:11px;color:var(--color-text-muted);margin-top:4px"></div>
+      </div>
+
+      <div id="ing-can-err" style="display:none;margin-top:12px;padding:9px 11px;border-radius:8px;background:#fee2e2;color:#991b1b;font-size:11.5px;font-weight:600"></div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">
+        <button onclick="ingCancelClose()" style="padding:9px 20px;border:1.5px solid var(--color-border);border-radius:8px;background:var(--color-surface);color:var(--color-text);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">Cerrar</button>
+        <button onclick="ingCancelReview()" style="padding:9px 20px;border:none;border-radius:8px;background:#c2410c;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Continuar →</button>
+      </div>
+    </div>
+
+    <!-- Paso 2: confirmar ANTES de escribir -->
+    <div id="ing-can-step2" style="display:none">
+      <div style="padding:11px 13px;border-radius:9px;background:#fff7ed;border:1.5px solid #fdba74;margin-bottom:14px">
+        <div style="font-size:12px;font-weight:800;color:#9a3412;margin-bottom:7px">Esto es lo que se va a cancelar:</div>
+        <div id="ing-can-rev" style="color:#7c2d12"></div>
+      </div>
+      <p style="margin:0 0 14px;font-size:11.5px;color:var(--color-text-muted);line-height:1.6">
+        Al confirmar: la venta queda marcada como cancelada (no se borra), se agrega el
+        movimiento de reverso en el banco, se cierra su saldo por cobrar y se abre el
+        comprobante para la paciente.
+      </p>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button onclick="ingCancelBack()" style="padding:9px 20px;border:1.5px solid var(--color-border);border-radius:8px;background:var(--color-surface);color:var(--color-text);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">← Volver</button>
+        <button id="ing-can-confirm-btn" onclick="ingCancelConfirm()" style="padding:9px 20px;border:none;border-radius:8px;background:#b91c1c;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Sí, cancelar la venta</button>
+      </div>
     </div>
   </div>
 </div>

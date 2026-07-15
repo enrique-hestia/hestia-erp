@@ -282,6 +282,7 @@ function _facReadOpsInRange(fechaInicio, fechaFin) {
   var hdrs = (raw[0] || []).map(function (h) { return String(h).trim().toLowerCase(); });
   var iUuid = hdrs.indexOf('facturauuid'), iRfc = hdrs.indexOf('facturarfc'), iRazon = hdrs.indexOf('razonsocial');
   var iPagosDet = hdrs.indexOf('pagosdetalle');
+  var iCancel = hdrs.indexOf('cancelada');   // cancelacion.gs
   var opsMap = {}, order = [];
   function dt(v) {
     if (!v) return '';
@@ -295,6 +296,8 @@ function _facReadOpsInRange(fechaInicio, fechaFin) {
     if (!op) continue;
     var fecha = dt(r[2]);
     if (fecha < fechaInicio || fecha > fechaFin) continue;
+    // Venta cancelada → no se factura ni cuenta como pendiente por facturar.
+    if (iCancel > -1 && typeof _ingEsCancelada === 'function' && _ingEsCancelada(r[iCancel])) continue;
     if (!opsMap[op]) {
       opsMap[op] = {
         id: op, fecha: fecha, paciente: String(r[3] || ''), total: 0,
@@ -344,6 +347,7 @@ function _facReadOpsConDetalleVenta(fechaInicio, fechaFin) {
   var sheet = ss.getSheetByName(BD_INGRESOS_TAB);
   if (!sheet) return [];
   var raw = sheet.getDataRange().getValues();
+  var iCancel = (raw[0] || []).map(function (h) { return String(h).trim().toLowerCase(); }).indexOf('cancelada');
   var opsMap = {}, order = [];
   function dt(v) {
     if (!v) return '';
@@ -355,6 +359,8 @@ function _facReadOpsConDetalleVenta(fechaInicio, fechaFin) {
     var r = raw[i];
     var op = String(r[0] || '').trim();
     if (!op) continue;
+    // Venta cancelada → fuera del análisis de descuento fiscal vs. venta.
+    if (iCancel > -1 && typeof _ingEsCancelada === 'function' && _ingEsCancelada(r[iCancel])) continue;
     var fecha = dt(r[2]);
     if (fecha < fechaInicio || fecha > fechaFin) continue;
     if (!opsMap[op]) {
@@ -388,6 +394,7 @@ function _facReadOpsPendientesDetalle(fechaInicio, fechaFin, opIds) {
   var sheet = ss.getSheetByName(BD_INGRESOS_TAB);
   if (!sheet) return {};
   var raw = sheet.getDataRange().getValues();
+  var iCancel = (raw[0] || []).map(function (h) { return String(h).trim().toLowerCase(); }).indexOf('cancelada');
   var wanted = {};
   opIds.forEach(function (id) { wanted[id] = true; });
   function dt(v) {
@@ -401,6 +408,8 @@ function _facReadOpsPendientesDetalle(fechaInicio, fechaFin, opIds) {
     var r = raw[i];
     var op = String(r[0] || '').trim();
     if (!op || !wanted[op]) continue;
+    // Venta cancelada → no se factura.
+    if (iCancel > -1 && typeof _ingEsCancelada === 'function' && _ingEsCancelada(r[iCancel])) continue;
     var fecha = dt(r[2]);
     if (fecha < fechaInicio || fecha > fechaFin) continue;
     if (!opsMap[op]) {
