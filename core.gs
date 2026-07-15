@@ -778,6 +778,22 @@ function doGet(e) {
       return jsonResponse(saveDropdownValues(JSON.parse(decodeURIComponent(ddData))));
     }
 
+    // ── Config del aviso de Novedades (novedades.gs) ──
+    // Lectura abierta a cualquier sesión: el filtro de audiencia corre en el frontend
+    // con hasPermission y para eso todos deben poder leer las banderas.
+    if (action === 'getNovedadesCfg') {
+      if (typeof readNovedadesCfg !== 'function')
+        return jsonResponse({ok:false, error:'Falta readNovedadesCfg() — agrega novedades.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readNovedadesCfg());
+    }
+    // El guardado valida admin/director DENTRO de saveNovedadesCfg (server-side).
+    if (action === 'saveNovedadesCfg') {
+      if (typeof saveNovedadesCfg !== 'function')
+        return jsonResponse({ok:false, error:'Falta saveNovedadesCfg() — agrega novedades.gs al proyecto de Apps Script y redespliega.'});
+      var novData = e.parameter.data || '{}';
+      return jsonResponse(saveNovedadesCfg(JSON.parse(decodeURIComponent(novData))));
+    }
+
     if (action === 'getFormatos') {
       return jsonResponse(readFormatos());
     }

@@ -520,6 +520,77 @@ function _presIngresosProy(tY, tQ) {
   return { grupos: grupos, totalImporte: totImp, crecimientoCant: gTot, kReciente: kRec, kAnioAnt: kAA };
 }
 
+/* ══ OMITIR LO NO AGRUPADO ══════════════════════════════════════════════════
+   Regla de negocio: "lo que no esté agrupado en el Presupuesto no se contempla en
+   la tabla ni en los reportes — se omite porque eso no se presupuesta".
+   Poda ingProd (grupos→subgrupos→productos) dejando SOLO los productos con grupo
+   asignado en 'Presupuesto_Grupos', y recalcula TODOS los importes hacia arriba.
+
+   Se filtra AQUÍ, en la fuente, a propósito: así la omisión es consistente POR
+   CONSTRUCCIÓN. ingresosGrupos, ingresosTotalProy y los escenarios base/conservador/
+   optimista (que se derivan de totalImporte) quedan sin lo no agrupado sin tocar a
+   cada lector — y el Board Deck, que lee proyeccionSeleccionada / ingresosGrupos vía
+   _boardPresLeeRaw, hereda la misma cifra. Un solo punto de verdad = no hay forma de
+   que la tabla diga una cosa y el Board Deck otra.
+
+   ⚠ GUARDA: si NO hay agrupación configurada (productoARuta vacío) NO se filtra nada.
+   Sin esa guarda "todo estaría sin grupo" y el presupuesto entero se iría a CERO en
+   cualquier instalación que aún no haya configurado ⚙ Grupos.
+
+   Devuelve el detalle de lo excluido para poder AVISARLO en pantalla (nunca se
+   esconde en silencio: un olvido al agrupar no debe volverse un hueco invisible). */
+function _presPodaSinGrupo(ingProd, rutaDe) {
+  var out = { aplicado: false, n: 0, importe: 0, productos: [] };
+  if (!ingProd || !rutaDe) return out;
+  if (!Object.keys(rutaDe).length) return out;      // sin agrupación configurada → no se filtra
+  var norm = {};
+  Object.keys(rutaDe).forEach(function (k) { norm[String(k).trim().toLowerCase()] = 1; });
+  function agrupado(p) { return !!norm[String(p || '').trim().toLowerCase()]; }
+  var grupos = [], totImp = 0;
+  (ingProd.grupos || []).forEach(function (G) {
+    var subs = [], gImp = 0, gCant = 0, gAA = 0, gRe = 0;
+    (G.subgrupos || []).forEach(function (S) {
+      var prods = [], sImp = 0, sCant = 0;
+      (S.productos || []).forEach(function (p) {
+        if (!agrupado(p.producto)) {
+          out.n++; out.importe += p.importeProy || 0;
+          out.productos.push({ producto: p.producto, grupo: G.grupo, sub: S.sub,
+            importeProy: p.importeProy || 0, cantProy: p.cantProy || 0 });
+          return;
+        }
+        prods.push(p); sImp += p.importeProy || 0; sCant += p.cantProy || 0;
+        gAA += p.impAnioAnt || 0; gRe += p.impReciente || 0;
+      });
+      if (!prods.length) return;                     // subgrupo que quedó vacío → no se pinta
+      S.productos = prods; S.importeProy = sImp; S.cantProy = sCant;
+      subs.push(S); gImp += sImp; gCant += sCant;
+    });
+    if (!subs.length) return;                        // grupo que quedó vacío → fuera
+    G.subgrupos = subs; G.importeProy = gImp; G.cantProy = gCant;
+    G.anioAntImp = gAA; G.recienteImp = gRe;
+    grupos.push(G); totImp += gImp;
+  });
+  ingProd.grupos = grupos; ingProd.totalImporte = totImp;
+  out.aplicado = true;
+  out.productos.sort(function (a, b) { return b.importeProy - a.importeProy; });
+  return out;
+}
+/* Meta capturada contando SOLO las líneas de productos agrupados. Si no se filtrara,
+   el escenario "meta" (que el Board Deck consume) seguiría cargando metas viejas de
+   productos que ya salieron de la tabla → la tabla y el reporte no cuadrarían.
+   Índice normalizado (trim+minúsculas) igual que _metaDeProducto, por si el nombre se
+   guardó con otra caja/espacios entre Presupuesto_Grupos y Presupuesto_Metas. */
+function _presMetaAgrupada(metaPer, rutaDe) {
+  if (!metaPer) return 0;
+  var norm = {};
+  Object.keys(rutaDe || {}).forEach(function (k) { norm[String(k).trim().toLowerCase()] = 1; });
+  var t = 0, L = metaPer._lineas || {};
+  Object.keys(L).forEach(function (k) {
+    if (norm[String(k).trim().toLowerCase()]) t += (L[k].metaIngreso || 0);
+  });
+  return t;
+}
+
 function readPresupuesto(periodo) {
   try {
     var hi = _presHistoricoIngresos();
@@ -551,6 +622,12 @@ function readPresupuesto(periodo) {
     var perSig = _presQKey(tgtY, tgtQ);
     // Motor nuevo: ingresos por producto (cantidad × precio real), agrupado como Board Deck
     var ingProd = _presIngresosProy(tgtY, tgtQ);
+    // ── Lo NO agrupado se OMITE del presupuesto (tabla y reportes) ──
+    // Se poda aquí, antes de calcular recomendación/escenarios/meta, para que TODO lo
+    // que sale de esta función (incluido lo que lee el Board Deck) ya venga sin ello.
+    var _grCfg = (typeof readGruposPresupuesto === 'function') ? readGruposPresupuesto() : { productoARuta: {} };
+    var _rutaDe = (_grCfg && _grCfg.productoARuta) || {};
+    var _sinGrupo = _presPodaSinGrupo(ingProd, _rutaDe);
 
     // Crecimiento real interanual (total) — referencia para líneas sin histórico propio
     var gRealTotal = _presCrecimientoReal(histQ, curY, curQ);
@@ -666,6 +743,14 @@ function readPresupuesto(periodo) {
     var _consAmt   = Math.round(_baseAjust * (1 - (_consP || 0) / 100));
     var _optAmt    = Math.round(_baseAjust * (1 + (_optP  || 0) / 100));
     var _metaTot   = (metas[perSig] && metas[perSig].__total) || 0;
+    // La meta capturada TAMBIÉN omite lo no agrupado: si no, el escenario "meta" seguiría
+    // sumando metas de productos que ya no están en la tabla (p.ej. quedaron sin grupo
+    // después de haberles capturado meta) y el Board Deck reportaría un número que en
+    // pantalla no existe. Excepción: el TOTAL explícito ("Fijar meta del trimestre") es
+    // una decisión manual y directa del usuario sobre el total → manda sin filtrar.
+    if (_sinGrupo.aplicado && !(metas[perSig] && metas[perSig].__tot != null)) {
+      _metaTot = _presMetaAgrupada(metas[perSig], _rutaDe);
+    }
     // Escenario activo: el guardado manda; si no hay pero sí hay meta capturada, se implica 'meta'; si no, 'base'.
     var _selScen = (_proyCfg && _proyCfg.seleccionado) ? _proyCfg.seleccionado : (_metaTot > 0 ? 'meta' : 'base');
     var _proySel = _selScen === 'conservador' ? _consAmt
@@ -734,6 +819,11 @@ function readPresupuesto(periodo) {
         lineas: lineasProy,
         ingresosGrupos: ingProd.grupos,              // NUEVO: cantidad × precio, agrupado como Board Deck
         ingresosTotalProy: ingProd.totalImporte,
+        // Lo que se OMITIÓ por no estar agrupado. Se reporta (no se esconde) para que el
+        // panel pueda avisar "N conceptos sin agrupar — no se presupuestan · Ver" y el
+        // usuario detecte un olvido en vez de perder el concepto en silencio.
+        sinGrupo: { aplicado: _sinGrupo.aplicado, n: _sinGrupo.n, importe: _sinGrupo.importe,
+                    productos: _sinGrupo.productos.slice(0, 300) },
         crecimientoCant: ingProd.crecimientoCant,
         totales: { anioAnterior: totAnioAnt, reciente: totReciente, base: totBase,
             recomendado: _recomBase,                 // recomendación cruda del modelo (semilla)

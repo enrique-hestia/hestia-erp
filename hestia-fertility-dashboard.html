@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.14.201 -->
+﻿<!-- app-build:2026.07.14.202 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1661,6 +1661,8 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
       <button class="pc-tab" onclick="pcTab('formularios',this)">Formularios</button>
       <button class="pc-tab" onclick="pcTab('animaciones',this)">Animaciones</button>
       <button class="pc-tab" onclick="pcTab('reportes',this)">Reportes</button>
+      <!-- Solo admin/director: define qué se le anuncia a TODA la empresa. pcInit lo oculta al resto. -->
+      <button class="pc-tab" id="pc-tab-novedades" style="display:none" onclick="pcTab('novedades',this)">Novedades ✨</button>
     </div>
 
     <!-- ── Apariencia ─────────────────────────────────────── -->
@@ -1939,6 +1941,20 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
           Cargando opciones...
         </div>
         <div id="dd-editor" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- ── Novedades (solo admin/director) ───────────────────── -->
+    <div id="pc-novedades" class="pc-section" style="display:none">
+      <div class="pc-card">
+        <div class="pc-card-title">Aviso de novedades</div>
+        <div style="font-size:12px;color:var(--color-text-muted);margin-bottom:16px">
+          Decide <b>si</b> el aviso emergente salta, <b>cuál</b> novedad se anuncia y <b>a quién</b>.
+          La configuración se guarda en Google Sheets y aplica a <b>todos los usuarios</b>.
+          La página de Novedades siempre queda disponible en el menú, aunque el aviso esté apagado.
+        </div>
+        <div id="nov-cfg-loading" style="text-align:center;padding:32px;color:var(--color-text-muted);font-size:13px">Cargando…</div>
+        <div id="nov-cfg-editor" style="display:none"></div>
       </div>
     </div>
 
@@ -16116,7 +16132,7 @@ async function presGruposConfigOpen(){
   var ovl=document.createElement('div'); ovl.id='pres-grp-ovl'; ovl.className='pr-mov';
   ovl.onclick=function(e){ if(e.target===ovl) ovl.remove(); };
   ovl.innerHTML='<div class="pr-modal" style="max-width:920px;width:96%" onclick="event.stopPropagation()">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:15px 20px;border-bottom:1px solid var(--color-divider,#e5e7eb)"><div><div style="font-size:15px;font-weight:800">Grupos del Presupuesto</div><div style="font-size:11px;color:#9ca3af">Arrastra productos a un grupo/subgrupo, o usa el menú de cada tarjeta. Lo que quede en «Sin agrupar» se muestra en el bucket «Sin grupo» del reporte (sigue contando en el total y en la meta).</div></div><button onclick="document.getElementById(\'pres-grp-ovl\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280">×</button></div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:15px 20px;border-bottom:1px solid var(--color-divider,#e5e7eb)"><div><div style="font-size:15px;font-weight:800">Grupos del Presupuesto</div><div style="font-size:11px;color:#9ca3af">Arrastra productos a un grupo/subgrupo, o usa el menú de cada tarjeta. ⚠ Lo que quede en «Sin agrupar» NO se presupuesta: se omite de la tabla, del total, de la meta y del Board Deck (el panel te avisa cuántos son).</div></div><button onclick="document.getElementById(\'pres-grp-ovl\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#6b7280">×</button></div>'
     +'<div id="pge-board" style="padding:14px 18px;max-height:66vh;overflow:auto"><div style="padding:44px 16px;text-align:center;color:#9ca3af;font-size:13px">'+(typeof hestiaLoader==='function'?hestiaLoader('Cargando productos y grupos…'):'Cargando productos y grupos…')+'</div></div>'
     +'<div style="display:flex;gap:10px;padding:13px 20px;border-top:1px solid var(--color-divider,#e5e7eb)"><div id="pge-msg" style="margin-right:auto;font-size:11px;align-self:center;color:#9ca3af"></div><button class="pr-btn" onclick="presGruposConfigSave()">Guardar grupos</button><button onclick="document.getElementById(\'pres-grp-ovl\').remove()" style="padding:10px 18px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider,#e5e7eb);border-radius:9px;cursor:pointer">Cancelar</button></div>'
     +'</div>';
@@ -16130,11 +16146,14 @@ async function presGruposConfigOpen(){
   var grupos=(existing.grupos||[]).map(function(g){ return {nombre:g.nombre, incluirMaestro:g.incluirMaestro!==false, subs:(g.subs||[]).map(function(s){return {nombre:s};})}; });
   var ruta={}, er=(existing.productoARuta||{});
   Object.keys(er).forEach(function(pn){ ruta[pn]={grupo:er[pn].grupo||'', sub:er[pn].sub||''}; });
-  // Arranca VACÍO: todos los productos en el pool. No se omiten — se muestran juntos en el
-  // bucket «Sin grupo» del reporte; agrupar solo cambia cómo se presentan.
+  // Arranca VACÍO: todos los productos en el pool. Lo que se deje en el pool NO se
+  // presupuesta (se omite de tabla/total/meta/Board Deck) — agrupar es lo que mete un
+  // producto al presupuesto. OJO: mientras NO exista ningún grupo configurado, el
+  // presupuesto NO filtra nada (si no, no habría presupuesto); el filtro empieza a
+  // aplicar en cuanto se guarda el primer grupo.
   var seeded=!(existing.grupos&&existing.grupos.length);
   window._presGE={prods:prods, grupos:grupos, ruta:ruta, seeded:seeded};
-  if(seeded){ var m=document.getElementById('pge-msg'); if(m) m.textContent='Empieza vacío: agrupa lo que quieras; el resto aparece junto en «Sin grupo». Usa «Autollenar» si quieres precargar por categoría.'; }
+  if(seeded){ var m=document.getElementById('pge-msg'); if(m) m.textContent='Empieza vacío: agrupa lo que SÍ quieras presupuestar; lo que dejes en «Sin agrupar» se omite. Usa «Autollenar» si quieres precargar por categoría.'; }
   _presGERender();
 }
 function _presGEProds(grupo,sub){ return (window._presGE.prods||[]).filter(function(p){ var r=window._presGE.ruta[p.producto]; if(!r||!r.grupo) return grupo===''; return r.grupo===grupo && (sub==null || (r.sub||'')===sub); }); }
@@ -16152,7 +16171,7 @@ function _presGEAutofill(){ var GE=window._presGE; if(!GE) return;
   GE.prods.forEach(function(p){ var r=GE.ruta[p.producto]; if(r&&r.grupo) return; var gn=(typeof _presClasificar==='function')?_presClasificar(p.producto):'Otros'; _presGEEnsureGrupo(gn); GE.ruta[p.producto]={grupo:gn,sub:''}; });
   _presGERender();
 }
-function _presGEClear(){ if(!confirm('¿Mandar TODOS los productos a «Sin agrupar»? Seguirán en el presupuesto, juntos en el bucket «Sin grupo».')) return; window._presGE.ruta={}; _presGERender(); }
+function _presGEClear(){ if(!confirm('¿Mandar TODOS los productos a «Sin agrupar»?\n\n⚠ Lo que quede sin agrupar NO se presupuesta: al guardar así, la tabla del Presupuesto y el Board Deck se quedan sin esos conceptos.')) return; window._presGE.ruta={}; _presGERender(); }
 function _presGEAssignSelect(prod){
   var GE=window._presGE, r=GE.ruta[prod]||{grupo:'',sub:''};
   var existentes={};
@@ -16222,10 +16241,10 @@ function _presGERender(){
       +'<button onclick="_presGENewSub(\''+gEnc+'\')" title="Crear un subgrupo dentro de este grupo" style="margin-top:8px;width:100%;font-size:10.5px;font-weight:700;padding:5px 8px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1px dashed var(--color-primary,#c46a7a);border-radius:7px;cursor:pointer">+ Subgrupo</button>'
       +'</div>';
   }).join('');
-  board.innerHTML='<div style="font-size:11px;color:#6b7280;margin-bottom:10px;background:rgba(196,106,122,.06);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:7px 10px">Organiza los productos como quieras. Crea <b>subgrupos</b> con <b>+ Subgrupo</b> y arrastra productos a cada uno (clic en su nombre para renombrar). Si un grupo no tiene subgrupos, sus productos se separan <b>automáticamente por Ciclo Alta/Baja</b>. Lo que quede en <b>«Sin agrupar»</b> no se pierde: aparece como bucket <b>«Sin grupo»</b> en el reporte.</div>'
+  board.innerHTML='<div style="font-size:11px;color:#6b7280;margin-bottom:10px;background:rgba(196,106,122,.06);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:7px 10px">Organiza los productos como quieras. Crea <b>subgrupos</b> con <b>+ Subgrupo</b> y arrastra productos a cada uno (clic en su nombre para renombrar). Si un grupo no tiene subgrupos, sus productos se separan <b>automáticamente por Ciclo Alta/Baja</b>. ⚠ Lo que quede en <b>«Sin agrupar»</b> <b>no se presupuesta</b>: se omite de la tabla, del total, de la meta y del Board Deck.</div>'
     +'<div style="display:grid;grid-template-columns:250px 1fr;gap:12px;align-items:start">'
     +'<div style="background:var(--color-surface,#fafafa);border:1px solid var(--color-divider,#e5e7eb);border-radius:11px;padding:10px">'
-      +'<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:#6b7280;margin-bottom:7px;display:flex;justify-content:space-between" title="No se omiten: se muestran en el bucket «Sin grupo» del reporte y cuentan en el total y en la meta.">Sin agrupar · van a «Sin grupo»<span style="color:#9ca3af">'+poolCount+'</span></div>'
+      +'<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:#b45309;margin-bottom:7px;display:flex;justify-content:space-between" title="Se OMITEN del presupuesto: no cuentan en la tabla, ni en el total, ni en la meta, ni en el Board Deck. Arrástralos a un grupo si sí quieres presupuestarlos.">Sin agrupar · NO se presupuestan<span style="color:#9ca3af">'+poolCount+'</span></div>'
       +_presGEZone('','',poolCards)
     +'</div>'
     +'<div><div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px;align-items:center">'
@@ -16835,12 +16854,14 @@ function presProdCant(key,val){ var p=_presProdMap[key]; if(!p)return; p._budCan
   var s=getSession()||{}; fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'savePresupuestoMeta',periodo:_presData.siguiente.periodo,linea:p.producto,metaIngreso:p._budImp,metaCantidad:p._budCant,usuario:s.email||''})}).then(function(){_presFlashSaved();}).catch(function(){}); }
 function _presProdDlUI(key){ var p=_presProdMap[key]; if(!p)return; var dl=p.importeProy>0?(p._budImp-p.importeProy):null; var dc=document.getElementById(key+'-dl'); if(dc){dc.textContent=dl==null?'—':_presFM(dl);dc.style.color=dl==null?'#9ca3af':(dl>=0?'#166534':'#991b1b');} }
 /* Total de la tabla de ingresos + total de META del periodo.
-   _presProdMap DEBE contener TODOS los productos (agrupados + "Sin grupo"): la vista
-   agrupada renderiza un bucket automático con los no agrupados, así el TOTAL de la tabla
-   es igual al KPI de ingresos por construcción y la meta nunca pierde lo que no se ve.
-   Antes la vista agrupada solo mapeaba los productos agrupados → tocar UNA cantidad
-   desplomaba "Meta capturada" (perdía los ~98 sin grupo) y ese número corrupto viajaba
-   al Board Deck cuando Meta era el escenario activo. */
+   INVARIANTE: _presProdMap contiene EXACTAMENTE lo que se pinta en la tabla — ni más ni
+   menos. En vista agrupada eso es lo AGRUPADO (lo no agrupado se omite del presupuesto y
+   se avisa aparte); en vista plana, todo. Por eso este total, «Meta capturada», lo que
+   guarda presGuardarTodo y lo que el Board Deck lee del backend coinciden por
+   construcción: un solo conjunto alimenta a los cuatro.
+   ⚠ No volver a meter aquí productos que NO se pintan: si el mapa y la tabla se
+   desincronizan, tocar UNA cantidad recalcula «Meta capturada» sobre un conjunto que el
+   usuario no ve y ese número viaja al Board Deck cuando Meta es el escenario activo. */
 function _presIngTotUI(){ var tot=0; Object.keys(_presProdMap).forEach(function(k){tot+=_presProdMap[k]._budImp;}); var el=document.getElementById('pr-ing-tot'); if(el)el.textContent=_presFM(tot);
   if(_presData&&_presData.siguiente&&_presData.siguiente.totales){
     _presData.siguiente.totales.meta=tot;
@@ -16920,12 +16941,15 @@ function presApplyProjAll(tipo){
    Colapsa los productos en los buckets/subgrupos definidos en ⚙ Grupos.
    Se captura la meta por IMPORTE a nivel grupo O subgrupo; se reparte
    proporcional a sus productos.
-   Los productos SIN grupo NO se ocultan: caen en un bucket automático «Sin grupo»
-   editable como cualquier otro, de modo que el TOTAL de la tabla == KPI de ingresos
-   POR CONSTRUCCIÓN (antes quedaban fuera del total pero sí contaban en el KPI y en la
-   meta → la tabla nunca cuadraba con el KPI y la meta se corrompía al editar).
+   Los productos SIN grupo se OMITEN del presupuesto (regla de negocio: "lo que no esté
+   agrupado no se contempla en la tabla ni en los reportes, porque eso no se presupuesta").
+   La omisión es TOTAL y consistente: no entran a _presProdMap, así que no suman al TOTAL
+   de la tabla, ni a «Meta capturada» (_presIngTotUI), ni a lo que se guarda
+   (presGuardarTodo), ni a lo que el Board Deck lee del backend (presupuesto.gs los poda
+   en la fuente). El universo del presupuesto == lo agrupado, en TODAS las vistas.
+   PERO no se esconden en silencio: _presAvisoSinGrupo pinta un aviso con el conteo y el
+   detalle, para que un olvido al agrupar se vea en vez de volverse un hueco invisible.
    El % maestro / cuadrar solo mueven grupos con "incluir en % maestro". */
-var PRES_SIN_GRUPO='Sin grupo';
 function _presBuildIngresosGrouped(grupos, canEdit){
   _presProdMap={}; _presGrupoMap=[];
   var fM=_presFM, primary='var(--color-primary,#c46a7a)', kc=0;
@@ -16960,13 +16984,12 @@ function _presBuildIngresosGrouped(grupos, canEdit){
     if(!allProds.length) return;
     buckets.push({nombre:gn, incluirMaestro:gc.incluirMaestro!==false, subMap:subMap, subOrder:subOrder, allProds:allProds});
   });
-  // ── 2) Bucket automático «Sin grupo»: TODO lo que no quedó en un grupo configurado ──
-  var sinG=[]; allOrder.forEach(function(pn){ if(!usados[pn]) sinG.push(allByName[pn]); });
-  if(sinG.length){
-    var sMap={}, sOrd=[];
-    sinG.forEach(function(p){ var sk=p._ciclo; if(!sMap[sk]){ sMap[sk]=[]; sOrd.push(sk); } sMap[sk].push(p); });
-    buckets.push({nombre:PRES_SIN_GRUPO, incluirMaestro:true, subMap:sMap, subOrder:sOrd, allProds:sinG, auto:true});
-  }
+  // ── 2) Lo que NO quedó en ningún grupo configurado se OMITE del presupuesto ──
+  // No se pinta, no entra a _presProdMap, no suma. Solo se ANOTA para el aviso.
+  // (Con el backend redesplegado estos productos ya ni siquiera llegan: presupuesto.gs
+  //  los podó en la fuente. Este bucle es el mismo criterio del lado del cliente, así el
+  //  aviso funciona igual antes y después del redeploy.)
+  _presSinGrupoList=[]; allOrder.forEach(function(pn){ if(!usados[pn]) _presSinGrupoList.push(allByName[pn]); });
   var hayBucket=buckets.length>0;
   var h='<div style="overflow-x:auto"><table class="pr-tbl"><thead><tr><th>Grupo / Subgrupo (Ciclo)</th><th>Cant. budget</th><th>Precio prom.</th><th>Importe budget</th><th>Proyección</th><th>Δ vs proy.</th><th style="text-align:center">% maestro</th></tr></thead><tbody>';
   buckets.forEach(function(gc){
@@ -16979,8 +17002,7 @@ function _presBuildIngresosGrouped(grupos, canEdit){
     totCant+=gCant; totImp+=gImp; totProy+=gProy; var dl=gProy>0?(gImp-gProy):null;
     var multiSub=subOrder.length>1;
     h+='<tr style="background:var(--color-primary-hl,rgba(196,106,122,.06))">'
-      +'<td style="font-weight:800">'+_esc(gn)+' <span style="color:#c9c9c9;font-weight:400;font-size:10px">· '+allProds.length+' item'+(allProds.length!==1?'s':'')+'</span>'
-        +(gc.auto?' <span style="font-weight:500;font-size:9.5px;color:#b45309" title="Productos que no están asignados a ningún grupo. Se incluyen en el total y en la meta (no se omiten); si quieres organizarlos, usa ⚙ Grupos.">· sin asignar · organízalos en ⚙ Grupos</span>':'')+'</td>'
+      +'<td style="font-weight:800">'+_esc(gn)+' <span style="color:#c9c9c9;font-weight:400;font-size:10px">· '+allProds.length+' item'+(allProds.length!==1?'s':'')+'</span></td>'
       +'<td style="text-align:right">'+(canEdit
           ? '<input id="pgi-'+gi+'-c" type="number" step="1" min="0" value="'+gCant+'" onchange="presGrupoCant('+gi+',this.value)" style="width:74px;text-align:right;border:1.5px solid var(--color-primary,#c46a7a);border-radius:7px;padding:6px 8px;font-size:12px;font-weight:700;background:var(--color-surface,#fafafa)">'
           : '<b>'+gCant+'</b>')+'</td>'
@@ -17018,9 +17040,67 @@ function _presBuildIngresosGrouped(grupos, canEdit){
     _presGrupoMap.push({nombre:gn, incluirMaestro:incl, movible:gMov, gi:gi, multiSub:multiSub, subs:subsModel, allProds:allProds});
   });
   if(!hayBucket) h+='<tr><td colspan="7" style="text-align:center;padding:1.6rem;color:var(--text-secondary,#9ca3af)">No hay productos asignados a grupos todavía. Usa <b>⚙ Grupos</b> para configurarlos.</td></tr>';
-  // El TOTAL incluye TODOS los productos (agrupados + «Sin grupo») → cuadra con el KPI de ingresos.
+  // El TOTAL es de lo AGRUPADO (lo no agrupado se omite del presupuesto). Por eso puede
+  // ser menor que el KPI histórico de ingresos: la diferencia es justo lo del aviso.
   h+='<tr style="border-top:2px solid var(--color-divider,#d1d5db)"><td style="font-weight:800">TOTAL</td><td style="text-align:right;font-weight:800">'+totCant+'</td><td></td><td id="pr-ing-tot" style="font-weight:800;color:'+primary+'">'+fM(totImp)+'</td><td style="font-weight:800;color:var(--text-secondary,#9ca3af)">'+fM(totProy)+'</td><td></td><td></td></tr></tbody></table></div>';
-  return h;
+  return _presAvisoSinGrupo(canEdit)+h;
+}
+/* ══ Conceptos SIN AGRUPAR — se omiten, pero se AVISAN ══════════════════════
+   Excluir en silencio convertiría un olvido (crear un producto y no agruparlo) en un
+   hueco invisible del presupuesto. El aviso es discreto (no bloquea, no es un error)
+   pero deja rastro y permite revisarlos y agruparlos en un clic.
+   Fuente doble a propósito, para que funcione ANTES y DESPUÉS del redeploy:
+     · backend nuevo → ya podó y reporta el detalle en siguiente.sinGrupo;
+     · backend viejo → los productos aún llegan y _presSinGrupoList los detecta aquí. */
+var _presSinGrupoList=[];
+function _presSinGrupoInfo(){
+  var b=(_presData&&_presData.siguiente&&_presData.siguiente.sinGrupo)||null;
+  if(b&&(b.n||0)>0) return {n:b.n, importe:b.importe||0, productos:b.productos||[]};
+  if(_presSinGrupoList.length){
+    var imp=0; _presSinGrupoList.forEach(function(p){ imp+=p.importeProy||0; });
+    return {n:_presSinGrupoList.length, importe:imp, productos:_presSinGrupoList.map(function(p){
+      return {producto:p.producto, grupo:p._ciclo||'', sub:'', importeProy:p.importeProy||0, cantProy:p.cantProy||0}; })};
+  }
+  return {n:0, importe:0, productos:[]};
+}
+function _presAvisoSinGrupo(canEdit){
+  var i=_presSinGrupoInfo(); if(!i.n) return '';
+  return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:rgba(180,83,9,.07);border:1px solid rgba(180,83,9,.28);border-radius:9px;padding:8px 12px;margin-bottom:10px">'
+    +'<span style="font-size:14px">⚠</span>'
+    +'<span style="font-size:11.5px;color:var(--text-primary,#374151)"><b>'+i.n+' concepto'+(i.n!==1?'s':'')+' sin agrupar</b> · no se presupuesta'+(i.n!==1?'n':'')
+      +' <span style="color:var(--text-secondary,#9ca3af)">(quedarían fuera '+_presFM(i.importe)+' de proyección)</span></span>'
+    +'<button onclick="presSinGrupoVer()" style="margin-left:auto;padding:4px 11px;background:none;border:1.5px solid rgba(180,83,9,.5);color:#b45309;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Ver</button>'
+    +(canEdit?'<button onclick="presGruposConfigOpen()" style="padding:4px 11px;background:#b45309;border:none;color:#fff;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">⚙ Agrupar</button>':'')
+    +'</div>';
+}
+function presSinGrupoVer(){
+  var i=_presSinGrupoInfo();
+  var rows=(i.productos||[]).map(function(p){
+    return '<tr><td style="padding:5px 8px;border-bottom:1px solid var(--color-divider,#eee)">'+_esc(p.producto)+'</td>'
+      +'<td style="padding:5px 8px;border-bottom:1px solid var(--color-divider,#eee);color:#9ca3af;font-size:11px">'+_esc(p.grupo||'—')+'</td>'
+      +'<td style="padding:5px 8px;border-bottom:1px solid var(--color-divider,#eee);text-align:right;color:#9ca3af">'+(p.cantProy||0)+'</td>'
+      +'<td style="padding:5px 8px;border-bottom:1px solid var(--color-divider,#eee);text-align:right;font-weight:700">'+_presFM(p.importeProy||0)+'</td></tr>';
+  }).join('');
+  var ov=document.createElement('div'); ov.id='pres-sg-ovl';
+  ov.style.cssText='position:fixed;inset:0;z-index:9500;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.innerHTML='<div style="background:var(--card-bg,#fff);border-radius:13px;max-width:660px;width:100%;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 18px 60px rgba(0,0,0,.3)">'
+    +'<div style="padding:15px 20px;border-bottom:1px solid var(--color-divider,#e5e7eb)">'
+      +'<div style="font-size:15px;font-weight:800;color:var(--text-primary,#111)">Conceptos sin agrupar · se omiten del presupuesto</div>'
+      +'<div style="font-size:11px;color:#9ca3af;margin-top:3px">Estos '+i.n+' concepto'+(i.n!==1?'s':'')+' no está'+(i.n!==1?'n':'')+' en ningún grupo de <b>⚙ Grupos</b>, así que <b>no se presupuesta'+(i.n!==1?'n':'')+'</b>: no cuentan en la tabla, ni en el total, ni en la meta, ni en el Board Deck. Si alguno debería presupuestarse, arrástralo a un grupo.</div>'
+    +'</div>'
+    +'<div style="overflow:auto;padding:0 20px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
+      +'<th style="text-align:left;padding:8px;position:sticky;top:0;background:var(--card-bg,#fff);font-size:10px;text-transform:uppercase;color:#9ca3af">Concepto</th>'
+      +'<th style="text-align:left;padding:8px;position:sticky;top:0;background:var(--card-bg,#fff);font-size:10px;text-transform:uppercase;color:#9ca3af">Ciclo / origen</th>'
+      +'<th style="text-align:right;padding:8px;position:sticky;top:0;background:var(--card-bg,#fff);font-size:10px;text-transform:uppercase;color:#9ca3af">Cant. proy.</th>'
+      +'<th style="text-align:right;padding:8px;position:sticky;top:0;background:var(--card-bg,#fff);font-size:10px;text-transform:uppercase;color:#9ca3af">Importe proy.</th>'
+    +'</tr></thead><tbody>'+rows+'</tbody></table></div>'
+    +'<div style="padding:13px 20px;border-top:1px solid var(--color-divider,#e5e7eb);display:flex;align-items:center;gap:9px">'
+      +'<span style="font-size:11.5px;color:#9ca3af">Total omitido: <b style="color:#b45309">'+_presFM(i.importe)+'</b></span>'
+      +'<button onclick="document.getElementById(\'pres-sg-ovl\').remove();presGruposConfigOpen()" style="margin-left:auto;padding:7px 14px;background:#b45309;border:none;color:#fff;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">⚙ Agrupar ahora</button>'
+      +'<button onclick="document.getElementById(\'pres-sg-ovl\').remove()" style="padding:7px 14px;background:none;border:1.5px solid var(--color-divider,#e5e7eb);color:var(--text-secondary,#6b7280);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">Cerrar</button>'
+    +'</div></div>';
+  ov.onclick=function(e){ if(e.target===ov) ov.remove(); };
+  document.body.appendChild(ov);
 }
 function _presProdDetailRow(p,fM,pad){
   var dl=p.importeProy>0?(p._budImp-p.importeProy):null;
@@ -17531,7 +17611,7 @@ var _PRES_TOUR = [
    body:'<b>Base (esperado)</b> = el <b>recomendado del modelo</b> (tu historial real) ± el <b>% vs recom.</b> que tú ajustes. <b>Conservador</b> y <b>Optimista</b> se calculan como Base <b>∓ un % que TÚ defines</b>. <b>Meta capturada</b> = la que fijas más abajo.<br><br><b>Lo más importante:</b> haz clic en una tarjeta para elegir el <b>escenario ACTIVO</b> (● Activo). Ese escenario es el que manda: de él salen los <b>Ingresos proyectados</b>, la <b>Ganancia</b> y el <b>% de margen</b> de los KPIs, la barra de utilidad y el <b>Informe Ejecutivo</b>. Si cambias de escenario o mueves un %, todo se recalcula al instante.<br><br><b>Ejemplo:</b> Base $8,051,108 con Conservador −10% y Optimista +5% → <b>$7,245,997</b> y <b>$8,453,663</b>.'},
   {el:'button[onclick="presGruposConfigOpen()"]',
    title:'⚙ Grupos — LO PRIMERO que debes hacer',
-   body:'Aquí <b>organizas</b> los productos del presupuesto. Se abre un tablero: arrastra (o usa el menú de cada tarjeta) para meter productos a un <b>grupo</b> (ej. "Tratamientos"). <b>Nada se pierde:</b> lo que dejes en «Sin agrupar» aparece junto en el bucket <b>«Sin grupo»</b> del reporte y <b>sí cuenta</b> en el total y en la meta (por eso el TOTAL de la tabla siempre cuadra con el KPI de ingresos). Dentro de un grupo puedes crear <b>subgrupos</b> con <b>+ Subgrupo</b> (arrastra productos a cada uno; clic en su nombre para renombrar); si no creas ninguno, se separan solos por <b>Ciclo Alta/Baja</b>. "✨ Autollenar" te lo precarga por categoría para que solo ajustes.'},
+   body:'Aquí <b>organizas</b> los productos del presupuesto. Se abre un tablero: arrastra (o usa el menú de cada tarjeta) para meter productos a un <b>grupo</b> (ej. "Tratamientos"). ⚠ <b>Agrupar es lo que mete un producto al presupuesto:</b> lo que dejes en «Sin agrupar» <b>no se presupuesta</b> — se omite de la tabla, del total, de la meta y del Board Deck, porque eso no se presupuesta. No se esconde: el panel te avisa «N conceptos sin agrupar» con el detalle, por si fue un olvido. Dentro de un grupo puedes crear <b>subgrupos</b> con <b>+ Subgrupo</b> (arrastra productos a cada uno; clic en su nombre para renombrar); si no creas ninguno, se separan solos por <b>Ciclo Alta/Baja</b>. "✨ Autollenar" te lo precarga por categoría para que solo ajustes.'},
   {el:'.pr-tbl',
    title:'La tabla de captura (por CANTIDAD)',
    body:'Solo aparecen <b>tus grupos y sus subgrupos (Alta/Baja)</b>, no los productos sueltos. Capturas por <b>cantidad</b> y el sistema pone el <b>importe automático</b> = cantidad × <i>precio promedio real</i>. La suma del grupo = suma de sus subgrupos. La columna <b>Δ vs proy.</b> compara tu número contra lo que estima el modelo.<br><br><b>Ejemplo:</b> IVF a precio promedio $75,000; si pones cantidad <b>20</b> → importe = 20 × 75,000 = <b>$1,500,000</b>. Tú solo mueves cuántos, no los pesos.'},
@@ -17637,7 +17717,7 @@ function presShowManual(){
     +'<div style="background:var(--color-primary-hl,rgba(196,106,122,.08));border:1px solid '+DV+';border-radius:10px;padding:13px 15px;margin-bottom:12px;font-size:12px;line-height:1.7;color:'+TP+'"><b>Ejemplo:</b> si la Base es <b>$8,051,108</b> y pones Conservador <b>−10%</b> y Optimista <b>+5%</b> → Conservador = 8,051,108 × 0.90 = <b>$7,245,997</b> · Optimista = 8,051,108 × 1.05 = <b>$8,453,663</b>. Ajusta esos % a lo que sea realista para tu negocio.</div>'
 
     +h2('⚙ Grupos — organiza CÓMO se ve el presupuesto')
-    +p('Abre un tablero con todos tus productos en una columna <b>«Sin agrupar»</b>. Arrastra la tarjeta a un grupo (o elígelo en el menú de cada producto) para organizarlos como quieras. <b>Nada se omite:</b> lo que dejes sin agrupar se muestra junto en el bucket <b>«Sin grupo»</b> del reporte, editable como cualquier otro, y <b>sigue contando</b> en el total y en la meta. Agrupar cambia <b>cómo se presenta</b> el presupuesto, no cuánto suma.')
+    +p('Abre un tablero con todos tus productos en una columna <b>«Sin agrupar»</b>. Arrastra la tarjeta a un grupo (o elígelo en el menú de cada producto) para organizarlos como quieras. ⚠ <b>Lo que dejes sin agrupar NO se presupuesta:</b> se omite de la tabla, del total, de la meta y del Board Deck. Agrupar no es solo presentación: es lo que <b>decide qué entra</b> al presupuesto. Si un concepto se te queda fuera por olvido, el panel te lo avisa arriba de la tabla («N conceptos sin agrupar · Ver») para que lo revises.')
     +p('<b>Subgrupos:</b> dentro de un grupo, <b>+ Subgrupo</b> crea uno; arrastra productos a su zona, haz clic en su nombre para <b>renombrarlo</b> y usa <b>×</b> para <b>eliminarlo</b> (sus productos vuelven al grupo). Si un grupo <b>no</b> tiene subgrupos manuales, sus productos se separan <b>solos por Ciclo Alta/Baja</b>. Otros botones: <b>+ Nuevo grupo</b>, <b>✨ Autollenar por categoría</b> y <b>🧹 Vaciar</b>. El checkbox <b>%m</b> de cada grupo marca si se mueve con las herramientas en bloque.')
     +p('El <b>TOTAL de la tabla siempre es igual al KPI de ingresos</b>: incluye lo agrupado y lo que está en «Sin grupo».')
 
@@ -17672,7 +17752,7 @@ function presShowManual(){
 
     +h2('Flujo de trabajo recomendado')
     +'<ol style="margin:0 0 14px;padding-left:18px;font-size:12.5px;line-height:2;color:'+TS+'">'
-      +'<li><b>Primero, ⚙ Grupos:</b> organiza tus productos en grupos y subgrupos (o usa Autollenar y poda). Lo que no agrupes no se pierde: aparece junto en «Sin grupo» y sigue contando.</li>'
+      +'<li><b>Primero, ⚙ Grupos:</b> organiza tus productos en grupos y subgrupos (o usa Autollenar y poda). ⚠ Lo que no agrupes <b>no se presupuesta</b> (se omite de tabla, total, meta y Board Deck); el panel te avisa cuántos quedaron fuera.</li>'
       +'<li>En la tabla, ajusta la <b>cantidad</b> de cada grupo/subgrupo; el importe sale solo con el precio promedio.</li>'
       +'<li>Usa <b>% maestro</b> o <b>Cuadrar a $</b> para mover todo en bloque; <b>desmarca el checkbox</b> de los buckets que quieras dejar fijos en tu número.</li>'
       +'<li>Fija la <b>meta total</b> con «Fijar / editar meta» — enciende el semáforo.</li>'
@@ -17683,7 +17763,8 @@ function presShowManual(){
     +'<table style="width:100%;border-collapse:collapse;margin-bottom:14px"><thead><tr style="background:'+S+'">'+th('Lo que ves')+th('Por qué / qué significa')+'</tr></thead><tbody>'
     +tr(['El <b>Δ vs proy.</b> está en $0.00','Porque no capturaste un presupuesto distinto: por defecto el sistema pone la <b>misma cantidad que proyecta</b>, entonces tu importe = la proyección y la diferencia es cero. En cuanto subas o bajes la cantidad de un grupo, el Δ mostrará cuánto te alejas del modelo (verde arriba, rojo abajo).'])
     +tr(['La <b>ganancia sale negativa</b> (roja)','Es una <b>pérdida</b>: los egresos proyectados son mayores que los ingresos proyectados. Ganancia = ingresos − egresos; si el número es negativo, a ese ritmo perderías.'])
-    +tr(['Un producto <b>no aparece</b> en la tabla','Porque no lo metiste a ningún grupo en <b>⚙ Grupos</b>. Lo que queda «Sin agrupar» se <b>omite</b> del presupuesto a propósito (no se cuenta). Si lo quieres, arrástralo a un grupo.'])
+    +tr(['Un producto <b>no aparece</b> en la tabla','Porque no lo metiste a ningún grupo en <b>⚙ Grupos</b>. Lo que queda «Sin agrupar» se <b>omite</b> del presupuesto a propósito (no cuenta en tabla, total, meta ni Board Deck). El aviso ámbar de arriba de la tabla te dice cuántos son: pulsa <b>Ver</b> para revisarlos y <b>⚙ Agrupar</b> si fue un olvido.'])
+    +tr(['El TOTAL de la tabla <b>no cuadra</b> con el KPI de ingresos','Es lo esperado si hay conceptos sin agrupar: el KPI es el histórico completo y el presupuesto solo cuenta lo agrupado. La diferencia es justo el importe del aviso ámbar.'])
     +tr(['Fijé una meta y <b>no cambió el total</b>','Manda la <b>última acción</b>: si fijas un TOTAL en «Fijar meta», ese manda; si luego mueves cantidades por producto, el total pasa a ser la suma de productos (y se borra el TOTAL fijo). No pueden gobernar los dos a la vez.'])
     +tr(['El <b>semáforo está rojo</b> y apenas empezó el trimestre','El semáforo no mira solo lo que llevas, sino tu <b>cierre proyectado</b> al ritmo actual (real ÷ fracción de tiempo transcurrida). Si ese cierre queda debajo del 90% de la meta, es rojo — es una alerta temprana, no un resultado final.'])
     +tr(['La proyección <b>no baja</b> aunque un mes vendí poco','Por el <b>piso</b> del modelo: nunca proyecta menos que el mismo trimestre del año pasado ni que el trimestre reciente. Evita que un mes flojo tire el plan. El crecimiento además tiene techo de 30%.'])
@@ -22137,6 +22218,14 @@ function pcInit() {
   var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
   var tog = document.getElementById('pc-dark-toggle');
   if (tog) tog.checked = isDark;
+  // El aviso de novedades define qué se le anuncia a TODA la empresa → solo admin/director.
+  // Esto es cosmético: saveNovedadesCfg revalida el rol en el servidor.
+  var _rolPC=(typeof getUserRole==='function')?getUserRole():'viewer';
+  var _novAdmin=(_rolPC==='admin'||_rolPC==='director');
+  var _tabNov=document.getElementById('pc-tab-novedades');
+  if(_tabNov) _tabNov.style.display=_novAdmin?'':'none';
+  // Si quedó seleccionado el tab de Novedades y este usuario ya no es admin, no dejarlo ahí.
+  if(_pcActiveTab==='novedades' && !_novAdmin) _pcActiveTab='apariencia';
   // Mostrar tab activo
   pcTab(_pcActiveTab, null, true);
 }
@@ -22298,7 +22387,7 @@ function fmtSyncColor(type) {
 
 function pcTab(tab, btn, silent) {
   _pcActiveTab = tab;
-  ['apariencia','menu','conexiones','general','programacion','formato','formularios','animaciones','reportes'].forEach(function(t) {
+  ['apariencia','menu','conexiones','general','programacion','formato','formularios','animaciones','reportes','novedades'].forEach(function(t) {
     var el = document.getElementById('pc-' + t);
     if (el) el.style.display = (t === tab) ? '' : 'none';
   });
@@ -22310,6 +22399,7 @@ function pcTab(tab, btn, silent) {
   if (tab === 'formularios') { ddLoad(); }
   if (tab === 'animaciones') { _renderAnimPanel(); }
   if (tab === 'reportes') { _renderReportesPanel(); }
+  if (tab === 'novedades') { _novCfgPanelLoad(); }
 }
 function _renderAnimPanel(){
   var grid=document.getElementById('anim-cfg-grid'); if(!grid) return;
@@ -33227,6 +33317,17 @@ function notaGenerar(){
  * aviso emergente (1 vez por versión) para quien tenga acceso a esas áreas.
  * Cada entrada puede llevar `perm`: si el usuario no lo tiene, se oculta. */
 var NOVEDADES=[
+  /* `destacada:true` = se anuncia con el aviso emergente (default del código; el admin lo
+     puede cambiar desde Panel de Control → Novedades sin tocar el código).
+     `perm:'clave'` = audiencia restringida a quien tenga ese permiso (vacío = todos). */
+  { build:'2026.07.16', fecha:'16 jul 2026', area:'General', icon:'📢', destacada:true,
+    titulo:'Novedades: ahora tú decides cuándo avisar y a quién',
+    puntos:['El aviso de novedades ya NO salta con cada actualización: tiene un interruptor. Se prende solo cuando hay algo que de verdad valga la pena contar.','⚠ Apagar el aviso NO esconde la página: Novedades sigue en el menú para consultarla cuando quieras. Lo que se apaga es que SALTE sola.','Eliges CUÁL novedad se anuncia: cada una tiene una casilla «Se anuncia». Solo las que marques disparan el aviso.','Eliges A QUIÉN: cada novedad tiene una audiencia — «Todos» o un permiso que ya existe en Gestión de Roles. Ej.: una novedad de Nómina solo la ven los de Nómina (ni en el aviso ni en la página).','La configuración se guarda en Google Sheets y aplica a TODOS los usuarios, no solo a quien la prendió.','Solo administrador/director pueden configurarlo (y el servidor lo vuelve a validar, no solo se esconde el botón).','El «ya lo vi» sigue siendo de cada quien: si lo cierras, no te vuelve a saltar hasta que haya otra novedad anunciada.'],
+    comoUsar:['Panel de Control → «Novedades ✨» (solo admin/director).','Prende o apaga el «Aviso emergente al entrar» con el switch de arriba.','Marca «Se anuncia» SOLO en las novedades importantes.','Elige la «Audiencia» de cada una: Todos, o el permiso del área a la que le interesa.','Guarda: aplica a todos los usuarios.'] },
+  { build:'2026.07.16', fecha:'16 jul 2026', area:'Finanzas', icon:'🎯', destacada:true,
+    titulo:'Presupuesto: lo que no está agrupado ya no se contempla',
+    puntos:['Regla nueva: lo que no esté agrupado en el Presupuesto NO se presupuesta. Se omite de la tabla, del TOTAL, de la meta y de los reportes que se alimentan del presupuesto (Board Deck).','Antes lo no agrupado caía en un bucket «Sin grupo» y seguía contando. Ahora agrupar es lo que DECIDE qué entra al presupuesto.','⚠ No se esconde nada en silencio: arriba de la tabla sale un aviso ámbar «N conceptos sin agrupar — no se presupuestan» con el botón «Ver» para revisar cuáles son y cuánto suman, y «⚙ Agrupar» para arreglarlo si fue un olvido.','La omisión es pareja en todos lados: si sale de la tabla, sale del total, de los %, de lo que se guarda y de lo que ve el Board Deck. No hay forma de que un número no cuadre entre vistas.','Por eso el TOTAL de la tabla puede quedar por DEBAJO del KPI histórico de ingresos: la diferencia es exactamente lo que se está omitiendo (lo dice el aviso).','Si todavía no has configurado ningún grupo, no se filtra nada — si no, el presupuesto entero se iría a cero.'],
+    comoUsar:['Finanzas → CFO → Presupuesto.','Si sale el aviso ámbar, pulsa «Ver» para revisar qué conceptos se están quedando fuera.','¿Alguno sí debía presupuestarse? Pulsa «⚙ Agrupar» y arrástralo a su grupo.','Lo que dejes en «Sin agrupar» a propósito, simplemente no se presupuesta.'] },
   { build:'2026.07.15', fecha:'15 jul 2026', area:'Ingresos', icon:'🪪',
     titulo:'Identificar pacientes: ponerle nombre a los cobros «No localizado»',
     puntos:['Cuando una paciente paga desde la PÁGINA DE CITAS, Mercado Pago no nos manda su nombre: el cobro entra al ERP con el paciente en «No localizado».','Quien cobró (vendedora o enfermera) es la única que sabe de quién es ese pago — pero no tiene acceso a Ingresos, y no debe tenerlo.','Nueva vista «Identificar pacientes»: muestra SOLO los cobros sin nombre, con fecha, monto y método de pago. Nada más: ni productos, ni otras pacientes, ni importes de nadie más.','Solo cambia el NOMBRE. No mueve productos, ni montos, ni comisiones, ni la conciliación bancaria — ahí no se toca nada.','Ya identificado, deja de aparecer en la lista. Si otra persona lo identificó primero, el sistema avisa y no lo deja encimar: solo se pueden nombrar cobros que siguen sin nombre.','Si la paciente no existe todavía, se da de alta ahí mismo. Si el nombre se parece 90% o más a alguien que ya existe, el ERP pregunta «¿Es la misma persona?» y muestra los parecidos con su porcentaje.','Si de verdad son dos personas distintas con casi los mismos apellidos (sí pasa), eliges «No, es otra persona» y se da de alta igual. Nunca te bloquea.','Todo queda en auditoría: quién identificó qué cobro, cuándo y con qué nombre.'],
@@ -33316,12 +33417,65 @@ var NOVEDADES=[
     puntos:['Sube tu firma como imagen en Panel de Control → Reportes.','Marca en qué documentos «lleva firma autógrafa».','La firma no se corta al imprimir (se va completa a la página siguiente si no cabe).'],
     comoUsar:['Panel de Control → Reportes → «Firma autógrafa» → sube tu imagen.','Activa «lleva firma» en los documentos que quieras.'] }
 ];
-function _novVisibles(){ return NOVEDADES.filter(function(n){ return !n.perm || (typeof hasPermission==='function' && hasPermission(n.perm)); }); }
+/* ══ CONFIG DEL AVISO — qué se anuncia y a quién ════════════════════════════
+   DOS CAPAS a propósito:
+     · el ARRAY NOVEDADES es el DEFAULT del código (`destacada`, `perm` de fábrica);
+     · la hoja 'Config_Novedades' (Panel de Control → Novedades) lo SOBRESCRIBE.
+   Se guarda en HOJA y no en localStorage porque es una decisión del ADMIN que debe
+   aplicar a TODOS: localStorage es por navegador, así que el admin prendería el aviso
+   solo para sí mismo y nadie más lo vería. (El "ya lo vi" SÍ es por usuario → sigue en
+   localStorage: eso es preferencia personal, no configuración.)
+   Si el backend no está redesplegado, se cae a los defaults del array: nada destacado
+   → NO salta nada. Es el estado seguro: un fallo de red nunca spamea a la empresa. */
+var _novCfg={avisoActivo:false, entradas:{}, _cargado:false};
+var NOV_SEEN_KEY='hf_nov_seen_v2';   // v2: la clave vieja guardaba el build de TODAS las
+                                     // novedades y habría tapado una destacada legítima.
+function _novKey(n){ return n.id || (n.build+'|'+n.titulo); }
+// Valor EFECTIVO = default del código, pisado por la config del admin si existe.
+function _novEff(n){
+  var o=(_novCfg.entradas||{})[_novKey(n)];
+  return { destacada: o ? !!o.destacada : !!n.destacada,
+           perm:      o ? String(o.audiencia||'') : String(n.perm||'') };
+}
+async function _novLoadCfg(){
+  var ok=false;
+  try{
+    var tok=(typeof getToken==='function')?getToken():'';
+    var r=await fetch(APPS_SCRIPT_URL+'?action=getNovedadesCfg&token='+tok+'&_t='+Date.now(),{redirect:'follow'});
+    var d=await r.json();
+    if(d&&d.ok){
+      _novCfg={avisoActivo:!!d.avisoActivo, entradas:d.entradas||{}, _cargado:true};
+      try{ localStorage.setItem('hf_nov_cfg', JSON.stringify({avisoActivo:_novCfg.avisoActivo, entradas:_novCfg.entradas})); }catch(e){}
+      ok=true;
+    }
+  }catch(e){}
+  // Sin backend / sin redeploy / sin red: usa la última config conocida para no perder
+  // la decisión del admin por un fallo puntual.
+  if(!ok){ try{ var c=JSON.parse(localStorage.getItem('hf_nov_cfg')||'null');
+    if(c&&c.entradas) _novCfg={avisoActivo:!!c.avisoActivo, entradas:c.entradas||{}}; }catch(e){} }
+  _novCfg._cargado=true;   // se intentó: no reintentar en bucle
+  return ok;
+}
+/* AUDIENCIA: una novedad con permiso solo la ve quien lo tenga. Reusa el mismo
+   hasPermission/OP_PERMS_CATALOG del resto del ERP — no hay un sistema paralelo.
+   (admin/director traen '*' → ven todas.) Filtra la VISTA y el aviso por igual: si la
+   novedad es de Nómina, quien no es de Nómina no tiene por qué leerla. */
+function _novVisibles(){ return NOVEDADES.filter(function(n){ var p=_novEff(n).perm; return !p || (typeof hasPermission==='function' && hasPermission(p)); }); }
+// Lo que SE ANUNCIA = visible para este usuario Y marcada como destacada.
+function _novDestacadas(){ return _novVisibles().filter(function(n){ return _novEff(n).destacada; }); }
 function _novMaxBuild(list){ var mx=''; (list||[]).forEach(function(n){ if(n.build>mx) mx=n.build; }); return mx; }
+/* La VISTA de Novedades es independiente del interruptor maestro: aunque el aviso esté
+   apagado, se sigue consultando desde el menú a propósito (lo que se apaga es que SALTE
+   solo, no la página). Muestra todo lo visible para el usuario, no solo lo destacado. */
 function novInit(){
   var root=document.getElementById('nov-root'); if(!root) return;
+  // La config define la audiencia: sin ella se pintaría de más. Si aún no cargó, se
+  // carga y se repinta (una sola vez, _cargado corta el bucle).
+  if(!_novCfg._cargado){ _novLoadCfg().then(function(){ novInit(); }); return; }
   var list=_novVisibles();
-  try{ localStorage.setItem('hf_nov_seen', _novMaxBuild(list)); }catch(e){}
+  // Abrir la página cuenta como "ya lo vi" de lo ANUNCIADO (destacadas), que es lo único
+  // que puede saltar. Marcarlo sobre TODAS taparía una destacada más vieja.
+  try{ localStorage.setItem(NOV_SEEN_KEY, _novMaxBuild(_novDestacadas())); }catch(e){}
   var pop=document.getElementById('nov-toast'); if(pop) pop.style.display='none';
   var h='<div style="max-width:860px;margin:0 auto;padding:24px 16px">';
   h+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><span style="font-size:26px">✨</span><h1 style="font-size:23px;font-weight:800;color:var(--color-text);margin:0">Novedades</h1></div>';
@@ -33334,7 +33488,12 @@ function novInit(){
     h+='<div style="display:flex;align-items:center;gap:10px;margin:8px 0 12px"><span style="background:var(--color-primary);color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px">'+ccEsc(seen[b][0].fecha||b)+'</span><div style="flex:1;height:1px;background:var(--color-divider)"></div></div>';
     seen[b].forEach(function(n){
       h+='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px;padding:16px 18px;margin-bottom:14px;box-shadow:var(--shadow-card)">';
-      h+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="font-size:22px">'+(n.icon||'•')+'</span><div><div style="font-size:14.5px;font-weight:700;color:var(--color-text)">'+ccEsc(n.titulo)+'</div><span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-primary)">'+ccEsc(n.area||'')+'</span></div></div>';
+      var _ef=_novEff(n);
+      h+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><span style="font-size:22px">'+(n.icon||'•')+'</span><div><div style="font-size:14.5px;font-weight:700;color:var(--color-text)">'+ccEsc(n.titulo)
+        // Chips informativos: cuál se está anunciando y si es de audiencia restringida.
+        +(_ef.destacada?' <span style="font-size:9.5px;font-weight:800;background:var(--color-primary);color:#fff;padding:2px 7px;border-radius:20px;vertical-align:middle" title="Marcada como destacada: es la que se anuncia con el aviso emergente.">📢 Anunciada</span>':'')
+        +(_ef.perm?' <span style="font-size:9.5px;font-weight:700;background:var(--color-surface-2);color:var(--color-text-muted);padding:2px 7px;border-radius:20px;vertical-align:middle" title="Audiencia restringida: solo la ve quien tiene el permiso «'+ccEsc(_ef.perm)+'».">🔒 '+ccEsc(_novPermLabel(_ef.perm))+'</span>':'')
+        +'</div><span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-primary)">'+ccEsc(n.area||'')+'</span></div></div>';
       if(n.puntos&&n.puntos.length){ h+='<ul style="margin:6px 0 4px;padding-left:20px">'; n.puntos.forEach(function(p){ h+='<li style="font-size:12.5px;color:var(--color-text);margin-bottom:3px;line-height:1.5">'+ccEsc(p)+'</li>'; }); h+='</ul>'; }
       if(n.comoUsar&&n.comoUsar.length){
         h+='<div style="margin-top:10px;background:var(--color-surface-2);border-radius:9px;padding:10px 12px"><div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);margin-bottom:6px">Cómo usarlo</div><ol style="margin:0;padding-left:18px">';
@@ -33347,28 +33506,161 @@ function novInit(){
   h+='</div>';
   root.innerHTML=h;
 }
+/* El aviso emergente salta SOLO si se cumplen las tres condiciones:
+     1) el interruptor maestro está ENCENDIDO (si no, no molesta en cada build menor);
+     2) hay al menos una novedad marcada «se anuncia» que este usuario pueda ver
+        (audiencia por permiso);
+     3) ese usuario no la ha visto ya (localStorage, por persona).
+   Nada de esto afecta a la VISTA: Novedades se sigue consultando desde el menú. */
 function novCheckPopup(){
   try{
     if(typeof getSession==='function' && !getSession()){ setTimeout(novCheckPopup, 3000); return; } // aún sin sesión
-    var list=_novVisibles(); if(!list.length) return;
-    var mx=_novMaxBuild(list); var seen=''; try{ seen=localStorage.getItem('hf_nov_seen')||''; }catch(e){}
+    if(!_novCfg._cargado){ _novLoadCfg().then(function(){ novCheckPopup(); }); return; }
+    if(!_novCfg.avisoActivo) return;                       // interruptor maestro APAGADO
+    var list=_novDestacadas(); if(!list.length) return;    // nada marcado para anunciar
+    var mx=_novMaxBuild(list); var seen=''; try{ seen=localStorage.getItem(NOV_SEEN_KEY)||''; }catch(e){}
     if(seen>=mx) return; // ya lo vio
     if(document.getElementById('nov-toast')) return;
     var t=document.createElement('div'); t.id='nov-toast';
     t.style.cssText='position:fixed;right:18px;bottom:18px;z-index:5000;max-width:320px;background:var(--color-surface);border:1px solid var(--color-divider);border-left:4px solid var(--color-primary);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.22);padding:14px 16px;font-family:inherit';
     t.innerHTML='<div style="display:flex;align-items:flex-start;gap:10px"><span style="font-size:22px">✨</span>'
       +'<div style="flex:1"><div style="font-size:13.5px;font-weight:700;color:var(--color-text);margin-bottom:2px">Hay novedades</div>'
-      +'<div style="font-size:12px;color:var(--color-text-muted);line-height:1.45;margin-bottom:10px">'+list.length+' mejora(s) nueva(s) en Cobranza y Reportes. Ve qué hay de nuevo y cómo usarlo.</div>'
+      // Texto derivado de lo que REALMENTE se anuncia (antes decía "Cobranza y Reportes"
+      // fijo en el código y mentía en cuanto cambiaba la novedad destacada).
+      +'<div style="font-size:12px;color:var(--color-text-muted);line-height:1.45;margin-bottom:10px">'+_novToastTxt(list)+'</div>'
       +'<div style="display:flex;gap:8px"><button onclick="novToastAbrir()" style="padding:6px 14px;background:var(--color-primary);color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer">Ver novedades</button>'
       +'<button onclick="novToastCerrar()" style="padding:6px 12px;background:none;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;color:var(--color-text-muted);cursor:pointer">Después</button></div></div>'
       +'<button onclick="novToastCerrar()" title="Cerrar" style="background:none;border:none;font-size:16px;color:var(--color-text-muted);cursor:pointer;line-height:1">×</button></div>';
     document.body.appendChild(t);
   }catch(e){}
 }
-function _novMarcarVisto(){ try{ localStorage.setItem('hf_nov_seen', _novMaxBuild(_novVisibles())); }catch(e){} }
+// Etiqueta legible de un permiso (reusa el catálogo de Gestión de Roles; si el permiso
+// ya no existe en el catálogo se muestra la clave cruda en vez de romper).
+function _novPermLabel(k){
+  if(!k) return 'Todos';
+  var f=(typeof OP_PERMS_CATALOG!=='undefined'?OP_PERMS_CATALOG:[]).filter(function(p){ return p.key===k; })[0];
+  return f ? f.label : k;
+}
+// Resumen honesto del aviso: 1 novedad → su título; varias → conteo + áreas reales.
+function _novToastTxt(list){
+  if(list.length===1) return ccEsc(list[0].titulo);
+  var areas=[]; list.forEach(function(n){ var a=String(n.area||'').trim(); if(a&&areas.indexOf(a)<0) areas.push(a); });
+  var txt=list.length+' novedades';
+  if(areas.length) txt+=' en '+ccEsc(areas.slice(0,3).join(', '))+(areas.length>3?'…':'');
+  return txt+'. Ve qué hay de nuevo y cómo usarlo.';
+}
+function _novMarcarVisto(){ try{ localStorage.setItem(NOV_SEEN_KEY, _novMaxBuild(_novDestacadas())); }catch(e){} }
 function novToastCerrar(){ _novMarcarVisto(); var t=document.getElementById('nov-toast'); if(t) t.remove(); }
 function novToastAbrir(){ _novMarcarVisto(); var t=document.getElementById('nov-toast'); if(t) t.remove(); if(typeof navigateTo==='function') navigateTo('novedades'); }
 setTimeout(novCheckPopup, 2500);
+
+/* ══ PANEL DE CONTROL → NOVEDADES (administración del aviso) ════════════════
+   Solo admin/director (pcInit oculta el tab; saveNovedadesCfg revalida en servidor).
+   Tres controles, exactamente lo que se pidió:
+     a) interruptor MAESTRO del aviso emergente (la vista nunca se apaga);
+     b) por entrada, «se anuncia» (destacada) → solo las importantes saltan;
+     c) por entrada, audiencia: Todos o un permiso del catálogo existente.
+   Se edita en memoria (_novCfgDraft) y se guarda todo junto: un solo POST, sin
+   guardados a medias si el backend no está redesplegado. */
+var _novCfgDraft=null;
+async function _novCfgPanelLoad(){
+  var ld=document.getElementById('nov-cfg-loading'), ed=document.getElementById('nov-cfg-editor');
+  if(!ld||!ed) return;
+  ld.style.display=''; ld.textContent='Cargando…'; ed.style.display='none';
+  await _novLoadCfg();
+  _novCfgDraft={ avisoActivo:!!_novCfg.avisoActivo, entradas:{} };
+  NOVEDADES.forEach(function(n){ var k=_novKey(n), e=_novEff(n); _novCfgDraft.entradas[k]={destacada:e.destacada, audiencia:e.perm}; });
+  _novCfgPanelRender();
+  ld.style.display='none'; ed.style.display='';
+}
+function _novCfgPanelRender(){
+  var ed=document.getElementById('nov-cfg-editor'); if(!ed||!_novCfgDraft) return;
+  // Opciones por fila (no un string compartido con replace): si la audiencia guardada
+  // apunta a un permiso que ya no está en el catálogo, se conserva como opción propia.
+  // Con un replace ciego no habría match, el select caería en «Todos» y al siguiente
+  // guardado la novedad restringida se habría vuelto pública en silencio.
+  function _permOpts(sel){
+    var cat=(typeof OP_PERMS_CATALOG!=='undefined'?OP_PERMS_CATALOG:[]);
+    var o='<option value=""'+(sel?'':' selected')+'>Todos (sin restricción)</option>';
+    var hay=false;
+    cat.forEach(function(p){ if(p.key===sel) hay=true;
+      o+='<option value="'+ccEsc(p.key)+'"'+(p.key===sel?' selected':'')+'>'+ccEsc(p.cat+' · '+p.label)+'</option>'; });
+    if(sel&&!hay) o+='<option value="'+ccEsc(sel)+'" selected>⚠ '+ccEsc(sel)+' (permiso que ya no existe)</option>';
+    return o;
+  }
+  var nDest=0; Object.keys(_novCfgDraft.entradas).forEach(function(k){ if(_novCfgDraft.entradas[k].destacada) nDest++; });
+  var on=_novCfgDraft.avisoActivo;
+  var h='<div style="display:flex;align-items:center;gap:14px;background:var(--color-surface-offset);border-radius:10px;padding:13px 16px;margin-bottom:16px">'
+    +'<div style="flex:1"><div style="font-size:13px;font-weight:700;color:var(--color-text)">Aviso emergente al entrar</div>'
+    +'<div style="font-size:11px;color:var(--color-text-muted);margin-top:2px">'
+      +(on?'Encendido: a quien no la haya visto le saltará el aviso con las novedades marcadas «se anuncia».'
+          :'Apagado: nadie recibe el aviso. La página de Novedades sigue disponible en el menú.')
+    +'</div></div>'
+    +'<label class="toggle-switch"><input type="checkbox" id="nov-cfg-master" '+(on?'checked':'')+' onchange="_novCfgMaster(this.checked)"><span class="toggle-slider"></span></label>'
+    +'</div>';
+  h+='<div style="font-size:11.5px;color:var(--color-text-muted);margin-bottom:10px">'
+    +'<b>'+nDest+'</b> novedad'+(nDest!==1?'es':'')+' marcada'+(nDest!==1?'s':'')+' para anunciar.'
+    +(on&&!nDest?' <span style="color:#b45309;font-weight:700">⚠ El aviso está encendido pero no hay ninguna marcada: no saltará nada.</span>':'')
+    +'</div>';
+  h+='<div style="max-height:440px;overflow:auto;border:1px solid var(--color-divider);border-radius:10px">';
+  h+='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
+    +'<th style="text-align:center;padding:8px;position:sticky;top:0;background:var(--color-surface);font-size:10px;text-transform:uppercase;color:var(--color-text-muted);width:78px">Se anuncia</th>'
+    +'<th style="text-align:left;padding:8px;position:sticky;top:0;background:var(--color-surface);font-size:10px;text-transform:uppercase;color:var(--color-text-muted)">Novedad</th>'
+    +'<th style="text-align:left;padding:8px;position:sticky;top:0;background:var(--color-surface);font-size:10px;text-transform:uppercase;color:var(--color-text-muted);width:230px">Audiencia</th>'
+    +'</tr></thead><tbody>';
+  NOVEDADES.forEach(function(n,i){
+    var k=_novKey(n), d=_novCfgDraft.entradas[k]||{destacada:false,audiencia:''};
+    h+='<tr style="border-top:1px solid var(--color-divider)">'
+      +'<td style="text-align:center;padding:7px"><input type="checkbox" '+(d.destacada?'checked':'')+' onchange="_novCfgSet('+i+',\'destacada\',this.checked)" style="width:16px;height:16px;accent-color:var(--color-primary);cursor:pointer"></td>'
+      +'<td style="padding:7px"><div style="font-weight:600;color:var(--color-text)">'+(n.icon||'•')+' '+ccEsc(n.titulo)+'</div>'
+        +'<div style="font-size:10px;color:var(--color-text-muted);margin-top:1px">'+ccEsc(n.fecha||n.build)+' · '+ccEsc(n.area||'')+'</div></td>'
+      +'<td style="padding:7px"><select onchange="_novCfgSet('+i+',\'audiencia\',this.value)" style="width:100%;border:1.5px solid var(--color-divider);border-radius:7px;padding:5px 7px;font-size:11px;background:var(--color-surface);color:var(--color-text);cursor:pointer">'
+        +_permOpts(d.audiencia)+'</select></td>'
+      +'</tr>';
+  });
+  h+='</tbody></table></div>';
+  h+='<div style="display:flex;align-items:center;gap:10px;margin-top:14px">'
+    +'<span id="nov-cfg-msg" style="font-size:11.5px;color:var(--color-text-muted)"></span>'
+    +'<button id="nov-cfg-save" onclick="_novCfgGuardar()" style="margin-left:auto;padding:8px 18px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">Guardar</button>'
+    +'</div>';
+  ed.innerHTML=h;
+}
+function _novCfgMaster(v){ _novCfgDraft.avisoActivo=!!v; _novCfgPanelRender(); }
+function _novCfgSet(i,campo,val){
+  var n=NOVEDADES[i]; if(!n) return; var k=_novKey(n);
+  if(!_novCfgDraft.entradas[k]) _novCfgDraft.entradas[k]={destacada:false,audiencia:''};
+  _novCfgDraft.entradas[k][campo]=(campo==='destacada')?!!val:String(val||'');
+  if(campo==='destacada') _novCfgPanelRender();   // refresca el contador/aviso
+}
+async function _novCfgGuardar(){
+  var btn=document.getElementById('nov-cfg-save'), msg=document.getElementById('nov-cfg-msg');
+  var entradas=Object.keys(_novCfgDraft.entradas).map(function(k){
+    var t=''; NOVEDADES.forEach(function(n){ if(_novKey(n)===k) t=n.titulo; });
+    return {clave:k, destacada:_novCfgDraft.entradas[k].destacada, audiencia:_novCfgDraft.entradas[k].audiencia, titulo:t};
+  });
+  var payload={token:(typeof getToken==='function')?getToken():'', usuario:(getSession()||{}).email||'',
+    avisoActivo:!!_novCfgDraft.avisoActivo, entradas:entradas};
+  if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  if(msg){ msg.textContent=''; msg.style.color='var(--color-text-muted)'; }
+  try{
+    var r=await fetch(APPS_SCRIPT_URL+'?action=saveNovedadesCfg&data='+encodeURIComponent(JSON.stringify(payload))+'&_t='+Date.now(), {redirect:'follow'});
+    var d=await r.json();
+    if(!d||!d.ok) throw new Error((d&&d.error)||'No se pudo guardar');
+    // Aplicar ya a esta sesión (sin recargar) para ver el efecto de inmediato.
+    _novCfg={avisoActivo:!!_novCfgDraft.avisoActivo, entradas:{}, _cargado:true};
+    entradas.forEach(function(e){ _novCfg.entradas[e.clave]={destacada:e.destacada, audiencia:e.audiencia}; });
+    try{ localStorage.setItem('hf_nov_cfg', JSON.stringify({avisoActivo:_novCfg.avisoActivo, entradas:_novCfg.entradas})); }catch(e){}
+    if(btn){ btn.textContent='✓ Guardado'; btn.style.background='#166534'; }
+    if(msg){ msg.textContent='Aplica a todos los usuarios.'; msg.style.color='#166534'; }
+    setTimeout(function(){ if(btn){ btn.textContent='Guardar'; btn.style.background='var(--color-primary)'; btn.disabled=false; } },1800);
+  }catch(e){
+    if(btn){ btn.textContent='Guardar'; btn.disabled=false; }
+    if(msg){ msg.style.color='#991b1b';
+      msg.textContent=/novedades\.gs|redespleg|Falta/i.test(e.message)
+        ? 'No se guardó: falta agregar novedades.gs al Apps Script y redesplegar.'
+        : 'No se guardó: '+e.message; }
+  }
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * MANUAL / AYUDA DEL ERP  ·  botón flotante «?» + overlay a pantalla completa
@@ -33930,10 +34222,11 @@ setTimeout(novCheckPopup, 2500);
   },
 
   { id:'presupuesto', group:'cfo', icon:'🎯', title:'Presupuesto',
-    keywords:'presupuesto meta proyeccion cantidad precio grupo subgrupo escenario conservador optimista base maestro cuadrar trimestre candado utilidad guardar presupuesto cantidad manual no revierte externos por origen',
-    intro:'El **Presupuesto** se arma por **cantidad × precio real** (importe ÷ cantidad realizada), agrupado igual que el Board Deck. Permite metas por grupo/subgrupo, % maestro, cuadrar a un monto objetivo y escenarios.',
+    keywords:'presupuesto meta proyeccion cantidad precio grupo subgrupo escenario conservador optimista base maestro cuadrar trimestre candado utilidad guardar presupuesto cantidad manual no revierte externos por origen sin agrupar omitir se omiten no se presupuesta aviso',
+    intro:'El **Presupuesto** se arma por **cantidad × precio real** (importe ÷ cantidad realizada), agrupado igual que el Board Deck. Permite metas por grupo/subgrupo, % maestro, cuadrar a un monto objetivo y escenarios. **Solo se presupuesta lo que está agrupado.**',
     bloques:[
-      { h:'Captura por grupos', p:'Con el editor **⚙ Grupos** (arrastrable) armas buckets: el tablero arranca **vacío** y metes SOLO lo que quieres presupuestar (el resto se ignora). Dentro de cada grupo los productos se separan por **ciclo** (Alta/Baja). Capturas por **cantidad**; el importe = cantidad × precio promedio real.' },
+      { h:'Captura por grupos', p:'Con el editor **⚙ Grupos** (arrastrable) armas buckets: el tablero arranca **vacío** y metes SOLO lo que quieres presupuestar. Dentro de cada grupo los productos se separan por **ciclo** (Alta/Baja). Capturas por **cantidad**; el importe = cantidad × precio promedio real.' },
+      { h:'⚠ Lo que no esté agrupado NO se presupuesta', p:'Un producto sin grupo se **omite por completo**: no sale en la tabla, ni en el TOTAL, ni en «Meta capturada», ni en lo que se guarda, ni en el **Board Deck** (`presupuesto.gs` lo poda en la fuente, así que todos los lectores ven la misma cifra). **Pero no se esconde**: arriba de la tabla sale un aviso «N conceptos sin agrupar — no se presupuestan · Ver» con el detalle y un atajo a ⚙ Grupos, para que un olvido no se vuelva un hueco invisible. Por eso el TOTAL de la tabla puede ser **menor** que el KPI histórico de ingresos: la diferencia es exactamente lo omitido. **Excepción**: si todavía **no hay ningún grupo configurado**, no se filtra nada (si no, el presupuesto entero sería cero).' },
       { h:'Herramientas', lista:[
         '**% maestro** — sube/baja todo un grupo por porcentaje.',
         '**Cuadrar a monto** — reparte proporcional a un total objetivo.',
@@ -33953,9 +34246,9 @@ setTimeout(novCheckPopup, 2500);
     datos:{
       hojas:['`Presupuesto_Grupos`: Grupo|Subgrupo|Producto|IncluirMaestro|Orden'],
       scriptProps:['`PRES_ABIERTOS` (trimestres abiertos)','`PRES_ESCENARIOS` (% conservador/optimista)','`PRES_CREC_MAX` (techo de crecimiento)'],
-      funciones:['readPresupuesto','savePresupuestoMeta','readGruposPresupuesto','saveGruposPresupuesto','readHistoricoMetas','_presIngresosProy'],
+      funciones:['readPresupuesto','savePresupuestoMeta','readGruposPresupuesto','saveGruposPresupuesto','readHistoricoMetas','_presIngresosProy','_presPodaSinGrupo','_presMetaAgrupada','_presSinGrupoInfo'],
       permisos:['abrir_periodo_presupuesto (fallback bank_capture)'],
-      nota:'`presupuesto.gs` requiere deploy (usa helpers de summary.gs). El Presupuesto alimenta el Board Deck y la vista Operating P&L.'
+      nota:'`presupuesto.gs` requiere deploy (usa helpers de summary.gs). El Presupuesto alimenta el Board Deck y la vista Operating P&L. La omisión de lo no agrupado se aplica **en la fuente** (`_presPodaSinGrupo` dentro de `readPresupuesto`): así `ingresosGrupos`, `ingresosTotalProy`, los escenarios y `proyeccionSeleccionada` — que es lo que lee el Board Deck — quedan podados por construcción, sin tocar a cada lector. El detalle de lo omitido viaja en `siguiente.sinGrupo` para poder avisarlo.'
     }
   },
 
@@ -34114,16 +34407,26 @@ setTimeout(novCheckPopup, 2500);
   },
 
   { id:'novedades', group:'admin', icon:'✨', title:'Novedades (qué hay de nuevo)',
-    keywords:'novedades changelog cambios nuevo version mejora aviso popup tutorial',
-    intro:'La página de **Novedades** es el changelog del ERP: cada mejora con «qué hace» y «cómo usarlo». Al publicar una versión nueva aparece un **aviso emergente una vez por versión** para quien tenga acceso a esas áreas.',
+    keywords:'novedades changelog cambios nuevo version mejora aviso popup tutorial activar desactivar destacada anunciar audiencia permiso interruptor maestro panel de control',
+    intro:'La página de **Novedades** es el changelog del ERP: cada mejora con «qué hace» y «cómo usarlo». El **aviso emergente** ya no salta con cada cambio: un administrador decide **si** avisa, **cuál** novedad se anuncia y **a quién**.',
+    bloques:[
+      { h:'Interruptor maestro', p:'En **Panel de Control → Novedades ✨** hay un switch para el aviso emergente. **Apagado** = nadie recibe el aviso (para no molestar con actualizaciones básicas). **Encendido** = a quien no la haya visto le salta el aviso. ⚠ Apagarlo **no esconde la página**: Novedades sigue en el menú para consultarla cuando se quiera — lo que se apaga es que **salte sola**.' },
+      { h:'Elegir QUÉ se anuncia', p:'Cada novedad tiene una casilla **«Se anuncia»**. Solo las marcadas disparan el aviso, así que se prenden únicamente las importantes. Si el maestro está encendido pero no hay ninguna marcada, no salta nada (el panel lo advierte).' },
+      { h:'Audiencia por permiso', p:'Cada novedad tiene una **Audiencia**: «Todos» o un **permiso** de los que ya existen en **Gestión de Roles**. Ej.: una novedad de Nómina con audiencia `Nómina` solo la ven quienes tengan ese permiso — ni en el aviso ni en la página. Los roles **admin/director** (comodín `*`) ven todas.' },
+      { h:'Dónde se guarda', p:'En la hoja `Config_Novedades`, **no** en el navegador: es una decisión del admin que debe aplicar a **todos**. Si se guardara local, el admin prendería el aviso solo para sí mismo. En cambio el **«ya lo vi»** sí es de cada quien (`localStorage`) — eso es preferencia personal.' },
+      { h:'Quién puede configurarlo', p:'Solo **admin/director**: el tab ni siquiera aparece para los demás, y el servidor vuelve a validar el rol al guardar (esconder el botón es cosmético).' }
+    ],
     pasos:[
       'Abre **Novedades ✨** desde el menú (o el aviso emergente).',
-      'Lee las entradas agrupadas por fecha; cada una trae sus puntos y el mini-tutorial «Cómo usarlo».'
+      'Lee las entradas agrupadas por fecha; cada una trae sus puntos y el mini-tutorial «Cómo usarlo».',
+      'Para administrarlo (admin/director): **Panel de Control → Novedades ✨** → prende/apaga el aviso, marca **«Se anuncia»** en las importantes y elige la **Audiencia** de cada una → **Guardar**.'
     ],
     datos:{
-      scriptProps:['`localStorage hf_nov_seen` (última versión vista)'],
-      funciones:['novInit','novCheckPopup','NOVEDADES'],
-      nota:'Frontend-only. Las entradas se pueden gatear por permiso (`perm`): si el usuario no lo tiene, se ocultan.'
+      hojas:['`Config_Novedades` (Clave | Destacada | Audiencia | Notas). La fila `__AVISO__` es el interruptor maestro.'],
+      scriptProps:['`localStorage hf_nov_seen_v2` (último build ANUNCIADO que vio este usuario)','`localStorage hf_nov_cfg` (copia de la config por si el backend no responde)'],
+      funciones:['novInit','novCheckPopup','_novEff','_novVisibles','_novDestacadas','_novLoadCfg','readNovedadesCfg','saveNovedadesCfg','NOVEDADES','OP_PERMS_CATALOG'],
+      deploy:'`novedades.gs` es NUEVO: hay que agregarlo al proyecto de Apps Script y **redesplegar** (ya está en `deploy-gas.ps1`), y correr **`setupNovedadesCfg()`** una vez. Sin eso, el panel avisa que no se pudo guardar y el aviso se queda apagado (estado seguro: un fallo nunca spamea a la empresa).',
+      nota:'Dos capas: el array `NOVEDADES` trae los defaults del código (`destacada`, `perm`) y la hoja los **sobrescribe**. La audiencia reutiliza `hasPermission` + `OP_PERMS_CATALOG` — no hay un sistema de permisos paralelo.'
     }
   },
 
@@ -35470,7 +35773,8 @@ setTimeout(novCheckPopup, 2500);
     ],
     buttons:[
       { k:'Trimestre (selector)', d:'Elige el Qx a presupuestar (histórico o futuro).' },
-      { k:'⚙ Grupos', d:'Abre el editor de buckets: qué productos entran a cada grupo.' },
+      { k:'⚙ Grupos', d:'Abre el editor de buckets: qué productos entran a cada grupo. Agrupar es lo que mete un producto AL presupuesto: lo que quede en «Sin agrupar» no se presupuesta.' },
+      { k:'Ver (aviso ámbar «N conceptos sin agrupar»)', d:'Lista los conceptos que se están omitiendo del presupuesto, con su importe proyectado, por si alguno se te olvidó agrupar.' },
       { k:'+ Nuevo grupo', d:'Crea un grupo de presupuesto.' },
       { k:'✨ Autollenar', d:'Precarga todos los productos por categoría para que luego podes lo que no va.' },
       { k:'🧹 Vaciar', d:'Limpia el tablero para empezar de cero.' },
@@ -35489,6 +35793,7 @@ setTimeout(novCheckPopup, 2500);
       { k:'💾 Guardar presupuesto', d:'Guardado masivo de reaseguro: guarda TODO lo visible (ingresos y egresos) en un solo lote, ahora mismo. El auto-guardado sigue activo.' }
     ],
     bloques:[
+      { h:'⚠ Lo que no esté agrupado NO se presupuesta', p:'Un producto que no metiste a ningún grupo se **omite completo**: no sale en la tabla, ni en el TOTAL, ni en la meta, ni en el **Board Deck**. Es a propósito — eso no se presupuesta. **No se esconde**: arriba de la tabla sale el aviso «N conceptos sin agrupar · Ver» con el detalle y el botón **⚙ Agrupar** por si fue un olvido. Si el TOTAL no cuadra con el KPI de ingresos, la diferencia es justo eso. Mientras **no exista ningún grupo**, no se filtra nada (si no, el presupuesto sería cero).' },
       { h:'Escenarios', p:'Conservador = Base×(1−%), Optimista = Base×(1+%), con % editable, más una tarjeta Meta. Cada escenario muestra su utilidad esperada.' },
       { h:'La cantidad manual se guarda', p:'La **cantidad que capturas a mano se guarda** y ya **no revierte** al estimado del modelo. El botón **💾 Guardar presupuesto** hace un guardado masivo de reaseguro de todo lo visible en un solo lote.' },
       { h:'Externos por origen', p:'El grupo **«Externos»** se puede **desglosar por origen** (agencia/médico) con el catálogo de Orígenes externos, para presupuestar por quién refiere.' },
@@ -35705,23 +36010,43 @@ setTimeout(novCheckPopup, 2500);
       nota:'`recordatorios.gs`. La tarea programada `recordatoriosDelDia` envía el recordatorio por correo.' } },
 
   { id:'novedades', group:'admin', icon:'✨', title:'Novedades (qué hay de nuevo)',
-    keywords:'novedades changelog cambios nuevo version mejora aviso popup tutorial como usar',
-    para:'La página de **Novedades** es el historial de cambios del ERP: cada mejora con «qué hace» y «cómo usarlo». Al publicar una versión aparece un **aviso emergente una vez por versión**.',
-    where:'Menú → **Novedades ✨** (o el aviso emergente).',
-    mock:{ title:'Novedades ✨', crumb:'Novedades',
-      table:{ cols:['Fecha','Mejora','Cómo usarlo'],
-        rows:[ ['2026-07-10','Panel Cuentas por Cobrar en Flujo','Abre Flujo → panel con buscador'],
-               ['2026-07-10','Manual ilustrado','Menú → 📖 Manual'] ] },
-      callouts:[] },
-    steps:[ 'Abre **Novedades ✨** desde el menú (o el aviso emergente).', 'Lee las entradas por fecha con su mini-tutorial «Cómo usarlo».' ],
+    keywords:'novedades changelog cambios nuevo version mejora aviso popup tutorial como usar activar desactivar apagar destacada anunciar audiencia permiso interruptor maestro',
+    para:'La página de **Novedades** es el historial de cambios del ERP: cada mejora con «qué hace» y «cómo usarlo». El **aviso emergente** ya no salta con cada cambio: un administrador decide **si** avisa, **cuál** novedad se anuncia y **a quién**.',
+    where:'Menú → **Novedades ✨** (o el aviso emergente). Para configurarlo: **Panel de Control → Novedades ✨** (solo admin/director).',
+    mock:{ title:'Panel de Control → Novedades ✨', crumb:'Panel de Control › Novedades',
+      table:{ cols:['Se anuncia','Novedad','Audiencia'],
+        rows:[ ['☑','🧾 Nómina por periodos','Nómina (solo con el permiso)'],
+               ['☐','🏦 Editar movimientos en Flujo','Todos (sin restricción)'],
+               ['☐','🪪 Alias: tu nombre corto','Todos (sin restricción)'] ] },
+      callouts:[ 'Arriba de la tabla: el **interruptor maestro** del aviso emergente.',
+                 'Apagarlo NO esconde la página de Novedades: solo evita que salte sola.' ] },
+    steps:[
+      'Abre **Novedades ✨** desde el menú (o el aviso emergente) y lee las entradas por fecha con su mini-tutorial «Cómo usarlo».',
+      'Para administrarlo, entra a **Panel de Control → Novedades ✨** (solo lo ven admin/director).',
+      'Prende o apaga el **aviso emergente** con el switch de arriba.',
+      'Marca **«Se anuncia»** SOLO en las novedades importantes: son las únicas que disparan el aviso.',
+      'Elige la **Audiencia** de cada una: «Todos» o un permiso (ej. una novedad de Nómina solo para quien tenga ese permiso).',
+      'Pulsa **Guardar**: aplica a **todos los usuarios**, no solo a ti.'
+    ],
     buttons:[
       { k:'Ver novedades (en el aviso emergente)', d:'Te lleva a la página de Novedades.' },
-      { k:'Después', d:'Cierra el aviso; lo vuelves a abrir desde el menú Novedades ✨.' }
+      { k:'Después', d:'Cierra el aviso; lo vuelves a abrir desde el menú Novedades ✨.' },
+      { k:'Aviso emergente al entrar (switch)', d:'Interruptor maestro. Apagado = nadie recibe el aviso; la página sigue disponible en el menú.' },
+      { k:'Se anuncia (casilla)', d:'Marca las novedades importantes. Solo las marcadas saltan.' },
+      { k:'Audiencia (lista)', d:'«Todos» o un permiso de Gestión de Roles: solo quien lo tenga ve esa novedad.' }
     ],
-    tips:[ 'El aviso emergente aparece **una vez por versión** para quien tenga acceso a esas áreas.' ],
-    tech:{ props:['`localStorage hf_nov_seen` (última versión vista)'],
-      funciones:['novInit','novCheckPopup','NOVEDADES'],
-      nota:'Frontend-only. Las entradas se pueden gatear por permiso (perm).' } },
+    tips:[
+      'Regla de los tres candados: el aviso salta solo si (1) el maestro está encendido, (2) hay una novedad marcada «se anuncia» que esa persona pueda ver y (3) no la ha visto antes.',
+      'Si el maestro está encendido pero no marcaste ninguna, **no salta nada** — el panel te lo advierte.',
+      'La **audiencia** filtra la página también, no solo el aviso: si la novedad es de Nómina, quien no es de Nómina ni la lee.',
+      '**admin/director** ven todas (traen el comodín `*`).',
+      'La configuración es **de todos**: se guarda en Google Sheets, no en tu navegador. El «ya lo vi» sí es tuyo.'
+    ],
+    tech:{ hojas:['`Config_Novedades` (Clave | Destacada | Audiencia | Notas); la fila `__AVISO__` es el interruptor maestro'],
+      props:['`localStorage hf_nov_seen_v2` (último build ANUNCIADO que vio este usuario)','`localStorage hf_nov_cfg` (copia de la config por si el backend no responde)'],
+      funciones:['novInit','novCheckPopup','_novEff','_novVisibles','_novDestacadas','_novLoadCfg','readNovedadesCfg','saveNovedadesCfg','NOVEDADES','OP_PERMS_CATALOG'],
+      deploy:'`novedades.gs` es NUEVO: agrégalo al Apps Script y **redespliega** (ya está en deploy-gas.ps1), y corre **`setupNovedadesCfg()`** una vez. Sin eso el aviso se queda apagado (estado seguro) y el panel avisa al guardar.',
+      nota:'Dos capas: el array `NOVEDADES` trae los defaults del código (`destacada`, `perm`) y la hoja los sobrescribe. La audiencia reutiliza `hasPermission` + `OP_PERMS_CATALOG`; el guardado revalida admin/director en el servidor.' } },
 
   /* ============ CONFIGURACIÓN Y REFERENCIA ============ */
   { id:'config-inicial', group:'ref', icon:'🧰', title:'Configuración inicial (hojas, setups, deploy)',
