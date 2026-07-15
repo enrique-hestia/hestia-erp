@@ -709,6 +709,13 @@ function readEstadoCuentaPaciente(pacienteNombre) {
 
     var movimientos = [];
     var totalGeneral = 0;
+    // Total efectivamente PAGADO por el paciente. Convención consistente con el
+    // histórico: si la columna Pagado viene en blanco/0 se asume la línea pagada por
+    // completo (así lo trata también el cálculo de saldo por línea de abajo). Si
+    // Pagado trae un número se toma literal — puede ser MENOR que el total (pago
+    // parcial → nos debe) o MAYOR (p. ej. un ingreso editado a un producto más
+    // barato → saldo a favor del paciente).
+    var totalPagado = 0;
     // Saldo por pago PARCIAL a nivel línea (solo si Pagado>0 y Pagado<Total; los
     // históricos con Pagado en blanco se asumen pagados). Se agrupa por OP para no
     // duplicar contra el registro explícito de Cuentas por Cobrar más abajo.
@@ -730,6 +737,10 @@ function readEstadoCuentaPaciente(pacienteNombre) {
       var saldoRow = (iPagado >= 0 && pagadoRow > 0.01 && pagadoRow < total - 0.01) ? (total - pagadoRow) : 0;
       var opRow = String(row[iOp] || '').trim();
       if (saldoRow > 0.01) _saldoLineaPorOp[opRow] = (_saldoLineaPorOp[opRow] || 0) + saldoRow;
+      // Pagado efectivo: Pagado en blanco/0 ⇒ línea asumida pagada por completo;
+      // un número ⇒ se respeta (puede exceder el total = sobrepago / saldo a favor).
+      var pagEfectivo = (iPagado < 0) ? total : (pagadoRow > 0.01 ? pagadoRow : total);
+      totalPagado += pagEfectivo;
       totalGeneral += total;
       movimientos.push({
         op:       opRow,
@@ -800,10 +811,19 @@ function readEstadoCuentaPaciente(pacienteNombre) {
       porAnio[m.anio] = (porAnio[m.anio] || 0) + m.total;
     });
 
+    // Saldo NETO (con signo) = Facturado − Pagado. Positivo = nos debe;
+    // negativo = saldo a favor del paciente (sobrepago). totalFacturado es alias
+    // explícito de totalGeneral (el "Total histórico" que ya se mostraba).
+    var totalFacturado = totalGeneral;
+    var saldoNeto = totalFacturado - totalPagado;
+
     return {
       ok: true,
       paciente: String(pacienteNombre).trim(),
       totalGeneral: totalGeneral,
+      totalFacturado: totalFacturado,
+      totalPagado: totalPagado,
+      saldoNeto: saldoNeto,
       totalMovimientos: movimientos.length,
       movimientos: movimientos,
       porCategoria: porCategoria,

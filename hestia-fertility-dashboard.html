@@ -29261,20 +29261,44 @@ function ecRenderResult(d) {
       + "<div style=\"font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:4px\">" + a + "</div>"
       + "<div style=\"font-size:14px;font-weight:700;color:var(--color-primary)\">" + ecFmt(d.porAnio[a]) + "</div></div>";
   }
-  // Tarjeta de saldo pendiente ("Nos debe") — solo si hay adeudo.
-  var _deuda = parseFloat(d.saldoPendiente) || 0;
-  var debeHtml = "";
+  // ── Saldo del paciente ───────────────────────────────────────────────────
+  // Facturado y Pagado vienen del backend (sumas sobre BD_Ingresos). El SALDO
+  // que se muestra como titular reconcilia dos fuentes sin contradecirse:
+  //  · Nos debe  → saldoPendiente (canónico de Cuentas por Cobrar; misma cifra
+  //    que el desglose y el módulo CxCobrar, evita deuda falsa por precios viejos).
+  //  · A favor   → −saldoNeto (Facturado − Pagado, cuando el paciente pagó de más
+  //    y no hay adeudo registrado, p. ej. tras editar un ingreso a algo más barato).
+  var _facturado = parseFloat(d.totalFacturado != null ? d.totalFacturado : d.totalGeneral) || 0;
+  var _pagado    = parseFloat(d.totalPagado) || 0;
+  var _saldoNeto = (d.saldoNeto != null) ? (parseFloat(d.saldoNeto) || 0) : (_facturado - _pagado);
+  var _deuda     = parseFloat(d.saldoPendiente) || 0;
+  // Titular con signo: nos debe (canónico) domina; si no hay adeudo y hay sobrepago, a favor.
+  var _saldoHeadline, _saldoLabel, _saldoBg, _saldoSub;
   if (_deuda > 0.01) {
-    debeHtml = "<div style=\"background:#b3261e;border-radius:10px;padding:14px 18px;color:#fff\">"
-      + "<div style=\"font-size:10px;font-weight:700;opacity:.85;text-transform:uppercase;margin-bottom:4px\">Nos debe (saldo pendiente)</div>"
-      + "<div style=\"font-size:22px;font-weight:800\">" + ecFmt(_deuda) + "</div>"
-      + "<div style=\"font-size:11px;opacity:.8;margin-top:4px\">" + ((d.deudaDetalle||[]).length) + " concepto(s) por cobrar</div></div>";
+    _saldoHeadline = _deuda; _saldoLabel = "Nos debe"; _saldoBg = "#b3261e";
+    _saldoSub = ((d.deudaDetalle||[]).length) + " concepto(s) por cobrar";
+  } else if (_saldoNeto < -0.01) {
+    _saldoHeadline = -_saldoNeto; _saldoLabel = "Saldo a favor"; _saldoBg = "#1a7f37";
+    _saldoSub = "Pagado de mas";
+  } else {
+    _saldoHeadline = 0; _saldoLabel = "Al corriente"; _saldoBg = "var(--color-surface-2)"; _saldoSub = "Sin saldo";
   }
+  var _saldoTextColor = (_saldoBg === "var(--color-surface-2)") ? "var(--color-text)" : "#fff";
+  var _saldoOpacity   = (_saldoBg === "var(--color-surface-2)") ? ".65" : ".85";
+  var saldoCard = "<div style=\"background:" + _saldoBg + ";border-radius:10px;padding:14px 18px;color:" + _saldoTextColor + "\">"
+    + "<div style=\"font-size:10px;font-weight:700;opacity:" + _saldoOpacity + ";text-transform:uppercase;margin-bottom:4px\">" + _saldoLabel + "</div>"
+    + "<div style=\"font-size:22px;font-weight:800\">" + ecFmt(_saldoHeadline) + "</div>"
+    + "<div style=\"font-size:11px;opacity:.75;margin-top:4px\">" + _saldoSub + "</div></div>";
+  var pagadoCard = "<div style=\"background:var(--color-surface-2);border-radius:10px;padding:14px 18px;color:var(--color-text)\">"
+    + "<div style=\"font-size:10px;font-weight:700;opacity:.65;text-transform:uppercase;margin-bottom:4px\">Total pagado</div>"
+    + "<div style=\"font-size:22px;font-weight:800;color:#1a7f37\">" + ecFmt(_pagado) + "</div>"
+    + "<div style=\"font-size:11px;opacity:.6;margin-top:4px\">Cobrado al paciente</div></div>";
   cards.innerHTML = "<div style=\"background:var(--color-primary);border-radius:10px;padding:14px 18px;color:#fff\">"
-    + "<div style=\"font-size:10px;font-weight:700;opacity:.8;text-transform:uppercase;margin-bottom:4px\">Total historico</div>"
-    + "<div style=\"font-size:22px;font-weight:800\">" + ecFmt(d.totalGeneral) + "</div>"
+    + "<div style=\"font-size:10px;font-weight:700;opacity:.8;text-transform:uppercase;margin-bottom:4px\">Total facturado</div>"
+    + "<div style=\"font-size:22px;font-weight:800\">" + ecFmt(_facturado) + "</div>"
     + "<div style=\"font-size:11px;opacity:.75;margin-top:4px\">" + d.totalMovimientos + " movimientos</div></div>"
-    + debeHtml
+    + pagadoCard
+    + saldoCard
     + porAnioHtml;
   // Desglose de lo que debe (por operación/concepto).
   var _dw = document.getElementById("ec-deuda-wrap");
@@ -29342,11 +29366,23 @@ function ecImprimir() {
   var d = _ecData;
   var movs = _ecMovAll;
   var hoy = ecFmtFecha(new Date().toISOString().substring(0,10));
+  // Facturado / Pagado / Saldo — misma lógica que la pantalla (ecRenderResult):
+  // Nos debe = saldoPendiente (canónico CxCobrar); Saldo a favor = −saldoNeto.
+  var _pFact  = parseFloat(d.totalFacturado != null ? d.totalFacturado : d.totalGeneral) || 0;
+  var _pPag   = parseFloat(d.totalPagado) || 0;
+  var _pNeto  = (d.saldoNeto != null) ? (parseFloat(d.saldoNeto) || 0) : (_pFact - _pPag);
+  var _pDeuda = parseFloat(d.saldoPendiente) || 0;
+  var _pSaldoVal, _pSaldoLbl;
+  if (_pDeuda > 0.01)      { _pSaldoVal = ecFmt(_pDeuda);   _pSaldoLbl = "Nos debe"; }
+  else if (_pNeto < -0.01) { _pSaldoVal = ecFmt(-_pNeto);   _pSaldoLbl = "Saldo a favor"; }
+  else                     { _pSaldoVal = ecFmt(0);          _pSaldoLbl = "Al corriente"; }
   var kpis = [
-    {value: ecFmt(d.totalGeneral), label: "Total histórico"},
+    {value: ecFmt(_pFact), label: "Total facturado"},
+    {value: ecFmt(_pPag),  label: "Total pagado"},
+    {value: _pSaldoVal,    label: _pSaldoLbl},
     {value: String(d.totalMovimientos || movs.length), label: "Movimientos"}
   ];
-  Object.keys(d.porAnio||{}).sort().slice(-3).forEach(function(a){
+  Object.keys(d.porAnio||{}).sort().slice(-2).forEach(function(a){
     kpis.push({value: ecFmt(d.porAnio[a]), label: a});
   });
   hfReportPrint('estado-cuenta', {
@@ -29357,8 +29393,8 @@ function ecImprimir() {
     kpis: kpis,
     cols: ['Fecha','Concepto','Categoría','Forma de pago','Importe'],
     rows: movs.map(function(m){ return [ecFmtFecha(m.fecha), m.producto||m.desc||'—', m.cat||'—', m.pago||'—', ecFmt(m.total)]; }),
-    totalLabel: 'Total histórico',
-    totalValue: ecFmt(d.totalGeneral),
+    totalLabel: 'Total facturado',
+    totalValue: ecFmt(_pFact),
     nota: cfg.frase || ''
   });
 }
