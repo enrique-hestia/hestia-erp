@@ -35,7 +35,7 @@ var COBRANZA_CARGOS   = 'Cuentas_Cobrar';
 var COBRANZA_SUS      = 'Suscripciones_Crio';
 var COBRANZA_DESCUENTOS = 'Descuentos_Agencia'; // escala de descuento por volumen, por agencia
 var COBRANZA_DEPOSITO_KEY = 'COBRANZA_DEPOSITO';
-var COBRANZA_VER      = 'cobranza-2026.07.13p';
+var COBRANZA_VER      = 'cobranza-2026.07.15a';
 // Cuenta de depósito por defecto (Hestia recibe aquí). Editable en Script Property COBRANZA_DEPOSITO.
 var COBRANZA_DEPOSITO_DEF = { banco:'Santander', beneficiario:'Hestia Clinic', cuenta:'65-51043096-7', clabe:'014180655104309670' };
 
@@ -336,6 +336,14 @@ function editarCuentaCobrar(body) {
     var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
     var sh = ss.getSheetByName(COBRANZA_CARGOS);
     if (!sh || rn > sh.getLastRow()) return { ok: false, error: 'Cuenta por cobrar no encontrada' };
+    // ── Renglón que MANDA la venta (auto-ingreso): su MontoCargo NO es editable aquí. Es
+    // un DERIVADO (Facturado − Pagado de la OP) que _cobRegistrarSaldoIngreso reescribe en
+    // el próximo abono o edición del ingreso → el cambio se evaporaría. Peor: entre tanto
+    // la deuda diría una cosa y la venta otra. Se corrige en la VENTA, que es la fuente. ──
+    var _au = _cobRowAuto(sh, rn);
+    if (_au.auto)
+      return { ok: false, version: COBRANZA_VER,
+        error: 'Este saldo lo manda la venta ' + _au.op + ': aquí no se puede editar (el monto se recalcula solo como Facturado − Pagado y tu cambio se perdería). Corrige la venta en Ingresos → editar la operación ' + _au.op + ' y el saldo se ajusta solo.' };
     // Cuentas_Cobrar: Fecha(1),OP(2),Paciente(3),Categoria(4),Concepto(5),MontoCargo(6),Estatus(7),Nota(8),...,Items
     // Partidas: si vienen items, se guardan y el MONTO = suma de partidas.
     var _itemsEdit = (body.items != null) ? _cobParseItems(body.items) : null;
@@ -359,9 +367,31 @@ function borrarCuentaCobrar(body) {
     var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
     var sh = ss.getSheetByName(COBRANZA_CARGOS);
     if (!sh || rn > sh.getLastRow()) return { ok: false, error: 'Cuenta por cobrar no encontrada' };
+    // ── Borrar el renglón de una VENTA a crédito dejaría el REVENUE huérfano: la venta
+    // seguiría viva en Ingresos (sumando al P&L) sin nadie a quién cobrarle, y volver a
+    // capturar el cargo duplicaría el ingreso. Deshacer una venta es CANCELARLA (queda
+    // registro del motivo y su saldo se cierra solo), no borrar su deuda. ──
+    var _au = _cobRowAuto(sh, rn);
+    if (_au.auto)
+      return { ok: false, version: COBRANZA_VER, op: _au.op,
+        error: 'Este saldo viene de la venta ' + _au.op + ': borrarlo aquí dejaría la venta cobrando en Ingresos sin cuenta por cobrar. Si la venta no va, cancélala: Ingresos → operación ' + _au.op + ' → «⊘ Cancelar» (pide motivo y cierra el saldo solo).' };
     sh.deleteRow(rn);
     return { ok: true, version: COBRANZA_VER, rowNum: rn };
   } catch (ex) { return { ok: false, error: ex.message, version: COBRANZA_VER }; }
+}
+/* ¿El renglón <rn> de Cuentas_Cobrar lo manda una venta? (Nota 'auto-ingreso' + OP —
+ * mismo criterio que _cobBuildSaldos para decidir auto:true, y que abonarCargo para
+ * rechazar el cobro por la vía equivocada.) */
+function _cobRowAuto(sh, rn) {
+  try {
+    var lc = Math.max(sh.getLastColumn(), 1);
+    var hdr = sh.getRange(1, 1, 1, lc).getValues()[0].map(function (x) { return String(x).trim().toLowerCase(); });
+    var iOp = hdr.indexOf('op');     if (iOp < 0) iOp = 1;
+    var iNota = hdr.indexOf('nota'); if (iNota < 0) iNota = 7;
+    var row = sh.getRange(rn, 1, 1, lc).getValues()[0];
+    var op = String(row[iOp] || '').trim();
+    return { auto: (String(row[iNota] || '').toLowerCase().indexOf('auto-ingreso') > -1 && !!op), op: op };
+  } catch (e) { return { auto: false, op: '' }; }
 }
 // Ajusta el Pagado de una OP en BD_Ingresos (para saldos que vienen de un pago
 // parcial). saldar=true → marca pagado completo (borra el adeudo). Si no, fija el
@@ -1095,27 +1125,216 @@ function registrarAbono(body) {
   }
 }
 
+/* ═════════ REGISTRAR UNA CUENTA POR COBRAR = VENDER A CRÉDITO ═════════
+ * "+ Cuenta por cobrar" es SIEMPRE una venta nueva que todavía NO está en Ingresos
+ * (decisión del negocio). Antes esta función solo hacía appendRow en Cuentas_Cobrar:
+ * creaba la DEUDA pero nunca la VENTA. Al cobrarla el dinero entraba al banco y el P&L
+ * jamás veía el ingreso → había que capturarlo a mano, duplicándolo.
+ *
+ * La raíz estaba en el ALTA, no en el cobro: al cobrar es imposible saber si la venta
+ * ya existe; al crear el cargo, sí se sabe (siempre es nueva).
+ *
+ * Ahora el cargo NACE de la venta:
+ *   1) saveIngreso(... pagado:0 ...) → escribe la venta en BD_Ingresos con Pagado 0.
+ *      pagado:0 NO manda nada al banco: saveIngreso no llama a saveBankRow ni a
+ *      saveCajaChicaIngreso en ninguna rama (el banco lo escribe el FRONT al capturar,
+ *      o _abonoRutearABanco al cobrar). Vender a crédito no mueve efectivo: correcto.
+ *   2) saveIngreso ve saldo (TotalPagar − Pagado = total) y llama a
+ *      _cobRegistrarSaldoIngreso → ESA es la cuenta por cobrar, con OP y Nota
+ *      'auto-ingreso' → _cobBuildSaldos la marca auto:true → el botón "Cobrar / Abonar"
+ *      rutea a abonarIngreso: sube el Pagado de la venta Y manda el dinero al banco.
+ *      UN SOLO MOTOR de cobro. Los abonos parciales salen gratis (Pagado sube de a poco).
+ * Esta función YA NO hace appendRow propio: sería una SEGUNDA cuenta por cobrar por el
+ * mismo dinero. Son mutuamente excluyentes (return antes del appendRow que ya no existe).
+ * La fecha de la venta = la fecha del cargo (devengado: el ingreso pertenece al mes en
+ * que se vendió, no a aquel en que se cobre).
+ */
 function cargarSaldoInicial(body) {
   try {
+    body = body || {};
+    // ── Version skew: si el backend está a medio desplegar, fallar RUIDOSO. Sin
+    // saveIngreso esto crearía otra vez deuda sin venta — justo el bug que cierra. ──
+    if (typeof saveIngreso !== 'function')
+      return { ok: false, error: 'Actualiza finance.gs en Apps Script y redespliega (falta saveIngreso): una cuenta por cobrar ahora se registra como venta a crédito.', version: COBRANZA_VER };
+    if (typeof _cobRegistrarSaldoIngreso !== 'function')
+      return { ok: false, error: 'Actualiza cobranza.gs en Apps Script y redespliega (falta _cobRegistrarSaldoIngreso).', version: COBRANZA_VER };
+    if (typeof INGRESOS_IDS === 'undefined' || typeof INGRESOS_SS_ID === 'undefined')
+      return { ok: false, error: 'Actualiza finance.gs en Apps Script y redespliega (faltan los libros de ingresos).', version: COBRANZA_VER };
+
+    var paciente = String(body.paciente || '').trim();
+    if (!paciente) return { ok: false, error: 'Falta el titular de la cuenta por cobrar (a quién se le cobra).', version: COBRANZA_VER };
+
     var items = _cobParseItems(body.items);
     var monto = items.length ? _cobItemsMonto(items) : _cobNum(body.monto);
-    if (monto <= 0) return { ok: false, error: 'Captura al menos una partida (producto) o un monto.' };
-    var sh = _cobEnsureCargos();
-    var iItems = _cobCargosItemsCol(sh);
+    if (monto <= 0) return { ok: false, error: 'Captura al menos una partida (producto) o un monto.', version: COBRANZA_VER };
+
     var fecha = body.fecha ? _cobStr(_cobD(body.fecha)) : _cobStr(_cobToday());
     var concepto = String(body.concepto || '').trim();
     if (!concepto) concepto = items.length ? (items.map(function (it) { return it.producto; }).filter(Boolean).slice(0, 3).join(', ') || 'Cuenta por cobrar') : 'Saldo inicial';
-    sh.appendRow([
-      fecha, String(body.op || '').trim(), String(body.paciente || '').trim(),
-      String(body.categoria || ''), concepto,
-      monto, String(body.estatus || 'Pendiente'), String(body.nota || ''),
-      String(body.usuario || ''), new Date()
-    ]);
-    if (items.length) sh.getRange(sh.getLastRow(), iItems).setValue(JSON.stringify(items));
-    return { ok: true, version: COBRANZA_VER, fecha: fecha, monto: monto };
+
+    // ── Cargo con MONTO SUELTO (sin partidas): saveIngreso aborta si no hay líneas
+    // ('No hay productos en la operación'). Se sintetiza UNA línea desde concepto+monto
+    // en vez de exigir partidas: ese flujo funciona hoy y romperlo sería una regresión. ──
+    if (!items.length) items = [{ producto: concepto, cantidad: 1, precio: monto, total: monto, saldo: 0, pac: '', fecha: '' }];
+
+    // ── GUARD DEL LIBRO ANUAL ──────────────────────────────────────────────────
+    // saveIngreso SIEMPRE escribe en INGRESOS_SS_ID (el libro del año en curso). Un cargo
+    // fechado en otro año caería en el libro equivocado con una fecha que no le toca:
+    // invisible donde debería estar y contaminando donde no. El guard es contra el LIBRO,
+    // no contra el reloj → se auto-mantiene cuando se agregue el libro del año siguiente.
+    var anio = parseInt(String(fecha).substring(0, 4), 10);
+    if (!anio || INGRESOS_IDS[anio] !== INGRESOS_SS_ID) {
+      return { ok: false, version: COBRANZA_VER,
+        error: 'La fecha del cargo (' + fecha + ') no corresponde al libro de ingresos activo. Una cuenta por cobrar ahora registra la VENTA en Ingresos, y la venta se escribiría en el libro equivocado. Captura el cargo con una fecha del año en curso, o registra la venta directamente en el libro de ' + anio + '.' };
+    }
+
+    // ── Doble alta (doble clic / "Reintentar" tras un timeout que en realidad SÍ guardó):
+    // antes duplicaba una deuda (feo pero visible); ahora duplicaría REVENUE. Se rechaza
+    // un cargo idéntico (titular + fecha + monto) creado hace segundos. Es una malla, no
+    // un candado: dos POST simultáneos pueden leer antes de que el otro escriba. La
+    // defensa principal es el front (botón deshabilitado + sin "Reintentar" a ciegas). ──
+    var dup = _cobCargoDuplicadoReciente(paciente, fecha, monto, 120);
+    if (dup) {
+      return { ok: false, version: COBRANZA_VER, duplicado: true, op: dup.op,
+        error: 'Ya se registró hace unos segundos una cuenta por cobrar idéntica de ' + paciente + ' por ' + monto.toFixed(2) + ' (venta ' + dup.op + '). No se creó otra para no duplicar el ingreso. Recarga la lista: si de verdad son dos cargos distintos, espera un momento y vuelve a capturarlo.' };
+    }
+
+    // ── TITULAR ────────────────────────────────────────────────────────────────
+    // El titular de la venta y de la cuenta por cobrar es el paciente del CARGO: en modo
+    // agencia (REPROVIDA) cada partida viaja con su propio `pac` (la paciente real), pero
+    // a quien se le cobra es a la AGENCIA. Tomar items[0].pac aquí pondría la deuda a
+    // nombre de la paciente: el aging por agencia perdería el saldo y se le cobraría a
+    // quien no debe. El nombre real de cada partida NO se pierde: viaja en el JSON de
+    // Items del renglón (que es lo que se despliega) y resumido en Observaciones.
+    var nota = _cobSanitizeNota(body.nota);
+    var pacsReales = [];
+    for (var pi = 0; pi < items.length; pi++) {
+      var pr = String(items[pi].pac || '').trim();
+      if (pr && pacsReales.indexOf(pr) < 0) pacsReales.push(pr);
+    }
+    var opRef = String(body.op || '').trim();   // referencia informativa; la venta genera su propia OP
+    var obs = 'Venta a crédito (cuenta por cobrar)'
+      + (opRef ? ' · ref. OP ' + opRef : '')
+      + (pacsReales.length ? ' · Pacientes: ' + pacsReales.join(', ') : '')
+      + (nota ? ' · ' + nota : '');
+
+    // ── Líneas de la venta. El PVP se deriva de total/cantidad para que el total que
+    // calcula saveIngreso (pvp × cant) sea EXACTAMENTE el monto del cargo: así la venta
+    // y la deuda nacen cuadradas al centavo. ──
+    var cat = String(body.categoria || '');
+    var lineas = [];
+    for (var li = 0; li < items.length; li++) {
+      var it = items[li];
+      var cant = _cobNum(it.cantidad) || 1;
+      var tot = _cobNum(it.total);
+      lineas.push({ categoria: cat, producto: String(it.producto || concepto), pvp: (cant ? tot / cant : tot),
+                    descuento: 0, cantidad: cant, pagado: 0, ciclo: '' });
+    }
+
+    // ── LA VENTA. pagado:0 → _pagadoOpDefinido es true (0 está definido) → saldoGenerado
+    // = totalOP → UNA llamada a _cobRegistrarSaldoIngreso → UN renglón en Cuentas_Cobrar.
+    // Los campos espejean lo que manda el formulario real de Ingresos para que la fila no
+    // ensucie el Estado de Resultados. conciliacion:false porque no hay nada en el banco
+    // todavía (marcarla sería mentir); formaPago vacío: aún no se cobra — la forma de pago
+    // se define al cobrar, y es ahí donde abonarIngreso rutea el dinero al banco. ──
+    var res = saveIngreso({
+      token: body.token || '', usuario: String(body.usuario || ''),
+      paciente: paciente, fecha: fecha,
+      formaPago: '', pagado: 0, pagos: [],
+      sucursal: String(body.sucursal || ''), moneda: String(body.moneda || 'MX'), ciclo: '',
+      observaciones: obs, factura: '', poliza: '', razonSocial: String(body.razonSocial || ''),
+      montoFactMes: 0, facturacion: false, conciliacion: false, contabilidad: false,
+      origenExterno: String(body.origenExterno || ''),
+      lineas: lineas
+    });
+    if (!res || !res.ok)
+      return { ok: false, version: COBRANZA_VER, error: 'No se pudo registrar la venta de la cuenta por cobrar: ' + ((res && res.error) || 'error desconocido') + '. No se creó ninguna deuda.' };
+
+    // ── El renglón de deuda lo crea _cobRegistrarSaldoIngreso DENTRO de saveIngreso, y ahí
+    // los errores se tragan (try/catch vacío: nunca deben tumbar una venta ya escrita). Si
+    // no quedó, tendríamos la VENTA sin su DEUDA y esta función devolvería ok:true sobre
+    // una cuenta por cobrar que no existe. Se verifica y se falla RUIDOSO. ──
+    var sh = _cobEnsureCargos();
+    var rowNum = _cobFindAutoRow(sh, res.op);
+    if (rowNum < 0) {
+      return { ok: false, version: COBRANZA_VER, op: res.op, ventaCreada: true,
+        error: 'La VENTA se registró (' + res.op + ') pero NO se pudo crear su cuenta por cobrar. El ingreso YA está capturado: NO lo vuelvas a capturar. Avisa al administrador para que revise la hoja ' + COBRANZA_CARGOS + ' (la deuda de ' + res.op + ' falta).' };
+    }
+
+    // Detalle del renglón: el JSON de partidas conserva el paciente real por línea (lo que
+    // se despliega en agencias) y el concepto que escribió el usuario.
+    try {
+      sh.getRange(rowNum, _cobCargosItemsCol(sh)).setValue(JSON.stringify(items));
+      var lcC = Math.max(sh.getLastColumn(), 1);
+      var hdrC = sh.getRange(1, 1, 1, lcC).getValues()[0].map(function (x) { return String(x).trim().toLowerCase(); });
+      var iConcC = hdrC.indexOf('concepto'); if (iConcC < 0) iConcC = 4;
+      var iUsrC = hdrC.indexOf('usuario');   if (iUsrC < 0) iUsrC = 8;
+      sh.getRange(rowNum, iConcC + 1).setValue(concepto);
+      sh.getRange(rowNum, iUsrC + 1).setValue(String(body.usuario || ''));
+    } catch (eD) {}
+
+    if (typeof logAudit === 'function') {
+      try { logAudit(String(body.usuario || '') || 'sistema', 'Cobranza', 'Registrar cuenta por cobrar (venta a crédito)',
+              res.op, 'Venta+CxC', '', paciente + ' · ' + Number(res.total || monto).toFixed(2) + ' · ' + concepto); } catch (ae) {}
+    }
+    return { ok: true, version: COBRANZA_VER, fecha: fecha, monto: Number(res.total || monto),
+             op: res.op, rowNum: rowNum, lineas: res.lineas, paciente: paciente };
   } catch (ex) {
     return { ok: false, error: ex.message, version: COBRANZA_VER };
   }
+}
+
+/* 'auto-ingreso' es un MARCADOR DEL SISTEMA en la columna Nota: significa "este saldo lo
+ * manda la venta". Si un POST lo mete en una nota de usuario, el renglón finge venir de
+ * una venta que no existe: abonarCargo lo rechaza y _cobBuildSaldos lo marca auto:false
+ * (exige OP) → callejón sin salida, imposible de cobrar. Se remueve el token. */
+function _cobSanitizeNota(x) {
+  return String(x || '').replace(/auto[\s\-_]*ingresos?/gi, '').replace(/\s{2,}/g, ' ').trim();
+}
+// Fila (1-based) del renglón auto-generado de una OP en Cuentas_Cobrar; -1 si no existe.
+function _cobFindAutoRow(sh, op) {
+  op = String(op || '').trim(); if (!op) return -1;
+  var lr = sh.getLastRow(); if (lr < 2) return -1;
+  var lc = Math.max(sh.getLastColumn(), 1);
+  var vals = sh.getRange(1, 1, lr, lc).getValues();
+  var hdr = (vals[0] || []).map(function (x) { return String(x).trim().toLowerCase(); });
+  var iOp = hdr.indexOf('op');     if (iOp < 0) iOp = 1;
+  var iNota = hdr.indexOf('nota'); if (iNota < 0) iNota = 7;
+  for (var r = 1; r < vals.length; r++) {
+    if (String(vals[r][iOp] || '').trim() === op &&
+        String(vals[r][iNota] || '').toLowerCase().indexOf('auto-ingreso') > -1) return r + 1;
+  }
+  return -1;
+}
+// ¿Se registró hace <ventanaSeg> una cuenta por cobrar idéntica? (anti doble-alta)
+function _cobCargoDuplicadoReciente(paciente, fecha, monto, ventanaSeg) {
+  try {
+    var sh = _cobEnsureCargos();
+    var lr = sh.getLastRow(); if (lr < 2) return null;
+    var lc = Math.max(sh.getLastColumn(), 1);
+    var hdr = sh.getRange(1, 1, 1, lc).getValues()[0].map(function (x) { return String(x).trim().toLowerCase(); });
+    var iOp = hdr.indexOf('op');           if (iOp < 0) iOp = 1;
+    var iPac = hdr.indexOf('paciente');    if (iPac < 0) iPac = 2;
+    var iMonto = hdr.indexOf('montocargo');if (iMonto < 0) iMonto = 5;
+    var iNota = hdr.indexOf('nota');       if (iNota < 0) iNota = 7;
+    var iFecha = hdr.indexOf('fecha');     if (iFecha < 0) iFecha = 0;
+    var iTs = hdr.indexOf('timestamp');    if (iTs < 0) iTs = 9;
+    var n = Math.min(lr - 1, 60);                  // un duplicado es RECIENTE → solo la cola
+    var start = lr - n + 1;
+    var vals = sh.getRange(start, 1, n, lc).getValues();
+    var ahora = new Date().getTime();
+    for (var i = vals.length - 1; i >= 0; i--) {
+      var row = vals[i];
+      if (String(row[iNota] || '').toLowerCase().indexOf('auto-ingreso') < 0) continue;
+      if (_cobKeyNom(row[iPac]) !== _cobKeyNom(paciente)) continue;
+      if (Math.abs(_cobNum(row[iMonto]) - _cobNum(monto)) > 0.01) continue;
+      if (_cobStr(_cobD(row[iFecha])) !== String(fecha)) continue;
+      var ts = (row[iTs] instanceof Date) ? row[iTs].getTime() : 0;
+      if (!ts || (ahora - ts) > (ventanaSeg * 1000)) continue;
+      return { rowNum: start + i, op: String(row[iOp] || '').trim(), ts: ts };
+    }
+    return null;
+  } catch (e) { return null; }
 }
 
 /* ═════════ COBRAR / ABONAR un CARGO EXPLÍCITO de Cuentas_Cobrar ═════════
@@ -1214,6 +1433,121 @@ function abonarCargo(body) {
     } finally { lock.releaseLock(); }
   } catch (ex) {
     return { ok: false, error: ex.message, version: COBRANZA_VER };
+  }
+}
+
+/* ═════════ AUDITORÍA: cargos SIN VENTA (SOLO LECTURA) ═════════
+ * Correr A MANO desde el editor de Apps Script. NO repara nada, NO escribe nada, NO tiene
+ * botón: solo LISTA. Cada caso se decide a mano.
+ *
+ * Qué lista: las cuentas por cobrar SIN la nota 'auto-ingreso', o sea las que se crearon
+ * ANTES del fix, cuando "+ Cuenta por cobrar" solo escribía la DEUDA y nunca la VENTA. En
+ * esas, cuando se cobra, el dinero entra al banco pero el ingreso no existe en el P&L.
+ * (Las nuevas nacen de la venta y traen 'auto-ingreso': esas ya están cuadradas.)
+ *
+ * ⚠ LA COLUMNA "PISTA" NO ES UNA PRUEBA. Solo dice si ese paciente tiene ALGO en
+ * BD_Ingresos, empatando ÚNICAMENTE POR NOMBRE — sin OP, sin fecha, sin monto. Un "sí"
+ * NO significa que la venta de ESTE cargo esté registrada: puede ser cualquier otra venta
+ * del mismo paciente (justo el falso indicio que casi nos hace duplicar un ingreso). Un
+ * "no" sí es señal fuerte de que la venta falta. Verifica caso por caso antes de tocar nada.
+ *
+ * Los cargos ya PAGADOS también salen: si se cobraron sin venta, el dinero entró al banco
+ * y el ingreso nunca se registró — el descuadre ya ocurrió y sigue ahí.
+ */
+function auditarCargosSinVenta() {
+  var L = [];
+  function log(s) { L.push(s); try { Logger.log(s); } catch (e) {} }
+  try {
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sh = ss.getSheetByName(COBRANZA_CARGOS);
+    if (!sh) return 'No existe la hoja ' + COBRANZA_CARGOS + ' — nada que auditar.';
+    var lr = sh.getLastRow(); if (lr < 2) return 'La hoja ' + COBRANZA_CARGOS + ' está vacía — nada que auditar.';
+    var lc = Math.max(sh.getLastColumn(), 1);
+    var vals = sh.getRange(1, 1, lr, lc).getValues();
+    var hdr = (vals[0] || []).map(function (x) { return String(x).trim().toLowerCase(); });
+    var iFecha = hdr.indexOf('fecha');      if (iFecha < 0) iFecha = 0;
+    var iOp = hdr.indexOf('op');            if (iOp < 0) iOp = 1;
+    var iPac = hdr.indexOf('paciente');     if (iPac < 0) iPac = 2;
+    var iCat = hdr.indexOf('categoria');    if (iCat < 0) iCat = 3;
+    var iConc = hdr.indexOf('concepto');    if (iConc < 0) iConc = 4;
+    var iMonto = hdr.indexOf('montocargo'); if (iMonto < 0) iMonto = 5;
+    var iEst = hdr.indexOf('estatus');      if (iEst < 0) iEst = 6;
+    var iNota = hdr.indexOf('nota');        if (iNota < 0) iNota = 7;
+
+    // Ventas por paciente (SOLO por nombre → es una PISTA, no una prueba).
+    var ventasPorPac = {};
+    try {
+      var shIn = ss.getSheetByName(BD_INGRESOS_TAB);
+      if (shIn) {
+        var din = shIn.getDataRange().getValues();
+        var HI = (din[0] || []).map(function (x) { return _cobLower(x); });
+        var hcI = function () { for (var a = 0; a < arguments.length; a++) { var k = HI.indexOf(arguments[a]); if (k > -1) return k; } return -1; };
+        var jOp = hcI('op'); if (jOp < 0) jOp = 0;
+        var jPac = hcI('paciente'), jTot = hcI('totalpagar', 'total a pagar', 'total'), jFec = hcI('fecha');
+        for (var r = 1; r < din.length; r++) {
+          var pk = _cobKeyNom(din[r][jPac]); if (!pk) continue;
+          if (!ventasPorPac[pk]) ventasPorPac[pk] = { n: 0, total: 0, ops: {} };
+          ventasPorPac[pk].total += _cobNum(din[r][jTot]);
+          var oo = String(din[r][jOp] || '').trim();
+          if (oo && !ventasPorPac[pk].ops[oo]) { ventasPorPac[pk].ops[oo] = _cobStr(_cobD(din[r][jFec])); ventasPorPac[pk].n++; }
+        }
+      }
+    } catch (eI) { log('! No se pudo leer ' + BD_INGRESOS_TAB + ': ' + eI.message + ' (la columna PISTA saldrá vacía)'); }
+
+    var abonos = { byOp: {} };
+    try { abonos = _cobReadAbonos(); } catch (eA) { log('! No se pudieron leer los abonos: ' + eA.message); }
+
+    var casos = [], totMonto = 0, totSaldo = 0, nAuto = 0, nPagados = 0;
+    for (var q = 1; q < vals.length; q++) {
+      var row = vals[q];
+      var nota = String(row[iNota] || '').toLowerCase();
+      var op = String(row[iOp] || '').trim();
+      if (nota.indexOf('auto-ingreso') > -1 && op) { nAuto++; continue; }   // nace de una venta: cuadrado
+      var monto = _cobNum(row[iMonto]);
+      var pac = String(row[iPac] || '').trim();
+      if (!pac && monto <= 0) continue;                                     // fila basura/vacía
+      var est = String(row[iEst] || '').trim();
+      var abo = op ? (abonos.byOp[op] || 0) : 0;
+      var saldo = monto - abo;
+      var pk2 = _cobKeyNom(pac);
+      var v = ventasPorPac[pk2];
+      var pista = v ? ('SÍ tiene ' + v.n + ' venta(s) por ' + v.total.toFixed(2) + ' — NO prueba que ESTA esté registrada')
+                    : 'NO hay NINGUNA venta a ese nombre — señal fuerte de que la venta falta';
+      if (_cobLower(est) === 'pagado') nPagados++;
+      totMonto += monto; totSaldo += Math.max(0, saldo);
+      casos.push({ fila: q + 1, fecha: _cobStr(_cobD(row[iFecha])), paciente: pac, op: op || '—',
+                   categoria: String(row[iCat] || ''), concepto: String(row[iConc] || ''),
+                   monto: monto, abonado: abo, saldo: saldo, estatus: est || 'Pendiente', pista: pista });
+    }
+
+    log('══════════ CARGOS SIN VENTA EN INGRESOS (SOLO LECTURA) ══════════');
+    log('Hoja: ' + COBRANZA_CARGOS + ' · renglones revisados: ' + (lr - 1));
+    log('Nacidos de una venta (nota auto-ingreso, ya cuadrados, NO se listan): ' + nAuto);
+    log('SIN venta (creados antes del fix): ' + casos.length + '  ·  de esos, ya cobrados/cerrados: ' + nPagados);
+    log('Monto total de esos cargos: ' + totMonto.toFixed(2) + '  ·  saldo vivo: ' + totSaldo.toFixed(2));
+    log('');
+    log('⚠ La PISTA empata SOLO POR NOMBRE (sin OP, sin fecha, sin monto). Un "SÍ" NO prueba');
+    log('  que la venta de ese cargo exista: puede ser otra venta del mismo paciente. Revisa');
+    log('  caso por caso antes de tocar nada. Esta función no repara nada.');
+    log('');
+    for (var c = 0; c < casos.length; c++) {
+      var k = casos[c];
+      log('── Fila ' + k.fila + ' · ' + k.fecha + ' · ' + k.paciente + ' · OP ' + k.op);
+      log('   ' + k.concepto + (k.categoria ? ' [' + k.categoria + ']' : '') + ' · ' + k.estatus);
+      log('   Monto ' + k.monto.toFixed(2) + ' · abonado ' + k.abonado.toFixed(2) + ' · saldo ' + k.saldo.toFixed(2));
+      log('   PISTA: ' + k.pista);
+    }
+    if (!casos.length) log('✓ No hay cargos sin venta: todas las cuentas por cobrar nacen de una venta registrada.');
+    log('');
+    log('Qué hacer con cada uno (lo decides tú, caso por caso):');
+    log(' · Si la venta NO está en Ingresos → captúrala ahí (con lo pagado que corresponda) y borra este cargo,');
+    log('   o cóbralo y captura el ingreso a mano UNA vez. Lo que no debe pasar es cobrarlo y no registrar nada.');
+    log(' · Si la venta SÍ está (verificado a mano, no por la pista) → este cargo es una deuda DUPLICADA: bórralo.');
+    log('══════════════════════════════════════════════════════════════════');
+    return L.join('\n');
+  } catch (ex) {
+    log('ERROR en la auditoría: ' + ex.message);
+    return L.join('\n');
   }
 }
 

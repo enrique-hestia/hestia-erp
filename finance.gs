@@ -5135,6 +5135,22 @@ function abonarIngreso(body) {
       var paciente = String(body.paciente || pacName || '').trim();
       var saldoAntes = Math.max(0, totalOP - pagadoActual);
 
+      // ── CANDADO ANTI DOBLE-COBRO (espejo del de cobranza.abonarCargo) ────────────
+      // Se RE-VALIDA aquí, DENTRO del lock y contra el Pagado recién leído, que el saldo
+      // siga siendo el que el usuario tenía en pantalla al confirmar. Sin esto la única
+      // defensa era "abonoTotal > saldoAntes", que NO detiene un doble clic: el primer
+      // POST baja el saldo, el segundo llega con un monto que aún cabe en el saldo
+      // restante y se cobra otra vez → DOS movimientos bancarios por el mismo dinero.
+      // Con el saldo esperado el segundo POST ve que el saldo ya cambió y se rechaza.
+      // Va ANTES de aplicar el crédito a favor: si no, el crédito se consumiría y
+      // habría que devolverlo. Compatible con clientes viejos que no lo mandan.
+      if (body.saldoEsperado != null && String(body.saldoEsperado) !== '' &&
+          Math.abs(num(body.saldoEsperado) - saldoAntes) > 0.01) {
+        return { ok: false, saldoCambio: true, saldo: saldoAntes,
+          error: 'El saldo de la OP ' + op + ' cambió (ahora es ' + saldoAntes.toFixed(2) +
+                 '). Puede que el cobro ya se haya registrado. Recarga la lista y verifica antes de reintentar.' };
+      }
+
       // Crédito a favor a aplicar (offset interno, sin banco). Se aplica lo disponible.
       var creditoAplicado = 0;
       if (aplicarCredito > 0.01 && typeof _cobAplicarCreditoFavor === 'function') {
