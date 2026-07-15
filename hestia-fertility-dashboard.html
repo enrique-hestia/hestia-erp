@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.14.196 -->
+﻿<!-- app-build:2026.07.14.197 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4357,6 +4357,9 @@ function _ingPacSearchRender(q) {
 }
 
 function ingSelectPacientePopup(nombre) {
+  // Gancho: si otra vista armó el buscador (p.ej. Identificar pacientes), le
+  // entrega el nombre y no toca el formulario de ingresos. Ver _idpPickCb.
+  if (window._idpPickCb) { var _cb = window._idpPickCb; window._idpPickCb = null; var _o0 = document.getElementById('ing-pac-search-ovl'); if (_o0) _o0.remove(); _cb(nombre); return; }
   var el = document.getElementById('ing-paciente');
   if (el) el.value = nombre;
   var ovl = document.getElementById('ing-pac-search-ovl'); if (ovl) ovl.remove();
@@ -4364,6 +4367,9 @@ function ingSelectPacientePopup(nombre) {
 }
 
 function ingNuevoPaciente() {
+  // Si el buscador lo abrió Identificar pacientes, el alta va por su propio
+  // flujo (con antipático de duplicados al 90%), no por el modal de captura.
+  if (window._idpPickCb && typeof idpAltaDesdeBuscador === 'function') { idpAltaDesdeBuscador(); return; }
   _ingPacienteCallback = function(nombre) {
     var pacEl = document.getElementById('ing-paciente');
     if (pacEl && nombre) {
@@ -9445,6 +9451,26 @@ async function loadMenu() {
         if (_idsFusionados.indexOf(i.padre) > -1) i.padre = 'egresos';
       });
     }
+    /* ── Inyectar "Identificar pacientes" (si la hoja Menu no lo trae) ──
+       Va como ítem RAÍZ (sin padre) A PROPÓSITO: quien lo usa (vendedoras /
+       enfermeras) tiene bloqueado el grupo de Ingresos, y colgándolo de ahí
+       desaparecería junto con el grupo — justo para quien se hizo la vista.
+       El match del id es EXACTO: un regex laxo ya borró el Catálogo General
+       una vez (ver el comentario del bloque de Productos, abajo). */
+    if (typeof hasPermission === 'function' && hasPermission('identificar_pacientes')) {
+      var _hasIdp = menuItems.some(function(i){ return String(i.id||'').trim() === 'identificar'; });
+      if (!_hasIdp) {
+        var _ingRef = menuItems.filter(function(i){
+          return String(i.id||'').trim() === 'ingresos' || String(i.fuente||'').toLowerCase() === 'ingresos';
+        })[0];
+        menuItems.push({
+          id:'identificar', label:'Identificar pacientes', padre:'',
+          icono:'user-check', tipo:'vista', orden:500,
+          seccion:(_ingRef && _ingRef.seccion) ? _ingRef.seccion : 'Operación',
+          fuente:'identificar'
+        });
+      }
+    }
     // Inyectar "Catálogo General" como primer hijo del grupo Productos
     var prodGroup = menuItems.filter(function(i){
       return (i.tipo==='grupo'||i.id==='productos') && /producto/i.test(i.label||i.id);
@@ -13875,6 +13901,17 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
   var _foundViewItem = null;
   for (var _fvi = 0; _fvi < menuItems.length; _fvi++) {
     if (menuItems[_fvi].id === viewId) { _foundViewItem = menuItems[_fvi]; break; }
+  }
+  /* Identificar pacientes — vista propia. Va ANTES de los ruteos genéricos
+     porque el id contiene "identificar"/"paciente" y el ruteo laxo de
+     pacientes/catálogo lo absorbería. Match EXACTO de id o fuente.
+     No hace fetch de Ingresos: idpInit() solo pide ?action=noLocalizados. */
+  if (viewId === 'identificar' || (_foundViewItem && /^identificar$/i.test(String(_foundViewItem.fuente||'')))) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _idpEl = document.getElementById('view-identificar');
+    if (_idpEl) _idpEl.style.display = '';
+    if (typeof idpInit === 'function') idpInit();
+    return;
   }
   // Manual ilustrado (guía de uso) — vista propia, sin fetch al API
   if (viewId === 'manual' || (_foundViewItem && /^manual$/i.test(String(_foundViewItem.fuente||'')))) {
@@ -23150,6 +23187,11 @@ var OP_PERMS_CATALOG = [
   {key:'bank_liberado',    label:'Marcar liberado (MP)',             cat:'Conciliación Bancaria'},
   {key:'editar_ingresos',  label:'Editar operaciones de ingreso',    cat:'Ingresos'},
   {key:'autorizar_credito_excedido', label:'Autorizar Nota de Crédito mayor al crédito a favor del paciente', cat:'Ingresos'},
+  /* Permiso MÍNIMO a propósito: NO da acceso a Ingresos. Solo deja ponerle
+     nombre a un cobro que quedó como "No localizado" (la página de citas cobra
+     por MP sin capturar el nombre). No toca productos, montos ni conciliación,
+     y el backend rechaza la operación si el paciente ya tiene nombre real. */
+  {key:'identificar_pacientes', label:'Identificar pacientes de cobros sin nombre (solo el nombre; no da acceso a Ingresos)', cat:'Identificación'},
   {key:'editar_egresos',   label:'Editar partidas de egreso',        cat:'Egresos'},
   {key:'borrar_egresos',   label:'Eliminar partidas de egreso',      cat:'Egresos'},
   {key:'abrir_periodo_presupuesto', label:'Abrir/cerrar periodos del presupuesto (supervisor)', cat:'Presupuesto'},
@@ -23167,9 +23209,13 @@ var ROLE_PERMS_DEFAULT = {
   admin:    ['*'],
   director: ['*'],
   gerente:  ['bank_create','bank_edit','bank_delete','bank_capture','bank_liberado',
-             'sheets_access','cf_capture','export_data','editar_ingresos','editar_egresos','ver_datos_sensibles'],
-  operador: ['bank_capture','bank_edit','bank_liberado','cf_capture','ver_datos_sensibles'],
-  captura:  ['bank_capture','cf_capture','ver_datos_sensibles'],
+             'sheets_access','cf_capture','export_data','editar_ingresos','editar_egresos','ver_datos_sensibles',
+             'identificar_pacientes'],
+  operador: ['bank_capture','bank_edit','bank_liberado','cf_capture','ver_datos_sensibles','identificar_pacientes'],
+  // 'captura' = vendedoras/enfermeras: son las ÚNICAS que saben de quién es cada
+  // cobro de la página de citas, así que identificar es justo su trabajo. Sigue
+  // SIN acceso a Ingresos: solo puede nombrar cobros que están "No localizado".
+  captura:  ['bank_capture','cf_capture','ver_datos_sensibles','identificar_pacientes'],
   socio:    ['export_data'],   // solo lectura de reportes; SIN ver_datos_sensibles
   viewer:   []                 // sin datos sensibles
 };
@@ -23570,6 +23616,340 @@ function initTheme() {
     </div>
   </div>
 </div>
+
+<!-- ══════════════════════════════════════════════════════════════════════
+     VIEW: IDENTIFICAR PACIENTES
+     La página de citas cobra por Mercado Pago pero no captura el nombre, así
+     que esos cobros entran como "No localizado". Quien cobró es la única que
+     sabe de quién es cada pago — pero no tiene (ni debe tener) acceso a
+     Ingresos. Esta vista existe para eso y SOLO para eso: ponerle nombre.
+     NO carga nada de Ingresos: su único fetch es ?action=noLocalizados, que
+     devuelve OP, fecha, monto y método. Nada más.
+     ══════════════════════════════════════════════════════════════════════ -->
+<div id="view-identificar" class="view" style="display:none">
+  <div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e2dc);border-radius:12px;padding:1rem 1.15rem;margin-bottom:1rem">
+    <div style="display:flex;align-items:flex-start;gap:10px">
+      <span style="font-size:1.3rem;line-height:1.2">🪪</span>
+      <div style="flex:1">
+        <div style="font-weight:700;color:var(--text-primary,#28251d);margin-bottom:3px">Cobros que llegaron sin nombre</div>
+        <div style="font-size:0.78rem;color:var(--text-secondary,#7a7670);line-height:1.5">
+          Cuando una paciente paga desde la <b>página de citas</b>, Mercado Pago no nos manda su nombre y el cobro entra como
+          <b>“No localizado”</b>. Búscalo por <b>fecha y monto</b>, y ponle el nombre de tu paciente.
+          Esto <b>solo cambia el nombre</b>: no mueve productos, montos ni la conciliación bancaria.
+        </div>
+      </div>
+      <div style="text-align:right;white-space:nowrap">
+        <div id="idp-contador" style="font-size:1.5rem;font-weight:800;color:var(--color-primary,#c46a7a);line-height:1">—</div>
+        <div style="font-size:0.66rem;color:var(--text-secondary,#7a7670)">pendientes</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e2dc);border-radius:12px;padding:0.85rem 1.15rem;margin-bottom:1rem;display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
+    <div>
+      <label style="display:block;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670);margin-bottom:4px">Año</label>
+      <select id="idp-anio" onchange="idpCargar()" style="padding:7px 9px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.82rem;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)"></select>
+    </div>
+    <div>
+      <label style="display:block;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670);margin-bottom:4px">Desde</label>
+      <input id="idp-f-ini" type="date" onchange="idpRender()" style="padding:7px 9px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.82rem;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)">
+    </div>
+    <div>
+      <label style="display:block;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670);margin-bottom:4px">Hasta</label>
+      <input id="idp-f-fin" type="date" onchange="idpRender()" style="padding:7px 9px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.82rem;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)">
+    </div>
+    <div>
+      <label style="display:block;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670);margin-bottom:4px">Monto desde</label>
+      <input id="idp-m-min" type="number" step="0.01" placeholder="0.00" oninput="idpRender()" style="width:110px;padding:7px 9px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.82rem;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)">
+    </div>
+    <div>
+      <label style="display:block;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670);margin-bottom:4px">Monto hasta</label>
+      <input id="idp-m-max" type="number" step="0.01" placeholder="0.00" oninput="idpRender()" style="width:110px;padding:7px 9px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.82rem;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)">
+    </div>
+    <button onclick="idpLimpiarFiltros()" style="padding:7px 12px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;background:transparent;color:var(--text-secondary,#7a7670);font-size:0.78rem;font-weight:600;cursor:pointer">Limpiar</button>
+    <button onclick="idpCargar()" style="padding:7px 12px;border:none;border-radius:8px;background:var(--color-primary,#c46a7a);color:#fff;font-size:0.78rem;font-weight:700;cursor:pointer">Actualizar</button>
+  </div>
+
+  <div id="idp-lista" style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e2dc);border-radius:12px;overflow:hidden"></div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════════
+   IDENTIFICAR PACIENTES (prefijo idp) — ponerle nombre a los "No localizado".
+   Backend: identificar.gs. Esta vista NO toca Ingresos: su único GET es
+   ?action=noLocalizados (OP, fecha, monto, método — nada más).
+   ══════════════════════════════════════════════════════════════════════════ */
+var _idpData = [];          // pendientes tal como los devolvió el backend
+var _idpPickCb = null;      // gancho del buscador de pacientes (ver ingSelectPacientePopup)
+var _idpCargando = false;
+
+function idpToast(msg) {
+  if (typeof _presFlashSaved === 'function') _presFlashSaved(msg);
+}
+
+function idpInit() {
+  var sel = document.getElementById('idp-anio');
+  if (sel && !sel.options.length) {
+    var hoy = new Date().getFullYear();
+    for (var a = hoy; a >= hoy - 2; a--) {
+      var o = document.createElement('option');
+      o.value = String(a); o.textContent = String(a);
+      sel.appendChild(o);
+    }
+    sel.value = String(hoy);
+  }
+  idpCargar();
+}
+
+function idpLimpiarFiltros() {
+  ['idp-f-ini','idp-f-fin','idp-m-min','idp-m-max'].forEach(function(id){
+    var el = document.getElementById(id); if (el) el.value = '';
+  });
+  idpRender();
+}
+
+function _idpFiltros() {
+  function v(id){ var el = document.getElementById(id); return el ? el.value : ''; }
+  return { fIni: v('idp-f-ini'), fFin: v('idp-f-fin'), mMin: v('idp-m-min'), mMax: v('idp-m-max') };
+}
+
+async function idpCargar() {
+  if (_idpCargando) return;
+  _idpCargando = true;
+  var cont = document.getElementById('idp-lista');
+  if (cont) cont.innerHTML = '<div style="padding:26px;text-align:center;color:var(--text-secondary,#7a7670);font-size:0.85rem">Cargando…</div>';
+  try {
+    var selA = document.getElementById('idp-anio');
+    var f = _idpFiltros();
+    var qs = '?action=noLocalizados&token=' + encodeURIComponent(getToken())
+           + '&anio=' + encodeURIComponent(selA ? selA.value : '')
+           + '&fechaIni=' + encodeURIComponent(f.fIni) + '&fechaFin=' + encodeURIComponent(f.fFin)
+           + '&montoMin=' + encodeURIComponent(f.mMin) + '&montoMax=' + encodeURIComponent(f.mMax)
+           + '&_t=' + Date.now();
+    var r = await fetch(APPS_SCRIPT_URL + qs, {redirect:'follow'});
+    var d = await r.json();
+    if (!d || !d.ok) {
+      _idpData = [];
+      if (cont) cont.innerHTML = '<div style="padding:26px;text-align:center;color:#b91c1c;font-size:0.85rem">'
+        + _escH((d && d.error) || 'No se pudo cargar la lista.') + '</div>';
+      var cE = document.getElementById('idp-contador'); if (cE) cE.textContent = '—';
+      return;
+    }
+    _idpData = d.pendientes || [];
+    idpRender();
+  } catch (e) {
+    if (cont) cont.innerHTML = '<div style="padding:26px;text-align:center;color:#b91c1c;font-size:0.85rem">Error de conexión: ' + _escH(e.message) + '</div>';
+  } finally {
+    _idpCargando = false;
+  }
+}
+
+/* Filtrado en cliente además del servidor: así los filtros responden al
+   instante mientras teclea, sin ir y volver al API en cada tecla. */
+function idpRender() {
+  var cont = document.getElementById('idp-lista');
+  if (!cont) return;
+  var f = _idpFiltros();
+  var mMin = f.mMin === '' ? null : parseFloat(f.mMin);
+  var mMax = f.mMax === '' ? null : parseFloat(f.mMax);
+  var rows = _idpData.filter(function(p){
+    if (f.fIni && p.fecha && p.fecha < f.fIni) return false;
+    if (f.fFin && p.fecha && p.fecha > f.fFin) return false;
+    if (mMin !== null && !isNaN(mMin) && p.monto < mMin) return false;
+    if (mMax !== null && !isNaN(mMax) && p.monto > mMax) return false;
+    return true;
+  });
+
+  var cE = document.getElementById('idp-contador');
+  if (cE) cE.textContent = String(rows.length);
+
+  if (!rows.length) {
+    cont.innerHTML = '<div style="padding:34px;text-align:center;color:var(--text-secondary,#7a7670)">'
+      + '<div style="font-size:1.8rem;margin-bottom:6px">✅</div>'
+      + '<div style="font-size:0.9rem;font-weight:600;color:var(--text-primary,#28251d)">'
+      + (_idpData.length ? 'Ningún cobro coincide con esos filtros' : 'No hay cobros pendientes de nombre')
+      + '</div><div style="font-size:0.78rem;margin-top:4px">'
+      + (_idpData.length ? 'Prueba con otra fecha o monto.' : 'Todos los cobros ya tienen paciente identificado.')
+      + '</div></div>';
+    return;
+  }
+
+  var h = '<table style="width:100%;border-collapse:collapse;font-size:0.84rem">'
+    + '<thead><tr style="background:var(--color-bg-alt,#faf9f7);border-bottom:1px solid var(--color-divider,#e5e2dc)">'
+    + '<th style="text-align:left;padding:10px 14px;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670)">Fecha</th>'
+    + '<th style="text-align:right;padding:10px 14px;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670)">Monto</th>'
+    + '<th style="text-align:left;padding:10px 14px;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670)">Método</th>'
+    + '<th style="text-align:right;padding:10px 14px"></th></tr></thead><tbody>';
+  for (var i = 0; i < rows.length; i++) {
+    var p = rows[i];
+    h += '<tr id="idp-row-' + _escH(p.op) + '" style="border-bottom:1px solid var(--color-divider,#f0eeea)">'
+      + '<td style="padding:11px 14px;color:var(--text-primary,#28251d)">' + _escH(p.fecha || '—') + '</td>'
+      + '<td style="padding:11px 14px;text-align:right;font-weight:700;color:var(--text-primary,#28251d)">' + fmtMXN(p.monto) + '</td>'
+      + '<td style="padding:11px 14px;color:var(--text-secondary,#7a7670)">' + _escH(p.metodoPago || '—') + '</td>'
+      + '<td style="padding:11px 14px;text-align:right">'
+      + '<button onclick="idpIdentificar(\'' + _escJs(p.op) + '\')" style="padding:6px 14px;border:none;border-radius:7px;background:var(--color-primary,#c46a7a);color:#fff;font-size:0.76rem;font-weight:700;cursor:pointer">Identificar</button>'
+      + '</td></tr>';
+  }
+  h += '</tbody></table>';
+  cont.innerHTML = h;
+}
+
+/* Abre el buscador de pacientes que ya existe (el de captura de ingresos) y
+   arma el gancho para que nos entregue el nombre a NOSOTROS y no al
+   formulario de ingresos. Ver ingSelectPacientePopup. */
+function idpIdentificar(op) {
+  _idpOpEnCurso = op;
+  window._idpPickCb = function(nombre) { idpAsignar(op, nombre); };
+  if (typeof ingBuscarPacientePopup === 'function') ingBuscarPacientePopup();
+}
+var _idpOpEnCurso = '';
+
+async function idpAsignar(op, nombre) {
+  if (!op || !nombre) return;
+  try {
+    var s = (typeof getSession === 'function') ? getSession() : null;
+    var selA = document.getElementById('idp-anio');
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body: JSON.stringify({
+      action: 'asignarPacienteNoLocalizado',
+      token: getToken(),
+      op: op, paciente: nombre,
+      anio: selA ? selA.value : '',
+      usuario: s ? (s.email || s.nombre || '') : ''
+    })});
+    var d = await r.json();
+    if (!d || !d.ok) {
+      // El backend relee la fila: si alguien más ya la identificó, avisa y
+      // refresca para que la lista deje de mentir.
+      alert((d && d.error) || 'No se pudo identificar el cobro.');
+      if (d && d.yaIdentificada) idpCargar();
+      return;
+    }
+    // Fuera de la lista + contador al día, sin recargar todo.
+    _idpData = _idpData.filter(function(p){ return p.op !== op; });
+    idpRender();
+    idpToast('✓ ' + nombre);
+  } catch (e) {
+    alert('Error de conexión: ' + e.message);
+  }
+}
+
+/* ── Alta de paciente desde el flujo (con antipático de duplicados) ── */
+function idpAltaDesdeBuscador() {
+  var inp = document.getElementById('ing-pac-search-inp');
+  var pre = inp ? inp.value : '';
+  var ovl = document.getElementById('ing-pac-search-ovl'); if (ovl) ovl.remove();
+  idpAltaModal(pre);
+}
+
+function idpAltaModal(nombrePre) {
+  var old = document.getElementById('idp-alta-ovl'); if (old) old.remove();
+  var ovl = document.createElement('div');
+  ovl.id = 'idp-alta-ovl';
+  ovl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10002;display:flex;align-items:flex-start;justify-content:center;padding-top:10vh;backdrop-filter:blur(3px)';
+  ovl.onclick = function(e){ if (e.target === ovl) idpAltaCerrar(); };
+  ovl.innerHTML = '<div style="background:var(--card-bg,#fff);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.35);width:min(460px,94vw);overflow:hidden" onclick="event.stopPropagation()">'
+    + '<div style="padding:14px 16px;border-bottom:1px solid var(--color-divider,#e5e7eb);font-weight:700;color:var(--text-primary,#111)">Agregar paciente</div>'
+    + '<div style="padding:16px">'
+      + '<label style="display:block;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670);margin-bottom:5px">Nombre completo</label>'
+      + '<input id="idp-alta-nombre" type="text" autocomplete="off" style="width:100%;padding:9px 11px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.9rem;box-sizing:border-box;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)">'
+      + '<label style="display:block;font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670);margin:12px 0 5px">Correo <span style="font-weight:500;text-transform:none;letter-spacing:0">(opcional)</span></label>'
+      + '<input id="idp-alta-email" type="email" autocomplete="off" style="width:100%;padding:9px 11px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.9rem;box-sizing:border-box;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)">'
+      + '<div id="idp-alta-msg" style="margin-top:10px;font-size:0.78rem;color:#b91c1c"></div>'
+    + '</div>'
+    + '<div style="padding:12px 16px;border-top:1px solid var(--color-divider,#e5e7eb);display:flex;justify-content:flex-end;gap:8px">'
+      + '<button onclick="idpAltaCerrar()" style="padding:8px 14px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;background:transparent;color:var(--text-secondary,#7a7670);font-size:0.8rem;font-weight:600;cursor:pointer">Cancelar</button>'
+      + '<button id="idp-alta-btn" onclick="idpAltaGuardar(false)" style="padding:8px 16px;border:none;border-radius:8px;background:var(--color-primary,#c46a7a);color:#fff;font-size:0.8rem;font-weight:700;cursor:pointer">Guardar y usar</button>'
+    + '</div></div>';
+  document.body.appendChild(ovl);
+  var n = document.getElementById('idp-alta-nombre');
+  if (n) { n.value = nombrePre || ''; setTimeout(function(){ n.focus(); }, 40); }
+}
+
+function idpAltaCerrar() {
+  var o = document.getElementById('idp-alta-ovl'); if (o) o.remove();
+  var c = document.getElementById('idp-dup-ovl'); if (c) c.remove();
+  window._idpPickCb = null;
+}
+
+async function idpAltaGuardar(forzar) {
+  var nEl = document.getElementById('idp-alta-nombre');
+  var eEl = document.getElementById('idp-alta-email');
+  var msg = document.getElementById('idp-alta-msg');
+  var btn = document.getElementById('idp-alta-btn');
+  var nombre = nEl ? nEl.value.replace(/^\s+|\s+$/g,'') : '';
+  if (!nombre) { if (msg) msg.textContent = 'Escribe el nombre de la paciente.'; return; }
+  if (msg) msg.textContent = '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+  try {
+    var s = (typeof getSession === 'function') ? getSession() : null;
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body: JSON.stringify({
+      action: 'altaPacienteRapida',
+      token: getToken(),
+      nombre: nombre,
+      email: eEl ? eEl.value.replace(/^\s+|\s+$/g,'') : '',
+      forzar: forzar === true,
+      usuario: s ? (s.email || s.nombre || '') : ''
+    })});
+    var d = await r.json();
+    if (d && d.needConfirm) { idpConfirmDup(d.candidatos || [], nombre); return; }
+    if (!d || !d.ok) { if (msg) msg.textContent = (d && d.error) || 'No se pudo dar de alta.'; return; }
+    // Alta lista → sigue el flujo: asignar ese nombre al cobro en curso.
+    idpAltaCerrar();
+    if (typeof _ingPacientesDB !== 'undefined' && _ingPacientesDB) _ingPacientesDB.push({nombre: d.nombre, lista: 'General', email: d.email || ''});
+    if (_idpOpEnCurso) idpAsignar(_idpOpEnCurso, d.nombre);
+    else idpToast('✓ Paciente agregada');
+  } catch (e) {
+    if (msg) msg.textContent = 'Error de conexión: ' + e.message;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Guardar y usar'; }
+  }
+}
+
+/* "¿Es la misma persona?" — el backend encontró un parecido >= 90%.
+   Nunca bloquea en duro: dos pacientes SÍ pueden tener casi los mismos
+   apellidos, así que "No, es otra persona" reenvía con forzar:true. */
+function idpConfirmDup(candidatos, nombre) {
+  var old = document.getElementById('idp-dup-ovl'); if (old) old.remove();
+  var ovl = document.createElement('div');
+  ovl.id = 'idp-dup-ovl';
+  ovl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10003;display:flex;align-items:flex-start;justify-content:center;padding-top:9vh;backdrop-filter:blur(3px)';
+  var lista = '';
+  for (var i = 0; i < candidatos.length; i++) {
+    var c = candidatos[i];
+    lista += '<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--color-divider,#e5e2dc);border-radius:9px;margin-bottom:7px">'
+      + '<div style="flex:1;min-width:0">'
+        + '<div style="font-weight:700;font-size:0.87rem;color:var(--text-primary,#28251d);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _escH(c.nombre) + '</div>'
+        + (c.email ? '<div style="font-size:0.72rem;color:var(--text-secondary,#7a7670);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _escH(c.email) + '</div>' : '')
+      + '</div>'
+      + '<span style="font-size:0.7rem;font-weight:800;color:var(--color-primary,#c46a7a);background:rgba(196,106,122,.12);padding:3px 8px;border-radius:20px;white-space:nowrap">' + c.score + '% parecido</span>'
+      + '<button onclick="idpUsarExistente(\'' + _escJs(c.nombre) + '\')" style="padding:6px 12px;border:none;border-radius:7px;background:var(--color-primary,#c46a7a);color:#fff;font-size:0.74rem;font-weight:700;cursor:pointer;white-space:nowrap">Sí, es esta</button>'
+      + '</div>';
+  }
+  ovl.innerHTML = '<div style="background:var(--card-bg,#fff);border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.4);width:min(500px,94vw);max-height:82vh;display:flex;flex-direction:column;overflow:hidden">'
+    + '<div style="padding:15px 16px;border-bottom:1px solid var(--color-divider,#e5e7eb)">'
+      + '<div style="font-weight:800;font-size:1rem;color:var(--text-primary,#28251d)">¿Es la misma persona?</div>'
+      + '<div style="font-size:0.79rem;color:var(--text-secondary,#7a7670);margin-top:4px;line-height:1.45">Escribiste <b>' + _escH(nombre) + '</b> y ya existe alguien muy parecido. Si es la misma, elígela para no duplicarla.</div>'
+    + '</div>'
+    + '<div style="padding:14px 16px;overflow-y:auto;flex:1">' + lista + '</div>'
+    + '<div style="padding:12px 16px;border-top:1px solid var(--color-divider,#e5e7eb);display:flex;justify-content:space-between;gap:8px;align-items:center">'
+      + '<button onclick="idpAltaCerrar()" style="padding:8px 14px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;background:transparent;color:var(--text-secondary,#7a7670);font-size:0.8rem;font-weight:600;cursor:pointer">Cancelar</button>'
+      + '<button onclick="idpForzarAlta()" style="padding:8px 16px;border:1px solid var(--color-primary,#c46a7a);border-radius:8px;background:transparent;color:var(--color-primary,#c46a7a);font-size:0.8rem;font-weight:700;cursor:pointer">No, es otra persona</button>'
+    + '</div></div>';
+  document.body.appendChild(ovl);
+}
+
+/* "Sí, es esta" → usa la que ya existe; no se da de alta nada. */
+function idpUsarExistente(nombre) {
+  idpAltaCerrar();
+  if (_idpOpEnCurso) idpAsignar(_idpOpEnCurso, nombre);
+}
+
+/* "No, es otra persona" → la usuaria confirmó; se da de alta el homónimo. */
+function idpForzarAlta() {
+  var d = document.getElementById('idp-dup-ovl'); if (d) d.remove();
+  idpAltaGuardar(true);
+}
+</script>
 
 <!-- ══ MODAL: NUEVA ENTRADA PACIENTES ══ -->
 <div id="modal-cap-pacientes" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeModal('cap-pacientes')">
@@ -32266,6 +32646,10 @@ function notaGenerar(){
  * aviso emergente (1 vez por versión) para quien tenga acceso a esas áreas.
  * Cada entrada puede llevar `perm`: si el usuario no lo tiene, se oculta. */
 var NOVEDADES=[
+  { build:'2026.07.15', fecha:'15 jul 2026', area:'Ingresos', icon:'🪪',
+    titulo:'Identificar pacientes: ponerle nombre a los cobros «No localizado»',
+    puntos:['Cuando una paciente paga desde la PÁGINA DE CITAS, Mercado Pago no nos manda su nombre: el cobro entra al ERP con el paciente en «No localizado».','Quien cobró (vendedora o enfermera) es la única que sabe de quién es ese pago — pero no tiene acceso a Ingresos, y no debe tenerlo.','Nueva vista «Identificar pacientes»: muestra SOLO los cobros sin nombre, con fecha, monto y método de pago. Nada más: ni productos, ni otras pacientes, ni importes de nadie más.','Solo cambia el NOMBRE. No mueve productos, ni montos, ni comisiones, ni la conciliación bancaria — ahí no se toca nada.','Ya identificado, deja de aparecer en la lista. Si otra persona lo identificó primero, el sistema avisa y no lo deja encimar: solo se pueden nombrar cobros que siguen sin nombre.','Si la paciente no existe todavía, se da de alta ahí mismo. Si el nombre se parece 90% o más a alguien que ya existe, el ERP pregunta «¿Es la misma persona?» y muestra los parecidos con su porcentaje.','Si de verdad son dos personas distintas con casi los mismos apellidos (sí pasa), eliges «No, es otra persona» y se da de alta igual. Nunca te bloquea.','Todo queda en auditoría: quién identificó qué cobro, cuándo y con qué nombre.'],
+    comoUsar:['Menú → «Identificar pacientes».','Busca tu cobro por FECHA y MONTO (los filtros de arriba).','Pulsa «Identificar» y elige a tu paciente del buscador.','¿No está? Pulsa «+ Registrar nuevo paciente» y captura el nombre; si te pregunta por un parecido, decide si es la misma o no.'] },
   { build:'2026.07.15', fecha:'15 jul 2026', area:'Nómina', icon:'🧾',
     titulo:'Nómina por periodos: captura, CFDI y pago por periodo',
     puntos:['La nómina ahora se trabaja POR PERIODO (semanal, quincenal o mensual) y la periodicidad es MIXTA: la define cada empleado en su ficha, así que puedes tener gente quincenal, semanal y mensual al mismo tiempo.','Hay periodos ORDINARIOS (los del calendario normal) y EXTRAORDINARIOS (aguinaldo, finiquitos, pagos especiales): conviven sin desplazarse.','Capturas por empleado lo que le toca; el ISR/IMSS que ves antes de timbrar es un ESTIMADO para presupuestar.','Cuando el despacho timbra, el XML CORRIGE al estimado: entra el neto REAL y se marca la Diferencia. En reportes manda el real.','El ERP NO calcula impuestos: el despacho timbra y el CFDI es la verdad.','Nueva pestaña SBC: empleados × 6 bimestres, con el SBC y casilla «Presentado» para el control del IMSS.','Puedes abrir el historial de CUALQUIER periodo (pasado o futuro) con su captura y su estatus.','⚠ IMPORTANTE: validar a Cuentas por Pagar es POR PERIODO. La vista «Nómina del mes (CFDI)» quedó solo para consultar y conciliar — ya no envía nada a CxP. Antes convivían dos vías que no se deduplicaban entre sí y se podía pagar dos veces al mismo empleado.'],
@@ -32429,6 +32813,27 @@ setTimeout(novCheckPopup, 2500);
 
   /* ──────────────────────── CONTENIDO ──────────────────────── */
   var HELP = [
+
+  /* ============ IDENTIFICAR PACIENTES ============ */
+  { id:'identificar-pacientes', group:'operacion', icon:'🪪', title:'Identificar pacientes (cobros «No localizado»)',
+    keywords:'identificar paciente no localizado sin nombre mercado pago mp pagina citas cobro nombre duplicado parecido asignar vendedora enfermera',
+    intro:'Cuando una paciente paga desde la **página de citas**, Mercado Pago nos avisa del cobro pero **no nos manda su nombre**. Ese ingreso entra al ERP con el paciente en **«No localizado»**. La única que sabe de quién es ese pago es **quien lo cobró** (la vendedora o la enfermera) — y ella no tiene acceso a Ingresos, ni debe tenerlo: ahí vería todas las operaciones de la clínica. Esta vista existe para cerrar ese hueco: **le pone nombre al cobro, y nada más**.',
+    pasos:[
+      'Entra a **Identificar pacientes** en el menú. Verás **solo** los cobros que están sin nombre — con su **fecha**, su **monto** y su **método de pago**. Nada más.',
+      'Ubica tu cobro con los filtros de **fecha** y **monto** (es como lo vas a reconocer: «cobré $3,500 el martes»).',
+      'Pulsa **«Identificar»** y busca a tu paciente por nombre, correo, razón social o RFC.',
+      'Si la paciente **no existe todavía**, pulsa **«+ Registrar nuevo paciente»**, escribe su nombre y guarda. Vuelve sola al cobro y lo identifica.',
+      'Listo: el cobro desaparece de la lista y el contador de pendientes baja.'
+    ],
+    bloques:[
+      { h:'¿Qué cambia exactamente? Solo el nombre', p:'Esta vista **solo** escribe el nombre de la paciente. **No** toca los productos, **no** toca los montos, **no** toca las comisiones, **no** toca Cuentas por Cobrar y **no** mueve la conciliación bancaria — ahí no se recalcula ni se mueve nada. Lo único que hace, además del nombre, es actualizar el **texto** del nombre en la observación del movimiento del banco, para que diga «Px. María López» en vez de «Px. No localizado». El dinero no se toca.' },
+      { h:'Solo cobros SIN nombre (el candado)', p:'Solo se puede escribir sobre un cobro que **siga** en «No localizado». Si alguien más ya lo identificó mientras tenías la lista abierta, el sistema te avisa y **no** te deja encimar el nombre. Este permiso **no** sirve para cambiarle el paciente a un ingreso que ya está identificado: para eso se necesita el permiso de editar ingresos.' },
+      { h:'¿Y si ya existe alguien muy parecido?', p:'Al dar de alta una paciente nueva, el ERP compara el nombre contra todo el catálogo. Si encuentra a alguien con **90% o más de parecido**, te pregunta **«¿Es la misma persona?»** y te muestra los candidatos con su porcentaje. La comparación ignora **acentos, mayúsculas, comas y el orden de los apellidos**: «María López García» y «Lopez Garcia, Maria» son la misma para el sistema.' },
+      { h:'Sí puedes dar de alta a dos personas parecidas', p:'Si de verdad son **dos pacientes distintas con casi los mismos apellidos** (poco común, pero pasa), elige **«No, es otra persona»** y se da de alta igual. El sistema **nunca te bloquea**: solo se asegura de que fue una decisión tuya y no un descuido. Lo único que sí rechaza es un nombre **idéntico**, porque eso sería la misma ficha dos veces.' },
+      { h:'¿Quién puede usarlo?', p:'Quien tenga el permiso **«Identificar pacientes de cobros sin nombre»** (Panel de Control → Gestión de Roles → categoría **Identificación**). Por defecto lo traen los roles **gerente**, **operador** y **captura**. Es un permiso **mínimo a propósito**: da acceso a esta vista y a nada más — no abre Ingresos.' },
+      { h:'Queda registrado', p:'Cada identificación se guarda en auditoría: **quién** la hizo, **cuándo**, sobre **qué operación**, y el nombre **anterior → nuevo**.' }
+    ]
+  },
 
   /* ============ PRIMEROS PASOS ============ */
   { id:'primeros-pasos', group:'inicio', icon:'🚀', title:'Bienvenida y primeros pasos',
@@ -33522,6 +33927,48 @@ setTimeout(novCheckPopup, 2500);
 
   /* ────────────────── CONTENIDO (todos los módulos) ────────────────── */
   var HFMAN = [
+
+  /* ============ IDENTIFICAR PACIENTES ============ */
+  { id:'identificar-pacientes', group:'operacion', icon:'🪪', title:'Identificar pacientes (cobros sin nombre)',
+    keywords:'identificar paciente no localizado sin nombre mercado pago mp pagina citas cobro asignar duplicado parecido vendedora enfermera',
+    para:'Cuando una paciente paga desde la **página de citas**, Mercado Pago nos avisa del cobro pero **no nos manda su nombre**: el ingreso entra como **«No localizado»**. La única que sabe de quién es ese pago eres **tú, que lo cobraste**. Aquí le pones nombre — y **solo** el nombre: no se mueve ningún producto, ningún monto, ni la conciliación del banco.',
+    where:'Menú de la izquierda → **Identificar pacientes**. Si no lo ves, tu rol no tiene el permiso: pídeselo al administrador.',
+    mock:{ title:'Identificar pacientes', h:'Cobros que llegaron sin nombre',
+      toolbar:[ {t:'select', label:'Año: 2026', n:1}, {t:'date', label:'Desde', n:2}, {t:'date', label:'Hasta', n:2},
+                {t:'txt', label:'Monto desde', n:3}, {t:'txt', label:'Monto hasta', n:3}, {t:'btn', label:'Actualizar'} ],
+      table:{ cols:['Fecha', {label:'Monto', r:true}, 'Método', ''],
+        rows:[ ['12/07/2026', {label:'$3,500.00', r:true}, 'Mercado Pago', {raw:'<span class="hfm-btn pri">Identificar</span>', n:4}],
+               ['12/07/2026', {label:'$1,200.00', r:true}, 'Mercado Pago', {raw:'<span class="hfm-btn">Identificar</span>'}],
+               ['11/07/2026', {label:'$8,900.00', r:true}, 'Mercado Pago', {raw:'<span class="hfm-btn">Identificar</span>'}] ] },
+      note:'Aquí **solo** aparecen los cobros sin nombre, y **solo** con fecha, monto y método. No verás productos, ni otras pacientes, ni importes de nadie más.',
+      callouts:[ {n:1,text:'El **año** del que quieres ver los cobros.'},
+                 {n:2,text:'**Desde / Hasta**: acota por la fecha en que cobraste.'},
+                 {n:3,text:'**Monto desde / hasta**: así es como vas a reconocerlo («cobré $3,500 el martes»).'},
+                 {n:4,text:'**Identificar** → se abre el buscador de pacientes. Elige a la tuya y listo.'} ] },
+    steps:[
+      'Entra a **Identificar pacientes**. Arriba a la derecha ves cuántos **pendientes** hay.',
+      'Filtra por **fecha** y **monto** hasta encontrar tu cobro.',
+      'Pulsa **«Identificar»**: se abre el buscador. Escribe el nombre (o correo/RFC) y elige a tu paciente.',
+      '¿No aparece? Pulsa **«+ Registrar nuevo paciente»**, escribe su nombre y **Guardar y usar**: se da de alta y se asigna al cobro de un solo golpe.',
+      'Si el nombre se parece **90% o más** a alguien que ya existe, el ERP te pregunta **«¿Es la misma persona?»**. Elige **«Sí, es esta»** para usar la que ya existe, o **«No, es otra persona»** si de verdad son dos pacientes distintas.',
+      'Al identificarlo, el cobro **desaparece de la lista** y el contador baja.'
+    ],
+    buttons:[
+      { k:'Identificar', d:'Abre el buscador de pacientes para ese cobro.' },
+      { k:'+ Registrar nuevo paciente', d:'Da de alta a la paciente sin salir del flujo (revisa duplicados al 90%).' },
+      { k:'Sí, es esta', d:'Usa la paciente que ya existe. No se crea nada nuevo.' },
+      { k:'No, es otra persona', d:'Confirmas que son distintas y se da de alta igual. Nunca te bloquea.' },
+      { k:'Limpiar', d:'Borra los filtros de fecha y monto.' },
+      { k:'Actualizar', d:'Vuelve a traer la lista del servidor.' }
+    ],
+    tips:[
+      '**Solo cambia el nombre.** No toca productos, montos, comisiones, Cuentas por Cobrar ni la conciliación bancaria. Ahí no se mueve nada.',
+      '**Solo cobros sin nombre.** Si alguien más ya identificó ese cobro, el sistema te avisa y no te deja encimarle otro nombre. Este permiso no sirve para cambiarle el paciente a un ingreso ya identificado.',
+      'La búsqueda de parecidos **ignora acentos, mayúsculas, comas y el orden de los apellidos**: «María López García» y «Lopez Garcia, Maria» son la misma persona para el sistema.',
+      '**Sí existen** pacientes distintas con casi los mismos apellidos. Por eso te pregunta en vez de bloquearte: tú decides.',
+      'Todo queda en **auditoría**: quién identificó qué cobro, cuándo y con qué nombre.'
+    ]
+  },
 
   /* ============ PRIMEROS PASOS ============ */
   { id:'primeros-pasos', group:'inicio', icon:'🚀', title:'Bienvenida y acceso',

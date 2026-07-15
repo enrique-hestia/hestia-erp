@@ -20,7 +20,7 @@ $DEPLOYMENT_ID = 'AKfycbw3pPDLfDFVmb2VF1FCGCTZGK8Ie1du7zUFyJPQT7Fwxi_ngsEmEL-o-u
 $FILES = @(
   '_diagnostico','analisis','board','capture','catalogo','chat','cobranza',
   'comprobantes','config','config_dropdowns','core','cxp_creditos','declaraciones',
-  'devengado','facturacion','finance','gastosfijos','inventario','inventario_migracion',
+  'devengado','facturacion','finance','gastosfijos','identificar','inventario','inventario_migracion',
   'lab','medical','nomina','origenes','poliza_concil','presupuesto','privacidad',
   'productos_ss_id','prov_defaults','providers','recordatorios','scheduler','semanal','summary'
 )
