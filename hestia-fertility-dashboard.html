@@ -15549,7 +15549,8 @@ async function presGruposConfigOpen(){
   var grupos=(existing.grupos||[]).map(function(g){ return {nombre:g.nombre, incluirMaestro:g.incluirMaestro!==false, subs:(g.subs||[]).map(function(s){return {nombre:s};})}; });
   var ruta={}, er=(existing.productoARuta||{});
   Object.keys(er).forEach(function(pn){ ruta[pn]={grupo:er[pn].grupo||'', sub:er[pn].sub||''}; });
-  // Arranca VACÍO: todos los productos en el pool (se omiten). El usuario mete solo lo que quiera.
+  // Arranca VACÍO: todos los productos en el pool. No se omiten — se muestran juntos en el
+  // bucket «Sin grupo» del reporte; agrupar solo cambia cómo se presentan.
   var seeded=!(existing.grupos&&existing.grupos.length);
   window._presGE={prods:prods, grupos:grupos, ruta:ruta, seeded:seeded};
   if(seeded){ var m=document.getElementById('pge-msg'); if(m) m.textContent='Empieza vacío: agrupa lo que quieras; el resto aparece junto en «Sin grupo». Usa «Autollenar» si quieres precargar por categoría.'; }
@@ -16917,7 +16918,7 @@ var _PRES_TOUR = [
    body:'<b>Proyecta cuánto vas a facturar y gastar el próximo trimestre</b> con base en tu historial real, y le da seguimiento al trimestre en curso.<br><br><b>De dónde salen los números:</b> los <b>datos reales</b> vienen de tus <b>Ingresos</b> y <b>Egresos</b> (no se inventan); el <b>motor</b> calcula la proyección con esos datos; y la <b>meta y los %</b> los defines tú. Te muestro cada parte — reabre este tutorial con el botón <b>?</b> cuando quieras.'},
   {el:'.pr-hero',
    title:'Semáforo de avance',
-   body:'Del trimestre EN CURSO: ¿vas a llegar a tu meta al ritmo actual? <span style="color:#166534;font-weight:700">Verde</span> = sí · <span style="color:#b45309;font-weight:700">Amarillo</span> = riesgo · <span style="color:#991b1b;font-weight:700">Rojo</span> = no. El % es tu <i>proyección de cierre ÷ meta</i>.<br><br><b>Ejemplo:</b> día 9 de 92 (9.8% del tiempo) con $442,886 registrados → proyección de cierre = 442,886 ÷ (9/92) = <b>$4,527,279</b>. Contra una meta de $7,973,522 = <b>57% → 🔴</b>.'},
+   body:'Del trimestre que estás consultando: ¿vas a llegar a tu meta al ritmo actual? <span style="color:#166534;font-weight:700">Verde</span> = sí · <span style="color:#b45309;font-weight:700">Amarillo</span> = riesgo · <span style="color:#991b1b;font-weight:700">Rojo</span> = no. El % es tu <i>proyección de cierre ÷ meta</i>.<br><br><b>Ejemplo:</b> día 9 de 92 (9.8% del tiempo) con $442,886 registrados → proyección de cierre = 442,886 ÷ (9/92) = <b>$4,527,279</b>. Contra una meta de $7,973,522 = <b>57% → 🔴</b>.<br><br>Si eliges un trimestre que <b>aún no comienza</b>, el semáforo (y la proyección de cierre y la brecha) se apagan: todavía no hay avance que medir, así que solo verás <b>meta vs proyección</b>.'},
   {el:'#pr-sim',
    title:'Simulador (el slider)',
    body:'Arrástralo para jugar con distintas metas <b>sin guardar nada</b>. Te dice la brecha que falta, cuánto necesitas facturar por día en lo que resta y el cierre proyectado. Si te gusta una cifra, <b>"Guardar como meta"</b> la fija.'},
@@ -16929,10 +16930,10 @@ var _PRES_TOUR = [
    body:'<b>Líneas sólidas</b> = tu historial real. <b>Punteadas</b> = la proyección del próximo trimestre. Rosa = ingresos, café = egresos. Los checkboxes de arriba ocultan/muestran cada una.'},
   {el:'.pr-scen',
    title:'Escenarios del próximo trimestre',
-   body:'<b>Base (esperado)</b> = la proyección del modelo con tu historial real (no editable). <b>Conservador</b> y <b>Optimista</b> se calculan como Base <b>∓ un % que TÚ defines</b> (edítalos en las tarjetas según cómo veas tu mercado — el 12% ya no está fijo). <b>Meta capturada</b> = la que fijas más abajo.<br><br><b>Ejemplo:</b> Base $8,051,108 con Conservador −10% y Optimista +5% → <b>$7,245,997</b> y <b>$8,453,663</b>.'},
+   body:'<b>Base (esperado)</b> = el <b>recomendado del modelo</b> (tu historial real) ± el <b>% vs recom.</b> que tú ajustes. <b>Conservador</b> y <b>Optimista</b> se calculan como Base <b>∓ un % que TÚ defines</b>. <b>Meta capturada</b> = la que fijas más abajo.<br><br><b>Lo más importante:</b> haz clic en una tarjeta para elegir el <b>escenario ACTIVO</b> (● Activo). Ese escenario es el que manda: de él salen los <b>Ingresos proyectados</b>, la <b>Ganancia</b> y el <b>% de margen</b> de los KPIs, la barra de utilidad y el <b>Informe Ejecutivo</b>. Si cambias de escenario o mueves un %, todo se recalcula al instante.<br><br><b>Ejemplo:</b> Base $8,051,108 con Conservador −10% y Optimista +5% → <b>$7,245,997</b> y <b>$8,453,663</b>.'},
   {el:'button[onclick="presGruposConfigOpen()"]',
    title:'⚙ Grupos — LO PRIMERO que debes hacer',
-   body:'Aquí eliges <b>qué productos entran al presupuesto</b>. Se abre un tablero: arrastra (o usa el menú de cada tarjeta) para meter productos a un <b>grupo</b> (ej. "Tratamientos"). <b>Lo que dejes en «Sin agrupar» se omite</b> — no se cuenta. Dentro de cada grupo, los productos se separan solos por <b>Ciclo Alta/Baja</b> (eso es el subgrupo, automático). "✨ Autollenar" te lo precarga por categoría para que solo ajustes.'},
+   body:'Aquí <b>organizas</b> los productos del presupuesto. Se abre un tablero: arrastra (o usa el menú de cada tarjeta) para meter productos a un <b>grupo</b> (ej. "Tratamientos"). <b>Nada se pierde:</b> lo que dejes en «Sin agrupar» aparece junto en el bucket <b>«Sin grupo»</b> del reporte y <b>sí cuenta</b> en el total y en la meta (por eso el TOTAL de la tabla siempre cuadra con el KPI de ingresos). Dentro de un grupo puedes crear <b>subgrupos</b> con <b>+ Subgrupo</b> (arrastra productos a cada uno; clic en su nombre para renombrar); si no creas ninguno, se separan solos por <b>Ciclo Alta/Baja</b>. "✨ Autollenar" te lo precarga por categoría para que solo ajustes.'},
   {el:'.pr-tbl',
    title:'La tabla de captura (por CANTIDAD)',
    body:'Solo aparecen <b>tus grupos y sus subgrupos (Alta/Baja)</b>, no los productos sueltos. Capturas por <b>cantidad</b> y el sistema pone el <b>importe automático</b> = cantidad × <i>precio promedio real</i>. La suma del grupo = suma de sus subgrupos. La columna <b>Δ vs proy.</b> compara tu número contra lo que estima el modelo.<br><br><b>Ejemplo:</b> IVF a precio promedio $75,000; si pones cantidad <b>20</b> → importe = 20 × 75,000 = <b>$1,500,000</b>. Tú solo mueves cuántos, no los pesos.'},
@@ -17037,10 +17038,10 @@ function presShowManual(){
     +'</tbody></table>'
     +'<div style="background:var(--color-primary-hl,rgba(196,106,122,.08));border:1px solid '+DV+';border-radius:10px;padding:13px 15px;margin-bottom:12px;font-size:12px;line-height:1.7;color:'+TP+'"><b>Ejemplo:</b> si la Base es <b>$8,051,108</b> y pones Conservador <b>−10%</b> y Optimista <b>+5%</b> → Conservador = 8,051,108 × 0.90 = <b>$7,245,997</b> · Optimista = 8,051,108 × 1.05 = <b>$8,453,663</b>. Ajusta esos % a lo que sea realista para tu negocio.</div>'
 
-    +h2('⚙ Grupos — decide QUÉ entra al presupuesto')
-    +p('Es el primer paso. Abre un tablero con todos tus productos en una columna <b>«Sin agrupar»</b>. Metes al presupuesto <b>solo lo que quieras</b> — arrastrando la tarjeta a un grupo o eligiéndolo en el menú de cada producto. <b>Lo que dejes sin agrupar se omite por completo</b> (no se busca su costo ni se suma, aunque pertenezca a una categoría grande).')
-    +p('Dentro de cada grupo, los productos se separan <b>solos por Ciclo Alta/Baja</b> — ése es el subgrupo, automático (no lo capturas a mano). Botones útiles: <b>+ Nuevo grupo</b>, <b>✨ Autollenar por categoría</b> (precarga todo y luego podas) y <b>🧹 Vaciar</b>. El checkbox <b>%m</b> de cada grupo marca si se mueve con las herramientas en bloque.')
-    +p('El total del presupuesto es la <b>suma únicamente de lo que agrupaste</b>.')
+    +h2('⚙ Grupos — organiza CÓMO se ve el presupuesto')
+    +p('Abre un tablero con todos tus productos en una columna <b>«Sin agrupar»</b>. Arrastra la tarjeta a un grupo (o elígelo en el menú de cada producto) para organizarlos como quieras. <b>Nada se omite:</b> lo que dejes sin agrupar se muestra junto en el bucket <b>«Sin grupo»</b> del reporte, editable como cualquier otro, y <b>sigue contando</b> en el total y en la meta. Agrupar cambia <b>cómo se presenta</b> el presupuesto, no cuánto suma.')
+    +p('<b>Subgrupos:</b> dentro de un grupo, <b>+ Subgrupo</b> crea uno; arrastra productos a su zona, haz clic en su nombre para <b>renombrarlo</b> y usa <b>×</b> para <b>eliminarlo</b> (sus productos vuelven al grupo). Si un grupo <b>no</b> tiene subgrupos manuales, sus productos se separan <b>solos por Ciclo Alta/Baja</b>. Otros botones: <b>+ Nuevo grupo</b>, <b>✨ Autollenar por categoría</b> y <b>🧹 Vaciar</b>. El checkbox <b>%m</b> de cada grupo marca si se mueve con las herramientas en bloque.')
+    +p('El <b>TOTAL de la tabla siempre es igual al KPI de ingresos</b>: incluye lo agrupado y lo que está en «Sin grupo».')
 
     +h2('La tabla de captura (por cantidad)')
     +p('Ya con tus grupos, la tabla muestra <b>solo grupos y sus subgrupos (Alta/Baja)</b> — los productos quedan colapsados. Capturas por <b>cantidad</b> y el importe se calcula solo.')
@@ -17073,7 +17074,7 @@ function presShowManual(){
 
     +h2('Flujo de trabajo recomendado')
     +'<ol style="margin:0 0 14px;padding-left:18px;font-size:12.5px;line-height:2;color:'+TS+'">'
-      +'<li><b>Primero, ⚙ Grupos:</b> mete al presupuesto solo los productos que quieras contemplar (o usa Autollenar y poda). Lo demás se omite.</li>'
+      +'<li><b>Primero, ⚙ Grupos:</b> organiza tus productos en grupos y subgrupos (o usa Autollenar y poda). Lo que no agrupes no se pierde: aparece junto en «Sin grupo» y sigue contando.</li>'
       +'<li>En la tabla, ajusta la <b>cantidad</b> de cada grupo/subgrupo; el importe sale solo con el precio promedio.</li>'
       +'<li>Usa <b>% maestro</b> o <b>Cuadrar a $</b> para mover todo en bloque; <b>desmarca el checkbox</b> de los buckets que quieras dejar fijos en tu número.</li>'
       +'<li>Fija la <b>meta total</b> con «Fijar / editar meta» — enciende el semáforo.</li>'
