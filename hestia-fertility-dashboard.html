@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.14.194 -->
+﻿<!-- app-build:2026.07.14.195 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -9452,7 +9452,14 @@ async function loadMenu() {
     if (prodGroup) {
       var prodChildren = menuItems.filter(function(i){ return i.padre===prodGroup.id; });
       var minOrden = prodChildren.length ? Math.min.apply(null, prodChildren.map(function(c){return c.orden||99;})) : 1;
-      var hasCatalogo = menuItems.some(function(i){ return /catalogo/i.test(i.id); });
+      // OJO: antes era /catalogo/i sobre CUALQUIER id → si una categoría del menú
+      // se llamaba "catalogo-tratamientos" (o parecido), el check daba true y se
+      // CANCELABA la inyección: el "Catálogo General" desaparecía del menú.
+      // Ahora solo cuenta un ítem que SEA el catálogo general.
+      var hasCatalogo = menuItems.some(function(i){
+        var _id = String(i.id||'').trim();
+        return _id === 'catalogo-general' || /^cat[aá]logo(-?general)?$/i.test(_id);
+      });
       if (!hasCatalogo) {
         menuItems.push({
           id:'catalogo-general', label:'Catálogo General', padre:prodGroup.id,
