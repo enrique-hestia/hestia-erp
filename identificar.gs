@@ -53,6 +53,16 @@ var IDENT_SIM_UMBRAL = 90;
    Ver BD_INGRESOS_HEADERS en finance.gs — OP(0),Linea(1),Fecha(2),Paciente(3). */
 var IDENT_PAC_COL = 4;
 
+// Índices (0-based) de BD_Ingresos, según BD_INGRESOS_HEADERS (finance.gs:4491):
+// ['OP','Linea','Fecha','Paciente','Categoria','Producto','PVP','Descuento',
+//  'Cantidad','TotalPagar','Pagado','MontoFactMes','FormaPago', ...]
+// Las columnas nuevas se agregan SIEMPRE al final (patrón _ingColEnsure), así que
+// estas posiciones son estables. Nombrarlas evita los r[9]/r[12] sueltos de antes.
+var IDENT_COL = {
+  OP: 0, FECHA: 2, PACIENTE: 3, CATEGORIA: 4, PRODUCTO: 5,
+  CANTIDAD: 8, TOTAL: 9, FORMA_PAGO: 12
+};
+
 /* ── Normalización ───────────────────────────────────────────────────────
    Sin .normalize('NFD') a propósito: el harness de validación corre en
    JScript (ES3) y no lo tiene. El reemplazo explícito funciona en ambos. */
@@ -237,9 +247,17 @@ function _identNum(v) {
 
 /* ══════════════════════════════════════════════════════════════════════
    1) LISTAR — los cobros que esperan nombre.
-   Devuelve SOLO: op, fecha, monto (total de la operación) y método de pago.
-   Deliberadamente nada más: esta respuesta es todo lo que verá alguien que
-   no tiene permiso de Ingresos.
+   Devuelve: op, anio, fecha, monto (total de la operación), método de pago y el
+   DESGLOSE de la venta (categoría, producto, cantidad, importe y forma de pago
+   por línea).
+
+   Esta respuesta es TODO lo que verá alguien que no tiene permiso de Ingresos, así
+   que la lista de campos es la frontera de privacidad del módulo: piénsalo dos
+   veces antes de agregar uno. El desglose de productos se agregó a pedido explícito
+   del usuario (2026-07-15) porque la fecha y el monto solos no alcanzaban para
+   reconocer a la paciente — saber que fue "Consulta Fertilidad" sí. Sigue acotado a
+   las OPs SIN identificar (las que esa persona ya podía ver) y deja fuera Pagado,
+   factura, póliza, observaciones, razón social y todo lo fiscal.
    Filtros: anio, fechaIni, fechaFin (YYYY-MM-DD), montoMin, montoMax.
 
    El DEFAULT es TODOS los años (anio vacío o 'todos'): el usuario pidió
@@ -310,13 +328,33 @@ function listarNoLocalizados(params) {
 
       var key = anioFila + '|' + op;
       if (!ops[key]) {
-        ops[key] = { op: op, anio: anioFila, fecha: _identFecha(r[2]), monto: 0, metodoPago: '' };
+        ops[key] = { op: op, anio: anioFila, fecha: _identFecha(r[2]), monto: 0, metodoPago: '', productos: [] };
         orden.push(key);
       }
-      ops[key].monto += _identNum(r[9]);                      // TotalPagar
-      var fp = String(r[12] || '').replace(/^\s+|\s+$/g, ''); // FormaPago
+      ops[key].monto += _identNum(r[IDENT_COL.TOTAL]);
+      var fp = String(r[IDENT_COL.FORMA_PAGO] || '').replace(/^\s+|\s+$/g, '');
       if (fp && ops[key].metodoPago.indexOf(fp) === -1)
         ops[key].metodoPago = ops[key].metodoPago ? (ops[key].metodoPago + ' + ' + fp) : fp;
+
+      // Desglose por línea: QUÉ se vendió y cómo se pagó. Pedido por el usuario para
+      // ubicar a la paciente ("Consulta Fertilidad" le dice a la enfermera a quién
+      // atendió; la fecha y el monto solos no bastaban).
+      // Ojo: esto AMPLÍA a propósito la superficie de datos de este endpoint, que es
+      // todo lo que ve alguien SIN permiso de Ingresos. Sigue acotada a las OPs sin
+      // identificar (las que ya podía ver) y NO incluye Pagado, factura, póliza,
+      // observaciones, razón social ni nada fiscal.
+      var prod = String(r[IDENT_COL.PRODUCTO] || '').replace(/^\s+|\s+$/g, '');
+      var cat  = String(r[IDENT_COL.CATEGORIA] || '').replace(/^\s+|\s+$/g, '');
+      if (prod || cat) {
+        var cant = _identNum(r[IDENT_COL.CANTIDAD]);
+        ops[key].productos.push({
+          categoria: cat,
+          producto: prod,
+          cantidad: cant || 1,
+          importe: Math.round(_identNum(r[IDENT_COL.TOTAL]) * 100) / 100,
+          formaPago: fp
+        });
+      }
     }
 
     var out = [];
@@ -326,7 +364,8 @@ function listarNoLocalizados(params) {
       if (fFin && o.fecha && o.fecha > fFin) continue;
       if (mMin !== null && o.monto < mMin) continue;
       if (mMax !== null && o.monto > mMax) continue;
-      out.push({ op: o.op, anio: o.anio, fecha: o.fecha, monto: Math.round(o.monto * 100) / 100, metodoPago: o.metodoPago });
+      out.push({ op: o.op, anio: o.anio, fecha: o.fecha, monto: Math.round(o.monto * 100) / 100,
+                 metodoPago: o.metodoPago, productos: o.productos });
     }
     // Más recientes primero: es donde ella va a reconocer a su paciente.
     out.sort(function (a, b) { return a.fecha < b.fecha ? 1 : (a.fecha > b.fecha ? -1 : 0); });

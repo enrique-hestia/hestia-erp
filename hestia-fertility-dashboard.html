@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.14.202 -->
+﻿<!-- app-build:2026.07.14.203 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1104,7 +1104,8 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
         <div style="font-weight:700;color:var(--text-primary,#28251d);margin-bottom:3px">Cobros que llegaron sin nombre</div>
         <div style="font-size:0.78rem;color:var(--text-secondary,#7a7670);line-height:1.5">
           Cuando una paciente paga desde la <b>página de citas</b>, Mercado Pago no nos manda su nombre y el cobro entra como
-          <b>“No localizado”</b>. Búscalo por <b>fecha y monto</b>, y ponle el nombre de tu paciente.
+          <b>“No localizado”</b>. Ubícalo por <b>lo que se vendió</b>, la fecha y el monto — abre el <b>▸</b>
+          para ver el detalle de productos y cómo se pagó — y ponle el nombre de tu paciente.
           Esto <b>solo cambia el nombre</b>: no mueve productos, montos ni la conciliación bancaria.
         </div>
       </div>
@@ -24300,24 +24301,88 @@ function idpRender() {
     return;
   }
 
+  var _th = 'padding:10px 14px;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670)';
   var h = '<table style="width:100%;border-collapse:collapse;font-size:0.84rem">'
     + '<thead><tr style="background:var(--color-bg-alt,#faf9f7);border-bottom:1px solid var(--color-divider,#e5e2dc)">'
-    + '<th style="text-align:left;padding:10px 14px;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670)">Fecha</th>'
-    + '<th style="text-align:right;padding:10px 14px;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670)">Monto</th>'
-    + '<th style="text-align:left;padding:10px 14px;font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-secondary,#7a7670)">Método</th>'
+    + '<th style="width:16px;padding:10px 4px 10px 12px"></th>'
+    + '<th style="text-align:left;' + _th + ';padding-left:4px">Fecha</th>'
+    + '<th style="text-align:left;' + _th + '">Concepto</th>'
+    + '<th style="text-align:right;' + _th + '">Monto</th>'
+    + '<th style="text-align:left;' + _th + '">Método</th>'
     + '<th style="text-align:right;padding:10px 14px"></th></tr></thead><tbody>';
   for (var i = 0; i < rows.length; i++) {
     var p = rows[i];
-    h += '<tr id="idp-row-' + _escH(String(p.anio||'') + '-' + p.op) + '" style="border-bottom:1px solid var(--color-divider,#f0eeea)">'
-      + '<td style="padding:11px 14px;color:var(--text-primary,#28251d)">' + _escH(p.fecha || '—') + '</td>'
-      + '<td style="padding:11px 14px;text-align:right;font-weight:700;color:var(--text-primary,#28251d)">' + fmtMXN(p.monto) + '</td>'
-      + '<td style="padding:11px 14px;color:var(--text-secondary,#7a7670)">' + _escH(p.metodoPago || '—') + '</td>'
+    var rid = _escH(String(p.anio||'') + '-' + p.op);
+    var tieneDet = !!(p.productos && p.productos.length);
+    h += '<tr style="border-bottom:1px solid var(--color-divider,#f0eeea)">'
+      + '<td style="padding:11px 4px 11px 12px;width:16px">'
+      + (tieneDet ? '<span id="idp-car-' + rid + '" onclick="idpDet(\'' + _escJs(String(p.anio||'') + '-' + p.op) + '\')" title="Ver qué se vendió" style="cursor:pointer;color:var(--color-primary,#c46a7a);font-size:0.68rem;user-select:none">▸</span>' : '')
+      + '</td>'
+      + '<td style="padding:11px 14px 11px 4px;color:var(--text-primary,#28251d);white-space:nowrap">' + _escH(p.fecha || '—') + '</td>'
+      + '<td style="padding:11px 14px;color:var(--text-primary,#28251d)">' + _idpConcepto(p) + '</td>'
+      + '<td style="padding:11px 14px;text-align:right;font-weight:700;color:var(--text-primary,#28251d);white-space:nowrap">' + fmtMXN(p.monto) + '</td>'
+      + '<td style="padding:11px 14px;color:var(--text-secondary,#7a7670);white-space:nowrap">' + _escH(p.metodoPago || '—') + '</td>'
       + '<td style="padding:11px 14px;text-align:right">'
-      + '<button onclick="idpIdentificar(\'' + _escJs(p.op) + '\',\'' + _escJs(String(p.anio||'')) + '\')" style="padding:6px 14px;border:none;border-radius:7px;background:var(--color-primary,#c46a7a);color:#fff;font-size:0.76rem;font-weight:700;cursor:pointer">Identificar</button>'
+      + '<button onclick="idpIdentificar(\'' + _escJs(p.op) + '\',\'' + _escJs(String(p.anio||'')) + '\')" style="padding:6px 14px;border:none;border-radius:7px;background:var(--color-primary,#c46a7a);color:#fff;font-size:0.76rem;font-weight:700;cursor:pointer;white-space:nowrap">Identificar</button>'
       + '</td></tr>';
+    if (tieneDet) {
+      h += '<tr id="idp-det-' + rid + '" style="display:none">'
+        + '<td colspan="6" style="padding:0 14px 12px 32px;background:var(--color-bg-alt,#faf9f7)">' + _idpDetalleHTML(p) + '</td>'
+        + '</tr>';
+    }
   }
   h += '</tbody></table>';
   cont.innerHTML = h;
+}
+
+/* Resumen del renglón: QUÉ se vendió. Es lo que de verdad permite reconocer a la
+   paciente — la fecha y el monto solos no bastan (varias pagan $1,800 el mismo día).
+   Va visible, no escondido tras un clic: es el dato principal, no un extra. */
+function _idpConcepto(p) {
+  var ps = p.productos || [];
+  if (!ps.length) return '<span style="color:var(--text-secondary,#7a7670)">—</span>';
+  var n = ps.map(function(x){
+    var t = x.producto || x.categoria || '';
+    return (x.cantidad > 1 ? (x.cantidad + '× ') : '') + t;
+  }).filter(Boolean);
+  var txt = n.slice(0, 2).join(' · ');
+  var resto = n.length - 2;
+  return _escH(txt) + (resto > 0
+    ? ' <span style="color:var(--text-secondary,#7a7670);font-size:0.76rem">+' + resto + ' más</span>' : '');
+}
+
+/* Detalle completo: categoría, producto, cantidad, importe y forma de pago POR LÍNEA
+   (una venta puede pagarse con dos métodos y eso ayuda a ubicarla). */
+function _idpDetalleHTML(p) {
+  var ps = p.productos || [];
+  var t = '<table style="width:100%;border-collapse:collapse;font-size:0.76rem">'
+    + '<thead><tr style="color:var(--text-secondary,#7a7670)">'
+    + '<th style="text-align:left;padding:5px 8px;font-weight:600">Categoría</th>'
+    + '<th style="text-align:left;padding:5px 8px;font-weight:600">Producto</th>'
+    + '<th style="text-align:right;padding:5px 8px;font-weight:600">Cant.</th>'
+    + '<th style="text-align:right;padding:5px 8px;font-weight:600">Importe</th>'
+    + '<th style="text-align:left;padding:5px 8px;font-weight:600">Forma de pago</th>'
+    + '</tr></thead><tbody>';
+  for (var i = 0; i < ps.length; i++) {
+    var x = ps[i];
+    t += '<tr>'
+      + '<td style="padding:5px 8px;color:var(--text-secondary,#7a7670)">' + _escH(x.categoria || '—') + '</td>'
+      + '<td style="padding:5px 8px;color:var(--text-primary,#28251d);font-weight:600">' + _escH(x.producto || '—') + '</td>'
+      + '<td style="padding:5px 8px;text-align:right;color:var(--text-primary,#28251d)">' + _escH(String(x.cantidad || 1)) + '</td>'
+      + '<td style="padding:5px 8px;text-align:right;color:var(--text-primary,#28251d)">' + fmtMXN(x.importe || 0) + '</td>'
+      + '<td style="padding:5px 8px;color:var(--text-secondary,#7a7670)">' + _escH(x.formaPago || '—') + '</td>'
+      + '</tr>';
+  }
+  return t + '</tbody></table>';
+}
+
+function idpDet(rid) {
+  var d = document.getElementById('idp-det-' + rid);
+  var c = document.getElementById('idp-car-' + rid);
+  if (!d) return;
+  var abierto = d.style.display !== 'none';
+  d.style.display = abierto ? 'none' : '';
+  if (c) c.textContent = abierto ? '▸' : '▾';
 }
 
 /* Abre el buscador de pacientes que ya existe (el de captura de ingresos) y
@@ -33331,7 +33396,7 @@ var NOVEDADES=[
   { build:'2026.07.15', fecha:'15 jul 2026', area:'Ingresos', icon:'🪪',
     titulo:'Identificar pacientes: ponerle nombre a los cobros «No localizado»',
     puntos:['Cuando una paciente paga desde la PÁGINA DE CITAS, Mercado Pago no nos manda su nombre: el cobro entra al ERP con el paciente en «No localizado».','Quien cobró (vendedora o enfermera) es la única que sabe de quién es ese pago — pero no tiene acceso a Ingresos, y no debe tenerlo.','Nueva vista «Identificar pacientes»: muestra SOLO los cobros sin nombre, con fecha, monto y método de pago. Nada más: ni productos, ni otras pacientes, ni importes de nadie más.','Solo cambia el NOMBRE. No mueve productos, ni montos, ni comisiones, ni la conciliación bancaria — ahí no se toca nada.','Ya identificado, deja de aparecer en la lista. Si otra persona lo identificó primero, el sistema avisa y no lo deja encimar: solo se pueden nombrar cobros que siguen sin nombre.','Si la paciente no existe todavía, se da de alta ahí mismo. Si el nombre se parece 90% o más a alguien que ya existe, el ERP pregunta «¿Es la misma persona?» y muestra los parecidos con su porcentaje.','Si de verdad son dos personas distintas con casi los mismos apellidos (sí pasa), eliges «No, es otra persona» y se da de alta igual. Nunca te bloquea.','Todo queda en auditoría: quién identificó qué cobro, cuándo y con qué nombre.'],
-    comoUsar:['Menú → «Identificar pacientes».','Busca tu cobro por FECHA y MONTO (los filtros de arriba).','Pulsa «Identificar» y elige a tu paciente del buscador.','¿No está? Pulsa «+ Registrar nuevo paciente» y captura el nombre; si te pregunta por un parecido, decide si es la misma o no.'] },
+    comoUsar:['Menú → «Identificar pacientes». Salen TODOS los pendientes, de todos los años (no solo el actual).','Ubica tu cobro por el CONCEPTO (qué se vendió), la fecha y el monto. Abre el «▸» para ver el detalle: productos, cantidades, importes y con qué se pagó cada uno.','Pulsa «Identificar» y elige a tu paciente del buscador.','¿No está? Pulsa «+ Registrar nuevo paciente» y captura el nombre; si te pregunta por un parecido, decide si es la misma o no.'] },
   { build:'2026.07.15', fecha:'15 jul 2026', area:'Cobranza', icon:'💰',
     titulo:'Arreglado: el botón de cobro de Cuentas por Cobrar sí manda el dinero al banco',
     puntos:['⚠ El botón «Abono» de Cuentas por Cobrar estaba roto: solo ANOTABA el abono en una hoja. No subía lo pagado de la venta, no creaba el movimiento bancario y no quitaba el saldo de la lista.','Ahora el botón se llama «Cobrar / Abonar» y hace el cobro COMPLETO en un solo paso, igual que el de Estado de Cuenta: sube lo Pagado, manda el dinero al banco que corresponda por forma de pago y cierra el saldo cuando llega a cero.','Funciona en los DOS tipos de renglón: los saldos que vienen de una venta (con OP) y los cargos capturados a mano (saldos iniciales / cargos a crédito, ej. REPROVIDA).','⚠ Los cargos SIN OP tenían un segundo bug: por más abonos que se les registraran, su saldo NUNCA bajaba. Ya baja.','En los saldos que vienen de una venta también puedes aplicar el crédito a favor del paciente, y se te pide la comisión de Mercado Pago si cobras con TDC/TDD/AMEX.','Si el saldo cambió mientras tenías la pantalla abierta, el sistema te avisa y te pide recargar en vez de abonarle al renglón equivocado. Un doble clic ya no cobra dos veces.','⚠ Los abonos registrados ANTES de este arreglo quedaron descuadrados: el dinero no entró a bancos. Pídele a sistemas que corra la auditoría para ver cuáles y corregirlos a mano.'],
