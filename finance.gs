@@ -674,9 +674,17 @@ function doPost(e) {
       if (typeof vincularEmpleadoUsuario !== 'function') return jsonResponse({ok:false, error:'Agrega/actualiza nomina.gs en Apps Script y redespliega.'});
       return jsonResponse(vincularEmpleadoUsuario(body));
     }
+    // ⛔ nominaValidarMes DESACTIVADA: la validación de nómina a CxP es POR
+    // PERIODO (nominaValidarPeriodo). Convivían dos vías que NO se deduplicaban
+    // entre sí (NominaID distinto para el mismo pago) ⇒ riesgo de pagar doble.
+    // El corte se hace AQUÍ, en la ruta, para que ni un nomina.gs viejo sin
+    // redesplegar pueda generar órdenes. La vista mensual de CFDI sigue viva,
+    // pero es solo de lectura/conciliación.
     if (body.action === 'nominaValidarMes') {
-      if (typeof nominaValidarMes !== 'function') return jsonResponse({ok:false, error:'Agrega/actualiza nomina.gs en Apps Script y redespliega.'});
-      return jsonResponse(nominaValidarMes(body));
+      return jsonResponse({ok:false, desactivada:true,
+        error:'La validación de nómina a Cuentas por Pagar ahora es POR PERIODO, no por mes. '
+            + 'Ve a Nómina → «Captura por periodo», elige el periodo y usa «✓ Validar y enviar a CxP». '
+            + 'La vista mensual de CFDI queda solo para consultar y conciliar los recibos timbrados.'});
     }
     if (body.action === 'saveBono') {
       if (typeof saveBono !== 'function') return jsonResponse({ok:false, error:'Agrega/actualiza nomina.gs en Apps Script y redespliega.'});
@@ -6087,6 +6095,10 @@ var CFG_DD_DEFAULTS = [
   // ahora administrables desde Panel de Control > Formularios.
   ['Productos', 'tipo',      'Tipo de producto',       'Tratamientos|Complemento|PGT-A|PGT-M|Estudios - Andrología|Estudios - Consulta|Estudios - Ciclo|Complementos|Laboratorio|Suplementos|Medicamento|Almacenamiento|Especial|Externos|Extras Externos|PGT-A Externos|PGT-M Externos|Violet Externos|Magenta Ext|Histeroscopia-Ext|Consulta|Comisiones|Consultation|Carrier|Andrology|Egg Donor|Art Lab|PGTA|Transfer and follow up|Admin|REPROVIDA'],
   ['Productos', 'categoria', 'Categoría de producto',  'Almacenamiento|Consulta|Estudios - Andrologia|Estudios - Ciclo|Estudios - Consulta|Extras Externos|Medicamento|PGT-A|Tratamientos|VIOLET'],
+  // Catálogo de Empleados (módulo de Nómina). Antes eran texto libre — cada quien
+  // escribía el puesto/área a su manera y no cuadraban los reportes por área.
+  ['Empleados', 'puesto',    'Puesto',                 'Enfermera|Marketing|Embrióloga|Médico|Finanzas|Limpieza|Ventas|Administración|Recepción'],
+  ['Empleados', 'area',      'Área / Depto',           'Enfermera|Marketing|Embrióloga|Médico|Finanzas|Limpieza|Ventas|Administración|Recepción'],
 ];
 
 // Inserta en la hoja las filas por defecto (CFG_DD_DEFAULTS) que aún no existan.

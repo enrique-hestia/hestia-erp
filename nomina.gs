@@ -521,7 +521,9 @@ function nominaDiagnostico() {
  *   GET  nominaMesEstado&anio=&mes=          → nominaMesEstado(anio, mes)
  *   GET  nominaBonos&anio=&mes=              → readBonos(anio, mes)
  *   POST vincularEmpleadoUsuario {token, email, numEmpleado, nombre, vincular}
- *   POST nominaValidarMes {token, anio, mes, forzar}
+ *   POST nominaValidarMes {token, anio, mes, forzar}  ⛔ DESACTIVADA — la
+ *        validación a CxP es POR PERIODO (nominaValidarPeriodo). Responde
+ *        {ok:false} y ya no genera órdenes; ver comentario en la función.
  *   POST saveBono {token, anio, mes, numEmpleado, nombre, concepto, monto}
  *   POST deleteBono {token, bonoId}
  * ═══════════════════════════════════════════════════════════════════════ */
@@ -777,11 +779,39 @@ function _nomAppendCxP(egSh, iNom1, item, usuario) {
   return { ok: true, id: newId };
 }
 
-// Valida la nómina del mes: crea UNA orden de pago por empleado en Cuentas por
-// Pagar (neto CFDI + bonos del mes), y marca el mes como Validada. Idempotente:
-// no duplica órdenes (dedup por NominaID); re-enviar con forzar sólo agrega las
-// faltantes.
+/* ═══════════════════════════════════════════════════════════════════════
+ * ⛔ DESACTIVADA — la validación a Cuentas por Pagar es AHORA POR PERIODO.
+ *
+ * POR QUÉ: convivían dos vías a CxP que NO se deduplicaban entre sí, porque
+ * cada una arma un NominaID distinto para el mismo pago:
+ *     nominaValidarMes     → 'NOM-2026-07-E01'
+ *     nominaValidarPeriodo → 'NOM-QNA-2026-07-1-E01'
+ * El dedup de _nomAppendCxP compara NominaID exacto, así que validar el mes
+ * DESPUÉS de haber validado sus quincenas creaba órdenes duplicadas y se podía
+ * pagar dos veces al mismo empleado. La oficial es POR PERIODO (F5).
+ *
+ * QUÉ SIGUE VIVO: la vista mensual de CFDI (readNominaMes / nominaMesEstado /
+ * nominaBonos) es de LECTURA y no se toca — sirve para ver y conciliar los
+ * recibos timbrados del mes. Lo único desactivado es la GENERACIÓN de órdenes.
+ *
+ * NO SE BORRA: la implementación original queda íntegra abajo, en
+ * _nominaValidarMes_LEGACY_DESACTIVADA(), como referencia y por si hubiera que
+ * auditar cómo se generaron las órdenes viejas. NO la vuelvas a cablear sin
+ * unificar antes el NominaID con el de nominaValidarPeriodo.
+ * ═══════════════════════════════════════════════════════════════════════ */
 function nominaValidarMes(body) {
+  return {
+    ok: false,
+    desactivada: true,
+    error: 'La validación de nómina a Cuentas por Pagar ahora es POR PERIODO, no por mes. '
+         + 'Ve a Nómina → «Captura por periodo», elige el periodo (semanal/quincenal/mensual) y usa «✓ Validar y enviar a CxP». '
+         + 'La vista mensual de CFDI queda solo para consultar y conciliar los recibos timbrados.'
+  };
+}
+
+// Implementación original (ver comentario de arriba). Desactivada: ya no se
+// llama desde ninguna ruta. Se conserva como referencia histórica.
+function _nominaValidarMes_LEGACY_DESACTIVADA(body) {
   try {
     if (!_tokenHasPermission(body.token || '', 'editar_egresos')) {
       return { ok: false, error: 'Sin autorización para validar nómina (editar_egresos).' };
