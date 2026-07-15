@@ -56,6 +56,116 @@ function _tradNorm(s) {
   return s.replace(/\s+/g, ' ').trim();
 }
 
+/* ── CONCEPTOS QUE NO SON PRODUCTOS ──────────────────────────────────────────
+   No todo lo que sale impreso en un renglón es un producto del catálogo. Una
+   cuenta por cobrar con monto suelto sintetiza su línea desde el CONCEPTO, que
+   es texto libre (cobranza.gs: `items = [{producto: concepto…}]`, y el concepto
+   por default es literalmente 'Saldo inicial'). Ese texto viaja a
+   BD_Ingresos.Producto y de ahí al reporte como un concepto más.
+
+   Al imprimir en otro idioma, el embudo (hfTradGate) exige traducción para CADA
+   concepto y `saveTraduccionProducto` solo sabía escribir en BD_Productos: un
+   concepto de texto libre no empataba con ningún producto → se rechazaba con
+   'Producto no encontrado en el catálogo' → el documento NO SALÍA NUNCA, sin
+   ninguna salida para el usuario (el mismo botón fallaba una y otra vez).
+   Le pasaba hasta al comprobante de una cancelación ya reembolsada.
+
+   Estas traducciones viven en su propia hoja, con la MISMA convención de columna
+   (`Descripcion_<LANG>`) y la MISMA normalización (`_tradNorm`) que el catálogo.
+   NO se meten a BD_Productos: 'Saldo inicial' no es un producto — no tiene SKU,
+   ni precio, ni categoría, ni existencias, y una fila fantasma ahí contaminaría
+   los selectores de producto, los reportes de catálogo, el inventario y las
+   auditorías. Un no-producto no se arregla inventándole identidad de producto.
+
+   PRECEDENCIA: el CATÁLOGO MANDA. Estas entradas solo RELLENAN HUECOS. Solo se
+   escriben cuando no había producto que empatara, así que normalmente no compiten
+   con nadie; pero si más adelante alguien da de alta ese texto como producto de
+   verdad y le captura su traducción, la del producto debe ganar — si no, editar
+   el catálogo no surtiría efecto y el documento imprimiría la traducción vieja
+   sin avisar. Rellenar huecos nunca puede empeorar lo que ya estaba bien. */
+var TRAD_OVR_TAB = 'Traducciones_Texto';
+
+/* Agrega una columna al final si no existe (match EXACTO de encabezado).
+   Mismo patrón append-safe que `_bdProdColEnsure`, pero sobre cualquier hoja. */
+function _tradColEnsureOn(sh, headerText) {
+  var lastCol = sh.getLastColumn();
+  if (lastCol < 1) { sh.getRange(1, 1).setValue(headerText); return 1; }
+  var hdrs = sh.getRange(1, 1, 1, lastCol).getValues()[0]
+    .map(function (h) { return String(h).trim().toLowerCase(); });
+  var idx = hdrs.indexOf(String(headerText).trim().toLowerCase());
+  if (idx > -1) return idx + 1;
+  sh.getRange(1, lastCol + 1).setValue(headerText);
+  return lastCol + 1;
+}
+
+/* La hoja de conceptos libres. `crear=false` → null si no existe (lectura: que no
+   exista es normal y significa "no hay ninguno", no un error). */
+function _tradOvrSheet(crear) {
+  var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+  var sh = ss.getSheetByName(TRAD_OVR_TAB);
+  if (!sh) {
+    if (!crear) return null;
+    sh = ss.insertSheet(TRAD_OVR_TAB);
+    sh.getRange(1, 1, 1, 3).setValues([['Descripcion', 'Actualizado', 'Usuario']]);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+/* { normalizado(Descripcion) → traducción } de los conceptos libres. Nunca tumba
+   una impresión: si algo falla, devuelve {} y manda el catálogo solo. */
+function _tradOvrMap(lang) {
+  try {
+    var sh = _tradOvrSheet(false);
+    if (!sh) return {};
+    var data = sh.getDataRange().getValues();
+    if (data.length < 2) return {};
+    var hdrs = data[0].map(function (h) { return String(h).trim().toLowerCase(); });
+    var iCol = hdrs.indexOf(_tradColName(lang).toLowerCase());
+    if (iCol < 0) return {};
+    var map = {};
+    for (var i = 1; i < data.length; i++) {
+      var desc = String(data[i][0] || '').trim();
+      var tr   = String(data[i][iCol] || '').trim();
+      if (!desc || !tr) continue;
+      map[_tradNorm(desc)] = tr;
+    }
+    return map;
+  } catch (e) { return {}; }
+}
+
+/* Guarda la traducción de un concepto libre. Empareja por Descripcion
+   normalizada (es lo único que trae un reporte) y actualiza en vez de duplicar. */
+function _tradOvrSave(lang, desc, traduccion, usuario) {
+  var sh  = _tradOvrSheet(true);
+  var col = _tradColEnsureOn(sh, _tradColName(lang));
+  var data = sh.getDataRange().getValues();
+  var normWanted = _tradNorm(desc), target = -1;
+  for (var i = 1; i < data.length; i++) {
+    if (_tradNorm(data[i][0]) === normWanted) { target = i + 1; break; }
+  }
+  var anterior = '';
+  if (target < 0) {
+    target = Math.max(sh.getLastRow(), 1) + 1;
+    sh.getRange(target, 1).setValue(String(desc).trim());
+  } else {
+    anterior = String(sh.getRange(target, col).getValue() || '');
+  }
+  sh.getRange(target, col).setValue(traduccion);
+  var cAct = _tradColEnsureOn(sh, 'Actualizado');
+  var cUsr = _tradColEnsureOn(sh, 'Usuario');
+  sh.getRange(target, cAct).setValue(new Date());
+  sh.getRange(target, cUsr).setValue(String(usuario || 'sistema'));
+  try {
+    if (typeof logAudit === 'function') {
+      logAudit(usuario || 'sistema', 'Productos', 'Traducir concepto',
+               String(desc).trim(), _tradColName(lang), anterior, traduccion);
+    }
+  } catch (e) { /* la auditoría no debe tumbar el guardado */ }
+  return { ok: true, lang: lang, productoId: '', origen: 'concepto',
+           descripcion: String(desc).trim(), traduccion: traduccion };
+}
+
 /* ── PAÍS → IDIOMA ────────────────────────────────────────────────────────────
    Vive en Config_Dropdowns (sección `Pacientes`, campo `paisIdioma`), NO
    hardcodeado. Ver CFG_DD_DEFAULTS en finance.gs. Formato de los valores:
@@ -107,19 +217,24 @@ function readTradMap(lang) {
     if (!sh) return { ok: false, error: 'BD_Productos no encontrada', map: {} };
 
     var data = sh.getDataRange().getValues();
-    if (!data.length) return { ok: true, lang: lang, map: {} };
-    var hdrs = data[0].map(function (h) { return String(h).trim().toLowerCase(); });
-    var iCol = hdrs.indexOf(_tradColName(lang).toLowerCase());
-    if (iCol < 0) return { ok: true, lang: lang, map: {}, sinColumna: true }; // aún nadie ha capturado ninguna
+    var hdrs = data.length ? data[0].map(function (h) { return String(h).trim().toLowerCase(); }) : [];
+    var iCol = hdrs.length ? hdrs.indexOf(_tradColName(lang).toLowerCase()) : -1;
 
     var map = {};
-    for (var i = 1; i < data.length; i++) {
-      var desc = String(data[i][2] || '').trim();
-      var tr   = String(data[i][iCol] || '').trim();
-      if (!desc || !tr) continue;
-      map[_tradNorm(desc)] = tr;
+    if (iCol > -1) {                       // iCol < 0 ⇒ aún nadie ha capturado ninguna
+      for (var i = 1; i < data.length; i++) {
+        var desc = String(data[i][2] || '').trim();
+        var tr   = String(data[i][iCol] || '').trim();
+        if (!desc || !tr) continue;
+        map[_tradNorm(desc)] = tr;
+      }
     }
-    return { ok: true, lang: lang, map: map };
+    // Conceptos que no son productos (ver TRAD_OVR_TAB). RELLENAN HUECOS: nunca
+    // pisan al catálogo, que es y sigue siendo la autoridad.
+    var ovr = _tradOvrMap(lang), nOvr = 0;
+    for (var k in ovr) { if (ovr.hasOwnProperty(k) && !map[k]) { map[k] = ovr[k]; nOvr++; } }
+
+    return { ok: true, lang: lang, map: map, sinColumna: iCol < 0, conceptos: nOvr };
   } catch (ex) {
     return { ok: false, error: ex.message, map: {} };
   }
@@ -155,7 +270,20 @@ function saveTraduccionProducto(body) {
       if (prodId) { if (String(data[i][0]).trim() === prodId) { target = i + 1; break; } }
       else if (normWanted && _tradNorm(data[i][2]) === normWanted) { target = i + 1; break; }
     }
-    if (target < 0) return { ok: false, error: 'Producto no encontrado en el catálogo: ' + (prodId || desc) };
+    // ── SIN MATCH EN EL CATÁLOGO ─────────────────────────────────────────────
+    // No siempre es un error: un reporte también imprime CONCEPTOS LIBRES que
+    // nunca fueron productos ('Saldo inicial', el concepto de una cuenta por
+    // cobrar con monto suelto…). Devolver error aquí dejaba al usuario ATRAPADO:
+    // el embudo exige la traducción para imprimir, y guardarla era imposible →
+    // el documento no salía nunca por más veces que le diera al botón.
+    // Se guarda en la hoja de conceptos, que readTradMap fusiona al imprimir.
+    // Si vino productoId, sí es un error real: se pidió un producto CONCRETO por
+    // su id y ese id no existe — inventarle un concepto libre taparía el bug.
+    if (target < 0) {
+      if (prodId) return { ok: false, error: 'Producto no encontrado en el catálogo: ' + prodId };
+      if (!desc)  return { ok: false, error: 'Falta la descripción del concepto a traducir.' };
+      return _tradOvrSave(lang, desc, traduccion, body.usuario);
+    }
 
     var anterior = String(sh.getRange(target, col).getValue() || '');
     sh.getRange(target, col).setValue(traduccion);
@@ -165,7 +293,7 @@ function saveTraduccionProducto(body) {
                  String(data[target - 1][0] || ''), _tradColName(lang), anterior, traduccion);
       }
     } catch (e) { /* la auditoría no debe tumbar el guardado */ }
-    return { ok: true, lang: lang, productoId: String(data[target - 1][0] || ''),
+    return { ok: true, lang: lang, origen: 'catalogo', productoId: String(data[target - 1][0] || ''),
              descripcion: String(data[target - 1][2] || ''), traduccion: traduccion };
   } catch (ex) {
     return { ok: false, error: ex.message };
@@ -200,7 +328,7 @@ function saveTraduccionesProductoBatch(body) {
     var items = body.items;
     if (typeof items === 'string') { try { items = JSON.parse(items); } catch (e) { items = []; } }
     if (!items || !items.length) return { ok: false, error: 'Nada que guardar.' };
-    var guardados = 0, errores = [];
+    var guardados = 0, errores = [], conceptos = 0;
     for (var i = 0; i < items.length; i++) {
       var r = saveTraduccionProducto({
         lang: items[i].lang || body.lang,
@@ -209,9 +337,17 @@ function saveTraduccionesProductoBatch(body) {
         traduccion: items[i].traduccion,
         usuario: body.usuario
       });
-      if (r.ok) guardados++; else errores.push((items[i].descripcion || items[i].productoId) + ': ' + r.error);
+      if (r.ok) { guardados++; if (r.origen === 'concepto') conceptos++; }
+      else errores.push((items[i].descripcion || items[i].productoId || '(sin descripción)') + ': ' + (r.error || 'error desconocido'));
     }
-    return { ok: errores.length === 0, guardados: guardados, errores: errores };
+    // Un fallo PARCIAL debe ser legible. Antes esto devolvía `ok:false` a secas y el
+    // front (`if(!d||!d.ok) throw`) lo mostraba como un error mudo que además borraba
+    // el hecho de que N traducciones SÍ se guardaron — el usuario reintentaba todo
+    // sin saber qué había quedado. Ahora `error` viene siempre armado y dice ambas
+    // cosas: cuántas entraron y exactamente cuál falló y por qué.
+    var ok = errores.length === 0;
+    return { ok: ok, guardados: guardados, conceptos: conceptos, errores: errores,
+             error: ok ? '' : ('Se guardaron ' + guardados + ' de ' + items.length + '. No se pudo guardar: ' + errores.join(' · ')) };
   } catch (ex) {
     return { ok: false, error: ex.message };
   }

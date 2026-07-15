@@ -5158,6 +5158,19 @@ function abonarIngreso(body) {
       var sheet = null, sheets = ss.getSheets();
       for (var i = 0; i < sheets.length; i++) { if (sheets[i].getName() === BD_INGRESOS_TAB) { sheet = sheets[i]; break; } }
       if (!sheet) return { ok: false, error: 'No se encontró BD_Ingresos' };
+      // ── VENTA CANCELADA: NO SE COBRA ─────────────────────────────────────────
+      // Espejo del guard que ya protege editar (:6058) y borrar (:6186) — faltaba
+      // en la ruta que MUEVE DINERO, que es la que más lo necesitaba.
+      // cancelacion.gs deja TotalPagar y Pagado intactos (registro histórico), así
+      // que (Total − Pagado) sigue viéndose como saldo vivo. Si algo vuelve a pintar
+      // ese saldo, este guard es la última línea: sin él, un POST a esta función
+      // cobraría de verdad una venta ya devuelta (_abonoRutearABanco escribe banco).
+      // El backend NO debe depender de que el botón no se pinte: el candado de
+      // saldoEsperado no ayuda aquí (el saldo fantasma COINCIDE con el esperado).
+      if (typeof _ingOPCancelada === 'function' && _ingOPCancelada(sheet, op))
+        return { ok: false, cancelada: true,
+                 error: 'La operación ' + op + ' está cancelada: no se puede cobrar ni abonar. ' +
+                        'Su importe ya se reversó al cancelarla; el saldo que aparezca es histórico, no una deuda.' };
       var data = sheet.getDataRange().getValues();
       var H = data[0].map(function(x){ return String(x||'').trim().toLowerCase(); });
       function hc(){ for (var a=0;a<arguments.length;a++){ var k=H.indexOf(arguments[a]); if(k>-1) return k; } return -1; }

@@ -713,6 +713,10 @@ function readEstadoCuentaPaciente(pacienteNombre) {
     var iPagado= hc('pagado');
     var iEst   = hc('estatus','estado');
     var iPago  = hc('formapago','forma de pago','forma pago');
+    // 'Cancelada' se agregó DESPUÉS (cancelacion.gs) y vive al final de la hoja: se
+    // localiza por ENCABEZADO, nunca por posición fija. Mismo patrón que
+    // _anReadBDIngresos (arriba en este archivo), summary.gs y presupuesto.gs.
+    var iCancel = hc('cancelada');
     if (iPac < 0 || iTotal < 0)
       return { ok: false, error: 'Columnas Paciente o Total no encontradas en ' + BD_INGRESOS_TAB };
 
@@ -734,6 +738,18 @@ function readEstadoCuentaPaciente(pacienteNombre) {
       var row = data[r];
       var pac = String(row[iPac] || '').trim().toLowerCase();
       if (pac !== nombreBuscar) continue;
+      // ── VENTA CANCELADA → no existe para el estado de cuenta ───────────────────
+      // cancelacion.gs marca Cancelada=true pero DEJA TotalPagar y Pagado intactos
+      // (es el registro histórico de lo que pasó, y el reverso del dinero ya se
+      // registró en el banco). Sin este filtro la venta cancelada seguía viva aquí:
+      //   · sumaba a totalFacturado y a las gráficas por año/categoría, y
+      //   · su (TotalPagar − Pagado) se colaba a _saldoLineaPorOp → saldoPendiente
+      //     con origen 'ingreso' → el front pintaba "Cobrar / Abonar" sobre una
+      //     venta YA DEVUELTA y un clic la volvía a cobrar.
+      // El renglón de Cuentas_Cobrar no tapa esto: cancelacion.gs lo deja en
+      // MontoCargo 0 y _cobReadCargos descarta monto<=0 → nunca llega al filtro
+      // st==='cancelado' de abajo. Se corta EN EL ORIGEN, que es aquí.
+      if (iCancel > -1 && typeof _ingEsCancelada === 'function' && _ingEsCancelada(row[iCancel])) continue;
       var rawFecha = row[iFecha];
       var fechaStr = '';
       if (rawFecha instanceof Date) {
@@ -743,12 +759,27 @@ function readEstadoCuentaPaciente(pacienteNombre) {
       }
       var total = parseFloat(String(row[iTotal] || '0').replace(/[$,]/g, '')) || 0;
       var pagadoRow = iPagado >= 0 ? (parseFloat(String(row[iPagado] || '0').replace(/[$,]/g, '')) || 0) : 0;
+      // ── ¿La celda Pagado está CAPTURADA o VACÍA? ──────────────────────────────
+      // No es lo mismo un 0 que un blanco, y hasta ahora se colapsaban al mismo
+      // valor (`String(row[iPagado] || '0')` convierte '' y 0 en '0'):
+      //   · VACÍA  ⇒ fila histórica anterior a que se capturara Pagado. La
+      //     convención de siempre es asumirla pagada por completo. Se respeta.
+      //   · 0      ⇒ alguien escribió CERO a propósito. Desde que existe
+      //     "+ Cuenta por cobrar" (cobranza.gs → saveIngreso con pagado:0) esto
+      //     significa una VENTA A CRÉDITO: no se ha cobrado ni un peso.
+      // Sin la distinción, una venta a crédito de $50,000 salía en el documento
+      // del paciente como "Total pagado: $50,000" — la cifra que menos podíamos
+      // equivocar. Se mira la celda CRUDA, antes de que parseFloat la aplane.
+      var _rawPag  = (iPagado >= 0) ? row[iPagado] : null;
+      var _pagDef  = (iPagado >= 0) && String(_rawPag == null ? '' : _rawPag).trim() !== '';
       var saldoRow = (iPagado >= 0 && pagadoRow > 0.01 && pagadoRow < total - 0.01) ? (total - pagadoRow) : 0;
       var opRow = String(row[iOp] || '').trim();
       if (saldoRow > 0.01) _saldoLineaPorOp[opRow] = (_saldoLineaPorOp[opRow] || 0) + saldoRow;
-      // Pagado efectivo: Pagado en blanco/0 ⇒ línea asumida pagada por completo;
-      // un número ⇒ se respeta (puede exceder el total = sobrepago / saldo a favor).
-      var pagEfectivo = (iPagado < 0) ? total : (pagadoRow > 0.01 ? pagadoRow : total);
+      // Pagado efectivo: celda VACÍA (o sin columna) ⇒ línea asumida pagada por
+      // completo (convención histórica intacta); celda CAPTURADA ⇒ se respeta el
+      // número tal cual — incluido el 0 de una venta a crédito, y un valor mayor
+      // al total (sobrepago → saldo a favor del paciente).
+      var pagEfectivo = _pagDef ? pagadoRow : total;
       totalPagado += pagEfectivo;
       totalGeneral += total;
       movimientos.push({
