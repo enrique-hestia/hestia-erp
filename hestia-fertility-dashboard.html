@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.14.198 -->
+﻿<!-- app-build:2026.07.14.199 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -31038,8 +31038,11 @@ function ecRenderResult(d) {
 
 /* ── Cobrar / Abonar INTEGRAL: cobra el saldo de una OP y cuadra los 3 libros ──
  * (BD_Ingresos.Pagado↑ · movimiento bancario [OP #..] · cierra la cuenta por cobrar).
- * Puede aplicar el crédito a favor del paciente (offset interno, sin banco). */
-function ecAbonarOP(op, saldo, paciente, credito){
+ * Puede aplicar el crédito a favor del paciente (offset interno, sin banco).
+ * ctx: de dónde se abrió, solo para saber qué recargar al terminar. '' / 'ec' =
+ * Estado de Cuenta (ecBuscar) · 'cc' = Cuentas por Cobrar (ccLoad). El botón "Abono"
+ * de Cobranza REUSA esta misma función: un solo motor de cobro para toda la app. */
+function ecAbonarOP(op, saldo, paciente, credito, ctx){
   saldo = parseFloat(saldo)||0; credito = parseFloat(credito)||0;
   var credAplicable = Math.min(credito, saldo);
   var fpSel = '<select id="ec-ab-fp" style="'+_ccInputStyle()+'">'
@@ -31058,7 +31061,7 @@ function ecAbonarOP(op, saldo, paciente, credito){
     + _ccField('Forma de pago (define el banco, igual que en Ingresos)', fpSel)
     + '<div style="font-size:10.5px;color:var(--color-text-muted);margin:-6px 0 12px">Efectivo → Caja · Santander → Santander · Transferencia/TDC/TDD/AMEX/Mercado Pago → Mercado Pago.</div>'
     + _ccField('Comisión Mercado Pago (solo TDC/TDD/AMEX, opcional)','<input id="ec-ab-com" type="number" step="0.01" value="0" style="'+_ccInputStyle()+'">');
-  ccModal('Cobrar / Abonar — OP '+ecEsc(op), body, function(){ ecGuardarAbonoOP(op, paciente, saldo, credAplicable); }, 'Cobrar / Abonar');
+  ccModal('Cobrar / Abonar — OP '+ecEsc(op), body, function(){ ecGuardarAbonoOP(op, paciente, saldo, credAplicable, ctx); }, 'Cobrar / Abonar');
 }
 function ecAbonToggleCred(saldo, credAplicable){
   var chk = document.getElementById('ec-ab-usecred');
@@ -31067,7 +31070,7 @@ function ecAbonToggleCred(saldo, credAplicable){
   inp.value = (chk && chk.checked) ? Math.max(0, (saldo - credAplicable)).toFixed(2) : (saldo||0);
 }
 function ecEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function ecGuardarAbonoOP(op, paciente, saldo, credAplicable){
+function ecGuardarAbonoOP(op, paciente, saldo, credAplicable, ctx){
   var efectivo = parseFloat((document.getElementById('ec-ab-monto')||{}).value||'0')||0;
   var usecred  = !!(document.getElementById('ec-ab-usecred')||{}).checked;
   var aplicarCredito = usecred ? credAplicable : 0;
@@ -31086,7 +31089,9 @@ function ecGuardarAbonoOP(op, paciente, saldo, credAplicable){
       if(d&&d.ok){
         try{ if(typeof _swrDel==='function'){ _swrDel('ingresos'); _swrDel('banks'); } }catch(e){}
         var m=document.getElementById('cc-modal'); if(m) m.remove();
-        ecBuscar(); // re-consulta: los 3 números (facturado/pagado/saldo) se actualizan
+        // Recarga la vista desde donde se abrió el cobro (los números se recalculan solos).
+        if(ctx==='cc'){ if(typeof ccLoad==='function') ccLoad(true); }
+        else ecBuscar(); // re-consulta: los 3 números (facturado/pagado/saldo) se actualizan
       } else {
         alert('No se pudo cobrar: '+((d&&d.error)||'error'));
         if(btn){ btn.textContent='Reintentar'; btn.disabled=false; }
@@ -31579,7 +31584,21 @@ function ccSaldoAcciones(o){
   var canDel=typeof hasPermission==='function' && hasPermission('borrar_egresos');
   var abtn='padding:5px 8px;background:none;border:1px solid var(--color-divider);border-radius:7px;font-size:11px;cursor:pointer;color:var(--color-text)';
   var dbtn='padding:5px 8px;background:none;border:1px solid #e3b3b3;border-radius:7px;font-size:11px;cursor:pointer;color:#c83c3c';
-  var h='<button onclick="ccAbrirAbono('+ccQ(o.op)+','+ccQ(o.paciente)+','+(o.saldo||0)+')" style="padding:5px 11px;background:var(--color-primary);color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Abono</button>';
+  // El botón de cobro se rutea al motor que MANDA sobre el saldo de este renglón:
+  //   o.auto → el saldo lo calcula la venta (Facturado − Pagado) ⇒ ecAbonarOP →
+  //            abonarIngreso: sube el Pagado de la OP, manda el dinero al banco y cierra
+  //            la cuenta. (Mismo motor que Estado de Cuenta, sin duplicar lógica.)
+  //   resto  → cargo explícito (saldo inicial / cargo a crédito, ej. REPROVIDA): no hay
+  //            Pagado que subir ⇒ ccAbrirAbonoCargo → abonarCargo, que decrementa el
+  //            MontoCargo y manda el dinero al banco.
+  // Antes ambos casos llamaban a registrarAbono, que solo anotaba el abono en una hoja:
+  // ni subía el Pagado, ni tocaba bancos, ni cerraba el saldo.
+  var h;
+  if(o.auto && o.op && o.op!=='—'){
+    h='<button onclick="ecAbonarOP('+ccQ(o.op)+','+(o.saldo||0)+','+ccQ(o.paciente)+','+(o.credito||0)+',\'cc\')" style="padding:5px 11px;background:var(--color-primary);color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Cobrar / Abonar</button>';
+  } else {
+    h='<button onclick="ccAbrirAbonoCargo('+o.rowNum+','+ccQ(o.paciente)+','+(o.saldo||0)+','+ccQ(o.concepto||'')+')" style="padding:5px 11px;background:var(--color-primary);color:#fff;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">Cobrar / Abonar</button>';
+  }
   if(o.origen==='registro' && o.rowNum){
     if(canEdit) h+=' <button onclick="ccEditarSaldo('+o.rowNum+','+ccQ(o.paciente)+','+(o.saldo||0)+','+ccQ(o.concepto||'')+')" title="Editar" style="'+abtn+'">✎</button>';
     if(canDel)  h+=' <button onclick="ccBorrarSaldo('+o.rowNum+','+ccQ(o.paciente)+','+(o.saldo||0)+')" title="Borrar" style="'+dbtn+'">✕</button>';
@@ -31767,19 +31786,54 @@ function ccBorrarSaldo(rowNum, paciente, saldo){
     }).catch(function(e){ alert('Error de red: '+e.message); });
 }
 
-/* ── Registrar abono a un saldo ── */
-function ccAbrirAbono(op, paciente, saldo){
+/* ── Cobrar / Abonar un CARGO EXPLÍCITO (saldo inicial / cargo a crédito, ej. REPROVIDA) ──
+ * Estos renglones no vienen de una venta con pago parcial: no hay Pagado que subir, el
+ * saldo vive en el MontoCargo de Cuentas_Cobrar. Va contra abonarCargo, que decrementa
+ * ese saldo, manda el efectivo al banco por forma de pago y cierra la cuenta al llegar a 0.
+ * Los saldos que SÍ vienen de una venta usan ecAbonarOP (motor abonarIngreso). */
+function ccAbrirAbonoCargo(rowNum, paciente, saldo, concepto){
+  saldo = parseFloat(saldo)||0;
+  var fpSel='<select id="cc-ab-fp" style="'+_ccInputStyle()+'">'
+    +'<option>Transferencia</option><option>Santander</option><option>Efectivo</option>'
+    +'<option>TDC</option><option>TDD</option><option>AMEX</option><option>Mercado Pago</option></select>';
   var body=''
     +'<div style="background:var(--color-surface-2);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--color-text-muted)">'
-      +'<b style="color:var(--color-text)">'+ccEsc(paciente)+'</b> · OP '+ccEsc(op)+'<br>Saldo actual: <b style="color:#c83c3c">'+ccFmt(saldo)+'</b></div>'
-    +_ccField('Monto del abono','<input id="cc-ab-monto" type="number" step="0.01" value="'+(saldo||0)+'" style="'+_ccInputStyle()+'">')
+      +'<b style="color:var(--color-text)">'+ccEsc(paciente)+'</b>'+(concepto?' · '+ccEsc(concepto):'')
+      +'<br>Saldo actual: <b style="color:#c83c3c">'+ccFmt(saldo)+'</b></div>'
+    +_ccField('Monto a cobrar','<input id="cc-ab-monto" type="number" step="0.01" value="'+(saldo||0)+'" style="'+_ccInputStyle()+'">')
     +_ccField('Fecha','<input id="cc-ab-fecha" type="date" value="'+new Date().toISOString().substring(0,10)+'" style="'+_ccInputStyle()+'">')
-    +'<div style="display:flex;gap:10px">'
-      +'<div style="flex:1">'+_ccField('Forma de pago',_ccFormaPagoSel('cc-ab-fp'))+'</div>'
-      +'<div style="flex:1">'+_ccField('Banco',_ccBancoSel('cc-ab-bco'))+'</div>'
-    +'</div>'
+    +_ccField('Forma de pago (define el banco, igual que en Ingresos)', fpSel)
+    +'<div style="font-size:10.5px;color:var(--color-text-muted);margin:-6px 0 12px">Efectivo → Caja · Santander → Santander · Transferencia/TDC/TDD/AMEX/Mercado Pago → Mercado Pago.</div>'
+    +_ccField('Comisión Mercado Pago (solo TDC/TDD/AMEX, opcional)','<input id="cc-ab-com" type="number" step="0.01" value="0" style="'+_ccInputStyle()+'">')
     +_ccField('Nota (opcional)','<input id="cc-ab-nota" type="text" style="'+_ccInputStyle()+'">');
-  ccModal('Registrar abono', body, function(){ ccGuardarAbono(op, paciente, 'saldo'); }, 'Registrar abono');
+  ccModal('Cobrar / Abonar — '+ccEsc(paciente), body, function(){ ccGuardarAbonoCargo(rowNum, paciente, saldo, concepto); }, 'Cobrar / Abonar');
+}
+function ccGuardarAbonoCargo(rowNum, paciente, saldo, concepto){
+  var monto=parseFloat((document.getElementById('cc-ab-monto')||{}).value||'0')||0;
+  if(monto<=0){ alert('Indica un monto a cobrar.'); return; }
+  if(monto>saldo+0.01){ alert('El abono ('+ccFmt(monto)+') supera el saldo de la cuenta ('+ccFmt(saldo)+').'); return; }
+  var fecha=(document.getElementById('cc-ab-fecha')||{}).value||'';
+  var formaPago=(document.getElementById('cc-ab-fp')||{}).value||'Transferencia';
+  var comisionMP=parseFloat((document.getElementById('cc-ab-com')||{}).value||'0')||0;
+  var nota=(document.getElementById('cc-ab-nota')||{}).value||'';
+  var btn=document.getElementById('cc-modal-save'); if(btn){ btn.textContent='Cobrando…'; btn.disabled=true; }
+  var s=getSession()||{};
+  // paciente/concepto/saldoEsperado viajan para que el backend RE-VALIDE el renglón: la
+  // hoja no tiene ID estable y la fila pudo moverse si alguien borró cuentas mientras tanto.
+  var payload={ action:'abonarCargo', rowNum:rowNum, paciente:paciente, concepto:concepto||'',
+    saldoEsperado:saldo, monto:monto, formaPago:formaPago, comisionMP:comisionMP,
+    fecha:fecha, nota:nota, token:s.token||getToken(), usuario:s.email||'' };
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(payload)})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d&&d.ok){
+        try{ if(typeof _swrDel==='function'){ _swrDel('ingresos'); _swrDel('banks'); } }catch(e){}
+        var m=document.getElementById('cc-modal'); if(m) m.remove();
+        ccLoad(true);
+      } else {
+        alert('No se pudo cobrar: '+((d&&d.error)||'error'));
+        if(btn){ btn.textContent='Reintentar'; btn.disabled=false; }
+      }
+    }).catch(function(e){ alert('Error de red: '+e.message); if(btn){ btn.textContent='Reintentar'; btn.disabled=false; } });
 }
 /* ── Cobrar suscripción (registra pago que extiende cobertura) ── */
 function ccCobrarSus(nombre, monto, plan){
@@ -31793,6 +31847,10 @@ function ccCobrarSus(nombre, monto, plan){
     +_ccField('Nota (opcional)','<input id="cc-ab-nota" type="text" value="Suscripción crío" style="'+_ccInputStyle()+'">');
   ccModal('Cobrar suscripción', body, function(){ ccGuardarAbono('', nombre, 'suscripcion'); }, 'Registrar cobro');
 }
+/* SOLO suscripciones (lo llama ccCobrarSus). NO lo uses para abonar saldos: 'registrarAbono'
+ * únicamente ANOTA el abono en Abonos_Cobrar — no sube el Pagado, no toca bancos y no cierra
+ * la cuenta. Por ahí entraba el bug del botón "Abono". Para cobrar un saldo usa
+ * ecAbonarOP (venta con OP) o ccAbrirAbonoCargo (cargo explícito). */
 function ccGuardarAbono(op, paciente, tipo){
   var monto=parseFloat((document.getElementById('cc-ab-monto')||{}).value||'0')||0;
   if(monto<=0){ alert('Monto inválido'); return; }
@@ -32968,6 +33026,10 @@ var NOVEDADES=[
     titulo:'Identificar pacientes: ponerle nombre a los cobros «No localizado»',
     puntos:['Cuando una paciente paga desde la PÁGINA DE CITAS, Mercado Pago no nos manda su nombre: el cobro entra al ERP con el paciente en «No localizado».','Quien cobró (vendedora o enfermera) es la única que sabe de quién es ese pago — pero no tiene acceso a Ingresos, y no debe tenerlo.','Nueva vista «Identificar pacientes»: muestra SOLO los cobros sin nombre, con fecha, monto y método de pago. Nada más: ni productos, ni otras pacientes, ni importes de nadie más.','Solo cambia el NOMBRE. No mueve productos, ni montos, ni comisiones, ni la conciliación bancaria — ahí no se toca nada.','Ya identificado, deja de aparecer en la lista. Si otra persona lo identificó primero, el sistema avisa y no lo deja encimar: solo se pueden nombrar cobros que siguen sin nombre.','Si la paciente no existe todavía, se da de alta ahí mismo. Si el nombre se parece 90% o más a alguien que ya existe, el ERP pregunta «¿Es la misma persona?» y muestra los parecidos con su porcentaje.','Si de verdad son dos personas distintas con casi los mismos apellidos (sí pasa), eliges «No, es otra persona» y se da de alta igual. Nunca te bloquea.','Todo queda en auditoría: quién identificó qué cobro, cuándo y con qué nombre.'],
     comoUsar:['Menú → «Identificar pacientes».','Busca tu cobro por FECHA y MONTO (los filtros de arriba).','Pulsa «Identificar» y elige a tu paciente del buscador.','¿No está? Pulsa «+ Registrar nuevo paciente» y captura el nombre; si te pregunta por un parecido, decide si es la misma o no.'] },
+  { build:'2026.07.15', fecha:'15 jul 2026', area:'Cobranza', icon:'💰',
+    titulo:'Arreglado: el botón de cobro de Cuentas por Cobrar sí manda el dinero al banco',
+    puntos:['⚠ El botón «Abono» de Cuentas por Cobrar estaba roto: solo ANOTABA el abono en una hoja. No subía lo pagado de la venta, no creaba el movimiento bancario y no quitaba el saldo de la lista.','Ahora el botón se llama «Cobrar / Abonar» y hace el cobro COMPLETO en un solo paso, igual que el de Estado de Cuenta: sube lo Pagado, manda el dinero al banco que corresponda por forma de pago y cierra el saldo cuando llega a cero.','Funciona en los DOS tipos de renglón: los saldos que vienen de una venta (con OP) y los cargos capturados a mano (saldos iniciales / cargos a crédito, ej. REPROVIDA).','⚠ Los cargos SIN OP tenían un segundo bug: por más abonos que se les registraran, su saldo NUNCA bajaba. Ya baja.','En los saldos que vienen de una venta también puedes aplicar el crédito a favor del paciente, y se te pide la comisión de Mercado Pago si cobras con TDC/TDD/AMEX.','Si el saldo cambió mientras tenías la pantalla abierta, el sistema te avisa y te pide recargar en vez de abonarle al renglón equivocado. Un doble clic ya no cobra dos veces.','⚠ Los abonos registrados ANTES de este arreglo quedaron descuadrados: el dinero no entró a bancos. Pídele a sistemas que corra la auditoría para ver cuáles y corregirlos a mano.'],
+    comoUsar:['Cuentas por Cobrar → botón «Cobrar / Abonar» del renglón.','Captura el monto, la fecha y la forma de pago (la forma de pago decide el banco: Efectivo → Caja, Santander → Santander, Transferencia/TDC/TDD/AMEX/Mercado Pago → Mercado Pago).','Con TDC/TDD/AMEX captura la comisión de Mercado Pago si aplica.','Confirma: el saldo baja (o desaparece si lo liquidaste) y el movimiento aparece en conciliación.'] },
   { build:'2026.07.15', fecha:'15 jul 2026', area:'Nómina', icon:'🧾',
     titulo:'Nómina por periodos: captura, CFDI y pago por periodo',
     puntos:['La nómina ahora se trabaja POR PERIODO (semanal, quincenal o mensual) y la periodicidad es MIXTA: la define cada empleado en su ficha, así que puedes tener gente quincenal, semanal y mensual al mismo tiempo.','Hay periodos ORDINARIOS (los del calendario normal) y EXTRAORDINARIOS (aguinaldo, finiquitos, pagos especiales): conviven sin desplazarse.','Capturas por empleado lo que le toca; el ISR/IMSS que ves antes de timbrar es un ESTIMADO para presupuestar.','Cuando el despacho timbra, el XML CORRIGE al estimado: entra el neto REAL y se marca la Diferencia. En reportes manda el real.','El ERP NO calcula impuestos: el despacho timbra y el CFDI es la verdad.','Nueva pestaña SBC: empleados × 6 bimestres, con el SBC y casilla «Presentado» para el control del IMSS.','Puedes abrir el historial de CUALQUIER periodo (pasado o futuro) con su captura y su estatus.','⚠ IMPORTANTE: validar a Cuentas por Pagar es POR PERIODO. La vista «Nómina del mes (CFDI)» quedó solo para consultar y conciliar — ya no envía nada a CxP. Antes convivían dos vías que no se deduplicaban entre sí y se podía pagar dos veces al mismo empleado.'],
@@ -33303,7 +33365,7 @@ setTimeout(novCheckPopup, 2500);
   },
 
   { id:'cobranza', group:'operacion', icon:'📥', title:'Cobranza / Cuentas por Cobrar',
-    keywords:'cobranza cuentas por cobrar cxc adeudo saldo abono suscripcion crio criopreservacion almacenamiento agencia reprovida descuento volumen deposito partida bloque paciente aging motor a motor b anual mensual conciliar mp mercado pago payer id recordar cobro',
+    keywords:'cobranza cuentas por cobrar cxc adeudo saldo abono abonar cobrar cobro credito a favor comision mp banco conciliacion pagado abonarcargo abonaringreso abonos huerfanos auditoria descuadre suscripcion crio criopreservacion almacenamiento agencia reprovida descuento volumen deposito partida bloque paciente aging motor a motor b anual mensual conciliar mp mercado pago payer id recordar cobro',
     intro:'**Cobranza (Cuentas por Cobrar)** controla lo que te deben. Tiene **dos motores independientes** que no mezclan datos: **Motor A — Saldos** (adeudos de ventas) y **Motor B — Suscripciones de criopreservación**. Se ve en la vista *Cuentas por Cobrar* (2 pestañas) y en el reporte *Cobranza*.',
     bloques:[
       { h:'Motor A — Saldos (SOLO registro explícito)', p:'⚠ Regla clave: el sistema **NO deduce** adeudos de la columna Pagado de `BD_Ingresos` (los precios de años pasados eran más bajos y darían saldos falsos). Un adeudo **solo nace** al: (1) capturar un ingreso con **pago parcial**, (2) **cargar un saldo inicial**, o (3) hacer un **cargo a crédito**. Se lee **solo** de la hoja `Cuentas_Cobrar`. Segmenta Pacientes / Médicos / Agencias, con antigüedad (aging) 0-30, 31-60, 61-90 y +90 días.' },
@@ -33312,21 +33374,24 @@ setTimeout(novCheckPopup, 2500);
       { h:'Generación de suscripciones', p:'`generarSuscripciones` (preview/commit, idempotente por `paciente|plan|periodo`) escribe cargos en la hoja `Suscripciones_Crio`: primero un cargo consolidado `SALDO-INICIAL` por el backlog histórico y luego periodo por periodo. Los abonos marcan periodos pagados **FIFO**.' },
       { h:'Descuento por volumen por agencia', p:'Se configura desde el panel **«🏷️ Descuentos agencia»** (Cuentas por Cobrar): lista de productos que aplican, escalones desde–hasta–%, conteo combinado o por producto, directo o por miembro, y base mes actual o mes anterior (a futuro). Config en Script Property `COBRANZA_DESC_CFG` (`cobDescCfgRead`/`cobDescCfgSave`, gate `editar_egresos`); si no existe se migra sola desde la hoja legacy `Descuentos_Agencia`. El estado de cuenta muestra **Neto a cobrar = Bruto − Descuento**.' },
       { h:'Datos para depósito', p:'El estado de cuenta incluye los **datos bancarios para depósito** (default Santander / Hestia Clinic / 65-51043096-7 / CLABE 014180655104309670), editables en la config.' },
-      { h:'Conciliar MP (suscripciones Crío)', p:'La pestaña **«Conciliar MP»** cruza el export de Mercado Pago contra los pacientes con inventario Crío para ver quién está **suscrito / en año gratis / pagó sin suscripción**, liga a cada paciente con su `payer_id` y ofrece **🔔 Recordar cobro** (tiene su propia sección: «Conciliar suscripciones Crío (Mercado Pago)»).' }
+      { h:'Conciliar MP (suscripciones Crío)', p:'La pestaña **«Conciliar MP»** cruza el export de Mercado Pago contra los pacientes con inventario Crío para ver quién está **suscrito / en año gratis / pagó sin suscripción**, liga a cada paciente con su `payer_id` y ofrece **🔔 Recordar cobro** (tiene su propia sección: «Conciliar suscripciones Crío (Mercado Pago)»).' },
+      { h:'Cobrar / Abonar: dos motores según el renglón', p:'El botón **«Cobrar / Abonar»** cuadra los tres libros en **una sola operación atómica**: sube lo cobrado, manda el efectivo al **banco** que toca por forma de pago (Efectivo → Caja · Santander → Santander · Transferencia/TDC/TDD/AMEX/Mercado Pago → Mercado Pago) y **cierra el saldo** al llegar a 0. Se rutea según **quién manda sobre el saldo** de ese renglón:\n\n**(a) Saldo de una venta** (renglón con OP, `Nota = auto-ingreso`): va a `abonarIngreso` — sube el **Pagado** de la OP en `BD_Ingresos` y el `MontoCargo` se **recomputa solo** como Facturado − Pagado. Admite **crédito a favor** del paciente (offset interno, no genera banco) y **comisión MP** con TDC/TDD/AMEX. Es el **mismo motor** que el botón de *Estado de Cuenta*.\n\n**(b) Cargo explícito** (saldo inicial / cargo a crédito, ej. REPROVIDA): va a `abonarCargo` — no hay Pagado que subir, así que **decrementa el `MontoCargo`** directo (ahí vive el saldo canónico) y cierra el renglón (`Estatus = Pagado`) al llegar a 0.\n\nAmbos rechazan el **sobrepago** y registran el abono en `Abonos_Cobrar` con un tipo que **no se vuelve a restar** (`abono-op` / `abono-cargo`), para no contar el mismo cobro dos veces. Como `Cuentas_Cobrar` no tiene columna ID, el cargo explícito **re-valida el renglón** (paciente, concepto y saldo) antes de escribir: si cambió, te pide recargar en vez de abonarle a otra cuenta — eso también evita que un doble clic cobre dos veces.' },
+      { h:'⚠ Abonos viejos descuadrados (antes del 15 jul 2026)', p:'Hasta esta versión el botón **«Abono»** solo llamaba a `registrarAbono`, que **únicamente anotaba** el abono en `Abonos_Cobrar` (tipo `saldo`): **no** subía el Pagado, **no** creaba el movimiento bancario y **no** cerraba el saldo. Consecuencias que siguen vivas en los datos históricos:\n\n· **Con OP**: el saldo en pantalla **sí bajó** (el tipo `saldo` sí se resta por OP), pero el dinero **nunca entró a bancos** ni subió el Pagado → descuadre silencioso.\n· **Sin OP**: el abono **nunca se restó de nada** (el motor fuerza abonado = 0 cuando el cargo no trae OP) → esos saldos **jamás bajaron** por más abonos que se registraran.\n\nPara ver el daño, sistemas corre `auditarAbonosHuerfanos()` desde el editor de Apps Script: es **solo lectura** (no repara nada) y lista cada abono viejo con su OP, monto, el Facturado/Pagado de esa OP y si se le encuentra movimiento bancario.' }
     ],
     pasos:[
       'Para registrar un adeudo desde cero: **Cuentas por Cobrar → Cargar saldo inicial** (autocompleta paciente + OP, avisa si ya existe).',
       'Para adeudos por venta: se generan solos al capturar el ingreso con pago parcial.',
-      'Para **cobrar**: usa **Abonar** en el saldo/suscripción; el abono se registra y (en suscripciones) marca periodos FIFO.',
+      'Para **cobrar** un saldo: **Cobrar / Abonar** en el renglón → monto, fecha y **forma de pago** (define el banco); con TDC/TDD/AMEX captura la comisión de Mercado Pago. Requiere el permiso **editar_ingresos**.',
+      'Para **cobrar** una suscripción: **Abonar** en la pestaña de suscripciones (marca periodos FIFO y genera el ingreso real).',
       'Para el estado de cuenta imprimible ve a **Reportes → Cobranza**, busca la agencia/paciente y pulsa imprimir (muestra Bruto, Descuento, Neto y datos de depósito, con detalle por paciente).'
     ],
     datos:{
       hojas:['`Cuentas_Cobrar` y `Abonos_Cobrar` (INGRESOS_SS_ID) — Motor A; columna `Items` = JSON de partidas (pac, fecha, producto, cant, importe)','`Suscripciones_Crio` (INGRESOS_SS_ID) — Motor B','`Inventario Crío` (LAB_SS_ID): NOMBRE / FECHA CRÍO / OOV / EMB / EXTERNO','`Descuentos_Agencia` (INGRESOS_SS_ID)'],
       scriptProps:['`COBRANZA_CONFIG` (tarifas/reglas)','`COBRANZA_PAC_CFG` (por paciente: {externo, mensual, autopay})','`COBRANZA_DESCUENTOS` (mapeo hoja de descuentos)','`COBRANZA_DEPOSITO` (datos bancarios)','`AGENCIAS` (lista de agencias, default [reprovida])'],
-      funciones:['readEstadoCobranza','cuentasCobrar','suscripcionesCrio','registrarAbono','cargarSaldoInicial','editarCuentaCobrar','generarSuscripciones','_cobDescuentosAgencia','_cobDeposito','_cobParseItems'],
-      permisos:['editar_egresos (alta/edición y toggles Tipo/Plan)','borrar_egresos'],
-      motorVer:'cobranza-2026.07.10o',
-      nota:'`cobranza.gs` requiere **agregar al Apps Script + redeploy + `setupCobranzaConfig()`** una vez. Cuentas por Cobrar también aparece resumido dentro de **Flujo de Efectivo**.'
+      funciones:['readEstadoCobranza','cuentasCobrar','suscripcionesCrio','abonarIngreso (saldo de venta: sube Pagado + banco + cierra)','abonarCargo (cargo explícito: baja MontoCargo + banco + cierra)','auditarAbonosHuerfanos (SOLO LECTURA, correr a mano)','registrarAbono (solo anota en Abonos_Cobrar — NO cobra)','cargarSaldoInicial','editarCuentaCobrar','generarSuscripciones','_cobDescuentosAgencia','_cobDeposito','_cobParseItems'],
+      permisos:['editar_ingresos (cobrar/abonar un saldo)','editar_egresos (alta/edición y toggles Tipo/Plan)','borrar_egresos'],
+      motorVer:'cobranza-2026.07.13p',
+      nota:'`cobranza.gs` requiere **agregar al Apps Script + redeploy + `setupCobranzaConfig()`** una vez. ⚠ `abonarCargo` necesita **`cobranza.gs` + `finance.gs` redesplegados juntos** (usa `_abonoRutearABanco` de finance.gs y su acción va en el `doPost` de finance.gs; si falta, falla cerrado y no escribe nada). Cuentas por Cobrar también aparece resumido dentro de **Flujo de Efectivo**.'
     },
     ejemplo:'REPROVIDA acumula 5 «Preparación endometrial RV» en el mes → cae en el escalón 4-8 = **7%**. Si el bruto es 5×$5,000 = $25,000, el descuento es $1,750 y el **Neto a cobrar = $23,250**.'
   },
@@ -34596,24 +34661,28 @@ setTimeout(novCheckPopup, 2500);
       deploy:'`poliza_concil.gs` devuelve los movimientos del ERP del periodo y escribe el Folio en la columna Póliza.' } },
 
   { id:'cobranza', group:'operacion', icon:'📥', title:'Cobranza / Cuentas por Cobrar',
-    keywords:'cobranza cuentas por cobrar cxc adeudo saldo abono suscripcion crio criopreservacion almacenamiento agencia reprovida descuento volumen deposito partida bloque paciente aging motor a motor b anual mensual saldo inicial conciliar mp mercado pago payer id recordar cobro',
+    keywords:'cobranza cuentas por cobrar cxc adeudo saldo abono abonar cobrar cobro credito a favor comision mp banco conciliacion pagado abonos huerfanos descuadre suscripcion crio criopreservacion almacenamiento agencia reprovida descuento volumen deposito partida bloque paciente aging motor a motor b anual mensual saldo inicial conciliar mp mercado pago payer id recordar cobro',
     para:'**Cobranza** controla lo que te deben. Tiene **dos motores** que no mezclan datos: **Motor A — Saldos** (adeudos de ventas) y **Motor B — Suscripciones de criopreservación**. Se ve en *Cuentas por Cobrar* (2 pestañas) y en el reporte *Cobranza*.',
     where:'Menú → **Cuentas por Cobrar** (operación) · Menú → Reportes → **Cobranza** (estado de cuenta imprimible).',
     mock:{ title:'Cuentas por Cobrar', crumb:'Cobranza', period:'Julio 2026',
       tabs:[ {label:'Saldos por cobrar', active:true, n:1}, {label:'Suscripciones Crío', n:2} ],
       toolbar:[ {t:'search', label:'Buscar paciente / agencia…'}, {t:'btn', label:'Cargar saldo inicial', pri:true, n:3} ],
       table:{ cols:['Cliente','Concepto','Saldo','Antigüedad',''],
-        rows:[ ['REPROVIDA','5 × Prep. endometrial','$23,250',{label:'31-60 d',n:5},{raw:'<span class="hfm-mini">Abonar · Editar</span>',n:4}],
-               ['A. López','Ciclo FIV (parcial)','$12,000','0-30 d',{raw:'<span class="hfm-mini">Abonar</span>'}] ] },
+        rows:[ ['REPROVIDA','5 × Prep. endometrial','$23,250',{label:'31-60 d',n:5},{raw:'<span class="hfm-mini">Cobrar / Abonar · Editar</span>',n:4}],
+               ['A. López','Ciclo FIV (parcial)','$12,000','0-30 d',{raw:'<span class="hfm-mini">Cobrar / Abonar</span>',n:6}] ] },
       callouts:[ {n:1,text:'**Motor A — Saldos**: adeudos de ventas. Segmenta Pacientes / Médicos / Agencias.'},
                  {n:2,text:'**Motor B — Suscripciones Crío**: almacenamiento de óvulos/embriones (cobro anual/mensual).'},
                  {n:3,text:'**Cargar saldo inicial**: registra un adeudo desde cero (autocompleta paciente + OP; avisa si ya existe).'},
-                 {n:4,text:'**Abonar** registra un pago (FIFO en suscripciones). **Editar** abre las partidas por bloque.'},
-                 {n:5,text:'**Antigüedad (aging)**: 0-30 / 31-60 / 61-90 / +90 días.'} ] },
+                 {n:4,text:'**Cobrar / Abonar** en un **cargo capturado a mano** (saldo inicial, sin OP): baja el saldo del cargo y manda el dinero al banco. **Editar** abre las partidas por bloque.'},
+                 {n:5,text:'**Antigüedad (aging)**: 0-30 / 31-60 / 61-90 / +90 días.'},
+                 {n:6,text:'**Cobrar / Abonar** en un **saldo de venta** (con OP): sube lo **Pagado** de la venta, manda el dinero al banco y cierra el saldo. Aquí puedes aplicar el **crédito a favor** del paciente.'} ] },
     steps:[
       'Para un adeudo **desde cero**: pestaña **Saldos → Cargar saldo inicial** (autocompleta paciente + OP).',
       'Los adeudos **por venta** se generan solos al capturar el ingreso con pago parcial.',
-      'Para **cobrar**: pulsa **Abonar** en el saldo o suscripción (en suscripciones marca periodos FIFO).',
+      'Para **cobrar** un saldo: pulsa **Cobrar / Abonar**, captura monto, fecha y **forma de pago** — la forma de pago decide el banco (Efectivo → Caja · Santander → Santander · Transferencia/TDC/TDD/AMEX/Mercado Pago → Mercado Pago). Con TDC/TDD/AMEX captura también la comisión de Mercado Pago.',
+      'El cobro es **un solo paso**: sube lo pagado, crea el movimiento en conciliación y quita el saldo de la lista al liquidarlo. Si el paciente tiene **crédito a favor** (saldos de venta), puedes aplicarlo con la casilla verde.',
+      'Si te dice que **el saldo cambió**, alguien más lo movió: recarga la lista y reintenta (evita cobrarle al renglón equivocado o cobrar dos veces).',
+      'Para **cobrar** una suscripción: pestaña **Suscripciones Crío → Abonar** (marca periodos FIFO y crea el ingreso real).',
       'Para el estado de cuenta imprimible: **Reportes → Cobranza**, busca la agencia/paciente e imprime (muestra Bruto − Descuento = Neto y datos de depósito).'
     ],
     buttons:[
@@ -34621,7 +34690,8 @@ setTimeout(novCheckPopup, 2500);
       { k:'Pestaña «Suscripciones Crío»', d:'Almacenamiento de óvulos/embriones (Motor B).' },
       { k:'Buscar', d:'Localiza al paciente o a la agencia.' },
       { k:'Cargar saldo inicial', d:'Registra un adeudo desde cero (autocompleta paciente y OP; avisa si ya existe).' },
-      { k:'Abonar', d:'Registra un cobro. En suscripciones marca los periodos pagados del más viejo al más nuevo.' },
+      { k:'Cobrar / Abonar', d:'Cobra el saldo en un solo paso: sube lo pagado, manda el dinero al banco según la forma de pago y quita el saldo de la lista al liquidarlo. En los saldos de venta puedes aplicar el crédito a favor del paciente. Requiere el permiso «editar_ingresos».' },
+      { k:'Abonar (suscripciones)', d:'Registra el cobro de una suscripción: marca los periodos pagados del más viejo al más nuevo (FIFO) y crea el ingreso real.' },
       { k:'Editar', d:'Abre el editor de partidas por bloque (paciente + fecha + productos).' },
       { k:'+ Otro paciente / fecha (en el editor)', d:'Agrega otro bloque de paciente a la misma nota.' },
       { k:'Toggle Tipo (Hestia / Externo)', d:'Define si aplica el primer año gratis (solo Hestia).' },
@@ -34633,6 +34703,8 @@ setTimeout(novCheckPopup, 2500);
     ],
     bloques:[
       { h:'⚠ Motor A: solo registro explícito', p:'El sistema **NO deduce** adeudos automáticamente (los precios viejos darían saldos falsos). Un adeudo **solo nace** al: (1) capturar un ingreso con **pago parcial**, (2) **cargar un saldo inicial**, o (3) hacer un **cargo a crédito**.' },
+      { h:'Cobrar / Abonar: qué pasa por dentro', p:'Un cobro toca **tres libros a la vez** y o entran los tres o no entra ninguno. El renglón decide el camino:\n\n· **Saldo de una venta** (trae OP): sube el **Pagado** de esa venta y el saldo se recalcula solo (Facturado − Pagado). Es el mismo motor del botón de *Estado de Cuenta*. Acepta **crédito a favor** (no genera movimiento en banco: ese dinero ya se había bancado cuando el paciente pagó de más).\n· **Cargo capturado a mano** (saldo inicial / cargo a crédito, ej. REPROVIDA): no hay venta cuyo Pagado subir, así que **baja el saldo del cargo** directo y lo cierra al llegar a 0.\n\nEn ambos: el efectivo va al banco por forma de pago y **no se acepta cobrar de más** que el saldo. Si alguien movió el renglón mientras tenías la pantalla abierta, el sistema **te frena y te pide recargar** en vez de cobrarle a otra cuenta; por lo mismo, un doble clic no cobra dos veces.' },
+      { h:'⚠ Abonos registrados antes del 15 jul 2026', p:'El botón viejo **«Abono»** solo **anotaba** el pago: no subía lo pagado de la venta, no creaba el movimiento bancario y no cerraba el saldo. Los **cargos sin OP** además nunca vieron bajar su saldo. Si cobraste por ahí, **el dinero no está reflejado en bancos**: pídele a sistemas que corra la auditoría (`auditarAbonosHuerfanos()`, solo lectura) para listar qué abonos quedaron descuadrados y corregirlos a mano.' },
       { h:'Partidas por bloque (agencias/externos)', p:'En agencias NUESTRO cliente es la agencia (ej. REPROVIDA), pero el reporte lista a los **pacientes reales**. El editor trabaja por **bloques**: cada bloque = **un paciente + la fecha de su tratamiento + sus productos**. El botón **«+ Otro paciente / fecha»** deja seguir capturando en la misma nota.' },
       { h:'Motor B: reglas de suscripción', p:'Solo se cobra a quien **tenga inventario** (óvulos u embriones > 0). **Año 1 gratis solo para Hestia** (externos pagan desde el inicio); plan **anual $5,700** o **mensual $475**, default anual por inscripción. Estatus: Cortesía / Vigente / Por vencer / Vencida / Falta suscripción.' },
       { h:'Descuento por volumen por agencia', p:'Se configura en el panel **«🏷️ Descuentos agencia»** (Cuentas por Cobrar): productos que aplican, escalones desde–hasta–%, conteo combinado/por producto, directo/por miembro, base mes actual/mes anterior. Config en Script Property `COBRANZA_DESC_CFG` (`cobDescCfgRead`/`cobDescCfgSave`, permiso `editar_egresos`); migra sola desde la hoja legacy `Descuentos_Agencia`. Requiere redeploy de cobranza.gs + core.gs + finance.gs.' },

@@ -602,6 +602,13 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(ajustarPagadoIngreso(body));
     }
+    // Abono a un cargo EXPLÍCITO de Cuentas_Cobrar (saldo inicial / cargo a crédito, sin
+    // Pagado que subir). Su hermano para ventas con OP es 'abonarIngreso'.
+    if (body.action === 'abonarCargo') {
+      if (typeof abonarCargo !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza cobranza.gs en Apps Script y redespliega.'});
+      return jsonResponse(abonarCargo(body));
+    }
     if (body.action === 'cobExterno') {
       if (typeof cobExterno !== 'function')
         return jsonResponse({ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.'});
@@ -5117,9 +5124,12 @@ function abonarIngreso(body) {
 //   Efectivo → Caja Chica (entrada) · Santander → depósito Santander ·
 //   Transferencia / TDC / TDD / AMEX / Mercado Pago → Mercado Pago (CARGO).
 // saveBankRow ya recalcula el saldo del banco y (si es MP) la partida de comisiones.
-function _abonoRutearABanco(op, paciente, monto, formaPago, fecha, comisionMP) {
+// obsOverride (opcional): etiqueta de Observaciones a la medida. Lo usa cobranza.abonarCargo,
+// que cobra un cargo SIN OP y debe etiquetar [CxC #<fila>] en vez de [OP #…] — ese formato
+// se reserva al dinero que sí pertenece a una OP (otros lectores lo buscan).
+function _abonoRutearABanco(op, paciente, monto, formaPago, fecha, comisionMP, obsOverride) {
   try {
-    var obs = 'Cobro/abono · Px. ' + (paciente || '') + ' [OP #' + op + ']';
+    var obs = obsOverride || ('Cobro/abono · Px. ' + (paciente || '') + ' [OP #' + op + ']');
     var mesStr = String(fecha || '').substring(0, 7);
     var fp = String(formaPago || '').trim();
     if (fp === 'Efectivo') {
