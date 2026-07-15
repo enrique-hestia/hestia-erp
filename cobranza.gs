@@ -234,7 +234,12 @@ function _cobReadAbonos() {
       if (!out.susByPac[kp]) out.susByPac[kp] = [];
       out.susByPac[kp].push(rec);
     } else {
-      if (op) out.byOp[op] = (out.byOp[op] || 0) + monto;
+      // 'abono-op' = abono del botón "Cobrar / Abonar" de una OP (finance.abonarIngreso).
+      // Ese flujo YA subió Pagado en BD_Ingresos y recomputó el renglón auto-ingreso de
+      // Cuentas_Cobrar (MontoCargo = Facturado − Pagado). Por eso NO se resta otra vez
+      // por OP aquí: haría doble conteo del mismo cobro. Queda en 'rows' (historial/traza
+      // y "Mis abonos"); el saldo canónico vive en el MontoCargo del renglón auto-ingreso.
+      if (op && tipo !== 'abono-op') out.byOp[op] = (out.byOp[op] || 0) + monto;
       var kp2 = _cobKeyNom(pac);
       if (!out.byPac[kp2]) out.byPac[kp2] = 0;
       out.byPac[kp2] += monto;
@@ -1096,6 +1101,92 @@ function cargarSaldoInicial(body) {
   } catch (ex) {
     return { ok: false, error: ex.message, version: COBRANZA_VER };
   }
+}
+
+/* ═════════════ CRÉDITO A FAVOR DEL PACIENTE (saldo a favor) ═════════════
+ * Cuando un ingreso se edita y queda Pagado > Facturado (el paciente pagó de más,
+ * p. ej. se le cambió a un producto más barato), el excedente NO se devuelve: se
+ * guarda como CRÉDITO a favor del paciente en la hoja Creditos_Favor y queda
+ * aplicable a otra (o la misma) cuenta desde el botón "Cobrar / Abonar".
+ *
+ * Se mantiene en hoja aparte a propósito: NO va en Cuentas_Cobrar para que los
+ * motores de deuda (_cobBuildSaldos / readEstadoCuentaPaciente) jamás lo lean como
+ * un adeudo (sería un cargo positivo = deuda falsa). Es idempotente por OP: editar
+ * el ingreso reescribe el MISMO renglón (upsert), no apila créditos.
+ * Esquema Creditos_Favor: Fecha | OP | Paciente | MontoCredito | Nota | Usuario | Timestamp
+ */
+var COBRANZA_CREDITOS = (typeof COBRANZA_CREDITOS !== 'undefined') ? COBRANZA_CREDITOS : 'Creditos_Favor';
+function _cobEnsureCreditos() {
+  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+  var sh = ss.getSheetByName(COBRANZA_CREDITOS);
+  if (!sh) {
+    sh = ss.insertSheet(COBRANZA_CREDITOS);
+    sh.appendRow(['Fecha', 'OP', 'Paciente', 'MontoCredito', 'Nota', 'Usuario', 'Timestamp']);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+// Upsert por OP: fija el crédito a favor de esa OP en 'monto' (absoluto). monto<=0
+// cierra el crédito (deja el renglón en 0 → sale de "disponible"). La llama
+// updateIngreso al detectar sobrepago (o al revertir el sobrepago). Nunca tumba nada.
+function _cobRegistrarCreditoFavor(op, paciente, monto, fecha) {
+  try {
+    op = String(op || '').trim();
+    var cred = _cobNum(monto); if (cred < 0) cred = 0;
+    var sh = _cobEnsureCreditos();
+    var raw = sh.getDataRange().getValues();
+    var foundRow = -1;
+    if (op) { for (var r = 1; r < raw.length; r++) { if (String(raw[r][1] || '').trim() === op) { foundRow = r + 1; break; } } }
+    if (foundRow > 0) {
+      sh.getRange(foundRow, 4).setValue(cred);
+      if (paciente) sh.getRange(foundRow, 3).setValue(String(paciente).trim());
+      sh.getRange(foundRow, 5).setValue(cred > 0.01 ? 'credito-favor' : 'credito-favor-cerrado');
+      return;
+    }
+    if (cred > 0.01) {
+      sh.appendRow([ fecha ? _cobStr(_cobD(fecha)) : _cobStr(_cobToday()), op, String(paciente || '').trim(), cred, 'credito-favor', '', new Date() ]);
+    }
+  } catch (e) {}
+}
+function _cobReadCreditos() {
+  var out = { byPac: {}, rows: [] };
+  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+  var sh = ss.getSheetByName(COBRANZA_CREDITOS);
+  if (!sh) return out;
+  var raw = sh.getDataRange().getValues();
+  for (var i = 1; i < raw.length; i++) {
+    var monto = _cobNum(raw[i][3]); if (monto <= 0.01) continue;
+    var rec = { rowNum: i + 1, fecha: _cobStr(_cobD(raw[i][0])), op: String(raw[i][1] || '').trim(), paciente: String(raw[i][2] || ''), monto: monto };
+    out.rows.push(rec);
+    var kp = _cobKeyNom(raw[i][2]);
+    out.byPac[kp] = (out.byPac[kp] || 0) + monto;
+  }
+  return out;
+}
+// Crédito a favor disponible de un paciente → { total, rows }.
+function _cobCreditoFavorPaciente(paciente) {
+  var all = _cobReadCreditos(); var kp = _cobKeyNom(paciente);
+  var rows = all.rows.filter(function (x) { return _cobKeyNom(x.paciente) === kp; });
+  var total = 0; rows.forEach(function (x) { total += x.monto; });
+  return { total: total, rows: rows };
+}
+// Consume hasta 'monto' del crédito a favor del paciente (FIFO por renglón),
+// decrementando la hoja. Devuelve el monto realmente aplicado (offset interno; NO
+// mueve dinero real). La llama abonarIngreso cuando el usuario aplica su crédito.
+function _cobAplicarCreditoFavor(paciente, monto) {
+  var restante = _cobNum(monto); if (restante <= 0) return 0;
+  var sh = _cobEnsureCreditos();
+  var raw = sh.getDataRange().getValues();
+  var kp = _cobKeyNom(paciente); var aplicado = 0;
+  for (var i = 1; i < raw.length && restante > 0.01; i++) {
+    if (_cobKeyNom(raw[i][2]) !== kp) continue;
+    var disp = _cobNum(raw[i][3]); if (disp <= 0.01) continue;
+    var take = Math.min(disp, restante);
+    sh.getRange(i + 1, 4).setValue(disp - take);
+    if (disp - take <= 0.01) sh.getRange(i + 1, 5).setValue('credito-favor-cerrado');
+    aplicado += take; restante -= take;
+  }
+  return aplicado;
 }
 
 /* ═════════════ GENERACIÓN DE SUSCRIPCIONES (materializar por periodo) ═════════════

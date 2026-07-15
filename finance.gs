@@ -558,6 +558,14 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega analisis.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(readEstadoCuentaPaciente(body.paciente||''));
     }
+    // ── COBRAR / ABONAR INTEGRAL: sube Pagado + banco + cierra CxCobrar (+ crédito) ──
+    if (body.action === 'abonarIngreso') {
+      if (typeof abonarIngreso !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza finance.gs en Apps Script y redespliega.'});
+      var _abRes = abonarIngreso(body);
+      try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
+      return jsonResponse(_abRes);
+    }
     // ── COBRANZA: registrar abono / cargar saldo inicial (escritura) ──
     if (body.action === 'registrarAbono') {
       if (typeof registrarAbono !== 'function')
@@ -4717,6 +4725,13 @@ function updateIngreso(payload) {
       if (typeof _cobRegistrarSaldoIngreso === 'function') {
         try { _cobRegistrarSaldoIngreso(opId, paciente, (lineas[0] && lineas[0].categoria) || '', _saldoGenUpd, fecha); } catch (eAR) {}
       }
+      // Sobrepago (Pagado > Facturado) → se guarda como CRÉDITO a favor del paciente
+      // (decisión: crédito, NO devolución automática). Idempotente por OP (upsert): si
+      // ahora ya no hay sobrepago, _saldoFavorUpd=0 limpia el crédito previo de esta OP.
+      // Aplicable después desde "Cobrar / Abonar" en el Estado de cuenta.
+      if (typeof _cobRegistrarCreditoFavor === 'function') {
+        try { _cobRegistrarCreditoFavor(opId, paciente, _saldoFavorUpd, fecha); } catch (eCF) {}
+      }
     }
     // Recalcula la partida de comisiones MP del mes (por si cambió el monto).
     try { _egRecalcComisionesMPFecha(fecha, ''); } catch(_mp) {}
@@ -4727,6 +4742,141 @@ function updateIngreso(payload) {
   } catch(ex) {
     return {ok:false, error:ex.message};
   }
+}
+
+/* ═════════════════ COBRAR / ABONAR INTEGRAL (saldo de una OP) ═════════════════
+ * Cobra la diferencia pendiente de una OP y deja los TRES libros cuadrados en una
+ * sola operación atómica (LockService):
+ *   1) BD_Ingresos → sube Pagado de la OP (Pagado += abono; tope = Facturado).
+ *   2) Cuentas_Cobrar → recomputa el renglón auto-ingreso de la OP con el saldo
+ *      residual (Facturado − nuevoPagado); si llega a 0 se cierra. AUTORIDAD del saldo.
+ *   3) Conciliación bancaria → UN movimiento de INGRESO por el EFECTIVO cobrado,
+ *      ruteado por forma de pago (mismo mapa que capturar un ingreso), etiquetado
+ *      [OP #<op>] para amarre/rastreo. El crédito a favor aplicado NO genera banco
+ *      (es un offset interno; ese dinero ya se bancó cuando se pagó de más).
+ * El abono se registra además en Abonos_Cobrar con tipo 'abono-op' (historial/traza)
+ * — ese tipo NO se resta por OP en _cobReadAbonos (el saldo ya vive en el renglón
+ * auto-ingreso) para no duplicar el cobro. Confirmar-antes-de-escribir en el front.
+ */
+function abonarIngreso(body) {
+  try {
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'editar_ingresos'))
+      return { ok: false, error: 'Sin autorización para cobrar/abonar (requiere el permiso editar_ingresos).' };
+    var op = String(body.op || '').trim();
+    if (!op) return { ok: false, error: 'OP inválida' };
+    function num(v){ var n = parseFloat(String(v||'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
+    var montoCobrado   = Math.max(0, num(body.monto));            // efectivo real cobrado AHORA
+    var aplicarCredito = Math.max(0, num(body.aplicarCredito));   // crédito a favor a aplicar
+    var formaPago = String(body.formaPago || 'Transferencia').trim();
+    var comisionMP = Math.max(0, num(body.comisionMP));
+    var fecha = body.fecha ? String(body.fecha) : Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'America/Mexico_City', 'yyyy-MM-dd');
+    var usuario = body.usuario || '';
+
+    var lock = LockService.getScriptLock();
+    if (!lock.tryLock(20000)) return { ok: false, error: 'Sistema ocupado, reintenta en un momento.' };
+    try {
+      var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+      var sheet = null, sheets = ss.getSheets();
+      for (var i = 0; i < sheets.length; i++) { if (sheets[i].getName() === BD_INGRESOS_TAB) { sheet = sheets[i]; break; } }
+      if (!sheet) return { ok: false, error: 'No se encontró BD_Ingresos' };
+      var data = sheet.getDataRange().getValues();
+      var H = data[0].map(function(x){ return String(x||'').trim().toLowerCase(); });
+      function hc(){ for (var a=0;a<arguments.length;a++){ var k=H.indexOf(arguments[a]); if(k>-1) return k; } return -1; }
+      var iOp = hc('op'); if (iOp < 0) iOp = 0;
+      var iPac = hc('paciente'), iCat = hc('categoria','categoría');
+      var iTotal = hc('totalpagar','total a pagar','total'), iPag = hc('pagado');
+      if (iPag < 0) return { ok: false, error: 'No se encontró la columna Pagado en BD_Ingresos' };
+
+      var rows = [], totalOP = 0, pagadoActual = 0, pacName = '', catName = '';
+      for (var r = 1; r < data.length; r++) {
+        if (String(data[r][iOp] || '').trim() !== op) continue;
+        var t = num(data[r][iTotal]), p = num(data[r][iPag]);
+        rows.push({ rowNum: r + 1, total: t, pagado: p });
+        totalOP += t; pagadoActual += p;
+        if (!pacName && iPac > -1) pacName = String(data[r][iPac] || '');
+        if (!catName && iCat > -1) catName = String(data[r][iCat] || '');
+      }
+      if (!rows.length) return { ok: false, error: 'OP no encontrada en BD_Ingresos' };
+      var paciente = String(body.paciente || pacName || '').trim();
+      var saldoAntes = Math.max(0, totalOP - pagadoActual);
+
+      // Crédito a favor a aplicar (offset interno, sin banco). Se aplica lo disponible.
+      var creditoAplicado = 0;
+      if (aplicarCredito > 0.01 && typeof _cobAplicarCreditoFavor === 'function') {
+        try { creditoAplicado = _cobAplicarCreditoFavor(paciente, aplicarCredito); } catch (eCr) { creditoAplicado = 0; }
+      }
+      var abonoTotal = montoCobrado + creditoAplicado;   // cuánto baja el saldo de la OP
+      if (abonoTotal <= 0.01) { return { ok: false, error: 'Nada que abonar (monto y crédito en 0).' }; }
+      if (abonoTotal > saldoAntes + 0.01) {
+        // Evita sobrepago desde este flujo (el sobrepago solo nace al EDITAR el ingreso).
+        // Si se aplicó crédito, se revierte para no perderlo.
+        if (creditoAplicado > 0.01 && typeof _cobRegistrarCreditoFavor === 'function') {
+          // devolver el crédito consumido a la hoja (nuevo renglón temporal por OP de origen no disponible → se reintegra al paciente por su OP actual)
+          try { _cobRegistrarCreditoFavor('CR-' + op, paciente, creditoAplicado, fecha); } catch (eRe) {}
+        }
+        return { ok: false, error: 'El abono (' + abonoTotal.toFixed(2) + ') supera el saldo pendiente de la OP (' + saldoAntes.toFixed(2) + '). Ajusta el monto.' };
+      }
+
+      // 1) Sube Pagado en BD_Ingresos, repartido llenando cada línea hasta su total.
+      var nuevoPagado = pagadoActual + abonoTotal;
+      if (nuevoPagado > totalOP) nuevoPagado = totalOP;
+      var rem = nuevoPagado;
+      for (var k = 0; k < rows.length; k++) {
+        var apply = Math.min(rem, rows[k].total); if (apply < 0) apply = 0;
+        sheet.getRange(rows[k].rowNum, iPag + 1).setValue(apply); rem -= apply;
+      }
+      try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch (e) {}
+
+      // 2) Recomputa el saldo auto de la OP en Cuentas_Cobrar (cierra si llega a 0).
+      var nuevoSaldo = Math.max(0, totalOP - nuevoPagado);
+      if (typeof _cobRegistrarSaldoIngreso === 'function') {
+        try { _cobRegistrarSaldoIngreso(op, paciente, catName, nuevoSaldo, fecha); } catch (eS) {}
+      }
+
+      // 3) Registra el abono en Abonos_Cobrar (tipo 'abono-op' → no doble conteo).
+      if (typeof registrarAbono === 'function') {
+        if (montoCobrado > 0.01) { try { registrarAbono({ op: op, paciente: paciente, monto: montoCobrado, tipo: 'abono-op', formaPago: formaPago, fecha: fecha, nota: 'Cobro/abono OP ' + op, usuario: usuario }); } catch (eA) {} }
+        if (creditoAplicado > 0.01) { try { registrarAbono({ op: op, paciente: paciente, monto: creditoAplicado, tipo: 'abono-op', formaPago: 'Crédito a favor', fecha: fecha, nota: 'Crédito a favor aplicado a OP ' + op, usuario: usuario }); } catch (eA2) {} }
+      }
+
+      // 4) Movimiento bancario SOLO por el efectivo real (el crédito ya se había bancado).
+      var bancoInfo = null;
+      if (montoCobrado > 0.01) { bancoInfo = _abonoRutearABanco(op, paciente, montoCobrado, formaPago, fecha, comisionMP); }
+
+      try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch (e) {}
+      try { logAudit(usuario || 'sistema', 'Cobranza', 'Cobrar/Abonar', op, 'Saldo OP',
+              'Pagado ' + pagadoActual.toFixed(2), 'Pagado ' + nuevoPagado.toFixed(2) + ' (' + formaPago + (creditoAplicado>0.01?(' + crédito '+creditoAplicado.toFixed(2)):'') + ')'); } catch (ae) {}
+
+      return { ok: true, op: op, abonado: abonoTotal, efectivo: montoCobrado, creditoAplicado: creditoAplicado,
+               pagado: nuevoPagado, total: totalOP, saldo: nuevoSaldo, formaPago: formaPago, banco: bancoInfo };
+    } finally { lock.releaseLock(); }
+  } catch (ex) {
+    return { ok: false, error: ex.message };
+  }
+}
+// Rutea un cobro de INGRESO al banco correcto según forma de pago — MISMO mapa que
+// al capturar/editar un ingreso (updateIngresoConBancos / _ccCobrarSuscComoIngreso):
+//   Efectivo → Caja Chica (entrada) · Santander → depósito Santander ·
+//   Transferencia / TDC / TDD / AMEX / Mercado Pago → Mercado Pago (CARGO).
+// saveBankRow ya recalcula el saldo del banco y (si es MP) la partida de comisiones.
+function _abonoRutearABanco(op, paciente, monto, formaPago, fecha, comisionMP) {
+  try {
+    var obs = 'Cobro/abono · Px. ' + (paciente || '') + ' [OP #' + op + ']';
+    var mesStr = String(fecha || '').substring(0, 7);
+    var fp = String(formaPago || '').trim();
+    if (fp === 'Efectivo') {
+      saveCajaChicaIngreso({ fecha: fecha, concepto: obs, entrada: monto });
+      return { banco: 'cajachica', monto: monto };
+    }
+    if (fp === 'Santander') {
+      saveBankRow('santander', [fecha, monto, 0, 0, obs, 0, 0, '', '']);
+      return { banco: 'santander', monto: monto };
+    }
+    // Transferencia / TDC / TDD / AMEX / Mercado Pago → Mercado Pago (CARGO).
+    var com = ((fp === 'TDC' || fp === 'TDD' || fp === 'AMEX') && comisionMP) ? -Math.abs(comisionMP) : 0;
+    saveBankRow('mercadopago', [mesStr, fecha, monto, com, 0, monto + com, 0, false, obs, 'CARGO']);
+    return { banco: 'mercadopago', monto: monto, comision: com };
+  } catch (e) { return { error: e.message }; }
 }
 
 function renamePacienteIngresos(oldNombre, newNombre) {
