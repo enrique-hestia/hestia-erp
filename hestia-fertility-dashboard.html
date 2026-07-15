@@ -22400,10 +22400,16 @@ var _ddData = null; // cache de dropdowns cargados
    del backend (el sembrado en Config_Dropdowns por finance.gs sólo aplica tras
    redesplegar). Se fusionan al cargar: si la hoja ya trae la sección, GANA la hoja
    (no se pisa lo que administre el usuario en el Panel). */
+var _DD_EMPLEADOS_SEED = ['Enfermera','Marketing','Embrióloga','Médico','Finanzas','Limpieza','Ventas','Administración','Recepción'];
 var _DD_FRONT_DEFAULTS = {
   Productos: {
     tipo: { etiqueta:'Tipo de producto', valores:['Tratamientos','Complemento','PGT-A','PGT-M','Estudios - Andrología','Estudios - Consulta','Estudios - Ciclo','Complementos','Laboratorio','Suplementos','Medicamento','Almacenamiento','Especial','Externos','Extras Externos','PGT-A Externos','PGT-M Externos','Violet Externos','Magenta Ext','Histeroscopia-Ext','Consulta','Comisiones','Consultation','Carrier','Andrology','Egg Donor','Art Lab','PGTA','Transfer and follow up','Admin','REPROVIDA'] },
     categoria: { etiqueta:'Categoría de producto', valores:['Almacenamiento','Consulta','Estudios - Andrologia','Estudios - Ciclo','Estudios - Consulta','Extras Externos','Medicamento','PGT-A','Tratamientos','VIOLET'] }
+  },
+  // Catálogo de Empleados (Nómina). Editables en Panel de Control > Formularios.
+  Empleados: {
+    puesto: { etiqueta:'Puesto',        valores:_DD_EMPLEADOS_SEED.slice() },
+    area:   { etiqueta:'Área / Depto',  valores:_DD_EMPLEADOS_SEED.slice() }
   }
 };
 function _ddMergeDefaults(d){
@@ -25839,47 +25845,31 @@ function _nomTablaEmp(d, filtroAsim, titulo, color){
   h+='</tbody><tfoot><tr style="border-top:2px solid var(--color-divider,#e5e7eb);font-weight:800"><td colspan="3" style="padding:10px 6px">Subtotal</td><td style="padding:10px 6px;text-align:right">'+_nomFmt(subPerc)+'</td><td colspan="2"></td><td style="padding:10px 6px;text-align:right;color:'+color+'">'+_nomFmt(subNeto)+'</td><td></td></tr></tfoot></table></div></div>';
   return h;
 }
-/* ── Validación del mes → Cuentas por Pagar (una orden por empleado) ── */
+/* ── Barra informativa de la vista mensual ──────────────────────────────
+   ⛔ El envío a Cuentas por Pagar DESDE EL MES está desactivado: la validación
+   oficial es POR PERIODO (pestaña «Captura por periodo»). Convivían dos vías
+   que NO se deduplicaban entre sí (cada una arma un NominaID distinto para el
+   mismo pago) ⇒ se podía pagar dos veces al mismo empleado.
+   Esta vista se conserva para VER y CONCILIAR los CFDI timbrados del mes. */
 function _nomValidBar(){
-  var puede=_nomPuede();
   var est=(_nomEstado&&_nomEstado.ok)?_nomEstado:null;
   var validada=est&&est.estado==='Validada';
   var bt=(_nomBonos&&_nomBonos.ok)?(_nomBonos.total||0):0;
-  var h='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:4px 0 16px;padding:12px 14px;border:1px solid '+(validada?'#bbf7d0':'var(--color-divider,#e5e7eb)')+';border-radius:12px;background:'+(validada?'rgba(22,101,52,.05)':'var(--card-bg,#fff)')+'">';
-  if(validada){
-    h+='<span style="display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:800;color:#166534"><span style="width:9px;height:9px;border-radius:50%;background:#166534"></span>Validada · '+(est.numOrdenes||0)+' orden(es) en CxP</span>';
-    h+='<span style="font-size:11px;color:#6b7280">'+_nomFmt(est.totalNeto)+(est.fechaValidacion?(' · '+_cxpEsc(String(est.fechaValidacion))):'')+'</span>';
-    if(puede) h+='<button id="nom-valid-btn" onclick="_nomValidarMes(true)" style="margin-left:auto;background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;padding:7px 13px;font-size:11.5px;font-weight:700;cursor:pointer;color:var(--color-primary,#c46a7a)">↻ Generar órdenes faltantes</button>';
-  }else{
-    h+='<span style="display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:800;color:#b45309"><span style="width:9px;height:9px;border-radius:50%;background:#f59e0b"></span>Borrador — aún no enviada a Cuentas por Pagar</span>';
-    if(puede) h+='<button id="nom-valid-btn" onclick="_nomValidarMes(false)" style="margin-left:auto;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:12.5px;font-weight:800;cursor:pointer">✓ Validar y enviar a CxP</button>';
-    else h+='<span style="margin-left:auto;font-size:10.5px;color:#9ca3af">Necesitas permiso editar_egresos para validar.</span>';
-  }
-  if(bt>0) h+='<div style="width:100%;font-size:11px;color:#7c3aed;margin-top:2px">＋ Bonos capturados del mes: <b>'+_nomFmt(bt)+'</b> (se suman al neto al enviar a CxP)</div>';
+  var h='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:4px 0 16px;padding:12px 14px;border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;background:var(--card-bg,#fff)">';
+  h+='<span style="display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:800;color:var(--text-primary,#374151)"><span style="width:9px;height:9px;border-radius:50%;background:#6366f1"></span>Vista de consulta — CFDI timbrados del mes</span>';
+  h+='<span style="font-size:11px;color:#6b7280">El pago a Cuentas por Pagar se valida <b>por periodo</b>, no por mes.</span>';
+  h+='<button onclick="_nomTabSwitch(\'captura\')" style="margin-left:auto;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:11.5px;font-weight:800;cursor:pointer">Ir a Captura por periodo →</button>';
+  if(validada) h+='<div style="width:100%;font-size:10.5px;color:#166534;margin-top:2px">Este mes tiene '+(est.numOrdenes||0)+' orden(es) generadas con el flujo mensual anterior'+(est.totalNeto?(' · '+_nomFmt(est.totalNeto)):'')+'. Ya están en CxP; no se vuelven a generar desde aquí.</div>';
+  if(bt>0) h+='<div style="width:100%;font-size:11px;color:#7c3aed;margin-top:2px">＋ Bonos capturados del mes: <b>'+_nomFmt(bt)+'</b></div>';
   h+='</div>';
   return h;
 }
-async function _nomValidarMes(forzar){
-  if(!_nomPuede()){ alert('Necesitas permiso editar_egresos para validar la nómina.'); return; }
-  var d=_nomData;
-  if(!d||!d.ok||!d.encontrada||!d.empleados||!d.empleados.length){ alert('No hay recibos de nómina (CFDI tipo N) para validar en este mes.'); return; }
-  var bt=(_nomBonos&&_nomBonos.ok)?(_nomBonos.total||0):0;
-  var msg;
-  if(forzar) msg='Volver a enviar la nómina de '+_nomMesNombre(_nomMes)+' '+_nomAnio+':\nse generarán SÓLO las órdenes que falten (las existentes no se duplican).\n\n¿Continuar?';
-  else msg='Se creará UNA orden de pago por empleado en Cuentas por Pagar para '+_nomMesNombre(_nomMes)+' '+_nomAnio+'.\n\n'
-    +d.empleados.length+' empleado(s) · Neto '+_nomFmt(d.totales.neto)+(bt>0?(' + bonos '+_nomFmt(bt)):'')+'\n\n¿Continuar?';
-  if(!confirm(msg)) return;
-  var btn=document.getElementById('nom-valid-btn'); if(btn){ btn.disabled=true; btn.innerHTML='<span class="ing-spinner"></span>Enviando…'; }
-  try{
-    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'nominaValidarMes',token:getToken(),anio:_nomAnio,mes:_nomMes,forzar:!!forzar})});
-    var res=await r.json();
-    if(!res||!res.ok){
-      if(res&&res.yaValidada){ if(confirm((res.error||'La nómina ya fue validada.')+'\n\n¿Generar las órdenes faltantes ahora?')){ return _nomValidarMes(true); } _nomCargarMes(); return; }
-      alert((res&&res.error)||'No se pudo validar la nómina.'); _nomCargarMes(); return;
-    }
-    alert('✓ Nómina validada.\n'+res.creadas+' orden(es) nuevas en Cuentas por Pagar'+(res.duplicadas?(' · '+res.duplicadas+' ya existían'):'')+'\nTotal '+_nomFmt(res.totalNeto));
-    _nomCargarMes();
-  }catch(e){ alert('Error: '+e.message); _nomCargarMes(); }
+/* Desactivada a propósito (ver _nomValidBar). Se conserva para no romper
+   llamadas viejas: ya no envía nada al backend, solo redirige al flujo bueno. */
+function _nomValidarMes(forzar){
+  if(confirm('La validación de nómina a Cuentas por Pagar ahora es POR PERIODO, no por mes.\n\n'
+    +'Ve a «Captura por periodo», elige el periodo (semanal/quincenal/mensual) y usa «✓ Validar y enviar a CxP».\n\n'
+    +'¿Ir ahora a Captura por periodo?')) _nomTabSwitch('captura');
 }
 /* ── Bonos por empleado/mes ── */
 function _nomBonosDe(e){
@@ -25994,6 +25984,33 @@ function _nomRenderEmpleados(d){
   h+='</tbody></table></div>';
   body.innerHTML=h;
 }
+/* ── Puesto / Área del empleado: dropdowns administrados ──────────────────
+   La fuente real es Config_Dropdowns > Empleados > puesto / area (Panel de
+   Control > Formularios). Se siembran con _DD_EMPLEADOS_SEED por si la config
+   aún no cargó o el backend no se ha redesplegado. */
+function _nomEmpDdVals(campo, actual){
+  var base=_ddVals('Empleados', campo, (typeof _DD_EMPLEADOS_SEED!=='undefined')?_DD_EMPLEADOS_SEED:[]);
+  var v=String(actual||'').trim();
+  // No perder un valor viejo capturado a mano que no esté en la lista.
+  if(v && base.indexOf(v)<0) base=[v].concat(base);
+  return base;
+}
+function _nomEmpSel(id,lbl,campo,val){
+  var v=String(val==null?'':val).trim();
+  var opts='<option value="">— Seleccionar —</option>'
+    +_nomEmpDdVals(campo,v).map(function(o){ return '<option value="'+_cxpEsc(o)+'"'+(o===v?' selected':'')+'>'+_cxpEsc(o)+'</option>'; }).join('');
+  return '<label style="font-size:10px;color:#6b7280">'+lbl+'<br><select id="'+id+'" style="width:100%;padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111);box-sizing:border-box">'+opts+'</select></label>';
+}
+/* Repuebla Puesto/Área cuando _ddData llega tarde, conservando lo elegido. */
+function _nomEmpDdRefresh(){
+  [['nom-e-puesto','puesto'],['nom-e-depto','area']].forEach(function(p){
+    var el=document.getElementById(p[0]); if(!el) return;
+    var v=el.value||'';
+    el.innerHTML='<option value="">— Seleccionar —</option>'
+      +_nomEmpDdVals(p[1],v).map(function(o){ return '<option value="'+_cxpEsc(o)+'"'+(o===v?' selected':'')+'>'+_cxpEsc(o)+'</option>'; }).join('');
+    _selEnsureValue(p[0], v);
+  });
+}
 function _nomEmpForm(num){
   var it=null;
   if(num){ var arr=_nomEmpleados||[]; for(var i=0;i<arr.length;i++){ if(String(arr[i].NumEmpleado)===String(num)){ it=arr[i]; break; } } }
@@ -26009,11 +26026,16 @@ function _nomEmpForm(num){
   function _po(v,l){ return '<option value="'+v+'"'+(_pk===v?' selected':'')+'>'+l+'</option>'; }
   var periSel='<label style="font-size:10px;color:#6b7280">Periodicidad de pago<br><select id="nom-e-peri" style="width:100%;padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'
     +_po('quincenal','Quincenal')+_po('semanal','Semanal')+_po('mensual','Mensual')+'</select></label>';
+  // Puesto y Área/Depto salen de Config_Dropdowns (Panel de Control > Formularios),
+  // no del código. _nomEmpDdRefresh() los repuebla cuando llega la config y respeta
+  // el valor ya capturado aunque no esté en la lista (dato viejo).
+  var puestoSel=_nomEmpSel('nom-e-puesto','Puesto','puesto',it.Puesto);
+  var areaSel  =_nomEmpSel('nom-e-depto','Área / Depto','area',it.Departamento);
   var bodyF='<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px">'
     +f('nom-e-num','N.º de empleado *',it.NumEmpleado)+f('nom-e-nombre','Nombre completo',it.Nombre)
     +f('nom-e-rfc','RFC',it.RFC)+f('nom-e-curp','CURP',it.CURP)
-    +f('nom-e-nss','NSS',it.NSS)+f('nom-e-puesto','Puesto',it.Puesto)
-    +f('nom-e-depto','Área / Departamento',it.Departamento)+f('nom-e-nac','Fecha de nacimiento',it.FechaNacimiento,'date')
+    +f('nom-e-nss','NSS',it.NSS)+puestoSel
+    +areaSel+f('nom-e-nac','Fecha de nacimiento',it.FechaNacimiento,'date')
     +f('nom-e-ingreso','Fecha de ingreso',it.FechaIngreso,'date')+f('nom-e-salario','Salario diario',it.SalarioDiario,'number')
     +f('nom-e-sbc','SBC (salario base de cotización)',it.SBC,'number')+periSel
     +tipoSel+f('nom-e-usuario','Usuario (email, si tiene acceso)',it.UsuarioEmail)
@@ -26029,6 +26051,9 @@ function _nomEmpForm(num){
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div style="font-weight:800;font-size:16px">'+(num?'Editar':'Nuevo')+' empleado</div>'
     +'<button onclick="document.getElementById(\'nom-emp-ov\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af">✕</button></div>'+bodyF+'</div>';
   if(num){ var ne=document.getElementById('nom-e-num'); if(ne) ne.readOnly=true; }
+  // SIEMPRE refresca la config desde la hoja y repuebla Puesto/Área, para que lo
+  // que se edite en Panel de Control > Formularios se refleje sin recargar.
+  if(typeof _ddEnsure==='function') _ddEnsure(true).then(_nomEmpDdRefresh).catch(function(){});
 }
 async function _nomEmpGuardar(){
   var g=function(id){ var el=document.getElementById(id); return el?el.value:''; };
@@ -32234,6 +32259,18 @@ function notaGenerar(){
  * aviso emergente (1 vez por versión) para quien tenga acceso a esas áreas.
  * Cada entrada puede llevar `perm`: si el usuario no lo tiene, se oculta. */
 var NOVEDADES=[
+  { build:'2026.07.15', fecha:'15 jul 2026', area:'Nómina', icon:'🧾',
+    titulo:'Nómina por periodos: captura, CFDI y pago por periodo',
+    puntos:['La nómina ahora se trabaja POR PERIODO (semanal, quincenal o mensual) y la periodicidad es MIXTA: la define cada empleado en su ficha, así que puedes tener gente quincenal, semanal y mensual al mismo tiempo.','Hay periodos ORDINARIOS (los del calendario normal) y EXTRAORDINARIOS (aguinaldo, finiquitos, pagos especiales): conviven sin desplazarse.','Capturas por empleado lo que le toca; el ISR/IMSS que ves antes de timbrar es un ESTIMADO para presupuestar.','Cuando el despacho timbra, el XML CORRIGE al estimado: entra el neto REAL y se marca la Diferencia. En reportes manda el real.','El ERP NO calcula impuestos: el despacho timbra y el CFDI es la verdad.','Nueva pestaña SBC: empleados × 6 bimestres, con el SBC y casilla «Presentado» para el control del IMSS.','Puedes abrir el historial de CUALQUIER periodo (pasado o futuro) con su captura y su estatus.','⚠ IMPORTANTE: validar a Cuentas por Pagar es POR PERIODO. La vista «Nómina del mes (CFDI)» quedó solo para consultar y conciliar — ya no envía nada a CxP. Antes convivían dos vías que no se deduplicaban entre sí y se podía pagar dos veces al mismo empleado.'],
+    comoUsar:['Nómina → «Captura por periodo»: elige año, periodicidad y el periodo.','Captura a cada empleado (mientras esté en borrador puedes editar).','Cuando el despacho timbre, pulsa «Conciliar CFDI» para que entre el neto real.','Pulsa «✓ Validar y enviar a CxP»: una orden de pago por empleado (reenviar no duplica, solo agrega las que falten).','Marca el periodo como «Pagada» al liquidarlo; si hay que corregir, reábrelo a borrador.'] },
+  { build:'2026.07.15', fecha:'15 jul 2026', area:'Nómina', icon:'🏷️',
+    titulo:'Puesto y Área / Depto: ahora son listas administrables',
+    puntos:['En la ficha del empleado, Puesto y Área / Depto dejaron de ser texto libre: ahora son desplegables que tú administras.','Antes cada quien escribía el área a su manera y no cuadraban los reportes por área.','Se editan en Panel de Control → Formularios (sección «Empleados»), como cualquier otro dropdown, y el cambio se refleja de inmediato.','Si un empleado ya tenía un valor viejo que no está en la lista, NO se pierde: se sigue mostrando y tú decides si lo dejas o lo cambias.'],
+    comoUsar:['Nómina → Empleados → «+ Nuevo empleado» o «Editar»: elige Puesto y Área / Depto de la lista.','Para agregar o quitar opciones: Panel de Control → «Formularios» → sección «Empleados».'] },
+  { build:'2026.07.15', fecha:'15 jul 2026', area:'General', icon:'🪪',
+    titulo:'Alias: tu nombre corto en pantalla',
+    puntos:['Cada usuario puede tener un Alias: es lo que se ve en la barra superior y en el Chat, en vez del nombre completo.','El nombre completo NO cambia en la base de datos: nómina, recibos, CFDI y auditoría lo siguen usando. El alias es solo presentación (el nombre completo queda en el tooltip).','Si se deja vacío se usa el primer nombre; si no hay nombre, el email. Nunca se queda en blanco.'],
+    comoUsar:['Panel de Control → Gestión de Usuarios.','Captura el Alias del usuario y guarda.'] },
   { build:'2026.07.14', fecha:'14 jul 2026', area:'Ingresos', icon:'🏷️',
     titulo:'Orígenes externos: de quién es cada venta de «Externos»',
     puntos:['Nuevo catálogo de agencias y médicos externos que refieren pacientes; al capturar un ingreso de Externos eliges su origen.','Si guardas un ingreso de externos sin origen, el sistema te avisa para que no se pierda la atribución.','«Atribuir histórico» revisa los ingresos de externos ya capturados sin origen, sugiere el origen por año y lo aplica en lote.'],
@@ -32623,6 +32660,41 @@ setTimeout(novCheckPopup, 2500);
     }
   },
 
+  { id:'nomina', group:'operacion', icon:'🧾', title:'Nómina (periodos, captura, SBC y CxP)',
+    keywords:'nomina periodo periodos semanal quincenal mensual mixta ordinaria extraordinaria captura empleado cfdi timbrado xml estimado real diferencia sbc bimestre imss validar cxp cuentas por pagar recibo bonos isn asimilados despacho impuestos aguinaldo finiquito',
+    intro:'Nómina se organiza por **periodos**: cada periodo agrupa a los empleados que se pagan con esa frecuencia, se captura lo que le toca a cada quien, y al final se **valida el periodo** para que se generen las órdenes de pago en Cuentas por Pagar.\n\n**Importante: el ERP NO calcula impuestos.** El ISR/IMSS que ves antes de timbrar es un **estimado** rotulado como tal, solo para presupuestar. Quien timbra es **tu despacho**, y el **CFDI es la verdad**: cuando llega el recibo timbrado, el dato **real** reemplaza al estimado.',
+    pasos:[
+      'Ve a **Nómina → «Captura por periodo»**. Elige el **año**, la **periodicidad** (semanal / quincenal / mensual) y el **periodo** concreto de la lista.',
+      'Captura por empleado lo que le toca (percepciones, deducciones, etc.). Se guarda por periodo; mientras esté en **borrador** puedes editarlo.',
+      'Cuando el despacho timbre, usa **«Conciliar CFDI»**: el XML **corrige al estimado** — el neto real entra y se marca la **Diferencia** contra lo que habías estimado.',
+      'Con el periodo listo, pulsa **«✓ Validar y enviar a CxP»**: se crea **una orden de pago por empleado** en Cuentas por Pagar. Es idempotente — reenviar solo agrega las que falten, nunca duplica.',
+      'Marca el periodo como **Pagada** cuando se liquide (la captura queda de solo lectura). Puedes **reabrirlo a borrador** si hay que corregir.'
+    ],
+    bloques:[
+      { h:'⚠ La validación a CxP es POR PERIODO (no por mes)', p:'La vista **«Nómina del mes (CFDI)»** es solo para **consultar y conciliar** los recibos timbrados del mes: **ya no envía nada a Cuentas por Pagar**. Antes convivían dos vías (mes y periodo) que **no se deduplicaban entre sí** —cada una armaba un `NominaID` distinto para el mismo pago—, así que se podía **pagar dos veces** al mismo empleado. La única vía oficial es **Captura por periodo → Validar**.' },
+      { h:'Periodicidad mixta por empleado', p:'La frecuencia **se define por empleado** (en su ficha del catálogo), así que se puede **mezclar**: unos quincenales, otros semanales, otros mensuales. Cada periodo agrupa **solo a los suyos**, y los periodos del año se generan solos por tipo.' },
+      { h:'ORDINARIA vs EXTRAORDINARIA', p:'Los periodos **ORDINARIOS** son los del calendario normal (la corrida de siempre). Los **EXTRAORDINARIOS** son las corridas fuera de calendario (aguinaldo, finiquitos, pagos especiales) y **no desplazan** a los ordinarios: conviven en el mismo año sin pisarse.' },
+      { h:'El XML corrige al estimado (manda el real)', p:'Antes de timbrar, el neto que ves es **estimado** y así se rotula. Al conciliar el CFDI, entra el **neto real** y el sistema calcula la **Diferencia** (real − estimado). **En reportes manda el real.** Si validas a CxP antes de que llegue el CFDI, la orden sale con el neto **ESTIMADO** y lo dice en las notas.' },
+      { h:'SBC bimestral (IMSS)', p:'La pestaña **SBC** es un tablero de empleados × **6 bimestres** del año (ene-feb … nov-dic) con el **SBC** de cada quien y una casilla **«Presentado»** para llevar el control de lo ya reportado al IMSS. Toma el SBC del catálogo del empleado como valor de arranque.' },
+      { h:'Historial: cualquier periodo, cuando quieras', p:'El selector de **año + periodicidad + periodo** te deja abrir **cualquier periodo** (pasado o futuro) con su captura, su conciliación y su estatus. No se pierde nada al cambiar de mes.' },
+      { h:'Qué NO hace el ERP', lista:[
+        'No calcula ni timbra impuestos — **el despacho timbra** y el **CFDI es la verdad**.',
+        'El ISR/IMSS mostrado antes del timbrado es **estimado** (para presupuestar), nunca un cálculo fiscal.',
+        'El **ISN** y los **asimilados** se ven en la vista mensual de CFDI, que es informativa.'
+      ]}
+    ],
+    datos:{
+      hojas:['`Nomina_Periodos` (libro NOMINA_SS_ID): PeriodoID · Tipo · FechaInicio · FechaFin · FechaPago · Estatus · Notas',
+             '`Nomina_Captura` / `Nomina_Captura_Det`: una fila por empleado × periodo (percepciones · estimado · real del CFDI · diferencia · pago)',
+             '`Nomina_SBC`: Anio · Bimestre · NumEmpleado · SBC · Presentado · FechaPresentado',
+             '`Empleados`: catálogo (Periodicidad define en qué periodo cae cada quien; Puesto y Área salen de `Config_Dropdowns > Empleados`)',
+             'Las órdenes se escriben en `Egresos2026` con `NominaID` (dedup) y aparecen como CxP'],
+      funciones:['readNominaPeriodos','readNominaCaptura','saveNominaCaptura','nominaConciliarPeriodo','nominaValidarPeriodo','readNominaSBC','saveNominaSBC','_nomGenPeriodos','setupNominaPeriodos'],
+      permisos:['editar_egresos (para capturar y validar a CxP)'],
+      nota:'`nomina.gs` requiere deploy + correr `setupNominaPeriodos()` una vez. ⛔ `nominaValidarMes` quedó **desactivada** (responde `{ok:false}` y ya no genera órdenes); su código se conserva como `_nominaValidarMes_LEGACY_DESACTIVADA` solo de referencia. Idempotencia: dedup por `NominaID` = `NOM-<PeriodoID>-<EmpleadoID>`.'
+    }
+  },
+
   /* ============ CATÁLOGOS E INVENTARIO ============ */
   { id:'proveedores', group:'catalogos', icon:'🏭', title:'Proveedores',
     keywords:'proveedor catalogo rfc razon social comercial nombre xml autocompletar renombrar cascada fiscal regimen uso cfdi datos fiscales',
@@ -32964,7 +33036,7 @@ setTimeout(novCheckPopup, 2500);
   },
 
   { id:'formularios', group:'admin', icon:'🧾', title:'Formularios (dropdowns universales)',
-    keywords:'formularios dropdowns opciones desplegables tipo categoria producto config_dropdowns panel de control sembrar nueva seccion listas selects administrar reflejo inmediato',
+    keywords:'formularios dropdowns opciones desplegables tipo categoria producto puesto area departamento empleado nomina config_dropdowns panel de control sembrar nueva seccion listas selects administrar reflejo inmediato',
     intro:'**Panel de Control → Formularios** administra **todos los dropdowns** de la aplicación desde un solo lugar (incluidos Tipo/Categoría de producto). Editas los valores y se **reflejan de inmediato** en los formularios, porque se guardan directo en Google Sheets.',
     pasos:[
       'Abre **Panel de Control → Formularios**. Verás cada sección (Productos, Egresos, General…) con sus campos y valores.',
@@ -32972,13 +33044,14 @@ setTimeout(novCheckPopup, 2500);
       'Para crear un dropdown nuevo usa **«Nueva sección / dropdown»**: defines Sección, Clave del campo, Etiqueta y, si quieres, **siembras** los valores copiándolos de un dropdown existente.'
     ],
     bloques:[
-      { h:'Tipo/Categoría de producto', p:'Los selectores **Tipo** y **Categoría** del alta de producto salen de aquí (`Config_Dropdowns > Productos`). Editarlos en Formularios cambia lo que ve Ingresos/Catálogo al instante (con fallback a los valores que ya existen en los datos).' }
+      { h:'Tipo/Categoría de producto', p:'Los selectores **Tipo** y **Categoría** del alta de producto salen de aquí (`Config_Dropdowns > Productos`). Editarlos en Formularios cambia lo que ve Ingresos/Catálogo al instante (con fallback a los valores que ya existen en los datos).' },
+      { h:'Puesto y Área / Depto del empleado', p:'La ficha del empleado (**Nómina → Empleados**) ya **no** usa texto libre: **Puesto** y **Área / Depto** son dropdowns administrados aquí (`Config_Dropdowns > Empleados > puesto` y `> area`). Antes cada quien escribía el área a su manera y no cuadraban los reportes por área. Si un empleado ya traía un valor viejo que no está en la lista, **no se pierde**: se muestra igual y puedes dejarlo o cambiarlo.' }
     ],
     datos:{
       hojas:['`Config_Dropdowns` (Sección | Campo | Etiqueta | Valores)'],
-      funciones:['getDropdowns','ddNuevaSeccion','ddCrearSeccion','_ddSeedPick','saveDropdowns'],
+      funciones:['getDropdowns','ddNuevaSeccion','ddCrearSeccion','_ddSeedPick','saveDropdowns','_ddVals','_ddEnsure','_nomEmpDdRefresh'],
       permisos:['administrar (Panel de Control)'],
-      nota:'La fuente real de Tipo/Categoría de producto es `Config_Dropdowns > Productos`; el sembrado inicial lo hace finance.gs.'
+      nota:'La fuente real de Tipo/Categoría de producto es `Config_Dropdowns > Productos`, y la de Puesto/Área es `Config_Dropdowns > Empleados`; el sembrado inicial lo hace finance.gs (`CFG_DD_DEFAULTS`, se auto-cura al leer). El frontend trae los mismos valores en `_DD_FRONT_DEFAULTS`, así que funcionan aun sin redesplegar.'
     }
   },
 
@@ -33900,6 +33973,56 @@ setTimeout(novCheckPopup, 2500);
       funciones:['programarGastoFijo','programarGastoFijoBatch','_gfAplica','readBDCxP'],
       nota:'Cada fila programada lleva `RecurrenteID` (GF-xxx|mes) para el anti-duplicado.' } },
 
+  { id:'nomina', group:'operacion', icon:'🧾', title:'Nómina (periodos, captura, SBC)',
+    keywords:'nomina periodo periodos semanal quincenal mensual mixta ordinaria extraordinaria captura empleado cfdi timbrado xml estimado real diferencia sbc bimestre imss validar cxp cuentas por pagar recibo bonos asimilados despacho impuestos aguinaldo finiquito puesto area',
+    para:'Nómina trabaja **por periodos**: cada periodo junta a los empleados que se pagan con esa frecuencia, capturas lo de cada quien, y al validar el periodo se crean las **órdenes de pago en Cuentas por Pagar**.\n\n**El ERP no calcula impuestos.** Lo que ves antes de timbrar es un **estimado** (para presupuestar). **El despacho timbra** y el **CFDI es la verdad**.',
+    where:'Menú → **Nómina**. La pestaña de trabajo es **«Captura por periodo»**.',
+    mock:{ title:'Nómina', crumb:'Nómina › Captura por periodo',
+      tabs:[ {label:'Captura por periodo', active:true, n:1}, {label:'Nómina del mes (CFDI)', n:5}, {label:'SBC', n:6}, {label:'Empleados'}, {label:'Configuración'} ],
+      toolbar:[ {t:'select', label:'2026'}, {t:'select', label:'Quincenal', n:2},
+                {t:'select', label:'QNA-2026-07-1 · 01/07 → 15/07', n:3},
+                {t:'btn', label:'Conciliar CFDI', icon:'🔗', n:4},
+                {t:'btn', label:'Validar y enviar a CxP', icon:'✓', pri:true, n:7} ],
+      table:{ cols:['Empleado','Percepciones','Neto estimado','Neto REAL (CFDI)',{label:'Diferencia', r:true}],
+        rows:[ ['A. Ramírez · Enfermera','$12,400','$10,850',{raw:'<span class="hfm-mini">$10,910</span>'},{label:'+$60', r:true}],
+               ['L. Ortiz · Embrióloga','$18,000','$15,240',{raw:'<span class="hfm-mini">pendiente de CFDI</span>'},{label:'—', r:true}] ] },
+      note:'El **estimado** es solo para presupuestar. Al conciliar, el **XML corrige al estimado**: entra el neto **real** y se marca la **Diferencia**. En reportes **manda el real**.',
+      callouts:[ {n:1,text:'**Captura por periodo** es la pestaña oficial: aquí se captura y **desde aquí se paga**.'},
+                 {n:2,text:'**Periodicidad**: semanal / quincenal / mensual. Es **mixta** — la define cada empleado en su ficha, y el periodo agrupa solo a los suyos.'},
+                 {n:3,text:'**El periodo**: elige cualquiera del año (historial completo). Los **EXTRAORDINARIOS** (aguinaldo, finiquitos) conviven con los ORDINARIOS sin desplazarlos.'},
+                 {n:4,text:'**Conciliar CFDI**: cuando el despacho timbre, el **real** entra y corrige al estimado.'},
+                 {n:5,text:'**Nómina del mes (CFDI)** es solo para **ver y conciliar** los recibos timbrados: ⛔ **ya no envía nada a CxP**.'},
+                 {n:6,text:'**SBC**: tablero de empleados × **6 bimestres** con casilla «Presentado» para el control del IMSS.'},
+                 {n:7,text:'**✓ Validar y enviar a CxP**: crea **una orden por empleado**. Reenviar solo agrega las que falten (no duplica).'} ] },
+    steps:[
+      'Entra a **Nómina → «Captura por periodo»** y elige **año**, **periodicidad** y **periodo**.',
+      'Captura lo de cada empleado. Mientras el periodo esté en **borrador** puedes editarlo.',
+      'Cuando el despacho timbre, pulsa **«Conciliar CFDI»**: el real corrige al estimado y sale la **Diferencia**.',
+      'Pulsa **«✓ Validar y enviar a CxP»**: una orden de pago por empleado en Cuentas por Pagar.',
+      'Marca el periodo como **Pagada** al liquidarlo (queda de solo lectura). Si hay que corregir, **reábrelo a borrador**.'
+    ],
+    buttons:[
+      { k:'Año / Periodicidad / Periodo', d:'Los tres selectores abren cualquier periodo del historial (pasado o futuro) con su captura y su estatus.' },
+      { k:'🔗 Conciliar CFDI', d:'Trae el neto REAL del recibo timbrado y lo compara contra tu estimado (Diferencia).' },
+      { k:'✓ Validar y enviar a CxP', d:'Genera una orden de pago por empleado. Idempotente: no duplica; reenviar solo agrega las faltantes.' },
+      { k:'Estatus (Borrador / Validada / Pagada)', d:'Borrador = editable · Validada = ya está en CxP · Pagada = solo lectura. Se puede reabrir a borrador.' },
+      { k:'Pestaña SBC', d:'SBC por empleado y bimestre, con casilla «Presentado» para el control del IMSS.' },
+      { k:'Pestaña Empleados', d:'Catálogo. Aquí se define la **Periodicidad** de cada quien (lo que decide en qué periodo cae) y su **Puesto** y **Área / Depto** (dropdowns administrables).' }
+    ],
+    tips:[
+      '⛔ **El pago se valida por PERIODO, nunca por mes.** La vista mensual de CFDI es de consulta. Antes había dos vías que **no se deduplicaban entre sí** y se podía pagar dos veces al mismo empleado.',
+      'Si validas **antes** de que llegue el CFDI, la orden sale con el neto **ESTIMADO** y así lo dice en las notas. Al llegar el real, concilia.',
+      'La periodicidad es **mixta**: puedes tener gente quincenal, semanal y mensual al mismo tiempo.',
+      '**Puesto** y **Área / Depto** se editan en **Panel de Control → Formularios** (`Empleados`), no en el código.'
+    ],
+    tech:{ hojas:['`Nomina_Periodos` (NOMINA_SS_ID): PeriodoID · Tipo · FechaInicio · FechaFin · FechaPago · Estatus · Notas',
+             '`Nomina_Captura` / `Nomina_Captura_Det`: una fila por empleado × periodo (estimado · real · diferencia · pago)',
+             '`Nomina_SBC`: Anio · Bimestre · NumEmpleado · SBC · Presentado',
+             'Órdenes en `Egresos2026` con `NominaID` = `NOM-<PeriodoID>-<EmpleadoID>` (dedup)'],
+      funciones:['readNominaPeriodos','readNominaCaptura','saveNominaCaptura','nominaConciliarPeriodo','nominaValidarPeriodo','readNominaSBC','saveNominaSBC','_nomGenPeriodos','setupNominaPeriodos'],
+      permisos:['editar_egresos'],
+      nota:'`nomina.gs` requiere deploy + `setupNominaPeriodos()` una vez. ⛔ `nominaValidarMes` quedó desactivada (responde `{ok:false}`; el corte está también en la ruta POST de finance.gs). Su código se conserva como `_nominaValidarMes_LEGACY_DESACTIVADA`.' } },
+
   /* ============ CATÁLOGOS E INVENTARIO ============ */
   { id:'proveedores', group:'catalogos', icon:'🏭', title:'Proveedores',
     keywords:'proveedor catalogo rfc razon social comercial nombre xml autocompletar renombrar cascada fiscal regimen uso cfdi datos fiscales',
@@ -34419,7 +34542,7 @@ setTimeout(novCheckPopup, 2500);
       nota:'`saveMenu` actualiza in-place por id (nunca toca id/tipo/fuente/seccion). El menú se cachea en `erp_menu_v3_*` (1800s).' } },
 
   { id:'formularios', group:'admin', icon:'🧾', title:'Formularios (dropdowns universales)',
-    keywords:'formularios dropdowns opciones desplegables tipo categoria producto config_dropdowns panel de control sembrar nueva seccion listas selects administrar reflejo inmediato',
+    keywords:'formularios dropdowns opciones desplegables tipo categoria producto puesto area departamento empleado nomina config_dropdowns panel de control sembrar nueva seccion listas selects administrar reflejo inmediato',
     para:'**Panel de Control → Formularios** administra **todos los dropdowns** de la app desde un solo lugar (incluidos **Tipo/Categoría** de producto). Editas los valores y se **reflejan de inmediato** en los formularios.',
     where:'Menú → **Panel de Control → Formularios**.',
     mock:{ title:'Panel de Control · Formularios', crumb:'Panel de Control › Formularios',
@@ -34440,13 +34563,15 @@ setTimeout(novCheckPopup, 2500);
       { k:'+ Nueva sección / dropdown', d:'Crea un dropdown nuevo; puede copiar los valores de uno existente.' }
     ],
     bloques:[
-      { h:'Tipo/Categoría de producto', p:'Los selectores **Tipo** y **Categoría** del alta de producto salen de aquí (`Config_Dropdowns > Productos`). Cambiarlos aquí actualiza al instante lo que ve Ingresos/Catálogo (con fallback a los valores existentes).' }
+      { h:'Tipo/Categoría de producto', p:'Los selectores **Tipo** y **Categoría** del alta de producto salen de aquí (`Config_Dropdowns > Productos`). Cambiarlos aquí actualiza al instante lo que ve Ingresos/Catálogo (con fallback a los valores existentes).' },
+      { h:'Puesto y Área / Depto del empleado', p:'La ficha de **Nómina → Empleados** ya no usa texto libre: **Puesto** y **Área / Depto** salen de `Config_Dropdowns > Empleados`. Si un empleado traía un valor viejo fuera de la lista, **no se pierde** — se sigue mostrando.' }
     ],
-    tips:[ 'Todo se guarda directo en Google Sheets: no hay que recargar para ver el cambio.' ],
+    tips:[ 'Todo se guarda directo en Google Sheets: no hay que recargar para ver el cambio.',
+      'Los dropdowns de **Empleados** (Puesto · Área/Depto) se editan aquí mismo, como cualquier otro.' ],
     tech:{ hojas:['`Config_Dropdowns` (Sección | Campo | Etiqueta | Valores)'],
-      funciones:['getDropdowns','ddNuevaSeccion','ddCrearSeccion','_ddSeedPick','saveDropdowns'],
+      funciones:['getDropdowns','ddNuevaSeccion','ddCrearSeccion','_ddSeedPick','saveDropdowns','_ddVals','_nomEmpDdRefresh'],
       permisos:['administrar (Panel de Control)'],
-      deploy:'El sembrado inicial de Config_Dropdowns lo hace finance.gs.' } },
+      deploy:'El sembrado inicial de Config_Dropdowns lo hace finance.gs (`CFG_DD_DEFAULTS`, se auto-cura al leer). El frontend replica los mismos valores en `_DD_FRONT_DEFAULTS`, así que Puesto/Área funcionan aun sin redesplegar.' } },
 
   { id:'chat', group:'admin', icon:'💬', title:'Chat interno',
     keywords:'chat mensaje directo dm canal general equipo adjunto tarea emoji flotante sondeo online',
