@@ -75,17 +75,24 @@ function _chatPresence(email, nombre) {
 }
 
 // Directorio de usuarios activos (para iniciar un DM con quien no esté en línea).
+// Devuelve también el `alias` de cada quien: es lo que el chat pinta en pantalla
+// (el nombre completo sigue viajando en `nombre` y sin tocar en la hoja Usuarios).
 function _chatDirectorio() {
   var out = [];
   try {
     var ss = SpreadsheetApp.openById(SHEET_ID); var sh = ss.getSheetByName('Usuarios'); if (!sh) return out;
     var d = sh.getDataRange().getValues(); var h = d[0].map(function (c) { return String(c).trim().toLowerCase(); });
-    var eI = h.indexOf('email'), nI = h.indexOf('nombre'), aI = h.indexOf('activo');
+    var eI = h.indexOf('email'), nI = h.indexOf('nombre'), aI = h.indexOf('activo'), lI = h.indexOf('alias');
     if (eI < 0) return out;
     for (var i = 1; i < d.length; i++) {
       var em = String(d[i][eI] || '').trim(); if (!em) continue;
       var act = aI > -1 ? d[i][aI] : true; if (act === false || String(act).toUpperCase() === 'FALSE') continue;
-      out.push({ email: em.toLowerCase(), nombre: String(d[i][nI > -1 ? nI : 0] || em).trim() });
+      var nom = String(d[i][nI > -1 ? nI : 0] || em).trim();
+      var ali = lI > -1 ? String(d[i][lI] || '').trim() : '';
+      out.push({
+        email: em.toLowerCase(), nombre: nom,
+        alias: (typeof _aliasFor === 'function') ? _aliasFor(ali, nom, em) : (ali || nom || em)
+      });
     }
   } catch (e) {}
   return out;

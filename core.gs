@@ -26,6 +26,35 @@ function verifyToken(token) {
     return (generateToken(email, day) === token) ? email : null;
   } catch(ex){ return null; }
 }
+/* ── ALIAS DE USUARIO ─────────────────────────────────────────────────
+   El Alias es SOLO capa de presentación (barra superior, chat). El Nombre
+   completo sigue intacto en la hoja Usuarios porque lo usan nómina, CFDI y
+   auditoría. Nunca devuelve vacío: alias → primer nombre → nombre → email.
+   ─────────────────────────────────────────────────────────────────── */
+function _aliasFor(alias, nombre, email) {
+  var a = String(alias == null ? '' : alias).trim();
+  if (a) return a;
+  var n = String(nombre == null ? '' : nombre).trim();
+  if (n) {
+    var first = n.split(/\s+/)[0];
+    if (first) return first;
+    return n;
+  }
+  return String(email == null ? '' : email).trim();
+}
+
+// Devuelve la columna (1-indexed) cuyo header contiene `want` en la hoja
+// Usuarios; si no existe la CREA al final (append-safe: nunca desplaza ni
+// reordena columnas existentes). Mismo patrón que _egColEnsure/_ingColEnsure.
+function _usrColEnsure(sh, want, headerText) {
+  var lastCol = sh.getLastColumn();
+  var hdrs = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h){ return String(h).trim().toLowerCase(); });
+  for (var c = 0; c < hdrs.length; c++) { if (hdrs[c].indexOf(want) > -1) return c + 1; }
+  sh.getRange(1, lastCol + 1).setValue(headerText);
+  sh.getRange(1, lastCol + 1).setFontWeight('bold').setBackground('#f3f4f6');
+  return lastCol + 1;
+}
+
 // Valida credenciales y devuelve token + permisos. Compartida por doGet y doPost.
 function handleLogin(email, password) {
   email = email || '';
@@ -46,6 +75,9 @@ function handleLogin(email, password) {
   var out = {
     success: true, token: generateToken(user.email),
     email: user.email, nombre: user.nombre, rol: user.rol,
+    // alias: solo para mostrar en pantalla (barra superior / chat). El nombre
+    // completo viaja igual en `nombre` para lo que ya dependa de él.
+    alias: _aliasFor(user.alias, user.nombre, user.email),
     vistasBloqueadas: rolCfg.vistasBloqueadas,
     soloLectura:      rolCfg.soloLectura
   };
@@ -60,10 +92,11 @@ function getUserRow(ss, email) {
   var data = sh.getDataRange().getValues();
   var h    = data[0].map(function(c){ return String(c).trim().toLowerCase(); });
   var eI=h.indexOf('email'), nI=h.indexOf('nombre'), pI=h.indexOf('contraseña'),
-      rI=h.indexOf('rol'),   aI=h.indexOf('activo');
+      rI=h.indexOf('rol'),   aI=h.indexOf('activo'), lI=h.indexOf('alias');
   for (var i=1; i<data.length; i++) {
     if (String(data[i][eI]).trim().toLowerCase() === email.toLowerCase()) {
       return { email: String(data[i][eI]).trim(), nombre: String(data[i][nI>-1?nI:0]).trim(),
+               alias: lI>-1?String(data[i][lI]).trim():'',
                password: pI>-1?String(data[i][pI]).trim():'',
                rol: rI>-1?String(data[i][rI]).trim():'viewer',
                activo: aI>-1?data[i][aI]:true, rowNum: i+1 };
@@ -191,6 +224,8 @@ function doGet(e) {
       if (!currentUser || String(currentUser.rol||'').toLowerCase() !== 'admin')
         return jsonResponse({ error: 'Sin permisos de administrador.' });
       var shU2 = ss.getSheetByName('Usuarios');
+      // Alias (presentación): se crea al final si aún no existe. Append-safe.
+      try { _usrColEnsure(shU2, 'alias', 'Alias'); } catch (eAl) {}
       var rowsU = shU2.getDataRange().getValues();
       var hdrsU = rowsU[0];
       var pIdx  = hdrsU.map(function(h){ return String(h).toLowerCase(); }).indexOf('contraseña');
