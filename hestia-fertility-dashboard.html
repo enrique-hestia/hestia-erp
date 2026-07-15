@@ -13612,10 +13612,13 @@ function _guRenderForm(u, roles, isNew) {
   var wrap = document.getElementById('gu-form-wrap');
   if (!wrap) return;
   var nombre  = u['Nombre']  || u['nombre']  || '';
+  var alias   = u['Alias']   || u['alias']   || '';
   var email   = u['Email']   || u['email']   || '';
   var rol     = u['Rol']     || u['rol']     || 'viewer';
   var activo  = u['Activo']  !== undefined ? u['Activo'] : true;
   var rowNum  = u['_rowNum'] || 0;
+  // Vista previa del alias efectivo (lo que verá en la barra y el chat).
+  var aliasPrev = aliasFrom(alias, nombre, email);
   var isActive= activo === true || activo === 'TRUE' || activo === 1 || String(activo).toLowerCase() === 'true';
   // Vínculo con Empleados (por UsuarioEmail): ¿este usuario ya es empleado?
   var _empLink= _guEmpMap[String(email||'').toLowerCase()] || null;
@@ -13635,7 +13638,23 @@ function _guRenderForm(u, roles, isNew) {
       + (isNew ? 'Nuevo usuario' : 'Editar usuario')
     + '</div>'
     // ── Nombre ──
-    + _guField('Nombre completo', 'gu-nombre', 'text', nombre, 'Ej. María García')
+    + _guField('Nombre completo', 'gu-nombre', 'text', nombre, 'Ej. María García', '_guAliasPrev()')
+    + '<div style="margin:-10px 0 16px;font-size:10.5px;color:var(--color-text-muted);line-height:1.4">'
+      + 'Como aparece en la base de datos. Lo usan nómina, recibos, CFDI y auditoría.'
+    + '</div>'
+    // ── Alias (solo presentación: barra superior + chat) ──
+    + '<div style="margin-bottom:16px">'
+      + '<label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:4px">'
+        + 'Alias <span style="font-size:9px;font-weight:400;text-transform:none;letter-spacing:0">(opcional — así se le ve en pantalla)</span>'
+      + '</label>'
+      + '<input id="gu-alias" type="text" value="' + String(alias).replace(/"/g,'&quot;') + '" placeholder="Ej. Mary" oninput="_guAliasPrev()"'
+        + ' style="width:100%;padding:9px 12px;border:1px solid var(--color-divider);border-radius:8px;font-size:13px;background:var(--color-surface);color:var(--color-text);box-sizing:border-box">'
+      + '<div style="margin-top:5px;font-size:10.5px;color:var(--color-text-muted);line-height:1.4">'
+        + 'Se muestra en la barra superior y en el chat. No cambia el nombre de la base de datos.<br>'
+        + 'Si lo dejas vacío se usa el primer nombre. En pantalla se verá: '
+        + '<b id="gu-alias-prev" style="color:var(--color-text)">' + _chatEsc(aliasPrev) + '</b>'
+      + '</div>'
+    + '</div>'
     // ── Email ──
     + '<div style="margin-bottom:16px">'
       + '<label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:4px">Email</label>'
@@ -13706,12 +13725,23 @@ function _guRenderForm(u, roles, isNew) {
     + '<div id="gu-msg" style="margin-top:14px;font-size:12px;font-weight:600;text-align:center;min-height:18px"></div>';
 }
 
-function _guField(label, id, type, value, placeholder) {
+function _guField(label, id, type, value, placeholder, oninput) {
   return '<div style="margin-bottom:16px">'
     + '<label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:4px">' + label + '</label>'
     + '<input id="' + id + '" type="' + type + '" value="' + (value||'').replace(/"/g,'&quot;') + '" placeholder="' + placeholder + '"'
+      + (oninput ? ' oninput="' + oninput + '"' : '')
       + ' style="width:100%;padding:9px 12px;border:1px solid var(--color-divider);border-radius:8px;font-size:13px;background:var(--color-surface);color:var(--color-text);box-sizing:border-box">'
   + '</div>';
+}
+
+// Muestra en vivo el alias efectivo (con la cascada alias → primer nombre → email).
+function _guAliasPrev() {
+  var prev = document.getElementById('gu-alias-prev');
+  if (!prev) return;
+  var alias  = (document.getElementById('gu-alias')  || {}).value || '';
+  var nombre = (document.getElementById('gu-nombre') || {}).value || '';
+  var email  = (document.getElementById('gu-email')  || {}).value || '';
+  prev.textContent = aliasFrom(alias, nombre, email);
 }
 
 function _guTogglePass() {
@@ -13742,6 +13772,7 @@ async function guSaveUser(rowNum) {
   var btn  = document.getElementById('gu-save-btn');
   var msg  = document.getElementById('gu-msg');
   var nombre = (document.getElementById('gu-nombre')  || {}).value || '';
+  var alias  = (((document.getElementById('gu-alias')|| {}).value) || '').trim();
   var email  = (document.getElementById('gu-email')   || {}).value || '';
   var pass   = (document.getElementById('gu-pass')    || {}).value || '';
   var rol    = (document.getElementById('gu-rol')     || {}).value || 'viewer';
@@ -13759,6 +13790,7 @@ async function guSaveUser(rowNum) {
       token:  getToken() || '',
       rowNum: rowNum || 0,
       'Nombre': nombre,
+      'Alias':  alias,     // solo presentación; vacío = se usa el primer nombre
       'Email':  email,
       'Contraseña': pass,
       'Rol': rol,
@@ -13808,7 +13840,7 @@ async function guToggleActive(rowNum, nuevoEstado) {
   try {
     var body = {
       action: 'saveuser', token: getToken() || '', rowNum: rowNum,
-      'Nombre': u['Nombre']||'', 'Email': u['Email']||'',
+      'Nombre': u['Nombre']||'', 'Alias': u['Alias']||'', 'Email': u['Email']||'',
       'Contraseña': '',  // vacío = conservar
       'Rol': u['Rol']||'viewer', 'Activo': nuevoEstado
     };
@@ -16764,8 +16796,18 @@ function _presApplyProjAllGrouped(){
 })();
 
 /* ══ CHAT INTERNO — canal general + mensajes directos, botón flotante, sondeo ══ */
-var _chat = { mounted:false, open:false, canal:'general', byCanal:{}, online:[], dir:[], sinceTs:0, me:'', meNombre:'', timer:null, peerName:{} };
+var _chat = { mounted:false, open:false, canal:'general', byCanal:{}, online:[], dir:[], sinceTs:0, me:'', meNombre:'', meAlias:'', timer:null, peerName:{}, aliasByEmail:{} };
 function _chatEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+/* Alias del autor para PINTAR. Los mensajes ya guardados traen el nombre completo
+   en `deNombre`: se resuelven aquí por email contra el directorio (no se reescribe
+   el historial). Si el email no está en el directorio, cae al primer nombre. */
+function _chatAliasFor(email, nombreFallback){
+  var e=String(email||'').toLowerCase();
+  if(e && e===_chat.me && _chat.meAlias) return _chat.meAlias;
+  var a=e ? _chat.aliasByEmail[e] : '';
+  if(a) return a;
+  return aliasFrom('', nombreFallback||'', email||'');
+}
 function _chatDM(a,b){ return 'dm:'+[String(a||'').toLowerCase(),String(b||'').toLowerCase()].sort().join('|'); }
 function _chatSeenKey(c){ return 'chat_seen_'+_chat.me+'_'+c; }
 function _chatSeen(c){ try{ return Number(localStorage.getItem(_chatSeenKey(c)))||0; }catch(e){ return 0; } }
@@ -16773,6 +16815,8 @@ function _chatSetSeen(c,ts){ try{ localStorage.setItem(_chatSeenKey(c), String(t
 function _chatMount(){
   if(_chat.mounted) return; var s=(typeof getSession==='function')?getSession():null; if(!s||!s.email) return;
   _chat.mounted=true; _chat.me=String(s.email).toLowerCase(); _chat.meNombre=s.nombre||s.email;
+  // meNombre (nombre completo) es lo que se GUARDA en la hoja Chat; meAlias es lo que se MUESTRA.
+  _chat.meAlias=sessionAlias(s);
   var fab=document.createElement('button'); fab.id='chat-fab'; fab.setAttribute('aria-label','Chat interno');
   fab.style.cssText='position:fixed;right:20px;bottom:20px;width:54px;height:54px;border-radius:50%;background:var(--color-primary,#c46a7a);color:#fff;border:none;box-shadow:0 6px 20px rgba(0,0,0,.28);cursor:pointer;z-index:9200;display:flex;align-items:center;justify-content:center;font-size:22px';
   fab.innerHTML='<span>💬</span><span id="chat-badge" style="display:none;position:absolute;top:-3px;right:-3px;min-width:19px;height:19px;padding:0 4px;border-radius:10px;background:#dc2626;color:#fff;font-size:11px;font-weight:800;line-height:19px;text-align:center;box-sizing:border-box"></span>';
@@ -16808,11 +16852,13 @@ function chatToggle(){ var pnl=document.getElementById('chat-panel'); if(!pnl) r
   _chatUpdateBadge(); }
 function chatSwitch(canal){ _chat.canal=canal; _chatMarkSeen(canal); chatRender(); _chatUpdateBadge(); var inp=document.getElementById('chat-input'); if(inp) inp.focus(); }
 function _chatMarkSeen(canal){ var arr=_chat.byCanal[canal]||[]; var last=arr.length?arr[arr.length-1].ts:Date.now(); _chatSetSeen(canal,last); }
+/* Lista de contactos para DM. `nombre` aquí ya es el ALIAS (es lo que se pinta);
+   el nombre completo no se usa en esta superficie. */
 function _chatPeers(){
   var map={};
-  (_chat.dir||[]).forEach(function(u){ var e=String(u.email||'').toLowerCase(); if(e&&e!==_chat.me) map[e]={email:e,nombre:u.nombre||e,online:false}; });
-  (_chat.online||[]).forEach(function(u){ var e=String(u.email||'').toLowerCase(); if(e&&e!==_chat.me){ if(!map[e]) map[e]={email:e,nombre:u.nombre||e}; map[e].online=true; } });
-  Object.keys(_chat.byCanal).forEach(function(c){ if(c.indexOf('dm:')!==0) return; var pe=c.substring(3).split('|'); var e=pe[0]===_chat.me?pe[1]:pe[0]; if(e&&e!==_chat.me&&!map[e]) map[e]={email:e,nombre:_chat.peerName[e]||e,online:false}; });
+  (_chat.dir||[]).forEach(function(u){ var e=String(u.email||'').toLowerCase(); if(e&&e!==_chat.me) map[e]={email:e,nombre:_chatAliasFor(e,u.nombre),online:false}; });
+  (_chat.online||[]).forEach(function(u){ var e=String(u.email||'').toLowerCase(); if(e&&e!==_chat.me){ if(!map[e]) map[e]={email:e,nombre:_chatAliasFor(e,u.nombre)}; map[e].online=true; } });
+  Object.keys(_chat.byCanal).forEach(function(c){ if(c.indexOf('dm:')!==0) return; var pe=c.substring(3).split('|'); var e=pe[0]===_chat.me?pe[1]:pe[0]; if(e&&e!==_chat.me&&!map[e]) map[e]={email:e,nombre:_chatAliasFor(e,_chat.peerName[e]||''),online:false}; });
   return Object.keys(map).map(function(k){return map[k];}).sort(function(a,b){ return (b.online?1:0)-(a.online?1:0) || (a.nombre<b.nombre?-1:1); });
 }
 function _chatUnread(canal){ var arr=_chat.byCanal[canal]||[]; var seen=_chatSeen(canal); var n=0; for(var i=0;i<arr.length;i++){ if(arr[i].ts>seen && String(arr[i].deEmail).toLowerCase()!==_chat.me) n++; } return n; }
@@ -16841,7 +16887,7 @@ function chatRender(){
     if(day!==lastDay){ lastDay=day; h+='<div style="text-align:center;font-size:10px;color:#9ca3af;margin:4px 0">'+day+'</div>'; }
     var hora=('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
     h+='<div style="align-self:'+(mine?'flex-end':'flex-start')+';max-width:82%">'
-      +(mine?'':'<div style="font-size:9.5px;color:#9c4f5f;font-weight:700;margin-bottom:1px">'+_chatEsc(m.deNombre||m.deEmail)+'</div>')
+      +(mine?'':'<div style="font-size:9.5px;color:#9c4f5f;font-weight:700;margin-bottom:1px" title="'+_chatEsc(m.deNombre||m.deEmail)+'">'+_chatEsc(_chatAliasFor(m.deEmail,m.deNombre))+'</div>')
       +'<div style="background:'+(mine?'var(--color-primary,#c46a7a)':'var(--card-bg,#fff)')+';color:'+(mine?'#fff':'var(--text-primary,#111)')+';border:1px solid '+(mine?'transparent':'var(--color-divider,#e5e7eb)')+';border-radius:12px;padding:6px 10px;font-size:12.5px;line-height:1.4;word-break:break-word">'+_chatMsgHtml(m.mensaje)+'</div>'
       +'<div style="font-size:9px;color:#c9c9c9;text-align:'+(mine?'right':'left')+';margin-top:1px">'+hora+'</div></div>';
   });
@@ -16860,6 +16906,9 @@ function chatPollOnce(first){
     .then(function(r){return r.json();}).then(function(res){
       if(!res||!res.ok) return;
       _chat.online=res.online||[]; if(res.dir) _chat.dir=res.dir; if(res.serverTs) _chat.sinceTs=res.serverTs;
+      // Mapa email → alias (del directorio): con esto se pinta el autor de cada
+      // mensaje, incluso los históricos que se guardaron con el nombre completo.
+      if(res.dir) res.dir.forEach(function(u){ var e=String(u.email||'').toLowerCase(); if(e) _chat.aliasByEmail[e]=aliasFrom(u.alias,u.nombre,e); });
       (res.mensajes||[]).forEach(function(m){
         var c=m.canal||'general'; var arr=_chat.byCanal[c]=_chat.byCanal[c]||[]; var dup=null;
         for(var i=arr.length-1;i>=0;i--){ var x=arr[i]; if(String(x.deEmail).toLowerCase()===String(m.deEmail).toLowerCase() && x.mensaje===m.mensaje && Math.abs(x.ts-m.ts)<25000){ dup=x; break; } }
@@ -16927,7 +16976,7 @@ function chatTareaSave(){
   var fecha=(document.getElementById('chat-tarea-fecha')||{}).value||'';
   if(!para||!txt){ alert('Elige a quién y escribe la tarea.'); return; }
   var paraNombre=(_chatPeers().filter(function(p){return p.email===para;})[0]||{}).nombre||para;
-  var recBody={action:'saveRecordatorio',usuario:para,titulo:txt,detalle:'Tarea asignada por '+_chat.meNombre+' (chat)',origen:'chat',referencia:_chat.me};
+  var recBody={action:'saveRecordatorio',usuario:para,titulo:txt,detalle:'Tarea asignada por '+(_chat.meAlias||_chat.meNombre)+' (chat)',origen:'chat',referencia:_chat.me};
   if(fecha) recBody.fecha=fecha;
   fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(recBody)}).catch(function(){});
   var canal=_chatDM(_chat.me,para); var msg='📌 Tarea para '+paraNombre+': '+txt+(fecha?(' (para '+fecha+')'):'');
@@ -23050,6 +23099,21 @@ function getSession() {
 }
 function setSession(data) { sessionStorage.setItem(SESSION_KEY, JSON.stringify(data)); }
 function clearSession()   { sessionStorage.removeItem(SESSION_KEY); }
+/* Alias para MOSTRAR en pantalla (barra superior, chat). El nombre completo se
+   queda intacto en la BD porque lo usan nómina, CFDI y auditoría — esto es solo
+   presentación. Cascada: alias → primer nombre → nombre completo → email.
+   Si el backend aún no manda `alias` (sesión vieja), cae al primer nombre. */
+function aliasFrom(alias, nombre, email) {
+  var a = String(alias == null ? '' : alias).trim();
+  if (a) return a;
+  var n = String(nombre == null ? '' : nombre).trim();
+  if (n) return n.split(/\s+/)[0] || n;
+  return String(email == null ? '' : email).trim();
+}
+function sessionAlias(s) {
+  s = s || getSession() || {};
+  return aliasFrom(s.alias, s.nombre, s.email);
+}
 
 function getToken() { var s = getSession(); return s ? s.token : ''; }
 function canEdit()  { var s = getSession(); return s ? !s.soloLectura : true; }
@@ -23115,7 +23179,11 @@ function showUserChip(session) {
   var chip = document.getElementById('user-chip');
   if (!chip) return;
   chip.style.display = 'flex';
-  document.getElementById('user-name').textContent = session.nombre || session.email;
+  var nameEl = document.getElementById('user-name');
+  // En pantalla va el ALIAS (corto); el nombre completo queda en el tooltip.
+  nameEl.textContent = sessionAlias(session);
+  var full = String(session.nombre || '').trim();
+  nameEl.title = full ? full + ' · ' + (session.email || '') : (session.email || '');
   document.getElementById('user-rol').textContent  = '(' + (session.rol || '') + ')';
 }
 
@@ -32837,20 +32905,22 @@ setTimeout(novCheckPopup, 2500);
 
   /* ============ ADMINISTRACIÓN ============ */
   { id:'roles', group:'admin', icon:'🔐', title:'Roles y Permisos',
-    keywords:'roles permisos rbac vistas bloqueadas solo lectura operativos gestion panel de control usuarios',
+    keywords:'roles permisos rbac vistas bloqueadas solo lectura operativos gestion panel de control usuarios alias nombre corto barra superior',
     intro:'El acceso se controla con **roles** (RBAC). Cada rol define vistas bloqueadas, si es solo-lectura, y permisos operativos. Se administra en **Panel de Control → Gestión de Roles**.',
     bloques:[
-      { h:'Permisos operativos', p:'Los permisos (ej. `editar_egresos`, `borrar_egresos`, `bank_capture`, `docs_enviar`, `ver_datos_sensibles`, `export_data`) habilitan botones y acciones. `hasPermission(perm)` los evalúa en el frontend; `*` = todo. Admin/director siempre pueden.' }
+      { h:'Permisos operativos', p:'Los permisos (ej. `editar_egresos`, `borrar_egresos`, `bank_capture`, `docs_enviar`, `ver_datos_sensibles`, `export_data`) habilitan botones y acciones. `hasPermission(perm)` los evalúa en el frontend; `*` = todo. Admin/director siempre pueden.' },
+      { h:'Alias (nombre corto en pantalla)', p:'Cada usuario puede tener un **Alias**: es lo que se muestra en la **barra superior** y en el **chat**, en vez del nombre completo. Se captura en **Gestión de Usuarios**. El **nombre completo NO cambia** en la base de datos — lo siguen usando nómina, recibos, CFDI y auditoría; el alias es solo presentación (el nombre completo queda en el tooltip). Si se deja vacío, se usa el **primer nombre**; si no hay nombre, el **email**. Nunca se queda en blanco.' }
     ],
     pasos:[
       'Abre **Panel de Control → Gestión de Roles**.',
       'Edita por rol: vistas bloqueadas, solo-lectura y permisos operativos.',
-      'Asigna el rol a cada usuario en la hoja `Usuarios`.'
+      'Asigna el rol a cada usuario en la hoja `Usuarios`.',
+      'Para el nombre corto en pantalla: **Gestión de Usuarios → Alias**.'
     ],
     datos:{
-      hojas:['`Roles`: rol · vistas_bloqueadas · solo_lectura · permisos_operativos','`Usuarios` (rol por usuario)'],
-      funciones:['hasPermission','getRolConfig','handleLogin','OP_PERMS_CATALOG'],
-      nota:'El login ahora sí devuelve los permisos operativos personalizados del rol (si están configurados).'
+      hojas:['`Roles`: rol · vistas_bloqueadas · solo_lectura · permisos_operativos','`Usuarios` (rol por usuario · columna `Alias` para mostrar en pantalla)'],
+      funciones:['hasPermission','getRolConfig','handleLogin','OP_PERMS_CATALOG','_aliasFor','sessionAlias'],
+      nota:'El login ahora sí devuelve los permisos operativos personalizados del rol (si están configurados) y el `alias` del usuario.'
     }
   },
 
@@ -32913,18 +32983,21 @@ setTimeout(novCheckPopup, 2500);
   },
 
   { id:'chat', group:'admin', icon:'💬', title:'Chat interno',
-    keywords:'chat mensaje directo dm canal general equipo adjunto tarea emoji flotante sondeo online',
+    keywords:'chat mensaje directo dm canal general equipo adjunto tarea emoji flotante sondeo online alias nombre',
     intro:'El **Chat interno** permite conversar con el equipo dentro del ERP: un **canal general** y **mensajes directos**. Funciona por **sondeo cada 7 segundos** (no es tiempo real; los mensajes llegan en el siguiente sondeo).',
     pasos:[
       'Pulsa el botón flotante **💬** (abajo a la derecha).',
       'Elige General o un contacto (con 🟢/⚪ de conectado y badge de no-leídos).',
       'Escribe; puedes adjuntar 📎, insertar emojis 😀 o **📌 asignar una tarea** (le llega como Recordatorio al destinatario).'
     ],
+    bloques:[
+      { h:'Se ve el Alias', p:'En los mensajes y en la lista de contactos aparece el **Alias** de cada quien (el que se captura en Gestión de Usuarios), no el nombre completo. Los mensajes viejos se **resuelven al pintarlos** — el historial guardado no se toca. Si alguien no tiene alias, se muestra su primer nombre.' }
+    ],
     datos:{
       hojas:['`Chat` (SHEET_ID): Fecha|Canal|DeEmail|DeNombre|Mensaje','Adjuntos en Drive `Chat_Adjuntos` (≤9 MB)'],
       scriptProps:['`CHAT_PRES` (presencia; online = ping < 90s)'],
-      funciones:['_chatMount','chatSend','chatPoll','chatUpload','chatTareaSave'],
-      nota:'`chat.gs` requiere agregarse al Apps Script + redeploy. La hoja `Chat` y la carpeta se crean solas.'
+      funciones:['_chatMount','chatSend','chatPoll','chatUpload','chatTareaSave','_chatAliasFor'],
+      nota:'`chat.gs` requiere agregarse al Apps Script + redeploy. La hoja `Chat` y la carpeta se crean solas. El alias se resuelve por email contra el directorio (`_chatDirectorio`).'
     }
   },
 
@@ -34272,7 +34345,7 @@ setTimeout(novCheckPopup, 2500);
 
   /* ============ ADMINISTRACIÓN ============ */
   { id:'roles', group:'admin', icon:'🔐', title:'Roles y Permisos',
-    keywords:'roles permisos rbac vistas bloqueadas solo lectura operativos gestion panel de control usuarios editar borrar',
+    keywords:'roles permisos rbac vistas bloqueadas solo lectura operativos gestion panel de control usuarios editar borrar alias nombre corto',
     para:'El acceso se controla con **roles**. Cada rol define qué vistas se bloquean, si es solo-lectura y qué acciones (permisos) puede hacer. Se administra en **Panel de Control → Gestión de Roles**.',
     where:'Menú → **Panel de Control → Gestión de Roles**.',
     mock:{ title:'Gestión de Roles', crumb:'Panel de Control › Roles',
@@ -34281,20 +34354,22 @@ setTimeout(novCheckPopup, 2500);
         rows:[ ['Editar egresos','☑'], ['Eliminar egresos','☐'], ['Capturar bancos','☑'], ['Ver datos sensibles','☐'] ] },
       callouts:[ {n:1,text:'Elige o crea un **rol**.'},
                  {n:2,text:'Marca **vistas bloqueadas**, solo-lectura y **permisos** (habilitan botones y acciones).'} ] },
-    steps:[ 'Abre **Panel de Control → Gestión de Roles**.', 'Edita por rol: vistas bloqueadas, solo-lectura y permisos.', 'Asigna el rol a cada usuario en Gestión de Usuarios.' ],
+    steps:[ 'Abre **Panel de Control → Gestión de Roles**.', 'Edita por rol: vistas bloqueadas, solo-lectura y permisos.', 'Asigna el rol a cada usuario en Gestión de Usuarios.', 'En **Gestión de Usuarios** captura el **Alias** de cada quien (nombre corto en pantalla).' ],
     buttons:[
       { k:'Rol (selector)', d:'Elige el rol a editar.' },
       { k:'+ Nuevo', d:'Crea un rol nuevo.' },
       { k:'Casillas de permisos', d:'Cada permiso habilita/oculta un botón o acción (editar, borrar, capturar bancos, enviar documentos, ver datos sensibles…).' },
       { k:'Vistas bloqueadas', d:'Oculta del menú las pantallas que ese rol no debe ver.' },
       { k:'Solo lectura', d:'Deja al rol ver todo pero sin poder editar.' },
+      { k:'Alias (en Gestión de Usuarios)', d:'Nombre corto que se ve en la barra superior y en el chat. No cambia el nombre completo de la base de datos (nómina, recibos, CFDI y auditoría lo siguen usando). Vacío = se usa el primer nombre.' },
       { k:'Guardar', d:'Aplica los cambios al rol.' }
     ],
-    tips:[ 'Los roles **admin** y **director** pueden todo. El resto ve solo lo que su rol permite.' ],
-    tech:{ hojas:['`Roles`: rol · vistas_bloqueadas · solo_lectura · permisos_operativos','`Usuarios` (rol por usuario)'],
-      funciones:['hasPermission','getRolConfig','handleLogin','OP_PERMS_CATALOG'],
+    tips:[ 'Los roles **admin** y **director** pueden todo. El resto ve solo lo que su rol permite.',
+      'El **Alias** es solo cosmético: cambia lo que se ve en pantalla, nunca lo que se guarda. El nombre completo aparece en el tooltip de la barra superior.' ],
+    tech:{ hojas:['`Roles`: rol · vistas_bloqueadas · solo_lectura · permisos_operativos','`Usuarios` (rol por usuario · columna `Alias`, se crea sola al final)'],
+      funciones:['hasPermission','getRolConfig','handleLogin','OP_PERMS_CATALOG','_aliasFor','sessionAlias','_usrColEnsure'],
       permisos:['editar_ingresos','editar_egresos','borrar_egresos','bank_capture','docs_enviar','ver_datos_sensibles','export_data'],
-      nota:'`*` = todos los permisos. El login devuelve los permisos operativos personalizados del rol.' } },
+      nota:'`*` = todos los permisos. El login devuelve los permisos operativos personalizados del rol y el `alias` (cascada: alias → primer nombre → nombre → email).' } },
 
   { id:'privacidad', group:'admin', icon:'🕶️', title:'Privacidad (rol Socio)',
     keywords:'privacidad socio datos sensibles enmascarar op paciente nomina proveedor confidencial',
@@ -34394,10 +34469,11 @@ setTimeout(novCheckPopup, 2500);
       { k:'📌 Tarea', d:'Envía una tarea que le llega al destinatario como Recordatorio.' },
       { k:'Enviar', d:'Manda el mensaje (llega en el siguiente sondeo).' }
     ],
+    tips:[ 'En los mensajes y en la lista de contactos se ve el **Alias** de cada quien (se captura en Gestión de Usuarios), no el nombre completo. Los mensajes viejos se resuelven al mostrarlos: el historial no se reescribe.' ],
     tech:{ hojas:['`Chat` (SHEET_ID): Fecha|Canal|DeEmail|DeNombre|Mensaje','Adjuntos en Drive `Chat_Adjuntos` (≤9 MB)'],
       props:['`CHAT_PRES` (presencia; online = ping < 90s)'],
-      funciones:['_chatMount','chatSend','chatPoll','chatUpload','chatTareaSave'],
-      deploy:'`chat.gs` requiere agregarse al Apps Script + redeploy.' } },
+      funciones:['_chatMount','chatSend','chatPoll','chatUpload','chatTareaSave','_chatAliasFor','_chatDirectorio'],
+      deploy:'`chat.gs` requiere agregarse al Apps Script + redeploy. El alias del autor se resuelve por email contra el directorio que devuelve `chatPoll`.' } },
 
   { id:'recordatorios', group:'admin', icon:'⏰', title:'Recordatorios (agenda)',
     keywords:'recordatorios agenda tarea pendiente fecha banner correo programar ofrecer hecho descartado',

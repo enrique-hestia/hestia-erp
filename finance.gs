@@ -1039,14 +1039,20 @@ function doPost(e) {
       if (!cu || String(cu.rol||'').toLowerCase() !== 'admin') return jsonResponse({ error: 'Sin permisos de administrador.' });
       var shU  = ss.getSheetByName('Usuarios');
       if (!shU) return jsonResponse({ error: 'Hoja Usuarios no encontrada.' });
+      // Alias (presentación): se crea al final si aún no existe. Append-safe.
+      try { _usrColEnsure(shU, 'alias', 'Alias'); } catch (eAl) {}
       var hdrs = shU.getRange(1,1,1,shU.getLastColumn()).getValues()[0];
       var rowNum = parseInt(body.rowNum || '0');
+      // Al EDITAR, una columna que el cliente no manda se conserva tal cual (no
+      // se borra): así ningún campo que este formulario no conozca se pierde.
+      var oldRowU = (rowNum > 1) ? shU.getRange(rowNum, 1, 1, hdrs.length).getValues()[0] : null;
       var newRow = hdrs.map(function(h, i) {
         var key = String(h).trim();
         if (key === 'Contraseña' && !body[key] && rowNum > 1) {
-          return shU.getRange(rowNum, i+1).getValue();
+          return oldRowU[i];
         }
-        return body[key] !== undefined ? body[key] : '';
+        if (body[key] !== undefined) return body[key];
+        return oldRowU ? oldRowU[i] : '';
       });
       if (rowNum > 1) {
         shU.getRange(rowNum, 1, 1, hdrs.length).setValues([newRow]);
