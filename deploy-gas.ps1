@@ -17,9 +17,14 @@ $clasp = Join-Path $env:APPDATA 'npm\clasp.cmd'
 $DEPLOYMENT_ID = 'AKfycbw3pPDLfDFVmb2VF1FCGCTZGK8Ie1du7zUFyJPQT7Fwxi_ngsEmEL-o-ukv2QzqZ6Ro'
 
 # Archivos .gs que SÍ van al proyecto de Apps Script (= los desplegados hoy).
+# OJO: 'config_dropdowns' se ELIMINO (2026-07-15). Definia CFG_DD_TAB/CFG_DD_DEFAULTS/
+# setupConfigDropdowns/readDropdowns/saveDropdownValues DUPLICADOS con finance.gs, pero en
+# version vieja (10 dropdowns, sin Productos ni Empleados, sin _ddAddMissingDefaults).
+# Como Apps Script comparte scope global, ganaba el archivo que cargara al final -> bomba
+# de tiempo. finance.gs es superconjunto estricto; config_dropdowns no aportaba NADA propio.
 $FILES = @(
   '_diagnostico','analisis','board','capture','catalogo','chat','cobranza',
-  'comprobantes','config','config_dropdowns','core','cxp_creditos','declaraciones',
+  'comprobantes','config','core','cxp_creditos','declaraciones',
   'devengado','facturacion','finance','gastosfijos','inventario','inventario_migracion',
   'lab','medical','nomina','origenes','poliza_concil','presupuesto','privacidad',
   'productos_ss_id','prov_defaults','providers','recordatorios','scheduler','semanal','summary'
