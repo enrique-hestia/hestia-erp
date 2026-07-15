@@ -534,6 +534,27 @@ function doPost(e) {
     if (body.action === 'saveProductoPrecio') {
       return jsonResponse(saveProductoPrecio(body.productoId, body.precio, body.vigencia, body.usuario));
     }
+    /* ── TRADUCCIONES: la traducción es un atributo del producto (traducciones.gs) ── */
+    if (body.action === 'saveTraduccionProducto') {
+      if (typeof saveTraduccionProducto !== 'function')
+        return jsonResponse({ok:false, error:'Agrega traducciones.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(saveTraduccionProducto(body));
+    }
+    if (body.action === 'saveTraduccionesBatch') {
+      if (typeof saveTraduccionesProductoBatch !== 'function')
+        return jsonResponse({ok:false, error:'Agrega traducciones.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(saveTraduccionesProductoBatch(body));
+    }
+    if (body.action === 'migrarTraducciones') {
+      if (typeof migrarTraduccionesProductos !== 'function')
+        return jsonResponse({ok:false, error:'Agrega traducciones.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(migrarTraduccionesProductos(body));
+    }
+    if (body.action === 'setupTraducciones') {
+      if (typeof setupTraducciones !== 'function')
+        return jsonResponse({ok:false, error:'Agrega traducciones.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(setupTraducciones());
+    }
     if (body.action === 'saveCxP') {
       return jsonResponse(saveCxP(body));
     }
@@ -3800,6 +3821,16 @@ function readProductos() {
         iCosto = prodHdrs.indexOf('costounitario'), iProv = prodHdrs.indexOf('proveedorpreferido'),
         iStockAct = prodHdrs.indexOf('stockactual');
 
+    // Traducciones del producto (Descripcion_EN / _FR / _PT). Mismo criterio que
+    // inventario: se leen por encabezado exacto y toleran no existir todavía.
+    // Son la ÚNICA autoridad de cómo se llama el producto en otro idioma —
+    // ver traducciones.gs.
+    var _tLangs = (typeof TRAD_LANGS !== 'undefined') ? TRAD_LANGS : ['en','fr','pt'];
+    var iTrad = {};
+    _tLangs.forEach(function(l){
+      iTrad[l.toUpperCase()] = prodHdrs.indexOf('descripcion_' + l.toLowerCase());
+    });
+
     // Leer productos
     var prodRaw = prodSheet.getDataRange().getValues();
     var productos = [];
@@ -3807,9 +3838,15 @@ function readProductos() {
       var r = prodRaw[i];
       var id = String(r[0]||'').trim();
       if (!id) continue;
+      var trads = {};
+      for (var _lk in iTrad) {
+        if (!iTrad.hasOwnProperty(_lk)) continue;
+        trads[_lk] = iTrad[_lk] > -1 ? String(r[iTrad[_lk]]||'').trim() : '';
+      }
       productos.push({
         id: id,
         sku: String(r[1]||''),
+        traducciones: trads,
         descripcion: String(r[2]||''),
         categoria: String(r[3]||''),
         tipo: String(r[4]||''),
@@ -4001,6 +4038,8 @@ function createProducto(body) {
     }
     var activo = body.activo !== false && body.activo !== 'false';
     prodSheet.appendRow([prodId, body.sku||'', desc, body.categoria||'', body.tipo||'', body.notas||'', activo]);
+    // Traducciones confirmadas por el usuario en el formulario (traducciones.gs)
+    try { if (typeof _bdProdWriteTrads === 'function') _bdProdWriteTrads(prodSheet, prodSheet.getLastRow(), body); } catch(te) {}
     var precio = parseFloat(String(body.precio||'').replace(/[$,]/g,''))||0;
     if (precio > 0) {
       var precSheet = ss.getSheetByName('BD_Precios');
@@ -4098,6 +4137,9 @@ function updateProducto(body) {
     if (body.tipo !== undefined) prodSheet.getRange(found, 5).setValue(body.tipo);
     if (body.notas !== undefined) prodSheet.getRange(found, 6).setValue(body.notas);
     if (body.activo !== undefined) prodSheet.getRange(found, 7).setValue(body.activo!==false&&body.activo!=='false');
+    // Traducciones confirmadas por el usuario en el formulario (traducciones.gs).
+    // Solo se tocan los idiomas que vengan en el body: omitir uno no lo borra.
+    try { if (typeof _bdProdWriteTrads === 'function') _bdProdWriteTrads(prodSheet, found, body); } catch(te) {}
 
     // Campos de inventario — se tocan solo si vienen en el body (la primera
     // vez que cualquier producto los necesita, se crean las columnas). El
@@ -4261,6 +4303,8 @@ function saveNewProducto(body) {
     var sku = String(body.sku||'').trim();
     prodSheet.appendRow([prodId, sku, desc, body.categoria||'', body.tipo||'', body.notas||'', body.activo!==false, new Date()]);
     var newRowNum = prodSheet.getLastRow();
+    // Traducciones confirmadas por el usuario en el formulario (traducciones.gs)
+    try { if (typeof _bdProdWriteTrads === 'function') _bdProdWriteTrads(prodSheet, newRowNum, body); } catch(te) {}
 
     // Inventario: automático para categoría "Medicamento", opcional (checkbox)
     // para cualquier otra — así cualquier insumo/reactivo puede sumarse a
@@ -6214,6 +6258,19 @@ var CFG_DD_DEFAULTS = [
   // ahora administrables desde Panel de Control > Formularios.
   ['Productos', 'tipo',      'Tipo de producto',       'Tratamientos|Complemento|PGT-A|PGT-M|Estudios - Andrología|Estudios - Consulta|Estudios - Ciclo|Complementos|Laboratorio|Suplementos|Medicamento|Almacenamiento|Especial|Externos|Extras Externos|PGT-A Externos|PGT-M Externos|Violet Externos|Magenta Ext|Histeroscopia-Ext|Consulta|Comisiones|Consultation|Carrier|Andrology|Egg Donor|Art Lab|PGTA|Transfer and follow up|Admin|REPROVIDA'],
   ['Productos', 'categoria', 'Categoría de producto',  'Almacenamiento|Consulta|Estudios - Andrologia|Estudios - Ciclo|Estudios - Consulta|Extras Externos|Medicamento|PGT-A|Tratamientos|VIOLET'],
+  // Ficha del paciente — idioma de sus documentos.
+  // `idioma`: valores del selector (código=etiqueta).
+  // `paisIdioma`: REGLA país → idioma sugerido (formato País=código). Vive aquí y
+  //   no en la pestaña "Opciones" del spreadsheet de Pacientes porque "Opciones"
+  //   es la LISTA de valores que puede tomar el campo País, mientras que esto es
+  //   una REGLA que relaciona dos campos. Config_Dropdowns ya es el lugar
+  //   administrable de configuración (Panel de Control → Formularios), vive en el
+  //   SHEET_ID que todos los módulos ya abren, y _ddAddMissingDefaults lo siembra
+  //   sin destruir lo que el usuario haya cambiado.
+  // El idioma del paciente MANDA sobre el país (una paciente mexicana puede
+  // necesitar su carta en inglés para su aseguradora de USA).
+  ['Pacientes', 'idioma',     'Idioma de sus documentos', 'es=Español|en=English|fr=Français|pt=Português'],
+  ['Pacientes', 'paisIdioma', 'País → idioma sugerido',   'México=es|Mexico=es|USA=en|Estados Unidos=en|United States=en|Canadá=fr|France=fr|Francia=fr|Brasil=pt|Brazil=pt'],
   // Catálogo de Empleados (módulo de Nómina). Antes eran texto libre — cada quien
   // escribía el puesto/área a su manera y no cuadraban los reportes por área.
   ['Empleados', 'puesto',    'Puesto',                 'Enfermera|Marketing|Embrióloga|Médico|Finanzas|Limpieza|Ventas|Administración|Recepción'],

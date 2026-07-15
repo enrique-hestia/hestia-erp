@@ -27,7 +27,8 @@ $FILES = @(
   'comprobantes','config','core','cxp_creditos','declaraciones',
   'devengado','facturacion','finance','gastosfijos','identificar','inventario','inventario_migracion',
   'lab','medical','nomina','novedades','origenes','poliza_concil','presupuesto','privacidad',
-  'productos_ss_id','prov_defaults','providers','recordatorios','scheduler','semanal','summary'
+  'productos_ss_id','prov_defaults','providers','recordatorios','scheduler','semanal','summary',
+  'traducciones'
 )
 
 if (-not (Test-Path $clasp)) { Write-Error 'clasp no encontrado. Corre: npm i -g @google/clasp'; exit 1 }

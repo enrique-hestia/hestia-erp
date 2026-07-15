@@ -730,6 +730,24 @@ function doGet(e) {
         textos: (e && e.parameter.textos) || '[]'
       }));
     }
+    /* ── TRADUCCIONES (catálogo = única fuente de verdad) ──────────────────
+       tradMap: lo que consulta el frontend ANTES de imprimir para decidir si
+       bloquea. Devuelve { normalizado(Descripcion) → traducción }. */
+    if (action === 'tradMap') {
+      if (typeof readTradMap !== 'function')
+        return jsonResponse({ ok:false, error:'Agrega traducciones.gs al proyecto de Apps Script y redespliega.' });
+      return jsonResponse(readTradMap((e && e.parameter.lang) || 'en'));
+    }
+    if (action === 'tradAuditar') {
+      if (typeof auditarTraduccionesProductos !== 'function')
+        return jsonResponse({ ok:false, error:'Agrega traducciones.gs al proyecto de Apps Script y redespliega.' });
+      return jsonResponse(auditarTraduccionesProductos({ lang: (e && e.parameter.lang) || '' }));
+    }
+    if (action === 'paisIdioma') {
+      if (typeof readPaisIdiomaMap !== 'function')
+        return jsonResponse({ ok:false, error:'Agrega traducciones.gs al proyecto de Apps Script y redespliega.' });
+      return jsonResponse(readPaisIdiomaMap());
+    }
     // Cobranza: configuración de descuentos por agencia (panel)
     if (action === 'cobDescCfg') {
       if (typeof cobDescCfgRead !== 'function')

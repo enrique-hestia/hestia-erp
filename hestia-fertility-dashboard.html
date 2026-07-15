@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.14.205 -->
+﻿<!-- app-build:2026.07.14.206 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -3762,6 +3762,66 @@ async function _agenciaPost(body){
 }
 
 /* ── Formulario agregar producto (página completa estilo Odoo) ── */
+/* ── Traducciones del producto (Catálogo General) ─────────────────────────────
+ * Aquí NACE la traducción con la que se imprimen los documentos del paciente.
+ * El traductor automático solo SUGIERE; lo que se guarda es lo que el usuario
+ * ve y confirma. Nada se guarda solo: es terminología médica y termina en un
+ * documento que lee la paciente (o su aseguradora).
+ * Los idiomas salen de HF_LANGS (menos español, que es el original), así que
+ * añadir uno nuevo no obliga a tocar este formulario. */
+function _prodTradSectionHTML(S,LBL){
+  var langs=HF_LANGS.filter(function(l){ return l!=='es'; });
+  var h='<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:20px;margin-bottom:16px">';
+  h+='<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:6px;display:flex;align-items:center;gap:8px">'
+    +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 8l6 6"/><path d="M4 14l6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="M22 22l-5-10-5 10"/><path d="M14 18h6"/></svg>Traducciones del producto</div>';
+  h+='<div style="font-size:11px;color:var(--color-text-muted,#6b7280);margin-bottom:12px;line-height:1.55">'
+    +'Así se llama este producto en los documentos del paciente que salen en otro idioma (estado de cuenta, cobranza, recibo, cancelación y carta de seguro). '
+    +'<b>Si está vacío, esos documentos NO se podrán imprimir</b> en ese idioma — a propósito: es preferible eso a mandarle a la paciente una carta en inglés con los servicios en español.</div>';
+  h+='<div style="display:grid;grid-template-columns:1fr;gap:12px">';
+  langs.forEach(function(l){
+    h+='<div><label '+LBL+'>'+_escH(HF_LANG_NAMES[l]||l)+' <span style="font-weight:400;color:var(--text-secondary,#9ca3af)">(Descripcion_'+l.toUpperCase()+')</span></label>'
+      +'<div style="display:flex;gap:7px;align-items:center">'
+      +'<input id="prod-f-trad-'+l+'" '+S+' placeholder="Nombre del producto en '+_escH(HF_LANG_NAMES[l]||l)+'">'
+      +'<button type="button" onclick="_prodTradSugerir(\''+l+'\')" title="Proponer una traducción automática para revisarla" '
+      +'style="white-space:nowrap;padding:8px 12px;background:var(--color-surface,#f3f4f6);color:var(--text-primary,#374151);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">✨ Sugerir</button>'
+      +'</div><div id="prod-f-trad-msg-'+l+'" style="font-size:10.5px;color:var(--text-secondary,#9ca3af);margin-top:4px;min-height:13px"></div></div>';
+  });
+  h+='</div></div>';
+  return h;
+}
+/* Pide una sugerencia y la deja EN EL CAMPO para que el usuario la revise.
+   No guarda nada: guardar sigue siendo un acto explícito del usuario. */
+function _prodTradSugerir(lang){
+  var desc=((document.getElementById('prod-f-desc')||{}).value||'').trim();
+  var msg=document.getElementById('prod-f-trad-msg-'+lang);
+  var inp=document.getElementById('prod-f-trad-'+lang);
+  if(!desc){ if(msg){ msg.style.color='#dc2626'; msg.textContent='Escribe primero la descripción en español.'; } return; }
+  if(msg){ msg.style.color='var(--text-secondary,#9ca3af)'; msg.textContent='Consultando…'; }
+  var url=APPS_SCRIPT_URL+(APPS_SCRIPT_URL.indexOf('?')>=0?'&':'?')
+    +'action=traducir&lang='+encodeURIComponent(lang)+'&textos='+encodeURIComponent(JSON.stringify([desc]))
+    +'&token='+encodeURIComponent(getToken())+'&_t='+Date.now();
+  fetch(url,{redirect:'follow'}).then(function(r){return r.json();}).then(function(d){
+    var sug=(d&&d.ok&&d.textos)?d.textos[desc]:null;
+    if(!sug){
+      if(msg){ msg.style.color='#b45309'; msg.textContent='El traductor no supo con este término. Escríbelo a mano.'; }
+      return;   // NO se rellena con el español disfrazado de traducción
+    }
+    if(inp) inp.value=sug;
+    if(msg){ msg.style.color='#b45309'; msg.textContent='Sugerencia automática — revísala antes de guardar.'; }
+  }).catch(function(e){
+    if(msg){ msg.style.color='#dc2626'; msg.textContent='No se pudo sugerir: '+e.message+'. Escríbela a mano.'; }
+  });
+}
+/* Recoge las traducciones del formulario para el payload de guardado. */
+function _prodTradPayload(){
+  var out={};
+  HF_LANGS.forEach(function(l){
+    if(l==='es') return;
+    var el=document.getElementById('prod-f-trad-'+l);
+    if(el) out[l.toUpperCase()]=String(el.value||'').trim();
+  });
+  return out;
+}
 function prodOpenForm(defaultCat) {
   var el = document.getElementById('view-productos-catalogo');
   if (!el) return;
@@ -3797,6 +3857,9 @@ function prodOpenForm(defaultCat) {
     +'<div><label '+LBL+'>Tipo</label><select id="prod-f-tipo" '+S+'><option value="">— Seleccionar —</option>'+opts(tipos)+'</select></div>'
     +'<div style="grid-column:1/-1"><label '+LBL+'>Notas adicionales</label><input id="prod-f-notas" '+S+' placeholder="Descripción detallada, indicaciones, etc."></div>'
     +'</div></div>';
+
+  // ── Sección: Traducciones (el producto es dueño de su nombre en otro idioma) ──
+  h += _prodTradSectionHTML(S,LBL);
 
   // Sección: Precio
   h += '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:20px;margin-bottom:16px">';
@@ -4049,6 +4112,12 @@ function prodEditForm(jsonStr) {
   _selEnsureValue('prod-f-cat', p.categoria||'');
   _selEnsureValue('prod-f-tipo', p.tipo||'');
   if(_el('prod-f-notas')) _el('prod-f-notas').value = p.notas||'';
+  // Traducciones ya confirmadas (readProductos las devuelve en p.traducciones)
+  HF_LANGS.forEach(function(l){
+    if(l==='es') return;
+    var te=_el('prod-f-trad-'+l);
+    if(te) te.value=(p.traducciones&&p.traducciones[l.toUpperCase()])||'';
+  });
   if(_el('prod-f-precio')) _el('prod-f-precio').value = p.precio||'';
   if(_el('prod-f-activo')) _el('prod-f-activo').value = p.activo?'true':'false';
   if(_el('prod-f-sku')) _el('prod-f-sku').value = p.sku||'';
@@ -4096,6 +4165,7 @@ async function prodSubmitEdit(productoId) {
       moneda: (document.getElementById('prod-f-moneda')||{}).value||'MXN',
       vigencia: (document.getElementById('prod-f-vigencia')||{}).value||'',
       lista: (document.getElementById('prod-f-lista')||{}).value||'General',
+      traducciones: _prodTradPayload(),
       usuario: s.email||'sistema'
     };
     var invChk = document.getElementById('prod-f-inventariable');
@@ -4195,6 +4265,7 @@ async function prodSubmitForm() {
       precio: precio,
       moneda: moneda,
       vigencia: vigencia,
+      traducciones: _prodTradPayload(),
       usuario: s.email||'sistema'
     };
     var invChk2 = document.getElementById('prod-f-inventariable');
@@ -4920,37 +4991,79 @@ function ingCancelPrintFromRow(opId) {
    ─────────────────────────────────────────────────────────────────────── */
 function ingCancelPrint(op, info) {
   info = info || {};
-  var hoy = new Date().toISOString().substring(0, 10);
-  var imp = (info.importeDevolver != null) ? info.importeDevolver : (op.pagado || 0);
-  var medio = info.medioPago || op.formaPago || '';
-  var desc = (op.productos && op.productos.length)
-    ? op.productos.map(function (p) { return p.producto; }).join(', ')
-    : 'Servicio contratado';
-
-  var rows = [];
-  rows.push(['Operación', op.id || '—']);
-  rows.push(['Descripción', desc]);
-  rows.push(['Fecha de la operación', (info.fechaVenta || op.fecha || '').substring(0, 10) || '—']);
-  if (info.opBanco) rows.push(['N.º de operación', info.opBanco]);
-  if (medio) rows.push(['Medio de pago', medio]);
-  rows.push(['Fecha de cancelación', (info.fechaHora || hoy).substring(0, 10)]);
-
-  hfReportPrint('cancelacion', {
-    title: 'Comprobante de cancelación',
-    subject: info.paciente || op.paciente || '',
-    period: 'Emitido el ' + hoy,
-    generado: 'Hestia ERP · ' + hoy + (info.usuario ? ' · ' + info.usuario : ''),
-    kpis: [{ value: _ingFC(imp), label: 'Importe a devolver', sub: 'Reembolso en proceso' }],
-    cols: ['Concepto', 'Detalle'],
-    rows: rows,
-    totalLabel: 'Importe a devolver',
-    totalValue: _ingFC(imp),
-    nota: 'Su cancelación está confirmada. El reembolso por ' + _ingFC(imp)
+  hfReportPrintAsk('cancelacion', info.paciente || op.paciente || '', function (lang) {
+    return _ingCancelBuildData(op, info, lang);
+  });
+}
+/* Aviso legal del comprobante de cancelación, por idioma. Es texto que lee la
+   paciente: va en el diccionario, no concatenado a mano en español. */
+var _CANCEL_NOTA = {
+  es: function (m) { return 'Su cancelación está confirmada. El reembolso por ' + m
         + ' ya fue procesado por Hestia Fertility y se encuentra en trámite ante la institución bancaria emisora de su medio de pago. '
         + 'El tiempo en que el importe se vea reflejado en su estado de cuenta depende exclusivamente de su banco '
         + 'y suele tomar entre 5 y 20 días hábiles. No se requiere ninguna gestión adicional de su parte. '
-        + 'Agradecemos su confianza y quedamos a sus órdenes para cualquier aclaración.'
-  });
+        + 'Agradecemos su confianza y quedamos a sus órdenes para cualquier aclaración.'; },
+  en: function (m) { return 'Your cancellation is confirmed. The refund of ' + m
+        + ' has been processed by Hestia Fertility and is now being handled by the bank that issued your payment method. '
+        + 'How long it takes to appear on your statement depends solely on your bank, and usually takes between 5 and 20 business days. '
+        + 'No further action is required on your part. '
+        + 'We thank you for your trust and remain at your disposal for any questions.'; },
+  fr: function (m) { return 'Votre annulation est confirmée. Le remboursement de ' + m
+        + ' a été traité par Hestia Fertility et est en cours auprès de l’établissement bancaire émetteur de votre moyen de paiement. '
+        + 'Le délai d’apparition sur votre relevé dépend exclusivement de votre banque et prend généralement entre 5 et 20 jours ouvrables. '
+        + 'Aucune démarche supplémentaire n’est requise de votre part. '
+        + 'Nous vous remercions de votre confiance et restons à votre disposition pour toute question.'; },
+  pt: function (m) { return 'Seu cancelamento está confirmado. O reembolso de ' + m
+        + ' já foi processado pela Hestia Fertility e está em trâmite junto à instituição bancária emissora do seu meio de pagamento. '
+        + 'O prazo para que o valor apareça no seu extrato depende exclusivamente do seu banco e costuma levar de 5 a 20 dias úteis. '
+        + 'Nenhuma providência adicional é necessária de sua parte. '
+        + 'Agradecemos sua confiança e ficamos à disposição para qualquer esclarecimento.'; }
+};
+function _ingCancelBuildData(op, info, lang) {
+  var T = hfDict('cancelacion', lang);
+  var hoy = new Date().toISOString().substring(0, 10);
+  var imp = (info.importeDevolver != null) ? info.importeDevolver : (op.pagado || 0);
+  var medio = info.medioPago || op.formaPago || '';
+  // En español, formato de siempre (_ingFC) y fechas en crudo ISO como antes: el
+  // comprobante en español queda idéntico. En otros idiomas, el `loc` que toca.
+  var _f  = function (n) { return lang === 'es' ? _ingFC(n) : hfFmtMoney(Math.abs(Number(n) || 0), lang); };
+  var _fd = function (s) { return lang === 'es' ? (String(s || '').substring(0, 10) || '—') : hfFmtDate(s, lang); };
+  // Cada producto de la operación es un concepto que hay que resolver contra el
+  // catálogo. Se listan por separado (una fila por producto) en vez de un
+  // "a, b, c" pegado: así el embudo puede traducir cada uno y sabemos cuál falta.
+  var prods = (op.productos && op.productos.length)
+    ? op.productos.map(function (p) { return String(p.producto || '').trim(); }).filter(Boolean)
+    : [];
+
+  var rows = [], conceptos = [];
+  rows.push([T.operacion, op.id || '—']);                        conceptos.push(null);
+  if (prods.length) {
+    prods.forEach(function (p, i) {
+      rows.push([i === 0 ? T.descripcion : '', p]);              conceptos.push(p);
+    });
+  } else {
+    rows.push([T.descripcion, T.servicioContratado]); conceptos.push(null);
+  }
+  rows.push([T.fechaOperacion, _fd((info.fechaVenta || op.fecha || '').substring(0, 10))]); conceptos.push(null);
+  if (info.opBanco) { rows.push([T.numOperacion, info.opBanco]); conceptos.push(null); }
+  if (medio)        { rows.push([T.medioPago, medio]);           conceptos.push(null); }
+  rows.push([T.fechaCancelacion, _fd((info.fechaHora || hoy).substring(0, 10))]); conceptos.push(null);
+
+  var notaFn = _CANCEL_NOTA[lang] || _CANCEL_NOTA.es;
+  return {
+    title: T.compCancelacion,
+    subject: info.paciente || op.paciente || '',
+    period: T.emitidoEl + ' ' + (lang === 'es' ? hoy : hfFmtDate(hoy, lang)),
+    generado: T.generadoPor + ' · ' + (lang === 'es' ? hoy : hfFmtDate(hoy, lang)) + (info.usuario ? ' · ' + info.usuario : ''),
+    kpis: [{ value: _f(imp), label: T.importeDevolver, sub: T.reembolsoProceso }],
+    cols: [T.concepto, T.detalle],
+    rows: rows,
+    conceptCol: 1,
+    rowConcepts: conceptos,
+    totalLabel: T.importeDevolver,
+    totalValue: _f(imp),
+    nota: notaFn(_f(imp))
+  };
 }
 
 async function ingOpenDrawer() {
@@ -23118,7 +23231,445 @@ function hfSubirFirma(input){
   rd.readAsDataURL(f);
 }
 function hfQuitarFirma(){ if(confirm('¿Quitar la firma guardada?')){ hfSigSet(''); if(typeof _renderReportesPanel==='function') _renderReportesPanel(); } }
-function hfReportPrint(reportId,data){
+/* ═══════════════════════════════════════════════════════════════════════════
+ * IDIOMA DE LOS DOCUMENTOS DEL PACIENTE
+ * ═══════════════════════════════════════════════════════════════════════════
+ * Los 5 reportes que ve el paciente (estado-cuenta, cobranza, nota, cancelacion
+ * y seguro) salen 100% en su idioma — incluidos los NOMBRES DE LOS PRODUCTOS.
+ *
+ * UNA sola fuente por cosa:
+ *   · Textos fijos  → el diccionario de aquí abajo (HF_LOC + HF_L_COMMON + SEG_L).
+ *   · Nombre de un producto en otro idioma → el CATÁLOGO (BD_Productos,
+ *     columna Descripcion_<LANG>). Ver traducciones.gs. Ni un mapa hardcodeado
+ *     más: tener dos ya nos costó que divergieran entre sí.
+ *   · Idioma del paciente → su ficha (servidor), NO localStorage.
+ *
+ * REGLA DURA: si un producto del documento no tiene traducción confirmada en el
+ * catálogo, el documento NO SE IMPRIME. Nunca se cae a español en silencio.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Locale por idioma — ÚNICO lugar donde se decide cómo se ven fechas y montos.
+   SEG_L trae su propio `loc` por razones históricas; hfLoc() manda sobre él. */
+var HF_LOC={es:'es-MX',en:'en-US',fr:'fr-FR',pt:'pt-BR'};
+var HF_LANGS=['es','en','fr','pt'];
+var HF_LANG_NAMES={es:'Español',en:'English',fr:'Français',pt:'Português'};
+function hfLoc(lang){ return HF_LOC[lang]||HF_LOC.es; }
+function hfLangOk(l){ return HF_LANGS.indexOf(String(l||'').toLowerCase().substring(0,2))>-1; }
+
+/* Textos COMUNES a los reportes del paciente. Los específicos de la Carta de
+   Seguro siguen en SEG_L (es su sección del mismo diccionario, no otro sistema).
+   hfDict(reportId,lang) fusiona comunes + sección del reporte. */
+var HF_L_COMMON={
+  es:{ fecha:'Fecha', concepto:'Concepto', categoria:'Categoría', formaPago:'Forma de pago',
+       importe:'Importe', cantidad:'Cant', total:'Total', pagado:'Pagado', saldo:'Saldo',
+       detalle:'Detalle', emitidoEl:'Emitido el', generadoPor:'Hestia ERP',
+       totalFacturado:'Total facturado', totalPagado:'Total pagado', nosDebe:'Nos debe',
+       saldoAFavor:'Saldo a favor', alCorriente:'Al corriente', movimientos:'Movimientos',
+       estadoCuenta:'Estado de cuenta', estadoCobranza:'Estado de cobranza',
+       totalPorCobrar:'Total por cobrar', saldos:'Saldos', suscripcion:'Suscripción',
+       alDia:'Al día', totalVendido:'Total vendido', porCobrarDetalle:'Por cobrar (detalle)',
+       netoACobrar:'Neto a cobrar', bruto:'Bruto', descuentoVol:'Descuento vol.',
+       soloPendiente:'Solo lo pendiente por cobrar', historicoCompleto:'Histórico completo',
+       datosDeposito:'Datos para depósito', banco:'Banco', beneficiario:'Beneficiario',
+       cuenta:'Cuenta', clabe:'CLABE', descuento:'Descuento',
+       compCancelacion:'Comprobante de cancelación', operacion:'Operación',
+       descripcion:'Descripción', fechaOperacion:'Fecha de la operación',
+       numOperacion:'N.º de operación', medioPago:'Medio de pago',
+       fechaCancelacion:'Fecha de cancelación', importeDevolver:'Importe a devolver',
+       reembolsoProceso:'Reembolso en proceso', suscripcionCrio:'Suscripción crío',
+       servicioContratado:'Servicio contratado' },
+  en:{ fecha:'Date', concepto:'Description', categoria:'Category', formaPago:'Payment method',
+       importe:'Amount', cantidad:'Qty', total:'Total', pagado:'Paid', saldo:'Balance',
+       detalle:'Detail', emitidoEl:'Issued on', generadoPor:'Hestia ERP',
+       totalFacturado:'Total billed', totalPagado:'Total paid', nosDebe:'Balance due',
+       saldoAFavor:'Credit balance', alCorriente:'Paid in full', movimientos:'Transactions',
+       estadoCuenta:'Account statement', estadoCobranza:'Collection statement',
+       totalPorCobrar:'Total receivable', saldos:'Balances', suscripcion:'Subscription',
+       alDia:'Up to date', totalVendido:'Total billed', porCobrarDetalle:'Receivable (detail)',
+       netoACobrar:'Net receivable', bruto:'Gross', descuentoVol:'Volume discount',
+       soloPendiente:'Outstanding balance only', historicoCompleto:'Full history',
+       datosDeposito:'Bank transfer details', banco:'Bank', beneficiario:'Beneficiary',
+       cuenta:'Account', clabe:'CLABE', descuento:'Discount',
+       compCancelacion:'Cancellation receipt', operacion:'Transaction',
+       descripcion:'Description', fechaOperacion:'Transaction date',
+       numOperacion:'Reference no.', medioPago:'Payment method',
+       fechaCancelacion:'Cancellation date', importeDevolver:'Amount to be refunded',
+       reembolsoProceso:'Refund in progress', suscripcionCrio:'Cryostorage subscription',
+       servicioContratado:'Contracted service' },
+  fr:{ fecha:'Date', concepto:'Description', categoria:'Catégorie', formaPago:'Mode de paiement',
+       importe:'Montant', cantidad:'Qté', total:'Total', pagado:'Payé', saldo:'Solde',
+       detalle:'Détail', emitidoEl:'Émis le', generadoPor:'Hestia ERP',
+       totalFacturado:'Total facturé', totalPagado:'Total payé', nosDebe:'Solde dû',
+       saldoAFavor:'Solde créditeur', alCorriente:'Soldé', movimientos:'Opérations',
+       estadoCuenta:'Relevé de compte', estadoCobranza:'État des créances',
+       totalPorCobrar:'Total à recevoir', saldos:'Soldes', suscripcion:'Abonnement',
+       alDia:'À jour', totalVendido:'Total facturé', porCobrarDetalle:'À recevoir (détail)',
+       netoACobrar:'Net à recevoir', bruto:'Brut', descuentoVol:'Remise de volume',
+       soloPendiente:'Solde restant dû uniquement', historicoCompleto:'Historique complet',
+       datosDeposito:'Coordonnées bancaires', banco:'Banque', beneficiario:'Bénéficiaire',
+       cuenta:'Compte', clabe:'CLABE', descuento:'Remise',
+       compCancelacion:'Justificatif d’annulation', operacion:'Opération',
+       descripcion:'Description', fechaOperacion:'Date de l’opération',
+       numOperacion:'N° de référence', medioPago:'Mode de paiement',
+       fechaCancelacion:'Date d’annulation', importeDevolver:'Montant à rembourser',
+       reembolsoProceso:'Remboursement en cours', suscripcionCrio:'Abonnement cryoconservation',
+       servicioContratado:'Service contracté' },
+  pt:{ fecha:'Data', concepto:'Descrição', categoria:'Categoria', formaPago:'Forma de pagamento',
+       importe:'Valor', cantidad:'Qtd', total:'Total', pagado:'Pago', saldo:'Saldo',
+       detalle:'Detalhe', emitidoEl:'Emitido em', generadoPor:'Hestia ERP',
+       totalFacturado:'Total faturado', totalPagado:'Total pago', nosDebe:'Saldo devedor',
+       saldoAFavor:'Saldo credor', alCorriente:'Quitado', movimientos:'Movimentações',
+       estadoCuenta:'Extrato de conta', estadoCobranza:'Extrato de cobrança',
+       totalPorCobrar:'Total a receber', saldos:'Saldos', suscripcion:'Assinatura',
+       alDia:'Em dia', totalVendido:'Total faturado', porCobrarDetalle:'A receber (detalhe)',
+       netoACobrar:'Líquido a receber', bruto:'Bruto', descuentoVol:'Desconto por volume',
+       soloPendiente:'Somente o saldo em aberto', historicoCompleto:'Histórico completo',
+       datosDeposito:'Dados para depósito', banco:'Banco', beneficiario:'Beneficiário',
+       cuenta:'Conta', clabe:'CLABE', descuento:'Desconto',
+       compCancelacion:'Comprovante de cancelamento', operacion:'Operação',
+       descripcion:'Descrição', fechaOperacion:'Data da operação',
+       numOperacion:'N.º da operação', medioPago:'Forma de pagamento',
+       fechaCancelacion:'Data de cancelamento', importeDevolver:'Valor a devolver',
+       reembolsoProceso:'Reembolso em andamento', suscripcionCrio:'Assinatura de criopreservação',
+       servicioContratado:'Serviço contratado' }
+};
+/* Sección del diccionario del RECIBO (nota). Igual que SEG_L para la carta: es
+   una sección más del mismo diccionario, no otro sistema. */
+var NOTA_L={
+  es:{ nTitulo:'RECIBO DE PAGO', nNoFiscal:'Documento informativo · NO es un comprobante fiscal (CFDI)',
+       nFolio:'Folio', nRecibiDe:'Recibí de', nCantidad:'La cantidad de', nPorConcepto:'por concepto de los servicios que se detallan:',
+       nRecibiConforme:'Recibí conforme', nRecibi:'Recibí',
+       nLegal:'Este recibo ampara únicamente el pago recibido y no sustituye a la factura (CFDI). Si requiere factura, solicítela a facturas@hestiafertility.com.' },
+  en:{ nTitulo:'PAYMENT RECEIPT', nNoFiscal:'Informational document · NOT a tax receipt (CFDI)',
+       nFolio:'Receipt no.', nRecibiDe:'Received from', nCantidad:'The amount of', nPorConcepto:'for the services detailed below:',
+       nRecibiConforme:'Received in good order', nRecibi:'Received',
+       nLegal:'This receipt covers the payment received only and does not replace a tax invoice (CFDI). If you require an invoice, please request it at facturas@hestiafertility.com.' },
+  fr:{ nTitulo:'REÇU DE PAIEMENT', nNoFiscal:'Document informatif · N’est PAS un justificatif fiscal (CFDI)',
+       nFolio:'N° de reçu', nRecibiDe:'Reçu de', nCantidad:'La somme de', nPorConcepto:'au titre des services détaillés ci-dessous :',
+       nRecibiConforme:'Reçu pour accord', nRecibi:'Reçu',
+       nLegal:'Ce reçu ne couvre que le paiement reçu et ne remplace pas la facture fiscale (CFDI). Si vous avez besoin d’une facture, demandez-la à facturas@hestiafertility.com.' },
+  pt:{ nTitulo:'RECIBO DE PAGAMENTO', nNoFiscal:'Documento informativo · NÃO é um comprovante fiscal (CFDI)',
+       nFolio:'N.º do recibo', nRecibiDe:'Recebi de', nCantidad:'A quantia de', nPorConcepto:'referente aos serviços detalhados a seguir:',
+       nRecibiConforme:'Recebi conforme', nRecibi:'Recebi',
+       nLegal:'Este recibo ampara somente o pagamento recebido e não substitui a nota fiscal (CFDI). Se precisar de nota fiscal, solicite-a em facturas@hestiafertility.com.' }
+};
+/* Secciones específicas por reporte. `seguro` reusa SEG_L (que ya traía sus ~30
+   claves legales en es/en/fr/pt) — no se duplica ni se reescribe. */
+function _hfSecciones(){
+  return {
+    seguro: (typeof SEG_L!=='undefined') ? SEG_L : null,
+    nota:   NOTA_L
+  };
+}
+function hfDict(reportId,lang){
+  lang=hfLangOk(lang)?String(lang).toLowerCase().substring(0,2):'es';
+  var base=HF_L_COMMON[lang]||HF_L_COMMON.es;
+  var out={}; for(var k in base){ if(base.hasOwnProperty(k)) out[k]=base[k]; }
+  var sec=_hfSecciones()[reportId];
+  if(sec && sec[lang]){ for(var k2 in sec[lang]){ if(sec[lang].hasOwnProperty(k2)) out[k2]=sec[lang][k2]; } }
+  out.loc=hfLoc(lang); out._lang=lang;
+  return out;
+}
+/* Fecha y monto SIEMPRE con el loc del idioma del documento. */
+function hfFmtDate(s,lang){
+  if(!s||s==='—') return '—';
+  try{ return new Date(String(s).substring(0,10)+'T12:00:00').toLocaleDateString(hfLoc(lang),{day:'2-digit',month:'short',year:'numeric'}); }
+  catch(e){ return String(s); }
+}
+function hfFmtMoney(n,lang,sym){
+  var v=parseFloat(n)||0;
+  return (sym||'$')+v.toLocaleString(hfLoc(lang),{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+/* ── Normalización: idéntica a _tradNorm del backend (traducciones.gs) ─────── */
+function hfTradNorm(s){ return String(s==null?'':s).toLowerCase()
+  .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i').replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').replace(/ñ/g,'n')
+  .replace(/\s+/g,' ').trim(); }
+
+/* ── Mapa de traducciones del CATÁLOGO (única autoridad al imprimir) ───────── */
+var _hfTradCache={};      // lang → {norm: traduccion}
+var _hfTradInflight={};   // lang → Promise
+function hfTradPreload(lang){
+  lang=String(lang||'').toLowerCase().substring(0,2);
+  if(lang==='es'||!hfLangOk(lang)) return Promise.resolve({});
+  if(_hfTradCache[lang]) return Promise.resolve(_hfTradCache[lang]);
+  if(_hfTradInflight[lang]) return _hfTradInflight[lang];
+  var url=APPS_SCRIPT_URL+(APPS_SCRIPT_URL.indexOf('?')>=0?'&':'?')
+    +'action=tradMap&lang='+encodeURIComponent(lang)+'&token='+encodeURIComponent(getToken())+'&_t='+Date.now();
+  _hfTradInflight[lang]=fetch(url,{redirect:'follow'}).then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.ok) throw new Error((d&&d.error)||'No se pudo leer el catálogo de traducciones.');
+    _hfTradCache[lang]=d.map||{};
+    delete _hfTradInflight[lang];
+    return _hfTradCache[lang];
+  }).catch(function(e){
+    delete _hfTradInflight[lang];
+    // NO se resuelve a {} silenciosamente: un mapa vacío por error de red haría
+    // que "no hay traducciones" se confunda con "todo falta" y, peor, que algún
+    // camino imprimiera español. El error sube y la pantalla de bloqueo lo dice.
+    throw e;
+  });
+  return _hfTradInflight[lang];
+}
+function hfTradDrop(lang){ if(lang) delete _hfTradCache[lang]; else _hfTradCache={}; }
+
+/* Resuelve una lista de conceptos contra el mapa ya cargado.
+   → {map:{original:traduccion}, faltan:[originales sin traducción]} */
+function hfTradResolve(lang,conceptos,catMap){
+  var map={},faltan=[],vistos={};
+  (conceptos||[]).forEach(function(c){
+    var orig=String(c==null?'':c).trim();
+    if(!orig||orig==='—') return;
+    if(vistos[orig]) return; vistos[orig]=true;
+    var hit=catMap[hfTradNorm(orig)];
+    if(hit) map[orig]=hit; else faltan.push(orig);
+  });
+  return {map:map,faltan:faltan};
+}
+
+/* ── EL BLOQUEO ────────────────────────────────────────────────────────────────
+   Si falta la traducción de aunque sea UN concepto, el documento no sale. Pero
+   bloquear no es abandonar: la pantalla deja escribir la traducción ahí mismo
+   (con la sugerencia automática precargada para editar) y la guarda AL CATÁLOGO,
+   así que se arregla una vez y para siempre, no solo para este documento.
+
+   `onReady(map)` se invoca desde el clic en "Imprimir" del modal → sigue siendo
+   un gesto del usuario, así que el pop-up no se bloquea. */
+function hfTradGate(lang,conceptos,onReady){
+  lang=String(lang||'es').toLowerCase().substring(0,2);
+  if(lang==='es'){ onReady({}); return; }
+  if(!hfLangOk(lang)){ alert('Idioma no soportado: '+lang); return; }
+  // Camino rápido SÍNCRONO: si el mapa ya está en memoria y no falta nada, se
+  // imprime sin modal. Importa que sea síncrono: así el `window.open` sigue
+  // colgando del clic del usuario y el bloqueador de pop-ups no lo mata.
+  var cached=_hfTradCache[lang];
+  if(cached){
+    var r0=hfTradResolve(lang,conceptos,cached);
+    if(!r0.faltan.length){ onReady(r0.map); return; }
+  }
+  _hfGateOpen(lang,conceptos,onReady,null);
+  hfTradPreload(lang).then(function(catMap){
+    var r=hfTradResolve(lang,conceptos,catMap);
+    if(!r.faltan.length){ _hfGateClose(); onReady(r.map); return; }   // todo listo → imprime directo
+    _hfGateOpen(lang,conceptos,onReady,r);
+    _hfGateSugerir(lang,r.faltan);
+  }).catch(function(e){
+    _hfGateError(e.message||String(e));
+  });
+}
+var _hfGateCtx=null;
+function _hfGateEl(){
+  var m=document.getElementById('hf-trad-gate');
+  if(!m){ m=document.createElement('div'); m.id='hf-trad-gate'; document.body.appendChild(m); }
+  m.style.cssText='position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);padding:16px';
+  return m;
+}
+function _hfGateClose(){ var m=document.getElementById('hf-trad-gate'); if(m) m.remove(); _hfGateCtx=null; }
+function _hfGateError(msg){
+  var m=_hfGateEl();
+  m.innerHTML='<div style="background:#fff;border-radius:14px;padding:24px;width:min(520px,94vw);box-shadow:0 20px 60px rgba(0,0,0,.3)">'
+    +'<div style="font-size:15px;font-weight:800;color:#b91c1c;margin-bottom:8px">No se puede imprimir en otro idioma</div>'
+    +'<div style="font-size:12.5px;color:#374151;line-height:1.6;margin-bottom:6px">No se pudo consultar el catálogo de traducciones, así que no hay forma de saber si el documento saldría completo.</div>'
+    +'<div style="font-size:12px;color:#6b7280;background:#f9fafb;border-radius:8px;padding:9px 11px;margin-bottom:14px">'+_escH(msg)+'</div>'
+    +'<div style="font-size:12px;color:#6b7280;margin-bottom:14px">El documento <b>no se imprimió</b>. Antes salía en español sin avisar; eso ya no pasa. Revisa tu conexión o pide que se redespliegue <code>traducciones.gs</code>.</div>'
+    +'<div style="display:flex;justify-content:flex-end;gap:8px">'
+    +'<button onclick="_hfGateClose()" style="padding:8px 18px;background:#111;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">Entendido</button></div></div>';
+}
+function _hfGateOpen(lang,conceptos,onReady,res){
+  _hfGateCtx={lang:lang,conceptos:conceptos,onReady:onReady,res:res};
+  var m=_hfGateEl();
+  if(!res){
+    m.innerHTML='<div style="background:#fff;border-radius:14px;padding:26px;width:min(420px,94vw);box-shadow:0 20px 60px rgba(0,0,0,.3);text-align:center">'
+      +'<div style="font-size:13.5px;font-weight:700;color:#111;margin-bottom:6px">Revisando traducciones…</div>'
+      +'<div style="font-size:12px;color:#6b7280">Comprobando que todos los conceptos del documento existan en '+_escH(HF_LANG_NAMES[lang]||lang)+'.</div></div>';
+    return;
+  }
+  var rows=res.faltan.map(function(t,i){
+    return '<div style="border:1px solid #e5e7eb;border-radius:9px;padding:10px 12px;margin-bottom:8px;background:#fff">'
+      +'<div style="font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#9ca3af;margin-bottom:3px">Concepto en español</div>'
+      +'<div style="font-size:13px;font-weight:600;color:#111;margin-bottom:8px">'+_escH(t)+'</div>'
+      +'<label style="display:block;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#9ca3af;margin-bottom:3px">Cómo se llama en '+_escH(HF_LANG_NAMES[lang]||lang)+' *</label>'
+      +'<input id="hf-gate-in-'+i+'" data-orig="'+_escH(t)+'" placeholder="Escribe la traducción…" '
+      +'style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;background:#fff;color:#111;font-family:inherit">'
+      +'<div id="hf-gate-sg-'+i+'" style="font-size:10.5px;color:#9ca3af;margin-top:4px;min-height:13px"></div>'
+      +'</div>';
+  }).join('');
+  m.innerHTML='<div style="background:#fff;border-radius:14px;padding:24px;width:min(620px,94vw);max-height:92vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">'
+    +'<div style="font-size:15.5px;font-weight:800;color:#b45309;margin-bottom:6px">Faltan traducciones — el documento no se imprimió</div>'
+    +'<div style="font-size:12.5px;color:#374151;line-height:1.6;margin-bottom:14px">'
+      +'Estos conceptos no tienen nombre en <b>'+_escH(HF_LANG_NAMES[lang]||lang)+'</b> en el catálogo. Si el documento saliera así, tendría el texto en '
+      +_escH(HF_LANG_NAMES[lang]||lang)+' y los servicios en español. Escríbelos aquí y se guardan <b>en el catálogo del producto</b>: se arregla para siempre, no solo para este documento.</div>'
+    +'<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 11px;font-size:11.5px;color:#92400e;margin-bottom:14px">'
+      +'La sugerencia automática es solo eso: <b>una sugerencia</b>. Revísala antes de guardar — es terminología médica y va en un documento del paciente.</div>'
+    +rows
+    +'<div id="hf-gate-msg" style="font-size:12px;min-height:16px;margin:6px 0"></div>'
+    +'<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">'
+      +'<button onclick="_hfGateClose()" style="padding:9px 16px;border:1.5px solid #e5e7eb;border-radius:8px;background:#fff;color:#374151;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">Cancelar</button>'
+      +'<button id="hf-gate-save" onclick="_hfGateGuardar()" style="padding:9px 22px;background:#c46a7a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">Guardar al catálogo e imprimir</button>'
+    +'</div></div>';
+}
+/* Sugerencia automática precargada, para EDITAR — nunca se guarda sola. */
+function _hfGateSugerir(lang,faltan){
+  var url=APPS_SCRIPT_URL+(APPS_SCRIPT_URL.indexOf('?')>=0?'&':'?')
+    +'action=traducir&lang='+encodeURIComponent(lang)+'&textos='+encodeURIComponent(JSON.stringify(faltan))
+    +'&token='+encodeURIComponent(getToken())+'&_t='+Date.now();
+  fetch(url,{redirect:'follow'}).then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.ok||!d.textos) return;
+    faltan.forEach(function(t,i){
+      var sg=d.textos[t]; if(!sg) return;
+      var inp=document.getElementById('hf-gate-in-'+i);
+      var lbl=document.getElementById('hf-gate-sg-'+i);
+      if(inp&&!inp.value){ inp.value=sg; }
+      if(lbl) lbl.textContent='Sugerencia automática — revísala y corrígela si hace falta.';
+    });
+  }).catch(function(){ /* sin sugerencia: el usuario la escribe. No desbloquea nada. */ });
+}
+function _hfGateGuardar(){
+  var ctx=_hfGateCtx; if(!ctx||!ctx.res) return;
+  var msg=document.getElementById('hf-gate-msg');
+  var btn=document.getElementById('hf-gate-save');
+  var items=[],vacios=0;
+  ctx.res.faltan.forEach(function(t,i){
+    var inp=document.getElementById('hf-gate-in-'+i);
+    var v=inp?String(inp.value||'').trim():'';
+    if(!v){ vacios++; if(inp) inp.style.borderColor='#dc2626'; return; }
+    if(inp) inp.style.borderColor='#e5e7eb';
+    items.push({descripcion:t,traduccion:v,lang:ctx.lang});
+  });
+  if(vacios){ if(msg){ msg.style.color='#dc2626'; msg.textContent='Faltan '+vacios+' traducción(es). El documento no puede salir incompleto.'; } return; }
+  if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  if(msg){ msg.style.color='#6b7280'; msg.textContent='Guardando en el catálogo…'; }
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({
+    action:'saveTraduccionesBatch', lang:ctx.lang, items:items,
+    token:getToken(), usuario:(getSession()||{}).email||'sistema'
+  })}).then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.ok) throw new Error((d&&(d.error||(d.errores||[]).join('; ')))||'No se pudo guardar.');
+    hfTradDrop(ctx.lang);                       // el catálogo cambió → recargar
+    return hfTradPreload(ctx.lang);
+  }).then(function(catMap){
+    var r2=hfTradResolve(ctx.lang,ctx.conceptos,catMap);
+    if(r2.faltan.length) throw new Error('Siguen sin traducción: '+r2.faltan.join(', '));
+    var cb=ctx.onReady; _hfGateClose(); cb(r2.map);   // desbloquea e imprime
+  }).catch(function(e){
+    if(msg){ msg.style.color='#dc2626'; msg.textContent='Error: '+(e.message||e); }
+    if(btn){ btn.disabled=false; btn.textContent='Guardar al catálogo e imprimir'; }
+  });
+}
+
+/* ── IDIOMA DEL PACIENTE — tres niveles, cada uno pisa al anterior ────────────
+   1) País (regla administrable Config_Dropdowns → Pacientes|paisIdioma)
+   2) Campo `Idioma` de su ficha  → MANDA sobre el país
+   3) El diálogo de impresión     → MANDA sobre ambos, solo para ESE documento
+   Nunca vive en localStorage: es del paciente, no del navegador. */
+function hfPaisIdiomaMap(){
+  var v=_ddVals('Pacientes','paisIdioma',['México=es','USA=en']);
+  var m={};
+  v.forEach(function(par){
+    var ix=String(par).indexOf('='); if(ix<1) return;
+    var p=hfTradNorm(String(par).substring(0,ix));
+    var l=String(par).substring(ix+1).trim().toLowerCase().substring(0,2);
+    if(p&&l) m[p]=l;
+  });
+  return m;
+}
+function hfIdiomaDePais(pais){ return hfPaisIdiomaMap()[hfTradNorm(pais)]||''; }
+/* Idioma que declara una ficha ya leída (readPacienteFull devuelve la fila entera
+   keyed por encabezado, así que `Idioma` y `País` llegan solos).
+   Devuelve '' si la ficha NO dice nada — que es distinto de "dice español". Esa
+   diferencia importa: la Carta de Seguro quiere caer a inglés cuando no se sabe,
+   y el recibo a español. Si esto devolviera 'es' a secas, no habría forma de
+   distinguir "es mexicana" de "no tengo ni idea". */
+function hfIdiomaDeFicha(row){
+  if(!row) return '';
+  var explicito=String(row['Idioma']||row['idioma']||'').trim().toLowerCase().substring(0,2);
+  if(hfLangOk(explicito)) return explicito;               // el campo del paciente MANDA
+  var porPais=hfIdiomaDePais(row['País']||row['Pais']||row['pais']||'');
+  return hfLangOk(porPais)?porPais:'';                    // el país solo SUGIERE
+}
+/* Lee la ficha del paciente y resuelve su idioma ('' = la ficha no dice nada).
+   Cachea por nombre. */
+var _hfPacLangCache={};
+function hfIdiomaPaciente(nombre){
+  var k=String(nombre||'').trim().toLowerCase();
+  if(!k) return Promise.resolve('');
+  if(_hfPacLangCache[k]!=null) return Promise.resolve(_hfPacLangCache[k]);
+  var url=APPS_SCRIPT_URL+(APPS_SCRIPT_URL.indexOf('?')>=0?'&':'?')
+    +'action=pacienteFull&paciente='+encodeURIComponent(nombre)+'&token='+encodeURIComponent(getToken())+'&_t='+Date.now();
+  return fetch(url,{redirect:'follow'}).then(function(r){return r.json();}).then(function(d){
+    var lang=(d&&d.ok&&d.row)?hfIdiomaDeFicha(d.row):'';
+    _hfPacLangCache[k]=lang;
+    if(lang&&lang!=='es') hfTradPreload(lang).catch(function(){});   // adelanta el mapa
+    return lang;
+  }).catch(function(){ return ''; });   // sin ficha → el llamador aplica su default
+}
+/* Deja el selector de un diálogo con el idioma de la FICHA del paciente ya
+   elegido (nivel 1 país → nivel 2 campo Idioma). El usuario lo puede cambiar
+   encima: eso es el nivel 3, y solo aplica a ese documento.
+   `fallback` = qué usar si el paciente no tiene idioma resuelto. La Carta de
+   Seguro conserva 'en' como default histórico (casi siempre va a una aseguradora
+   de EE. UU.); el recibo conserva 'es'. */
+function _hfSetIdiomaFicha(selId,nombre,fallback){
+  hfIdiomaPaciente(nombre).then(function(lang){
+    var sel=document.getElementById(selId); if(!sel) return;
+    var v=lang||fallback||'es';    // '' = la ficha no dice nada → default del documento
+    sel.value=v;
+    if(v!=='es') hfTradPreload(v).catch(function(){});
+  });
+}
+/* Selector de idioma reusable para los diálogos de impresión (nivel 3). */
+function hfLangSelectHTML(id,sel,extraStyle){
+  return '<select id="'+id+'" onchange="hfTradPreload(this.value).catch(function(){})" style="'+(extraStyle||'padding:5px 8px;border-radius:6px;border:1px solid var(--color-divider,#e5e7eb);background:var(--color-surface,#fff);color:var(--color-text,#111);font-size:12px;font-family:inherit')+'">'
+    +HF_LANGS.map(function(l){ return '<option value="'+l+'"'+(l===sel?' selected':'')+'>'+HF_LANG_NAMES[l]+'</option>'; }).join('')
+    +'</select>';
+}
+
+/* ── EL EMBUDO ────────────────────────────────────────────────────────────────
+   `data.lang`         idioma del documento ('es' = original, camino intacto)
+   `data.conceptCol`   índice de la columna de rows[] donde aparece el nombre del
+                       producto.
+   `data.rowConcepts`  alineado con rows[]: el NOMBRE EXACTO del producto de esa
+                       fila, o null si esa fila no lleva producto (un "Saldo
+                       inicial" o un "Descuento 10%" son etiquetas del sistema —
+                       esas se traducen con el diccionario, no contra el catálogo,
+                       y buscarlas en el catálogo bloquearía la impresión por algo
+                       que nunca fue un producto).
+   `data.conceptos`    conceptos sueltos a validar que no estén en rows[].
+
+   Se pide el concepto explícito en vez de adivinarlo recortando la celda: las
+   celdas traen adornos ("Producto · OP 123", "Paciente · Producto") y el adorno
+   va a veces antes y a veces después. Adivinar aquí sería volver a inventar una
+   heurística que se desincroniza de quien arma las filas. */
+function _hfDataConceptos(data){
+  var out=[];
+  if(!data) return out;
+  if(data.conceptos&&data.conceptos.length) out=out.concat(data.conceptos);
+  if(data.rowConcepts&&data.rowConcepts.length) out=out.concat(data.rowConcepts);
+  return out.filter(function(v,i,a){
+    return v && String(v).trim() && v!=='—' && a.indexOf(v)===i;
+  });
+}
+function _hfTraduceData(data,map){
+  var d={}; for(var k in data){ if(data.hasOwnProperty(k)) d[k]=data[k]; }
+  if(d.conceptCol!=null && d.rows && d.rowConcepts){
+    d.rows=d.rows.map(function(r,i){
+      var base=d.rowConcepts[i];
+      if(!base) return r;                    // fila sin producto → intacta
+      var tr=map[base]; if(!tr) return r;
+      var nr=r.slice();
+      // El concepto aparece literal en la celda: se sustituye conservando el adorno
+      // ("· OP 123", el nombre de la paciente, etc.). Algunas filas escapan el
+      // nombre antes de meterlo a la celda (ccEsc/_escH), así que si no aparece en
+      // crudo se intenta en su forma escapada — si no, un producto con "&" en el
+      // nombre saldría en español sin que nadie se enterara.
+      var cell=String(nr[d.conceptCol]==null?'':nr[d.conceptCol]);
+      if(cell.indexOf(base)>=0)                cell=cell.split(base).join(tr);
+      else if(cell.indexOf(_escH(base))>=0)    cell=cell.split(_escH(base)).join(_escH(tr));
+      nr[d.conceptCol]=cell;
+      return nr;
+    });
+  }
+  return d;
+}
+function _hfPrintNow(reportId,data){
   var tplId=hfTplGet(reportId);
   var fn=_REPORT_TEMPLATES[tplId]||_REPORT_TEMPLATES['ejecutivo'];
   var html=fn(data);
@@ -23129,6 +23680,60 @@ function hfReportPrint(reportId,data){
   w.document.write(html);
   w.document.close();
 }
+function hfReportPrint(reportId,data){
+  var lang=(data&&data.lang)?String(data.lang).toLowerCase().substring(0,2):'es';
+  // Español = el original. Camino idéntico al de siempre, sin tocar.
+  if(lang==='es'||!hfLangOk(lang)) return _hfPrintNow(reportId,data);
+  var conceptos=_hfDataConceptos(data);
+  if(!conceptos.length) return _hfPrintNow(reportId,data);   // nada que resolver
+  // hfTradGate ya trae el camino rápido síncrono; si falta algo, bloquea.
+  hfTradGate(lang,conceptos,function(map){ _hfPrintNow(reportId,_hfTraduceData(data,map)); });
+}
+/* ── EL DIÁLOGO DE IMPRESIÓN (nivel 3 del idioma) ─────────────────────────────
+   Un solo diálogo para los reportes del paciente. Llega con el idioma de la
+   ficha ya elegido (país → campo Idioma) y el usuario puede cambiarlo SOLO para
+   este documento — sin tocar la ficha.
+
+   `buildFn(lang)` construye el `data` del reporte YA con el idioma correcto: así
+   las fechas y los montos se formatean con el `loc` que toca, en vez de armarse
+   en es-MX y traducirse a medias después.
+
+   El clic en "Imprimir" es un gesto del usuario → el pop-up no se bloquea. */
+function hfReportPrintAsk(reportId,paciente,buildFn){
+  var m=document.getElementById('hf-print-ask');
+  if(!m){ m=document.createElement('div'); m.id='hf-print-ask'; document.body.appendChild(m); }
+  m.style.cssText='position:fixed;inset:0;z-index:99990;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);padding:16px';
+  function close(){ var x=document.getElementById('hf-print-ask'); if(x) x.remove(); }
+  window._hfPrintAskClose=close;
+  window._hfPrintAskGo=function(){
+    var lang=(document.getElementById('hf-print-lang')||{}).value||'es';
+    close();
+    var data=buildFn(lang)||{};
+    data.lang=lang;
+    hfReportPrint(reportId,data);
+  };
+  m.innerHTML='<div style="background:var(--color-surface,#fff);border-radius:14px;padding:24px;width:min(440px,94vw);box-shadow:0 20px 60px rgba(0,0,0,.3)">'
+    +'<div style="font-size:15px;font-weight:800;color:var(--color-text,#111);margin-bottom:4px">Imprimir documento</div>'
+    +'<div style="font-size:12px;color:var(--color-text-muted,#6b7280);margin-bottom:16px">'+(paciente?_escH(paciente):'')+'</div>'
+    +'<label style="display:block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted,#9ca3af);margin-bottom:5px">Idioma del documento</label>'
+    +hfLangSelectHTML('hf-print-lang','es','width:100%;box-sizing:border-box;padding:8px 10px;border-radius:8px;border:1.5px solid var(--color-divider,#e5e7eb);background:var(--color-surface,#fff);color:var(--color-text,#111);font-size:13px;font-family:inherit')
+    +'<div id="hf-print-ask-hint" style="font-size:11px;color:var(--color-text-muted,#9ca3af);margin-top:6px;min-height:14px">Buscando el idioma de la ficha del paciente…</div>'
+    +'<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px">'
+      +'<button onclick="_hfPrintAskClose()" style="padding:9px 16px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;background:var(--color-surface,#fff);color:var(--color-text,#374151);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">Cancelar</button>'
+      +'<button onclick="_hfPrintAskGo()" style="padding:9px 22px;background:#c46a7a;color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">Imprimir</button>'
+    +'</div></div>';
+  // El idioma de la ficha manda como valor inicial; el usuario decide encima.
+  hfIdiomaPaciente(paciente).then(function(lang){
+    var sel=document.getElementById('hf-print-lang'); var hint=document.getElementById('hf-print-ask-hint');
+    if(!sel) return;                       // el usuario ya cerró el diálogo
+    sel.value=lang||'es';                  // '' = la ficha no dice nada → español
+    if(hint) hint.textContent=!lang
+      ? 'Su ficha no tiene idioma ni país; se usa español. Puedes cambiarlo solo para este documento.'
+      : 'Según su ficha, sus documentos van en '+(HF_LANG_NAMES[lang]||lang)+'. Puedes cambiarlo solo para este documento.';
+    if(lang&&lang!=='es') hfTradPreload(lang).catch(function(){});
+  });
+}
+
 function hfReportExcel(data,filename){
   var ths=(data.cols||[]).map(function(c){return'<th style="background:#c46a7a;color:#fff;padding:4px 8px;font-size:10px">'+c+'</th>';}).join('');
   var trs=(data.rows||[]).map(function(r,ri){
@@ -24836,7 +25441,12 @@ function idpForzarAlta() {
       </div>
       <div class="form-group">
         <label class="form-label">País</label>
-        <select class="form-input" id="pac-f-pais"><option value="">— Selecciona —</option></select>
+        <select class="form-input" id="pac-f-pais" onchange="_pacPaisChanged()"><option value="">— Selecciona —</option></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Idioma de sus documentos</label>
+        <select class="form-input" id="pac-f-idioma"><option value="">— Según su país —</option></select>
+        <div id="pac-idioma-hint" style="font-size:10.5px;color:var(--color-text-muted,#9ca3af);margin-top:4px">Se completa solo al elegir el país. Puedes cambiarlo: <b>este campo manda sobre el país</b>.</div>
       </div>
       <div class="form-group full">
         <label class="form-label">Observaciones / Notas</label>
@@ -25273,12 +25883,16 @@ var CAPTURA_CONFIG = {
     // Sin periodoField — esta hoja no tiene columna Periodo
     submitBtn: 'pac-submit-btn',
     msgEl:     'pac-modal-msg',
+    // `Idioma` (columna nueva, append-safe — ver setupTraducciones en traducciones.gs):
+    // en qué idioma salen los documentos de esta paciente. Se autocompleta desde el
+    // País, pero MANDA sobre él: una paciente mexicana puede necesitar su carta en
+    // inglés para su aseguradora de EE. UU.
     fields: ['pac-f-id','pac-f-nombre','pac-f-fecha_nac','pac-f-email',
-             'pac-f-origen','pac-f-canal','pac-f-medico','pac-f-pais',
+             'pac-f-origen','pac-f-canal','pac-f-medico','pac-f-pais','pac-f-idioma',
              'pac-f-observaciones',
              'pac-f-razon_social','pac-f-rfc','pac-f-cp','pac-f-uso_cfdi','pac-f-regimen','pac-f-forma_pago'],
     keys:   ['ID','Nombre Completo del Paciente','Fecha de Nacimiento','E-mail',
-             'Origen','Canal','Médico Tratante','País',
+             'Origen','Canal','Médico Tratante','País','Idioma',
              'Observaciones / Notas',
              'Razon Social','RFC','Codigo Postal','Uso CFDI','Regimen Fiscal','Forma de Pago Habitual'],
     required: ['pac-f-nombre']
@@ -25346,7 +25960,9 @@ function openModal(tipo) {
       .then(function(r){ return r.json(); })
       .then(function(d){ if (idEl) idEl.value = d.nextId || 'HEC-001'; })
       .catch(function(){ if (idEl) idEl.value = 'HEC-001'; });
+    _pacIdiomaTocado = false;   // alta nueva: el país vuelve a poder autocompletar
     loadPacientesOptions();
+    _pacIdiomaHint();
     if (!_pacFiscalMigrated) {
       _pacFiscalMigrated = true;
       fetch(APPS_SCRIPT_URL + '?action=migratePacientesFiscales&token=' + encodeURIComponent(getToken())).catch(function(){});
@@ -25401,6 +26017,16 @@ function openEditModal(viewId, rowIdx) {
       var val = row[keys[i]] || row[keys[i].toLowerCase()] || '';
       sel.value = val;
     });
+    // Idioma guardado en la ficha. Si la paciente ya tiene uno, cuenta como
+    // decisión tomada: cambiar el país después NO se lo pisa.
+    _pacLlenaIdiomaSelect();
+    var selIdi = document.getElementById('pac-f-idioma');
+    if (selIdi) {
+      var vIdi = String(row['Idioma'] || row['idioma'] || '').trim().toLowerCase().substring(0,2);
+      selIdi.value = hfLangOk(vIdi) ? vIdi : '';
+      _pacIdiomaTocado = !!selIdi.value;
+      _pacIdiomaHint();
+    }
   }, 600);
 }
 
@@ -25462,8 +26088,48 @@ async function _cascadeRenamePaciente(oldNombre, newNombre, msgEl) {
   }
 }
 
+/* ── Idioma del paciente (nivel 1 → nivel 2) ─────────────────────────────────
+   El país AUTOCOMPLETA el idioma, pero no lo impone: en cuanto el usuario elige
+   un idioma a mano, cambiar el país ya no se lo pisa. Ese matiz es el caso real
+   que justifica el campo — paciente mexicana que necesita su carta en inglés
+   para su aseguradora de EE. UU.: si el país siguiera mandando, se lo borraría. */
+var _pacIdiomaTocado = false;
+function _pacLlenaIdiomaSelect(){
+  var sel = document.getElementById('pac-f-idioma');
+  if (!sel || sel.options.length > 1) return;
+  // Valores administrables (Config_Dropdowns → Pacientes|idioma), formato codigo=Etiqueta
+  var vals = _ddVals('Pacientes','idioma',['es=Español','en=English','fr=Français','pt=Português']);
+  vals.forEach(function(v){
+    var ix = String(v).indexOf('=');
+    var code = ix>0 ? String(v).substring(0,ix).trim() : String(v).trim();
+    var label = ix>0 ? String(v).substring(ix+1).trim() : String(v).trim();
+    var o = document.createElement('option');
+    o.value = code; o.textContent = label;
+    sel.appendChild(o);
+  });
+  sel.onchange = function(){ _pacIdiomaTocado = true; _pacIdiomaHint(); };
+}
+function _pacIdiomaHint(){
+  var hint = document.getElementById('pac-idioma-hint');
+  var sel  = document.getElementById('pac-f-idioma');
+  if (!hint || !sel) return;
+  hint.innerHTML = sel.value
+    ? 'Sus documentos saldrán en <b>'+(HF_LANG_NAMES[sel.value]||sel.value)+'</b>, aunque su país diga otra cosa.'
+    : 'Se completa solo al elegir el país. Puedes cambiarlo: <b>este campo manda sobre el país</b>.';
+}
+function _pacPaisChanged(){
+  var sel = document.getElementById('pac-f-idioma');
+  var pais = (document.getElementById('pac-f-pais')||{}).value||'';
+  if (!sel) return;
+  _pacLlenaIdiomaSelect();
+  if (_pacIdiomaTocado) return;              // el usuario ya decidió: no se le pisa
+  var sug = hfIdiomaDePais(pais);
+  if (sug) sel.value = sug;
+  _pacIdiomaHint();
+}
 var _pacOptLoaded = false;
 function loadPacientesOptions() {
+  _pacLlenaIdiomaSelect();
   if (_pacOptLoaded) return;
   var url = APPS_SCRIPT_URL + '?action=options&sheet=Pacientes&token=' + encodeURIComponent(getToken());
   fetch(url).then(function(r){ return r.json(); }).then(function(d) {
@@ -31750,12 +32416,25 @@ function ecFiltrarTabla(q) {
 
 function ecImprimir() {
   if (!_ecData) return;
+  // El idioma sale de la ficha del paciente; el diálogo lo puede cambiar solo
+  // para este documento. Todo el `data` se arma YA en ese idioma (fechas y
+  // montos con su `loc`), y los nombres de producto los resuelve el embudo
+  // contra el catálogo — si falta alguno, no imprime.
+  hfReportPrintAsk('estado-cuenta', _ecData.paciente, _ecBuildPrintData);
+}
+function _ecBuildPrintData(lang) {
   // Pasa por el sistema de plantillas (Panel de Control > Reportes) — la
   // plantilla asignada a "Estado de cuenta" decide el diseño (Célula, etc.).
   var cfg = getFmtConfig();
   var d = _ecData;
   var movs = _ecMovAll;
-  var hoy = ecFmtFecha(new Date().toISOString().substring(0,10));
+  var T = hfDict('estado-cuenta', lang);
+  // En español se usa EXACTAMENTE el formato de siempre (ecFmt/ecFmtFecha, que no
+  // son toLocaleString sino formatos propios): el documento en español no cambia
+  // ni un carácter. Los demás idiomas usan el `loc` que les toca.
+  var _f  = function(n){ return lang==='es' ? ecFmt(n)       : hfFmtMoney(n, lang); };
+  var _fd = function(s){ return lang==='es' ? ecFmtFecha(s)  : hfFmtDate(s, lang); };
+  var hoy = _fd(new Date().toISOString().substring(0,10));
   // Facturado / Pagado / Saldo — misma lógica que la pantalla (ecRenderResult):
   // Nos debe = saldoPendiente (canónico CxCobrar); Saldo a favor = −saldoNeto.
   var _pFact  = parseFloat(d.totalFacturado != null ? d.totalFacturado : d.totalGeneral) || 0;
@@ -31763,30 +32442,33 @@ function ecImprimir() {
   var _pNeto  = (d.saldoNeto != null) ? (parseFloat(d.saldoNeto) || 0) : (_pFact - _pPag);
   var _pDeuda = parseFloat(d.saldoPendiente) || 0;
   var _pSaldoVal, _pSaldoLbl;
-  if (_pDeuda > 0.01)      { _pSaldoVal = ecFmt(_pDeuda);   _pSaldoLbl = "Nos debe"; }
-  else if (_pNeto < -0.01) { _pSaldoVal = ecFmt(-_pNeto);   _pSaldoLbl = "Saldo a favor"; }
-  else                     { _pSaldoVal = ecFmt(0);          _pSaldoLbl = "Al corriente"; }
+  if (_pDeuda > 0.01)      { _pSaldoVal = _f(_pDeuda);   _pSaldoLbl = T.nosDebe; }
+  else if (_pNeto < -0.01) { _pSaldoVal = _f(-_pNeto);   _pSaldoLbl = T.saldoAFavor; }
+  else                     { _pSaldoVal = _f(0);          _pSaldoLbl = T.alCorriente; }
   var kpis = [
-    {value: ecFmt(_pFact), label: "Total facturado"},
-    {value: ecFmt(_pPag),  label: "Total pagado"},
-    {value: _pSaldoVal,    label: _pSaldoLbl},
-    {value: String(d.totalMovimientos || movs.length), label: "Movimientos"}
+    {value: _f(_pFact), label: T.totalFacturado},
+    {value: _f(_pPag),  label: T.totalPagado},
+    {value: _pSaldoVal, label: _pSaldoLbl},
+    {value: String(d.totalMovimientos || movs.length), label: T.movimientos}
   ];
   Object.keys(d.porAnio||{}).sort().slice(-2).forEach(function(a){
-    kpis.push({value: ecFmt(d.porAnio[a]), label: a});
+    kpis.push({value: _f(d.porAnio[a]), label: a});
   });
-  hfReportPrint('estado-cuenta', {
-    title: 'Estado de cuenta',
+  return {
+    title: T.estadoCuenta,
     subject: d.paciente,
-    period: 'Emitido el ' + hoy,
-    generado: 'Hestia ERP · ' + hoy,
+    period: T.emitidoEl + ' ' + hoy,
+    generado: T.generadoPor + ' · ' + hoy,
     kpis: kpis,
-    cols: ['Fecha','Concepto','Categoría','Forma de pago','Importe'],
-    rows: movs.map(function(m){ return [ecFmtFecha(m.fecha), m.producto||m.desc||'—', m.cat||'—', m.pago||'—', ecFmt(m.total)]; }),
-    totalLabel: 'Total facturado',
-    totalValue: ecFmt(_pFact),
+    cols: [T.fecha, T.concepto, T.categoria, T.formaPago, T.importe],
+    rows: movs.map(function(m){ return [_fd(m.fecha), m.producto||m.desc||'—', m.cat||'—', m.pago||'—', _f(m.total)]; }),
+    // El embudo resuelve estos nombres contra el catálogo; si falta uno, no imprime.
+    conceptCol: 1,
+    rowConcepts: movs.map(function(m){ return m.producto||m.desc||''; }),
+    totalLabel: T.totalFacturado,
+    totalValue: _f(_pFact),
     nota: cfg.frase || ''
-  });
+  };
 }
 
 </script>
@@ -33033,40 +33715,57 @@ function cobRender(d){
 }
 function cobImprimir(){
   if(!_cobData) return;
-  var d=_cobData, sus=d.suscripcion, hoy=ccFch(new Date().toISOString().substring(0,10));
+  // Idioma: ficha del paciente → el diálogo lo puede pisar para este documento.
+  hfReportPrintAsk('cobranza', _cobData.paciente, _cobBuildPrintData);
+}
+/* En español se usa EXACTAMENTE el formato de siempre (ccFmt/ccFch globales) —
+   el documento en español no cambia ni un carácter. Estas dos viven FUERA de
+   _cobBuildPrintData a propósito: ahí dentro los nombres ccFmt/ccFch quedan
+   sombreados por las versiones con idioma, y las globales serían inalcanzables. */
+function _cobMoney(n,lang){ return lang==='es' ? ccFmt(n) : hfFmtMoney(n,lang); }
+function _cobDate(s,lang){  return lang==='es' ? ccFch(s) : hfFmtDate(s,lang); }
+function _cobBuildPrintData(lang){
+  var d=_cobData, sus=d.suscripcion;
+  var T=hfDict('cobranza',lang);
+  var ccFmt=function(n){ return _cobMoney(n,lang); };
+  var ccFch=function(s){ return _cobDate(s,lang); };
+  var hoy=ccFch(new Date().toISOString().substring(0,10));
   // El PDF lleva el detalle de lo vendido según la vista elegida (histórico o periodo)
   var _vv=_cobVentasVista(d), _vvTot=0; _vv.forEach(function(v){ _vvTot+=v.total; });
   var rows=_vv.map(function(v){ return [ccFch(v.fecha), (v.producto||'—')+(v.op?' · OP '+v.op:''), String(v.cantidad||1), ccFmt(v.total), ccFmt(v.pagado), v.saldo>0.01?ccFmt(v.saldo):'—']; });
+  // `conceptos` va en paralelo a `rows`: el nombre EXACTO del producto de cada
+  // fila, o null si la fila no lleva producto (saldos, suscripción, descuentos:
+  // esas son etiquetas del sistema y se traducen con el diccionario).
+  var conceptos=_vv.map(function(v){ return v.producto||''; });
   // Saldos de registro (saldo inicial / cargo a crédito) que no vienen de una venta.
   // Si el saldo trae partidas con paciente (agencias/externos), se expande una fila por
   // paciente para que el reporte muestre a cada paciente con su procedimiento.
   (d.saldos||[]).forEach(function(o){
     if(o.origen!=='registro') return;
     var partes=(o.items||[]).filter(function(x){return x.pac;});
-    if(partes.length){ partes.forEach(function(x){ rows.push([ccFch(x.fecha||o.fecha), x.pac+' · '+(x.producto||'—'), String(x.cantidad||1), ccFmt(x.total), '', ccFmt(x.total)]); }); }
-    else rows.push([ccFch(o.fecha), o.concepto||'Saldo', '—', ccFmt(o.total), ccFmt((o.total||0)-(o.saldo||0)), ccFmt(o.saldo)]);
+    if(partes.length){ partes.forEach(function(x){ rows.push([ccFch(x.fecha||o.fecha), x.pac+' · '+(x.producto||'—'), String(x.cantidad||1), ccFmt(x.total), '', ccFmt(x.total)]); conceptos.push(x.producto||''); }); }
+    else { rows.push([ccFch(o.fecha), o.concepto||T.saldo, '—', ccFmt(o.total), ccFmt((o.total||0)-(o.saldo||0)), ccFmt(o.saldo)]); conceptos.push(null); }
   });
-  if(sus&&sus.montoDebe>0) rows.push([ccFch(sus.proximoCobro),'Suscripción crío ('+sus.plan+')', '—', ccFmt(sus.montoDebe), '$0.00', ccFmt(sus.montoDebe)]);
+  if(sus&&sus.montoDebe>0){ rows.push([ccFch(sus.proximoCobro),T.suscripcionCrio+' ('+sus.plan+')', '—', ccFmt(sus.montoDebe), ccFmt(0), ccFmt(sus.montoDebe)]); conceptos.push(null); }
   var susDebe=(sus&&sus.montoDebe)||0, totalDebe=(d.totalSaldo||0)+susDebe;
   var _desc=(d.descuentos&&d.descuentos.aplica)?d.descuentos:null;
   var _descTot=_desc?(_desc.total||0):0;
   var _neto=totalDebe-_descTot; if(_neto<0) _neto=0;
-  if(_desc){ _desc.lineas.forEach(function(l){ rows.push([ccEsc(l.mes), 'Descuento '+l.pct+'% · '+(l.paciente?ccEsc(l.paciente)+' · ':'')+ccEsc(l.producto), String(l.cantidad||1), '', '', '−'+ccFmt(l.descuento)]); }); }
+  if(_desc){ _desc.lineas.forEach(function(l){ rows.push([ccEsc(l.mes), T.descuento+' '+l.pct+'% · '+(l.paciente?ccEsc(l.paciente)+' · ':'')+ccEsc(l.producto), String(l.cantidad||1), '', '', '−'+ccFmt(l.descuento)]); conceptos.push(l.producto||''); }); }
   var kpis = _desc
-    ? [{value:ccFmt(_neto),label:'Neto a cobrar'},{value:ccFmt(totalDebe),label:'Bruto'},{value:'−'+ccFmt(_descTot),label:'Descuento vol.'},{value:susDebe>0?ccFmt(susDebe):'Al día',label:'Suscripción'}]
-    : [{value:ccFmt(totalDebe),label:'Total por cobrar'},{value:ccFmt(d.totalSaldo||0),label:'Saldos'},{value:susDebe>0?ccFmt(susDebe):'Al día',label:'Suscripción'},{value:ccFmt(_vvTot),label:(_cobVista==='pendiente'?'Por cobrar (detalle)':'Total vendido')}];
-  var periodTxt = (_cobVista==='pendiente') ? ('Solo lo pendiente por cobrar · Emitido el '+hoy) : ('Histórico completo · Emitido el '+hoy);
+    ? [{value:ccFmt(_neto),label:T.netoACobrar},{value:ccFmt(totalDebe),label:T.bruto},{value:'−'+ccFmt(_descTot),label:T.descuentoVol},{value:susDebe>0?ccFmt(susDebe):T.alDia,label:T.suscripcion}]
+    : [{value:ccFmt(totalDebe),label:T.totalPorCobrar},{value:ccFmt(d.totalSaldo||0),label:T.saldos},{value:susDebe>0?ccFmt(susDebe):T.alDia,label:T.suscripcion},{value:ccFmt(_vvTot),label:(_cobVista==='pendiente'?T.porCobrarDetalle:T.totalVendido)}];
+  var periodTxt = (_cobVista==='pendiente') ? (T.soloPendiente+' · '+T.emitidoEl+' '+hoy) : (T.historicoCompleto+' · '+T.emitidoEl+' '+hoy);
   // Nota al pie: datos para depósito
   var _dep=d.deposito, notaHtml='';
   if(_dep && (_dep.clabe||_dep.cuenta)){
-    var _parts=[]; if(_dep.banco)_parts.push('Banco: <b>'+ccEsc(_dep.banco)+'</b>'); if(_dep.beneficiario)_parts.push('Beneficiario: <b>'+ccEsc(_dep.beneficiario)+'</b>'); if(_dep.cuenta)_parts.push('Cuenta: <b>'+ccEsc(_dep.cuenta)+'</b>'); if(_dep.clabe)_parts.push('CLABE: <b>'+ccEsc(_dep.clabe)+'</b>');
-    notaHtml='<div style="margin:16px 22px;padding:10px 14px;border:1px dashed #bbb;border-radius:8px;font-size:11px;color:#333;page-break-inside:avoid"><span style="text-transform:uppercase;letter-spacing:.05em;font-weight:700;color:#777;font-size:9px">Datos para depósito</span><br>'+_parts.join(' &nbsp;·&nbsp; ')+'</div>';
+    var _parts=[]; if(_dep.banco)_parts.push(T.banco+': <b>'+ccEsc(_dep.banco)+'</b>'); if(_dep.beneficiario)_parts.push(T.beneficiario+': <b>'+ccEsc(_dep.beneficiario)+'</b>'); if(_dep.cuenta)_parts.push(T.cuenta+': <b>'+ccEsc(_dep.cuenta)+'</b>'); if(_dep.clabe)_parts.push(T.clabe+': <b>'+ccEsc(_dep.clabe)+'</b>');
+    notaHtml='<div style="margin:16px 22px;padding:10px 14px;border:1px dashed #bbb;border-radius:8px;font-size:11px;color:#333;page-break-inside:avoid"><span style="text-transform:uppercase;letter-spacing:.05em;font-weight:700;color:#777;font-size:9px">'+ccEsc(T.datosDeposito)+'</span><br>'+_parts.join(' &nbsp;·&nbsp; ')+'</div>';
   }
-  if(typeof hfReportPrint==='function'){
-    hfReportPrint('cobranza',{ title:'Estado de cobranza', subject:d.paciente, period:periodTxt, generado:'Hestia ERP · '+hoy,
-      kpis:kpis, cols:['Fecha','Concepto','Cant','Total','Pagado','Saldo'], rows:rows,
-      totalLabel:_desc?'Neto a cobrar':'Total por cobrar', totalValue:ccFmt(_desc?_neto:totalDebe), notaHtml:notaHtml });
-  } else { window.print(); }
+  return { title:T.estadoCobranza, subject:d.paciente, period:periodTxt, generado:T.generadoPor+' · '+hoy,
+    kpis:kpis, cols:[T.fecha,T.concepto,T.cantidad,T.total,T.pagado,T.saldo], rows:rows,
+    conceptCol:1, rowConcepts:conceptos,
+    totalLabel:_desc?T.netoACobrar:T.totalPorCobrar, totalValue:ccFmt(_desc?_neto:totalDebe), notaHtml:notaHtml };
 }
 /* ── Búsqueda de pacientes TOLERANTE a errores de dedo (fuzzy) ── */
 function _fzNorm(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9 ]/g,''); }
@@ -33143,7 +33842,7 @@ function segBuscar(){
   var res=document.getElementById('seg-result'); res.innerHTML='<div style="padding:30px;text-align:center;color:var(--color-text-muted)">Cargando operaciones…</div>';
   var tok=encodeURIComponent(getToken());
   fetch(APPS_SCRIPT_URL+'?action=estadoCobranza&paciente='+encodeURIComponent(nombre)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
-    .then(function(r){return r.json();}).then(function(d){ _segData=d; segRenderResult(d); })
+    .then(function(r){return r.json();}).then(function(d){ _segData=d; segRenderResult(d); _hfSetIdiomaFicha('seg-idioma',nombre,'en'); })
     .catch(function(e){ res.innerHTML='<div style="padding:24px;color:#c83c3c">Error de red: '+e.message+'</div>'; });
 }
 function segRenderResult(d){
@@ -33326,13 +34025,20 @@ function segGenerar(cfgOverride, isPreview){
   var cfg=cfgOverride||segDesignGet();
   var currency=(document.getElementById('seg-moneda')||{}).value||'USD';
   var idioma=(document.getElementById('seg-idioma')||{}).value||'en';
-  var L=SEG_L[idioma]||SEG_L.en;
+  // Diccionario unificado: comunes + la sección `seguro` (que es SEG_L), con el
+  // `loc` correcto. Antes SEG_L se leía suelto; ahora pasa por el mismo hfDict
+  // que el resto de los reportes del paciente.
+  var L=hfDict('seguro',idioma);
   var pac, rows=[], total=0;
   if(isPreview && (!_segData || !document.querySelectorAll('.seg-chk:checked').length)){
-    // vista previa con datos de muestra
+    // Vista previa con datos de muestra. Los servicios van en ESPAÑOL a propósito:
+    // así la vista previa recorre EXACTAMENTE el mismo camino que la impresión
+    // real (resolución contra el catálogo incluida). Antes la muestra ya venía en
+    // inglés y además la traducción se saltaba si isPreview, así que la vista
+    // previa se veía perfecta y la carta real salía en español. Mentía.
     pac=((document.getElementById('seg-pacnom')||{}).value||'').trim()||'Jane Doe';
-    rows=[{desc:'In Vitro Fertilization (IVF)',cpt:'58970',fecha:'2026-03-14',cur:currency,amt:4520.61},
-          {desc:'Embryo Cryopreservation',cpt:'89258',fecha:'2026-03-20',cur:currency,amt:850.00}];
+    rows=[{desc:'Fertilización in vitro',cpt:'58970',fecha:'2026-03-14',cur:currency,amt:4520.61},
+          {desc:'Criopreservación de embriones',cpt:'89258',fecha:'2026-03-20',cur:currency,amt:850.00}];
     total=5370.61;
   } else {
     if(!_segData) return;
@@ -33349,77 +34055,40 @@ function segGenerar(cfgOverride, isPreview){
     });
     if(faltaMonto){ if(!confirm('Alguna operación no tiene monto en '+currency+'. ¿Generar de todas formas?')) return; }
   }
-  // Abrir la ventana ANTES de cualquier await/fetch para no chocar con el bloqueador
-  // de pop-ups (debe ser síncrono respecto al clic del usuario).
-  var w=window.open('','_blank');
-  if(!w){ alert('Habilita las ventanas emergentes para este sitio e intenta de nuevo.'); return; }
-  try{ w.document.write('<!doctype html><meta charset="utf-8"><title> </title><body style="font-family:\'Segoe UI\',Arial,sans-serif;color:#555;padding:48px;font-size:14px">'+((idioma!=='es'&&!isPreview)?'Traduciendo servicios…':'Generando carta…')+'</body>'); }catch(e){}
-  function _finish(){ _segWrite(w, cfg, L, currency, pac, rows, total); }
-  // ── Traducción automática de las descripciones de servicio (idioma ≠ español) ──
-  // Los productos vienen en español desde la operación; la carta debe salir 100%
-  // en el idioma elegido. Si el backend falla, se usa el texto original (no bloquea).
-  if(idioma!=='es' && !isPreview){
-    // 1) Traducción LOCAL (mapa curado en el frontend): funciona SIN backend/redeploy.
-    //    Aplica lo que conozca y junta lo que NO esté en el mapa para el backend.
-    var origs=[];
-    rows.forEach(function(r){
-      if(!r.desc || r.desc==='—') return;
-      var t=_segTradLocal(r.desc, idioma);
-      if(t){ r.desc=t; }
-      else if(origs.indexOf(r.desc)<0){ origs.push(r.desc); }
-    });
-    // 2) Los no mapeados se intentan por backend (LanguageApp) si está desplegado;
-    //    si falla, se quedan como están (no bloquea la carta).
-    if(origs.length){
-      var tok=encodeURIComponent(getToken());
-      var url=APPS_SCRIPT_URL+'?action=traducir&lang='+encodeURIComponent(idioma)+'&textos='+encodeURIComponent(JSON.stringify(origs))+'&token='+tok+'&_t='+Date.now();
-      fetch(url,{redirect:'follow'})
-        .then(function(r){return r.json();})
-        .then(function(d){ if(d&&d.ok&&d.textos){ rows.forEach(function(r){ if(d.textos[r.desc]) r.desc=d.textos[r.desc]; }); } _finish(); })
-        .catch(function(){ _finish(); });
-      return;
-    }
-  }
-  _finish();
+  /* ── Los nombres de los servicios salen del CATÁLOGO, no de un mapa local ──
+   * La carta debe salir 100% en el idioma elegido, servicios incluidos. Si algún
+   * servicio no tiene traducción confirmada en el catálogo, hfTradGate BLOQUEA y
+   * ofrece capturarla ahí mismo; NO existe ya ningún camino que termine
+   * imprimiendo la carta con los servicios en español.
+   *
+   * La ventana se abre DENTRO del callback (que cuelga del clic del usuario o del
+   * botón del gate), no antes: así no queda una ventana huérfana cuando bloquea.
+   * Esto vale también para la vista previa — recorre el mismo camino. */
+  var conceptos=rows.map(function(r){ return r.desc; })
+                    .filter(function(v,i,a){ return v && v!=='—' && a.indexOf(v)===i; });
+  hfTradGate(idioma, conceptos, function(map){
+    rows.forEach(function(r){ if(map[r.desc]) r.desc=map[r.desc]; });
+    var w=window.open('','_blank');
+    if(!w){ alert('Habilita las ventanas emergentes para este sitio e intenta de nuevo.'); return; }
+    _segWrite(w, cfg, L, currency, pac, rows, total);
+  });
 }
-/* Traducción LOCAL de descripciones de servicio (sin depender del backend).
-   Claves normalizadas (minúsculas, sin acentos). Se elige la clave más larga
-   contenida en la descripción para máxima especificidad. */
-function _segNorm(s){ return String(s==null?'':s).toLowerCase()
-  .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i').replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').replace(/ñ/g,'n')
-  .replace(/[^a-z0-9]+/g,' ').replace(/^ | $/g,''); }
-var SEG_TRAD_MAP = {
-  en:{
-    'fertilizacion in vitro':'In Vitro Fertilization','fiv':'In Vitro Fertilization (IVF)','fiv icsi':'IVF with ICSI','icsi':'ICSI',
-    'histeroscopia':'Hysteroscopy','histeroscopia diagnostica':'Diagnostic Hysteroscopy','histeroscopia quirurgica':'Surgical Hysteroscopy',
-    'criopreservacion':'Cryopreservation','anualidad criopreservacion':'Cryopreservation Annuity','criopreservacion de embriones':'Embryo Cryopreservation','criopreservacion de ovulos':'Egg Cryopreservation',
-    'estimulacion ovarica controlada':'Controlled Ovarian Stimulation','estimulacion ovarica':'Ovarian Stimulation',
-    'transferencia de embriones':'Embryo Transfer','transferencia de embrion':'Embryo Transfer','transferencia embrionaria':'Embryo Transfer',
-    'consulta':'Consultation','consulta de valoracion':'Assessment Consultation','consulta subsecuente':'Follow-up Consultation','valoracion':'Assessment',
-    'almacenamiento':'Storage','ovodonacion':'Egg Donation','donacion de ovulos':'Egg Donation',
-    'inseminacion artificial':'Artificial Insemination','inseminacion intrauterina':'Intrauterine Insemination','induccion de ovulacion':'Ovulation Induction',
-    'biopsia embrionaria':'Embryo Biopsy','medicamentos':'Medications','medicamento':'Medication','laboratorio':'Laboratory',
-    'estudios':'Tests','estudio':'Test','ultrasonido':'Ultrasound','perfil hormonal':'Hormone Panel','espermatobioscopia':'Semen Analysis','seguimiento folicular':'Follicular Monitoring'
-  },
-  fr:{
-    'fertilizacion in vitro':'Fécondation in vitro','fiv':'Fécondation in vitro (FIV)','icsi':'ICSI','histeroscopia':'Hystéroscopie',
-    'criopreservacion':'Cryoconservation','anualidad criopreservacion':'Annuité de cryoconservation','estimulacion ovarica controlada':'Stimulation ovarienne contrôlée',
-    'transferencia de embriones':'Transfert d’embryons','consulta':'Consultation','almacenamiento':'Stockage','ovodonacion':'Don d’ovocytes','medicamentos':'Médicaments','laboratorio':'Laboratoire'
-  },
-  pt:{
-    'fertilizacion in vitro':'Fertilização in vitro','fiv':'Fertilização in vitro (FIV)','icsi':'ICSI','histeroscopia':'Histeroscopia',
-    'criopreservacion':'Criopreservação','anualidad criopreservacion':'Anuidade de criopreservação','estimulacion ovarica controlada':'Estimulação ovariana controlada',
-    'transferencia de embriones':'Transferência de embriões','consulta':'Consulta','almacenamiento':'Armazenamento','ovodonacion':'Doação de óvulos','medicamentos':'Medicamentos','laboratorio':'Laboratório'
-  }
-};
-function _segTradLocal(desc, idioma){
-  var m=SEG_TRAD_MAP[idioma]; if(!m) return null;
-  var k=_segNorm(desc); if(!k) return null;
-  if(m[k]) return m[k];
-  var best=null;
-  for(var key in m){ if(m.hasOwnProperty(key) && k.indexOf(key)>-1){ if(!best || key.length>best.length) best=key; } }
-  return best ? m[best] : null;
-}
+/* ── SEG_TRAD_MAP / _segTradLocal / _segNorm: ELIMINADOS ──────────────────────
+ * Aquí vivía un mapa hardcodeado de ~30 términos médicos que traducía los
+ * nombres de los servicios en el frontend. Había OTRO mapa equivalente en el
+ * backend (SEG_TRAD_OVERRIDES, cobranza.gs) y los dos ya habían divergido: cada
+ * uno traducía distinto y nadie sabía cuál mandaba.
+ *
+ * Ahora la traducción de un producto es un ATRIBUTO DEL PRODUCTO y vive en el
+ * catálogo (BD_Productos → Descripcion_<LANG>, ver traducciones.gs). El trabajo
+ * curado de ESTE mapa no se tiró: está como semilla en `TRAD_SEED_FRONTEND`
+ * (traducciones.gs) y `migrarTraduccionesProductos()` lo vuelca al catálogo.
+ *
+ * Se BORRÓ en vez de dejarlo como respaldo a propósito: un mapa muerto aquí
+ * invita a que alguien "corrija" una traducción en este archivo y luego no
+ * entienda por qué el documento sigue saliendo con el término viejo. Una sola
+ * fuente de verdad — el catálogo — o volvemos a la enfermedad que curamos.
+ * ─────────────────────────────────────────────────────────────────────────── */
 /* Construye y escribe la carta en la ventana ya abierta. Diseño = documento Word del
  * cliente: US Letter, márgenes de 1 pulgada, Calibri 11pt, acentos navy #2c5f8a,
  * encabezado (logo izq. + título der.), bandas de sección navy subrayadas, tabla de
@@ -33428,7 +34097,10 @@ function _segTradLocal(desc, idioma){
 function _segWrite(w, cfg, L, currency, pac, rows, total){
   var ov=cfg.overrides||{};
   var sym=({USD:'$',CAD:'$',MXN:'$',EUR:'€',GBP:'£'})[currency]||'$';
-  function money(n){ return sym+' '+(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  // Los montos también llevan el `loc` del idioma de la carta: en 'en-US' es
+  // "1,234.56" pero en 'fr-FR' es "1 234,56". Antes iba fijo a en-US, así que una
+  // carta en francés mostraba los importes con formato inglés.
+  function money(n){ return sym+' '+(n||0).toLocaleString(L.loc,{minimumFractionDigits:2,maximumFractionDigits:2}); }
   function dLarga(s){ try{ return new Date(String(s).substring(0,10)+'T12:00:00').toLocaleDateString(L.loc,{year:'numeric',month:'long',day:'numeric'}); }catch(e){ return s||'—'; } }
   // Formato del documento Word: "Wednesday July 1, 2026" (sin coma tras el día de la
   // semana). replace(',','') quita solo la primera coma; en inglés queda idéntico al
@@ -33576,7 +34248,7 @@ function notaBuscar(){
   var res=document.getElementById('nota-result'); res.innerHTML='<div style="padding:30px;text-align:center;color:var(--color-text-muted)">Cargando operaciones…</div>';
   var tok=encodeURIComponent(getToken());
   fetch(APPS_SCRIPT_URL+'?action=estadoCobranza&paciente='+encodeURIComponent(nombre)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
-    .then(function(r){return r.json();}).then(function(d){ _notaData=d; notaRenderResult(d); })
+    .then(function(r){return r.json();}).then(function(d){ _notaData=d; notaRenderResult(d); _hfSetIdiomaFicha('nota-idioma',nombre,'es'); })
     .catch(function(e){ res.innerHTML='<div style="padding:24px;color:#c83c3c">Error de red: '+e.message+'</div>'; });
 }
 function notaRenderResult(d){
@@ -33592,6 +34264,10 @@ function notaRenderResult(d){
     +'<div><label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);display:block;margin-bottom:3px">Folio</label><input id="nota-folio" type="text" value="'+folioAuto+'" style="width:150px;padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)"></div>'
     +'<div><label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);display:block;margin-bottom:3px">Fecha</label><input id="nota-fecha" type="date" value="'+fechaISO+'" style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)"></div>'
     +'<div><label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);display:block;margin-bottom:3px">Forma de pago</label><select id="nota-formapago" style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)"><option>Efectivo</option><option>Transferencia</option><option>Tarjeta de crédito</option><option>Tarjeta de débito</option><option>Depósito</option><option>Cheque</option></select></div>'
+    // Idioma del recibo (nivel 3): llega con el de la ficha del paciente y el
+    // usuario lo puede cambiar solo para este documento — ver _notaSetIdiomaFicha.
+    +'<div><label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);display:block;margin-bottom:3px">Idioma</label>'
+      +hfLangSelectHTML('nota-idioma','es','padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text);font-family:inherit')+'</div>'
     +'<button onclick="notaGenerar()" style="padding:9px 18px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">Generar nota / recibo</button>'
   +'</div>';
   h+='<div style="font-size:11.5px;color:var(--color-text-muted);margin-bottom:6px;line-height:1.5">Selecciona la(s) operación(es) del recibo. El <b>importe</b> se puede ajustar (por defecto es el total de la operación en MXN).</div>';
@@ -33617,23 +34293,35 @@ function notaGenerar(){
   var folio=((document.getElementById('nota-folio')||{}).value||'').trim();
   var formaPago=((document.getElementById('nota-formapago')||{}).value||'Efectivo');
   var fechaSel=((document.getElementById('nota-fecha')||{}).value||'');
+  var idioma=((document.getElementById('nota-idioma')||{}).value||'es');
   var rows=[], total=0;
   Array.prototype.forEach.call(chks,function(chk){
     var i=chk.getAttribute('data-i'); var v=_notaData.ventas[i];
     var monto=parseFloat((document.getElementById('nota-monto-'+i)||{}).value||v.total||0)||0;
     total+=monto; rows.push({desc:v.producto||'—', op:v.op, fecha:v.fecha, monto:monto});
   });
-  function money(n){ return '$'+(n||0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); }
-  function dLarga(s){ try{ return new Date(String(s).substring(0,10)+'T12:00:00').toLocaleDateString('es-MX',{year:'numeric',month:'long',day:'numeric'}); }catch(e){ return s||'—'; } }
-  var fechaDoc = fechaSel ? dLarga(fechaSel) : new Date().toLocaleDateString('es-MX',{year:'numeric',month:'long',day:'numeric'});
+  // Los nombres de los servicios se resuelven contra el catálogo. Si falta
+  // alguno, hfTradGate bloquea y ofrece capturarlo — el recibo no sale a medias.
+  var _conc=rows.map(function(r){ return r.desc; })
+                .filter(function(v,i,a){ return v && v!=='—' && a.indexOf(v)===i; });
+  hfTradGate(idioma,_conc,function(map){
+    rows.forEach(function(r){ if(map[r.desc]) r.desc=map[r.desc]; });
+    _notaWrite(rows,total,idioma,receptor,folio,formaPago,fechaSel);
+  });
+}
+function _notaWrite(rows,total,idioma,receptor,folio,formaPago,fechaSel){
+  var T=hfDict('nota',idioma);
+  function money(n){ return '$'+(n||0).toLocaleString(T.loc,{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function dLarga(s){ try{ return new Date(String(s).substring(0,10)+'T12:00:00').toLocaleDateString(T.loc,{year:'numeric',month:'long',day:'numeric'}); }catch(e){ return s||'—'; } }
+  var fechaDoc = fechaSel ? dLarga(fechaSel) : new Date().toLocaleDateString(T.loc,{year:'numeric',month:'long',day:'numeric'});
   var w=window.open('','_blank');
   if(!w){ alert('Habilita las ventanas emergentes para este sitio e intenta de nuevo.'); return; }
   var trs=rows.map(function(r){ return '<tr><td style="text-align:center;white-space:nowrap">'+dLarga(r.fecha)+'</td><td>'+_esc(r.desc)+(r.op?' <span style="color:#999">· OP '+_esc(r.op)+'</span>':'')+'</td><td style="text-align:right;white-space:nowrap">'+money(r.monto)+'</td></tr>'; }).join('');
   var logo=(typeof _HF_LOGO_DEFAULT!=='undefined'?_HF_LOGO_DEFAULT:'');
-  var firma=(typeof hfFirmaBloque==='function')?hfFirmaBloque('nota','Recibí'):'';
+  var firma=(typeof hfFirmaBloque==='function')?hfFirmaBloque('nota',T.nRecibi):'';
   var sig= firma
     ? '<div style="margin-top:34px;page-break-inside:avoid;text-align:center;width:280px;margin-left:auto;margin-right:auto">'+firma+'</div>'
-    : '<div style="margin-top:52px;page-break-inside:avoid;text-align:center"><div style="border-top:1px solid #333;width:260px;margin:0 auto;padding-top:5px;font-size:11px">Recibí conforme</div></div>';
+    : '<div style="margin-top:52px;page-break-inside:avoid;text-align:center"><div style="border-top:1px solid #333;width:260px;margin:0 auto;padding-top:5px;font-size:11px">'+_esc(T.nRecibiConforme)+'</div></div>';
   w.document.write('<html><head><meta charset="utf-8"><title> </title><style>'
     +'@page{margin:18mm}body{font-family:Georgia,"Times New Roman",serif;color:#1a1a1a;font-size:12.5px;line-height:1.55;margin:0}'
     +'.hd{text-align:center;border-bottom:2px solid #c46a7a;padding-bottom:9px;margin-bottom:14px}.hd img{height:52px}.hd .cn{font-size:14px;font-weight:700;letter-spacing:1px;color:#c46a7a;margin-top:5px}'
@@ -33645,17 +34333,20 @@ function notaGenerar(){
     +'.fp{font-size:12px;margin-top:14px}.leg{font-size:9px;color:#999;margin-top:26px;border-top:1px solid #eee;padding-top:8px;text-align:center}'
     +'</style></head><body>'
     +'<div class="hd">'+(logo?'<img src="'+logo+'" onerror="this.style.display=\'none\'">':'')+'<div class="cn">HESTIA FERTILITY CLINIC</div></div>'
-    +'<div class="title">RECIBO DE PAGO</div>'
-    +'<div class="nf">Documento informativo · NO es un comprobante fiscal (CFDI)</div>'
-    +'<div class="meta"><div><b>Folio:</b> '+_esc(folio||'—')+'</div><div><b>Fecha:</b> '+fechaDoc+'</div></div>'
-    +'<div style="font-size:13px;margin:6px 0 2px">Recibí de: <b>'+_esc(receptor)+'</b></div>'
-    +'<div style="font-size:12px;color:#555;margin-bottom:6px">La cantidad de <b>'+money(total)+'</b> por concepto de los servicios que se detallan:</div>'
-    +'<table><thead><tr><th style="text-align:center;width:120px">Fecha</th><th>Concepto</th><th style="text-align:right;width:130px">Importe</th></tr></thead><tbody>'+trs+'</tbody></table>'
-    +'<div class="tot">TOTAL: '+money(total)+' MXN</div>'
-    +'<div class="letra">'+_esc(_notaImporteLetra(total))+'</div>'
-    +'<div class="fp"><b>Forma de pago:</b> '+_esc(formaPago)+'</div>'
+    +'<div class="title">'+_esc(T.nTitulo)+'</div>'
+    +'<div class="nf">'+_esc(T.nNoFiscal)+'</div>'
+    +'<div class="meta"><div><b>'+_esc(T.nFolio)+':</b> '+_esc(folio||'—')+'</div><div><b>'+_esc(T.fecha)+':</b> '+fechaDoc+'</div></div>'
+    +'<div style="font-size:13px;margin:6px 0 2px">'+_esc(T.nRecibiDe)+': <b>'+_esc(receptor)+'</b></div>'
+    +'<div style="font-size:12px;color:#555;margin-bottom:6px">'+_esc(T.nCantidad)+' <b>'+money(total)+'</b> '+_esc(T.nPorConcepto)+'</div>'
+    +'<table><thead><tr><th style="text-align:center;width:120px">'+_esc(T.fecha)+'</th><th>'+_esc(T.concepto)+'</th><th style="text-align:right;width:130px">'+_esc(T.importe)+'</th></tr></thead><tbody>'+trs+'</tbody></table>'
+    +'<div class="tot">'+_esc(T.total.toUpperCase())+': '+money(total)+' MXN</div>'
+    // El importe con letra es una convención de los comprobantes mexicanos y
+    // _notaImporteLetra solo sabe deletrear en español. En otros idiomas se omite
+    // en vez de imprimir una línea en español dentro de un recibo en inglés.
+    +(idioma==='es' ? '<div class="letra">'+_esc(_notaImporteLetra(total))+'</div>' : '')
+    +'<div class="fp"><b>'+_esc(T.formaPago)+':</b> '+_esc(formaPago)+'</div>'
     +sig
-    +'<div class="leg">Este recibo ampara únicamente el pago recibido y no sustituye a la factura (CFDI). Si requiere factura, solicítela a facturas@hestiafertility.com.</div>'
+    +'<div class="leg">'+_esc(T.nLegal)+'</div>'
     +'</body></html>');
   w.document.close(); setTimeout(function(){ try{ w.print(); }catch(e){} },400);
 }
@@ -33672,6 +34363,10 @@ var NOVEDADES=[
     titulo:'Cuenta por cobrar: ya se registra sola como venta (deja de capturarla dos veces)',
     puntos:['El problema: al abonar una cuenta por cobrar el dinero SÍ llegaba a bancos, pero el ingreso NO llegaba a Ingresos. O lo capturabas a mano —y quedaba DUPLICADO al cobrarlo— o no lo capturabas y el ingreso nunca contaba en el Estado de Resultados.','La causa estaba en el ALTA, no en el cobro: «+ Cuenta por cobrar» creaba la DEUDA pero nunca la VENTA. Al cobrar ya era imposible adivinar si esa venta existía o no.','Ahora «+ Cuenta por cobrar» es lo que siempre quiso ser: VENDER A CRÉDITO. Registra la venta sola en Ingresos (con la fecha del cargo y pagado en $0) y de esa venta nace la cuenta por cobrar. Un solo paso.','⚠ LO ÚNICO QUE TIENES QUE CAMBIAR: ya NO la captures también en Ingresos. Si lo haces, ahora sí la duplicas tú. Al cobrarla no hay nada que capturar: el ingreso ya estaba contado.','El ingreso cuenta en el mes en que VENDISTE, no en el que cobres (devengado). Vender a crédito no mueve dinero: el alta no toca ningún banco — el banco se toca al cobrar.','Se cobra con el MISMO botón «Cobrar / Abonar» de siempre, con el mismo motor que cualquier venta: sube lo pagado, manda el dinero al banco por forma de pago y cierra el saldo. Los abonos parciales funcionan igual.','En agencias (REPROVIDA) la deuda queda a nombre de la AGENCIA, como debe ser — y el nombre de cada paciente real se conserva por partida y en las observaciones de la venta.','La fecha del cargo debe ser del año en curso (ahí se escribe la venta). Un cargo de otro año se rechaza y te explica por qué, en vez de esconderlo en el libro equivocado.','Ya no se pide «OP relacionada»: la venta genera su propio folio.','Los saldos que manda una venta ya no se editan ni se borran desde Cobranza (borrarlos dejaría la venta cobrando sola). Se corrigen en Ingresos → editar la operación, o se deshacen con «⊘ Cancelar», que cierra el saldo solo.','Doble clic más seguro: si el saldo ya cambió, el cobro se rechaza en vez de mandar el dinero al banco dos veces. Y si se cae la red, ya no te ofrece «Reintentar» a ciegas: recarga y te pide verificar.'],
     comoUsar:['Cobranza → Cuentas por Cobrar → «+ Cuenta por cobrar».','Captura el cliente (en agencias, la agencia), las partidas y la fecha. Registra.','Listo: la venta YA quedó en Ingresos y el adeudo en la lista. No captures nada más.','Cuando te paguen: «Cobrar / Abonar» como siempre.','⚠ Las cuentas por cobrar de ANTES de este cambio no tienen venta. No las toques todavía: el administrador tiene un reporte para revisarlas una por una y decidir.'] },
+  { build:'2026.07.16', fecha:'16 jul 2026', area:'Operación', icon:'🌐', destacada:true,
+    titulo:'Documentos del paciente en otro idioma — ahora sí, completos',
+    puntos:['⚠ El problema: la Carta de Seguro salía en inglés pero los NOMBRES DE LOS SERVICIOS salían en español. Una carta mitad y mitad, enfrente de una aseguradora. Y cuando la traducción fallaba, salía igual, sin avisar.','Ya no puede pasar: si a algún servicio del documento le falta su traducción, el ERP NO IMPRIME. Te dice exactamente cuáles faltan.','Bloquear no es dejarte tirado: en esa misma pantalla escribes la traducción y el documento sale enseguida. Y se guarda EN EL CATÁLOGO del producto, así que se arregla para siempre, no solo para ese documento.','Ahora son 5 los documentos que salen en otro idioma (antes solo la carta de seguro): Estado de cuenta, Cobranza, Recibo, Comprobante de cancelación y Carta de Seguro. Español, inglés, francés y portugués.','Se traduce TODO: títulos, encabezados de tabla, textos legales, y las fechas y los importes con el formato del idioma (en inglés «Mar 14, 2026» y $1,234.50; en francés «14 mars 2026» y $1 234,50).','El idioma sale de la FICHA de la paciente, no de tu navegador: lo sugiere el País (México→español, USA→inglés), pero el campo «Idioma de sus documentos» de su ficha manda sobre el país. Caso real: paciente mexicana que necesita su carta en inglés para su aseguradora de USA.','Al imprimir puedes cambiar el idioma solo para ESE documento, sin tocar su ficha.','Los nombres de los servicios ya no los inventa un traductor automático: viven en el catálogo, en el producto. El traductor solo SUGIERE y tú confirmas — es terminología médica y la lee la paciente.','⚠ La vista previa de la carta de seguro MENTÍA: se saltaba la traducción, así que se veía perfecta y la carta real salía en español. Ya muestra exactamente lo que se va a imprimir.','Los documentos en español siguen funcionando igual que siempre: no consultan nada ni se bloquean.'],
+    comoUsar:['Para que el catálogo quede listo: pide que corran la migración (vuelca los ~36 términos médicos ya revisados) y la auditoría, que te dice qué productos siguen sin traducción.','Catálogo General → editar producto → sección «Traducciones del producto»: escribe (o pulsa «✨ Sugerir» y revisa) el nombre en inglés/francés/portugués.','Ficha de la paciente → elige su País: el idioma se autocompleta. ¿Necesita otro? Cámbialo en «Idioma de sus documentos» — ese campo manda.','Al imprimir cualquiera de los 5 documentos, revisa el idioma en el diálogo y pulsa Imprimir.','¿Te bloqueó? Escribe las traducciones que te pide y pulsa «Guardar al catálogo e imprimir».'] },
   { build:'2026.07.16', fecha:'16 jul 2026', area:'General', icon:'📢', destacada:true,
     titulo:'Novedades: ahora tú decides cuándo avisar y a quién',
     puntos:['El aviso de novedades ya NO salta con cada actualización: tiene un interruptor. Se prende solo cuando hay algo que de verdad valga la pena contar.','⚠ Apagar el aviso NO esconde la página: Novedades sigue en el menú para consultarla cuando quieras. Lo que se apaga es que SALTE sola.','Eliges CUÁL novedad se anuncia: cada una tiene una casilla «Se anuncia». Solo las que marques disparan el aviso.','Eliges A QUIÉN: cada novedad tiene una audiencia — «Todos» o un permiso que ya existe en Gestión de Roles. Ej.: una novedad de Nómina solo la ven los de Nómina (ni en el aviso ni en la página).','La configuración se guarda en Google Sheets y aplica a TODOS los usuarios, no solo a quien la prendió.','Solo administrador/director pueden configurarlo (y el servidor lo vuelve a validar, no solo se esconde el botón).','El «ya lo vi» sigue siendo de cada quien: si lo cierras, no te vuelve a saltar hasta que haya otra novedad anunciada.'],
@@ -34058,6 +34753,25 @@ async function _novCfgGuardar(){
 
   /* ──────────────────────── CONTENIDO ──────────────────────── */
   var HELP = [
+
+  /* ============ IDIOMA DE LOS DOCUMENTOS DEL PACIENTE ============ */
+  { id:'idioma-documentos', group:'operacion', icon:'🌐', title:'Documentos del paciente en otro idioma',
+    keywords:'idioma traduccion traducir ingles english frances francais portugues carta seguro estado cuenta cobranza recibo nota cancelacion producto catalogo descripcion_en bloqueo faltan traducciones pais paciente',
+    intro:'Los 5 documentos que ve la paciente — **estado de cuenta, cobranza, recibo, comprobante de cancelación y carta de seguro** — pueden salir en **español, inglés, francés o portugués**, y salen **100% en ese idioma: también los nombres de los servicios**. Antes pasaba que la carta salía en inglés pero los servicios en español; eso ya no puede pasar, porque si falta una traducción **el documento no se imprime**.',
+    pasos:[
+      '**El idioma sale de la ficha de la paciente.** Al elegir su **País** se autocompleta el idioma (México → español, USA → inglés). Ese es solo un punto de partida.',
+      '**El campo «Idioma de sus documentos» de su ficha manda sobre el país.** Si una paciente mexicana necesita su carta en inglés para su aseguradora de EE. UU., se lo pones ahí y todos sus documentos salen en inglés.',
+      '**Al imprimir puedes cambiarlo solo para ESE documento** — sin tocar su ficha. El diálogo de impresión llega con su idioma ya elegido; si lo cambias ahí, aplica únicamente a esa hoja.',
+      '**Los nombres de los servicios salen del catálogo del producto**, no de un traductor automático. Cada producto tiene su nombre en inglés/francés/portugués en **Catálogo General → editar producto → «Traducciones del producto»**.',
+      '**Si algún servicio del documento no tiene traducción, el ERP NO imprime.** Te muestra exactamente cuáles faltan y te deja escribirlas ahí mismo: al guardarlas se guardan **en el catálogo** (se arregla para siempre, no solo para ese documento) y el documento sale enseguida.',
+      '**El traductor automático solo SUGIERE.** Te propone un texto para que lo revises y lo corrijas; nunca se guarda solo. Es terminología médica y termina en un documento que lee la paciente o su aseguradora.'
+    ],
+    tips:[
+      '¿Quieres saber qué te falta ANTES de tener a la paciente enfrente? Pide que corran `auditarTraduccionesProductos()`: lista los productos activos sin traducción. No cambia nada, solo informa.',
+      'Los documentos en **español** funcionan exactamente igual que siempre: no consultan traducciones ni se bloquean nunca.',
+      'Las fechas y los importes también se adaptan al idioma: en inglés «Mar 14, 2026» y $1,234.50; en francés «14 mars 2026» y $1 234,50.',
+      '¿La paciente no tiene país ni idioma en su ficha? El documento sale en español (la carta de seguro, en inglés, como siempre).'
+    ] },
 
   /* ============ IDENTIFICAR PACIENTES ============ */
   { id:'identificar-pacientes', group:'operacion', icon:'🪪', title:'Identificar pacientes (cobros «No localizado»)',
@@ -35224,6 +35938,24 @@ async function _novCfgGuardar(){
 
   /* ────────────────── CONTENIDO (todos los módulos) ────────────────── */
   var HFMAN = [
+
+  /* ============ IDIOMA DE LOS DOCUMENTOS ============ */
+  { id:'idioma-documentos', group:'operacion', icon:'🌐', title:'Documentos del paciente en otro idioma',
+    keywords:'idioma traduccion traducir ingles frances portugues carta seguro estado cuenta recibo cancelacion producto catalogo bloqueo faltan traducciones pais',
+    para:'Los documentos que ve la paciente pueden salir en **español, inglés, francés o portugués** — y salen completos en ese idioma, **incluidos los nombres de los servicios**. Si a algún servicio le falta su traducción, el ERP **no imprime** y te deja escribirla en el momento.',
+    where:'El idioma vive en la **ficha de la paciente** (campo «Idioma de sus documentos»). Las traducciones de los servicios viven en **Catálogo General → editar producto → «Traducciones del producto»**.',
+    mock:{ title:'Faltan traducciones — el documento no se imprimió', h:'Escríbelas y se guardan en el catálogo',
+      toolbar:[ {t:'select', label:'Idioma del documento: English', n:1}, {t:'btn', label:'Imprimir'} ],
+      table:{ cols:['Concepto en español', 'Cómo se llama en English'],
+        rows:[ ['Criopreservación de embriones', {raw:'<span class="hfm-btn">Embryo Cryopreservation</span>', n:2}],
+               ['Paquete Violeta Premium', {raw:'<span class="hfm-btn">Escribe la traducción…</span>', n:3}] ] },
+      foot:[{t:'btn', label:'Guardar al catálogo e imprimir', n:4}] },
+    steps:[
+      {n:1, t:'El idioma llega solo', d:'El diálogo de impresión ya viene con el idioma de la ficha de la paciente. Puedes cambiarlo aquí para ESTE documento sin tocar su ficha.'},
+      {n:2, t:'La sugerencia es solo una sugerencia', d:'El traductor automático propone un texto. Revísalo: es terminología médica y va en un documento que lee la paciente. Nunca se guarda solo.'},
+      {n:3, t:'Lo que falta, lo escribes tú', d:'Si el traductor no supo, escríbelo a mano. El documento no sale hasta que estén todos: es preferible eso a mandar una carta mitad inglés, mitad español.'},
+      {n:4, t:'Se arregla para siempre', d:'Al guardar, la traducción se guarda EN EL CATÁLOGO del producto. La próxima vez que ese servicio salga en un documento, ya no te lo va a pedir.'}
+    ] },
 
   /* ============ IDENTIFICAR PACIENTES ============ */
   { id:'identificar-pacientes', group:'operacion', icon:'🪪', title:'Identificar pacientes (cobros sin nombre)',
