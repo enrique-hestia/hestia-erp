@@ -266,17 +266,58 @@ function _cobReadCargos() {  // registro manual de saldos iniciales / cargos a c
   }
   return out;
 }
-// Registra automáticamente una cuenta por cobrar cuando un ingreso se captura con
-// pago parcial. La llama saveIngreso (finance.gs). Nunca debe tumbar la venta.
+// Registra/actualiza automáticamente una cuenta por cobrar cuando un ingreso se
+// captura o EDITA con pago parcial. La llaman saveIngreso y updateIngreso
+// (finance.gs). Nunca debe tumbar la venta.
+// IDEMPOTENTE (upsert por OP): la fila auto-generada se marca con Nota='auto-ingreso';
+// editar el ingreso N veces reescribe ese MISMO renglón (no apila duplicados). Si el
+// saldo baja a 0 (ya se pagó completo), el renglón se cierra (Estatus 'Pagado',
+// Monto 0) sin borrarlo → queda como histórico y sale de Cuentas por Cobrar.
+// 'monto' aquí es el SALDO (TotalPagar − Pagado) de la OP, no el total.
 function _cobRegistrarSaldoIngreso(op, paciente, categoria, monto, fecha) {
   try {
-    if (!(_cobNum(monto) > 0)) return;
+    op = String(op || '').trim();
+    var saldo = _cobNum(monto);
     var sh = _cobEnsureCargos();
-    sh.appendRow([
-      fecha ? _cobStr(_cobD(fecha)) : _cobStr(_cobToday()),
-      String(op || '').trim(), String(paciente || '').trim(), String(categoria || ''),
-      'Saldo pendiente de OP ' + op, _cobNum(monto), 'Pendiente', 'auto-ingreso', '', new Date()
-    ]);
+    var raw = sh.getDataRange().getValues();
+    var hdr = (raw[0] || []).map(function (x) { return String(x).trim().toLowerCase(); });
+    var iOp    = hdr.indexOf('op');        if (iOp < 0) iOp = 1;
+    var iCat   = hdr.indexOf('categoria'); if (iCat < 0) iCat = 3;
+    var iConc  = hdr.indexOf('concepto');  if (iConc < 0) iConc = 4;
+    var iMonto = hdr.indexOf('montocargo');if (iMonto < 0) iMonto = 5;
+    var iEst   = hdr.indexOf('estatus');   if (iEst < 0) iEst = 6;
+    var iNota  = hdr.indexOf('nota');      if (iNota < 0) iNota = 7;
+    var iPac   = hdr.indexOf('paciente');  if (iPac < 0) iPac = 2;
+    // Localiza la fila auto-generada de ESTA OP (idempotencia).
+    var foundRow = -1;
+    if (op) {
+      for (var r = 1; r < raw.length; r++) {
+        if (String(raw[r][iOp] || '').trim() === op &&
+            String(raw[r][iNota] || '').toLowerCase().indexOf('auto-ingreso') > -1) { foundRow = r + 1; break; }
+      }
+    }
+    if (foundRow > 0) {
+      if (saldo > 0.01) {
+        sh.getRange(foundRow, iMonto + 1).setValue(saldo);
+        sh.getRange(foundRow, iEst + 1).setValue('Pendiente');
+        sh.getRange(foundRow, iConc + 1).setValue('Saldo pendiente de OP ' + op);
+        if (paciente) sh.getRange(foundRow, iPac + 1).setValue(String(paciente).trim());
+        if (categoria) sh.getRange(foundRow, iCat + 1).setValue(String(categoria));
+      } else {
+        // Sin saldo → cerrar (no borrar): sale de Cuentas por Cobrar, queda traza.
+        sh.getRange(foundRow, iMonto + 1).setValue(0);
+        sh.getRange(foundRow, iEst + 1).setValue('Pagado');
+      }
+      return;
+    }
+    // No existe todavía → solo se crea si de verdad hay saldo.
+    if (saldo > 0.01) {
+      sh.appendRow([
+        fecha ? _cobStr(_cobD(fecha)) : _cobStr(_cobToday()),
+        op, String(paciente || '').trim(), String(categoria || ''),
+        'Saldo pendiente de OP ' + op, saldo, 'Pendiente', 'auto-ingreso', '', new Date()
+      ]);
+    }
   } catch (e) {}
 }
 // Editar / borrar una cuenta por cobrar. Permisos AMARRADOS a los de Cuentas por

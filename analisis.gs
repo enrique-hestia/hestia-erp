@@ -701,6 +701,7 @@ function readEstadoCuentaPaciente(pacienteNombre) {
     var iDesc  = hc('descripcion','descripción');
     var iCant  = hc('cantidad');
     var iTotal = hc('totalpagar','total a pagar','total');
+    var iPagado= hc('pagado');
     var iEst   = hc('estatus','estado');
     var iPago  = hc('formapago','forma de pago','forma pago');
     if (iPac < 0 || iTotal < 0)
@@ -708,6 +709,10 @@ function readEstadoCuentaPaciente(pacienteNombre) {
 
     var movimientos = [];
     var totalGeneral = 0;
+    // Saldo por pago PARCIAL a nivel línea (solo si Pagado>0 y Pagado<Total; los
+    // históricos con Pagado en blanco se asumen pagados). Se agrupa por OP para no
+    // duplicar contra el registro explícito de Cuentas por Cobrar más abajo.
+    var _saldoLineaPorOp = {};
 
     for (var r = 1; r < data.length; r++) {
       var row = data[r];
@@ -721,9 +726,13 @@ function readEstadoCuentaPaciente(pacienteNombre) {
         fechaStr = String(rawFecha || '').substring(0, 10);
       }
       var total = parseFloat(String(row[iTotal] || '0').replace(/[$,]/g, '')) || 0;
+      var pagadoRow = iPagado >= 0 ? (parseFloat(String(row[iPagado] || '0').replace(/[$,]/g, '')) || 0) : 0;
+      var saldoRow = (iPagado >= 0 && pagadoRow > 0.01 && pagadoRow < total - 0.01) ? (total - pagadoRow) : 0;
+      var opRow = String(row[iOp] || '').trim();
+      if (saldoRow > 0.01) _saldoLineaPorOp[opRow] = (_saldoLineaPorOp[opRow] || 0) + saldoRow;
       totalGeneral += total;
       movimientos.push({
-        op:       String(row[iOp]   || '').trim(),
+        op:       opRow,
         fecha:    fechaStr,
         anio:     fechaStr ? fechaStr.substring(0, 4) : 'Sin año',
         cat:      String(row[iCat]  || '').trim(),
@@ -731,10 +740,53 @@ function readEstadoCuentaPaciente(pacienteNombre) {
         desc:     iDesc >= 0 ? String(row[iDesc] || '').trim() : '',
         cant:     iCant >= 0 ? (parseFloat(String(row[iCant]||'1'))||1) : 1,
         total:    total,
+        pagado:   pagadoRow,
+        saldo:    saldoRow,
         estatus:  iEst  >= 0 ? String(row[iEst]  || '').trim() : '',
         pago:     iPago >= 0 ? String(row[iPago]  || '').trim() : ''
       });
     }
+
+    // ── Saldo pendiente / "Nos debe" ────────────────────────────────────────────
+    // Fuente (b): registro EXPLÍCITO de Cuentas por Cobrar (Motor A de cobranza.gs)
+    //   — incluye los adeudos auto-generados al capturar/editar un ingreso con pago
+    //   parcial y los saldos iniciales/cargos a crédito. Es la fuente canónica y la
+    //   misma que ve el módulo "Cuentas por Cobrar" (evita la deuda falsa por precios
+    //   viejos que daría restar Pagado a ciegas de TODO el histórico).
+    // Fuente (a): pagos parciales a nivel línea de BD_Ingresos que AÚN no tengan un
+    //   renglón en el registro (históricos previos a esta función) — se suman sin
+    //   duplicar los que ya están cubiertos por el registro.
+    var deudaDetalle = [];
+    var saldoPendiente = 0;
+    var _opsCubiertos = {};
+    try {
+      if (typeof _cobReadCargos === 'function' && typeof _cobReadAbonos === 'function' && typeof _cobKeyNom === 'function') {
+        var _keyPac = _cobKeyNom(pacienteNombre);
+        var _cargos = _cobReadCargos();
+        var _abonos = _cobReadAbonos();
+        for (var cgi = 0; cgi < _cargos.rows.length; cgi++) {
+          var cg = _cargos.rows[cgi];
+          if (_cobKeyNom(cg.paciente) !== _keyPac) continue;
+          var st = String(cg.estatus || '').toLowerCase();
+          if (st === 'cancelado' || st === 'pagado') continue;
+          var abo = cg.op ? (_abonos.byOp[cg.op] || 0) : 0;
+          var sReg = cg.monto - abo;
+          if (sReg <= 0.01) continue;
+          if (cg.op) _opsCubiertos[cg.op] = true;
+          saldoPendiente += sReg;
+          deudaDetalle.push({ op: cg.op || '—', concepto: cg.concepto || 'Saldo', fecha: cg.fecha,
+                              saldo: sReg, origen: (String(cg.nota || '').toLowerCase().indexOf('auto-ingreso') > -1) ? 'ingreso' : 'registro' });
+        }
+      }
+    } catch (eCob) {}
+    // Pagos parciales de línea no cubiertos por el registro explícito.
+    for (var opk in _saldoLineaPorOp) {
+      if (_opsCubiertos[opk]) continue;
+      saldoPendiente += _saldoLineaPorOp[opk];
+      deudaDetalle.push({ op: opk || '—', concepto: 'Pago parcial de OP ' + opk, fecha: '',
+                          saldo: _saldoLineaPorOp[opk], origen: 'ingreso' });
+    }
+    deudaDetalle.sort(function (a, b) { return b.saldo - a.saldo; });
 
     movimientos.sort(function(a, b) { return a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0; });
 
@@ -755,7 +807,9 @@ function readEstadoCuentaPaciente(pacienteNombre) {
       totalMovimientos: movimientos.length,
       movimientos: movimientos,
       porCategoria: porCategoria,
-      porAnio: porAnio
+      porAnio: porAnio,
+      saldoPendiente: saldoPendiente,
+      deudaDetalle: deudaDetalle
     };
   } catch(ex) {
     return { ok: false, error: ex.message };
