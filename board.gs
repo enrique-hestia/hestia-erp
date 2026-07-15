@@ -62,17 +62,31 @@ function _boardSeries(endIso){
   return out;
 }
 
-/* Meta / presupuesto del periodo (best-effort; null si no hay presupuesto.gs). */
+/* Meta / presupuesto del periodo (best-effort; null si no hay presupuesto.gs).
+   Se apoya en _boardPresLee, la ÚNICA vía correcta de leer el presupuesto: resuelve el
+   escenario ACTIVO (totales.proyeccionSeleccionada) igual que el resto del Board Deck.
+   Antes llamaba readPresupuesto(fi, ff) con FECHAS ('2026-07-01') cuando la función solo
+   acepta 'YYYY-Qn' → caía al default, y leía campos inexistentes (p.metaIngresos /
+   p.ingresosMeta / p.meta.ingresos) → ingresosMeta = 0 SIEMPRE y cumplimientoMeta = null.
+   El presupuesto vive por TRIMESTRE: si el periodo reportado abarca solo parte del Q
+   (p.ej. un mes), la meta se prorratea × meses/3 para que sea comparable con el real. */
 function _boardMeta(fi, ff){
   try {
     if (typeof readPresupuesto !== 'function') return null;
-    var p = readPresupuesto(fi, ff);
-    if (!p || !p.ok) return null;
-    // Estructura tolerante: busca metas de ingresos/egresos/utilidad
+    var y = parseInt(String(ff).substring(0,4),10), mo = parseInt(String(ff).substring(5,7),10);
+    if (!y || !mo) return null;
+    var q = Math.ceil(mo/3);
+    var p = _boardPresLee(y+'-Q'+q);
+    if (!p) return null;
+    // Meses del trimestre que cubre fi..ff (1..3) → prorrateo del budget trimestral.
+    var yi = parseInt(String(fi).substring(0,4),10) || y, mi = parseInt(String(fi).substring(5,7),10) || mo;
+    var qIni = (q-1)*3 + 1;
+    var desde = (yi < y) ? qIni : Math.max(mi, qIni), hasta = Math.min(mo, qIni+2);
+    var f = Math.max(1, Math.min(3, hasta - desde + 1)) / 3;
     return {
-      ingresosMeta: _boardNum(p.metaIngresos || p.ingresosMeta || (p.meta && p.meta.ingresos) || 0),
-      egresosMeta:  _boardNum(p.metaEgresos  || p.egresosMeta  || (p.meta && p.meta.egresos)  || 0),
-      utilidadMeta: _boardNum(p.metaUtilidad || p.utilidadMeta || (p.meta && p.meta.utilidad) || 0)
+      ingresosMeta: _boardNum(p.ingresos) * f,
+      egresosMeta:  _boardNum(p.egresos)  * f,
+      utilidadMeta: _boardNum(p.utilidad) * f
     };
   } catch(e){ return null; }
 }
@@ -277,7 +291,16 @@ function _boardVentasDesgloseProy(grupos){
   (grupos||[]).forEach(function(g){ if(_boardEsVentaGrupo(g.grupo)){ var k=_boardVentaKey(g.grupo); map[k]=(map[k]||0)+_boardNum(g.cantProy); } });
   return map;
 }
+// Memo por ejecución: readPresupuesto es caro (relee ingresos/egresos de varios años) y
+// ahora se pide dos veces por request (_boardMeta + _boardPresupuesto) para el mismo Q.
+var _BOARD_PRES_MEMO = {};
 function _boardPresLee(per){
+  if (_BOARD_PRES_MEMO.hasOwnProperty(per)) return _BOARD_PRES_MEMO[per];
+  var out = _boardPresLeeRaw(per);
+  _BOARD_PRES_MEMO[per] = out;
+  return out;
+}
+function _boardPresLeeRaw(per){
   try{
     if(typeof readPresupuesto!=='function') return null;
     var pr = readPresupuesto(per);
