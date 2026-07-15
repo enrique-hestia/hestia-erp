@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.14.206 -->
+﻿<!-- app-build:2026.07.14.207 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -7950,16 +7950,34 @@ var _egFilters = {mes:'',contable:'',subtipo:'',proveedor:'',formaPago:'',buscar
 // Rango efectivo de la vista Egresos: el año elegido a mano (completo) o el periodo global.
 function _egRangeIni(){ return _egAnioSel ? (_egAnioSel+'-01-01') : (currentFechaInicio||''); }
 function _egRangeFin(){ return _egAnioSel ? (_egAnioSel+'-12-31') : (currentFechaFin||''); }
-// Mapa proveedor→nombre comercial (para buscar/mostrar el comercial en Egresos).
+// Mapa proveedor→ficha del catálogo (nombre comercial + razón social).
+// Se indexa por AMBOS nombres, así que resuelve igual si el egreso se capturó
+// con la razón social o con el nombre comercial.
 function _egProvMap(){
   var pv=window._proveedores||[];
   if(window._egProvMapCache && window._egProvMapCache._n===pv.length) return window._egProvMapCache;
   var idx={_n:pv.length};
-  pv.forEach(function(p){ var nom=String(p.nombre||'').trim().toLowerCase(), com=String(p.comercial||'').trim(); var rec={comercial:com};
-    if(nom) idx[nom]=rec; if(com) idx[com.toLowerCase()]=rec; });
+  pv.forEach(function(p){ var nom=String(p.nombre||'').trim(), com=String(p.comercial||'').trim(); var rec={comercial:com, razon:nom};
+    if(nom) idx[nom.toLowerCase()]=rec; if(com) idx[com.toLowerCase()]=rec; });
   window._egProvMapCache=idx; return idx;
 }
 function _egComercial(nombre){ var r=_egProvMap()[String(nombre||'').trim().toLowerCase()]; return (r&&r.comercial)||''; }
+// Razón social = col B "Nombre / Razón social" del catálogo de Proveedores.
+// Devuelve '' si el proveedor no está dado de alta (el llamador decide el fallback).
+function _egRazonSocial(nombre){ var r=_egProvMap()[String(nombre||'').trim().toLowerCase()]; return (r&&r.razon)||''; }
+// Campo "Razón social" del detalle del egreso. Siempre se pinta (nunca queda
+// hueco): si el proveedor no está en el catálogo cae al nombre capturado en el
+// egreso, atenuado y marcado "sin catálogo" para que se note que falta darlo de
+// alta — no es lo mismo un dato verificado que uno tecleado a mano.
+function _egRazonFld(proveedor){
+  var rs  = _egRazonSocial(proveedor);
+  var cap = String(proveedor||'').trim();
+  var lbl = '<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Razón social</div>';
+  if (rs)  return '<div>'+lbl+'<div style="font-weight:600;color:var(--text-primary,#111)">'+_esc(rs)+'</div></div>';
+  if (!cap) return '<div>'+lbl+'<div style="font-weight:600;color:var(--text-secondary,#6b7280)">—</div></div>';
+  return '<div>'+lbl+'<div style="font-weight:600;color:var(--text-secondary,#6b7280)" title="Este proveedor no está en el catálogo de Proveedores — se muestra el nombre capturado en el egreso">'
+    + _esc(cap)+' <span style="font-size:9px;font-weight:600;opacity:.7">· sin catálogo</span></div></div>';
+}
 var _egPage = 1, _egPerPage = 30;
 
 async function loadEgresosERP(force) {
@@ -8359,6 +8377,7 @@ function _renderEgresosERP() {
         +(_egRE?'<div style="padding:8px 18px 0;font-size:10px;color:var(--text-secondary,#9ca3af)">✏️ Edición rápida — solo <strong>Póliza</strong>, <strong>Notas</strong> y <strong>Observaciones</strong>. Para cambiar monto, forma de pago, fecha o clasificación usa «editar» (así el movimiento bancario se recalcula bien).</div>':'')
         +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px 18px;padding:14px 18px;font-size:12px">'
         +_egFld('Concepto completo', r._rowNum, 'concepto', r.concepto, 'text', false)
+        +_egRazonFld(r.proveedor)
         +(_egComercial(r.proveedor)?'<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af)">Nombre comercial</div><div style="font-weight:600;color:var(--text-primary,#111)">'+_egComercial(r.proveedor)+'</div></div>':'')
         +_egFld('Monto (MXN)', r._rowNum, 'monto', r.monto, 'money', false)
         +_egFld('Contable', r._rowNum, 'contable', r.contable, 'select', false, ['Gasto','Costo','Crédito'])
@@ -9150,7 +9169,8 @@ function egDeleteConfirm() {
 
 function egOpenForm() {
   if (!_egEditRowNum) _egEditRowNum = null;
-  _egPendingFactura = null; // limpia cualquier factura seleccionada de una captura anterior
+  // Los adjuntos pendientes viven en las propias zonas de arrastre, que se
+  // vuelven a pintar más abajo: no hay estado de una captura anterior que limpiar.
   var view = document.getElementById('eg-form-view');
   var content = document.getElementById('eg-form-content');
   if (!view || !content) return;
@@ -9184,7 +9204,7 @@ function egOpenForm() {
   h += '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:20px;margin-bottom:16px">'
     +'<div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:14px">Datos del egreso</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
-    +'<div><label '+LBL+'>Fecha de pago <span style="font-weight:400;color:var(--text-secondary,#9ca3af)">(si ya se pagó)</span></label><input type="date" id="eg-fecha" '+S+'></div>'
+    +'<div><label '+LBL+'>Fecha de pago <span style="font-weight:400;color:var(--text-secondary,#9ca3af)">(si ya se pagó)</span></label><input type="date" id="eg-fecha" '+S+' oninput="egSyncDocChecks()" onchange="egSyncDocChecks()"></div>'
     +'<div><label '+LBL+'>Proveedor * <a href="javascript:void(0)" onclick="egNuevoProveedor()" style="font-weight:700;color:var(--color-primary,#c46a7a);text-decoration:none">+ Nuevo</a></label><input id="eg-proveedor" list="prov-datalist" '+S+' placeholder="Nombre del proveedor" oninput="egSugerirClasif();_egDupCheck()" onchange="egSugerirClasif();_egDupCheck()"></div>'
     +'<div><label '+LBL+'>Monto *</label><input type="number" id="eg-monto" '+S+' placeholder="0.00" step="0.01" oninput="_egDupCheck()"></div>'
     +'</div>'
@@ -9200,7 +9220,7 @@ function egOpenForm() {
     +'<div style="margin-top:5px;text-align:right"><a href="javascript:void(0)" onclick="egFijarClasif()" style="font-size:11px;font-weight:600;color:var(--color-primary,#c46a7a);text-decoration:none" title="Guarda Contable/Tipo/Subtipo/Concepto como default de este proveedor para que se sugiera solo la próxima vez">📌 Fijar esta clasificación al proveedor</a></div></div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">'
     +'<div><label '+LBL+'>Vencimiento <span style="font-weight:400;color:var(--text-secondary,#9ca3af)">(si no se ha pagado)</span></label><input type="date" id="eg-venc" '+S+'></div>'
-    +'<div><label '+LBL+'>Póliza</label><input id="eg-poliza" '+S+' placeholder="Número de póliza"></div>'
+    +'<div><label '+LBL+'>Póliza</label><input id="eg-poliza" '+S+' placeholder="Número de póliza" oninput="egSyncDocChecks()"></div>'
     +'<div><label '+LBL+'>Notas</label><input id="eg-notas" '+S+' placeholder="Notas adicionales"></div>'
     +'</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">'
@@ -9212,11 +9232,7 @@ function egOpenForm() {
     +'<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary,#9ca3af)" title="Se activa al subir comprobante de pago"><input type="checkbox" id="eg-chk-pag" class="eg-chk" disabled> Pagado <span style="font-size:9px">(auto: link pago)</span></label>'
     +'<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary,#9ca3af)" title="Se activa al capturar póliza"><input type="checkbox" id="eg-chk-cont" class="eg-chk" disabled> Contabilidad <span style="font-size:9px">(auto: póliza)</span></label>'
     +'</div>'
-    +'<div style="margin-bottom:14px"><label '+LBL+'>Factura <span style="font-weight:400;color:var(--text-secondary,#9ca3af)">(XML/PDF · opcional — se adjunta y marca Facturación al guardar)</span></label>'
-    +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
-    +'<label style="display:inline-flex;align-items:center;gap:7px;padding:8px 14px;background:var(--color-surface,#f3f4f6);border:1.5px dashed var(--color-divider,#e5e7eb);border-radius:9px;font-size:12px;font-weight:600;cursor:pointer;color:var(--text-primary,#111)">📎 Subir factura<input type="file" accept=".pdf,.xml" style="display:none" onchange="egSelectFactura(this)"></label>'
-    +'<span id="eg-fact-name" style="font-size:11.5px;color:var(--text-secondary,#6b7280)"></span>'
-    +'</div></div>'
+    + _egDzBlock()
     +'<div><label '+LBL+'>Observaciones</label><textarea id="eg-obs" '+S+' rows="2" placeholder="Observaciones…" style="resize:vertical"></textarea></div>'
     +'</div>';
 
@@ -9230,9 +9246,21 @@ function egOpenForm() {
   view.scrollTop = 0;
 }
 
-/* ── Auto-clasificación de gastos por proveedor frecuente ──────────── */
+/* ── Auto-clasificación de gastos por proveedor frecuente ────────────
+   Componente REUTILIZABLE: mismo motor (clasifProveedores / guardarClasif-
+   Proveedor de prov_defaults.gs) y mismo diseño en los dos formularios que
+   capturan un gasto — "Nuevo egreso" (ns 'eg') y "Registrar cuenta por pagar"
+   (ns 'cxp'). Para montarlo en otro formulario basta con agregar su namespace
+   aquí y pintar un <div id="…-clasif-banner">. */
 var _egClasifProv = null;      // {map:{nombreLower:{...}}}
 var _egClasifLoading = false;
+var _clasifNS = {
+  eg:  { banner:'eg-clasif-banner',  prov:'eg-proveedor', contable:'eg-contable',
+         tipo:'eg-tipo',   subtipo:'eg-subtipo',   concepto:'eg-concepto' },
+  cxp: { banner:'cxp-clasif-banner', prov:'cxp-f-prov',   contable:'cxp-f-contable',
+         tipo:'cxp-f-tipo', subtipo:'cxp-f-subtipo', concepto:'cxp-f-concepto' }
+};
+var _clasifRec = {};           // ns -> recomendación vigente
 function _egClasifKey(s){ return String(s||'').trim().toLowerCase().replace(/\s+/g,' '); }
 async function _egLoadClasifProv(force){
   if (_egClasifProv && !force) return _egClasifProv;
@@ -9243,21 +9271,26 @@ async function _egLoadClasifProv(force){
     var j = await r.json();
     if (j && j.ok) { _egClasifProv = j; }
   } catch(e){} finally { _egClasifLoading = false; }
-  // Si al terminar ya hay un proveedor escrito, reevaluar
-  try { egSugerirClasif(); } catch(e){}
+  // Al terminar, reevaluar TODOS los paneles montados (el usuario pudo escribir
+  // el proveedor mientras cargaba, en Egresos o en CxP).
+  try { Object.keys(_clasifNS).forEach(function(ns){
+    if (document.getElementById(_clasifNS[ns].banner)) provClasifSugerir(ns);
+  }); } catch(e){}
   return _egClasifProv;
 }
-function egSugerirClasif(){
-  var banner = document.getElementById('eg-clasif-banner');
+// Pinta el panel de recomendación del namespace `ns` (no toca ningún campo).
+function provClasifSugerir(ns){
+  var S = _clasifNS[ns]; if (!S) return;
+  var banner = document.getElementById(S.banner);
   if (!banner) return;
-  var provEl = document.getElementById('eg-proveedor');
+  var provEl = document.getElementById(S.prov);
   var nombre = provEl ? provEl.value.trim() : '';
   if (!nombre || !_egClasifProv || !_egClasifProv.map){ banner.style.display='none'; return; }
   var rec = _egClasifProv.map[_egClasifKey(nombre)];
   if (!rec){ banner.style.display='none'; return; }
   // Solo recomendar si hay algo útil
   if (!rec.contable && !rec.subtipo){ banner.style.display='none'; return; }
-  _egClasifRec = rec;
+  _clasifRec[ns] = rec;
   var esFijo = rec.fuente === 'fijo';
   var chips = [rec.contable, rec.tipo, rec.subtipo].filter(Boolean).join(' · ');
   var detalle = esFijo
@@ -9271,32 +9304,45 @@ function egSugerirClasif(){
     +   '<div style="font-size:12.5px;font-weight:700;color:var(--text-primary,#111)">'+(esFijo?'📌':'💡')+' '+_esc(chips||'—')+'</div>'
     +   '<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-top:1px">'+detalle+'</div>'+concLine
     + '</div>'
-    + '<button type="button" onclick="egAplicarClasif()" style="padding:7px 14px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">Aplicar</button>'
+    + '<button type="button" onclick="provClasifAplicar(\''+ns+'\')" style="padding:7px 14px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">Aplicar</button>'
     + '</div>';
 }
-var _egClasifRec = null;
-function egAplicarClasif(){
-  var rec = _egClasifRec; if (!rec) return;
-  function setSel(id,val){ var el=document.getElementById(id); if(el&&val){ el.value=val;
+// Aplica la recomendación. Nada se toca hasta que el usuario pulsa [Aplicar]:
+// el panel solo sugiere. Al aplicar, los campos VACÍOS se rellenan sin ruido
+// (es lo que promete el botón), pero lo que el usuario ya escribió no se pisa
+// en silencio — se listan los cambios y se piden una sola confirmación.
+function provClasifAplicar(ns){
+  var S = _clasifNS[ns]; if (!S) return;
+  var rec = _clasifRec[ns]; if (!rec) return;
+  var campos = [['Contable',S.contable,rec.contable], ['Tipo',S.tipo,rec.tipo],
+                ['Subtipo',S.subtipo,rec.subtipo], ['Concepto',S.concepto,rec.concepto]];
+  var pisa = [];
+  campos.forEach(function(c){
+    var el = document.getElementById(c[1]); if (!el || !c[2]) return;
+    var actual = String(el.value||'').trim();
+    if (actual && actual !== String(c[2]).trim()) pisa.push('· '+c[0]+': "'+actual+'" → "'+c[2]+'"');
+  });
+  if (pisa.length && !confirm('Esto reemplaza lo que ya capturaste:\n\n'+pisa.join('\n')+'\n\n¿Aplicar de todas formas?')) return;
+  campos.forEach(function(c){
+    var el = document.getElementById(c[1]); if (!el || !c[2]) return;
+    var val = String(c[2]);
+    el.value = val;
     // si es <select> y el valor no existe como opción, agregarlo
-    if(el.tagName==='SELECT' && el.value!==val){ var o=document.createElement('option'); o.value=val; o.textContent=val; el.appendChild(o); el.value=val; } } }
-  setSel('eg-contable', rec.contable);
-  setSel('eg-tipo', rec.tipo);
-  setSel('eg-subtipo', rec.subtipo);
-  var conc=document.getElementById('eg-concepto');
-  if (conc && rec.concepto && !conc.value.trim()) conc.value = rec.concepto;
+    if (el.tagName==='SELECT' && el.value!==val){ var o=document.createElement('option'); o.value=val; o.textContent=val; el.appendChild(o); el.value=val; }
+  });
   setStatus('Clasificación aplicada desde el proveedor. Revisa antes de guardar.','ok');
 }
 // Fijar la clasificación ACTUAL del formulario al proveedor (siempre será esto)
-async function egFijarClasif(){
-  var provEl=document.getElementById('eg-proveedor');
+async function provClasifFijar(ns){
+  var S = _clasifNS[ns]; if (!S) return;
+  var provEl=document.getElementById(S.prov);
   var nombre=provEl?provEl.value.trim():'';
   if(!nombre){ alert('Escribe primero el proveedor.'); return; }
   var payload={ action:'guardarClasifProveedor', nombre:nombre,
-    contable:(document.getElementById('eg-contable')||{}).value||'',
-    tipo:(document.getElementById('eg-tipo')||{}).value||'',
-    subtipo:(document.getElementById('eg-subtipo')||{}).value||'',
-    concepto:(document.getElementById('eg-concepto')||{}).value||'',
+    contable:(document.getElementById(S.contable)||{}).value||'',
+    tipo:(document.getElementById(S.tipo)||{}).value||'',
+    subtipo:(document.getElementById(S.subtipo)||{}).value||'',
+    concepto:(document.getElementById(S.concepto)||{}).value||'',
     usuario:(getSession()||{}).email||'sistema' };
   if(!payload.contable && !payload.subtipo){ alert('Selecciona al menos Contable y Subtipo para fijarlos al proveedor.'); return; }
   try{
@@ -9307,6 +9353,12 @@ async function egFijarClasif(){
     _egClasifProv=null; await _egLoadClasifProv(true);
   }catch(e){ alert('No se pudo fijar: '+(e.message||e)); }
 }
+// Atajos por formulario (mantienen cableados los onclick/oninput ya existentes)
+function egSugerirClasif(){ provClasifSugerir('eg'); }
+function egAplicarClasif(){ provClasifAplicar('eg'); }
+function egFijarClasif(){ return provClasifFijar('eg'); }
+function cxpSugerirClasif(){ provClasifSugerir('cxp'); }
+function cxpFijarClasif(){ return provClasifFijar('cxp'); }
 
 function egCloseForm() {
   var view = document.getElementById('eg-form-view');
@@ -9326,32 +9378,73 @@ function egNuevoProveedor(){
   });
 }
 
-// ── Subir factura desde "Nuevo egreso" ──────────────────────────────
-// La factura se ADJUNTA al guardar (necesita que exista la fila/rowNum). Aquí
-// sólo se selecciona y se retiene en memoria; egSubmit la sube al terminar.
-var _egPendingFactura = null;
-function egSelectFactura(input){
-  var f = (input && input.files && input.files.length) ? input.files[0] : null;
-  var name = document.getElementById('eg-fact-name');
-  var chk = document.getElementById('eg-chk-fact');
-  if (!f){ _egPendingFactura = null; if(name) name.innerHTML=''; if(chk) chk.checked=false; return; }
-  if (f.size > 10*1024*1024){ alert('Archivo demasiado grande (máx 10MB)'); if(input) input.value=''; _egPendingFactura=null; if(name) name.innerHTML=''; if(chk) chk.checked=false; return; }
-  _egPendingFactura = f;
-  if (name) name.innerHTML = '✓ '+_esc(f.name)+' <a href="javascript:void(0)" onclick="egQuitarFactura()" style="color:var(--color-primary,#c46a7a);font-weight:700;margin-left:6px;text-decoration:none">quitar</a>';
-  if (chk) chk.checked = true; // reflejo visual: al guardar quedará facturado
+// ── Adjuntos desde "Nuevo egreso" ───────────────────────────────────
+// Tres zonas de arrastre, TODAS opcionales: factura, cotización y comprobante
+// de pago. Usan el mismo componente erpDropzoneHTML() del modal de CxP, en
+// modo diferido: el archivo se retiene y egSubmit lo sube cuando ya existe la
+// fila (uploadFile necesita rowNum para enlazarlo en su columna). Cada tipo
+// viaja con su `tipo` y el backend lo manda a SU carpeta de Drive
+// (Facturas Recibidas / Cotizaciones / Pagos, en <Año>\<Mes>).
+var _EG_DZ = {
+  factura:    { id:'eg-dz-factura',    label:'Factura',             icon:'🧾', accept:'.pdf,.xml',
+                text:'Arrastra la factura o <span class="erp-dz-link">selecciona archivo</span>',
+                sub:'XML o PDF · Máx 10MB · opcional' },
+  cotizacion: { id:'eg-dz-cotizacion', label:'Cotización',          icon:'📋', accept:'.pdf,.jpg,.jpeg,.png',
+                text:'Arrastra la cotización o <span class="erp-dz-link">selecciona archivo</span>',
+                sub:'PDF, JPG, PNG · Máx 10MB · opcional' },
+  pago:       { id:'eg-dz-pago',       label:'Comprobante de pago', icon:'📄', accept:'.pdf,.jpg,.jpeg,.png',
+                text:'Arrastra el comprobante o <span class="erp-dz-link">selecciona archivo</span>',
+                sub:'PDF, JPG, PNG · Máx 10MB · opcional' }
+};
+var _EG_DZ_KINDS = ['factura','cotizacion','pago'];
+function _egDzBlock(){
+  var LBL = 'style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px"';
+  var h = '<div style="margin-bottom:14px">'
+    + '<label '+LBL+'>Adjuntos <span style="font-weight:400;color:var(--text-secondary,#9ca3af)">(los tres opcionales — arrastra el archivo o haz clic; se suben al guardar)</span></label>'
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px">';
+  _EG_DZ_KINDS.forEach(function(k){
+    var d = _EG_DZ[k];
+    h += '<div><div style="font-size:10px;font-weight:700;color:var(--text-secondary,#6b7280);margin-bottom:4px">'+d.label+'</div>'
+      + erpDropzoneHTML({ id:d.id, tipo:k, defer:true, ondefer:'egOnDocDefer',
+          icon:d.icon, text:d.text, sub:d.sub, accept:d.accept })
+      + '</div>';
+  });
+  return h + '</div></div>';
 }
-function egQuitarFactura(){
-  _egPendingFactura = null;
-  var name = document.getElementById('eg-fact-name'); if(name) name.innerHTML='';
-  var chk = document.getElementById('eg-chk-fact'); if(chk) chk.checked=false;
+// Deja las 3 zonas vacías (al abrir el formulario / tras guardar).
+function egResetDocs(){
+  _EG_DZ_KINDS.forEach(function(k){ try { erpDzClear(_EG_DZ[k].id); } catch(e){} });
 }
-// Sube un archivo de factura a la fila recién creada (misma acción uploadFile
-// que usa el dropzone genérico; enlaza el archivo y marca Facturación en la hoja).
-async function _egUploadFacturaTo(rowNum, file){
+// Las casillas automáticas son un ESPEJO, no una segunda fuente de verdad:
+// Facturación la marca uploadFile al enlazar el archivo; Pagado sale de la
+// Fecha de pago (autoPagado en egSubmit) y Contabilidad de la Póliza. Aquí solo
+// se previsualiza lo que va a quedar al guardar.
+function egSyncDocChecks(){
+  var f = document.getElementById('eg-chk-fact');
+  if (f) f.checked = !!erpDzPending(_EG_DZ.factura.id);
+  var p = document.getElementById('eg-chk-pag');
+  if (p) p.checked = !!((document.getElementById('eg-fecha')||{}).value||'');
+  var c = document.getElementById('eg-chk-cont');
+  if (c) c.checked = !!String((document.getElementById('eg-poliza')||{}).value||'').trim();
+}
+// Callback de las zonas diferidas de este formulario.
+function egOnDocDefer(dz, file){
+  egSyncDocChecks();
+  // Un comprobante de pago sin Fecha de pago no marca Pagado: sin fecha el
+  // movimiento se registra como cuenta por pagar. Se avisa en vez de inventar
+  // la fecha, que cambiaría el sentido de la captura.
+  if (file && dz && dz.dataset.tipo === 'pago' && !((document.getElementById('eg-fecha')||{}).value||'')){
+    try { setStatus('Adjuntaste el comprobante de pago: captura también la «Fecha de pago» para que el egreso quede marcado como Pagado (sin ella se registra como cuenta por pagar).','err'); } catch(e){}
+  }
+}
+// Sube un adjunto a la fila recién creada. Misma acción uploadFile que usan los
+// dropzones inmediatos: enlaza el archivo en su columna, lo archiva en la
+// carpeta de Drive de su tipo y marca Facturación cuando es factura.
+async function _egUploadDocTo(rowNum, file, tipo){
   var base64 = await _fileToBase64(file);
   var s = getSession()||{};
   var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
-    action:'uploadFile', tipo:'factura', prefix:'EG-'+rowNum, rowNum:rowNum,
+    action:'uploadFile', tipo:tipo, prefix:'EG-'+rowNum, rowNum:rowNum,
     fileName:file.name, base64:base64, mimeType:file.type||'application/pdf',
     usuario:s.email||'sistema'
   })});
@@ -9508,15 +9601,29 @@ async function egSubmit() {
           try { await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveBankRow',banco:banco,row:bankRow})}); } catch(be){}
         }
       }
-      // Adjuntar la factura seleccionada a la fila recién creada (egreso o CxP: misma hoja).
-      // Enlaza el archivo y marca Facturación. Sólo en altas nuevas con rowNum.
-      if (!isEdit && _egPendingFactura && res.rowNum) {
-        if (btn) btn.textContent = 'Subiendo factura…';
-        try {
-          var up = await _egUploadFacturaTo(res.rowNum, _egPendingFactura);
-          if (!up || !up.ok) { try { setStatus('Egreso guardado, pero la factura no se pudo adjuntar: '+((up&&up.error)||'error'),'err'); } catch(_s){} }
-        } catch(fe){ try { setStatus('Egreso guardado, pero la factura no se pudo adjuntar: '+fe.message,'err'); } catch(_s2){} }
-        _egPendingFactura = null;
+      // Adjuntar los documentos seleccionados a la fila (egreso o CxP: misma
+      // hoja). Cada uno va a su columna y a su carpeta de Drive, y la factura
+      // marca Facturación. Todos son opcionales: si no hay ninguno este bloque
+      // no hace nada y el guardado termina igual. Tanto el alta como la edición
+      // devuelven rowNum, así que en los dos casos el archivo se enlaza (antes
+      // el adjunto se descartaba en silencio al editar).
+      if (res.rowNum) {
+        for (var _i = 0; _i < _EG_DZ_KINDS.length; _i++) {
+          var _k = _EG_DZ_KINDS[_i], _doc = erpDzPending(_EG_DZ[_k].id);
+          if (!_doc) continue;
+          if (btn) btn.textContent = 'Subiendo '+_EG_DZ[_k].label.toLowerCase()+'…';
+          try {
+            var up = await _egUploadDocTo(res.rowNum, _doc, _k);
+            if (!up || !up.ok) { try { setStatus('Egreso guardado, pero '+_EG_DZ[_k].label+' no se pudo adjuntar: '+((up&&up.error)||'error'),'err'); } catch(_s){} }
+          } catch(fe){ try { setStatus('Egreso guardado, pero '+_EG_DZ[_k].label+' no se pudo adjuntar: '+fe.message,'err'); } catch(_s2){} }
+        }
+        // Sin fecha de pago la partida se guardó como cuenta por pagar: el
+        // comprobante queda enlazado, pero marcarla pagada tiene que pasar por
+        // el flujo de pago (es el que registra el movimiento bancario).
+        if (isCxP && erpDzPending(_EG_DZ.pago.id)) {
+          try { setStatus('Se adjuntó el comprobante de pago, pero sin «Fecha de pago» la partida quedó como cuenta por pagar. Márcala pagada desde Cuentas por Pagar para que se registre el movimiento en el banco.','err'); } catch(_s3){}
+        }
+        egResetDocs();
       }
       _swrDel('egresos');
       egCloseForm();
@@ -30282,6 +30389,75 @@ window.cxpSubmitPay = async function(rowNum) {
 };
 
 // ── ERP File Upload (drag & drop + click) ──
+// Un solo componente de zona de arrastre para todo el ERP. Dos modos:
+//   · inmediato (por defecto) — la fila destino ya existe: sube al soltar.
+//   · diferido (data-defer="1") — todavía no hay fila (altas): retiene el
+//     archivo y lo sube quien guarde, cuando ya tiene rowNum.
+// En los dos modos se acepta arrastrar Y hacer clic (el <input> tapa la zona).
+var _erpDzOpts = {};   // id -> opts, para poder re-renderizar la zona al "quitar"
+
+// Markup de una zona. opts: {id,tipo,icon,text,sub,accept,prefix,defer,onupload,ondefer}
+function erpDropzoneHTML(o){
+  o = o || {};
+  _erpDzOpts[o.id] = o;
+  return '<div id="'+o.id+'" class="erp-dropzone" data-tipo="'+(o.tipo||'factura')+'" data-prefix="'+(o.prefix||'')+'"'
+    + (o.defer ? ' data-defer="1"' : '')
+    + (o.onupload ? ' data-onupload="'+o.onupload+'"' : '')
+    + '>' + _erpDzInner(o) + '</div>';
+}
+function _erpDzInner(o){
+  return '<div class="erp-dz-icon">'+(o.icon||'📄')+'</div>'
+    + '<div class="erp-dz-text">'+(o.text||'Arrastra tu PDF aquí o <span class="erp-dz-link">selecciona archivo</span>')+'</div>'
+    + '<div class="erp-dz-sub">'+(o.sub||'PDF, JPG, PNG · Máx 10MB')+'</div>'
+    + '<input type="file" class="erp-dz-input" accept="'+(o.accept||'.pdf,.jpg,.jpeg,.png')+'" onchange="erpHandleFile(this,\''+o.id+'\')">';
+}
+// Valida tamaño y tipo contra el accept que declara la propia zona. El accept
+// solo filtra el selector de archivos; al ARRASTRAR el navegador no lo aplica,
+// así que aquí se revisa a mano.
+function _erpDzCheck(dz, file){
+  if (file.size > 10*1024*1024){ alert('Archivo demasiado grande (máx 10MB): '+file.name); return false; }
+  var inp = dz.querySelector('.erp-dz-input');
+  var acc = (inp && inp.getAttribute('accept')) || ((_erpDzOpts[dz.id]||{}).accept) || '';
+  if (acc){
+    var exts = acc.split(',').map(function(s){ return s.trim().toLowerCase(); }).filter(Boolean);
+    var name = String(file.name||'').toLowerCase();
+    var ok = exts.some(function(x){ return x && name.slice(-x.length) === x; });
+    if (!ok){ alert('Tipo de archivo no permitido: '+file.name+'\nSe aceptan: '+exts.join(', ')); return false; }
+  }
+  return true;
+}
+// Único punto de entrada: decide subir ya o retener.
+function _erpDispatch(dz, file){
+  if (dz.dataset.defer === '1') _erpDzDefer(dz, file);
+  else _erpUploadFile(dz, file);
+}
+// Modo diferido: valida igual que el inmediato, pero solo retiene el archivo.
+function _erpDzDefer(dz, file){
+  if (!_erpDzCheck(dz, file)) return;
+  dz._pendingFile = file;
+  dz.classList.remove('drag-over','uploading');
+  dz.classList.add('done');
+  dz.innerHTML = '<div class="erp-dz-icon">📎</div>'
+    + '<div class="erp-dz-text" style="color:#16a34a;font-weight:700">Listo para adjuntar</div>'
+    + '<div class="erp-dz-file"><span class="erp-dz-fname">'+_esc(file.name)+'</span>'
+    +   '<a href="javascript:void(0)" onclick="event.stopPropagation();erpDzClear(\''+dz.id+'\')" style="font-size:10px;color:var(--color-primary,#c46a7a);font-weight:700">quitar</a></div>';
+  _erpDzNotify(dz, file);
+}
+function _erpDzNotify(dz, file){
+  var cb = (_erpDzOpts[dz.id]||{}).ondefer;
+  if (cb && typeof window[cb] === 'function'){ try { window[cb](dz, file); } catch(e){} }
+}
+// Archivo retenido por una zona diferida (null si no hay).
+window.erpDzPending = function(dzId){ var dz = document.getElementById(dzId); return (dz && dz._pendingFile) || null; };
+// Quita el archivo retenido y deja la zona lista para volver a usarse.
+window.erpDzClear = function(dzId){
+  var dz = document.getElementById(dzId); if (!dz) return;
+  dz._pendingFile = null;
+  dz.classList.remove('done','uploading','drag-over');
+  dz.innerHTML = _erpDzInner(_erpDzOpts[dzId] || {id:dzId});
+  _erpDzNotify(dz, null);
+};
+
 document.addEventListener('dragover', function(e){ e.preventDefault(); });
 document.addEventListener('drop', function(e){
   e.preventDefault();
@@ -30289,7 +30465,7 @@ document.addEventListener('drop', function(e){
   if (!dz) return;
   dz.classList.remove('drag-over');
   var files = e.dataTransfer.files;
-  if (files.length) _erpUploadFile(dz, files[0]);
+  if (files.length) _erpDispatch(dz, files[0]);
 });
 document.addEventListener('dragenter', function(e){
   var dz = e.target.closest('.erp-dropzone');
@@ -30303,11 +30479,11 @@ document.addEventListener('dragleave', function(e){
 window.erpHandleFile = function(input, dzId) {
   var dz = document.getElementById(dzId);
   if (!dz || !input.files.length) return;
-  _erpUploadFile(dz, input.files[0]);
+  _erpDispatch(dz, input.files[0]);
 };
 
 async function _erpUploadFile(dz, file) {
-  if (file.size > 10*1024*1024) { alert('Archivo demasiado grande (máx 10MB)'); return; }
+  if (!_erpDzCheck(dz, file)) return;
   var tipo = dz.dataset.tipo || 'factura';
   var prefix = dz.dataset.prefix || '';
   var pesado = file.size > 2*1024*1024; // >2MB — avisar que puede tardar más
@@ -30382,24 +30558,45 @@ function _fileToBase64(file) {
 // ── CxP Capture & Edit ──
 var _cxpSubtipos = ['Renta','Mantenimiento','Nomina','Contabilidad','Honorarios','Impuestos','Medicamentos','Laboratorios','Gases','Software','Insumos Qx','Insumos Lab','Insumos Oficina','Insumos Limpieza','Marketing','Servicios','RPBI','Lavanderia','Comisiones','Seguro','Envíos','Reportes','Equipo','Mobiliario','Otros Gastos'];
 
+// Opciones de un <select> del formulario CxP: arranca en "— Seleccionar —"
+// (así se distingue "no elegido" de un valor real, que es lo que necesita el
+// panel de recomendación para saber si puede rellenar sin pisar) y conserva
+// cualquier valor histórico que ya no esté en la lista, para no perderlo al editar.
+function _cxpOpts(vals, sel){
+  sel = String(sel==null?'':sel).trim();
+  var found = false;
+  var out = '<option value="">— Seleccionar —</option>';
+  (vals||[]).forEach(function(v){
+    var s = (String(v) === sel); if (s) found = true;
+    out += '<option value="'+String(v).replace(/"/g,'&quot;')+'"'+(s?' selected':'')+'>'+_esc(v)+'</option>';
+  });
+  if (sel && !found) out += '<option value="'+sel.replace(/"/g,'&quot;')+'" selected>'+_esc(sel)+'</option>';
+  return out;
+}
+
 function _cxpBuildForm(data) {
   // Asegura el datalist global de proveedores (catálogo central)
   try { if (typeof _renderProvDatalist === 'function') _renderProvDatalist(); } catch(e){}
   var S = 'style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"';
   var LBL = 'style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px"';
-  var subVals = (_ddData&&_ddData['Egresos']&&_ddData['Egresos']['subtipo']&&_ddData['Egresos']['subtipo'].valores) || _cxpSubtipos;
-  var subOpts = subVals.map(function(s){return '<option value="'+String(s).replace(/"/g,'&quot;')+'"'+(s===(data&&data.subtipo||'')?'selected':'')+'>'+s+'</option>';}).join('');
+  // Mismas listas que "Nuevo egreso": Config_Dropdowns (Panel de Control >
+  // Formularios) con el catálogo de siempre como respaldo.
+  var subVals  = (_ddData&&_ddData['Egresos']&&_ddData['Egresos']['subtipo']&&_ddData['Egresos']['subtipo'].valores) || _cxpSubtipos;
+  var contVals = (_ddData&&_ddData['Egresos']&&_ddData['Egresos']['contable']&&_ddData['Egresos']['contable'].valores) || ['Gasto','Costo','Crédito'];
+  var tipoVals = (_ddData&&_ddData['Egresos']&&_ddData['Egresos']['tipo']&&_ddData['Egresos']['tipo'].valores) || ['Fijo','Variable'];
   var h = '<div style="padding:4px">'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'
-      + '<div><label '+LBL+'>Proveedor * <a href="javascript:void(0)" onclick="cxpNuevoProveedor()" style="font-weight:700;color:var(--color-primary,#c46a7a);text-decoration:none">+ Nuevo</a></label><input id="cxp-f-prov" list="prov-datalist" '+S+' placeholder="Nombre del proveedor" value="'+(data&&data.proveedor||'').replace(/"/g,'&quot;')+'" oninput="_cxpDupCheck()" onchange="_cxpDupCheck()"></div>'
+      + '<div><label '+LBL+'>Proveedor * <a href="javascript:void(0)" onclick="cxpNuevoProveedor()" style="font-weight:700;color:var(--color-primary,#c46a7a);text-decoration:none">+ Nuevo</a></label><input id="cxp-f-prov" list="prov-datalist" '+S+' placeholder="Nombre del proveedor" value="'+(data&&data.proveedor||'').replace(/"/g,'&quot;')+'" oninput="cxpSugerirClasif();_cxpDupCheck()" onchange="cxpSugerirClasif();_cxpDupCheck()"></div>'
       + '<div><label '+LBL+'>Monto *</label><input type="number" id="cxp-f-monto" '+S+' placeholder="0.00" step="0.01" value="'+(data&&data.monto||'')+'" oninput="if(typeof cxpFormDivisaCalc===\'function\')cxpFormDivisaCalc();_cxpDupCheck()"></div>'
     + '</div>'
+    + '<div id="cxp-clasif-banner" style="display:none;margin-bottom:12px"></div>'
     + '<div id="cxp-dup-notice" style="display:none;margin-bottom:12px"></div>'
-    + '<div style="margin-bottom:12px"><label '+LBL+'>Concepto *</label><input id="cxp-f-concepto" '+S+' placeholder="Descripción del gasto" value="'+(data&&data.concepto||'').replace(/"/g,'&quot;')+'"></div>'
+    + '<div style="margin-bottom:12px"><label '+LBL+'>Concepto *</label><input id="cxp-f-concepto" '+S+' placeholder="Descripción del gasto" value="'+(data&&data.concepto||'').replace(/"/g,'&quot;')+'">'
+    + '<div style="margin-top:5px;text-align:right"><a href="javascript:void(0)" onclick="cxpFijarClasif()" style="font-size:11px;font-weight:600;color:var(--color-primary,#c46a7a);text-decoration:none" title="Guarda Contable/Tipo/Subtipo/Concepto como default de este proveedor para que se sugiera solo la próxima vez">📌 Fijar esta clasificación al proveedor</a></div></div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">'
-      + '<div><label '+LBL+'>Contable</label><select id="cxp-f-contable" '+S+'><option'+(data&&data.contable==='Gasto'?' selected':'')+'>Gasto</option><option'+(data&&data.contable==='Costo'?' selected':'')+'>Costo</option><option'+(data&&data.contable==='Crédito'?' selected':'')+'>Crédito</option></select></div>'
-      + '<div><label '+LBL+'>Tipo</label><select id="cxp-f-tipo" '+S+'><option'+(data&&data.tipo==='Fijo'?' selected':'')+'>Fijo</option><option'+(data&&data.tipo==='Variable'?' selected':'')+'>Variable</option></select></div>'
-      + '<div><label '+LBL+'>Subtipo</label><select id="cxp-f-subtipo" '+S+'><option value="">—</option>'+subOpts+'</select></div>'
+      + '<div><label '+LBL+'>Contable</label><select id="cxp-f-contable" '+S+'>'+_cxpOpts(contVals, data&&data.contable)+'</select></div>'
+      + '<div><label '+LBL+'>Tipo</label><select id="cxp-f-tipo" '+S+'>'+_cxpOpts(tipoVals, data&&data.tipo)+'</select></div>'
+      + '<div><label '+LBL+'>Subtipo</label><select id="cxp-f-subtipo" '+S+'>'+_cxpOpts(subVals, data&&data.subtipo)+'</select></div>'
     + '</div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">'
       + '<div><label '+LBL+'>Vencimiento *</label><input type="date" id="cxp-f-venc" '+S+' value="'+(data&&data.vencimiento||'')+'"></div>'
@@ -30419,12 +30616,9 @@ function _cxpBuildForm(data) {
     ? ' · <a href="'+data.linkCotizacionUrl+'" target="_blank" style="color:var(--color-primary,#c46a7a);font-weight:700">📋 Ver actual ↗</a>'
     : '';
   h += '<div style="margin-bottom:4px"><label '+LBL+'>Cotización del proveedor'+cotActual+'</label>'
-    + '<div id="cxp-f-cotiz" class="erp-dropzone" data-tipo="cotizacion" data-prefix="'+cotPrefix+'">'
-    +   '<div class="erp-dz-icon">📋</div>'
-    +   '<div class="erp-dz-text">Arrastra la cotización o <span class="erp-dz-link">selecciona archivo</span></div>'
-    +   '<div class="erp-dz-sub">PDF, JPG, PNG · Máx 10MB · opcional</div>'
-    +   '<input type="file" class="erp-dz-input" accept=".pdf,.jpg,.jpeg,.png" onchange="erpHandleFile(this,\'cxp-f-cotiz\')">'
-    + '</div>'
+    + erpDropzoneHTML({ id:'cxp-f-cotiz', tipo:'cotizacion', prefix:cotPrefix, icon:'📋',
+        text:'Arrastra la cotización o <span class="erp-dz-link">selecciona archivo</span>',
+        sub:'PDF, JPG, PNG · Máx 10MB · opcional', accept:'.pdf,.jpg,.jpeg,.png' })
     + '<input type="hidden" id="cxp-f-cotiz-link" value="">'
     + '<div id="cxp-f-cotiz-status" style="font-size:10px;margin-top:4px;color:var(--text-secondary,#9ca3af)"></div></div>';
   return h;
@@ -30514,6 +30708,8 @@ window.cxpOpenCapture = function() {
     + '<button id="cxp-cap-btn" onclick="cxpSubmitCapture()" style="flex:1;padding:12px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">Guardar</button>'
     + '<button onclick="cxpClosePay()" style="padding:12px 20px;background:var(--color-surface,#f3f4f6);color:var(--text-primary);border:1px solid var(--color-divider);border-radius:10px;font-size:13px;cursor:pointer">Cancelar</button>'
     + '</div></div>';
+  // Recomendación de clasificación por proveedor (mismo panel que en Egresos)
+  try { _egLoadClasifProv(); cxpSugerirClasif(); } catch(e){}
 };
 
 window.cxpOpenEdit = function(rowNum, jsonStr) {
@@ -30530,6 +30726,8 @@ window.cxpOpenEdit = function(rowNum, jsonStr) {
     + '<button id="cxp-edit-btn" onclick="cxpSubmitEdit('+rowNum+')" style="flex:1;padding:12px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">Actualizar</button>'
     + '<button onclick="cxpClosePay()" style="padding:12px 20px;background:var(--color-surface,#f3f4f6);color:var(--text-primary);border:1px solid var(--color-divider);border-radius:10px;font-size:13px;cursor:pointer">Cancelar</button>'
     + '</div></div>';
+  // Recomendación de clasificación por proveedor (mismo panel que en Egresos)
+  try { _egLoadClasifProv(); cxpSugerirClasif(); } catch(e){}
 };
 
 window.cxpSubmitCapture = async function() {
@@ -30575,8 +30773,10 @@ window.cxpSubmitEdit = async function(rowNum) {
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
       action:'updateCxP', rowNum:rowNum, proveedor:prov, monto:_dv.montoMXN, concepto:concepto, vencimiento:venc,
       divisa:_dv.divisa, tipoCambio:_dv.tc, montoUSD:_dv.montoUSD,
-      contable:(document.getElementById('cxp-f-contable')||{}).value||'',
-      tipo:(document.getElementById('cxp-f-tipo')||{}).value||'',
+      // Mismos defaults que el alta: los selects ya pueden quedar en
+      // "— Seleccionar —", y una CxP sin clasificación descuadra el P&L.
+      contable:(document.getElementById('cxp-f-contable')||{}).value||'Gasto',
+      tipo:(document.getElementById('cxp-f-tipo')||{}).value||'Variable',
       subtipo:(document.getElementById('cxp-f-subtipo')||{}).value||'',
       poliza:(document.getElementById('cxp-f-poliza')||{}).value||'',
       notas:(document.getElementById('cxp-f-notas')||{}).value||'',
@@ -34367,6 +34567,10 @@ var NOVEDADES=[
     titulo:'Documentos del paciente en otro idioma — ahora sí, completos',
     puntos:['⚠ El problema: la Carta de Seguro salía en inglés pero los NOMBRES DE LOS SERVICIOS salían en español. Una carta mitad y mitad, enfrente de una aseguradora. Y cuando la traducción fallaba, salía igual, sin avisar.','Ya no puede pasar: si a algún servicio del documento le falta su traducción, el ERP NO IMPRIME. Te dice exactamente cuáles faltan.','Bloquear no es dejarte tirado: en esa misma pantalla escribes la traducción y el documento sale enseguida. Y se guarda EN EL CATÁLOGO del producto, así que se arregla para siempre, no solo para ese documento.','Ahora son 5 los documentos que salen en otro idioma (antes solo la carta de seguro): Estado de cuenta, Cobranza, Recibo, Comprobante de cancelación y Carta de Seguro. Español, inglés, francés y portugués.','Se traduce TODO: títulos, encabezados de tabla, textos legales, y las fechas y los importes con el formato del idioma (en inglés «Mar 14, 2026» y $1,234.50; en francés «14 mars 2026» y $1 234,50).','El idioma sale de la FICHA de la paciente, no de tu navegador: lo sugiere el País (México→español, USA→inglés), pero el campo «Idioma de sus documentos» de su ficha manda sobre el país. Caso real: paciente mexicana que necesita su carta en inglés para su aseguradora de USA.','Al imprimir puedes cambiar el idioma solo para ESE documento, sin tocar su ficha.','Los nombres de los servicios ya no los inventa un traductor automático: viven en el catálogo, en el producto. El traductor solo SUGIERE y tú confirmas — es terminología médica y la lee la paciente.','⚠ La vista previa de la carta de seguro MENTÍA: se saltaba la traducción, así que se veía perfecta y la carta real salía en español. Ya muestra exactamente lo que se va a imprimir.','Los documentos en español siguen funcionando igual que siempre: no consultan nada ni se bloquean.'],
     comoUsar:['Para que el catálogo quede listo: pide que corran la migración (vuelca los ~36 términos médicos ya revisados) y la auditoría, que te dice qué productos siguen sin traducción.','Catálogo General → editar producto → sección «Traducciones del producto»: escribe (o pulsa «✨ Sugerir» y revisa) el nombre en inglés/francés/portugués.','Ficha de la paciente → elige su País: el idioma se autocompleta. ¿Necesita otro? Cámbialo en «Idioma de sus documentos» — ese campo manda.','Al imprimir cualquiera de los 5 documentos, revisa el idioma en el diálogo y pulsa Imprimir.','¿Te bloqueó? Escribe las traducciones que te pide y pulsa «Guardar al catálogo e imprimir».'] },
+  { build:'2026.07.15', fecha:'15 jul 2026', area:'Egresos', icon:'💳', destacada:true, perm:'editar_egresos',
+    titulo:'Cuentas por Pagar ya te recomienda la clasificación + adjuntas los 3 documentos arrastrando',
+    puntos:['**El recomendado del proveedor ya está en Cuentas por Pagar.** Antes solo salía al capturar un egreso; como casi todo se registra en CxP, ahí no servía de nada y sus dropdowns salían en «—».','Escribes el proveedor y aparece el MISMO panel de siempre: «📌 Costo · Variable · Medicamentos — Clasificación fija de este proveedor · Concepto sugerido: MEDICAMENTOS CICLOS», con su botón «Aplicar». 📌 = clasificación fija; 💡 = sale de su histórico (y te dice qué tan seguro: «12 de 13 gastos · 92%»).','El panel **solo sugiere: no te cambia nada solo**. Hasta que pulsas «Aplicar» no se toca un campo.','Y **«Aplicar» no te pisa lo que ya escribiste en silencio**: si algo cambiaría, te lista exactamente qué («Concepto: "lo tuyo" → "lo sugerido"») y te pregunta antes. Lo que estaba vacío se llena sin preguntar, que es justo lo que quieres.','También está ahí el enlace **«📌 Fijar esta clasificación al proveedor»**: captúralo bien una vez y de ahí en adelante se sugiere solo.','Es el mismo motor y el mismo panel que Egresos — no una copia: lo que aprende en un lado lo sugiere en el otro.','**En «Nuevo egreso» ahora hay TRES zonas de arrastre**: Factura, Cotización y Comprobante de pago. Antes solo se podía la factura, y seleccionando archivo.','**Ninguna es obligatoria.** Guardar sin adjuntar nada funciona igual que siempre; adjunta una, dos, las tres o ninguna.','Cada zona acepta **arrastrar el archivo o hacer clic** para escogerlo, avisa si pesa más de 10MB o si el tipo no va (la factura pide XML/PDF; las otras dos PDF/JPG/PNG), y te muestra el **nombre del archivo con un «quitar»** antes de guardar.','Cada archivo se guarda en **su** carpeta de Drive (Facturas Recibidas / Cotizaciones / Pagos), ordenado por año y mes. La **factura marca «Facturación» sola**.','⚠ **«Pagado» se marca con la Fecha de pago, no con el comprobante.** Si adjuntas el comprobante y dejas la fecha vacía, el ERP te avisa y la partida se guarda como cuenta por pagar: marcarla pagada tiene que pasar por «Pagar», que es quien registra el movimiento en el banco.','**El detalle del egreso ya muestra la RAZÓN SOCIAL.** Despliega un egreso con ▼ y ahí está, junto al concepto y el monto — sale del catálogo de Proveedores y aparece aunque el egreso se haya capturado con el nombre comercial.','Si el proveedor no está dado de alta, no queda un hueco: verás el nombre tal como se capturó, en gris y con «· sin catálogo» — la señal de que ahí falta darlo de alta en Proveedores.'],
+    comoUsar:['**Cuentas por Pagar → + Registrar CxP** → escribe el proveedor → pulsa «Aplicar» en el panel que aparece.','¿Ese proveedor siempre es lo mismo? Captúralo bien y pulsa «📌 Fijar esta clasificación al proveedor».','**Egresos → Nuevo egreso**: llena los datos y arrastra abajo la factura, la cotización y/o el comprobante de pago. Los que tengas — ninguno es obligatorio.','Si ya lo pagaste, captura la **Fecha de pago** para que quede marcado como Pagado.','En **Egresos**, despliega cualquier renglón con ▼ para ver su razón social.'] },
   { build:'2026.07.16', fecha:'16 jul 2026', area:'General', icon:'📢', destacada:true,
     titulo:'Novedades: ahora tú decides cuándo avisar y a quién',
     puntos:['El aviso de novedades ya NO salta con cada actualización: tiene un interruptor. Se prende solo cuando hay algo que de verdad valga la pena contar.','⚠ Apagar el aviso NO esconde la página: Novedades sigue en el menú para consultarla cuando quieras. Lo que se apaga es que SALTE sola.','Eliges CUÁL novedad se anuncia: cada una tiene una casilla «Se anuncia». Solo las que marques disparan el aviso.','Eliges A QUIÉN: cada novedad tiene una audiencia — «Todos» o un permiso que ya existe en Gestión de Roles. Ej.: una novedad de Nómina solo la ven los de Nómina (ni en el aviso ni en la página).','La configuración se guarda en Google Sheets y aplica a TODOS los usuarios, no solo a quien la prendió.','Solo administrador/director pueden configurarlo (y el servidor lo vuelve a validar, no solo se esconde el botón).','El «ya lo vi» sigue siendo de cada quien: si lo cierras, no te vuelve a saltar hasta que haya otra novedad anunciada.'],
@@ -34905,15 +35109,18 @@ async function _novCfgGuardar(){
   },
 
   { id:'egresos', group:'operacion', icon:'💳', title:'Egresos y Cuentas por Pagar (CxP)',
-    keywords:'egresos gasto cxp cuentas por pagar proveedor pagar credito abono cancelar devolucion moneda extranjera usd tipo de cambio clasificacion auto factura pago correo de pago duplicado nuevo proveedor inline poliza conciliar subir factura enviar nombre comercial razon social buscar seleccionar checkbox suma total seleccionado informativo',
+    keywords:'egresos gasto cxp cuentas por pagar proveedor pagar credito abono cancelar devolucion moneda extranjera usd tipo de cambio clasificacion auto factura pago correo de pago duplicado nuevo proveedor inline poliza conciliar subir factura enviar nombre comercial razon social buscar seleccionar checkbox suma total seleccionado informativo adjuntos arrastrar drag and drop cotizacion comprobante de pago zonas opcional recomendado contable tipo subtipo aplicar fijar detalle',
     intro:'**Egresos** son los gastos ya pagados; **Cuentas por Pagar (CxP)** son los que aún no. Físicamente viven en la misma hoja `Egresos2026`: una fila con `PAGADO=TRUE` es un egreso; sin pagar es una CxP. Incluye créditos de proveedor, abonos parciales, cancelación y moneda extranjera.',
     pasos:[
-      'Registra un gasto en **CxP → + Nuevo** (proveedor, contable/tipo/subtipo, monto, vencimiento). Al capturar el proveedor, el sistema **recomienda** la clasificación (histórica 💡 o fija 📌); pulsa «Aplicar».',
+      'Registra un gasto en **CxP → + Registrar CxP** (proveedor, contable/tipo/subtipo, monto, vencimiento). Al capturar el proveedor, el sistema **recomienda** la clasificación (histórica 💡 o fija 📌); pulsa «Aplicar». Es el **mismo panel** que ya salía en «Nuevo egreso».',
       'Cuando lo pagues, usa **Pagar**: eliges forma de pago y se setea `Fecha + PAGADO`. La fila pasa a Egresos y se genera su movimiento bancario.',
       'Si el proveedor te dio **crédito** (por una cancelación previa), lo aplicas desde el modal de Pagar; si solo cubre parte, el resto se rutea al banco (no se duplica el importe).',
       'Para **cancelar** una orden usa el botón **⊘** (está en CxP y también en Egresos, porque las ya pagadas viven en Egresos).'
     ],
     bloques:[
+      { h:'Clasificación recomendada del proveedor (Egresos y CxP)', p:'Al escribir el proveedor —tanto en **Nuevo egreso** como en **Registrar cuenta por pagar**— aparece un panel con lo que ese proveedor **siempre** es: `Costo · Variable · Medicamentos`, y su **concepto sugerido**. Es 📌 rosa si tiene **clasificación fija** y 💡 azul si sale de su **histórico** (te dice en cuántos de sus gastos acertó, ej. «12 de 13 · 92%»). El panel **solo sugiere: no toca nada solo**. Al pulsar **«Aplicar»** rellena Contable/Tipo/Subtipo/Concepto; **lo que ya escribiste no se pisa en silencio** — si algo cambiaría, te lista qué y te pide confirmación. Con **📌 Fijar esta clasificación al proveedor** guardas la combinación actual para que la próxima captura la sugiera sola. Es el mismo motor (`prov_defaults.gs`) y el mismo panel en los dos formularios.' },
+      { h:'Adjuntos al capturar un egreso: los tres, arrastrando', p:'Abajo de **Nuevo egreso** hay **tres zonas**: **Factura** (XML/PDF), **Cotización** y **Comprobante de pago** (PDF/JPG/PNG). **Ninguna es obligatoria** — puedes guardar sin adjuntar nada, adjuntar solo una o las tres. Cada zona acepta **arrastrar el archivo** o **hacer clic** para seleccionarlo, valida **máx 10MB** y que la extensión sea la correcta, y te muestra el **nombre del archivo con un «quitar»** antes de guardar. Los archivos se suben **al guardar** (hasta ese momento existe la fila a la que enlazarlos) y cada uno se archiva en **su** carpeta de Drive: `Facturas Recibidas`, `Cotizaciones` o `Pagos`, dentro de `<Año>\\<Mes>`. La **factura marca Facturación** sola al quedar enlazada. **Pagado** se marca con la **Fecha de pago**: si adjuntas el comprobante sin fecha, el ERP te avisa y la partida se guarda como cuenta por pagar (marcarla pagada tiene que pasar por el flujo de pago, que es el que registra el movimiento bancario).' },
+      { h:'Razón social en el detalle del egreso', p:'Al desplegar un egreso con la flecha **▼**, el detalle muestra la **RAZÓN SOCIAL** junto al concepto, el monto y la clasificación. Sale del catálogo de **Proveedores** (columna `Nombre / Razón social`) y se resuelve aunque el egreso se haya capturado con el **nombre comercial**. Si ese proveedor **no está en el catálogo**, no queda hueco: se muestra el nombre tal como se capturó en el egreso, atenuado y marcado **«· sin catálogo»** — señal de que conviene darlo de alta en Proveedores.' },
       { h:'Cancelación: crédito vs devolución', p:'El modal de cancelar tiene dos modos: **crédito** (default) deja saldo a favor del proveedor sin tocar bancos; **devolución** registra una ENTRADA al banco/caja (el proveedor regresó el dinero) para conciliar. La fila cancelada queda **tachada con badge CANCELADA** como referencia histórica y se excluye de todos los totales. La **traza del dinero** se ve al expandir la fila.' },
       { h:'Créditos y abonos de proveedor', p:'Al cancelar una orden ya pagada se genera un **crédito** en `Creditos_Proveedor` (no se pierde el dinero). Se aplica a otra orden vía `aplicarAbonoCxP`, con blindaje: un crédito solo se aplica a órdenes del **mismo** proveedor. Botón admin **🔧 Reparar créditos cruzados** para el caso histórico.' },
       { h:'Moneda extranjera', p:'CxP acepta **Divisa MXN/USD + tipo de cambio**; guarda el monto ya en MXN (USD×TC) para cuadrar totales y conserva Divisa/Monto USD/TC en la fila. Al pagar se aplica el USD con el TC real.' },
@@ -34924,9 +35131,9 @@ async function _novCfgGuardar(){
     ],
     datos:{
       hojas:['`Egresos2026` (EGRESOS_SS_2026 = 1iRj…RAQw): A=ID, B=Fecha, C=Mes, E=Proveedor, F=Contable, G=Tipo, H=Subtipo, I=Concepto, J=Monto, N=PAGADO, Q=Forma de Pago, S=Link Factura(19), T=Link Pago(20), + `Estatus`, `RecurrenteID`, `Divisa/Monto USD/TC`','Multi-año: `Egresos2025` y `Egresos2024`','`Creditos_Proveedor` y `Abonos_CxP` (EGRESOS_SS_2026)'],
-      funciones:['saveCxP','pagarCxP','cancelarOrdenCxP','aplicarAbonoCxP','readTrazaCancelacion','readClasificacionProveedores','regresarCxPaProgramacion'],
+      funciones:['saveCxP','pagarCxP','cancelarOrdenCxP','aplicarAbonoCxP','readTrazaCancelacion','readClasificacionProveedores','guardarClasifProveedor','regresarCxPaProgramacion','uploadFile'],
       permisos:['editar_egresos','borrar_egresos','bank_capture'],
-      nota:'Requiere (una vez) `setupCxPCreditosAbonos()`. La clasificación automática vive en `prov_defaults.gs` (columnas `Def Contable/Tipo/Subtipo/Concepto` en la hoja Proveedores).'
+      nota:'Requiere (una vez) `setupCxPCreditosAbonos()`. La clasificación automática vive en `prov_defaults.gs` (columnas `Def Contable/Tipo/Subtipo/Concepto` en la hoja Proveedores) y la sirve el mismo endpoint `?action=clasifProveedores` a Egresos y a CxP. Los adjuntos usan `uploadFile` (finance.gs): `tipo` = `factura` | `cotizacion` | `pago` decide la carpeta — `EGRESOS_DRIVE_FACTURAS` / `EGRESOS_DRIVE_COTIZACIONES` / `EGRESOS_DRIVE_PAGOS`, con subcarpeta `<Año>\\<Mes>`. La razón social sale del catálogo de Proveedores (`providers.gs`, col B `Nombre / Razón social`).'
     },
     ejemplo:'LEPSI PRISMA: egreso pagado $2,463.39 en Santander que se cancela en modo **crédito** → queda saldo a favor de LEPSI que luego se abona a otra orden del **mismo** proveedor.'
   },
@@ -36187,7 +36394,7 @@ async function _novCfgGuardar(){
       nota:'`cancelacion.gs` es un archivo NUEVO: agrégalo al proyecto de Apps Script y redespliega. Mismo patrón que `cancelarOrdenCxP` (cancelación de órdenes de Egresos). El comprobante sale por `hfReportPrint(\'cancelacion\', …)`, así que hereda plantilla/marca de agua/firma de Panel de Control → Formato de reportes.' } },
 
   { id:'egresos', group:'operacion', icon:'💳', title:'Egresos y Cuentas por Pagar (CxP)',
-    keywords:'egresos gasto cxp cuentas por pagar proveedor pagar credito abono cancelar cancelacion devolucion moneda extranjera usd tipo de cambio clasificacion factura pago fact cont checkbox nombre comercial año historico editar borrar correo de pago enviar duplicado nuevo proveedor inline conciliar poliza',
+    keywords:'egresos gasto cxp cuentas por pagar proveedor pagar credito abono cancelar cancelacion devolucion moneda extranjera usd tipo de cambio clasificacion factura pago fact cont checkbox nombre comercial razon social año historico editar borrar correo de pago enviar duplicado nuevo proveedor inline conciliar poliza adjuntar arrastrar drag drop cotizacion comprobante zonas opcional recomendado aplicar fijar detalle',
     para:'**Egresos** son los gastos ya pagados; **Cuentas por Pagar (CxP)** los que aún no. Una fila con **PAG** marcado es un egreso; sin pagar es una CxP. Incluye créditos de proveedor, abonos, cancelación y moneda extranjera.',
     where:'Menú → Finanzas → **Cuentas por Pagar** (para lo pendiente) y **Egresos** (para lo pagado).',
     mock:{ title:'Cuentas por Pagar', crumb:'Finanzas › Cuentas por Pagar', period:'Julio 2026',
@@ -36202,7 +36409,8 @@ async function _novCfgGuardar(){
                  {n:5,text:'Checkboxes **FACT** (facturado) · **PAG** (pagado) · **CONT** (registrado en contabilidad). Se marcan inline.'},
                  {n:6,text:'Iconos de documentos: **📄** factura/XML, **🔗** comprobante de pago. Clic para ver o vincular.'} ] },
     steps:[
-      'Registra un gasto en **Cuentas por Pagar → + Nuevo**. Al capturar el proveedor, pulsa **Aplicar** en la clasificación recomendada.',
+      'Registra un gasto en **Cuentas por Pagar → + Registrar CxP**. Al escribir el proveedor sale el panel con su clasificación de siempre (💡 histórica / 📌 fija): pulsa **Aplicar** y se llenan Contable/Tipo/Subtipo/Concepto. Es el mismo panel de «Nuevo egreso».',
+      'Si vas a capturar un gasto ya pagado, usa **Egresos → Nuevo egreso**: abajo tienes **tres zonas de arrastre** (Factura, Cotización, Comprobante de pago). Arrastra las que tengas — **ninguna es obligatoria** — y se suben al guardar.',
       'Puedes capturar/corregir **inline desde el despliegue** de una fila (expandir) sin abrir el formulario completo.',
       'Cuando lo pagues, usa **Pagar**: eliges forma de pago; se marca **PAG**, la fila pasa a Egresos y se genera su movimiento bancario.',
       'Si el proveedor te dio **crédito** (por una cancelación previa), lo aplicas desde el modal de Pagar; si solo cubre parte, el resto va al banco (no se duplica el importe).',
@@ -36212,8 +36420,10 @@ async function _novCfgGuardar(){
       { k:'Buscar por nombre comercial', d:'Localiza al proveedor por su nombre corto de todos los días (también busca por razón social).' },
       { k:'Casilla de selección (por fila)', d:'Palomea partidas para verlas sumadas en la barra azul. El total es solo informativo; desde ahí también puedes fijar monto o eliminar las seleccionadas.' },
       { k:'Año (selector)', d:'Cambia entre 2026 / 2025 / 2024 para ver el histórico.' },
-      { k:'+ Nuevo', d:'Captura un gasto (proveedor, contable/tipo/subtipo, monto, vencimiento).' },
-      { k:'Aplicar (clasificación recomendada)', d:'Acepta la categoría que el sistema propone para ese proveedor.' },
+      { k:'+ Registrar CxP', d:'Captura un gasto pendiente (proveedor, contable/tipo/subtipo, monto, vencimiento).' },
+      { k:'Aplicar (clasificación recomendada)', d:'Acepta la categoría que el sistema propone para ese proveedor y llena Contable/Tipo/Subtipo/Concepto. Si ya habías escrito algo distinto, te dice qué cambiaría y te pide confirmar: no te pisa lo tuyo en silencio.' },
+      { k:'📌 Fijar esta clasificación al proveedor', d:'Guarda la combinación que tienes capturada como la fija de ese proveedor, para que la próxima vez se sugiera sola (con 📌 y 100%). Está en «Nuevo egreso» y en «Registrar cuenta por pagar».' },
+      { k:'Zonas de adjuntos (Factura · Cotización · Comprobante de pago)', d:'Las tres zonas del final de «Nuevo egreso». Arrastra el archivo encima o haz clic para escogerlo. **Ninguna es obligatoria**: puedes guardar sin adjuntar nada. Máx 10MB; la factura acepta XML o PDF y las otras dos PDF/JPG/PNG. Antes de guardar ves el nombre del archivo y puedes pulsar «quitar». Cada archivo se guarda en su carpeta de Drive (Facturas Recibidas / Cotizaciones / Pagos, por año y mes).' },
       { k:'FACT (casilla)', d:'Marca/desmarca que la partida está facturada.' },
       { k:'PAG (casilla)', d:'Marca pagado: crea el movimiento bancario y la fila pasa a Egresos.' },
       { k:'CONT (casilla)', d:'Marca que ya está registrado en contabilidad.' },
@@ -36231,8 +36441,11 @@ async function _novCfgGuardar(){
       { k:'🧾 Conciliar pólizas', d:'Cruza el export de ContaDigital y asigna el Folio como Póliza (ver su sección).' }
     ],
     bloques:[
+      { h:'La clasificación de siempre del proveedor (también al registrar CxP)', p:'Escribes el proveedor y sale el recuadro con lo que ese proveedor **siempre** es: `Costo · Variable · Medicamentos` + su concepto sugerido. 📌 rosa = **clasificación fija**; 💡 azul = sale de su **histórico** (te dice qué tan seguro: «12 de 13 gastos · 92%»). **No te cambia nada solo**: hasta que pulsas **Aplicar** no se toca un campo. Y si ya habías escrito algo distinto, te dice exactamente qué cambiaría y te pregunta antes de reemplazarlo. Con **📌 Fijar esta clasificación al proveedor** dejas amarrada la combinación para la próxima vez. Ahora está en los **dos** formularios (Nuevo egreso y Registrar cuenta por pagar) y es literalmente el mismo panel: lo que aprende en uno lo sugiere en el otro.' },
+      { h:'Tres adjuntos arrastrando (y ninguno obligatorio)', p:'Al final de **Nuevo egreso** hay tres zonas: **Factura**, **Cotización** y **Comprobante de pago**. Arrastra el archivo encima o haz clic para escogerlo — las dos cosas funcionan. **Ninguna es obligatoria**: guardar sin adjuntar nada funciona igual que siempre. Te avisa si el archivo pesa más de **10MB** o si es de un tipo que esa zona no acepta (la factura pide XML o PDF; las otras dos PDF/JPG/PNG). Antes de guardar ves el nombre del archivo y un **«quitar»** por si te equivocaste. Al guardar, cada archivo se va a **su** carpeta de Drive (Facturas Recibidas, Cotizaciones o Pagos), ordenado por año y mes, y queda enlazado en la fila. **La factura marca FACT sola.** **PAG se marca con la Fecha de pago**, no con el comprobante: si adjuntas el comprobante y dejas la fecha vacía, el sistema te lo dice y la partida se guarda como cuenta por pagar (para marcarla pagada usa **Pagar**, que es quien registra el movimiento del banco).' },
       { h:'Cancelación: crédito vs devolución', p:'El modal de cancelar tiene dos modos: **crédito** (default) deja saldo a favor del proveedor sin tocar bancos; **devolución** registra una ENTRADA al banco/caja. La fila queda **tachada con badge CANCELADA** (referencia histórica, excluida de totales). La **traza del dinero** se ve al expandir la fila.' },
       { h:'Nombre comercial en la columna Proveedor', p:'La tabla muestra el **nombre comercial** arriba (el de todos los días) y la **razón social** abajo en chico — porque el proveedor se factura con razón social pero se reconoce por el comercial. Sale del catálogo de **Proveedores** (columna `Nombre comercial`); si no está capturado, se ve solo la razón social. El **buscador** encuentra por **cualquiera de los dos**.' },
+      { h:'Razón social en el detalle del egreso', p:'Despliega un egreso con **▼** y el detalle ahora trae la **RAZÓN SOCIAL** junto al concepto y el monto — el nombre con el que ese proveedor factura, que es el que necesitas para contabilidad. Sale del catálogo de **Proveedores** y aparece aunque el egreso se haya capturado con el nombre comercial. Si el proveedor **no está dado de alta**, en vez de un hueco verás el nombre tal como se capturó, en gris y con **«· sin catálogo»**: es el recordatorio de que ahí falta darlo de alta en Proveedores.' },
       { h:'Suma de lo seleccionado (solo informativa)', p:'Al palomear partidas, la barra azul muestra «**N partidas seleccionadas · Total: $X**» en un recuadro. **No cambia nada**: solo te dice cuánto suma ese grupo antes de decidir. Suma el **saldo pendiente** (o el monto si no hay abonos), que **ya está en MXN** incluso en las partidas en dólares; si hay USD seleccionados, desglosa además «incluye US$ …».' },
       { h:'Moneda extranjera', p:'CxP acepta **Divisa MXN/USD + tipo de cambio**; guarda el monto ya en pesos (USD × TC) para cuadrar totales. Al pagar aplica el USD con el TC real.' },
       { h:'Correo de pago, factura y aviso de duplicado', p:'El icono **✉** de cada fila abre **Enviar correo de pago**: rellena la plantilla con proveedor/concepto/monto/fecha/póliza/folio, adjunta el comprobante de pago y la factura si están vinculados, prefila el correo del proveedor y **siempre pide confirmar** antes de enviar. Con **+ Nuevo proveedor** das de alta al proveedor sin salir de la captura. Al capturar, si ya hay un pago al **mismo proveedor por un monto similar en el mes** (±1% o ±$1) aparece **⚠ Posible pago duplicado** (solo avisa, no bloquea). Para cruzar contra contabilidad, **🧾 Conciliar pólizas** (tiene su propia sección).' }
@@ -36240,13 +36453,16 @@ async function _novCfgGuardar(){
     ejemplo:'**LEPSI PRISMA**: egreso pagado $2,463.39 en Santander que se cancela en modo **crédito** → queda saldo a favor de LEPSI que luego abonas a otra orden **del mismo** proveedor.',
     tips:[
       'Un **crédito** solo se aplica a órdenes del **mismo** proveedor.',
-      'La clasificación recomendada al capturar sale del historial de ese proveedor (💡) o de su valor fijo (📌).'
+      'La clasificación recomendada al capturar sale del historial de ese proveedor (💡) o de su valor fijo (📌) — y ya sale igual en Egresos y en Cuentas por Pagar.',
+      '¿Un proveedor siempre se clasifica igual? Captúralo bien una vez y pulsa **📌 Fijar esta clasificación al proveedor**: de ahí en adelante se sugiere solo, con 📌.',
+      'Los tres adjuntos son **opcionales**: si no tienes la cotización, guarda sin ella y súbela después con los iconos de la fila.',
+      'Si el detalle de un egreso dice **«· sin catálogo»** en la razón social, es que ese proveedor no está en Proveedores: dalo de alta y se llenará solo.'
     ],
     tech:{ hojas:['`Egresos2026` (EGRESOS_SS_2026 = 1iRj…RAQw): A=ID, B=Fecha, C=Mes, E=Proveedor, F=Contable, G=Tipo, H=Subtipo, I=Concepto, J=Monto, N=PAGADO, Q=Forma de Pago, S=Link Factura(19), T=Link Pago(20), + Estatus, RecurrenteID, Divisa/Monto USD/TC','Multi-año: `Egresos2025` y `Egresos2024`','`Creditos_Proveedor` y `Abonos_CxP` (EGRESOS_SS_2026)'],
-      funciones:['saveCxP','pagarCxP','cxpCancelarOrden','aplicarAbonoCxP','readTrazaCancelacion','readClasificacionProveedores','regresarCxPaProgramacion','egEditRow','egDeleteRow'],
+      funciones:['saveCxP','pagarCxP','cxpCancelarOrden','aplicarAbonoCxP','readTrazaCancelacion','readClasificacionProveedores','guardarClasifProveedor','regresarCxPaProgramacion','egEditRow','egDeleteRow','uploadFile'],
       permisos:['editar_egresos','borrar_egresos','bank_capture'],
-      deploy:'La primera vez, correr `setupCxPCreditosAbonos()`.',
-      nota:'La clasificación automática vive en `prov_defaults.gs` (columnas Def Contable/Tipo/Subtipo/Concepto en la hoja Proveedores). Botón admin **🔧 Reparar créditos cruzados** para casos históricos.' } },
+      deploy:'La primera vez, correr `setupCxPCreditosAbonos()`. Las 3 zonas de adjuntos y el panel de clasificación en CxP son **solo frontend**: no requieren redeploy del Apps Script.',
+      nota:'La clasificación automática vive en `prov_defaults.gs` (columnas Def Contable/Tipo/Subtipo/Concepto en la hoja Proveedores); la sirve `?action=clasifProveedores` y la consumen Egresos y CxP con el mismo componente (`provClasifSugerir/Aplicar/Fijar`). Los adjuntos usan `uploadFile` (finance.gs): el `tipo` (`factura`/`cotizacion`/`pago`) elige la carpeta `EGRESOS_DRIVE_FACTURAS` / `EGRESOS_DRIVE_COTIZACIONES` / `EGRESOS_DRIVE_PAGOS` + subcarpeta `<Año>\\<Mes>`, y marca Facturación cuando es factura. La razón social sale de `providers.gs` (col B `Nombre / Razón social`) vía el mismo mapa `_egProvMap()` del nombre comercial. Botón admin **🔧 Reparar créditos cruzados** para casos históricos.' } },
 
   { id:'xml-cfdi', group:'operacion', icon:'🧷', title:'Vinculación de facturas XML / CFDI',
     keywords:'vincular factura xml cfdi mismo mes cross month mes cerrado espera esperando factura desvincular egreso comprobante folio',
