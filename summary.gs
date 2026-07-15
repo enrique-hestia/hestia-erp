@@ -353,7 +353,10 @@ function _summaryReadIngresos(anio) {
   var iOp=col(['op'],0), iFecha=col(['fecha'],2), iPac=col(['paciente'],3),
       iCat=col(['categoria'],4), iProd=col(['producto'],5), iCant=col(['cantidad'],8),
       iTot=col(['totalpagar','total a pagar','total'],9), iFP=col(['forma de pago','formapago'],12),
-      iCiclo=col(['ciclo'],20), iOrigen=col(['origenexterno','origen'],-1);
+      iCiclo=col(['ciclo'],20), iOrigen=col(['origenexterno','origen'],-1),
+      // Ventas canceladas (cancelacion.gs): no existen para el negocio → no suman.
+      // Sin fallback: si la hoja del año no trae la columna, nada está cancelado.
+      iCancel=col(['cancelada'],-1);
 
   // ── Red de seguridad: si la columna Fecha detectada NO trae fechas de verdad
   //    (encabezado engañoso u hoja recorrida), buscar la columna con más fechas y
@@ -366,13 +369,16 @@ function _summaryReadIngresos(anio) {
       var _shift = iFecha - bestC;
       iFecha = bestC;
       if (_shift !== 0){ function _adj(x){ return x<0?x:Math.max(0, x-_shift); }
-        iPac=_adj(iPac); iCat=_adj(iCat); iProd=_adj(iProd); iCant=_adj(iCant); iTot=_adj(iTot); iFP=_adj(iFP); iCiclo=_adj(iCiclo); iOrigen=_adj(iOrigen); }
+        iPac=_adj(iPac); iCat=_adj(iCat); iProd=_adj(iProd); iCant=_adj(iCant); iTot=_adj(iTot); iFP=_adj(iFP); iCiclo=_adj(iCiclo); iOrigen=_adj(iOrigen); iCancel=_adj(iCancel); }
     }
   }
 
   for (var i=1;i<data.length;i++){
     var r=data[i];
     if (!String(r[iOp]||'').trim()) continue;
+    // Venta cancelada → fuera de P&L, Board Deck, Presupuesto y Resumen Semanal
+    // (los 4 leen de aquí). La fila sigue en la hoja: solo deja de sumar.
+    if (iCancel>-1 && typeof _ingEsCancelada==='function' && _ingEsCancelada(r[iCancel])) continue;
     var _pac = (typeof _privVer==='function' && !_privVer()) ? _privPaciente(r[iOp]) : String(r[iPac]||'');
     out.push({ op:String(r[iOp]||''), fecha:_sumParseDate(r[iFecha]),
       fechaRaw:(r[iFecha] instanceof Date ? r[iFecha].toISOString().substring(0,10) : String(r[iFecha]||'')), paciente:_pac,

@@ -23,7 +23,7 @@ $DEPLOYMENT_ID = 'AKfycbw3pPDLfDFVmb2VF1FCGCTZGK8Ie1du7zUFyJPQT7Fwxi_ngsEmEL-o-u
 # Como Apps Script comparte scope global, ganaba el archivo que cargara al final -> bomba
 # de tiempo. finance.gs es superconjunto estricto; config_dropdowns no aportaba NADA propio.
 $FILES = @(
-  '_diagnostico','analisis','board','capture','catalogo','chat','cobranza',
+  '_diagnostico','analisis','board','cancelacion','capture','catalogo','chat','cobranza',
   'comprobantes','config','core','cxp_creditos','declaraciones',
   'devengado','facturacion','finance','gastosfijos','identificar','inventario','inventario_migracion',
   'lab','medical','nomina','novedades','origenes','poliza_concil','presupuesto','privacidad',

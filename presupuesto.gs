@@ -111,10 +111,17 @@ function _presHistoricoIngresos() {
   for (var i = 0; i < all.length; i++) if (all[i].getName() === BD_INGRESOS_TAB) { sh = all[i]; break; }
   if (!sh) return { ok: false, error: 'No existe ' + BD_INGRESOS_TAB, q: {}, m: {}, lineas: [] };
   var raw = sh.getDataRange().getValues();
+  // 'Cancelada' (cancelacion.gs) va al final de la hoja: por encabezado, no por posición.
+  var _iCancel = -1, _h0 = raw[0] || [];
+  for (var _hc = 0; _hc < _h0.length; _hc++) {
+    if (String(_h0[_hc]).trim().toLowerCase() === 'cancelada') { _iCancel = _hc; break; }
+  }
   var q = {}, m = {}, lineSet = {};
   for (var r = 1; r < raw.length; r++) {
     var row = raw[r];
     if (!String(row[0] || '').trim()) continue;     // sin OP
+    // Venta cancelada → fuera de la base histórica del presupuesto.
+    if (_iCancel > -1 && typeof _ingEsCancelada === 'function' && _ingEsCancelada(row[_iCancel])) continue;
     var f = row[2];
     var d = (f instanceof Date) ? f : new Date(f);
     if (!d || isNaN(d.getTime())) continue;
