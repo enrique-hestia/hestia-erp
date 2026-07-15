@@ -481,12 +481,22 @@ function doPost(e) {
       try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
       return jsonResponse(result);
     }
+    // Editar/borrar movimiento bancario mueve saldos y puede dejar huerfana la
+    // conciliacion de una OP/egreso: se valida el permiso en el SERVIDOR, no
+    // solo en el boton. El gate del frontend es cosmetico (cualquiera puede
+    // mandar el POST a mano).
     if (body.action === 'deleteBankRow') {
+      if (!_tokenHasPermission(body.token || '', 'bank_delete')) {
+        return jsonResponse({ok:false, error:'Sin autorizacion para eliminar movimientos bancarios (bank_delete).'});
+      }
       var result = deleteBankRow(body.banco, body.rowNum);
       try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
       return jsonResponse(result);
     }
     if (body.action === 'updateBankRow') {
+      if (!_tokenHasPermission(body.token || '', 'bank_edit')) {
+        return jsonResponse({ok:false, error:'Sin autorizacion para editar movimientos bancarios (bank_edit).'});
+      }
       var result = updateBankRow(body.banco, body.rowNum, body.row);
       try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
       return jsonResponse(result);
