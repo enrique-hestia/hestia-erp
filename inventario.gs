@@ -433,12 +433,10 @@ function setupOrdenesCompra() {
   return { ok: true, creadas: creadas };
 }
 
+// Escanea el MÁXIMO real (_maxIdNum, en finance.gs — scope global compartido en
+// Apps Script). Leer solo la última fila producía folios OC duplicados.
 function _ocNextId(sh) {
-  var lr = sh.getLastRow();
-  if (lr < 2) return 'OC-00001';
-  var last = String(sh.getRange(lr, 1).getValue() || '');
-  var m = last.match(/OC-(\d+)/);
-  return 'OC-' + String((m ? parseInt(m[1], 10) : 0) + 1).padStart(5, '0');
+  return 'OC-' + String(_maxIdNum(sh, /OC-(\d+)/) + 1).padStart(5, '0');
 }
 
 function crearOrdenCompra(body) {

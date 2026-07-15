@@ -1443,12 +1443,9 @@ function setupBDCxP() {
   return {ok:true, msg:'BD_CxP creada'};
 }
 
+// Escanea el MÁXIMO real (ver _maxIdNum) — leer la última fila daba IDs duplicados.
 function _getNextCxPID(sheet) {
-  var lr = sheet.getLastRow();
-  if (lr < 2) return 'CXP-00001';
-  var last = String(sheet.getRange(lr,1).getValue()||'');
-  var m = last.match(/CXP-(\d+)/);
-  return 'CXP-' + String((m ? parseInt(m[1],10) : 0) + 1).padStart(5,'0');
+  return 'CXP-' + String(_maxIdNum(sheet, /CXP-(\d+)/) + 1).padStart(5,'0');
 }
 
 // Escribe Divisa + (si USD) Monto USD y Tipo de Cambio en la fila de la CxP.
@@ -1821,13 +1818,8 @@ function migrateCxPFromEgresos() {
     function dt(v){if(!v)return'';if(v instanceof Date)return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0');return String(v);}
     function num(v){var n=parseFloat(String(v||'').replace(/[$,\s]/g,''));return isNaN(n)?0:n;}
 
-    var counter = 0;
-    var lr = cxpSh.getLastRow();
-    if (lr > 1) {
-      var last = String(cxpSh.getRange(lr,1).getValue()||'');
-      var m = last.match(/CXP-(\d+)/);
-      if (m) counter = parseInt(m[1],10);
-    }
+    // MÁXIMO real de la columna (no la última fila): evita folios duplicados.
+    var counter = _maxIdNum(cxpSh, /CXP-(\d+)/);
 
     var batchRows = [];
     for (var i=1;i<raw.length;i++) {
@@ -3451,12 +3443,9 @@ function logAudit(usuario, modulo, accion, referencia, campo, anterior, nuevo) {
   } catch(e) { /* silencioso para no bloquear operaciones */ }
 }
 
+// Escanea el MÁXIMO real (ver _maxIdNum) — leer la última fila daba IDs duplicados.
 function _getNextProdID(sheet) {
-  var lr = sheet.getLastRow();
-  if (lr < 2) return 'PROD-00001';
-  var last = String(sheet.getRange(lr,1).getValue()||'');
-  var m = last.match(/PROD-(\d+)/);
-  return 'PROD-' + String((m ? parseInt(m[1],10) : 0) + 1).padStart(5,'0');
+  return 'PROD-' + String(_maxIdNum(sheet, /PROD-(\d+)/) + 1).padStart(5,'0');
 }
 
 function _getNextSkuConPrefijo(sheet, prefix) {
@@ -4401,13 +4390,81 @@ function setupBDIngresos() {
   return {ok:true, msg:'BD_Ingresos creada', headers:BD_INGRESOS_HEADERS};
 }
 
-function _getNextOP(sheet) {
+/* ══════════════════════════════════════════════════════════════════════
+   MÁXIMO ID de la columna 1 — base de TODOS los generadores de folio.
+   ──────────────────────────────────────────────────────────────────────
+   ANTES los generadores leían SOLO LA ÚLTIMA FILA (`getRange(lr,1)`) y le
+   sumaban 1. Eso produce IDs DUPLICADOS en cuanto:
+     · la hoja se ordena por otra columna (fecha/paciente/producto),
+     · se borran o reordenan filas,
+     · la última fila trae el ID vacío → devolvía el folio 1.
+   Un ID duplicado descuadra ingresos ↔ conciliación ↔ estado de cuenta.
+   Ahora se escanea el MÁXIMO real de toda la columna: inmune al orden.
+   ══════════════════════════════════════════════════════════════════════ */
+function _maxIdNum(sheet, re) {
   var lr = sheet.getLastRow();
-  if (lr < 2) return 'OP-00001';
-  var lastOP = String(sheet.getRange(lr, 1).getValue() || '');
-  var m = lastOP.match(/OP-(\d+)/);
-  var next = m ? (parseInt(m[1], 10) + 1) : 1;
-  return 'OP-' + String(next).padStart(5, '0');
+  if (lr < 2) return 0;
+  var vals = sheet.getRange(2, 1, lr - 1, 1).getValues();
+  var max = 0;
+  for (var i = 0; i < vals.length; i++) {
+    var m = String(vals[i][0] || '').match(re);
+    if (m) { var n = parseInt(m[1], 10); if (!isNaN(n) && n > max) max = n; }
+  }
+  return max;
+}
+
+function _getNextOP(sheet) {
+  return 'OP-' + String(_maxIdNum(sheet, /OP-(\d+)/) + 1).padStart(5, '0');
+}
+
+/* Diagnóstico SOLO LECTURA — detecta folios OP usados por DOS operaciones
+   distintas (lo que provocaba el generador viejo). Un OP legítimamente abarca
+   varias filas (líneas 1,2,3…), así que un duplicado REAL es: mismo OP con
+   distinto paciente/fecha, o con el número de línea repetido.
+   Correr desde el editor de Apps Script:  detectarOPsDuplicados()            */
+function detectarOPsDuplicados(anio) {
+  try {
+    var anios = anio ? [parseInt(anio, 10)]
+                     : Object.keys(INGRESOS_IDS).map(function (y) { return parseInt(y, 10); });
+    var out = [];
+    anios.forEach(function (y) {
+      var ss = SpreadsheetApp.openById(_ingIdDeAnio(y));
+      var sh = null, all = ss.getSheets();
+      for (var s = 0; s < all.length; s++) { if (all[s].getName() === BD_INGRESOS_TAB) { sh = all[s]; break; } }
+      if (!sh) return;
+      var data = sh.getDataRange().getValues();
+      var byOp = {};
+      for (var i = 1; i < data.length; i++) {
+        var op = String(data[i][0] || '').trim(); if (!op) continue;
+        var linea = String(data[i][1] || '').trim();
+        var fRaw = data[i][2], pac = String(data[i][3] || '').trim();
+        var f = (fRaw instanceof Date)
+          ? Utilities.formatDate(fRaw, 'America/Mexico_City', 'yyyy-MM-dd')
+          : String(fRaw || '').substring(0, 10);
+        if (!byOp[op]) byOp[op] = { filas: [], combos: {}, lineas: {} };
+        byOp[op].filas.push(i + 1);
+        byOp[op].combos[pac + ' | ' + f] = 1;
+        byOp[op].lineas[linea] = (byOp[op].lineas[linea] || 0) + 1;
+      }
+      Object.keys(byOp).forEach(function (op) {
+        var o = byOp[op];
+        var nCombos = Object.keys(o.combos).length;
+        var lineaRep = Object.keys(o.lineas).some(function (l) { return o.lineas[l] > 1; });
+        if (nCombos > 1 || lineaRep) {
+          out.push({ anio: y, op: op, operacionesDistintas: nCombos,
+                     filas: o.filas.join(','), detalle: Object.keys(o.combos).join('  ||  ') });
+        }
+      });
+    });
+    var msg = out.length
+      ? '⚠ ' + out.length + ' folio(s) OP DUPLICADO(S):\n' + out.map(function (d) {
+          return '  • ' + d.op + ' (' + d.anio + ') → ' + d.operacionesDistintas +
+                 ' operaciones distintas · filas ' + d.filas + '\n      ' + d.detalle;
+        }).join('\n')
+      : '✅ Sin folios OP duplicados.';
+    Logger.log(msg);
+    return { ok: true, total: out.length, duplicados: out, msg: msg };
+  } catch (ex) { Logger.log('detectarOPsDuplicados: ' + ex.message); return { ok: false, error: ex.message }; }
 }
 
 var INGRESOS_FOLDER_FACTURAS = '1veQEpzQPS_5FfulHP848aTVWO8CC9X-Q'; // Hestia Fertility\01 Administración y Finanzas\01 Contabilidad\Facturación
@@ -4454,9 +4511,16 @@ function saveIngreso(payload) {
     }
     if (!sheet) return {ok:false, error:'No se pudo crear BD_Ingresos'};
 
-    var opId = _getNextOP(sheet);
     var lineas = payload.lineas || [];
     if (!lineas.length) return {ok:false, error:'No hay productos en la operación'};
+
+    // ── FOLIO OP ATÓMICO ───────────────────────────────────────────────
+    // El folio se CALCULA y se ESCRIBE bajo el mismo lock. Sin lock, dos
+    // guardados simultáneos leen el mismo máximo y generan el MISMO OP
+    // (descuadra ingresos ↔ conciliación ↔ estado de cuenta).
+    var _opLock = LockService.getScriptLock();
+    if (!_opLock.tryLock(20000)) return {ok:false, error:'Otro guardado está en curso. Intenta de nuevo en unos segundos.'};
+    var opId = _getNextOP(sheet);
 
     var fecha     = payload.fecha || '';
     var paciente  = payload.paciente || '';
@@ -4534,6 +4598,10 @@ function saveIngreso(payload) {
 
     var startRow = sheet.getLastRow()+1;
     sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
+    // El folio OP ya quedó PERSISTIDO → se libera el lock aquí. Lo de abajo
+    // (pagos, origen, inventario) ya no compite por el folio.
+    try { SpreadsheetApp.flush(); } catch (eFl) {}
+    try { _opLock.releaseLock(); } catch (eLk) {}
 
     // Pago mixto: guardar el desglose de formas de pago en la primera línea
     try { _bdIngresosWritePagosDetalle(sheet, startRow, payload.pagos); } catch (ePag) {}
@@ -4567,6 +4635,9 @@ function saveIngreso(payload) {
     return {ok:true, op:opId, lineas:rows.length, total:totalOP,
             pagado:pagadoOp, saldoGenerado:saldoGenerado, paciente:paciente};
   } catch(ex) {
+    // Si truena entre el lock y la escritura, liberarlo para no bloquear otros
+    // guardados (GAS lo suelta al terminar la ejecución, pero mejor explícito).
+    try { if (typeof _opLock !== 'undefined' && _opLock) _opLock.releaseLock(); } catch (eLk) {}
     return {ok:false, error:ex.message};
   }
 }
@@ -5062,13 +5133,8 @@ function migrateIngresosToDBD() {
 
   var MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
                'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-  var opCounter = 0;
-  var lr = sheet.getLastRow();
-  if (lr > 1) {
-    var lastOP = String(sheet.getRange(lr,1).getValue()||'');
-    var m = lastOP.match(/OP-(\d+)/);
-    if (m) opCounter = parseInt(m[1],10);
-  }
+  // MÁXIMO real de la columna (no la última fila): evita folios OP duplicados.
+  var opCounter = _maxIdNum(sheet, /OP-(\d+)/);
 
   function num(v){var n=parseFloat(String(v||'').replace(/[$,\s]/g,''));return isNaN(n)?0:n;}
   function dt(v){
