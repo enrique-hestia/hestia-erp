@@ -4765,13 +4765,32 @@ function readPacienteLista(pacienteNombre) {
     var ss = SpreadsheetApp.openById(PACIENTES_SS_ID);
     var sh = ss.getSheets()[0];
     var data = sh.getDataRange().getValues();
+    // Canal / Médico Tratante POR ENCABEZADO (la hoja no garantiza posiciones).
+    // Viajan junto con la lista de precios para que el formulario de ingreso
+    // pueda PRECARGAR la atribución (OrigenExterno) desde la ficha sin una
+    // segunda vuelta al servidor. Ver _ingAutofillOrigen en el frontend.
+    var hdr = data[0] || [];
+    function _pacCol(nom){
+      var t = String(nom).trim().toLowerCase();
+      for (var c=0;c<hdr.length;c++){
+        var h = String(hdr[c]||'').trim().toLowerCase()
+                  .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i')
+                  .replace(/[óòö]/g,'o').replace(/[úùü]/g,'u');
+        if (h === t) return c;
+      }
+      return -1;
+    }
+    var iCanal = _pacCol('canal'), iMed = _pacCol('medico tratante');
     for (var i=1;i<data.length;i++) {
       var nombre = String(data[i][1]||'').trim();
       if (nombre.toLowerCase() === String(pacienteNombre||'').trim().toLowerCase()) {
-        return {ok:true, paciente:nombre, lista:String(data[i][PAC_COL_LISTA-1]||'General').trim()||'General'};
+        return {ok:true, paciente:nombre,
+                lista:String(data[i][PAC_COL_LISTA-1]||'General').trim()||'General',
+                canal:  iCanal>-1 ? String(data[i][iCanal]||'').trim() : '',
+                medico: iMed  >-1 ? String(data[i][iMed]  ||'').trim() : ''};
       }
     }
-    return {ok:true, paciente:pacienteNombre, lista:'General'};
+    return {ok:true, paciente:pacienteNombre, lista:'General', canal:'', medico:''};
   } catch(e) { return {ok:false, error:e.message, lista:'General'}; }
 }
 

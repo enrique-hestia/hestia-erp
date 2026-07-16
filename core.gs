@@ -871,6 +871,25 @@ function doGet(e) {
               .filter(function(v) { return v && v !== '' && v !== 'undefined'; });
           });
         }
+        // ── Canal y Médico Tratante YA NO salen de la pestaña "Opciones":
+        //    salen del CATÁLOGO Origenes_Externos (origenes.gs), que es el
+        //    mismo que atribuye las ventas. Antes eran texto libre paralelo y
+        //    por eso no se podía reportar por médico/agencia.
+        //      Canal  → orígenes tipo Grupo y Agencia ("de dónde viene").
+        //      Médico → orígenes tipo "Médico externo".
+        //    `origenes` viaja para que el frontend filtre los médicos por el
+        //    grupo del Canal elegido.
+        //    Si el catálogo está vacío o el módulo no está desplegado,
+        //    _origOpcionesFicha() devuelve ok:false y se conservan tal cual
+        //    las opciones de la hoja (nunca se deja la ficha sin opciones).
+        if (String(sheetName) === 'Pacientes' && typeof _origOpcionesFicha === 'function') {
+          var _of = _origOpcionesFicha();
+          if (_of && _of.ok) {
+            options['Canal']           = _of.canales;
+            options['Médico Tratante'] = _of.medicos;
+            return jsonResponse({ options: options, origenes: _of.registros, origenesFicha: true });
+          }
+        }
         return jsonResponse({ options: options });
       } catch(ex) {
         return jsonResponse({ error: ex.message });

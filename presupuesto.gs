@@ -460,7 +460,13 @@ function _presIngresosProy(tY, tQ) {
         _l2 = _agN || _l2 || _l1;   // Agencias › REPROVIDA (nombre canónico) › items
       }
       // Ingresos externos atribuidos: el sub-nivel se abre por DUEÑO (Origen
-      // externo). Los no-externos traen r.origen='' → sub = categoría (sin cambio).
+      // externo).
+      // ⚠ NO QUITAR el gate por grupo (g === 'Agencias' / 'Externos'). Desde el
+      // build .212 una venta NORMAL también puede traer r.origen (atribución ≠
+      // rubro contable: una paciente referida por un médico puede pagar
+      // directo). Para los NO-externos el sub DEBE seguir siendo la categoría:
+      // si se abriera por origen, las ventas normales entrarían al desglose de
+      // Externos y la proyección cambiaría.
       var _org = String(r.origen || '').trim();
       var _tieneOrigen = !!_org;
       var s = (g === 'Agencias') ? (_org || _l2 || g)

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.211 -->
+﻿<!-- app-build:2026.07.16.212 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4565,6 +4565,9 @@ async function ingOnPacienteChange() {
     if (d.ok && d.lista) {
       _ingPacienteLista = d.lista;
       if (listaLabel) listaLabel.textContent = 'Lista: '+d.lista;
+      // Atribución: se precarga el origen desde la ficha (Médico Tratante, o
+      // el Canal si no hay médico). Igual que la lista de precios, es un default.
+      _ingAutofillOrigen(d);
       // Refrescar datalists de productos con precios de la nueva lista
       // Sin llamar ingOnCatChange (limpia los valores) — solo actualizar datalist
       for (var i=1;i<=_ingLineCount;i++) {
@@ -4694,7 +4697,10 @@ function ingEditOp(opId) {
 
     // Origen externo (agencia / médico) — precargar el guardado en la operación.
     // ingOpenDrawer() ya awaitó la carga del catálogo, así que aquí solo se reselecciona.
+    // Se marca como "tocado": lo que ya se guardó en la operación MANDA sobre la
+    // ficha, si no ingOnPacienteChange (más abajo) se lo pisaría al editar.
     _ingUpdateOrigenVisibility();
+    _ingOrigenTocado = true;
     _ingLoadOrigenesIntoSelect(first.origenExterno || first.origen || '');
 
     // Pre-llenar pago — si la operación tiene desglose mixto (pagosDetalle),
@@ -5127,8 +5133,9 @@ async function ingOpenDrawer() {
   // Origen (agencia / médico externo) — solo se muestra cuando la operación es de
   // EXTERNOS (categoría con "externo" o ciclo EXTERNOS). Se puebla vía action=origenes.
   h += '<div id="ing-f-origen-wrap" style="display:none;margin-top:14px">'
-    +'<label '+LBL+'>Origen (agencia / médico) <span id="ing-f-origen-req" style="color:#dc2626">*</span> <span style="font-size:9px;font-weight:500;color:var(--color-text-muted,#9ca3af);letter-spacing:.3px">— quién refirió este ingreso de externos</span></label>'
-    +'<select id="ing-f-origen" '+S+'><option value="">— Sin origen —</option></select>'
+    +'<label '+LBL+'>Origen (grupo / agencia / médico) <span id="ing-f-origen-req" style="color:#dc2626">*</span> <span id="ing-f-origen-lbl" style="font-size:9px;font-weight:500;color:var(--color-text-muted,#9ca3af);letter-spacing:.3px">— quién refirió a la paciente</span></label>'
+    +'<select id="ing-f-origen" '+S+' onchange="_ingOrigenChanged()"><option value="">— Sin origen —</option></select>'
+    +'<div id="ing-f-origen-src" style="display:none;font-size:10.5px;color:var(--color-primary,#c46a7a);margin-top:5px;line-height:1.4"></div>'
     +'</div>';
   h += '<div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-top:14px">'
     +'<div><label '+LBL+'>Razón Social (facturación) <span style="font-size:9px;font-weight:500;color:var(--color-text-muted,#9ca3af);letter-spacing:.3px">— se autocompleta al elegir paciente</span></label>'
@@ -5329,7 +5336,11 @@ function _ingResetForNext(op) {
   var listaEl = document.getElementById('ing-lista-label');
   if (listaEl) listaEl.textContent = 'Lista: General';
   var cicloEl = document.getElementById('ing-ciclo'); if (cicloEl) cicloEl.value = '';
+  // Origen: se limpia y se vuelve a habilitar la precarga desde la ficha para
+  // la SIGUIENTE captura (si no, el "tocado" de la anterior la dejaría muda).
   var origEl  = document.getElementById('ing-f-origen'); if (origEl) origEl.value = '';
+  _ingOrigenTocado = false;
+  _ingOrigenFuente('');
   var ddEl    = document.getElementById('ing-pac-dd'); if (ddEl) ddEl.style.display = 'none';
 
   // Adjunto de factura: es de la operación que ya se guardó, no de la siguiente
@@ -5798,10 +5809,26 @@ function _ingIsExternosForm() {
   if (cicloEl && String(cicloEl.value||'').toUpperCase() === 'EXTERNOS') return true;
   return false;
 }
+/* ATRIBUCIÓN ≠ SEGMENTO CONTABLE. Antes el selector de origen SOLO existía si
+   la venta era de "Externos" (_ingIsExternosForm), lo que conflataba dos cosas
+   distintas: una paciente puede pagar directo (venta normal, NO externos) y
+   venir referida por el Dr. Paladino. Con el selector escondido, esa venta se
+   quedaba sin dueño y el médico no aparecía en ningún reporte.
+   Ahora el selector SIEMPRE se muestra; lo que sigue dependiendo de
+   _ingIsExternosForm es únicamente si el origen es OBLIGATORIO.
+   El bucket contable NO se toca: summary.gs / presupuesto.gs deciden "esto es
+   Externos" por el ciclo (col U) / categoría, nunca por el origen. */
 function _ingUpdateOrigenVisibility() {
   var wrap = document.getElementById('ing-f-origen-wrap');
   if (!wrap) return;
-  wrap.style.display = _ingIsExternosForm() ? 'block' : 'none';
+  wrap.style.display = 'block';
+  var esExt = _ingIsExternosForm();
+  var req = document.getElementById('ing-f-origen-req');
+  if (req) req.style.display = esExt ? 'inline' : 'none';
+  var lbl = document.getElementById('ing-f-origen-lbl');
+  if (lbl) lbl.textContent = esExt
+    ? '— quién refirió este ingreso de externos (obligatorio)'
+    : '— quién refirió a la paciente (opcional; no cambia el rubro contable)';
 }
 async function _ingLoadOrigenesIntoSelect(preselect) {
   var sel = document.getElementById('ing-f-origen');
@@ -5811,13 +5838,44 @@ async function _ingLoadOrigenesIntoSelect(preselect) {
     var actives = list.filter(function(o){ return o.activo !== false; });
     var cur = (preselect != null) ? preselect : sel.value;
     sel.innerHTML = _origOptionsHTML(actives, cur);
+    if (cur) sel.value = cur;
   } catch(e) { /* sin catálogo aún: se queda el placeholder "— Sin origen —" */ }
 }
-// Valor de origen a persistir: solo si la operación es de externos; si no, ''.
+/* Valor de origen a persistir. Ya NO se filtra por "¿es de externos?": una
+   venta normal atribuida guarda su origen. Los reportes de Externos no se
+   mueven (ver comentario de _ingUpdateOrigenVisibility). */
 function _ingCollectOrigen() {
-  if (!_ingIsExternosForm()) return '';
   var sel = document.getElementById('ing-f-origen');
   return sel ? (sel.value || '') : '';
+}
+
+/* ── Precarga del origen desde la FICHA de la paciente ───────────────────
+   Igual que la lista de precios: es un DEFAULT, no una cárcel. El usuario
+   puede cambiarlo y, una vez que lo toca, la precarga ya no se lo pisa
+   (mismo criterio que _pacIdiomaTocado en la ficha). */
+var _ingOrigenTocado = false;
+function _ingOrigenChanged(){ _ingOrigenTocado = true; _ingOrigenFuente(''); }
+function _ingOrigenFuente(txt){
+  var el = document.getElementById('ing-f-origen-src');
+  if (!el) return;
+  el.textContent = txt || '';
+  el.style.display = txt ? 'block' : 'none';
+}
+/* d = respuesta de action=pacienteLista {medico, canal}. Se prefiere el Médico
+   Tratante; si no hay, el Canal (grupo/agencia de donde viene). */
+async function _ingAutofillOrigen(d){
+  var sel = document.getElementById('ing-f-origen');
+  if (!sel || _ingOrigenTocado) return;
+  var val = String((d && d.medico) || '').trim() || String((d && d.canal) || '').trim();
+  if (!val) { _ingOrigenFuente(''); return; }
+  await _ingLoadOrigenesIntoSelect(val);
+  sel.value = val;
+  if (String(sel.value) !== val) {   // no está en el catálogo → no se inventa nada
+    _ingOrigenFuente('La ficha dice «' + val + '», que no está en el catálogo de Orígenes externos. Dala de alta o elige el origen a mano.');
+    return;
+  }
+  var deMedico = !!String((d && d.medico) || '').trim();
+  _ingOrigenFuente('Se tomó de la ficha de la paciente (' + (deMedico ? 'Médico Tratante' : 'Canal') + '). Puedes cambiarlo.');
 }
 
 /* ── Líneas de pago múltiple ───────────────────────────── */
@@ -25620,11 +25678,13 @@ function idpForzarAlta() {
       </div>
       <div class="form-group">
         <label class="form-label">Canal</label>
-        <select class="form-input" id="pac-f-canal"><option value="">— Selecciona —</option></select>
+        <select class="form-input" id="pac-f-canal" onchange="_pacCanalChanged()"><option value="">— Selecciona —</option></select>
+        <div style="font-size:10.5px;color:var(--color-text-muted,#9ca3af);margin-top:4px">Grupos y agencias del catálogo de <b>Orígenes externos</b>.</div>
       </div>
       <div class="form-group">
         <label class="form-label">Médico Tratante</label>
         <select class="form-input" id="pac-f-medico"><option value="">— Selecciona —</option></select>
+        <div id="pac-medico-hint" style="display:none;font-size:10.5px;color:var(--color-text-muted,#9ca3af);margin-top:4px"></div>
       </div>
       <div class="form-group">
         <label class="form-label">País</label>
@@ -26202,8 +26262,14 @@ function openEditModal(viewId, rowIdx) {
       var sel = document.getElementById(selId);
       if (!sel) return;
       var val = row[keys[i]] || row[keys[i].toLowerCase()] || '';
+      // Canal/Médico ahora salen del catálogo: un valor viejo que no esté ahí
+      // NO se descarta. Sin _pacEnsureOption, `sel.value = val` lo dejaría en ''
+      // y al guardar se borraría el dato de la ficha en silencio.
+      _pacEnsureOption(sel, val);
       sel.value = val;
     });
+    // El filtro de médicos por grupo se aplica DESPUÉS de fijar el Canal.
+    _pacFiltraMedicos();
     // Idioma guardado en la ficha. Si la paciente ya tiene uno, cuenta como
     // decisión tomada: cambiar el país después NO se lo pisa.
     _pacLlenaIdiomaSelect();
@@ -26315,12 +26381,78 @@ function _pacPaisChanged(){
   _pacIdiomaHint();
 }
 var _pacOptLoaded = false;
+/* Catálogo de orígenes tal como lo manda el backend para la ficha:
+   [{id,nombre,tipo,padre,grupoId}]. Vacío = el backend no lo mandó (catálogo sin
+   sembrar o módulo sin desplegar) → la ficha sigue con la pestaña Opciones. */
+var _pacOrigMeta = [];
+
+/* Garantiza que `val` exista como opción del select ANTES de asignarlo.
+   Sin esto, `sel.value = val` con un valor que no está en la lista lo deja en
+   '' EN SILENCIO: al guardar la ficha se escribiría vacío y se perdería el
+   dato histórico. Justo el riesgo de mover Canal/Médico al catálogo: los
+   valores viejos que no empatan NO se borran, se conservan y se marcan. */
+function _pacEnsureOption(sel, val){
+  if (!sel) return;
+  val = String(val == null ? '' : val).trim();
+  if (!val) return;
+  for (var i = 0; i < sel.options.length; i++){ if (sel.options[i].value === val) return; }
+  var o = document.createElement('option');
+  o.value = val;
+  o.textContent = val + ' (fuera de catálogo)';
+  o.dataset.fueraCatalogo = '1';
+  sel.appendChild(o);
+}
+function _pacOrigFind(nombre){
+  var n = _origNormJS(nombre);
+  if (!n) return null;
+  for (var i = 0; i < _pacOrigMeta.length; i++){
+    if (_origNormJS(_pacOrigMeta[i].nombre) === n) return _pacOrigMeta[i];
+  }
+  return null;
+}
+/* Al elegir un Canal que es un Grupo (o una Agencia CON integrantes), el
+   selector de Médico se filtra a sus miembros. Canal libre / agencia sin
+   miembros → se listan todos los médicos. El valor actual se conserva siempre
+   (nunca se borra por el filtro). */
+function _pacFiltraMedicos(){
+  var selC = document.getElementById('pac-f-canal');
+  var selM = document.getElementById('pac-f-medico');
+  var hint = document.getElementById('pac-medico-hint');
+  if (!selC || !selM || !_pacOrigMeta.length) return;
+  var cur = String(selM.value || '').trim();
+  var canal = String(selC.value || '').trim();
+  var reg = _pacOrigFind(canal);
+  var todos = _pacOrigMeta.filter(function(o){ return o.tipo === 'Médico externo'; });
+  var lista = todos, filtrado = false;
+  if (reg){
+    var miembros = todos.filter(function(o){ return String(o.grupoId||'') === String(reg.id||''); });
+    if (miembros.length){ lista = miembros; filtrado = true; }
+  }
+  selM.innerHTML = '<option value="">— Selecciona —</option>';
+  lista.forEach(function(o){
+    var op = document.createElement('option');
+    op.value = o.nombre; op.textContent = o.nombre;
+    selM.appendChild(op);
+  });
+  _pacEnsureOption(selM, cur);   // el médico ya capturado nunca se pierde
+  selM.value = cur;
+  if (hint){
+    hint.textContent = filtrado
+      ? 'Mostrando solo los de «' + canal + '» (' + lista.length + '). Cambia el Canal para ver otros.'
+      : (_pacOrigMeta.length ? 'Del catálogo de Orígenes externos. Elige un Canal de tipo Grupo para filtrar por sus integrantes.' : '');
+    hint.style.display = hint.textContent ? 'block' : 'none';
+  }
+}
+function _pacCanalChanged(){ _pacFiltraMedicos(); }
 function loadPacientesOptions() {
   _pacLlenaIdiomaSelect();
   if (_pacOptLoaded) return;
   var url = APPS_SCRIPT_URL + '?action=options&sheet=Pacientes&token=' + encodeURIComponent(getToken());
   fetch(url).then(function(r){ return r.json(); }).then(function(d) {
     if (!d.options) return;
+    // Canal y Médico Tratante vienen del catálogo Origenes_Externos cuando el
+    // backend lo tiene sembrado (d.origenesFicha); si no, de la hoja Opciones.
+    _pacOrigMeta = (d.origenes && d.origenes.length) ? d.origenes : [];
     var map = {
       'Origen':          'pac-f-origen',
       'Canal':           'pac-f-canal',
@@ -26337,9 +26469,11 @@ function loadPacientesOptions() {
         o.value = opt; o.textContent = opt;
         sel.appendChild(o);
       });
+      _pacEnsureOption(sel, current);   // no perder lo que ya estaba elegido
       sel.value = current;
     });
     _pacOptLoaded = true;
+    _pacFiltraMedicos();
   }).catch(function(){});
 }
 
@@ -29764,21 +29898,55 @@ async function _origFetchList(force){
   if (d && d.ok && Array.isArray(d.origenes)) { _origListCache = d.origenes; return _origListCache; }
   throw new Error((d && d.error) || 'No se pudieron cargar los orígenes externos.');
 }
-function _origEsTipoAgencia(o){ return String((o&&o.tipo)||'').toLowerCase().indexOf('agenc') >= 0; }
+/* Tipo CANÓNICO de un origen. Espejo exacto de _origTipoCanon (origenes.gs):
+   si los dos criterios se separan, la vista miente sobre lo que guardó el
+   backend. Antes esto era `indexOf('agenc')>=0 ? Agencia : Médico`, que con 4
+   tipos manda Grupo y Coordinador al cajón de "médicos externos". */
+var ORIG_TIPOS = ['Grupo','Agencia','Médico externo','Coordinador'];
+function _origTipoCanon(t){
+  var n = _origNormJS(t);
+  if (!n) return 'Médico externo';
+  if (n.indexOf('agenc')   >= 0) return 'Agencia';
+  if (n.indexOf('coordin') >= 0) return 'Coordinador';
+  if (n.indexOf('grupo')   >= 0) return 'Grupo';
+  if (n.indexOf('medic')   >= 0 || n.indexOf('doctor') >= 0) return 'Médico externo';
+  return 'Médico externo';
+}
+function _origNormJS(s){
+  s = String(s == null ? '' : s).toLowerCase();
+  s = s.replace(/[áàäâã]/g,'a').replace(/[éèëê]/g,'e').replace(/[íìïî]/g,'i')
+       .replace(/[óòöôõ]/g,'o').replace(/[úùüû]/g,'u').replace(/ñ/g,'n').replace(/ç/g,'c');
+  return s.replace(/[^a-z0-9]+/g,' ').replace(/^\s+|\s+$/g,'');
+}
+function _origTipoDe(o){ return _origTipoCanon((o && o.tipo) || ''); }
+function _origEsTipoAgencia(o){ return _origTipoDe(o) === 'Agencia'; }
+function _origIcono(t){
+  return t === 'Grupo' ? '🏛️' : t === 'Agencia' ? '🏢' : t === 'Coordinador' ? '🧑‍💼' : '🩺';
+}
+/* Nombre del Grupo de un origen ('' si es independiente o si él mismo es el grupo). */
+function _origGrupoNombre(o, list){
+  var p = String((o && o.padre) || '').trim();
+  if (!p) return '';
+  for (var i = 0; i < (list||[]).length; i++){ if (String(list[i].id||'').trim() === p) return list[i].nombre; }
+  return '';
+}
 // Opciones <select> agrupadas por tipo, con "— Sin origen —" y fallback al valor actual.
 function _origOptionsHTML(list, selected){
   selected = selected || '';
   list = list || [];
-  var ags = list.filter(_origEsTipoAgencia);
-  var meds = list.filter(function(o){ return !_origEsTipoAgencia(o); });
   function opt(o){
     var v = _cxpEsc(o.nombre).replace(/"/g,'&quot;');
     var sel = (String(o.nombre) === String(selected)) ? ' selected' : '';
-    return '<option value="'+v+'"'+sel+'>'+_cxpEsc(o.nombre)+'</option>';
+    // El grupo se muestra en la etiqueta: "Dr. Paladino · Grupo Médico".
+    var g = _origGrupoNombre(o, list);
+    return '<option value="'+v+'"'+sel+'>'+_cxpEsc(o.nombre)+(g?' · '+_cxpEsc(g):'')+'</option>';
   }
   var h = '<option value="">— Sin origen —</option>';
-  if (ags.length)  h += '<optgroup label="Agencias">'+ags.map(opt).join('')+'</optgroup>';
-  if (meds.length) h += '<optgroup label="Médicos externos">'+meds.map(opt).join('')+'</optgroup>';
+  var etiq = { 'Grupo':'Grupos', 'Agencia':'Agencias', 'Médico externo':'Médicos externos', 'Coordinador':'Coordinadores' };
+  ORIG_TIPOS.forEach(function(t){
+    var arr = list.filter(function(o){ return _origTipoDe(o) === t; });
+    if (arr.length) h += '<optgroup label="'+_cxpEsc(etiq[t])+'">'+arr.map(opt).join('')+'</optgroup>';
+  });
   // Si el valor actual ya no está en el catálogo (borrado/renombrado), preservarlo.
   if (selected && !list.some(function(o){ return String(o.nombre) === String(selected); })) {
     h += '<option value="'+_cxpEsc(selected).replace(/"/g,'&quot;')+'" selected>'+_cxpEsc(selected)+' (actual)</option>';
@@ -29799,16 +29967,22 @@ async function loadOrigenes(){
   }
 }
 
-function _origCard(o, canEdit){
+function _origCard(o, canEdit, sangria){
   var inactive = o.activo === false;
   var badge = inactive ? '<span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:20px;background:#f3f4f6;color:#6b7280;margin-left:6px">Inactivo</span>' : '';
-  var pj = encodeURIComponent(JSON.stringify({rowNum:o.rowNum, id:o.id, nombre:o.nombre||'', tipo:o.tipo||'', alias:o.alias||'', activo:o.activo!==false, notas:o.notas||''}));
+  var tipo = _origTipoDe(o);
+  badge += '<span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:20px;background:rgba(196,106,122,.10);color:var(--color-primary,#c46a7a);margin-left:6px">'+_origIcono(tipo)+' '+_cxpEsc(tipo)+'</span>';
+  var pj = encodeURIComponent(JSON.stringify({rowNum:o.rowNum, id:o.id, nombre:o.nombre||'', tipo:tipo, alias:o.alias||'', activo:o.activo!==false, notas:o.notas||'', padre:o.padre||''}));
   var acc = '';
   if (canEdit) {
     acc = '<button onclick="origOpenForm(JSON.parse(decodeURIComponent(\''+pj+'\')))" style="padding:5px 10px;background:rgba(37,99,235,.08);color:#2563eb;border:none;border-radius:7px;font-size:12px;cursor:pointer" title="Editar">✎</button>'
         + '<button onclick="origDelete('+o.rowNum+',decodeURIComponent(\''+encodeURIComponent(o.nombre||'')+'\'))" style="padding:5px 10px;background:rgba(220,38,38,.07);color:#dc2626;border:none;border-radius:7px;font-size:12px;cursor:pointer" title="Eliminar">🗑</button>';
   }
-  return '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:12px 15px;margin-bottom:10px;'+(inactive?'opacity:.65':'')+'">'
+  // Los miembros de un Grupo se dibujan indentados y con una guía a la izquierda.
+  var ind = sangria
+    ? 'margin-left:22px;border-left:3px solid rgba(196,106,122,.35);border-top-left-radius:4px;border-bottom-left-radius:4px;'
+    : '';
+  return '<div style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:12px;padding:12px 15px;margin-bottom:10px;'+ind+(inactive?'opacity:.65':'')+'">'
     + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">'
     + '<div style="flex:1;min-width:180px"><div style="font-size:13.5px;font-weight:700;color:var(--text-primary,#111)">'+_cxpEsc(o.nombre)+badge+'</div>'
     + (o.alias ? '<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-top:3px">Alias: '+_cxpEsc(o.alias)+'</div>' : '')
@@ -29820,20 +29994,41 @@ function _origCard(o, canEdit){
 function _renderOrigenes(){
   var root = document.getElementById('orig-root'); if (!root) return;
   var list = window._origData || [];
-  var canEdit = hasPermission('bank_capture');
-  var ags = list.filter(_origEsTipoAgencia);
-  var meds = list.filter(function(o){ return !_origEsTipoAgencia(o); });
-  function sec(titulo, arr, emoji){
-    if (!arr.length) return '<div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin:18px 0 8px">'+emoji+' '+titulo+' (0)</div>'
-      + '<div style="font-size:12px;color:var(--text-secondary,#9ca3af);padding:0 2px 4px">Sin registros.</div>';
-    return '<div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin:18px 0 8px">'+emoji+' '+titulo+' ('+arr.length+')</div>'
-      + arr.map(function(o){ return _origCard(o, canEdit); }).join('');
+  // El backend exige `editar_ingresos` (saveOrigen/deleteOrigen). La vista pedía
+  // `bank_capture`: quien tenía bank_capture veía el botón y el backend lo
+  // rechazaba; quien tenía editar_ingresos podía guardar pero no veía el botón.
+  // Manda el backend.
+  var canEdit = hasPermission('editar_ingresos');
+  var grupos = list.filter(function(o){ return _origTipoDe(o) === 'Grupo'; });
+  var sueltos = list.filter(function(o){ return _origTipoDe(o) !== 'Grupo' && !String(o.padre||'').trim(); });
+  function miembros(g){
+    return list.filter(function(o){ return String(o.padre||'').trim() === String(g.id||'').trim(); });
+  }
+  function tit(txt, n, emoji){
+    return '<div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin:18px 0 8px">'+emoji+' '+txt+' ('+n+')</div>';
+  }
+  // ── Grupos con sus miembros debajo, y luego los independientes por tipo.
+  function secGrupos(){
+    if (!grupos.length) return '';
+    var h = tit('Grupos', grupos.length, '🏛️');
+    grupos.forEach(function(g){
+      var ms = miembros(g);
+      h += _origCard(g, canEdit, false);
+      if (ms.length) h += ms.map(function(o){ return _origCard(o, canEdit, true); }).join('');
+      else h += '<div style="margin-left:22px;font-size:11px;color:var(--text-secondary,#9ca3af);padding:0 0 10px 8px">Sin integrantes todavía · edita un médico o coordinador y elige este grupo como <b>Pertenece a</b>.</div>';
+    });
+    return h;
+  }
+  function secSueltos(t, emoji, etiq){
+    var arr = sueltos.filter(function(o){ return _origTipoDe(o) === t; });
+    if (!arr.length) return '';
+    return tit(etiq, arr.length, emoji) + arr.map(function(o){ return _origCard(o, canEdit, false); }).join('');
   }
   var h = '<div style="max-width:760px;margin:0 auto;padding:4px 2px 44px">';
   h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px">'
     + '<div><div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-secondary,#6b7280)">Hestia Fertility</div>'
     + '<h1 style="font-size:20px;font-weight:800;color:var(--text-primary,#111);margin:0">Orígenes externos</h1>'
-    + '<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">Agencias y médicos externos que refieren ingresos · se usan para atribuir cada venta de externos</div></div>'
+    + '<div style="font-size:11.5px;color:var(--text-secondary,#6b7280);margin-top:3px">Grupos, agencias, médicos y coordinadores que refieren pacientes · atribuyen cada venta y alimentan <b>Canal</b> y <b>Médico Tratante</b> de la ficha</div></div>'
     + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
     + '<button onclick="navBack()" style="padding:9px 14px;background:var(--color-surface,#f3f4f6);color:var(--text-primary,#374151);border:1px solid var(--color-divider,#e5e7eb);border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">‹ Volver</button>'
     + '<button onclick="navigateTo(\'atribuir-externos\')" title="Asignar origen a ingresos de externos ya capturados" style="padding:9px 16px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">📌 Atribuir histórico</button>'
@@ -29844,7 +30039,10 @@ function _renderOrigenes(){
       + (canEdit ? ' Crea el primero con <b>+ Nuevo origen</b>.' : '')
       + '<br><span style="font-size:11px">Los alias ayudan a auto-detectar el origen en el histórico y en la captura.</span></div>';
   } else {
-    h += sec('Agencias', ags, '🏢') + sec('Médicos externos', meds, '🩺');
+    h += secGrupos()
+       + secSueltos('Agencia', '🏢', 'Agencias')
+       + secSueltos('Médico externo', '🩺', 'Médicos externos independientes')
+       + secSueltos('Coordinador', '🧑‍💼', 'Coordinadores independientes');
   }
   h += '</div>' + _origModalHTML();
   root.innerHTML = h;
@@ -29857,7 +30055,14 @@ function _origModalHTML(){
     + '<div id="orig-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:9999;background:var(--card-bg,#fff);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(460px,94vw);max-height:90vh;overflow:auto;padding:20px">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div id="orig-modal-title" style="font-size:15px;font-weight:800">Nuevo origen externo</div><button onclick="origCloseForm()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-secondary,#6b7280)">×</button></div>'
     + '<div style="margin-bottom:12px"><label '+L+'>Nombre *</label><input id="orig-f-nombre" '+S+' placeholder="Ej. Reprovida, Dr. Juan Pérez"></div>'
-    + '<div style="margin-bottom:12px"><label '+L+'>Tipo *</label><select id="orig-f-tipo" '+S+'><option value="Agencia">Agencia</option><option value="Médico externo">Médico externo</option></select></div>'
+    + '<div style="margin-bottom:12px"><label '+L+'>Tipo *</label><select id="orig-f-tipo" '+S+' onchange="origTipoChanged()">'
+    + '<option value="Grupo">🏛️ Grupo (agrupa médicos / coordinadores)</option>'
+    + '<option value="Agencia">🏢 Agencia</option>'
+    + '<option value="Médico externo">🩺 Médico externo</option>'
+    + '<option value="Coordinador">🧑‍💼 Coordinador</option></select></div>'
+    // Solo se listan orígenes tipo Grupo: la jerarquía es de UN nivel.
+    + '<div id="orig-f-padre-wrap" style="margin-bottom:12px"><label '+L+'>Pertenece a (grupo)</label><select id="orig-f-padre" '+S+'><option value="">— Independiente —</option></select>'
+    + '<div id="orig-f-padre-hint" style="font-size:10.5px;color:var(--text-secondary,#9ca3af);margin-top:5px;line-height:1.4">Si pertenece a un grupo, sus ventas suman también al grupo. Un <b>Grupo</b> no puede pertenecer a otro.</div></div>'
     + '<div style="margin-bottom:12px"><label '+L+'>Alias (separados por coma)</label><input id="orig-f-alias" '+S+' placeholder="reprovida, repro vida, RPV"><div style="font-size:10.5px;color:var(--text-secondary,#9ca3af);margin-top:5px;line-height:1.4">Ayudan a <b>auto-detectar el origen</b> en el histórico y en la captura (busca estos textos en paciente/producto/observaciones).</div></div>'
     + '<div style="margin-bottom:12px;display:flex;align-items:center;gap:8px"><input type="checkbox" id="orig-f-activo" checked style="width:15px;height:15px;accent-color:var(--color-primary,#c46a7a);cursor:pointer"><label for="orig-f-activo" style="font-size:12px;font-weight:600;color:var(--text-primary,#374151);cursor:pointer">Activo (aparece en la captura de ingresos)</label></div>'
     + '<div style="margin-bottom:14px"><label '+L+'>Notas</label><textarea id="orig-f-notas" '+S+' rows="2" style="resize:vertical"></textarea></div>'
@@ -29865,10 +30070,36 @@ function _origModalHTML(){
     + '<button onclick="origCloseForm()" style="padding:12px 20px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider);border-radius:10px;font-size:13px;cursor:pointer">Cancelar</button></div></div>';
 }
 
+/* Llena el selector de Grupo padre. SOLO orígenes tipo Grupo (un nivel), y
+   nunca uno mismo (un origen no puede ser su propio grupo). */
+function _origLlenaPadreSelect(selectedId, selfId){
+  var sel = document.getElementById('orig-f-padre'); if (!sel) return;
+  var list = window._origData || [];
+  var h = '<option value="">— Independiente —</option>';
+  list.filter(function(o){ return _origTipoDe(o) === 'Grupo' && String(o.id||'') !== String(selfId||''); })
+      .forEach(function(o){
+        var v = _cxpEsc(o.id).replace(/"/g,'&quot;');
+        h += '<option value="'+v+'"'+(String(o.id)===String(selectedId||'')?' selected':'')+'>'+_cxpEsc(o.nombre)+'</option>';
+      });
+  sel.innerHTML = h;
+  sel.value = String(selectedId || '');
+}
+/* Un Grupo no tiene padre → se oculta el selector y se limpia, para que la UI
+   no ofrezca lo que el backend va a rechazar. */
+function origTipoChanged(){
+  var t = (document.getElementById('orig-f-tipo')||{}).value || '';
+  var wrap = document.getElementById('orig-f-padre-wrap');
+  var sel  = document.getElementById('orig-f-padre');
+  var esGrupo = (_origTipoCanon(t) === 'Grupo');
+  if (wrap) wrap.style.display = esGrupo ? 'none' : 'block';
+  if (esGrupo && sel) sel.value = '';
+}
 function origOpenForm(o){
   _origEditRow = (o && o.id) ? o : null;
   var n = document.getElementById('orig-f-nombre'); if (n) n.value = (o && o.nombre) || '';
-  var t = document.getElementById('orig-f-tipo');   if (t) t.value = (o && o.tipo) || 'Agencia';
+  var t = document.getElementById('orig-f-tipo');   if (t) t.value = _origTipoCanon((o && o.tipo) || 'Agencia');
+  _origLlenaPadreSelect((o && o.padre) || '', (o && o.id) || '');
+  origTipoChanged();
   var a = document.getElementById('orig-f-alias');  if (a) a.value = (o && o.alias) || '';
   var ac = document.getElementById('orig-f-activo');if (ac) ac.checked = o ? (o.activo !== false) : true;
   var nt = document.getElementById('orig-f-notas'); if (nt) nt.value = (o && o.notas) || '';
@@ -29890,9 +30121,11 @@ async function origSaveForm(){
   var alias = (document.getElementById('orig-f-alias')||{}).value || '';
   var activo = !!(document.getElementById('orig-f-activo')||{}).checked;
   var notas = (document.getElementById('orig-f-notas')||{}).value || '';
+  // Un Grupo nunca manda padre (el backend lo rechaza igual; aquí se evita el viaje).
+  var padre = (_origTipoCanon(tipo) === 'Grupo') ? '' : ((document.getElementById('orig-f-padre')||{}).value || '');
   var btn = document.getElementById('orig-save-btn'); if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
   var s = getSession() || {};
-  var payload = { action:'saveOrigen', nombre:nombre, tipo:tipo, alias:alias, activo:activo, notas:notas, token:getToken(), usuario:s.email||s.nombre||'' };
+  var payload = { action:'saveOrigen', nombre:nombre, tipo:tipo, alias:alias, activo:activo, notas:notas, padre:padre, token:getToken(), usuario:s.email||s.nombre||'' };
   if (_origEditRow && _origEditRow.id) payload.id = _origEditRow.id;
   try {
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify(payload)});
@@ -29902,7 +30135,8 @@ async function origSaveForm(){
   } catch(e) { alert('Error de conexión: '+e.message); if (btn) { btn.disabled = false; btn.textContent = 'Guardar'; } }
 }
 async function origDelete(rowNum, nombre){
-  if (!hasPermission('bank_capture')) { alert('No tienes permiso para borrar orígenes.'); return; }
+  // Mismo permiso que exige deleteOrigen en el backend (antes: bank_capture).
+  if (!hasPermission('editar_ingresos')) { alert('No tienes permiso para borrar orígenes. Se requiere «editar_ingresos».'); return; }
   if (!confirm('¿Eliminar el origen "'+(nombre||'')+'"?\n\nLos ingresos ya atribuidos conservan el nombre; solo desaparece del catálogo.')) return;
   var s = getSession() || {};
   try {
@@ -34684,6 +34918,20 @@ var NOVEDADES=[
   /* `destacada:true` = se anuncia con el aviso emergente (default del código; el admin lo
      puede cambiar desde Panel de Control → Novedades sin tocar el código).
      `perm:'clave'` = audiencia restringida a quien tenga ese permiso (vacío = todos). */
+  { build:'2026.07.16', fecha:'16 jul 2026', area:'Ingresos', icon:'🏷️', destacada:true, perm:'editar_ingresos',
+    titulo:'Ya se puede reportar por médico y por grupo de médicos: los tres vocabularios ahora son uno',
+    puntos:['⚠ El problema: había TRES listas de médicos que no se conocían entre sí. La ficha de la paciente tenía «Canal» y «Médico Tratante» como texto libre; el catálogo de Orígenes externos era otra lista aparte; y el origen de cada venta se elegía a mano en una tercera. El dato ESTABA, pero no se podía sacar un reporte por médico — y contar los procedimientos de un GRUPO de médicos era imposible.',
+      'Ahora hay UN solo catálogo. «Canal» y «Médico Tratante» de la ficha salen de Orígenes externos, y cada venta se atribuye contra la misma lista.',
+      'El catálogo tiene JERARQUÍA: 🏛️ Grupo, 🏢 Agencia, 🩺 Médico externo y 🧑‍💼 Coordinador. Un médico puede «Pertenecer a» un grupo y aparece indentado debajo de él. Así «los procedimientos del Grupo Médico» suman los de todos sus integrantes. Un médico independiente es su propio grupo.',
+      'En la ficha: al elegir un Canal que es un Grupo, el selector de Médico Tratante se filtra SOLO a los integrantes de ese grupo. Se acabó buscar en una lista de todos.',
+      '⚠ La venta ya se atribuye SOLA: al elegir la paciente, el origen se precarga desde su ficha (igual que la lista de precios). Te dice de dónde lo sacó y lo puedes cambiar — es un default, no una cárcel.',
+      'Y lo importante: ATRIBUIR NO CAMBIA EL RUBRO CONTABLE. Antes el selector de origen solo existía si la venta era de «Externos», así que una paciente que paga directo pero viene referida por el Dr. Paladino se quedaba sin dueño. Ahora el selector sale siempre, y atribuir una venta normal NO la mete al bucket de Externos: el rubro lo sigue decidiendo el ciclo/categoría de la venta. Tu Estado de Resultados, Board Deck y Presupuesto NO cambian de números.',
+      'Nada se borra: si tu ficha traía un médico que no está en el catálogo, se conserva y sale marcado «(fuera de catálogo)» para que lo des de alta o lo corrijas.',
+      'De paso: el botón de editar orígenes pedía un permiso (bank_capture) distinto al que exigía el servidor (editar_ingresos). El botón aparecía y luego el guardado se rechazaba. Ya están alineados.'],
+    comoUsar:['Panel de Control → «🏷️ Orígenes externos»: da de alta tus grupos y luego cuelga de ellos a sus médicos con «Pertenece a».',
+      'Ficha del paciente: Canal (grupos/agencias) y Médico Tratante ya salen del catálogo.',
+      'Ingresos: elige la paciente y el origen se llena solo. Cámbialo si hace falta.',
+      'Para revisar las fichas ya capturadas: en Apps Script corre migrarCanalesAOrigenes(). Es SOLO LECTURA: te enseña qué empata y qué no ANTES de tocar nada.'] },
   { build:'2026.07.16', fecha:'16 jul 2026', area:'General', icon:'🔎', destacada:true,
     titulo:'El manual ya entiende lo que buscas: escribe tu duda y te lleva a la sección exacta',
     puntos:['⚠ El problema: la respuesta ESTABA en el manual, pero el buscador solo encontraba coincidencias exactas. «descuento agencia» no encontraba nada si esas dos palabras no estaban escritas juntas — y te quedabas sin respuesta teniéndola enfrente.','Ahora escribes tu duda como te salga («descuento agencia», «cómo facturo», «cancelar venta») y salen las secciones ORDENADAS POR RELEVANCIA, con un extracto y tus palabras resaltadas.','Clic en un resultado → se abre la sección con los términos MARCADOS y el scroll te deja en el primero. Ya no hay que leerse toda la sección para encontrar el pedazo que contesta.','Entiende sinónimos del ERP: «factura» también encuentra CFDI, XML y UUID; «gasto» encuentra egresos y CxP; «venta» encuentra ingresos y OP. Y da igual escribir con o sin acentos, o en mayúsculas.','La búsqueda cubre el manual de texto (botón «?») y los tutoriales ilustrados (📖 Manual) — cada uno con su buscador, y Ctrl+K los combina.','¿No encontró nada? Te sugiere términos cercanos en vez de dejarte en blanco.','Ctrl+K también busca en el manual: la paleta de comandos agrega hasta 3 resultados «📖 Manual: …» debajo de las pantallas. La navegación sigue saliendo primero.','De paso: los descuentos por volumen a agencias ya tienen SU PROPIA sección en el manual (antes estaban escondidos dentro de Cobranza — justo la duda que originó este buscador).'],
@@ -35402,23 +35650,29 @@ async function _novCfgGuardar(){
     }
   },
 
-  { id:'origenes-externos', group:'operacion', icon:'🏷️', title:'Orígenes externos (agencias / médicos)',
-    keywords:'origen origenes externos agencia medico referido atribucion atribuir historico externos catalogo quien refiere venta reprovida madero back-fill origen desconocido',
-    intro:'Los **Orígenes externos** son el catálogo de **agencias y médicos externos** que refieren pacientes. Sirven para saber **de quién es cada venta** de «Externos» (atribución), y alimentan el desglose por origen en Presupuesto y Board Deck.',
+  { id:'origenes-externos', group:'operacion', icon:'🏷️', title:'Orígenes externos (grupos, agencias, médicos)',
+    keywords:'origen origenes externos agencia medico referido atribucion atribuir historico externos catalogo quien refiere venta reprovida madero back-fill origen desconocido grupo grupos jerarquia padre pertenece coordinador canal medico tratante ficha paciente reporte por medico reporte por grupo quien mando a la paciente',
+    intro:'Los **Orígenes externos** son el catálogo ÚNICO de quién refiere pacientes: **grupos, agencias, médicos externos y coordinadores**. Sirven para saber **de quién es cada venta** (atribución) y para **contar los procedimientos de un grupo entero de médicos**, no solo de uno. El mismo catálogo alimenta **Canal** y **Médico Tratante** de la ficha del paciente y el desglose por origen en Presupuesto y Board Deck.',
     pasos:[
       'Abre el catálogo desde **Panel de Control → 🏷️ Orígenes externos** (o el botón 🏷️ del encabezado).',
-      'Da de alta cada agencia/médico externo. El mismo catálogo alimenta el selector de **origen** al capturar un ingreso de Externos.',
-      'Al capturar un ingreso de Externos, elige su **origen**. Si lo guardas sin origen, el sistema te avisa y podrás atribuirlo después.',
-      'Para los ingresos de externos **ya capturados sin origen**, usa **📌 Atribuir histórico**.'
+      'Da de alta cada origen con su **Tipo**: 🏛️ *Grupo*, 🏢 *Agencia*, 🩺 *Médico externo* o 🧑‍💼 *Coordinador*.',
+      'Si el médico/coordinador pertenece a un grupo, elige el grupo en **«Pertenece a»**. En la lista aparecerá indentado debajo de su grupo.',
+      'En la **ficha del paciente**, *Canal* y *Médico Tratante* ya salen de este catálogo (antes eran texto libre).',
+      'Al capturar un ingreso, el **origen se precarga solo** desde la ficha de la paciente. Puedes cambiarlo.',
+      'Para los ingresos **ya capturados sin origen**, usa **📌 Atribuir histórico**.'
     ],
     bloques:[
-      { h:'Atribuir histórico (back-fill)', p:'La vista **Atribuir externos (histórico)** revisa los ingresos de externos de un año y **sugiere** el origen (por nombre/patrón); tú confirmas y **aplicas en lote**. Así el histórico queda atribuido sin recapturar cada venta.' }
+      { h:'Jerarquía: grupos y sus integrantes', p:'La jerarquía es de **UN solo nivel**: un médico o coordinador pertenece a un **Grupo**; un Grupo no pertenece a nadie. Así «los procedimientos del Grupo Médico» suman los de todos sus integrantes. Un médico **independiente** es su propio grupo. El sistema **rechaza los ciclos** y las jerarquías de más de un nivel, y no te deja borrar un Grupo que todavía tiene integrantes.' },
+      { h:'Atribución ≠ rubro contable', p:'**Son cosas distintas y ya no se confunden.** Una paciente puede **pagar directo** (venta normal, NO es «Externos») y aun así venir referida por un médico. Por eso el selector de **origen aparece SIEMPRE**, no solo en ventas de Externos. Atribuir una venta normal **no la mete al bucket de Externos**: el rubro contable lo sigue decidiendo el **ciclo/categoría** de la venta, nunca el origen. Los números de Estado de Resultados, Board Deck y Presupuesto **no cambian** por atribuir.' },
+      { h:'Canal y Médico Tratante en la ficha', p:'*Canal* lista los **Grupos y Agencias** (de dónde viene la paciente). *Médico Tratante* lista los **Médicos externos**; si el Canal elegido es un Grupo, el selector **se filtra a los integrantes de ese grupo**. Si un valor viejo de la ficha no está en el catálogo, **no se borra**: aparece marcado como *(fuera de catálogo)* para que lo corrijas o lo des de alta.' },
+      { h:'Atribuir histórico (back-fill)', p:'La vista **Atribuir externos (histórico)** revisa los ingresos de externos de un año y **sugiere** el origen (por nombre/alias); tú confirmas y **aplicas en lote**. Así el histórico queda atribuido sin recapturar cada venta.' },
+      { h:'Migrar las fichas ya capturadas', p:'`migrarCanalesAOrigenes()` (Apps Script) compara el *Canal*/*Médico Tratante* de **todas las fichas** contra el catálogo y te enseña el mapeo: qué empata y qué no. **Es solo lectura**: no escribe nada hasta que la corres con `{aplicar:true, token:"…"}`, y aun así solo **normaliza la ortografía** de lo que empata (ej. «Grupo Medico» → «Grupo Médico»). Lo que no empata **nunca se toca ni se borra**: se reporta para que decidas.' }
     ],
     datos:{
-      hojas:['Catálogo de orígenes (backend `action=origenes`)','`BD_Ingresos`: columna de origen externo por operación'],
-      funciones:['loadOrigenes','saveOrigen','deleteOrigen','loadAtribuirExternos','sugerirOrigenes','aplicarOrigenesHistorico','_ingLoadOrigenesIntoSelect'],
-      permisos:['editar_egresos'],
-      nota:'Requiere el backend de externos (`action=origenes` / `sugerirOrigenes` / `aplicarOrigenesHistorico`) desplegado. El catálogo se comparte con el selector de origen en Ingresos.'
+      hojas:['`Origenes_Externos`: catálogo (columna **Padre** = el grupo al que pertenece)','`BD_Ingresos`: columna `OrigenExterno` por operación','Hoja de Pacientes: columnas `Canal` y `Médico Tratante`'],
+      funciones:['loadOrigenes','saveOrigen','deleteOrigen','_origResolver','migrarCanalesAOrigenes','loadAtribuirExternos','sugerirOrigenes','aplicarOrigenesHistorico','_ingLoadOrigenesIntoSelect','_ingAutofillOrigen'],
+      permisos:['editar_ingresos'],
+      nota:'Requiere `origenes.gs` + `core.gs` + `finance.gs` desplegados. Editar/borrar orígenes pide **editar_ingresos** (antes la vista pedía `bank_capture` y el backend `editar_ingresos`: el botón aparecía y luego el guardado se rechazaba — ya están alineados).'
     }
   },
 
@@ -36875,34 +37129,43 @@ async function _novCfgGuardar(){
       motor:'cobranza-2026.07.10o',
       deploy:'`cobranza.gs` requiere **agregarse al Apps Script + redeploy + `setupCobranzaConfig()`** una vez.' } },
 
-  { id:'origenes-externos', group:'operacion', icon:'🏷️', title:'Orígenes externos (agencias / médicos)',
-    keywords:'origen origenes externos agencia medico referido atribucion atribuir historico catalogo quien refiere venta reprovida back-fill origen desconocido',
-    para:'Los **Orígenes externos** son el catálogo de **agencias y médicos externos** que refieren pacientes. Sirven para saber **de quién es cada venta** de «Externos» (atribución), y alimentan el desglose por origen en Presupuesto y Board Deck.',
+  { id:'origenes-externos', group:'operacion', icon:'🏷️', title:'Orígenes externos (grupos, agencias, médicos)',
+    keywords:'origen origenes externos agencia medico referido atribucion atribuir historico catalogo quien refiere venta reprovida back-fill origen desconocido grupo grupos jerarquia padre pertenece coordinador canal medico tratante ficha paciente reporte por medico reporte por grupo',
+    para:'Los **Orígenes externos** son el catálogo ÚNICO de quién refiere pacientes: **grupos, agencias, médicos externos y coordinadores**. Sirven para saber **de quién es cada venta** y para contar los procedimientos de **un grupo entero de médicos**. El mismo catálogo alimenta **Canal** y **Médico Tratante** de la ficha del paciente y el desglose por origen en Presupuesto y Board Deck.',
     where:'**Panel de Control → 🏷️ Orígenes externos** (o el botón 🏷️ del encabezado).',
     mock:{ title:'Orígenes externos', crumb:'Panel de Control › Orígenes externos',
-      toolbar:[ {t:'btn', label:'+ Nuevo origen', pri:true, n:1}, {t:'btn', label:'📌 Atribuir histórico', n:3} ],
-      table:{ cols:['Origen','Tipo','Ventas atribuidas',''],
-        rows:[ ['REPROVIDA','Agencia','48',{raw:'<span class="hfm-mini">✎ Editar</span>',n:2}],
-               ['Dr. Madero','Médico','12','✎ Editar'] ] },
-      callouts:[ {n:1,text:'**+ Nuevo origen**: da de alta una agencia o médico externo.'},
-                 {n:2,text:'El catálogo alimenta el **selector de origen** al capturar un ingreso de Externos.'},
-                 {n:3,text:'**📌 Atribuir histórico**: asigna origen a los ingresos de externos ya capturados sin origen.'} ] },
+      toolbar:[ {t:'btn', label:'+ Nuevo origen', pri:true, n:1}, {t:'btn', label:'📌 Atribuir histórico', n:4} ],
+      table:{ cols:['Origen','Tipo','Pertenece a',''],
+        rows:[ ['🏛️ Grupo Médico','Grupo','—',{raw:'<span class="hfm-mini">✎ Editar</span>',n:2}],
+               ['↳ 🩺 Dr. Paladino','Médico externo',{raw:'Grupo Médico',n:3},'✎ Editar'],
+               ['↳ 🧑‍💼 Daniel Madero','Coordinador','Grupo Médico','✎ Editar'],
+               ['🩺 Dr. Lozano','Médico externo','— (independiente)','✎ Editar'],
+               ['🏢 REPROVIDA','Agencia','—','✎ Editar'] ] },
+      callouts:[ {n:1,text:'**+ Nuevo origen**: da de alta un grupo, agencia, médico externo o coordinador.'},
+                 {n:2,text:'Un **Grupo** agrupa médicos y coordinadores: sus ventas suman también al grupo.'},
+                 {n:3,text:'**«Pertenece a»**: los integrantes salen indentados debajo de su grupo. Un médico sin grupo es **independiente** (es su propio grupo).'},
+                 {n:4,text:'**📌 Atribuir histórico**: asigna origen a los ingresos ya capturados sin origen.'} ] },
     steps:[
-      'Abre **Panel de Control → 🏷️ Orígenes externos** y da de alta cada agencia/médico.',
-      'Al capturar un ingreso de Externos, elige su **origen** (si lo guardas sin origen, el sistema te avisa).',
+      'Abre **Panel de Control → 🏷️ Orígenes externos** y da de alta cada grupo, agencia, médico o coordinador.',
+      'Elige el **Tipo** y, si pertenece a un grupo, marca **«Pertenece a»**. Un Grupo no puede pertenecer a otro.',
+      'En la **ficha del paciente**, *Canal* (grupos/agencias) y *Médico Tratante* ya salen de este catálogo; al elegir un Canal que es Grupo, el médico se filtra a sus integrantes.',
+      'Al capturar un ingreso, el **origen se precarga** desde la ficha de la paciente. Puedes cambiarlo.',
       'Para el histórico sin origen, entra a **📌 Atribuir histórico**, revisa las **sugerencias** por año, confirma y **aplica en lote**.'
     ],
     buttons:[
-      { k:'+ Nuevo origen', d:'Alta de una agencia o médico externo que refiere pacientes.' },
-      { k:'✎ Editar', d:'Cambia el nombre/datos del origen.' },
-      { k:'📌 Atribuir histórico', d:'Abre el back-fill: sugiere y aplica el origen a ingresos de externos ya capturados.' }
+      { k:'+ Nuevo origen', d:'Alta de un grupo, agencia, médico externo o coordinador.' },
+      { k:'✎ Editar', d:'Cambia el nombre, el tipo, los alias o el grupo al que pertenece.' },
+      { k:'🗑 Eliminar', d:'Quita el origen del catálogo. No te deja borrar un Grupo que todavía tiene integrantes.' },
+      { k:'📌 Atribuir histórico', d:'Abre el back-fill: sugiere y aplica el origen a ingresos ya capturados.' }
     ],
-    tips:[ 'El origen sirve para saber de quién es cada venta de «Externos» y presupuestar por quién refiere.',
-           'El mismo catálogo se usa en el selector de origen dentro de Ingresos.' ],
-    tech:{ hojas:['Catálogo de orígenes (backend `action=origenes`)','`BD_Ingresos`: columna de origen externo'],
-      funciones:['loadOrigenes','saveOrigen','deleteOrigen','loadAtribuirExternos','sugerirOrigenes','aplicarOrigenesHistorico','_ingLoadOrigenesIntoSelect'],
-      permisos:['editar_egresos'],
-      deploy:'Requiere el backend de externos (`action=origenes` / `sugerirOrigenes` / `aplicarOrigenesHistorico`) desplegado.' } },
+    tips:[ 'La jerarquía es de **UN nivel**: un médico pertenece a un grupo; un grupo no pertenece a nada. Un médico independiente es su propio grupo.',
+           '**Atribuir ≠ rubro contable.** Una paciente que paga directo puede venir referida por un médico: se atribuye SIN que la venta se vaya al bucket de «Externos». El rubro lo decide el ciclo/categoría, nunca el origen.',
+           'Si un valor viejo de la ficha no está en el catálogo, **no se borra**: sale marcado como *(fuera de catálogo)*.',
+           'Para revisar las fichas ya capturadas, corre `migrarCanalesAOrigenes()` en Apps Script: es **solo lectura** y te enseña el mapeo antes de escribir nada.' ],
+    tech:{ hojas:['`Origenes_Externos`: catálogo (columna **Padre** = grupo al que pertenece)','`BD_Ingresos`: columna `OrigenExterno`','Hoja de Pacientes: `Canal` y `Médico Tratante`'],
+      funciones:['loadOrigenes','saveOrigen','deleteOrigen','_origResolver','migrarCanalesAOrigenes','loadAtribuirExternos','sugerirOrigenes','aplicarOrigenesHistorico','_ingLoadOrigenesIntoSelect','_ingAutofillOrigen'],
+      permisos:['editar_ingresos'],
+      deploy:'Requiere `origenes.gs`, `core.gs` y `finance.gs` desplegados. Editar/borrar pide **editar_ingresos**.' } },
 
   { id:'conciliar-mp', group:'operacion', icon:'🔄', title:'Conciliar suscripciones Crío (Mercado Pago)',
     keywords:'conciliar mp mercado pago suscripcion crio payer id payerid recordar cobro export csv xlsx suscrito año gratis pago sin suscripcion vincular',

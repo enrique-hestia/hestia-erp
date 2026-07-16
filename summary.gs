@@ -578,7 +578,14 @@ function readSummary(fechaInicio, fechaFin) {
         // por r.origen. Sin origen → bucket genérico que no oculta nada:
         //   · Agencias → conserva el nombre de la agencia (l2 actual).
         //   · Externos → "Externos (sin atribuir)".
-        // Los NO-externos traen r.origen='' y no entran aquí (grupo sin cambio).
+        //
+        // ⚠ NO QUITAR EL GATE `_esExt`. Desde el build .212 una venta NORMAL
+        // (paga directo, no es de externos) TAMBIÉN puede traer r.origen: la
+        // atribución y el rubro contable son cosas distintas y una paciente
+        // referida por un médico puede pagar directo. El bucket lo decide el
+        // ciclo (col U) / la categoría —arriba, en _esExt—, NUNCA el origen.
+        // Si esto se abriera a cualquier fila con r.origen, las ventas normales
+        // se colarían al desglose de Externos y el P&L cambiaría de números.
         if (_esExt) {
           var _org = String(r.origen||'').trim();
           l2 = _org || (l1 === 'Agencias' ? l2 : 'Externos (sin atribuir)');
