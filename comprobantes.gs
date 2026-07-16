@@ -807,3 +807,36 @@ function enviarCorreoPago(body) {
     return _correoEnviarCore(body);
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
+
+/* ═════════════════════════════════════════════════════════════════════════
+   Envoltorio de UN CLIC para el back-fill fiscal de Egresos (build .209/.210).
+   El botón ▶ del editor ejecuta sin argumentos, y backfillFacturasEgresos
+   necesita {anio, desde} para reanudarse tras el corte de 6 min de Apps
+   Script. Este wrapper encadena las corridas él solo dentro de un
+   presupuesto seguro (~4.5 min) y deja en el log un mensaje inequívoco:
+   o "TERMINADO", o "vuelve a ejecutar esta misma función" (retoma donde
+   quedó, es idempotente — lo ya lleno se salta).
+   Ejecutar por año: backfillEgresos2026 / 2025 / 2024.
+   ═════════════════════════════════════════════════════════════════════════ */
+function _backfillEgresosAnio(anio) {
+  var t0 = Date.now(), PRESUPUESTO = 270000;   // 4.5 min < corte de 6 min
+  var desde = 2, total = { procesados: 0, yaListos: 0, sinXml: 0 }, r = null;
+  do {
+    r = backfillFacturasEgresos({ anio: anio, desde: desde, maxMs: 60000 });
+    if (!r || !r.ok) { Logger.log('ERROR año ' + anio + ': ' + ((r && r.error) || 'desconocido')); return r; }
+    total.procesados += (r.procesados || 0);
+    total.yaListos  += (r.yaListos  || 0);
+    total.sinXml    += (r.sinXml    || 0);
+    desde = r.siguiente || (desde + 1);
+    Logger.log('  …fila ' + desde + ' · llenados ' + total.procesados + ' · ya listos ' + total.yaListos + ' · sin XML ' + total.sinXml + (r.truncado ? (' · faltan ' + r.faltan) : ''));
+  } while (r.truncado && (Date.now() - t0) < PRESUPUESTO);
+  if (r.truncado) {
+    Logger.log('AÚN FALTAN ' + r.faltan + ' del año ' + anio + ' → VUELVE A EJECUTAR ESTA MISMA FUNCIÓN (retoma sola donde quedó).');
+  } else {
+    Logger.log('TERMINADO año ' + anio + ': llenados ' + total.procesados + ', ya estaban ' + total.yaListos + ', sin XML (solo PDF) ' + total.sinXml + '.');
+  }
+  return { ok: true, anio: anio, terminado: !r.truncado, resumen: total };
+}
+function backfillEgresos2026() { return _backfillEgresosAnio(2026); }
+function backfillEgresos2025() { return _backfillEgresosAnio(2025); }
+function backfillEgresos2024() { return _backfillEgresosAnio(2024); }
