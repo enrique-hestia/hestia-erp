@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.213 -->
+﻿<!-- app-build:2026.07.16.214 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -9177,6 +9177,24 @@ async function egRepararFechas(){
 
 var _egEditRowNum = null;
 
+/* Asigna un valor a un campo del formulario de egresos SIN perderlo en silencio.
+   Para <select>: si el valor guardado no está entre las opciones (porque alguien
+   editó el catálogo en Panel de Control > Formularios), en vez de dejar el select
+   en "— Seleccionar —" y blanquear el campo al guardar, se agrega la opción
+   marcada como "(valor actual)" y se selecciona. El usuario VE el valor histórico
+   y decide si lo cambia; no se evapora solo. */
+function _egSetSelVal(el, val) {
+  var v = (val == null) ? '' : String(val);
+  if (!el || el.tagName !== 'SELECT') { if (el) el.value = val; return; }
+  el.value = v;
+  if (el.value === v || v === '') return;        // la opción existe (o no hay valor): listo
+  var opt = document.createElement('option');
+  opt.value = v;
+  opt.textContent = v + ' (valor actual)';
+  el.insertBefore(opt, el.firstChild ? el.firstChild.nextSibling : null);
+  el.value = v;
+}
+
 function egEditRow(rowNum) {
   if (!hasPermission('editar_egresos')) { alert('No tienes permisos para editar egresos.'); return; }
   if (!_egData || !_egData.rows) return;
@@ -9199,7 +9217,17 @@ function egEditRow(rowNum) {
     };
     for (var id in fields) {
       var el = document.getElementById(id);
-      if (el && fields[id] != null) el.value = fields[id];
+      if (el && fields[id] != null) {
+        // ⚠ En un <select>, asignar un value que NO existe entre las <option> no
+        // hace nada y NO avisa: el select se queda en "— Seleccionar —" (value '')
+        // y al guardar BLANQUEA el campo. Con la forma de pago eso llegaba a
+        // borrar el movimiento del banco del egreso. Pasa cuando alguien edita el
+        // catálogo (Panel de Control > Formularios) y quita/renombra un valor que
+        // los egresos viejos todavía usan. Solución: si el valor guardado no está
+        // entre las opciones, se AGREGA marcado como valor actual — visible, y no
+        // se pierde al guardar.
+        _egSetSelVal(el, fields[id]);
+      }
     }
     var chks = {'eg-chk-fact': row.facturacion, 'eg-chk-pag': row.pagado, 'eg-chk-cont': row.contabilidad};
     for (var cid in chks) { var ce = document.getElementById(cid); if (ce) ce.checked = !!chks[cid]; }

@@ -1,4 +1,4 @@
-/* ==============================================================
+﻿/* ==============================================================
    finance.gs — Módulo Financiero
    --------------------------------------------------------------
    CashFlow, P&L, ER, Bancos (3 cuentas), CxC/CxP futuros
@@ -3023,6 +3023,37 @@ function saveEgreso(payload) {
    Columna de obs por banco: Santander idx4, AMEX idx3, Mercado Pago idx8. */
 function _egBankObsIdx(key) { return key === 'amex' ? 3 : (key === 'mercadopago' ? 8 : 4); }
 
+/* ── FUENTE ÚNICA del ruteo forma de pago → destino de dinero ──────────────
+   Antes esta tabla estaba DUPLICADA (y divergente) en _egresoResyncBanco y en
+   _cxpRutearABanco, con matching '===' exacto contra una lista cerrada. Como el
+   dropdown de "Forma de pago" es EDITABLE por el usuario (Panel de Control >
+   Formularios, ver CFG_DD_DEFAULTS), agregar un valor nuevo ('Cheque', 'BBVA')
+   hacía que el resync BORRARA la fila del banco y ninguna rama la re-creara:
+   el egreso quedaba huérfano y el saldo del banco, mal. En silencio.
+
+   Ahora: una sola función, normalizada (mayúsculas/acentos/espacios), que
+   devuelve null cuando NO sabe rutear. Un null NUNCA debe traducirse en un
+   borrado: quien la llame tiene que fallar ruidosamente.
+   Devuelve: {banco:'santander'|'amex'|'mercadopago'|'cajachica', forma:<canónica>} | null */
+function _egNormForma(fp) {
+  return String(fp == null ? '' : fp).trim().toLowerCase()
+    .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i')
+    .replace(/[óòö]/g,'o').replace(/[úùü]/g,'u')
+    .replace(/\s+/g,' ');
+}
+function _egRutaBanco(formaPago) {
+  var n = _egNormForma(formaPago);
+  if (!n) return null;
+  if (n === 'efectivo') return { banco: 'cajachica', forma: 'Efectivo' };
+  if (n === 'santander') return { banco: 'santander', forma: 'Santander' };
+  if (n === 'transferencia') return { banco: 'santander', forma: 'Transferencia' };
+  if (n === 'amex') return { banco: 'amex', forma: 'AMEX' };
+  if (n === 'mercado pago' || n === 'mercadopago') return { banco: 'mercadopago', forma: 'Mercado Pago' };
+  if (n === 'tdc') return { banco: 'mercadopago', forma: 'TDC' };
+  if (n === 'tdd') return { banco: 'mercadopago', forma: 'TDD' };
+  return null;   // desconocida → el que llama DEBE fallar, no borrar
+}
+
 /* ¿Esta observación pertenece al egreso egId? Acepta las DOS formas del tag:
      '[Egreso #123]'      → pago simple (pagarCxP)
      '[Egreso #123/AB-7]' → un abono concreto de una orden multi-abono
@@ -3122,17 +3153,14 @@ function _egresoResyncBanco(sheet, rowNum) {
       ? Utilities.formatDate(fechaRaw, 'America/Mexico_City', 'yyyy-MM-dd')
       : String(fechaRaw||'').substring(0,10);
 
-    // Aperturas ANTES de borrar (para recomputar sin perder saldo inicial)
-    var _sanOpen = _bankOpening('santander');
-    var _amexOpen = _amexOpening();
-
-    // 1) BORRAR el movimiento previo en TODOS los destinos (idempotente)
-    _egBankDeleteByEgreso('santander', egId);
-    _egBankDeleteByEgreso('amex', egId);
-    _egBankDeleteByEgreso('mercadopago', egId);
-    _egCajaChicaDeleteByEgreso(egId);
-
-    // 2) RE-CREAR. El ledger Abonos_CxP manda: si la orden se pagó en VARIOS abonos,
+    // 1) PLANEAR ANTES DE BORRAR ─────────────────────────────────────────
+    // Regla dura: NUNCA se borra la fila del banco si no podemos re-crearla.
+    // Antes se borraba incondicionalmente y se re-creaba condicionalmente; si
+    // la forma de pago no caía en la lista cerrada ('Cheque', 'santander' en
+    // minúscula, un valor nuevo del dropdown editable), se borraba y no se
+    // creaba nada: el egreso quedaba huérfano y el saldo del banco, mal.
+    // Ahora se arma el plan completo primero y, si el plan no cubre un egreso
+    // pagado con monto > 0, se ABORTA con error visible SIN tocar los bancos.
     // el banco real tiene VARIOS movimientos y hay que reconstruirlos uno por uno.
     // Recrear una sola fila sintética con el monto total (lo que se hacía antes)
     // colapsaba 2 movimientos reales en 1 y rompía la conciliación.
@@ -3143,57 +3171,166 @@ function _egresoResyncBanco(sheet, rowNum) {
     try { if (typeof _cxpAbonosPorId === 'function') _abonos = _cxpAbonosPorId(egId, true) || []; }
     catch (eAb) { _abonos = []; Logger.log('_egresoResyncBanco abonos: ' + eAb.message); }
 
+    var plan = [];          // filas que SE VAN A crear: {via,ruta,monto,fecha,ref,abonoId}
+    var planErr = '';       // si queda algo aquí → abortamos sin borrar
+
     if (_abonos.length) {
       // ── Orden con abonos (multi-abono o abono único): UNA FILA POR ABONO, cada
-      // una con su monto/forma de pago/fecha propios del ledger. Se re-rutea con
-      // _cxpRutearABanco — la MISMA función que las creó — para que la fila
-      // reconstruida sea idéntica a la original. Los abonos de Origen='credito'
-      // NO generan fila bancaria: son offset interno, no movimiento de dinero. ──
+      // una con su monto/forma de pago/fecha propios del ledger. Los abonos de
+      // Origen='credito' NO generan fila bancaria: son offset interno, no dinero. ──
       for (var ab = 0; ab < _abonos.length; ab++) {
         var _a = _abonos[ab];
         if (String(_a.origen || 'pago') === 'credito') continue;
         var _aMonto = Number(_a.monto) || 0; if (_aMonto <= 0) continue;
-        var _aFP = _a.formaPago || formaPago; if (!_aFP) continue;
-        var _aFecha = _a.fecha || fechaPago;
-        var _aRef = (_a.concepto || concepto) + ' · ' + (_a.proveedor || proveedor) + ' [Egreso #' + egId + '/' + _a.id + ']';
-        try { _cxpRutearABanco(_aFP, _aMonto, _aFecha, _aRef); }
-        catch (eRt) { Logger.log('_egresoResyncBanco rutear abono ' + _a.id + ': ' + eRt.message); }
+        var _aFP = _a.formaPago || formaPago;
+        if (!_aFP) {
+          planErr = 'El abono ' + (_a.id || '?') + ' del egreso #' + egId + ' (por $' + _aMonto +
+                    ') no tiene forma de pago y el egreso tampoco. No sé de qué banco salió ese dinero: ' +
+                    'corrige la forma de pago antes de guardar.';
+          break;
+        }
+        var _aRuta = _egRutaBanco(_aFP);
+        if (!_aRuta) {
+          planErr = 'No sé a qué banco mandar la forma de pago "' + _aFP + '" (abono ' + (_a.id || '?') +
+                    ' del egreso #' + egId + '). Agrégala al ruteo o corrige el egreso.';
+          break;
+        }
+        plan.push({ via: 'abono', ruta: _aRuta, forma: _aFP, monto: _aMonto,
+                    fecha: _a.fecha || fechaPago, abonoId: _a.id,
+                    ref: (_a.concepto || concepto) + ' · ' + (_a.proveedor || proveedor) +
+                         ' [Egreso #' + egId + '/' + _a.id + ']' });
       }
-    } else if (pagado && monto > 0 && formaPago) {
-      // ── Sin abonos = pago simple (la gran mayoría): comportamiento intacto. ──
-      if (formaPago === 'Efectivo') {
-        try {
-          var ccSh = getCajaChicaSheet();
-          var ccData = ccSh.getDataRange().getValues();
-          var ccHdr  = ccData[0].map(function(h){ return String(h).trim().toUpperCase(); });
-          var ciF = ccHdr.indexOf('FECHA'), ciC = ccHdr.indexOf('CONCEPTO'), ciS = ccHdr.indexOf('SALIDA');
-          var ccRow = -1;
-          for (var ci = 1; ci < ccData.length; ci++) {
-            if (!String(ccData[ci][ciF]||'').trim() && !String(ccData[ci][ciC]||'').trim()) { ccRow = ci + 1; break; }
-          }
-          if (ccRow === -1) ccRow = ccSh.getLastRow() + 1;
-          ccSh.getRange(ccRow, ciF+1).setValue(fechaPago);
-          ccSh.getRange(ccRow, ciC+1).setValue(ref);
-          ccSh.getRange(ccRow, ciS+1).setValue(monto);
-          SpreadsheetApp.flush();
-        } catch(ccErr) { Logger.log('_egresoResyncBanco caja: ' + ccErr.message); }
-      } else if (formaPago === 'Santander' || formaPago === 'Transferencia') {
-        saveBankRow('santander', [fechaPago, 0, monto, 0, ref, '', '', '', '']);
-      } else if (formaPago === 'AMEX') {
-        saveBankRow('amex', [fechaPago, monto, 0, ref, '', '', '', '', mesStr]);
-      } else if (formaPago === 'Mercado Pago' || formaPago === 'TDC' || formaPago === 'TDD') {
-        saveBankRow('mercadopago', [mesStr, fechaPago, -monto, 0, 0, -monto, 0, true, ref, 'PAGO']);
+    } else if (pagado && monto > 0) {
+      // ── Sin abonos = pago simple (la gran mayoría). ──
+      if (!formaPago) {
+        planErr = 'El egreso #' + egId + ' está marcado como PAGADO por $' + monto +
+                  ' pero no tiene forma de pago. No sé de qué banco salió: ' +
+                  'elige la forma de pago o destilda PAGADO.';
+      } else {
+        var _ruta = _egRutaBanco(formaPago);
+        if (!_ruta) {
+          planErr = 'No sé a qué banco mandar la forma de pago "' + formaPago + '" del egreso #' + egId +
+                    '. Agrégala al ruteo (Santander, Transferencia, AMEX, Mercado Pago, TDC, TDD, Efectivo) ' +
+                    'o corrige el egreso.';
+        } else {
+          plan.push({ via: 'simple', ruta: _ruta, forma: formaPago, monto: monto,
+                      fecha: fechaPago, ref: ref, abonoId: '' });
+        }
       }
     }
+    // Egreso NO pagado (o monto 0, o todos los abonos a crédito) → plan vacío es
+    // legítimo: no hubo movimiento real de dinero, se borra la fila vieja y ya.
 
-    // 3) Recomputar saldos corridos de los bancos afectados
+    if (planErr) {
+      // ⛔ ABORTO: no se ha borrado NADA. El egreso conserva su fila de banco y el
+      // usuario recibe el error. Antes, este mismo caso borraba y callaba.
+      try {
+        logAudit('sistema', 'Egresos', 'Resync banco ABORTADO', 'Egreso #' + egId,
+          proveedor + ' · ' + concepto, formaPago, planErr);
+      } catch (_la) {}
+      throw new Error(planErr);
+    }
+
+    // Aperturas ANTES de borrar (para recomputar sin perder saldo inicial)
+    var _sanOpen = _bankOpening('santander');
+    var _amexOpen = _amexOpening();
+
+    // 2) BORRAR el movimiento previo en TODOS los destinos (idempotente).
+    // Ya sabemos exactamente qué vamos a crear, así que borrar es seguro.
+    var _borradas = 0;
+    _borradas += _egBankDeleteByEgreso('santander', egId) || 0;
+    _borradas += _egBankDeleteByEgreso('amex', egId) || 0;
+    _borradas += _egBankDeleteByEgreso('mercadopago', egId) || 0;
+    _borradas += _egCajaChicaDeleteByEgreso(egId) || 0;
+
+    // 3) CREAR según el plan (ya validado).
+    var _creadas = 0, _fallos = [];
+    for (var p = 0; p < plan.length; p++) {
+      var it = plan[p];
+      try {
+        if (it.via === 'abono') {
+          // _cxpRutearABanco es la MISMA función que creó la fila original →
+          // la reconstruida es idéntica (conciliación intacta).
+          _cxpRutearABanco(it.forma, it.monto, it.fecha, it.ref);
+          _creadas++;
+        } else {
+          _egCrearFilaSimple(it.ruta.banco, it.monto, it.fecha, it.ref);
+          _creadas++;
+        }
+      } catch (eRt) { _fallos.push((it.abonoId || 'pago') + ': ' + eRt.message); }
+    }
+
+    // 4) VERIFICAR. Si borramos filas y no creamos las que tocaban, el egreso
+    // quedó huérfano: hay que gritarlo, no loguearlo y seguir.
+    if (_creadas < plan.length) {
+      var _msg = 'Egreso #' + egId + ': se borraron ' + _borradas + ' movimiento(s) de banco y solo se ' +
+                 'pudieron recrear ' + _creadas + ' de ' + plan.length + '. El saldo del banco puede estar mal. ' +
+                 'Detalle: ' + _fallos.join(' | ');
+      try {
+        logAudit('sistema', 'Egresos', 'Resync banco INCOMPLETO', 'Egreso #' + egId,
+          proveedor + ' · ' + concepto, _borradas + ' borradas', _creadas + '/' + plan.length + ' creadas');
+      } catch (_la2) {}
+      _bankRecompute('santander', _sanOpen);
+      _bankRecomputeAmex(_amexOpen);
+      _bankRecompute('mercadopago', 0);
+      throw new Error(_msg);
+    }
+
+    // 5) Recomputar saldos corridos de los bancos afectados
     _bankRecompute('santander', _sanOpen);
     _bankRecomputeAmex(_amexOpen);
     _bankRecompute('mercadopago', 0);
 
+    // 6) Traza: qué se borró y qué se creó, con montos. Si vuelve a pasar, hay rastro.
+    if (_borradas || _creadas) {
+      try {
+        logAudit('sistema', 'Egresos', 'Resync banco', 'Egreso #' + egId,
+          proveedor + ' · ' + concepto,
+          _borradas + ' fila(s) borradas',
+          _creadas + ' fila(s) creadas: ' + plan.map(function (x) {
+            return x.ruta.banco + ' $' + x.monto + (x.abonoId ? ' (abono ' + x.abonoId + ')' : '');
+          }).join(', '));
+      } catch (_la3) {}
+    }
+
     // Partida automática de comisiones MP del mes (por si cambió algo en MP)
     try { _egRecalcComisionesMPFecha(fechaPago, ''); } catch(_mp) {}
-  } catch (ex) { Logger.log('_egresoResyncBanco: ' + ex.message); }
+  } catch (ex) {
+    // El resync ya NO se traga los errores: quien edita el egreso tiene que
+    // enterarse de que su movimiento bancario no se pudo reconstruir.
+    Logger.log('_egresoResyncBanco: ' + ex.message);
+    throw ex;
+  }
+}
+
+/* Crea la fila de banco de un pago SIMPLE (sin abonos) según el destino ya
+   resuelto por _egRutaBanco. Extraído del cuerpo de _egresoResyncBanco para que
+   el plan pueda validarse antes de borrar. Los layouts de fila se conservan
+   EXACTAMENTE como estaban (no se tocan columnas de dinero). */
+function _egCrearFilaSimple(banco, monto, fechaPago, ref) {
+  var mesStr = String(fechaPago || '').substring(0, 7);
+  if (banco === 'cajachica') {
+    var ccSh = getCajaChicaSheet();
+    var ccData = ccSh.getDataRange().getValues();
+    var ccHdr  = ccData[0].map(function(h){ return String(h).trim().toUpperCase(); });
+    var ciF = ccHdr.indexOf('FECHA'), ciC = ccHdr.indexOf('CONCEPTO'), ciS = ccHdr.indexOf('SALIDA');
+    var ccRow = -1;
+    for (var ci = 1; ci < ccData.length; ci++) {
+      if (!String(ccData[ci][ciF]||'').trim() && !String(ccData[ci][ciC]||'').trim()) { ccRow = ci + 1; break; }
+    }
+    if (ccRow === -1) ccRow = ccSh.getLastRow() + 1;
+    ccSh.getRange(ccRow, ciF+1).setValue(fechaPago);
+    ccSh.getRange(ccRow, ciC+1).setValue(ref);
+    ccSh.getRange(ccRow, ciS+1).setValue(monto);
+    SpreadsheetApp.flush();
+    return;
+  }
+  var res;
+  if (banco === 'santander')        res = saveBankRow('santander', [fechaPago, 0, monto, 0, ref, '', '', '', '']);
+  else if (banco === 'amex')        res = saveBankRow('amex', [fechaPago, monto, 0, ref, '', '', '', '', mesStr]);
+  else if (banco === 'mercadopago') res = saveBankRow('mercadopago', [mesStr, fechaPago, -monto, 0, 0, -monto, 0, true, ref, 'PAGO']);
+  else throw new Error('Destino de banco desconocido: ' + banco);
+  if (res && res.ok === false) throw new Error(res.error || ('No se pudo escribir en ' + banco));
 }
 
 function updateEgresoField(payload) {
@@ -3248,6 +3385,31 @@ function updateEgresoField(payload) {
       var iMes = findCol('mes');
       if (iMes>-1 && !isNaN(fd)) sheet.getRange(rowNum, iMes+1).setValue(meses[fd.getMonth()]+'-'+String(fd.getFullYear()).slice(-2));
 
+      // ── NO BLANQUEAR lo que el payload no trajo de verdad ───────────────
+      // Cadena del bug real: si el usuario editó el catálogo de formas de pago
+      // (Panel de Control > Formularios) y quitó/renombró un valor, el <select>
+      // de edición no encuentra la opción del egreso viejo → se queda en
+      // "— Seleccionar —" (value '') → el payload manda formaPago:'' → aquí se
+      // ESCRIBÍA '' en la celda → el resync leía forma vacía → borraba la fila
+      // del banco y no recreaba nada. El egreso sobrevivía; su movimiento, no.
+      // Regla: un campo clave para el dinero NO se blanquea desde este formulario.
+      // Si el payload trae '' pero la celda tiene valor, se conserva la celda.
+      var _noBlanquear = ['forma de pago', 'proveedor', 'concepto'];
+      for (var nb = 0; nb < _noBlanquear.length; nb++) {
+        var _k = _noBlanquear[nb];
+        if (!(_k in colMap)) continue;
+        if (String(colMap[_k] || '').trim() !== '') continue;      // trae valor: se escribe
+        var _ciNb = findCol(_k);
+        var _actual = _ciNb > -1 ? String(sheet.getRange(rowNum, _ciNb+1).getValue() || '').trim() : '';
+        if (_actual) {
+          delete colMap[_k];                                       // conserva lo que ya había
+          try {
+            logAudit(payload.usuario||'sistema', 'Egresos', 'Blanqueo evitado', 'Fila '+rowNum,
+              _k, _actual, '(el formulario mando vacio; se conservo el valor)');
+          } catch(_ab) {}
+        }
+      }
+
       for (var field in colMap) {
         var ci = findCol(field);
         if (ci > -1) sheet.getRange(rowNum, ci+1).setValue(colMap[field]);
@@ -3259,7 +3421,15 @@ function updateEgresoField(payload) {
       } catch(ae){}
 
       // Mover el movimiento bancario si cambió forma de pago / monto / fecha.
-      try { _egresoResyncBanco(sheet, rowNum); } catch(bErr){ Logger.log('resync egreso (form): '+bErr.message); }
+      // Si el resync no puede reconstruir la fila del banco (forma de pago
+      // desconocida, etc.) NO borra nada y truena: el egreso ya quedó guardado,
+      // pero el usuario TIENE que enterarse de que su banco no se sincronizó.
+      try { _egresoResyncBanco(sheet, rowNum); }
+      catch(bErr){
+        Logger.log('resync egreso (form): '+bErr.message);
+        return {ok:false, rowNum:rowNum, edited:true, bankSynced:false,
+                error:'El egreso se guardó, pero el movimiento del banco NO se pudo sincronizar: '+bErr.message};
+      }
 
       return {ok:true, rowNum:rowNum, edited:true, bankSynced:true};
     }
@@ -3307,7 +3477,12 @@ function updateEgresoField(payload) {
     var _bankTouch = ('forma de pago' in fields) || ('egresos' in fields) ||
                      ('pagado' in fields) || ('fecha' in fields);
     if (_bankTouch) {
-      try { _egresoResyncBanco(sheet, rowNum); } catch(bErr){ Logger.log('resync egreso (inline): '+bErr.message); }
+      try { _egresoResyncBanco(sheet, rowNum); }
+      catch(bErr){
+        Logger.log('resync egreso (inline): '+bErr.message);
+        return {ok:false, rowNum:rowNum, bankSynced:false,
+                error:'El egreso se guardó, pero el movimiento del banco NO se pudo sincronizar: '+bErr.message};
+      }
     }
 
     return {ok:true, rowNum:rowNum, bankSynced:_bankTouch};
