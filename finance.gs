@@ -6796,7 +6796,7 @@ var CFG_DD_TAB = 'Config_Dropdowns';
    Fuente de verdad compartida: el HTML la replica en ING_CICLOS y en
    _DD_FRONT_DEFAULTS. Derivada de SUMMARY_REV_RULES (summary.gs). */
 var CFG_DD_TIPOS_PRODUCTO = ['ALTA','BAJA','Surrogacy','EXTERNOS','CONSULTA','Almacenamiento',
-  'Estudios - Andrologia','Estudios - Ciclo','Laboratorios','Agencias','Other Income'];
+  'Estudios - Andrologia','Estudios - Ciclo','Laboratorios','Agencias','Reprovida','Other Income'];
 
 /* Huella EXACTA del valor mal sembrado en builds previas (era una copia de
    `Productos|categoria`). Solo se repara una fila que coincida con esto —
