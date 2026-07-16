@@ -1118,6 +1118,10 @@ function doPost(e) {
       if (typeof deleteOrigen !== 'function') return jsonResponse({ok:false, error:'Agrega origenes.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(deleteOrigen(body));
     }
+    if (body.action === 'aplicarTiposProducto') {
+      if (typeof aplicarTiposProducto !== 'function') return jsonResponse({ok:false, error:'Redespliega finance.gs.'});
+      return jsonResponse(aplicarTiposProducto(body));
+    }
     if (body.action === 'aplicarOrigenesHistorico') {
       if (typeof aplicarOrigenesHistorico !== 'function') return jsonResponse({ok:false, error:'Agrega origenes.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(aplicarOrigenesHistorico(body));
@@ -6788,6 +6792,17 @@ function deleteIngreso(payload) {
    ══════════════════════════════════════════════════════════════ */
 var CFG_DD_TAB = 'Config_Dropdowns';
 
+/* Tipos de producto = grupos de Revenue del Estado de Resultados.
+   Fuente de verdad compartida: el HTML la replica en ING_CICLOS y en
+   _DD_FRONT_DEFAULTS. Derivada de SUMMARY_REV_RULES (summary.gs). */
+var CFG_DD_TIPOS_PRODUCTO = ['ALTA','BAJA','Surrogacy','EXTERNOS','CONSULTA','Almacenamiento',
+  'Estudios - Andrologia','Estudios - Ciclo','Laboratorios','Agencias','Other Income'];
+
+/* Huella EXACTA del valor mal sembrado en builds previas (era una copia de
+   `Productos|categoria`). Solo se repara una fila que coincida con esto —
+   si el usuario ya la editó, no se toca. Ver repararTipoProductoDropdown(). */
+var CFG_DD_TIPO_PRODUCTO_MALO = 'Tratamientos|Complemento|PGT-A|PGT-M|Estudios - Andrología|Estudios - Consulta|Estudios - Ciclo|Complementos|Laboratorio|Suplementos|Medicamento|Almacenamiento|Especial|Externos|Extras Externos|PGT-A Externos|PGT-M Externos|Violet Externos|Magenta Ext|Histeroscopia-Ext|Consulta|Comisiones|Consultation|Carrier|Andrology|Egg Donor|Art Lab|PGTA|Transfer and follow up|Admin|REPROVIDA';
+
 var CFG_DD_DEFAULTS = [
   // Seccion, Campo, Etiqueta, Valores (pipe-separated)
   ['Egresos',   'subtipo',   'Subtipo / Categoría',   'Honorarios Médicos|Honorarios Cons|Nómina|Renta|Servicios Generales|Medicamentos e Insumos|Insumos Lab|Laboratorio Externo|Marketing|Mantenimiento|Seguros|Impuestos y Contribuciones|Equipo Médico|Tecnología|Viáticos|Comisiones|Otros'],
@@ -6802,7 +6817,11 @@ var CFG_DD_DEFAULTS = [
   ['General',   'moneda',    'Moneda',                 'MXN|USD|EUR'],
   // Formulario de productos (Catálogo General). Antes hardcodeados en el HTML,
   // ahora administrables desde Panel de Control > Formularios.
-  ['Productos', 'tipo',      'Tipo de producto',       'Tratamientos|Complemento|PGT-A|PGT-M|Estudios - Andrología|Estudios - Consulta|Estudios - Ciclo|Complementos|Laboratorio|Suplementos|Medicamento|Almacenamiento|Especial|Externos|Extras Externos|PGT-A Externos|PGT-M Externos|Violet Externos|Magenta Ext|Histeroscopia-Ext|Consulta|Comisiones|Consultation|Carrier|Andrology|Egg Donor|Art Lab|PGTA|Transfer and follow up|Admin|REPROVIDA'],
+  // OJO: `tipo` NO es una segunda categoría. Es el BUCKET CONTABLE del producto:
+  // el grupo de Revenue en el que cae su venta en el Estado de Resultados
+  // (SUMMARY_REV_RULES en summary.gs). Por eso la lista son ciclos (ALTA, BAJA,
+  // Surrogacy…), no familias de producto. Debe coincidir con ING_CICLOS del HTML.
+  ['Productos', 'tipo',      'Tipo de producto',       CFG_DD_TIPOS_PRODUCTO.join('|')],
   ['Productos', 'categoria', 'Categoría de producto',  'Almacenamiento|Consulta|Estudios - Andrologia|Estudios - Ciclo|Estudios - Consulta|Extras Externos|Medicamento|PGT-A|Tratamientos|VIOLET'],
   // Ficha del paciente — idioma de sus documentos.
   // `idioma`: valores del selector (código=etiqueta).
@@ -6838,6 +6857,172 @@ function _ddAddMissingDefaults(sh) {
   }).map(function(r){ return [r[0], r[1], r[2], r[3], true]; });
   if (toAdd.length) sh.getRange(sh.getLastRow()+1, 1, toAdd.length, 5).setValues(toAdd);
   return toAdd.length;
+}
+
+/* ── Reparación explícita de la fila `Productos|tipo` ────────────────────
+   Por qué existe: _ddAddMissingDefaults SOLO agrega filas faltantes. La fila
+   `Productos|tipo` ya está sembrada en la hoja con la lista mala (una copia de
+   `categoria`), así que cambiar CFG_DD_DEFAULTS no la corrige nunca.
+   Por qué NO se auto-repara al leer: readDropdowns corre en cada carga; pisar
+   ahí un valor que el usuario pudo haber editado a mano en Panel de Control >
+   Formularios sería borrarle su trabajo en silencio. Esto se corre a propósito.
+   Idempotente y conservador:
+     - fila ya con la lista buena → 'ya-ok', no escribe.
+     - fila con la huella mala EXACTA (CFG_DD_TIPO_PRODUCTO_MALO) → la repara.
+     - fila con cualquier otro valor (el usuario la editó) → NO la toca y avisa
+       para que él decida; `force:true` la sobreescribe si él lo pide.
+   Uso: repararTipoProductoDropdown() · repararTipoProductoDropdown(true) */
+function repararTipoProductoDropdown(force) {
+  var bueno = CFG_DD_TIPOS_PRODUCTO.join('|');
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sh = ss.getSheetByName(CFG_DD_TAB);
+  if (!sh) { setupConfigDropdowns(); sh = ss.getSheetByName(CFG_DD_TAB); }
+  var data = sh.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() !== 'Productos' || String(data[i][1]).trim() !== 'tipo') continue;
+    var actual = String(data[i][3] || '').trim();
+    if (actual === bueno) return {ok:true, estado:'ya-ok', msg:'La fila Productos|tipo ya tiene la lista correcta. No se escribió nada.'};
+    if (actual === CFG_DD_TIPO_PRODUCTO_MALO || force === true) {
+      sh.getRange(i+1, 4).setValue(bueno);
+      sh.getRange(i+1, 3).setValue('Tipo de producto');
+      return {ok:true, estado:'reparada', fila:i+1, anterior:actual, nuevo:bueno,
+              msg:'Fila Productos|tipo reparada (fila '+(i+1)+').'};
+    }
+    return {ok:false, estado:'editada-por-usuario', fila:i+1, actual:actual, propuesto:bueno,
+            msg:'La fila Productos|tipo NO coincide con la lista mala original: parece que ya la editaste. No la pisé. '
+              + 'Corrígela en Panel de Control > Formularios, o corre repararTipoProductoDropdown(true) para sobreescribirla.'};
+  }
+  _ddAddMissingDefaults(sh);
+  return {ok:true, estado:'sembrada', msg:'La fila Productos|tipo no existía; se sembró con la lista correcta.'};
+}
+
+/* ── Sugerir el Tipo (bucket contable) de los productos sin Tipo ─────────
+   SOLO LECTURA. No escribe una sola celda. Patrón: sugerirOrigenesHistorico.
+   Fuentes, en orden de confianza:
+     (a) 'historico' — el ciclo (col U de BD_Ingresos) que MÁS veces se usó para
+         ese producto. Es lo que el usuario ya clasificó a mano: la mejor fuente.
+     (b) 'categoria'  — el mapa categoría→ciclo (espejo de _ING_CAT_TO_CICLO).
+   Confianza: alta = histórico unánime (o >=80%); media = histórico dividido;
+   baja = derivado solo de la categoría. */
+var _TIPOPROD_CAT_TO_CICLO = {
+  'tratamientos':'ALTA', 'pgt-a':'ALTA', 'violet':'ALTA',
+  'consulta':'CONSULTA', 'almacenamiento':'Almacenamiento',
+  'estudios - andrologia':'Estudios - Andrologia', 'estudios - ciclo':'Estudios - Ciclo',
+  'estudios - consulta':'CONSULTA', 'extras externos':'EXTERNOS', 'medicamento':'ALTA'
+};
+function _tipoProdNorm(s){ return String(s == null ? '' : s).trim().toLowerCase(); }
+/* Canoniza un ciclo/tipo libre contra CFG_DD_TIPOS_PRODUCTO (case-insensitive).
+   Devuelve '' si no es un tipo válido → así un valor basura nunca se propone. */
+function _tipoProdCanon(v){
+  var n = _tipoProdNorm(v);
+  if (!n) return '';
+  for (var i = 0; i < CFG_DD_TIPOS_PRODUCTO.length; i++){
+    if (_tipoProdNorm(CFG_DD_TIPOS_PRODUCTO[i]) === n) return CFG_DD_TIPOS_PRODUCTO[i];
+  }
+  return '';
+}
+/* Núcleo PURO (probable sin Sheets): recibe los productos y los pares
+   {producto, ciclo} del histórico; devuelve las sugerencias. */
+function _tipoProdSugerirPuro(productos, historico){
+  var conteo = {}; // descripcion(norm) → { ciclo → veces }
+  (historico || []).forEach(function(h){
+    var d = _tipoProdNorm(h.producto), c = _tipoProdCanon(h.ciclo);
+    if (!d || !c) return;
+    conteo[d] = conteo[d] || {};
+    conteo[d][c] = (conteo[d][c] || 0) + 1;
+  });
+  var out = [];
+  (productos || []).forEach(function(p){
+    if (_tipoProdNorm(p.tipo)) return; // ya tiene Tipo → no se sugiere
+    var d = _tipoProdNorm(p.descripcion);
+    var votos = conteo[d], total = 0, mejor = '', mejorN = 0;
+    for (var c in votos){ if (!votos.hasOwnProperty(c)) continue; total += votos[c]; if (votos[c] > mejorN){ mejorN = votos[c]; mejor = c; } }
+    if (mejor){
+      var pct = total ? mejorN / total : 0;
+      out.push({ id:p.id, sku:p.sku || '', descripcion:p.descripcion, categoria:p.categoria || '',
+                 tipoSugerido:mejor, fuente:'historico', veces:mejorN, deTotal:total,
+                 confianza: pct >= 0.8 ? 'alta' : 'media' });
+      return;
+    }
+    var porCat = _tipoProdCanon(_TIPOPROD_CAT_TO_CICLO[_tipoProdNorm(p.categoria)]);
+    if (porCat){
+      out.push({ id:p.id, sku:p.sku || '', descripcion:p.descripcion, categoria:p.categoria || '',
+                 tipoSugerido:porCat, fuente:'categoria', veces:0, deTotal:0, confianza:'baja' });
+    }
+  });
+  return out;
+}
+function sugerirTiposProducto(anio){
+  try {
+    var reg = readProductos();
+    if (!reg || !reg.ok) return {ok:false, error:'No se pudo leer BD_Productos'};
+    var productos = reg.todosProductos || reg.productos || [];
+
+    // Histórico: BD_Ingresos del año pedido (o todos los años disponibles).
+    var anios = [];
+    if (anio) anios = [parseInt(anio,10)];
+    else { var y = new Date().getFullYear(); anios = [y, y-1, y-2]; }
+    var historico = [];
+    anios.forEach(function(a){
+      try {
+        var ss = SpreadsheetApp.openById(_ingIdDeAnio(a));
+        var sh = ss.getSheetByName(BD_INGRESOS_TAB);
+        if (!sh) return;
+        var data = sh.getDataRange().getValues();
+        for (var i = 1; i < data.length; i++){
+          var prod = String(data[i][5] || '').trim();
+          var ciclo = String(data[i][20] || '').trim();
+          if (prod && ciclo) historico.push({ producto:prod, ciclo:ciclo });
+        }
+      } catch(ea) {}
+    });
+
+    var sug = _tipoProdSugerirPuro(productos, historico);
+    var sinTipo = productos.filter(function(p){ return !_tipoProdNorm(p.tipo); }).length;
+    return { ok:true, anios:anios, totalProductos:productos.length, sinTipo:sinTipo,
+             filasHistorico:historico.length, sugerencias:sug,
+             sinSugerencia: sinTipo - sug.length,
+             nota:'Solo lectura: no se escribió nada. Aplica con aplicarTiposProducto({ids:[...],aplicar:true}).' };
+  } catch(e) { return {ok:false, error:String(e && e.message || e)}; }
+}
+
+/* Aplica los tipos sugeridos. Idempotente: por defecto SOLO escribe donde la
+   celda Tipo está vacía (correr dos veces no cambia nada la segunda). Con
+   `sobreescribir:true` sí pisa un Tipo ya capturado — hay que pedirlo.
+   body: { ids:['PROD-00001',…] | omitido=todos, aplicar:true, anio, sobreescribir }
+   Sin `aplicar:true` es un simulacro (dry-run) que no escribe. */
+function aplicarTiposProducto(b){
+  try {
+    b = b || {};
+    var res = sugerirTiposProducto(b.anio);
+    if (!res.ok) return res;
+    var filtro = null;
+    if (b.ids && b.ids.length){ filtro = {}; b.ids.forEach(function(i){ filtro[String(i).trim()] = true; }); }
+    var elegidas = res.sugerencias.filter(function(s){ return !filtro || filtro[s.id]; });
+    if (b.aplicar !== true && b.aplicar !== 'true')
+      return { ok:true, simulacro:true, aplicados:0, aRealizar:elegidas.length, cambios:elegidas,
+               msg:'Simulacro: nada escrito. Manda aplicar:true para escribir.' };
+
+    var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+    var sh = ss.getSheetByName('BD_Productos');
+    if (!sh) return {ok:false, error:'BD_Productos no encontrada'};
+    var data = sh.getDataRange().getValues();
+    var fila = {}; // ProductoID → nº de fila
+    for (var i = 1; i < data.length; i++){ var id = String(data[i][0]||'').trim(); if (id) fila[id] = i+1; }
+
+    var aplicados = 0, saltados = [], cambios = [];
+    elegidas.forEach(function(s){
+      var f = fila[s.id];
+      if (!f) { saltados.push({ id:s.id, motivo:'no-encontrado' }); return; }
+      var actual = String(data[f-1][4] || '').trim();
+      if (actual && b.sobreescribir !== true){ saltados.push({ id:s.id, motivo:'ya-tiene-tipo', actual:actual }); return; }
+      if (actual === s.tipoSugerido){ saltados.push({ id:s.id, motivo:'sin-cambio' }); return; }
+      sh.getRange(f, 5).setValue(s.tipoSugerido); // col E = Tipo
+      aplicados++;
+      cambios.push({ id:s.id, descripcion:s.descripcion, anterior:actual, nuevo:s.tipoSugerido, fuente:s.fuente });
+    });
+    return { ok:true, aplicados:aplicados, saltados:saltados.length, detalleSaltados:saltados, cambios:cambios };
+  } catch(e) { return {ok:false, error:String(e && e.message || e)}; }
 }
 
 function setupConfigDropdowns() {
