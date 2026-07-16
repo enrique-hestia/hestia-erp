@@ -1237,6 +1237,39 @@ function registrarAbono(body) {
  * La fecha de la venta = la fecha del cargo (devengado: el ingreso pertenece al mes en
  * que se vendió, no a aquel en que se cobre).
  */
+/* ── TITULAR: resolución contra el catálogo de Orígenes ────────────────────
+   Puro (recibe el catálogo ya leído) → se prueba sin hojas.
+   body.titularTipo === 'origen'  → el titular es una agencia / médico externo /
+     grupo / coordinador: se resuelve por ID, nombre o alias y se devuelve el
+     NOMBRE CANÓNICO del catálogo. Si no resuelve → se rechaza (no se inventa un
+     titular nuevo: eso es exactamente lo que rompe el empate del crédito).
+   Cualquier otro valor → paciente: texto libre, como siempre (no se rompe el
+     flujo normal, que es el 95% de las altas). */
+function _cobResolverTitularEn(body, catalogo) {
+  body = body || {};
+  var raw = String(body.titularId || body.paciente || '').trim();
+  if (!raw) return { ok: false, error: 'Falta el titular de la cuenta por cobrar (a quién se le cobra).' };
+  if (String(body.titularTipo || '').trim().toLowerCase() !== 'origen')
+    return { ok: true, paciente: String(body.paciente || '').trim(), origenId: '' };
+  var hit = _origResolverEn(catalogo || [], raw);
+  if (!hit || !hit.id)
+    return { ok: false, error: 'El titular "' + raw + '" no está en el catálogo de Orígenes externos (agencias / médicos / grupos). ' +
+      'Dalo de alta ahí primero y vuelve a elegirlo del menú: si se captura a mano, su crédito a favor queda a un nombre distinto y no se le puede aplicar nunca.' };
+  return { ok: true, paciente: hit.nombre, origenId: hit.id, origenTipo: hit.tipo };
+}
+/* Envoltura que lee el catálogo. Guard de version skew: sin origenes.gs desplegado
+   NO se degrada a texto libre en silencio (patrón finance.gs:616-630). */
+function _cobResolverTitular(body) {
+  if (String((body || {}).titularTipo || '').trim().toLowerCase() !== 'origen')
+    return _cobResolverTitularEn(body, []);
+  if (typeof _origResolver !== 'function' || typeof readOrigenes !== 'function')
+    return { ok: false, error: 'Agrega/actualiza origenes.gs en el proyecto de Apps Script y redespliega: el titular de esta cuenta es una agencia o un médico y debe validarse contra el catálogo de Orígenes.' };
+  var reg;
+  try { reg = readOrigenes(); } catch (ex) { reg = null; }
+  if (!reg || !reg.ok) return { ok: false, error: 'No se pudo leer el catálogo de Orígenes externos para validar el titular: ' + ((reg && reg.error) || 'error desconocido') };
+  return _cobResolverTitularEn(body, reg.origenes || []);
+}
+
 function cargarSaldoInicial(body) {
   try {
     body = body || {};
@@ -1249,8 +1282,15 @@ function cargarSaldoInicial(body) {
     if (typeof INGRESOS_IDS === 'undefined' || typeof INGRESOS_SS_ID === 'undefined')
       return { ok: false, error: 'Actualiza finance.gs en Apps Script y redespliega (faltan los libros de ingresos).', version: COBRANZA_VER };
 
-    var paciente = String(body.paciente || '').trim();
-    if (!paciente) return { ok: false, error: 'Falta el titular de la cuenta por cobrar (a quién se le cobra).', version: COBRANZA_VER };
+    // ── TITULAR CANÓNICO ───────────────────────────────────────────────────────
+    // El crédito a favor (comisiones.gs) se consume por NOMBRE normalizado contra el
+    // titular de la venta. Si el catálogo dice "Dr. Paladino" y aquí se teclea "Juan
+    // Paladino", el crédito nace y se queda inerte. Cuando el titular es un origen
+    // (agencia/médico/grupo) se RESUELVE contra el catálogo y se guarda su nombre
+    // canónico — nunca lo que llegó por el cable.
+    var _tit = _cobResolverTitular(body);
+    if (!_tit.ok) return { ok: false, error: _tit.error, version: COBRANZA_VER };
+    var paciente = _tit.paciente;
 
     var items = _cobParseItems(body.items);
     var monto = items.length ? _cobItemsMonto(items) : _cobNum(body.monto);

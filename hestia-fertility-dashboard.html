@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.213 -->
+﻿<!-- app-build:2026.07.16.214 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2058,6 +2058,10 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
           <svg style="position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--color-text-muted)" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <div id="ec-suggestions" style="display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:8px;box-shadow:var(--shadow-dropdown);z-index:200;max-height:220px;overflow-y:auto"></div>
         </div>
+        <select id="ec-orig" onchange="ecOrigPick()" title="Estado de cuenta de una agencia o médico externo: se elige del catálogo para que el nombre sea el mismo con el que están sus cargos y su crédito."
+          style="padding:10px 12px;border-radius:8px;background:var(--color-surface-2);border:1.5px solid var(--color-divider);color:var(--color-text);font-size:12.5px;max-width:210px">
+          <option value="">…o una agencia / médico</option>
+        </select>
         <button onclick="ecBuscar()" style="padding:10px 20px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap">Ver estado</button>
       </div>
     </div>
@@ -33007,6 +33011,7 @@ var _ecPacientesList = [];
 var _ecMovAll = [];
 
 function ecInit() {
+  ecOrigLlenar();
   if (_ecPacientesList.length) return;
   var tok = getToken();
   fetch(APPS_SCRIPT_URL + "?action=listaPacientes&token=" + encodeURIComponent(tok) + "&_t=" + Date.now(), {redirect:"follow"})
@@ -33043,6 +33048,31 @@ function ecSeleccionar(nombre) {
   if (inp) inp.value = nombre;
   var box = document.getElementById("ec-suggestions");
   if (box) box.style.display = "none";
+  ecBuscar();
+}
+
+/* El titular de un estado de cuenta también puede ser una agencia o un médico, y
+ * hasta ahora se tecleaba: un acento de más y el estado sale vacío aunque el saldo
+ * exista. Se elige del catálogo y se escribe su nombre CANÓNICO en el buscador (que
+ * es el mismo con el que quedó el cargo, porque cargarSaldoInicial canoniza igual). */
+function ecOrigLlenar() {
+  var sel = document.getElementById('ec-orig'); if (!sel || typeof _origFetchList !== 'function') return;
+  _origFetchList().then(function (list) {
+    var s = document.getElementById('ec-orig'); if (!s) return;
+    var act = (list || []).filter(function (o) {
+      var a = String(o.activo == null ? '' : o.activo).toLowerCase();
+      return !(a === 'false' || a === 'no' || a === '0' || a === 'inactivo');
+    }).sort(function (a, b) { return String(a.nombre || '').localeCompare(String(b.nombre || '')); });
+    s.innerHTML = '<option value="">…o una agencia / médico</option>' + act.map(function (o) {
+      var n = String(o.nombre || '').replace(/"/g, '&quot;');
+      return '<option value="' + n + '">' + ecEsc(o.nombre || '') + ' · ' + ecEsc(_origTipoDe(o)) + '</option>';
+    }).join('');
+  }).catch(function () {});
+}
+function ecOrigPick() {
+  var sel = document.getElementById('ec-orig'); if (!sel || !sel.value) return;
+  var inp = document.getElementById('ec-search'); if (inp) inp.value = sel.value;
+  var box = document.getElementById('ec-suggestions'); if (box) box.style.display = 'none';
   ecBuscar();
 }
 
@@ -34287,8 +34317,9 @@ function ccAbrirSaldoInicial(){
     +'<div style="background:rgba(26,127,55,.07);border:1px solid rgba(26,127,55,.3);border-radius:8px;padding:9px 11px;margin-bottom:14px;font-size:11.5px;color:#1a7f37;line-height:1.5">'
       +'<b>Esto registra una VENTA a crédito.</b> Se captura sola en Ingresos (con la fecha del cargo y pagado en $0) y de ahí nace la cuenta por cobrar. '
       +'<b>No la captures también en Ingresos</b>: se duplicaría. Al cobrarla, el dinero entra al banco y el ingreso ya estaba contado.</div>'
-    +_ccField('Cliente / titular de la cuenta (a quién se le cobra)','<div style="position:relative"><input id="cc-si-pac" type="text" autocomplete="off" oninput="ccSiOnInput(this.value)" placeholder="Escribe el nombre…" style="'+_ccInputStyle()+'"><div id="cc-si-sug" style="display:none;position:absolute;top:calc(100% + 3px);left:0;right:0;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:8px;box-shadow:var(--shadow-dropdown);z-index:10;max-height:180px;overflow-y:auto"></div></div>')
     +_ccField('Segmento','<select id="cc-si-cat" onchange="ccSiSegChange()" style="'+_ccInputStyle()+'"><option value="">Pacientes</option><option value="GrupoMedico">Médicos</option><option value="REPROVIDA">Agencias</option></select>')
+    +'<div id="cc-si-pacwrap">'+_ccField('Cliente / titular de la cuenta (a quién se le cobra)','<div style="position:relative"><input id="cc-si-pac" type="text" autocomplete="off" oninput="ccSiOnInput(this.value)" placeholder="Escribe el nombre…" style="'+_ccInputStyle()+'"><div id="cc-si-sug" style="display:none;position:absolute;top:calc(100% + 3px);left:0;right:0;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:8px;box-shadow:var(--shadow-dropdown);z-index:10;max-height:180px;overflow-y:auto"></div></div>')+'</div>'
+    +'<div id="cc-si-origwrap" style="display:none">'+_ccField('Titular (del catálogo de Orígenes externos)','<select id="cc-si-orig" onchange="ccSiOrigPick()" style="'+_ccInputStyle()+'"><option value="">Cargando catálogo…</option></select><div style="font-size:11px;color:var(--color-text-muted);margin-top:5px;line-height:1.45">Se elige del catálogo y se guarda con el <b>nombre exacto</b> que tiene ahí. Así su crédito a favor (comisiones) siempre le empata. ¿No aparece? <a href="javascript:void(0)" onclick="navigateTo(\'origenes\')" style="color:var(--color-primary);font-weight:700">Dalo de alta en Orígenes externos</a>.</div>')+'</div>'
     +'<div id="cc-si-ophint" style="display:none;font-size:11px;color:#b45309;margin:-6px 0 12px;line-height:1.45"></div>'
     +_ccItemsEditorHtml()
     +_ccField('Concepto (opcional)','<input id="cc-si-con" type="text" placeholder="Se arma de las partidas si lo dejas vacío" style="'+_ccInputStyle()+'">')
@@ -34322,6 +34353,43 @@ function ccSiSegChange(){
   var mode=/reprovida|agencia|grupo|medico|externo/i.test(seg);
   if(mode) _ccEnsurePacDatalist();
   _ccItemsInit(_ccItemsPayload(), mode); // conserva las partidas ya capturadas
+  // El titular deja de teclearse: en modo agencia/médico se ELIGE del catálogo de
+  // Orígenes. Teclearlo es lo que dejaba el crédito del médico inerte (nombre distinto).
+  var pw=document.getElementById('cc-si-pacwrap'), ow=document.getElementById('cc-si-origwrap');
+  if(pw) pw.style.display=mode?'none':'';
+  if(ow) ow.style.display=mode?'':'none';
+  var hint=document.getElementById('cc-si-ophint'); if(hint) hint.style.display='none';
+  if(mode) ccSiOrigLlenar(seg);
+}
+/* Puebla el dropdown del titular desde el catálogo de Orígenes (solo ACTIVOS).
+ * value = ID del origen (estable aunque le cambien el nombre); el backend resuelve
+ * y guarda el nombre canónico. Se filtra por el segmento elegido. */
+var _ccSiOrigTipos=null;
+function ccSiOrigTiposDe(seg){
+  return /agenc|reprovida/i.test(seg) ? ['Agencia','Grupo'] : ['Médico externo','Coordinador','Grupo'];
+}
+function ccSiOrigLlenar(seg){
+  var sel=document.getElementById('cc-si-orig'); if(!sel) return;
+  _origFetchList().then(function(list){
+    var sel2=document.getElementById('cc-si-orig'); if(!sel2) return;
+    var tipos=ccSiOrigTiposDe(seg);
+    var act=(list||[]).filter(function(o){
+      var a=String(o.activo==null?'':o.activo).toLowerCase();
+      var vivo=!(a==='false'||a==='no'||a==='0'||a==='inactivo');
+      return vivo && tipos.indexOf(_origTipoDe(o))>=0;
+    }).sort(function(a,b){ return String(a.nombre||'').localeCompare(String(b.nombre||'')); });
+    if(!act.length){ sel2.innerHTML='<option value="">— No hay '+ccEsc(tipos[0].toLowerCase())+'s en el catálogo —</option>'; return; }
+    sel2.innerHTML='<option value="">— Elige del catálogo —</option>'+act.map(function(o){
+      return '<option value="'+ccEsc(String(o.id||'')).replace(/"/g,'&quot;')+'" data-n="'+ccEsc(String(o.nombre||'')).replace(/"/g,'&quot;')+'">'+ccEsc(o.nombre||'')+' · '+ccEsc(_origTipoDe(o))+'</option>';
+    }).join('');
+  }).catch(function(e){
+    var sel3=document.getElementById('cc-si-orig'); if(sel3) sel3.innerHTML='<option value="">— No se pudo cargar el catálogo: '+ccEsc(e.message)+' —</option>';
+  });
+}
+function ccSiOrigPick(){
+  var sel=document.getElementById('cc-si-orig'); if(!sel||!sel.value) return;
+  var op=sel.options[sel.selectedIndex];
+  var n=op?op.getAttribute('data-n'):''; if(n) ccSiPacientePick(n);
 }
 /* Avisa si ese cliente YA tiene saldos: este alta crea una VENTA nueva, así que cargar
  * aquí algo que ya está en el sistema lo duplicaría. Es un AVISO, no un bloqueo: un mismo
@@ -34339,15 +34407,29 @@ function ccSiPacientePick(nombre){
 function ccGuardarSaldoInicial(){
   var items=_ccItemsPayload();
   var monto=items.length?_ccItemsTotal():(parseFloat((document.getElementById('cc-si-monto')||{}).value||'0')||0);
-  var pac=(document.getElementById('cc-si-pac')||{}).value||'';
-  if(!pac.trim()){ alert('Falta el cliente / titular de la cuenta'); return; }
+  var seg=(document.getElementById('cc-si-cat')||{}).value||'';
+  var origMode=/reprovida|agencia|grupo|medico|externo/i.test(seg);
+  // En modo agencia/médico el titular es el ID del catálogo: el backend lo resuelve y
+  // guarda el nombre canónico (aunque aquí se vea un alias). Nada se teclea.
+  var pac='', titularTipo='', titularId='';
+  if(origMode){
+    var selo=document.getElementById('cc-si-orig');
+    titularId=(selo||{}).value||'';
+    if(!titularId){ alert('Elige el titular del catálogo de Orígenes externos.\n\nSi la agencia o el médico no aparece, dalo de alta en Ingresos → Orígenes externos. No se puede capturar a mano: si el nombre queda distinto al del catálogo, su crédito a favor no se le podrá aplicar nunca.'); return; }
+    var opo=selo.options[selo.selectedIndex];
+    pac=(opo?opo.getAttribute('data-n'):'')||titularId;
+    titularTipo='origen';
+  } else {
+    pac=(document.getElementById('cc-si-pac')||{}).value||'';
+    if(!pac.trim()){ alert('Falta el cliente / titular de la cuenta'); return; }
+  }
   if(monto<=0){ alert('Captura al menos una partida (producto) o un monto.'); return; }
   var btn=document.getElementById('cc-modal-save'); if(btn){ btn.textContent='Guardando…'; btn.disabled=true; }
   var s=getSession()||{};
   // Sin `op`: la venta que se crea genera su propio folio. Lo que se manda es el titular
   // del CARGO (en agencias, la agencia — el paciente real de cada partida viaja en items).
-  var payload={ action:'cargarSaldoInicial', paciente:pac,
-    categoria:(document.getElementById('cc-si-cat')||{}).value||'', concepto:(document.getElementById('cc-si-con')||{}).value||'',
+  var payload={ action:'cargarSaldoInicial', paciente:pac, titularTipo:titularTipo, titularId:titularId,
+    categoria:seg, concepto:(document.getElementById('cc-si-con')||{}).value||'',
     monto:monto, items:items, fecha:(document.getElementById('cc-si-fecha')||{}).value||'',
     token:s.token||getToken(), usuario:s.email||'' };
   fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(payload)})
