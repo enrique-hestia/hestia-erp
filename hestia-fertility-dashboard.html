@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.216 -->
+﻿<!-- app-build:2026.07.16.217 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -11245,6 +11245,13 @@ var _cbPageSize    = 50;   // movimientos por página
    ══════════════════════════════════════════════════════════════════════════ */
 var _comCalc = null;   // último cálculo mostrado
 var _comCfgD = null;   // config de reglas (para el panel)
+/* Editor de reglas. `_comCfgW` es la copia de TRABAJO (lo que el usuario edita);
+   `_comCfgD.reglas` es lo GUARDADO (lo que el selector de arriba puede calcular).
+   Separarlas evita que un borrador a medias parezca calculable. */
+var _comCfgW = null;   // [regla] borrador editable
+var _comCfgSel = 0;    // índice de la regla abierta
+var _comCfgOpen = false; // <details> abierto
+var _comOrig = null;   // catálogo de orígenes externos (activos), para los dropdowns
 
 function _comEsc(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -11270,8 +11277,151 @@ async function comInit() {
       var r = await fetch(APPS_SCRIPT_URL + '?action=comisionesCfg&token=' + encodeURIComponent(getToken()) + '&_t=' + Date.now(), { redirect: 'follow' });
       _comCfgD = await r.json();
     } catch (e) { _comCfgD = { ok: false, error: e.message }; }
+    // Borrador = copia de lo guardado. Nunca editamos _comCfgD directo: si el
+    // usuario cancela, lo guardado debe seguir intacto para poder calcular.
+    _comCfgW = JSON.parse(JSON.stringify((_comCfgD && _comCfgD.reglas) || []));
+    _comCfgSel = 0;
   }
   comRender();
+  // El catálogo de orígenes alimenta los dropdowns (grupo y beneficiarios). Se
+  // carga aparte y re-pinta solo el panel: que tarde no debe frenar la vista.
+  if (!_comOrig && typeof _origFetchList === 'function') {
+    _origFetchList().then(function (l) {
+      _comOrig = (l || []).filter(function (o) { return o.activo !== false; });
+      comCfgRender();
+    }).catch(function () { _comOrig = []; comCfgRender(); });
+  }
+  // Catálogo de productos para el <datalist> de chips (igual que Descuentos agencia).
+  if (typeof _ccItemsProductsReady === 'function') _ccItemsProductsReady(function () { comCfgRender(); });
+}
+
+/* ── Estado del editor ── */
+function comCfgR() { return (_comCfgW && _comCfgW[_comCfgSel]) || null; }
+function comCfgSelR(i) { _comCfgSel = parseInt(i, 10) || 0; comCfgRender(); }
+function comCfgSet(k, v) { var r = comCfgR(); if (r) { r[k] = v; comCfgRender(); } }
+function comCfgSetQuiet(k, v) { var r = comCfgR(); if (r) r[k] = v; }   // texto: no re-pintar en cada tecla
+function comCfgNuevaId() {
+  var n = 1, usados = {};
+  (_comCfgW || []).forEach(function (r) { usados[String(r.id || '')] = 1; });
+  while (usados['R' + n]) n++;
+  return 'R' + n;
+}
+function comCfgAddRegla() {
+  if (!_comCfgW) _comCfgW = [];
+  // Nace VÁLIDA salvo lo que solo el usuario sabe (grupo y productos): un escalón
+  // y un reparto que ya suma 100 evitan que la primera pantalla salga en rojo.
+  _comCfgW.push({ id: comCfgNuevaId(), nombre: 'Nueva regla', activo: true, grupoId: '', productos: [],
+                  escalones: [{ desde: 1, hasta: 2, pct: 0 }, { desde: 3, hasta: '', pct: 10 }],
+                  beneficiarios: [{ tipo: 'medico_del_procedimiento', origenId: '', parte: 100, via: 'nota_credito' }],
+                  diferido: 1, notas: '' });
+  _comCfgSel = _comCfgW.length - 1; _comCfgOpen = true; comCfgRender();
+}
+function comCfgDelRegla() {
+  var r = comCfgR(); if (!r) return;
+  if (!confirm('¿Quitar la regla "' + (r.nombre || r.id) + '"?\n\nDejará de calcular comisiones. Se aplica al Guardar.')) return;
+  _comCfgW.splice(_comCfgSel, 1);
+  // Quitar la ÚLTIMA deja el índice fuera de rango: acotarlo aquí evita que el
+  // panel truene al pintar (comCfgR devuelve null y se muestra el vacío).
+  if (_comCfgSel >= _comCfgW.length) _comCfgSel = Math.max(0, _comCfgW.length - 1);
+  comCfgRender();
+}
+function comCfgSeedEjemplo() {
+  var grupos = (_comOrig || []).filter(function (o) { return _origTipoDe(o) === 'Grupo'; });
+  var coord = (_comOrig || []).filter(function (o) { return _origTipoDe(o) === 'Coordinador'; });
+  if (!_comCfgW) _comCfgW = [];
+  _comCfgW.push({ id: comCfgNuevaId(), nombre: 'Grupo Médico — volumen mensual', activo: true,
+                  grupoId: grupos.length ? String(grupos[0].id) : '',
+                  productos: ['Captura + Vitrificación'],
+                  escalones: [{ desde: 1, hasta: 2, pct: 0 }, { desde: 3, hasta: '', pct: 10 }],
+                  beneficiarios: [{ tipo: 'medico_del_procedimiento', origenId: '', parte: 50, via: 'nota_credito' },
+                                  { tipo: 'fijo', origenId: coord.length ? String(coord[0].id) : '', parte: 50, via: 'efectivo' }],
+                  diferido: 1, notas: '' });
+  _comCfgSel = _comCfgW.length - 1; _comCfgOpen = true; comCfgRender();
+}
+function comCfgProdAdd() {
+  var r = comCfgR(); if (!r) return;
+  var inp = document.getElementById('com-cfg-prod'); var v = (inp && inp.value || '').trim(); if (!v) return;
+  var dup = false; (r.productos || []).forEach(function (p) { if (String(p).toLowerCase() === v.toLowerCase()) dup = true; });
+  if (!dup) (r.productos = r.productos || []).push(v);
+  if (inp) inp.value = '';
+  comCfgRender();
+}
+function comCfgProdDel(j) { var r = comCfgR(); if (r) { r.productos.splice(j, 1); comCfgRender(); } }
+function comCfgEscAdd() { var r = comCfgR(); if (r) { (r.escalones = r.escalones || []).push({ desde: 1, hasta: '', pct: 0 }); comCfgRender(); } }
+function comCfgEscDel(j) { var r = comCfgR(); if (r) { r.escalones.splice(j, 1); comCfgRender(); } }
+function comCfgEscSet(j, k, v) {
+  var r = comCfgR(); if (!r || !r.escalones[j]) return;
+  r.escalones[j][k] = (k === 'hasta' && String(v).trim() === '') ? '' : (parseFloat(v) || 0);
+  comCfgRender();   // el preview del % efectivo depende del escalón: debe seguirlo en vivo
+}
+function comCfgBenAdd() { var r = comCfgR(); if (r) { (r.beneficiarios = r.beneficiarios || []).push({ tipo: 'fijo', origenId: '', parte: 0, via: 'efectivo' }); comCfgRender(); } }
+function comCfgBenDel(j) { var r = comCfgR(); if (r) { r.beneficiarios.splice(j, 1); comCfgRender(); } }
+function comCfgBenSet(j, k, v) {
+  var r = comCfgR(); if (!r || !r.beneficiarios[j]) return;
+  var b = r.beneficiarios[j];
+  if (k === 'parte') b.parte = parseFloat(v) || 0;
+  else if (k === 'tipo') { b.tipo = String(v); if (b.tipo === 'medico_del_procedimiento') b.origenId = ''; }
+  else b[k] = String(v);
+  comCfgRender();
+}
+
+/* Espejo EXACTO de _comTiers/_comPreviewReparto/_comValidarRegla (comisiones.gs).
+   Se replica en el front para que el preview y el rojo respondan en vivo, sin ida
+   y vuelta al servidor. El backend sigue siendo la autoridad: valida otra vez al
+   guardar y sus `_errores` se muestran tal cual. Si los dos se separan, el que
+   manda es el backend (rechaza el guardado) — no se puede colar una regla mala. */
+function _comfNum(v) { return parseFloat(String(v == null ? '' : v).replace(/[$,\s]/g, '')) || 0; }
+function _comfRedondea(n) { return Math.round((_comfNum(n) + Number.EPSILON) * 100) / 100; }
+var COMF_VIAS  = ['nota_credito', 'efectivo'];
+var COMF_TIPOS = ['medico_del_procedimiento', 'fijo'];
+function _comfTiers(regla) {
+  return ((regla && regla.escalones) || []).map(function (t) {
+    return { desde: _comfNum(t.desde) || 1,
+             hasta: (t.hasta === '' || t.hasta == null) ? 1e9 : (_comfNum(t.hasta) || 1e9),
+             pct: _comfNum(t.pct) };
+  }).sort(function (a, b) { return a.desde - b.desde; });
+}
+function _comfPreview(regla) {
+  var out = [];
+  _comfTiers(regla).forEach(function (t) {
+    if (t.pct <= 0) return;
+    ((regla && regla.beneficiarios) || []).forEach(function (b) {
+      out.push({ escalonPct: t.pct, desde: t.desde, hasta: t.hasta === 1e9 ? '' : t.hasta,
+                 tipo: b.tipo, origenId: b.origenId || '', via: b.via, parte: _comfNum(b.parte),
+                 efectivoPct: _comfRedondea(t.pct * _comfNum(b.parte) / 100) });
+    });
+  });
+  return out;
+}
+function _comfValidar(r) {
+  var errs = [];
+  if (!r || !String(r.id || '').trim()) errs.push('La regla necesita un id.');
+  if (!String((r && r.grupoId) || '').trim()) errs.push('Falta el grupo cuyo volumen cuenta.');
+  if (!((r && r.productos) || []).length) errs.push('Falta la lista de procedimientos que cuentan (sin ella no contaría nada).');
+  if (!((r && r.escalones) || []).length) errs.push('Faltan los escalones (desde / hasta / %).');
+  var bens = (r && r.beneficiarios) || [];
+  if (!bens.length) errs.push('Faltan los beneficiarios del reparto.');
+  var suma = 0;
+  bens.forEach(function (b, i) {
+    suma += _comfNum(b.parte);
+    if (COMF_TIPOS.indexOf(String(b.tipo)) < 0) errs.push('Beneficiario ' + (i + 1) + ': tipo desconocido "' + b.tipo + '".');
+    if (COMF_VIAS.indexOf(String(b.via)) < 0)   errs.push('Beneficiario ' + (i + 1) + ': vía de pago desconocida "' + b.via + '".');
+    if (String(b.tipo) === 'fijo' && !String(b.origenId || '').trim())
+      errs.push('Beneficiario ' + (i + 1) + ': un beneficiario fijo necesita elegirse del catálogo.');
+  });
+  if (bens.length && Math.abs(suma - 100) > 0.01)
+    errs.push('El reparto suma ' + suma + '% y debe sumar exactamente 100% (es el reparto DEL escalón, no del monto).');
+  var tiers = _comfTiers(r || {});
+  for (var i = 1; i < tiers.length; i++)
+    if (tiers[i].desde <= tiers[i - 1].hasta && tiers[i - 1].hasta !== 1e9)
+      errs.push('Los escalones se enciman entre ' + tiers[i - 1].desde + '-' + tiers[i - 1].hasta + ' y ' + tiers[i].desde + '-' + (tiers[i].hasta === 1e9 ? '∞' : tiers[i].hasta) + '.');
+  return errs;
+}
+// Nombre legible de un origen por ID (el ID es lo que se guarda; el nombre solo se muestra).
+function _comOrigNombre(id) {
+  var l = _comOrig || [];
+  for (var i = 0; i < l.length; i++) if (String(l[i].id || '').trim() === String(id || '').trim()) return l[i].nombre || id;
+  return id ? String(id) : '';
 }
 
 function comRender() {
@@ -11492,50 +11642,256 @@ async function comGenerar(regenerar) {
 
 /* ── Panel de configuración de reglas (sin tocar código) ───────────────────── */
 function comCfgPanelHtml(reglas, puede) {
-  var h = '<details class="card" style="margin-bottom:16px"' + (reglas.length ? '' : ' open') + '>'
-    +  '<summary style="cursor:pointer;font-weight:700;font-size:14px;padding:4px 0">⚙️ Configurar reglas</summary>'
-    +  '<div style="font-size:12px;color:var(--color-text-muted,#6b7280);margin:8px 0 14px">'
-    +  'El <b>reparto</b> es un porcentaje <b>del escalón</b>, no de la venta. Con un escalón del 10% y reparto 50/50, cada quien recibe el <b>5%</b> de la venta. '
-    +  'Así, si mañana un nivel da 15%, el reparto sigue siendo mitad y mitad sin reconfigurar nada.</div>';
-  if (!puede) h += '<div style="padding:10px;background:var(--color-surface,#f9fafb);border-radius:8px;font-size:12px;color:var(--color-text-muted,#6b7280);margin-bottom:10px">Solo lectura: te falta el permiso <b>generar_comisiones</b>.</div>';
-  if (!reglas.length) {
-    h += '<div style="font-size:12.5px;color:var(--color-text-muted,#6b7280)">No hay reglas. Se capturan en la hoja de configuración (Script Property <code>COMISIONES_CFG</code>) o pidiéndoselo a quien administra el ERP. Ejemplo de una regla:'
-      +  '<pre style="font-size:11px;background:var(--color-surface,#f9fafb);padding:10px;border-radius:8px;overflow-x:auto;margin-top:8px">'
-      +  _comEsc('{ "reglas": [{\n  "id": "R1", "nombre": "Grupo Médico — volumen mensual", "activo": true,\n  "grupoId": "ORIG-00001",\n  "productos": ["Captura + Vitrificación"],\n  "escalones": [{"desde":1,"hasta":2,"pct":0}, {"desde":3,"hasta":"","pct":10}],\n  "beneficiarios": [\n    {"tipo":"medico_del_procedimiento", "parte":50, "via":"nota_credito"},\n    {"tipo":"fijo", "origenId":"ORIG-00005", "parte":50, "via":"efectivo"}\n  ],\n  "diferido": 1\n}] }')
-      +  '</pre></div>';
+  // Host estable: comCfgRender() re-pinta SOLO aquí dentro, sin tocar el
+  // resultado del cálculo ni los selectores de arriba (los que engancha el tour).
+  return '<div id="com-cfg-host">' + comCfgInnerHtml() + '</div>';
+}
+function comCfgRender() {
+  var host = document.getElementById('com-cfg-host');
+  if (host) host.innerHTML = comCfgInnerHtml();
+}
+function comCfgToggle(el) { _comCfgOpen = !!(el && el.open); }
+function _comCfgProdDl() {
+  var opts = ((typeof _ingProductos !== 'undefined' ? _ingProductos : []) || []).slice(0, 3000)
+    .map(function (p) { return '<option value="' + _comEsc(p.descripcion).replace(/"/g, '&quot;') + '">'; }).join('');
+  return '<datalist id="com-cfg-dl">' + opts + '</datalist>';
+}
+/* Dropdown del catálogo de Orígenes externos. SIEMPRE guarda el ID, nunca texto
+   libre: teclear el nombre a mano fue el bug que dejaba la comisión colgada de un
+   nombre que no empataba con el catálogo. */
+function _comCfgOrigOpts(sel, soloGrupos) {
+  var l = (_comOrig || []).slice();
+  if (soloGrupos) {
+    // Un médico SIN padre es su propio grupo (independiente): también puede ser
+    // el sujeto del volumen. Excluirlo dejaría fuera al médico que trabaja solo.
+    l = l.filter(function (o) {
+      var t = _origTipoDe(o);
+      return t === 'Grupo' || t === 'Agencia' || (t === 'Médico externo' && !String(o.padre || '').trim());
+    });
   }
-  reglas.forEach(function (r) {
-    h += '<div style="border:1px solid var(--color-border,#e5e7eb);border-radius:10px;padding:12px;margin-bottom:10px">'
-      +  '<div style="font-weight:700;font-size:13px;margin-bottom:6px">' + _comEsc(r.nombre || r.id)
-      +  (r.activo === false ? ' <span style="font-size:11px;color:#991b1b">(inactiva)</span>' : '') + '</div>'
-      +  '<div style="font-size:12px;color:var(--color-text-muted,#6b7280);margin-bottom:8px">Grupo <code>' + _comEsc(r.grupoId) + '</code> · se aplica ' + (r.diferido === 0 ? 'el mismo mes' : (r.diferido || 1) + ' mes(es) después') + '</div>'
-      +  '<div style="font-size:12px;margin-bottom:6px"><b>Cuentan y generan:</b> ' + (r.productos || []).map(_comEsc).join(' · ') + '</div>'
-      +  '<div style="font-size:12px;margin-bottom:8px"><b>Escalones:</b> ' + (r.escalones || []).map(function (t) { return t.desde + (t.hasta === '' || t.hasta == null ? '+' : '–' + t.hasta) + ' → ' + t.pct + '%'; }).join(' · ') + '</div>';
-    // EL PREVIEW: traduce `parte` al % real sobre la venta. Es lo que desambigua
-    // el "5% de ese 10%" del usuario (leído literal sería 0.5%).
-    var pv = (r._preview || []).filter(function (p) { return p.escalonPct > 0; });
+  var h = '<option value="">— Elige del catálogo —</option>';
+  var hay = false;
+  l.forEach(function (o) {
+    var id = String(o.id || '');
+    if (id === String(sel || '')) hay = true;
+    h += '<option value="' + _comEsc(id) + '"' + (id === String(sel || '') ? ' selected' : '') + '>'
+      + _origIcono(_origTipoDe(o)) + ' ' + _comEsc(o.nombre) + '</option>';
+  });
+  // El valor guardado puede haberse dado de baja del catálogo: mostrarlo en vez
+  // de dejar el menú en blanco (silencio que ya nos costó un dato borrado).
+  if (sel && !hay) h += '<option value="' + _comEsc(sel) + '" selected>⚠ ' + _comEsc(sel) + ' (ya no está en el catálogo)</option>';
+  return h;
+}
+function comCfgInnerHtml() {
+  var puede = (typeof hasPermission === 'function') && hasPermission('generar_comisiones');
+  var W = _comCfgW || [];
+  var r = comCfgR();
+  var lab = 'font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--color-primary);margin:16px 0 6px;display:block';
+  var inS = 'width:74px;padding:6px 8px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)';
+  var selS = 'padding:7px 10px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:12.5px;background:var(--color-surface-2);color:var(--color-text)';
+
+  var h = '<details class="card" style="margin-bottom:16px"' + (_comCfgOpen || !W.length ? ' open' : '') + ' ontoggle="comCfgToggle(this)">'
+    + '<summary style="cursor:pointer;font-weight:700;font-size:14px;padding:4px 0">⚙️ Configurar reglas</summary>'
+    + '<div style="font-size:12px;color:var(--color-text-muted,#6b7280);margin:8px 0 14px">'
+    + 'El <b>reparto</b> es un porcentaje <b>del escalón</b>, no de la venta. Con un escalón del 10% y reparto 50/50, cada quien recibe el <b>5%</b> de la venta. '
+    + 'Así, si mañana un nivel da 15%, el reparto sigue siendo mitad y mitad sin reconfigurar nada.</div>';
+  if (!puede) h += '<div style="padding:10px;background:var(--color-surface,#f9fafb);border-radius:8px;font-size:12px;color:var(--color-text-muted,#6b7280);margin-bottom:10px">Solo lectura: te falta el permiso <b>generar_comisiones</b>.</div>';
+
+  var sinCatalogo = _comOrig && !_comOrig.length;
+  if (sinCatalogo) {
+    h += '<div style="padding:12px;background:#fffbeb;border:1px solid #fde68a;border-radius:9px;color:#92400e;font-size:12.5px;margin-bottom:10px">'
+      + '<b>El catálogo de Orígenes externos está vacío.</b> Sin él no hay grupo que elegir: la comisión no sabría de quién es el volumen. '
+      + '<a href="#" onclick="hfIrAhi(\'origenes-externos\');return false;" style="color:var(--color-primary);font-weight:700">Dar de alta el grupo y sus médicos →</a></div>';
+  }
+
+  // Selector de regla
+  h += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px">'
+    + '<label style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted)">Regla</label>'
+    + '<select onchange="comCfgSelR(this.value)" style="' + selS + ';font-weight:700;min-width:240px">'
+    + (W.length ? W.map(function (x, i) { return '<option value="' + i + '"' + (i === _comCfgSel ? ' selected' : '') + '>' + _comEsc(x.nombre || x.id) + (x.activo === false ? ' (inactiva)' : '') + '</option>'; }).join('') : '<option value="0">— sin reglas —</option>')
+    + '</select>'
+    + (puede ? '<button onclick="comCfgAddRegla()" style="padding:8px 12px;background:none;border:1.5px dashed var(--color-primary);color:var(--color-primary);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">＋ Nueva regla</button>' : '')
+    + (puede && r ? '<button onclick="comCfgDelRegla()" style="padding:8px 10px;background:none;border:1px solid #e3b3b3;color:#c83c3c;border-radius:8px;font-size:11px;cursor:pointer">✕ Quitar regla</button>' : '')
+    + '</div>';
+
+  if (!r) {
+    h += '<div style="padding:26px;text-align:center;color:var(--color-text-muted);font-size:12.5px;line-height:1.7">'
+      + 'No hay ninguna regla configurada todavía.'
+      + (puede ? '<br><br><button onclick="comCfgSeedEjemplo()" style="padding:10px 18px;background:var(--color-primary);color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer">✨ Empezar con un ejemplo</button>'
+              + '<div style="font-size:11px;margin-top:8px">Crea la regla de <b>Grupo Médico</b> ya armada (escalón 3+ → 10%, reparto 50/50, el mes siguiente) para que solo la ajustes.</div>'
+              + '<div style="font-size:11px;margin-top:6px;color:var(--color-text-muted)">…o parte de cero con <b>＋ Nueva regla</b>.</div>' : '')
+      + '</div>';
+  } else {
+    var errs = _comfValidar(r);
+    h += '<label style="display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--color-text);margin-top:10px"><input type="checkbox" ' + (r.activo !== false ? 'checked' : '') + ' onchange="comCfgSet(\'activo\',this.checked)" style="width:15px;height:15px;accent-color:#c46a7a"' + (puede ? '' : ' disabled') + '> Regla <b>activa</b></label>';
+
+    h += '<span style="' + lab + '">Nombre de la regla</span>'
+      + '<input value="' + _comEsc(r.nombre || '').replace(/"/g, '&quot;') + '" oninput="comCfgSetQuiet(\'nombre\',this.value)" placeholder="Ej. Grupo Médico — volumen mensual" style="width:100%;max-width:420px;padding:8px 11px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:12.5px;background:var(--color-surface-2);color:var(--color-text)"' + (puede ? '' : ' disabled') + '>';
+
+    // Grupo — SIEMPRE del catálogo
+    h += '<span style="' + lab + '">Grupo cuyo volumen cuenta <span style="font-weight:400;text-transform:none;color:var(--color-text-muted)">· del catálogo de Orígenes externos; un médico independiente es su propio grupo</span></span>'
+      + '<select onchange="comCfgSet(\'grupoId\',this.value)" style="' + selS + ';min-width:280px"' + (puede ? '' : ' disabled') + '>'
+      + (_comOrig ? _comCfgOrigOpts(r.grupoId, true) : '<option value="' + _comEsc(r.grupoId || '') + '">Cargando catálogo…</option>')
+      + '</select>';
+
+    // Productos
+    h += '<span style="' + lab + '">Procedimientos que aplican <span style="font-weight:400;text-transform:none;color:var(--color-text-muted)">· solo estos cuentan para el escalón Y generan comisión</span></span>';
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">';
+    if ((r.productos || []).length) {
+      r.productos.forEach(function (p, j) {
+        h += '<span style="display:inline-flex;align-items:center;gap:6px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:20px;padding:5px 6px 5px 12px;font-size:12px;color:var(--color-text)">' + _comEsc(p)
+          + (puede ? '<button onclick="comCfgProdDel(' + j + ')" title="Quitar" style="border:none;background:#fbeeec;color:#c83c3c;border-radius:50%;width:18px;height:18px;font-size:10px;cursor:pointer;line-height:1">✕</button>' : '') + '</span>';
+      });
+    } else h += '<span style="font-size:11.5px;color:#b45309">⚠ Sin procedimientos — sin lista no cuenta ni genera nada.</span>';
+    h += '</div>';
+    if (puede) {
+      h += '<div style="display:flex;gap:8px;max-width:520px"><input id="com-cfg-prod" list="com-cfg-dl" placeholder="Escribe o elige un procedimiento del catálogo…" style="flex:1;padding:8px 11px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:12.5px;background:var(--color-surface-2);color:var(--color-text)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();comCfgProdAdd();}">'
+        + '<button onclick="comCfgProdAdd()" style="padding:8px 14px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">Agregar</button></div>' + _comCfgProdDl();
+    }
+
+    // Escalones
+    h += '<span style="' + lab + '">Escalones <span style="font-weight:400;text-transform:none;color:var(--color-text-muted)">· cuántos procedimientos junta el grupo en el mes · «Hasta» vacío = sin límite</span></span>';
+    h += '<table style="width:100%;max-width:420px;border-collapse:collapse;font-size:12px"><thead><tr>'
+      + '<th style="text-align:left;padding:4px 8px;font-size:9.5px;text-transform:uppercase;color:var(--color-text-muted)">Desde</th>'
+      + '<th style="text-align:left;padding:4px 8px;font-size:9.5px;text-transform:uppercase;color:var(--color-text-muted)">Hasta</th>'
+      + '<th style="text-align:left;padding:4px 8px;font-size:9.5px;text-transform:uppercase;color:var(--color-text-muted)">% del escalón</th>'
+      + (puede ? '<th style="width:30px"></th>' : '') + '</tr></thead><tbody>';
+    (r.escalones || []).forEach(function (t, j) {
+      h += '<tr>'
+        + '<td style="padding:3px 8px">' + (puede ? '<input type="number" min="1" step="1" value="' + (t.desde || 1) + '" onchange="comCfgEscSet(' + j + ',\'desde\',this.value)" style="' + inS + '">' : (t.desde || 1)) + '</td>'
+        + '<td style="padding:3px 8px">' + (puede ? '<input type="number" min="1" step="1" value="' + (t.hasta === '' || t.hasta == null ? '' : t.hasta) + '" placeholder="∞" onchange="comCfgEscSet(' + j + ',\'hasta\',this.value)" style="' + inS + '">' : (t.hasta === '' || t.hasta == null ? '∞' : t.hasta)) + '</td>'
+        + '<td style="padding:3px 8px">' + (puede ? '<input type="number" min="0" step="0.5" value="' + (t.pct || 0) + '" onchange="comCfgEscSet(' + j + ',\'pct\',this.value)" style="' + inS + '">' : ((t.pct || 0) + '%')) + '</td>'
+        + (puede ? '<td style="text-align:center"><button onclick="comCfgEscDel(' + j + ')" title="Quitar escalón" style="border:1px solid #e3b3b3;background:none;border-radius:6px;color:#c83c3c;cursor:pointer;font-size:11px;padding:3px 7px">✕</button></td>' : '')
+        + '</tr>';
+    });
+    h += '</tbody></table>';
+    if (puede) h += '<button onclick="comCfgEscAdd()" style="margin-top:6px;padding:5px 11px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;color:var(--color-text)">+ Agregar escalón</button>';
+
+    // Beneficiarios
+    var suma = 0; (r.beneficiarios || []).forEach(function (b) { suma += _comfNum(b.parte); });
+    var sumaOK = Math.abs(suma - 100) <= 0.01;
+    h += '<span style="' + lab + '">Reparto entre beneficiarios <span style="font-weight:400;text-transform:none;color:var(--color-text-muted)">· qué parte DEL ESCALÓN se lleva cada quien · debe sumar 100%</span></span>';
+    h += '<table style="width:100%;max-width:640px;border-collapse:collapse;font-size:12px"><thead><tr>'
+      + '<th style="text-align:left;padding:4px 8px;font-size:9.5px;text-transform:uppercase;color:var(--color-text-muted)">Quién</th>'
+      + '<th style="text-align:left;padding:4px 8px;font-size:9.5px;text-transform:uppercase;color:var(--color-text-muted)">Parte %</th>'
+      + '<th style="text-align:left;padding:4px 8px;font-size:9.5px;text-transform:uppercase;color:var(--color-text-muted)">Cómo cobra</th>'
+      + (puede ? '<th style="width:30px"></th>' : '') + '</tr></thead><tbody>';
+    (r.beneficiarios || []).forEach(function (b, j) {
+      var esMed = String(b.tipo) === 'medico_del_procedimiento';
+      h += '<tr><td style="padding:4px 8px">';
+      if (puede) {
+        h += '<select onchange="comCfgBenSet(' + j + ',\'tipo\',this.value)" style="' + selS + ';min-width:180px">'
+          + '<option value="medico_del_procedimiento"' + (esMed ? ' selected' : '') + '>🩺 El médico del procedimiento</option>'
+          + '<option value="fijo"' + (!esMed ? ' selected' : '') + '>👤 Alguien fijo (del catálogo)</option></select>';
+        if (!esMed) {
+          h += '<div style="margin-top:4px"><select onchange="comCfgBenSet(' + j + ',\'origenId\',this.value)" style="' + selS + ';min-width:220px">'
+            + (_comOrig ? _comCfgOrigOpts(b.origenId, false) : '<option value="' + _comEsc(b.origenId || '') + '">Cargando catálogo…</option>')
+            + '</select></div>';
+        }
+      } else h += esMed ? '🩺 El médico del procedimiento' : ('👤 ' + _comEsc(_comOrigNombre(b.origenId)));
+      h += '</td><td style="padding:4px 8px">' + (puede ? '<input type="number" min="0" step="1" value="' + (b.parte || 0) + '" onchange="comCfgBenSet(' + j + ',\'parte\',this.value)" style="' + inS + '">' : ((b.parte || 0) + '%')) + '</td>'
+        + '<td style="padding:4px 8px">';
+      if (puede) {
+        h += '<select onchange="comCfgBenSet(' + j + ',\'via\',this.value)" style="' + selS + '">'
+          + '<option value="nota_credito"' + (b.via === 'nota_credito' ? ' selected' : '') + '>🧾 Nota de crédito</option>'
+          + '<option value="efectivo"' + (b.via === 'efectivo' ? ' selected' : '') + '>💵 Efectivo</option></select>';
+      } else h += _comVia(b.via);
+      h += '</td>' + (puede ? '<td style="text-align:center"><button onclick="comCfgBenDel(' + j + ')" title="Quitar" style="border:1px solid #e3b3b3;background:none;border-radius:6px;color:#c83c3c;cursor:pointer;font-size:11px;padding:3px 7px">✕</button></td>' : '') + '</tr>';
+    });
+    h += '</tbody></table>';
+    h += '<div style="margin-top:6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+      + (puede ? '<button onclick="comCfgBenAdd()" style="padding:5px 11px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;color:var(--color-text)">+ Agregar beneficiario</button>' : '')
+      + '<span style="font-size:12px;font-weight:700;color:' + (sumaOK ? '#16a34a' : '#c83c3c') + '">Suma: ' + _comfRedondea(suma) + '%' + (sumaOK ? ' ✓' : ' — debe ser exactamente 100%') + '</span></div>';
+
+    // Diferido
+    h += '<span style="' + lab + '">¿Cuándo se aplica?</span>'
+      + '<div style="display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--color-text)">'
+      + '<input type="number" min="0" step="1" value="' + (r.diferido == null || r.diferido === '' ? 1 : r.diferido) + '" onchange="comCfgSet(\'diferido\',parseInt(this.value,10)||0)" style="' + inS + '"' + (puede ? '' : ' disabled') + '>'
+      + '<span>mes(es) después del procedimiento. <b>' + (_comfNum(r.diferido) === 0 && r.diferido !== '' && r.diferido != null ? 'El mismo mes' : 'El mes siguiente') + '</b> con el valor actual.</span></div>';
+
+    // EL PREVIEW: traduce `parte` al % REAL sobre la venta. Es lo que desambigua el
+    // "5% de ese 10%" del usuario (leído literal sería 0.5%). En vivo, mientras edita.
+    var pv = _comfPreview(r).filter(function (p) { return p.escalonPct > 0; });
     if (pv.length) {
       var byEsc = {};
       pv.forEach(function (p) { (byEsc[p.escalonPct] = byEsc[p.escalonPct] || []).push(p); });
-      h += '<div style="padding:10px;background:rgba(196,106,122,.07);border:1px solid rgba(196,106,122,.25);border-radius:8px;font-size:12px">';
+      h += '<div style="margin-top:14px;padding:12px;background:rgba(196,106,122,.07);border:1px solid rgba(196,106,122,.25);border-radius:9px;font-size:12px">'
+        + '<div style="font-weight:800;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--color-primary);margin-bottom:6px">Qué % de la venta acaba recibiendo cada quien</div>';
       Object.keys(byEsc).forEach(function (k) {
-        h += '<div style="margin:2px 0">Del <b>' + k + '%</b> del escalón: '
-          +  byEsc[k].map(function (p) {
-               var quien = p.tipo === 'fijo' ? ('el beneficiario ' + p.origenId) : 'el médico';
-               return p.parte + '% a ' + quien + ' = <b>' + p.efectivoPct + '%</b> de su venta (' + (p.via === 'efectivo' ? 'efectivo' : 'crédito') + ')';
-             }).join(' · ') + '</div>';
+        h += '<div style="margin:3px 0">Del <b>' + k + '%</b> del escalón: '
+          + byEsc[k].map(function (p) {
+              var quien = p.tipo === 'fijo' ? ('a ' + _comEsc(_comOrigNombre(p.origenId) || 'el beneficiario fijo')) : 'al médico';
+              return p.parte + '% ' + quien + ' = <b>' + p.efectivoPct + '%</b> de la venta (' + (p.via === 'efectivo' ? 'efectivo' : 'crédito') + ')';
+            }).join(' · ') + '</div>';
       });
+      // Ejemplo con números: el % abstracto no se siente hasta que es dinero.
+      var top = _comfTiers(r).filter(function (t) { return t.pct > 0; })[0];
+      if (top) {
+        var PU = 23600, N = Math.max(top.desde, 1);
+        var bono = _comfRedondea(PU * top.pct / 100);
+        h += '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(196,106,122,.35);color:var(--color-text-muted);line-height:1.6">'
+          + '<b>Ejemplo:</b> si el grupo hace <b>' + N + '</b> procedimiento(s) de <b>' + _comMoney(PU) + '</b>, cae en el escalón de <b>' + top.pct + '%</b> → <b>' + _comMoney(bono) + '</b> por cada procedimiento del médico → '
+          + (r.beneficiarios || []).map(function (b) {
+              var quien = String(b.tipo) === 'fijo' ? ('a ' + _comEsc(_comOrigNombre(b.origenId) || 'el beneficiario fijo')) : 'al médico';
+              return '<b>' + _comMoney(_comfRedondea(bono * _comfNum(b.parte) / 100)) + '</b> ' + quien + ' (' + (b.via === 'efectivo' ? 'efectivo' : 'nota de crédito') + ')';
+            }).join(' + ')
+          + ', ' + (_comfNum(r.diferido) === 0 ? 'el mismo mes' : 'el mes siguiente') + '.</div>';
+      }
       h += '</div>';
     }
-    if ((r._errores || []).length) {
-      h += '<div style="margin-top:8px;padding:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;color:#991b1b;font-size:12px">'
-        +  '<b>⚠ Esta regla no se puede usar:</b><ul style="margin:4px 0 0 16px;padding:0">'
-        +  r._errores.map(function (e) { return '<li>' + _comEsc(e) + '</li>'; }).join('') + '</ul></div>';
+
+    // Errores: los del front (en vivo) + los que ya traía el backend de lo GUARDADO.
+    if (errs.length) {
+      h += '<div style="margin-top:10px;padding:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;color:#991b1b;font-size:12px">'
+        + '<b>⚠ Así no se puede guardar:</b><ul style="margin:4px 0 0 16px;padding:0">'
+        + errs.map(function (e) { return '<li>' + _comEsc(e) + '</li>'; }).join('') + '</ul></div>';
+    } else if ((r._errores || []).length) {
+      h += '<div style="margin-top:10px;padding:10px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;color:#92400e;font-size:12px">'
+        + '<b>El servidor había marcado esta regla:</b><ul style="margin:4px 0 0 16px;padding:0">'
+        + r._errores.map(function (e) { return '<li>' + _comEsc(e) + '</li>'; }).join('') + '</ul>'
+        + '<div style="margin-top:4px">Ya se ve corregida aquí — guarda para confirmarlo.</div></div>';
     }
-    h += '</div>';
-  });
+  }
+
+  // Guardar
+  if (puede) {
+    var malas = 0;
+    (W || []).forEach(function (x) { if (_comfValidar(x).length) malas++; });
+    h += '<div style="display:flex;justify-content:flex-end;gap:10px;align-items:center;margin-top:16px;padding-top:14px;border-top:1px solid var(--color-divider)">'
+      + (malas ? '<span style="font-size:11.5px;color:#c83c3c;font-weight:600">' + malas + ' regla(s) con errores: corrígelas para poder guardar.</span>' : '')
+      + '<button id="com-cfg-save" onclick="comCfgSave()"' + (malas ? ' disabled' : '') + ' style="padding:9px 20px;border:none;border-radius:8px;background:' + (malas ? 'var(--color-surface-2);color:var(--color-text-muted);cursor:not-allowed' : 'var(--color-primary);color:#fff;cursor:pointer') + ';font-size:13px;font-weight:700">Guardar reglas</button></div>';
+  }
+
+  // El JSON sigue disponible para soporte, pero ya no es la forma de capturar.
+  h += '<details style="margin-top:12px"><summary style="cursor:pointer;font-size:11px;color:var(--color-text-muted)">Ver la configuración en JSON (soporte)</summary>'
+    + '<pre style="font-size:11px;background:var(--color-surface,#f9fafb);padding:10px;border-radius:8px;overflow-x:auto;margin-top:6px">'
+    + _comEsc(JSON.stringify({ reglas: (W || []).map(function (x) { var c = JSON.parse(JSON.stringify(x)); delete c._preview; delete c._errores; return c; }) }, null, 2))
+    + '</pre></details>';
   h += '</details>';
   return h;
+}
+async function comCfgSave() {
+  if (!_comCfgW) return;
+  var btn = document.getElementById('com-cfg-save');
+  if (btn) { btn.textContent = 'Guardando…'; btn.disabled = true; }
+  try {
+    var s = (typeof getSession === 'function' && getSession()) || {};
+    var limpio = (_comCfgW || []).map(function (x) { var c = JSON.parse(JSON.stringify(x)); delete c._preview; delete c._errores; return c; });
+    var r = await fetch(APPS_SCRIPT_URL, { method: 'POST', redirect: 'follow',
+      body: JSON.stringify({ action: 'saveComisionesCfg', reglas: limpio, token: s.token || getToken(), usuario: s.email || '' }) });
+    var j = await r.json();
+    if (j && j.ok) {
+      _comCfgD = null; _comCalc = null;   // re-lee del servidor: refleja lo que QUEDÓ, no lo que creemos
+      alert('✓ Se guardaron ' + j.guardadas + ' regla(s). Ya puedes calcular el mes.');
+      await comInit();
+    } else {
+      alert('No se pudo guardar:\n' + ((j && j.error) || 'error'));
+      if (btn) { btn.textContent = 'Guardar reglas'; btn.disabled = false; }
+    }
+  } catch (e) {
+    alert('Error de red: ' + e.message);
+    if (btn) { btn.textContent = 'Guardar reglas'; btn.disabled = false; }
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -35347,6 +35703,14 @@ var NOVEDADES=[
   /* `destacada:true` = se anuncia con el aviso emergente (default del código; el admin lo
      puede cambiar desde Panel de Control → Novedades sin tocar el código).
      `perm:'clave'` = audiencia restringida a quien tenga ese permiso (vacío = todos). */
+  { build:'2026.07.16', fecha:'16 jul 2026', area:'Comisiones', icon:'🤝', destacada:true, perm:'generar_comisiones',
+    titulo:'Ya puedes capturar las reglas de comisión tú mismo (se acabó el JSON)',
+    puntos:['El motor de comisiones ya estaba listo, pero no se podía **encender**: para dar de alta una regla había que escribir JSON a mano en una configuración interna, o pedírselo a sistemas. Ahora hay un **editor completo** en Comisiones → **⚙️ Configurar reglas**, igual de sencillo que el panel de Descuentos por agencia.',
+      '¿No hay ninguna regla todavía? Pulsa **✨ Empezar con un ejemplo**: te deja la regla de Grupo Médico ya armada (escalón 3 o más → 10%, reparto 50/50 médico/coordinador, el mes siguiente) para que solo la ajustes.',
+      '**El grupo y el coordinador se eligen de un menú** (el catálogo de Orígenes externos, solo los activos): ya no se teclean. Se guarda el ID del catálogo, así el crédito del médico siempre empata con su cuenta.',
+      '**Ves el número real antes de guardar.** Mientras editas, el panel te dice en vivo qué % de la venta acaba recibiendo cada quien («Del **10%** del escalón: 50% al médico = **5%** de la venta») y te pone un ejemplo en pesos. Es la diferencia entre el 5% y el 0.5%: ahí se ve.',
+      '**No se puede guardar un reparto descuadrado.** Si las partes no suman exactamente 100%, se marca en rojo y el botón Guardar se bloquea — ni de más ni de menos.'],
+    comoUsar:['Comisiones → abre **⚙️ Configurar reglas** (abajo en la misma pantalla).','Sin reglas: **✨ Empezar con un ejemplo** y ajusta. Con reglas: elige la regla del menú, o **＋ Nueva regla**.','Llena grupo (menú), procedimientos que aplican (chips del catálogo), escalones (desde/hasta/%, «Hasta» vacío = sin límite), beneficiarios (quién · parte % · nota de crédito o efectivo) y el diferido.','Revisa el recuadro del **% efectivo** y pulsa **Guardar reglas**. Ya puedes Calcular el mes.','¿El grupo no sale en el menú? Dalo de alta en **Orígenes externos** primero; el panel te pone el enlace directo.'] },
   { build:'2026.07.16', fecha:'16 jul 2026', area:'Egresos', icon:'🏦', destacada:true, perm:'editar_egresos',
     titulo:'Arreglado: al editar un egreso ya no se borra su movimiento del banco',
     puntos:['⚠ El problema, reportado en vivo: «el egreso existe pero el banco se borra» — y el saldo real del banco se movía. Pasaba así: si la Forma de pago guardada de un egreso ya no estaba entre las opciones del menú (porque alguien editó el catálogo en Panel de Control → Formularios), al abrirlo el menú se quedaba en «— Seleccionar —» SIN AVISAR; al guardar, mandaba la forma vacía; el sistema BLANQUEABA la forma de pago del egreso; y como para rearmar el movimiento del banco hace falta saber a qué banco mandarlo, borraba la fila vieja y ya no creaba la nueva.',
@@ -36025,7 +36389,7 @@ async function _novCfgGuardar(){
 
   /* ============ COMISIONES POR VOLUMEN DE GRUPO ============ */
   { id:'comisiones', group:'operacion', icon:'🤝', title:'Comisiones a médicos externos (volumen de grupo)',
-    keywords:'comision comisiones rebate escalon escalones volumen grupo medico medicos externos coordinador madero daniel madero paladino nivel niveles porcentaje descuento grupo medico procedimientos elegibles beneficiario reparto credito efectivo cxp diferido mes siguiente generar regenerar',
+    keywords:'comision comisiones rebate escalon escalones volumen grupo medico medicos externos coordinador madero daniel madero paladino nivel niveles porcentaje descuento grupo medico procedimientos elegibles beneficiario reparto credito efectivo cxp diferido mes siguiente generar regenerar configurar regla reglas editor crear regla nueva regla capturar regla escalones desde hasta beneficiarios parte 100 empezar con un ejemplo',
     intro:'Cuando un **grupo de médicos externos** junta suficientes procedimientos en el mes, se les paga un **rebate**. Funciona en 4 pasos: el **grupo desbloquea** el nivel entre todos, pero **cada médico cobra sobre lo suyo**, y ese monto se **reparte** entre el médico y el coordinador, pagándose **el mes siguiente**.',
     pasos:[
       '**1. Se cuenta.** Se suman los procedimientos **elegibles** (una lista configurable de productos — no todos cuentan) de **todos** los médicos del grupo en el mes. Las **ventas canceladas no cuentan**.',
@@ -36036,6 +36400,8 @@ async function _novCfgGuardar(){
     ],
     bloques:[
       { h:'El reparto es un % DEL ESCALÓN, no de la venta', p:'Si el escalón da **10%** y el reparto es **50/50**, cada quien recibe el **5% de la venta**. Está guardado así a propósito: el día que un nivel dé 15%, el reparto sigue siendo mitad y mitad sin reconfigurar nada. El panel de configuración te **muestra el % efectivo resultante** («Del 10% del escalón: 50% al médico = **5%**») para que veas el número real antes de aprobarlo.' },
+      { h:'Cómo se crea o se ajusta una regla', p:'Todo se hace en **⚙️ Configurar reglas**, dentro de la misma pantalla de Comisiones — **sin tocar código ni JSON**. Si aún no hay ninguna, el botón **«✨ Empezar con un ejemplo»** te deja la regla de Grupo Médico ya armada (escalón 3+ → 10%, reparto 50/50, el mes siguiente) para que solo la ajustes.\n\nLa regla tiene: **nombre**, el **grupo cuyo volumen cuenta** (se elige del catálogo de Orígenes externos — nunca se teclea), los **procedimientos que aplican** (chips del catálogo de productos; solo esos cuentan **y** generan), los **escalones** (desde / hasta / %, con «Hasta» vacío = sin límite), los **beneficiarios** (quién, qué parte y si cobra por nota de crédito o en efectivo) y el **diferido** (cuántos meses después se aplica; normalmente 1).\n\nMientras editas, abajo se ve **en vivo** el % que acaba recibiendo cada quien y un **ejemplo con pesos**. La **suma de las partes debe dar exactamente 100%**: si no, se marca en rojo y el botón **Guardar se bloquea** — ni el front ni el servidor dejan pasar un reparto descuadrado. Guardar requiere el permiso **generar_comisiones**.' },
+      { h:'¿No aparece tu grupo en el menú?', p:'El menú del grupo se llena del catálogo de **Orígenes externos**, y solo con los **activos**. Si el grupo (o el coordinador) no está ahí, primero dalo de alta en **Orígenes externos**: el panel te pone el enlace directo cuando detecta el catálogo vacío. Se guarda el **ID** del catálogo, no el nombre — así el crédito del médico siempre empata con su cuenta aunque después le cambien el nombre.' },
       { h:'Un médico solo también es un grupo', p:'Un médico que no tenga un grupo asignado (sin **Padre** en el catálogo de orígenes) cuenta como **su propio grupo**: sus procedimientos solo se suman con los suyos.' },
       { h:'Generar dos veces NO duplica', p:'El ERP guarda lo que ya generó de cada mes. Si intentas generarlo otra vez, **se niega** y te dice qué se creó. Si de verdad necesitas rehacerlo, existe **↻ Regenerar**: deshace lo anterior y lo vuelve a crear — pero **solo si nadie lo ha cobrado todavía**. Si el médico ya usó su crédito o al coordinador ya se le pagó, el ERP **se niega y no toca nada** (regenerar le devolvería un dinero que ya se aplicó).' },
       { h:'Cómo se paga cada quien', p:'El **crédito** del médico se guarda a su nombre y se descuenta de lo que él debe la próxima vez que se le facture. ⚠ Para que se pueda aplicar, la cuenta tiene que estar a **exactamente ese mismo nombre**; si el médico nunca ha sido titular de una cuenta, la pantalla te lo **avisa** antes de generar. El **efectivo** del coordinador se crea como una **cuenta por pagar** que vence a fin del mes siguiente, y se paga desde CxP como cualquier otra.' }
@@ -36044,7 +36410,7 @@ async function _novCfgGuardar(){
       hojas:['`BD_Ingresos` (columna `OrigenExterno` = quién trajo la venta, y `Cancelada`)','`Origenes_Externos` (columna `Padre` = a qué grupo pertenece cada médico)','`Creditos_Favor` (el crédito del médico)','`Egresos<año>` (la CxP del coordinador)','`Comisiones_Generadas` (memoria de lo ya generado: impide duplicar)'],
       funciones:['calcularComisiones','generarComisiones','readComisionesCfg','saveComisionesCfg','setupComisionesConfig'],
       permisos:['generar_comisiones'],
-      nota:'`comisiones.gs` (backend) requiere deploy + `setupComisionesConfig()`. La configuración vive en la Script Property `COMISIONES_CFG`. Depende de `origenes.gs` (`_origResolver`, la jerarquía de grupos): si no está desplegado, el módulo **falla ruidoso** en vez de calcular cero en silencio.'
+      nota:'`comisiones.gs` (backend) requiere deploy + `setupComisionesConfig()`. Las reglas se capturan desde **⚙️ Configurar reglas** (`readComisionesCfg`/`saveComisionesCfg`, permiso `generar_comisiones`); se guardan en la Script Property `COMISIONES_CFG` — el JSON queda visible en un `<details>` solo para soporte, ya no es la forma de capturar. Depende de `origenes.gs` (`_origResolver`, la jerarquía de grupos): si no está desplegado, el módulo **falla ruidoso** en vez de calcular cero en silencio. La validación (`_comValidarRegla`) corre en el front **y** en el backend: el reparto debe sumar 100% en los dos.'
     } },
 
   { id:'poliza-concil', group:'operacion', icon:'🧾', title:'Conciliar pólizas (ContaDigital)',
@@ -37673,7 +38039,7 @@ async function _novCfgGuardar(){
 
   /* ============ COMISIONES POR VOLUMEN DE GRUPO ============ */
   { id:'comisiones', group:'operacion', icon:'🤝', title:'Comisiones a médicos externos (volumen de grupo)',
-    keywords:'comision comisiones rebate escalon volumen grupo medico medicos externos coordinador madero paladino nivel porcentaje reparto credito efectivo generar regenerar diferido mes siguiente',
+    keywords:'comision comisiones rebate escalon escalones volumen grupo medico medicos externos coordinador madero paladino nivel porcentaje reparto credito efectivo generar regenerar diferido mes siguiente configurar regla reglas editor de reglas crear regla nueva regla capturar regla beneficiarios parte suma 100 empezar con un ejemplo desde hasta sin limite',
     para:'El **grupo** de médicos junta procedimientos en el mes y eso **desbloquea** un escalón (ej. 3 o más → 10%). El % se aplica **solo a los procedimientos de cada médico**, y ese monto se **reparte**: mitad de **crédito al médico** y mitad en **efectivo al coordinador**, el **mes siguiente**. Nada se escribe hasta que lo apruebas.',
     where:'Menú **Comisiones** (o Ctrl+K → «comisiones»).',
     mock:{ title:'Comisiones por volumen de grupo', crumb:'Finanzas › Comisiones',
@@ -37690,12 +38056,17 @@ async function _novCfgGuardar(){
                  {n:5,text:'**Efectivo** al coordinador: se crea una **cuenta por pagar** que vence a fin del mes siguiente. Recibe **un solo pago al mes**, por los procedimientos de todos los médicos.'},
                  {n:6,text:'Hasta aquí no se ha escrito nada. **Generar** es el único botón que mueve dinero.'} ] },
     steps:[
+      '**¿Primera vez?** Abre **⚙️ Configurar reglas** (abajo, en la misma pantalla) y pulsa **✨ Empezar con un ejemplo**: te deja la regla armada (escalón 3+ → 10%, reparto 50/50, el mes siguiente) para que la ajustes. Elige el **grupo** del menú del catálogo, agrega los **procedimientos que aplican** y pulsa **Guardar reglas**.',
       'Entra a **Comisiones** y elige la **regla**, el **mes** de los procedimientos y el **año**.',
       'Pulsa **Calcular**: verás **cuántos procedimientos hizo el grupo** y **qué escalón alcanzó**, el detalle por médico y los totales por beneficiario.',
       'Revisa los **avisos** (ej. un crédito que quedaría a nombre de un médico sin cuenta) y el detalle de las ventas que forman cada base.',
       'Pulsa **Generar**: se crean los créditos y las cuentas por pagar. Si el mes **ya se generó**, el ERP se niega y te dice qué existe; **↻ Regenerar** solo funciona si nadie lo ha cobrado.'
     ],
-    tip:'Si un mes sale en **0%**, no es un error: el grupo no llegó al escalón. La pantalla te dice cuántos procedimientos hizo y cuántos le faltaban.' },
+    tips:[
+      'Si un mes sale en **0%**, no es un error: el grupo no llegó al escalón. La pantalla te dice cuántos procedimientos hizo y cuántos le faltaban.',
+      'Las **partes del reparto deben sumar 100%**. Es el reparto **del escalón**, no de la venta: del 10%, 50/50 = **5% de la venta** para cada quien. El panel te muestra ese número en vivo mientras editas.',
+      'El **grupo** y los beneficiarios fijos se eligen del catálogo de **Orígenes externos** (solo activos) y se guardan por **ID**: así el crédito siempre empata con la cuenta del médico.'
+    ] },
 
   { id:'poliza-concil', group:'operacion', icon:'🧾', title:'Conciliar pólizas (ContaDigital)',
     keywords:'poliza polizas contadigital conciliar folio contabilidad crvisor export xlsx egresos ingresos factura monto fecha cuadrar registrado sin poliza ambiguo',
