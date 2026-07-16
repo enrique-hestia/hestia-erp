@@ -389,6 +389,23 @@ function doGet(e) {
     if (action === 'presupuesto') {
       return jsonResponse(readPresupuesto((e && e.parameter.periodo) || ''));
     }
+    // ── Comisiones por volumen de grupo (rebate a médicos externos + coordinador) ──
+    // 'comisiones' SOLO CALCULA: no escribe un peso. Lo que se ve aquí es la pantalla
+    // de revisión previa; escribir es 'generarComisiones' (POST, con permiso).
+    if (action === 'comisiones') {
+      if (typeof calcularComisiones !== 'function')
+        return jsonResponse({ok:false, error:'Agrega comisiones.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(calcularComisiones({
+        anio:    (e && e.parameter.anio)    || '',
+        mes:     (e && e.parameter.mes)     || '',
+        reglaId: (e && e.parameter.reglaId) || ''
+      }));
+    }
+    if (action === 'comisionesCfg') {
+      if (typeof readComisionesCfg !== 'function')
+        return jsonResponse({ok:false, error:'Agrega comisiones.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readComisionesCfg());
+    }
     // Presupuesto: histórico de metas por trimestre (racha meta vs real)
     if (action === 'historicoMetas') {
       if (typeof readHistoricoMetas !== 'function')

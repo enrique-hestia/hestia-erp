@@ -558,6 +558,24 @@ function doPost(e) {
     if (body.action === 'saveCxP') {
       return jsonResponse(saveCxP(body));
     }
+    // ── Comisiones por volumen de grupo ──────────────────────────────────────
+    // generarComisiones ESCRIBE (crédito al médico + CxP en efectivo al coordinador):
+    // exige permiso 'generar_comisiones' y aprobación explícita del usuario en pantalla.
+    if (body.action === 'generarComisiones') {
+      if (typeof generarComisiones !== 'function')
+        return jsonResponse({ok:false, error:'Agrega comisiones.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(generarComisiones(body));
+    }
+    if (body.action === 'saveComisionesCfg') {
+      if (typeof saveComisionesCfg !== 'function')
+        return jsonResponse({ok:false, error:'Agrega comisiones.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(saveComisionesCfg(body));
+    }
+    if (body.action === 'comisionesSetup') {
+      if (typeof setupComisionesConfig !== 'function')
+        return jsonResponse({ok:false, error:'Agrega comisiones.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(setupComisionesConfig());
+    }
     if (body.action === 'deleteCxPRow')            return jsonResponse(deleteCxPRow(body));
     if (body.action === 'updateCxP') {
       return jsonResponse(updateCxP(body));
