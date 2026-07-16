@@ -4318,7 +4318,12 @@ var ING_CATEGORIAS = ['Almacenamiento','Consulta','Estudios - Andrologia','Estud
 // 'Nota de Crédito' = saldo a favor del paciente aplicado como pago — no toca
 // ningún banco (no es movimiento de dinero), solo baja lo que queda por cobrar.
 var ING_FORMAS_PAGO = ['TDC','TDD','AMEX','Santander','Transferencia','Efectivo','Nota de Crédito','Otro'];
-var ING_CICLOS = ['ALTA','BAJA','CONSULTA','Almacenamiento','Estudios - Andrologia','Estudios - Ciclo','EXTERNOS'];
+/* Ciclo (col U de BD_Ingresos) = el BUCKET del Estado de Resultados. Esta lista
+   debe poder producir TODOS los grupos de Revenue que espera SUMMARY_REV_RULES
+   (summary.gs) — antes le faltaban Surrogacy, Laboratorios y Agencias, así que
+   una venta de Surrogacy no se podía clasificar desde el formulario.
+   Espejo exacto de CFG_DD_TIPOS_PRODUCTO (finance.gs) = los Tipos de producto. */
+var ING_CICLOS = ['ALTA','BAJA','Surrogacy','EXTERNOS','CONSULTA','Almacenamiento','Estudios - Andrologia','Estudios - Ciclo','Laboratorios','Agencias','Other Income'];
 var _ingProductos = [];
 var _ingTodosProductos = [];
 var _ingProductosLoaded = false;
@@ -4386,6 +4391,29 @@ var _ING_CAT_TO_CICLO = {
   'estudios - consulta':'CONSULTA', 'extras externos':'EXTERNOS', 'medicamento':'ALTA'
 };
 
+/* Ciclo de un producto, CON RED DE SEGURIDAD.
+   1º el Tipo del producto (col E de BD_Productos) — es el bucket contable que el
+      usuario captura a propósito; manda.
+   2º si el producto aún no tiene Tipo (o trae basura que no es un ciclo válido),
+      cae al mapa por categoría de siempre → un producto sin Tipo se comporta
+      EXACTAMENTE como antes de esta build.
+   Devuelve '' si no se puede determinar (el llamador entonces no toca el Ciclo). */
+function _ingCicloDeProducto(tipo, categoria) {
+  function _canon(v) {
+    var n = String(v == null ? '' : v).trim().toLowerCase();
+    if (!n) return '';
+    for (var i = 0; i < ING_CICLOS.length; i++) {
+      if (ING_CICLOS[i].toLowerCase() === n) return ING_CICLOS[i];
+    }
+    return '';
+  }
+  var porTipo = _canon(tipo);
+  if (porTipo) return porTipo;
+  var cat = String(categoria == null ? '' : categoria).trim().toLowerCase();
+  if (!cat) return '';
+  return _ING_CAT_TO_CICLO[cat] || _canon(cat);
+}
+
 function ingOnProdChange(lineNum) {
   var prodEl = document.getElementById('ing-prod-'+lineNum);
   var pvpEl = document.getElementById('ing-pvp-'+lineNum);
@@ -4395,18 +4423,11 @@ function ingOnProdChange(lineNum) {
     pvpEl.value = opt.dataset.precio;
     ingCalcTotal();
   }
-  // Auto-llenar Ciclo basado en categoría del producto (solo si aún no se eligió uno)
+  // Auto-llenar Ciclo desde el Tipo del producto (fallback: su categoría).
   var cicloEl = document.getElementById('ing-ciclo');
-  if (cicloEl && opt && opt.dataset.cat) {
-    var cat = opt.dataset.cat.toLowerCase();
-    var mapped = _ING_CAT_TO_CICLO[cat];
-    if (!mapped) {
-      // Buscar coincidencia parcial en ING_CICLOS
-      for (var c = 0; c < ING_CICLOS.length; c++) {
-        if (ING_CICLOS[c].toLowerCase() === cat) { mapped = ING_CICLOS[c]; break; }
-      }
-    }
-    if (mapped) cicloEl.value = mapped;
+  if (cicloEl && opt && (opt.dataset.tipo || opt.dataset.cat)) {
+    var mapped = _ingCicloDeProducto(opt.dataset.tipo, opt.dataset.cat);
+    if (mapped && !cicloEl.dataset.manual) cicloEl.value = mapped;
   }
 }
 
@@ -5470,13 +5491,12 @@ function ingOnProdSearch(lineNum) {
   // Auto-llenar PVP
   var pvpEl = document.getElementById('ing-pvp-'+lineNum);
   if (pvpEl) pvpEl.value = precio;
-  // Auto-llenar Ciclo
+  // Auto-llenar Ciclo — desde el Tipo del producto, con caída a su categoría.
+  // Este es el camino VIVO (el selector de producto es un <input list=…>).
   var cicloEl = document.getElementById('ing-ciclo');
-  if (cicloEl && found.categoria) {
-    var cat = found.categoria.toLowerCase();
-    var mapped = _ING_CAT_TO_CICLO[cat];
-    if (!mapped) { for (var c=0;c<ING_CICLOS.length;c++){if(ING_CICLOS[c].toLowerCase()===cat){mapped=ING_CICLOS[c];break;}} }
-    if (mapped) cicloEl.value = mapped;
+  if (cicloEl && (found.tipo || found.categoria)) {
+    var mapped = _ingCicloDeProducto(found.tipo, found.categoria);
+    if (mapped && !cicloEl.dataset.manual) cicloEl.value = mapped;
   }
   ingCalcTotal();
 }
@@ -24815,7 +24835,9 @@ var _ddData = null; // cache de dropdowns cargados
 var _DD_EMPLEADOS_SEED = ['Enfermera','Marketing','Embrióloga','Médico','Finanzas','Limpieza','Ventas','Administración','Recepción'];
 var _DD_FRONT_DEFAULTS = {
   Productos: {
-    tipo: { etiqueta:'Tipo de producto', valores:['Tratamientos','Complemento','PGT-A','PGT-M','Estudios - Andrología','Estudios - Consulta','Estudios - Ciclo','Complementos','Laboratorio','Suplementos','Medicamento','Almacenamiento','Especial','Externos','Extras Externos','PGT-A Externos','PGT-M Externos','Violet Externos','Magenta Ext','Histeroscopia-Ext','Consulta','Comisiones','Consultation','Carrier','Andrology','Egg Donor','Art Lab','PGTA','Transfer and follow up','Admin','REPROVIDA'] },
+    // El Tipo NO es una segunda categoría: es el bucket contable (grupo de
+    // Revenue) del producto. Espejo de ING_CICLOS / CFG_DD_TIPOS_PRODUCTO.
+    tipo: { etiqueta:'Tipo de producto', valores:(typeof ING_CICLOS!=='undefined')?ING_CICLOS.slice():['ALTA','BAJA','Surrogacy','EXTERNOS','CONSULTA','Almacenamiento','Estudios - Andrologia','Estudios - Ciclo','Laboratorios','Agencias','Other Income'] },
     categoria: { etiqueta:'Categoría de producto', valores:['Almacenamiento','Consulta','Estudios - Andrologia','Estudios - Ciclo','Estudios - Consulta','Extras Externos','Medicamento','PGT-A','Tratamientos','VIOLET'] }
   },
   // Catálogo de Empleados (Nómina). Editables en Panel de Control > Formularios.

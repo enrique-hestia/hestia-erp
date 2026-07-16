@@ -473,6 +473,12 @@ function doGet(e) {
       return jsonResponse(sugerirOrigenesHistorico((e && e.parameter.anio) || ''));
     }
 
+    if (action === 'sugerirTiposProducto') {
+      if (typeof sugerirTiposProducto !== 'function')
+        return jsonResponse({ok:false, error:'Redespliega finance.gs.'});
+      return jsonResponse(sugerirTiposProducto((e && e.parameter.anio) || ''));
+    }
+
     if (action === 'leerXmlFactura') {
       var fid = (e && e.parameter.fileId) || '';
       return jsonResponse(leerXmlFactura(fid));
