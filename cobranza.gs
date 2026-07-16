@@ -203,12 +203,20 @@ function _cobParseItems(x) {
   var out = [];
   for (var i = 0; i < arr.length; i++) {
     var it = arr[i] || {};
-    var c = _cobNum(it.cantidad) || 1;
+    // La cantidad tiene DOS usos y no se pueden mezclar:
+    //  · cRaw = lo que de verdad se capturó. null = no se capturó. Es lo que se
+    //    IMPRIME, y por eso no puede llevar un 1 inventado: un documento que le
+    //    llega a una agencia no puede afirmar "1" donde nadie escribió nada.
+    //  · c    = el 1 solo para la ARITMÉTICA (p × c). Si no hay cantidad, el
+    //    precio ES el total de la partida; asumir 1 aquí es correcto y necesario
+    //    (ponerle null daría p × null = 0 y borraría el importe).
+    var cRaw = (it.cantidad == null || it.cantidad === '') ? null : _cobNum(it.cantidad);
+    var c = cRaw || 1;
     var p = _cobNum(it.precio);
     var t = (it.total != null && it.total !== '') ? _cobNum(it.total) : (p * c);
     var pac = String(it.pac || it.paciente || '').trim(); // nombre del paciente real (agencias/externos)
     var fecha = String(it.fecha || '').trim();            // fecha del tratamiento de esa partida
-    if (String(it.producto || '').trim() || t > 0) out.push({ producto: String(it.producto || '').trim(), cantidad: c, precio: p, total: t, saldo: 0, pac: pac, fecha: fecha });
+    if (String(it.producto || '').trim() || t > 0) out.push({ producto: String(it.producto || '').trim(), cantidad: cRaw, precio: p, total: t, saldo: 0, pac: pac, fecha: fecha });
   }
   return out;
 }

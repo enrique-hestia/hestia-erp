@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.220 -->
+﻿<!-- app-build:2026.07.16.221 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2166,9 +2166,15 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
               <tr style="background:var(--color-surface-2)">
                 <th style="padding:10px 14px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);border-bottom:1px solid var(--color-divider)">Fecha</th>
                 <th style="padding:10px 14px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);border-bottom:1px solid var(--color-divider)">Concepto</th>
+                <!-- Cant. va oculta hasta que ecRenderTabla confirme que el backend
+                     distingue una cantidad capturada de una desconocida (cantFiable).
+                     La pantalla y el PDF tienen que decir LO MISMO: si el documento
+                     que se le entrega a la paciente omite la columna, la pantalla
+                     también, o el que cobra ve un dato que el PDF no respalda. -->
+                <th id="ec-th-cant" style="display:none;padding:10px 14px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);border-bottom:1px solid var(--color-divider)">Cant.</th>
                 <th style="padding:10px 14px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);border-bottom:1px solid var(--color-divider)">Categoría</th>
                 <th style="padding:10px 14px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);border-bottom:1px solid var(--color-divider)">Forma de pago</th>
-                <th style="padding:10px 14px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);border-bottom:1px solid var(--color-divider)">Importe</th>
+                <th style="padding:10px 14px;text-align:right;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-muted);border-bottom:1px solid var(--color-divider)">Subtotal</th>
               </tr>
             </thead>
             <tbody id="ec-tbody"></tbody>
@@ -23882,15 +23888,40 @@ function _tplColMeta(cols){
   out.explicit=explicit;
   return out;
 }
-/* Columna bajo la que se imprime el GRAN TOTAL en las plantillas que lo pintan
- * como una fila más de la tabla. `d.totalCol` manda; sin él se conserva el
- * histórico (cols.length-2), que solo acierta cuando la última columna no lleva
- * dinero. Sin declararlo, el estado de cuenta imprimía su total bajo "Forma de
- * pago" y dejaba la columna de dinero vacía. */
+/* CUIDADO CON EL NOMBRE: hoy `totalCol` NO mueve el gran total. Ninguna plantilla
+ * ancla el gran total a una columna — todas lo pintan como un bloque flotado a la
+ * derecha (ver _tplTablaFina y el pie de `minimalista`), así que ahí este valor ni
+ * se consulta. Su único consumidor real es _tplLineCol, como respaldo cuando un
+ * reporte no declara `lineCol`.
+ *
+ * Se conserva el nombre porque varios reportes ya declaran `totalCol` y en casi
+ * todos coincide con la columna de la cifra de cada fila, que es justo lo que
+ * _tplLineCol necesita. Si algún día una plantilla sí imprime el total dentro de
+ * la tabla, este es el lugar. Mientras tanto: para cambiar qué cifra sale en cada
+ * renglón se toca `lineCol`, no esto. */
 function _tplTotalCol(d){
   var n=((d&&d.cols)||[]).length;
   var c=(d&&d.totalCol!=null)?d.totalCol:(n-2);
   return (c>=0&&c<n)?c:(n-2);
+}
+/* Columna de la cifra de CADA FILA (para las plantillas que pintan una sola cifra
+   por renglón, como `minimalista`). Es distinta del ancla del gran total: en
+   Cobranza la fila muestra el Subtotal (col 3) y el gran total va bajo Saldo
+   (col 5). Si no se declara `lineCol`, cae a `totalCol` — que es lo correcto en
+   los reportes donde la cifra de la fila Y el total son la misma columna
+   (estado de cuenta, orden de compra). */
+function _tplLineCol(d){
+  var n=((d&&d.cols)||[]).length;
+  if(d&&d.lineCol!=null&&d.lineCol>=0&&d.lineCol<n) return d.lineCol;
+  return _tplTotalCol(d);
+}
+/* Columna de la CANTIDAD, para las plantillas que no pintan la tabla entera y
+   tienen que reinyectarla a mano (minimalista). Se DECLARA (`qtyCol`), no se
+   adivina: buscarla por el rótulo se rompería en cuanto el reporte se imprime en
+   inglés/francés/portugués. Sin declarar = -1 = este reporte no tiene cantidad. */
+function _tplQtyCol(d){
+  var n=((d&&d.cols)||[]).length;
+  return (d&&d.qtyCol!=null&&d.qtyCol>=0&&d.qtyCol<n) ? d.qtyCol : -1;
 }
 function _tplTableHTML(data,headerBg,headerColor){
   headerBg=headerBg||'#f0f0f0'; headerColor=headerColor||'#333';
@@ -23993,13 +24024,25 @@ var _REPORT_TEMPLATES={
         +(k.sub?'<div style="font-size:9px;color:#888;margin-top:1px">'+k.sub+'</div>':'')+'</div>';}).join('')+'</div>'
       // Esta plantilla pinta UNA sola cifra por fila, así que tiene que saber cuál
       // es la de dinero. Antes asumía r[r.length-2] y en el estado de cuenta eso
-      // era la FORMA DE PAGO: imprimía "Transferencia" donde va el importe. Ahora
-      // usa la misma columna bajo la que va el gran total, para que la fila y el
-      // total hablen de lo mismo.
-      +(function(){ var _mc=_tplTotalCol(d);
+      // era la FORMA DE PAGO: imprimía "Transferencia" donde va el importe.
+      //
+      // OJO — son DOS conceptos distintos y confundirlos rompe reportes:
+      //   d.lineCol  = qué columna es la cifra de CADA FILA.
+      //   d.totalCol = bajo qué columna se ancla el GRAN TOTAL.
+      // En el estado de cuenta coinciden; en Cobranza NO (la fila muestra el
+      // Subtotal, el gran total va bajo Saldo). Atarlos hacía que Cobranza en
+      // esta plantilla imprimiera una lista de conceptos con guiones.
+      // Esta plantilla colapsa cada fila a "fecha · concepto → cifra", así que la
+      // columna Cantidad se caía del documento. Se reinyecta pegada al concepto
+      // ("FIV × 2"): es el mismo dato que las demás plantillas pintan en su propia
+      // columna. Si no consta (_cq imprimió "—"), no se pega nada — mejor sin el
+      // dato que con un "× —" que no dice nada.
+      +(function(){ var _mc=_tplLineCol(d), _qc=_tplQtyCol(d);
         return (d.rows||[]).map(function(r){ var _i=(_mc>=0&&_mc<r.length)?_mc:(r.length-2);
+          var _q=(_qc>=0&&_qc<r.length)?String(r[_qc]||'').trim():'';
+          var _cn=r[1]+((_q&&_q!=='—'&&_q!=='-')?' <span style="color:#999">× '+_q+'</span>':'');
           return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:0.5px solid #f0f0f0">'
-        +'<span style="font-size:10px;color:#666">'+r[0]+' &nbsp;·&nbsp; '+r[1]+'</span>'
+        +'<span style="font-size:10px;color:#666">'+r[0]+' &nbsp;·&nbsp; '+_cn+'</span>'
         +'<span style="font-size:11px;font-weight:600;color:#111">'+r[_i]+'</span></div>';}).join(''); })()
       +'<div style="display:flex;justify-content:space-between;padding:9px 0;border-top:1.5px solid #111;margin-top:3px">'
       +'<span style="font-size:12px;font-weight:700">'+d.totalLabel+'</span>'
@@ -33855,7 +33898,15 @@ function ecGuardarAbonoOP(op, paciente, saldo, credAplicable, ctx){
 
 function ecRenderTabla(movs) {
   var tbody = document.getElementById("ec-tbody");
-  if (!movs.length) { tbody.innerHTML = "<tr><td colspan=\"5\" style=\"padding:30px;text-align:center;color:var(--color-text-muted)\">Sin movimientos</td></tr>"; return; }
+  // Espeja a _ecBuildPrintData: misma condición (cantFiable), mismo orden de
+  // columnas, mismo "—" cuando no consta. Si esto y el PDF divergen, el que cobra
+  // y la paciente están leyendo dos documentos distintos del mismo saldo.
+  var _cant = !!(typeof _ecData !== "undefined" && _ecData && _ecData.cantFiable);
+  var _thc = document.getElementById("ec-th-cant");
+  if (_thc) _thc.style.display = _cant ? "" : "none";
+  var _ncols = _cant ? 6 : 5;
+  var _fq = function(n){ n = Number(n); return (isFinite(n) && n > 0) ? String(n) : "—"; };
+  if (!movs.length) { tbody.innerHTML = "<tr><td colspan=\"" + _ncols + "\" style=\"padding:30px;text-align:center;color:var(--color-text-muted)\">Sin movimientos</td></tr>"; return; }
   var html = "";
   for (var i = 0; i < movs.length; i++) {
     var m = movs[i];
@@ -33863,6 +33914,7 @@ function ecRenderTabla(movs) {
     html += "<tr style=\"border-bottom:1px solid var(--color-divider);" + bg + "\">"
       + "<td style=\"padding:10px 14px;white-space:nowrap;color:var(--color-text-muted);font-size:12px\">" + ecFmtFecha(m.fecha) + "</td>"
       + "<td style=\"padding:10px 14px;color:var(--color-text);font-weight:500\">" + (m.producto||m.desc||"--") + "</td>"
+      + (_cant ? "<td style=\"padding:10px 14px;text-align:right;color:var(--color-text);font-size:12px\">" + _fq(m.cant) + "</td>" : "")
       + "<td style=\"padding:10px 14px;color:var(--color-text-muted);font-size:12px\">" + (m.cat||"--") + "</td>"
       + "<td style=\"padding:10px 14px;color:var(--color-text-muted);font-size:12px\">" + (m.pago||"--") + "</td>"
       + "<td style=\"padding:10px 14px;text-align:right;font-weight:700;color:var(--color-text)\">" + ecFmt(m.total) + "</td>"
@@ -33951,6 +34003,8 @@ function _ecBuildPrintData(lang) {
     // El embudo resuelve estos nombres contra el catálogo; si falta uno, no imprime.
     // La cantidad se inserta DESPUÉS del concepto, así que conceptCol sigue siendo 1.
     conceptCol: 1,
+    // Sin columna de cantidad, qtyCol:-1 → la plantilla minimalista no pega "× N".
+    qtyCol: _cant ? 2 : -1,
     rowConcepts: movs.map(function(m){ return m.producto||m.desc||''; }),
     totalLabel: T.totalFacturado,
     totalValue: _f(_pFact),
@@ -35272,11 +35326,15 @@ function _cobBuildPrintData(lang){
   var T=hfDict('cobranza',lang);
   var ccFmt=function(n){ return _cobMoney(n,lang); };
   var ccFch=function(s){ return _cobDate(s,lang); };
-  // Cantidad: la real, o "—". Aquí decía String(v.cantidad||1), y ese `||1` era un
-  // dato inventado: _cobNum (cobranza.gs) devuelve 0 cuando la celda Cantidad está
-  // vacía, así que toda línea histórica sin cantidad capturada salía impresa como
-  // "1" en el documento de la paciente. Un 0 real no existe (saveIngreso escribe
-  // num(cantidad)||1), así que 0 aquí significa "la hoja no lo dice".
+  // Cantidad: la real, o "—" si nadie la capturó. NUNCA un 1 inventado: este
+  // documento se le manda a la paciente o a la agencia, y no puede afirmar "1"
+  // donde la hoja no dice nada. Un 0 real no existe (saveIngreso escribe
+  // num(cantidad)||1), así que 0/null/vacío aquí significan lo mismo: no consta.
+  // Ojo, esto solo funciona porque el origen también dejó de inventar: en las
+  // partidas de agencias/externos, _cobParseItems (cobranza.gs) devuelve
+  // cantidad:null cuando no se capturó — antes hacía `_cobNum(it.cantidad)||1` y
+  // el 1 llegaba aquí ya convertido en número, con lo que este guard no se
+  // enteraba de nada. Si alguien vuelve a poner ese `||1` allá, esto queda mudo.
   var _cq=function(n){ n=Number(n); return (isFinite(n)&&n>0) ? String(n) : '—'; };
   var hoy=ccFch(new Date().toISOString().substring(0,10));
   // El PDF lleva el detalle de lo vendido según la vista elegida (histórico o periodo)
@@ -35326,7 +35384,12 @@ function _cobBuildPrintData(lang){
     // desde el final), que insinuaba justo lo contrario: que el "Total por cobrar"
     // era la suma de lo ya cobrado. OJO: sigue sin ser la suma exacta de la columna
     // Saldo — ver la nota de _cobTotalNoCuadra() más abajo.
-    totalCol:5, notaHtml:notaHtml };
+    //
+    // lineCol ≠ totalCol AQUÍ, y es el único reporte donde difieren: la cifra de
+    // cada renglón es el Subtotal (3), pero el gran total se ancla bajo Saldo (5).
+    // Sin lineCol, `minimalista` tomaba el ancla del total como cifra de la fila e
+    // imprimía "—" en cada renglón: una lista de conceptos sin un solo monto.
+    lineCol:3, totalCol:5, qtyCol:2, notaHtml:notaHtml };
 }
 /* ── Por qué el "Total por cobrar" de cobranza NO es la suma de la columna Saldo ──
  * Documentado aquí porque es una diferencia REAL que este build no resuelve (toca
@@ -35966,7 +36029,7 @@ var NOVEDADES=[
     titulo:'Los reportes ya dicen la cantidad, y el gran total cae donde debe',
     puntos:['**Ya se ve cuántas unidades se vendieron.** El **Estado de cuenta**, la **Cobranza** y el **Recibo** llevan columna de **Cant** al lado del concepto. Antes solo se veía el importe y no había forma de saber si eran 1 o 3 ampolletas.',
       '**«Importe» ahora se llama «Subtotal»** en el estado de cuenta, la cobranza y la orden de compra. No es un cambio de nombre por gusto: esa cifra **siempre fue** el subtotal (precio × cantidad − descuento). Poner una columna «Subtotal» aparte habría repetido el mismo número dos veces.',
-      '**Se arreglaron tres columnas que mentían.** El gran total del estado de cuenta se imprimía debajo de **«Forma de pago»** (con la columna de dinero vacía); el de la orden de compra, debajo de **«Costo unit.»**; y en el comprobante de cancelación el **importe a devolver no se imprimía en absoluto** con la mitad de las plantillas. Ya no.',
+      '**Se arreglaron columnas que mentían, con la plantilla «Minimalista».** Esa plantilla resume cada renglón a una sola cifra, y elegía mal cuál: en el estado de cuenta imprimía **«Transferencia»** (la forma de pago) donde va el importe, y en la orden de compra el **costo unitario** en lugar del subtotal. En el comprobante de cancelación el **importe a devolver no se imprimía en absoluto**. Ya no. El gran total nunca estuvo mal: va flotado a la derecha en todas las plantillas.',
       '**Si no sabemos la cantidad, sale «—» y no «1».** En las líneas viejas, anteriores a que se capturara la cantidad, el sistema rellenaba un **1** inventado. En un documento que se le entrega a una paciente eso es afirmar algo que nadie sabe: ahora se dice que no se sabe.',
       'La **Carta de Seguro no se tocó**: sigue idéntica al formato Word que pide la aseguradora.'],
     comoUsar:['No hay que hacer nada: imprime como siempre y las columnas ya salen.','Las cabeceras salen en el idioma de la ficha de la paciente (Cant / Qty / Qté / Qtd, Subtotal / Sous-total).','⚠️ La columna de cantidad del **Estado de cuenta** solo aparece cuando el backend está actualizado (`analisis.gs`). Mientras no se redespliegue, el reporte sale **sin** esa columna — a propósito: preferimos que falte el dato a que salga inventado.','En **Panel de Control → Reportes** la vista previa ya refleja el layout nuevo.'] },
@@ -37005,7 +37068,7 @@ async function _novCfgGuardar(){
       { h:'Marca de agua', p:'Selector global (blastocisto / llama / ondas / ninguna / auto) en Panel de Control → Reportes.' },
       { h:'Firma autógrafa', p:'Sube tu firma como imagen y marca en qué documentos «lleva firma autógrafa». La firma **no se corta** al imprimir: si no cabe, se va completa a la página siguiente.' },
       { h:'Columnas: la alineación se declara, no se adivina', p:'Al armar un reporte, una columna puede ser un texto (`\'Importe\'`) o un objeto (`{label:\'Cant\', r:true}`). Con objeto, **la columna dice si va a la derecha**; con texto se conserva la regla antigua (las dos últimas a la derecha) para no mover los reportes viejos. **Si declaras una columna, declara todas las de esa tabla** — basta una para que la tabla entera pase a modo declarado y las de texto se vayan a la izquierda. Vale para las 10 plantillas y para el Excel.' },
-      { h:'Dónde cae el gran total: `data.totalCol`', p:'Es el **índice de la columna** bajo la que se imprime el gran total. Sin declararlo se usa el histórico (dos columnas desde el final), que solo acierta si la tabla termina en dos columnas de números — por eso el Estado de Cuenta imprimía su total bajo «Forma de pago» y la Orden de Compra bajo «Costo unit.». Declara `totalCol` apuntando a la columna que ese total realmente suma.' }
+      { h:'Qué cifra sale en cada renglón: `data.lineCol`', p:'Solo importa en las plantillas que resumen cada fila a **una sola cifra** (hoy, «Minimalista»); las demás pintan la tabla completa y no consultan nada de esto. `lineCol` es el **índice de la columna** con la cifra de dinero de cada renglón. Sin declararlo se cae a `totalCol` y, sin ese, al histórico (dos columnas desde el final) — que solo acierta si la tabla termina en dos columnas de números. Por eso el Estado de Cuenta llegó a imprimir «Transferencia» donde iba el importe. **`totalCol` no mueve el gran total**, pese al nombre: el gran total va flotado a la derecha en todas las plantillas. Y `qtyCol` marca la columna de cantidad, que «Minimalista» pega al concepto como «× 2».' }
     ],
     pasos:[
       'Ve a **Panel de Control → Reportes**.',
