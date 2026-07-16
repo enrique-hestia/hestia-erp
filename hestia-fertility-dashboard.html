@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.218 -->
+﻿<!-- app-build:2026.07.16.219 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -24641,6 +24641,59 @@ function _hfTraduceData(data,map){
   }
   return d;
 }
+/* ═══════════════════════════════════════════════════════════════════════════
+   NOMBRE SUGERIDO DEL PDF
+   El navegador propone como nombre de archivo el <title> de la ventana que se
+   imprime. Las plantillas ponían títulos genéricos ("Reporte · Hestia
+   Fertility") o vacíos, así que todos los PDF salían llamándose igual y había
+   que renombrarlos a mano. Aquí se arma un nombre útil y se pisa el título
+   JUSTO ANTES de imprimir.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var HF_DOC_NOMBRE = {
+  es:{ 'estado-cuenta':'Estado de cuenta', 'cobranza':'Estado de cobranza',
+       'cancelacion':'Comprobante de cancelacion', 'nota':'Recibo', 'seguro':'Carta para seguro',
+       'proveedor':'Reporte de proveedor', 'orden-compra':'Orden de compra',
+       'inventario-mov':'Movimientos de inventario' },
+  en:{ 'estado-cuenta':'Account Statement', 'cobranza':'Collections Statement',
+       'cancelacion':'Cancellation Receipt', 'nota':'Receipt', 'seguro':'Insurance Letter',
+       'proveedor':'Vendor Report', 'orden-compra':'Purchase Order',
+       'inventario-mov':'Inventory Movements' },
+  fr:{ 'estado-cuenta':'Releve de compte', 'cobranza':'Etat de recouvrement',
+       'cancelacion':'Justificatif d annulation', 'nota':'Recu', 'seguro':'Lettre d assurance',
+       'proveedor':'Rapport fournisseur', 'orden-compra':'Bon de commande',
+       'inventario-mov':'Mouvements de stock' },
+  pt:{ 'estado-cuenta':'Extrato de conta', 'cobranza':'Extrato de cobranca',
+       'cancelacion':'Comprovante de cancelamento', 'nota':'Recibo', 'seguro':'Carta de seguro',
+       'proveedor':'Relatorio de fornecedor', 'orden-compra':'Ordem de compra',
+       'inventario-mov':'Movimentos de estoque' }
+};
+/* Windows/macOS rechazan \ / : * ? " < > | en un nombre de archivo, y el
+   navegador los sustituye por guiones bajos sin avisar. Los quitamos nosotros
+   para que el nombre salga legible y no "Estado_de_cuenta__Maria_Lopez". */
+function _hfNombreLimpio(s){
+  return String(s==null?'':s)
+    .replace(/[\\\/:*?"<>|]+/g,' ')      // prohibidos por el sistema de archivos
+    .replace(/[\u0000-\u001F\u007F]/g,'')      // caracteres de control
+    .replace(/·/g,'-')                   // el separador interno de algunos subjects
+    .replace(/\s+/g,' ')
+    .replace(/^[\s.\-]+|[\s.\-]+$/g,''); // ni empieza ni termina en punto/guion/espacio
+}
+function hfNombreArchivo(reportId,data){
+  data=data||{};
+  var lang=(data.lang && typeof hfLangOk==='function' && hfLangOk(data.lang))
+    ? String(data.lang).toLowerCase().substring(0,2) : 'es';
+  var tabla=HF_DOC_NOMBRE[lang]||HF_DOC_NOMBRE.es;
+  var base=tabla[reportId] || HF_DOC_NOMBRE.es[reportId] || data.title || 'Reporte';
+  var partes=[_hfNombreLimpio(base)];
+  var quien=_hfNombreLimpio(data.subject||'');
+  if(quien) partes.push(quien);
+  var cuando=_hfNombreLimpio(data.period||data.periodo||'');
+  // Un periodo largo ("1 de julio al 31 de julio de 2026") no aporta al nombre.
+  if(cuando && cuando.length<=24) partes.push(cuando);
+  var out=partes.join(' - ').substring(0,120);
+  return _hfNombreLimpio(out) || 'Reporte';
+}
+
 function _hfPrintNow(reportId,data){
   var tplId=hfTplGet(reportId);
   var fn=_REPORT_TEMPLATES[tplId]||_REPORT_TEMPLATES['ejecutivo'];
@@ -24651,6 +24704,8 @@ function _hfPrintNow(reportId,data){
   if(!w){ alert('Habilita las ventanas emergentes para este sitio e intenta de nuevo.'); return; }
   w.document.write(html);
   w.document.close();
+  // Pisa el <title> de la plantilla: es lo que el navegador propone al "Guardar como PDF".
+  try{ w.document.title=hfNombreArchivo(reportId,data); }catch(_t){}
 }
 function hfReportPrint(reportId,data){
   var lang=(data&&data.lang)?String(data.lang).toLowerCase().substring(0,2):'es';
@@ -35554,6 +35609,12 @@ function _segWrite(w, cfg, L, currency, pac, rows, total){
     +body
     +'</body></html>';
   try{ w.document.open(); w.document.write(out); w.document.close(); }catch(e){}
+  // Nombre sugerido al "Guardar como PDF" (el navegador usa el <title>). El título
+  // iba en blanco a propósito para no ensuciar el encabezado de impresión; se pisa
+  // AQUÍ, después de escribir, porque un archivo llamado "documento.pdf" obliga a
+  // renombrar a mano cada carta. Si el encabezado estorba, se apaga en el diálogo
+  // de impresión del navegador ("Encabezados y pies de página").
+  try{ w.document.title=hfNombreArchivo('seguro',{subject:pac,lang:(L&&L._lang)||''}); }catch(_t){}
   setTimeout(function(){ try{ w.print(); }catch(e){} },450);
 }
 
@@ -35714,7 +35775,11 @@ function _notaWrite(rows,total,idioma,receptor,folio,formaPago,fechaSel){
     +sig
     +'<div class="leg">'+_esc(T.nLegal)+'</div>'
     +'</body></html>');
-  w.document.close(); setTimeout(function(){ try{ w.print(); }catch(e){} },400);
+  w.document.close();
+  // Nombre sugerido al "Guardar como PDF" — ver la nota en _segWrite. El folio va
+  // en el nombre porque es lo que identifica al recibo.
+  try{ w.document.title=hfNombreArchivo('nota',{subject:receptor,period:folio,lang:idioma}); }catch(_t){}
+  setTimeout(function(){ try{ w.print(); }catch(e){} },400);
 }
 
 /* ═══════════ NOVEDADES / QUÉ HAY DE NUEVO (tutorial + changelog) ═══════════
@@ -35733,6 +35798,13 @@ var NOVEDADES=[
       '**Ves el número real antes de guardar.** Mientras editas, el panel te dice en vivo qué % de la venta acaba recibiendo cada quien («Del **10%** del escalón: 50% al médico = **5%** de la venta») y te pone un ejemplo en pesos. Es la diferencia entre el 5% y el 0.5%: ahí se ve.',
       '**No se puede guardar un reparto descuadrado.** Si las partes no suman exactamente 100%, se marca en rojo y el botón Guardar se bloquea — ni de más ni de menos.'],
     comoUsar:['Comisiones → abre **⚙️ Configurar reglas** (abajo en la misma pantalla).','Sin reglas: **✨ Empezar con un ejemplo** y ajusta. Con reglas: elige la regla del menú, o **＋ Nueva regla**.','Llena grupo (menú), procedimientos que aplican (chips del catálogo), escalones (desde/hasta/%, «Hasta» vacío = sin límite), beneficiarios (quién · parte % · nota de crédito o efectivo) y el diferido.','Revisa el recuadro del **% efectivo** y pulsa **Guardar reglas**. Ya puedes Calcular el mes.','¿El grupo no sale en el menú? Dalo de alta en **Orígenes externos** primero; el panel te pone el enlace directo.'] },
+  { build:'2026.07.16', fecha:'16 jul 2026', area:'Reportes', icon:'📄',
+    titulo:'Los PDF ya se guardan con un nombre útil',
+    puntos:['Antes, al «Guardar como PDF» todos los documentos salían llamándose igual («Reporte · Hestia Fertility») o sin nombre, y había que renombrarlos a mano uno por uno.',
+      'Ahora el navegador propone el nombre bueno: «Estado de cuenta - María López - 2026-07», «Comprobante de cancelacion - Diana Garcia», «Orden de compra - OC-00012 - MEDYLAB - 2026-07-14».',
+      'Sigue el IDIOMA del documento: si lo imprimes en inglés, el archivo se llama «Account Statement - María López - 2026-07».',
+      'Los caracteres que Windows no admite en un nombre de archivo (/ \\ : * ? " < > |) se limpian solos, así que el nombre sale legible y no lleno de guiones bajos.'],
+    comoUsar:['No hay que hacer nada: imprime como siempre y el nombre ya viene sugerido en el diálogo de guardar.','En la Carta de Seguro y el Recibo el título antes iba en blanco para que no saliera en el encabezado impreso. Si ahora te estorba en el papel, apágalo en el diálogo de impresión del navegador → «Encabezados y pies de página».'] },
   { build:'2026.07.16', fecha:'16 jul 2026', area:'Egresos', icon:'🏦', destacada:true, perm:'editar_egresos',
     titulo:'Arreglado: al editar un egreso ya no se borra su movimiento del banco',
     puntos:['⚠ El problema, reportado en vivo: «el egreso existe pero el banco se borra» — y el saldo real del banco se movía. Pasaba así: si la Forma de pago guardada de un egreso ya no estaba entre las opciones del menú (porque alguien editó el catálogo en Panel de Control → Formularios), al abrirlo el menú se quedaba en «— Seleccionar —» SIN AVISAR; al guardar, mandaba la forma vacía; el sistema BLANQUEABA la forma de pago del egreso; y como para rearmar el movimiento del banco hace falta saber a qué banco mandarlo, borraba la fila vieja y ya no creaba la nueva.',
