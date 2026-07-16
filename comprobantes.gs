@@ -299,8 +299,11 @@ function vincularComprobanteEgreso(body) {
     var campo = body.campo === 'pago' ? 'pago' : 'factura';
     if (!rowNum || !fileId) return { ok: false, error: 'Faltan rowNum o fileId' };
 
-    var ssId = EGRESOS_IDS[anio] || EGRESOS_SS_2026;
-    var tabName = (typeof EGRESOS_TABS !== 'undefined' && EGRESOS_TABS[anio]) ? EGRESOS_TABS[anio] : 'Egresos' + anio;
+    // Libro/pestaña del AÑO (cada año es un spreadsheet distinto). _egIdDeAnio /
+    // _egTabDeAnio (finance.gs) son el único punto de verdad; no repetir el
+    // EGRESOS_IDS[anio]||EGRESOS_SS_2026 a mano, que es como se acaba clavado en 2026.
+    var ssId = _egIdDeAnio(anio);
+    var tabName = _egTabDeAnio(anio);
     var ss = SpreadsheetApp.openById(ssId);
     var sheet = ss.getSheetByName(tabName) || ss.getSheets()[0];
 
@@ -315,8 +318,25 @@ function vincularComprobanteEgreso(body) {
     var rich = SpreadsheetApp.newRichTextValue().setText(etiqueta).setLinkUrl(url).build();
     sheet.getRange(rowNum, iCol + 1).setRichTextValue(rich);
 
-    try { logAudit(body.usuario || 'sistema', 'Comprobantes', 'Vincular' + (campo === 'pago' ? 'Pago' : 'Factura'), 'fila ' + rowNum, '', '', (body.uuid || fileId)); } catch (e) {}
-    return { ok: true, rowNum: rowNum, url: url, campo: campo };
+    // ── Persistir los datos fiscales del CFDI en la fila ──────────────────
+    // Antes el UUID solo se mandaba a logAudit y se TIRABA: el folio fiscal
+    // quedaba únicamente dentro del XML de Drive, así que no se podía buscar.
+    // Se lee del PROPIO archivo (no de body.uuid) porque hay vías que no lo
+    // mandan — p.ej. egVincularXmlDetectado, el botón "Vincular" del detalle
+    // del egreso, solo manda fileId. body.uuid queda como respaldo por si
+    // Drive falla (el lote sí lo trae, del índice del mes).
+    var fiscal = null;
+    if (campo === 'factura' && typeof _egAplicarFacturaFiscal === 'function') {
+      fiscal = _egAplicarFacturaFiscal(sheet, rowNum, fileId, body.uuid);
+    }
+
+    try { logAudit(body.usuario || 'sistema', 'Comprobantes', 'Vincular' + (campo === 'pago' ? 'Pago' : 'Factura'), 'fila ' + rowNum, '', '', ((fiscal && fiscal.datos && fiscal.datos.uuid) || body.uuid || fileId)); } catch (e) {}
+    var out = { ok: true, rowNum: rowNum, url: url, campo: campo };
+    if (fiscal) {
+      if (fiscal.datos) out.fiscal = fiscal.datos;
+      if (fiscal.avisoDuplicado) out.avisoDuplicado = fiscal.avisoDuplicado;
+    }
+    return out;
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
@@ -427,7 +447,7 @@ function vincularComprobantesLote(body) {
     var mes = parseInt(body.mes, 10) || (new Date().getMonth() + 1);
     var data = readComprobantesMes(anio, mes, 'facturas');
     if (!data.ok) return data;
-    var vinculados = 0, detalles = [], errores = [];
+    var vinculados = 0, detalles = [], errores = [], avisos = [];
     (data.comprobantes || []).forEach(function (x) {
       if (x.estado !== 'sugerido' || !x.candidatos || !x.candidatos.length) return;
       var c = x.candidatos[0];
@@ -436,12 +456,144 @@ function vincularComprobantesLote(body) {
         uuid: x.uuid, etiqueta: (x.serie ? x.serie + '-' : '') + (x.folio || 'Factura XML'),
         usuario: body.usuario || 'sistema'
       });
-      if (r.ok) { vinculados++; detalles.push({ folio: (x.serie ? x.serie + '-' : '') + (x.folio || ''), proveedor: c.proveedor, monto: c.monto }); }
+      if (r.ok) {
+        vinculados++;
+        detalles.push({ folio: (x.serie ? x.serie + '-' : '') + (x.folio || ''), proveedor: c.proveedor, monto: c.monto });
+        // El aviso de CFDI repetido NO se traga: en un lote es justo donde más
+        // fácil pasa desapercibido que dos egresos quedaron con la misma factura.
+        if (r.avisoDuplicado) avisos.push((x.folio || x.fileName) + ': ' + r.avisoDuplicado);
+      }
       else errores.push((x.folio || x.fileName) + ': ' + r.error);
     });
     try { logAudit(body.usuario || 'sistema', 'Comprobantes', 'VincularLote', anio + '-' + mes, '', '', vinculados + ' vinculados'); } catch (e) {}
-    return { ok: true, vinculados: vinculados, detalles: detalles, errores: errores };
+    return { ok: true, vinculados: vinculados, detalles: detalles, errores: errores, avisos: avisos };
   } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   BACK-FILL de datos fiscales de Egresos ya vinculados
+   ------------------------------------------------------------
+   Los egresos que YA tenían su factura vinculada antes del build
+   .209 traen el UUID dentro del XML de Drive, pero no en la hoja:
+   no se pueden buscar. Esto los recorre, abre el XML y llena
+   FacturaUUID/FacturaFolio/FacturaRFC/FacturaRazonSocial.
+
+   REANUDABLE por presupuesto de tiempo (mismo patrón que
+   _provEmisorIndex, providers.gs): Apps Script corta a los 6 min y
+   abrir ~1 XML de Drive cuesta ~0.2-0.5 s, así que un año con
+   cientos de facturas NO cabe en una corrida. En vez de morir a la
+   mitad en silencio, se corta solo y devuelve `siguiente` (la fila
+   por la que va) y `faltan`. Se vuelve a llamar con `desde:
+   siguiente` hasta que `truncado` sea false.
+
+   IDEMPOTENTE: una fila que ya tiene UUID se salta (cuenta en
+   `yaListos`), salvo que se pida `sobrescribir:true`.
+   ══════════════════════════════════════════════════════════════ */
+function backfillFacturasEgresos(body) {
+  try {
+    body = body || {};
+    var t0 = Date.now();
+    var anio = parseInt(body.anio, 10) || new Date().getFullYear();
+    var maxMs = parseInt(body.maxMs, 10) || 120000;   // 2 min: deja aire de sobra bajo el corte de 6
+    var desde = parseInt(body.desde, 10) || 2;        // fila 2 = primer dato (1 = headers)
+    var sobrescribir = (body.sobrescribir === true || body.sobrescribir === 'true');
+    if (desde < 2) desde = 2;
+
+    if (typeof _egIdDeAnio !== 'function' || typeof _egFacturaCols !== 'function')
+      return { ok:false, error:'Falta finance.gs (o está desactualizado) en el proyecto de Apps Script. Redespliega.' };
+    if (typeof EGRESOS_IDS !== 'undefined' && !EGRESOS_IDS[anio])
+      return { ok:false, error:'Año no configurado en EGRESOS_IDS: ' + anio };
+
+    var ss = SpreadsheetApp.openById(_egIdDeAnio(anio));   // libro DEL AÑO
+    var sh = ss.getSheetByName(_egTabDeAnio(anio));
+    if (!sh) return { ok:false, error:'Pestaña ' + _egTabDeAnio(anio) + ' no encontrada' };
+
+    var last = sh.getLastRow();
+    if (last < 2) return { ok:true, anio:anio, procesados:0, actualizados:0, yaListos:0,
+                           sinArchivo:0, sinXml:0, errores:[], truncado:false, siguiente:0, faltan:0 };
+
+    var cols = _egFacturaCols(sh);                    // crea las columnas si aún no existen
+    var iLink = -1;
+    var hdrs = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0]
+                 .map(function (h) { return String(h).trim().toLowerCase(); });
+    for (var c = 0; c < hdrs.length; c++) if (hdrs[c].indexOf('link factura') > -1) { iLink = c + 1; break; }
+    if (iLink < 0) return { ok:false, error:'No se encontró la columna "Link Factura" en ' + _egTabDeAnio(anio) };
+
+    // Lecturas en BLOQUE (1 llamada por columna, no 1 por celda): el hipervínculo
+    // vive en el richText, pero una referencia de texto vive en el valor plano.
+    var nFilas = last - 1;
+    var richLink = sh.getRange(2, iLink, nFilas, 1).getRichTextValues();
+    var valLink  = sh.getRange(2, iLink, nFilas, 1).getValues();
+    var valUuid  = sh.getRange(2, cols.uuid, nFilas, 1).getValues();
+
+    function urlDe(i) {
+      var r = richLink[i][0];
+      var u = (r && r.getLinkUrl()) ? r.getLinkUrl() : String(valLink[i][0] || '');
+      return /^https?:\/\//i.test(u) ? u : '';   // una referencia de texto NO es un archivo
+    }
+    function pendiente(i) {
+      if (!urlDe(i)) return false;                                  // sin factura vinculada
+      if (!sobrescribir && String(valUuid[i][0] || '').trim()) return false; // ya tiene UUID
+      return true;
+    }
+
+    var procesados = 0, actualizados = 0, yaListos = 0, sinArchivo = 0, sinXml = 0;
+    var errores = [], truncado = false, siguiente = 0;
+    var escribir = {};   // rowNum → datos (se vuelcan por columna al final)
+
+    for (var r0 = desde; r0 <= last; r0++) {
+      var i = r0 - 2;
+      if (!urlDe(i)) { sinArchivo++; continue; }
+      if (!pendiente(i)) { yaListos++; continue; }
+      // Presupuesto de tiempo: se checa ANTES de abrir el archivo (lo caro).
+      if (Date.now() - t0 > maxMs) { truncado = true; siguiente = r0; break; }
+
+      var m = urlDe(i).match(/[-\w]{25,}/);
+      if (!m) { sinArchivo++; continue; }
+      procesados++;
+      var lec = _egLeerFacturaDrive(m[0]);
+      if (lec.tipo === 'xml' && lec.datos) { escribir[r0] = lec.datos; actualizados++; }
+      else if (lec.tipo === 'otro') sinXml++;       // PDF: no hay UUID que sacar, no se inventa
+      else { errores.push('fila ' + r0 + ': ' + (lec.error || 'no se pudo leer')); }
+    }
+
+    // Volcado: 4 setValues (uno por columna) sobre el tramo recorrido, en vez de
+    // 4 escrituras por fila. Las filas que no tocamos conservan su valor actual.
+    var hasta = truncado ? (siguiente - 1) : last;
+    if (hasta >= desde && actualizados) {
+      var n = hasta - desde + 1;
+      var curUuid  = sh.getRange(desde, cols.uuid,  n, 1).getValues();
+      var curFolio = sh.getRange(desde, cols.folio, n, 1).getValues();
+      var curRfc   = sh.getRange(desde, cols.rfc,   n, 1).getValues();
+      var curRazon = sh.getRange(desde, cols.razon, n, 1).getValues();
+      Object.keys(escribir).forEach(function (k) {
+        var idx = parseInt(k, 10) - desde, d = escribir[k];
+        if (idx < 0 || idx >= n) return;
+        curUuid[idx][0] = d.uuid; curFolio[idx][0] = d.folio;
+        curRfc[idx][0] = d.rfc;   curRazon[idx][0] = d.razon;
+      });
+      sh.getRange(desde, cols.uuid,  n, 1).setValues(curUuid);
+      sh.getRange(desde, cols.folio, n, 1).setValues(curFolio);
+      sh.getRange(desde, cols.rfc,   n, 1).setValues(curRfc);
+      sh.getRange(desde, cols.razon, n, 1).setValues(curRazon);
+    }
+
+    // Cuántas filas quedan pendientes DESPUÉS del corte (para reportar de verdad
+    // cuánto falta, no un "se acabó el tiempo" a secas).
+    var faltan = 0;
+    if (truncado) for (var r1 = siguiente; r1 <= last; r1++) if (pendiente(r1 - 2)) faltan++;
+
+    try {
+      logAudit(body.usuario || 'sistema', 'Comprobantes', 'BackfillFacturasEgresos', String(anio),
+        'filas ' + desde + '-' + hasta, '', actualizados + ' actualizados' + (truncado ? ' (truncado, faltan ' + faltan + ')' : ''));
+    } catch (e) {}
+
+    return { ok:true, anio:anio, desde:desde, hasta:hasta,
+             procesados:procesados, actualizados:actualizados, yaListos:yaListos,
+             sinArchivo:sinArchivo, sinXml:sinXml, errores:errores,
+             truncado:truncado, siguiente:(truncado ? siguiente : 0), faltan:faltan,
+             ms:(Date.now() - t0) };
+  } catch (ex) { return { ok:false, error: ex.message }; }
 }
 
 /* ── Menú (estructura aprobada por Enrique): "Comprobantes" DENTRO de
