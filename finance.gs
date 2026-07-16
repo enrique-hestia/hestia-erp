@@ -6697,6 +6697,37 @@ function updateIngresoConBancos(payload) {
     _bankRecompute('santander', _sanOpen);
     _bankRecompute('mercadopago', 0);
 
+    // ── CASCADA A CUENTAS POR COBRAR ─────────────────────────────────────────
+    // Corregir una venta tiene que mover TODO lo que cuelga de ella, y la cuenta
+    // por cobrar es parte de ese "todo": si cambia el NOMBRE o el MONTO, la deuda
+    // tiene que quedar tan corregida como el banco de aquí arriba.
+    //
+    // updateIngreso YA recomputa el renglón, pero SÓLO si el formulario mandó
+    // 'pagado' (su guard _pagadoDefUpd). El front siempre lo manda, así que por la
+    // UI no se cae; un POST directo SIN 'pagado' sí: reescribía la venta y el banco
+    // con el nombre nuevo y dejaba la deuda con el VIEJO → adeudo HUÉRFANO a nombre
+    // de quien ya no debe. Aquí se REAFIRMA de forma AUTORITATIVA leyendo lo que
+    // quedó ESCRITO en la venta (Facturado − Pagado) en vez de confiar en la forma
+    // del payload. Mismo criterio que el guard de venta cancelada: el backend no
+    // debe depender de que el frontend se porte bien.
+    //
+    // Por qué no duplica ni deja huérfanos: _cobRegistrarSaldoIngreso hace UPSERT
+    // localizando el renglón por OP + marca 'auto-ingreso' — NUNCA por nombre — así
+    // que un cambio de paciente REESCRIBE EL MISMO renglón (uno solo, con el nombre
+    // nuevo). Si la edición dejó la venta saldada (Facturado − Pagado ≤ 0) lo CIERRA
+    // en 0 en vez de dejarlo colgado. Idempotente: guardar dos veces no apila deuda.
+    // Con 'pagado' presente calcula lo mismo que updateIngreso → reescritura inocua.
+    try {
+      if (typeof _cobRegistrarSaldoIngreso === 'function' && typeof _cobOPPagado === 'function') {
+        var _cxcOP = _cobOPPagado(opId);   // Facturado/Pagado YA escritos por updateIngreso
+        if (_cxcOP.determinado) {
+          var _cxcCat = (payload.lineas && payload.lineas[0] && payload.lineas[0].categoria) || '';
+          _cobRegistrarSaldoIngreso(opId, newPac, _cxcCat,
+            Math.max(0, _cxcOP.total - _cxcOP.pagado), newFecha);
+        }
+      }
+    } catch (eCxc) { Logger.log('updateIngresoConBancos CxCobrar: ' + eCxc.message); }
+
     // Partida automática de comisiones MP del mes (ya con la comisión recién movida).
     try { _egRecalcComisionesMPFecha(payload.fecha || '', ''); } catch(_mp) {}
     return {ok:true, op:opId, edited:true, bankSynced:true};
