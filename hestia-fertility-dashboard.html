@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.219 -->
+﻿<!-- app-build:2026.07.16.220 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -10341,11 +10341,143 @@ function _swrSet(key, data, fi, ff) {
 }
 function _swrDel(key) { delete _swrCache[key]; }
 
-/* Botón global "Actualizar": invalida las cachés en memoria (incluidas las listas
-   que se cargan una sola vez, como la de pacientes del Estado de Cuenta) y vuelve
-   a ejecutar la vista actual, forzando datos frescos del servidor. Sirve para
-   TODAS las páginas con datos sincronizados sin recargar toda la app. */
-function refrescarVistaActual(btn) {
+/* ── Botón global "Actualizar" ─────────────────────────────────────────────
+   Recarga la vista actual sin recargar toda la app.
+
+   Antes esto era una lista de cachés escrita a mano + navigateTo, y fallaba en
+   dos casos distintos:
+
+     a) Vistas con SELECCIÓN interna (una paciente buscada en Estado de Cuenta):
+        navigateTo las re-inicializa, pero NADIE volvía a consultar lo que estaba
+        en pantalla — ecInit() solo llena la lista de pacientes; quien consulta es
+        ecBuscar(). Se limpiaba _ecData y el resultado ya pintado se quedaba con
+        los datos VIEJOS. Ese era el bug reportado.
+     b) Vistas con CACHÉ propia cuyo loader arranca con `if (_xData) return;`
+        (catálogo de productos, comisiones): si no se limpia ANTES de navegar, el
+        loader se salta el fetch y re-pinta lo viejo.
+
+   Y la lista central se desincronizaba con cada vista nueva (_cobData nunca entró).
+   Ahora cada vista declara su recarga aquí, junto a su caché.
+
+   La clave es el displayId que ya resolvió navigateTo (window._navDisplayId): la
+   MISMA identidad que usa el router, para no copiar aquí sus reglas de ruteo.
+
+   Contrato de un hook (las tres partes son opcionales):
+     limpiar()      — ANTES de navegar: anula la caché propia de la vista para que
+                      su loader vuelva a pedir datos al servidor.
+     capturar()     — ANTES de navegar: devuelve la selección en pantalla, porque
+                      varios loaders reconstruyen su shell y borran el input.
+     recargar(sel)  — DESPUÉS de navegar: restaura la selección y la vuelve a
+                      consultar. Devuelve Promise<boolean> (el boolean dice si de
+                      verdad llegaron datos) o null si no había nada que recargar.
+
+   Una vista SIN hook degrada al comportamiento de siempre (limpieza genérica +
+   navigateTo) — nunca se rompe.
+   ⚠️ Si agregas una vista con caché propia o con selección interna, decláralo
+   aquí: sin hook, "Actualizar" no la recargará (la consola lo avisa). */
+
+function _refInputVal(id) {
+  var el = document.getElementById(id);
+  return (el && el.value) ? String(el.value).trim() : '';
+}
+
+/* Restaura el nombre en el buscador (el shell pudo haber sido reconstruido) y
+   vuelve a consultar. `probe` dice si de verdad llegaron datos: las funciones
+   *Buscar solo asignan su variable de datos cuando el backend respondió bien,
+   así que sirve de señal honesta de éxito sin reescribir su manejo de errores. */
+function _refReconsultar(inputId, sel, buscar, probe) {
+  if (!sel) return null;                       // sin selección no hay nada que recargar
+  var el = document.getElementById(inputId);
+  if (el) el.value = sel;
+  var p;
+  try { p = buscar(); } catch(e) { return Promise.resolve(false); }
+  return Promise.resolve(p).then(function(){ return !!probe(); }, function(){ return false; });
+}
+
+var _REFRESH_HOOKS = {
+  // El bug reportado: se veía a una paciente con movimientos nuevos y "Actualizar"
+  // dejaba la pantalla igual. Ahora se vuelve a consultar a ESA paciente.
+  'estado-cuenta': {
+    capturar: function(){ return _refInputVal('ec-search'); },
+    recargar: function(sel){
+      _ecData = null; _ecMovAll = [];
+      return _refReconsultar('ec-search', sel, ecBuscar, function(){ return _ecData; });
+    }
+  },
+  // cobInit() reconstruye su shell: hay que capturar el nombre antes de navegar.
+  'cobranza': {
+    capturar: function(){ return _refInputVal('cob-search'); },
+    recargar: function(sel){
+      _cobData = null;
+      return _refReconsultar('cob-search', sel, cobBuscar, function(){ return _cobData; });
+    }
+  },
+  'seguro': {
+    capturar: function(){ return _refInputVal('seg-search'); },
+    recargar: function(sel){
+      _segData = null;
+      return _refReconsultar('seg-search', sel, segBuscar, function(){ return _segData && _segData.ok; });
+    }
+  },
+  'nota': {
+    capturar: function(){ return _refInputVal('nota-search'); },
+    recargar: function(sel){
+      _notaData = null;
+      return _refReconsultar('nota-search', sel, notaBuscar, function(){ return _notaData && _notaData.ok; });
+    }
+  },
+  // loadProductosView arranca con `if (!_prodData || _prodData.error)`: sin esto
+  // "Actualizar" re-pintaba el catálogo viejo sin pedir nada.
+  'productos-catalogo': {
+    limpiar: function(){ _prodData = null; }
+  },
+  // comInit solo pide las reglas `if (!_comCfgD)`.
+  // _comCfgW es el BORRADOR del editor: si el panel está abierto el usuario está
+  // editando y refrescar tiraría sus cambios sin avisar. Ahí no se toca nada.
+  'comisiones': {
+    limpiar: function(){
+      if (_comCfgOpen) return;
+      _comCfgD = null; _comCfgW = null; _comCfgSel = 0;
+    }
+  }
+};
+
+/* La vista que el router considera actual. Si por lo que sea no hay displayId
+   resuelto, se cae a currentView: peor identidad, pero nunca rompe. */
+function _refVistaActual() {
+  try { if (window._navDisplayId) return window._navDisplayId; } catch(e){}
+  return (typeof currentView !== 'undefined' && currentView) ? currentView : 'resumen';
+}
+
+/* La etiqueta solo dice "Actualizado HH:MM" cuando de verdad se recargó.
+   Un "Actualizado 5:10 p.m." sobre datos viejos es peor que no poner nada. */
+function _refEtiqueta(ok) {
+  try {
+    var lbl = document.getElementById('sync-status');
+    if (!lbl) return;
+    if (ok) {
+      lbl.textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'});
+      lbl.style.color = 'var(--color-text-faint)';
+    } else {
+      lbl.textContent = 'No se pudo actualizar';
+      lbl.style.color = 'var(--color-amber)';
+    }
+  } catch(e){}
+}
+
+async function refrescarVistaActual(btn) {
+  var vista = _refVistaActual();
+  var hook  = _REFRESH_HOOKS[vista] || null;
+  if (!hook) {
+    try { console.debug('[Actualizar] la vista "' + vista + '" no declara hook en _REFRESH_HOOKS: ' +
+      'solo se limpia lo genérico y se re-navega. Si tiene caché propia o selección interna, agrégale uno.'); } catch(e){}
+  }
+
+  // 1) Capturar la selección ANTES de navegar (varios loaders rehacen su shell).
+  var sel = null;
+  try { if (hook && hook.capturar) sel = hook.capturar(); } catch(e){}
+
+  // 2) Limpiar cachés: primero lo genérico, luego lo que declare la vista.
   try { _swrCache = {}; } catch(e){}
   try { viewCache = {}; } catch(e){}
   // Cachés que se cargan una sola vez o guardan el último payload de la vista
@@ -10356,12 +10488,30 @@ function refrescarVistaActual(btn) {
   try { _boardData = null; } catch(e){}         // Board Deck
   try { _semData = null; } catch(e){}           // Resumen Semanal
   try { _ecData = null; _ecMovAll = []; } catch(e){}
-  // Animación del ícono (giro)
+  try { if (hook && hook.limpiar) hook.limpiar(); } catch(e){}
+
+  // 3) Animación del ícono (giro)
   if (btn) { var svg = btn.querySelector('svg'); if (svg) { svg.style.transition='transform .6s ease'; svg.style.transform='rotate(360deg)'; setTimeout(function(){ svg.style.transition=''; svg.style.transform=''; }, 650); } }
-  // Re-ejecutar la vista actual (navigateTo re-inicializa el loader correcto)
+
+  // 4) Re-ejecutar la vista actual (navigateTo re-inicializa el loader correcto).
+  //    Se espera a su loader para no anunciar "Actualizado" antes de tiempo.
+  var ok = false;
   var v = (typeof currentView !== 'undefined' && currentView) ? currentView : (window.currentView || 'resumen');
-  try { navigateTo(v); } catch(e){ try { location.reload(); } catch(_){} }
-  try { var lbl = document.getElementById('sync-status'); if (lbl) lbl.textContent = 'Actualizado ' + new Date().toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'}); } catch(e){}
+  try {
+    var nav = navigateTo(v);
+    if (nav && typeof nav.then === 'function') { await nav.catch(function(){}); }
+    ok = true;
+  } catch(e) { try { location.reload(); } catch(_){} return; }
+
+  // 5) Recargar lo que el usuario tenía en pantalla. Si el hook hizo una recarga
+  //    real, su resultado manda sobre el genérico: es el que sabe si llegaron datos.
+  if (hook && hook.recargar) {
+    var r = null;
+    try { r = hook.recargar(sel); } catch(e) { r = Promise.resolve(false); }
+    if (r && typeof r.then === 'function') { ok = await r; }
+  }
+
+  _refEtiqueta(ok);
 }
 
 /* ── localStorage cache helpers ─────────────────────────── */
@@ -22853,6 +23003,10 @@ function navigateTo(viewId) {
   console.log('[navigateTo] viewId:', viewId, '→ displayId:', displayId);
   // Resolver alias: variantes de config siempre usan view-configuracion
   var resolvedId = isConfigFuente(displayId) ? 'configuracion' : displayId;
+  // Identidad canónica de la vista, ya resuelta (alias, fuente del menú, etc.).
+  // El botón "Actualizar" la reusa para saber QUÉ vista recargar en vez de volver
+  // a copiar aquí las reglas de ruteo — que es como se desincronizan. Ver _REFRESH_HOOKS.
+  try { window._navDisplayId = resolvedId; } catch(e){}
   // Mostrar la vista (conocida o genérica)
   var el = document.getElementById('view-' + resolvedId);
   if (el) {
@@ -22874,8 +23028,11 @@ function navigateTo(viewId) {
   currentView = viewId;
   setActiveNav(viewId);
 
-  // Cargar datos (lazy)
-  loadView(viewId, currentFechaInicio, currentFechaFin);
+  // Cargar datos (lazy). Se devuelve la promesa del loader para que quien
+  // navegue pueda esperar a que los datos estén en pantalla (lo usa
+  // "Actualizar" para no anunciar "Actualizado" antes de tiempo). Los demás
+  // llamadores la ignoran, como siempre.
+  return loadView(viewId, currentFechaInicio, currentFechaFin);
 }
 
 /* ── URLs de sheets externos para botón "Ver en Sheets" en vistas genéricas ─── */
@@ -33537,6 +33694,8 @@ function ecOrigPick() {
   ecBuscar();
 }
 
+/* Devuelve la promesa de la consulta (la usa el botón "Actualizar" para esperar
+   a los datos antes de anunciar que actualizó). Los demás llamadores la ignoran. */
 function ecBuscar() {
   var nombre = (document.getElementById("ec-search") || {}).value || "";
   nombre = nombre.trim();
@@ -33548,7 +33707,7 @@ function ecBuscar() {
   document.getElementById("ec-error").style.display = "none";
   document.getElementById("ec-btn-print").style.display = "none";
   var s = getSession() || {};
-  fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow',
+  return fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow',
     body: JSON.stringify({action:'estadoCuenta', paciente: nombre, token: s.token||getToken(), usuario: s.email||''})})
     .then(function(r){ return r.json(); })
     .then(function(d){
@@ -34960,7 +35119,8 @@ function cobBuscar(){
   var res=document.getElementById('cob-result');
   res.innerHTML='<div style="padding:40px;text-align:center;color:var(--color-text-muted);font-size:13px">Calculando cobranza…</div>';
   var tok=encodeURIComponent(getToken());
-  fetch(APPS_SCRIPT_URL+'?action=estadoCobranza&paciente='+encodeURIComponent(nombre)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
+  // Devuelve la promesa: "Actualizar" espera los datos antes de anunciarlos.
+  return fetch(APPS_SCRIPT_URL+'?action=estadoCobranza&paciente='+encodeURIComponent(nombre)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
     .then(function(r){return r.json();}).then(function(d){
       if(!d||!d.ok){ res.innerHTML='<div style="padding:30px;text-align:center;color:#c83c3c;font-size:13px">'+ccEsc((d&&d.error)||'No disponible. ¿Agregaste cobranza.gs y redeployaste?')+'</div>'; return; }
       _cobData=d; cobRender(d);
@@ -35262,7 +35422,8 @@ function segBuscar(){
   var box=document.getElementById('seg-sug'); if(box) box.style.display='none';
   var res=document.getElementById('seg-result'); res.innerHTML='<div style="padding:30px;text-align:center;color:var(--color-text-muted)">Cargando operaciones…</div>';
   var tok=encodeURIComponent(getToken());
-  fetch(APPS_SCRIPT_URL+'?action=estadoCobranza&paciente='+encodeURIComponent(nombre)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
+  // Devuelve la promesa: "Actualizar" espera los datos antes de anunciarlos.
+  return fetch(APPS_SCRIPT_URL+'?action=estadoCobranza&paciente='+encodeURIComponent(nombre)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
     .then(function(r){return r.json();}).then(function(d){ _segData=d; segRenderResult(d); _hfSetIdiomaFicha('seg-idioma',nombre,'en'); })
     .catch(function(e){ res.innerHTML='<div style="padding:24px;color:#c83c3c">Error de red: '+e.message+'</div>'; });
 }
@@ -35674,7 +35835,8 @@ function notaBuscar(){
   var box=document.getElementById('nota-sug'); if(box) box.style.display='none';
   var res=document.getElementById('nota-result'); res.innerHTML='<div style="padding:30px;text-align:center;color:var(--color-text-muted)">Cargando operaciones…</div>';
   var tok=encodeURIComponent(getToken());
-  fetch(APPS_SCRIPT_URL+'?action=estadoCobranza&paciente='+encodeURIComponent(nombre)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
+  // Devuelve la promesa: "Actualizar" espera los datos antes de anunciarlos.
+  return fetch(APPS_SCRIPT_URL+'?action=estadoCobranza&paciente='+encodeURIComponent(nombre)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
     .then(function(r){return r.json();}).then(function(d){ _notaData=d; notaRenderResult(d); _hfSetIdiomaFicha('nota-idioma',nombre,'es'); })
     .catch(function(e){ res.innerHTML='<div style="padding:24px;color:#c83c3c">Error de red: '+e.message+'</div>'; });
 }
@@ -35967,7 +36129,11 @@ var NOVEDADES=[
   { build:'2026.07.10', fecha:'10 jul 2026', area:'General', icon:'✍️',
     titulo:'Firma autógrafa en documentos',
     puntos:['Sube tu firma como imagen en Panel de Control → Reportes.','Marca en qué documentos «lleva firma autógrafa».','La firma no se corta al imprimir (se va completa a la página siguiente si no cabe).'],
-    comoUsar:['Panel de Control → Reportes → «Firma autógrafa» → sube tu imagen.','Activa «lleva firma» en los documentos que quieras.'] }
+    comoUsar:['Panel de Control → Reportes → «Firma autógrafa» → sube tu imagen.','Activa «lleva firma» en los documentos que quieras.'] },
+  { build:'2026.07.16', fecha:'16 jul 2026', area:'General', icon:'🔄',
+    titulo:'El botón «Actualizar» ahora sí actualiza lo que estás viendo',
+    puntos:['En Estado de Cuenta, con una paciente en pantalla, «Actualizar» vuelve a consultar a ESA paciente: antes se quedaba con los movimientos viejos.','Igual en Cobranza, Carta de Seguro y Nota / Recibo: se mantiene la paciente y se recarga.','Catálogo de productos y Comisiones ya vuelven a pedir datos al servidor (antes re-pintaban lo que tenían guardado).','La hora de «Actualizado» ya no miente: aparece cuando los datos de verdad llegaron, y si algo falla lo dice.'],
+    comoUsar:['Pulsa el botón 🔄 de la barra superior en la pantalla que estés viendo.','En Comisiones, si tienes el panel de reglas abierto editando, no se tocan tus cambios sin guardar.'] }
 ];
 /* ══ CONFIG DEL AVISO — qué se anuncia y a quién ════════════════════════════
    DOS CAPAS a propósito:
