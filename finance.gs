@@ -4990,6 +4990,20 @@ function updateIngreso(payload) {
     var opId = payload.opId;
     if (!opId) return {ok:false, error:'opId es requerido'};
 
+    // ── VENTA CANCELADA: NO SE EDITA ─────────────────────────────────────────
+    // Mismo guard que ya protege updateIngresoConBancos (:6071) y deleteIngreso (:6199).
+    // Aquí abajo se BORRAN y re-insertan las filas de la OP y se REVIVE la deuda en
+    // Cuentas_Cobrar (_cobRegistrarSaldoIngreso con el saldo del formulario, :5105) →
+    // sobre una venta ya cancelada y reembolsada eso la "des-cancelaría": volvería a
+    // cobrar en el P&L y a aparecer como adeudo del paciente.
+    // Hoy NO es alcanzable desde la UI (el front sólo manda updateIngresoConBancos, que
+    // sí tiene guard; no hay un solo emisor de action:'updateIngreso'), así que esto es
+    // defensa en profundidad contra un POST directo: el backend no debe depender de que
+    // el frontend se porte bien. Es barato y cierra la ruta.
+    if (typeof _ingOPCancelada === 'function' && _ingOPCancelada(sheet, opId))
+      return {ok:false, cancelada:true,
+              error:'La operación ' + opId + ' está cancelada: no se puede editar. Su registro de cancelación es histórico.'};
+
     // Encontrar y eliminar filas existentes de este OP
     var data = sheet.getDataRange().getValues();
     var rowsToDelete = [];
@@ -5182,7 +5196,24 @@ function abonarIngreso(body) {
       var rows = [], totalOP = 0, pagadoActual = 0, pacName = '', catName = '';
       for (var r = 1; r < data.length; r++) {
         if (String(data[r][iOp] || '').trim() !== op) continue;
-        var t = num(data[r][iTotal]), p = num(data[r][iPag]);
+        var t = num(data[r][iTotal]);
+        // ── MISMA DEFINICIÓN DE "PAGADO" QUE EL RESTO DEL ERP ────────────────────
+        // Celda Pagado VACÍA ⇒ línea histórica: se asume PAGADA POR COMPLETO.
+        // Celda CAPTURADA (incluido un 0 literal = venta a crédito) ⇒ se toma tal cual.
+        // Es la convención que ya usa el estado de cuenta (analisis.gs `_pagDef`) y la
+        // que el usuario ve en pantalla. Aquí se leía `num(celda)`, que aplana '' y 0 al
+        // mismo 0 → una línea en blanco se contaba como NO pagada.
+        // Eso hacía divergir este candado del saldo del front en un caso real: OP
+        // MULTI-LÍNEA + pago parcial + sin renglón vivo en Cuentas_Cobrar (histórico
+        // previo al registro). El front sumaba sólo las líneas parciales; aquí se sumaba
+        // además el total íntegro de cada línea en blanco → saldoEsperado nunca cuadraba
+        // → "El saldo cambió" en bucle y la OP quedaba IMPOSIBLE de cobrar.
+        // Unificar la definición (en vez de aflojar la tolerancia) mantiene intacto el
+        // candado anti doble-cobro: tras el primer abono las celdas quedan escritas, el
+        // saldo recalculado ya no coincide con el esperado y el segundo POST se rechaza
+        // igual que antes. No se relaja nada; se dejan de comparar dos cosas distintas.
+        var _rawP = data[r][iPag];
+        var p = (String(_rawP == null ? '' : _rawP).trim() === '') ? t : num(_rawP);
         rows.push({ rowNum: r + 1, total: t, pagado: p });
         totalOP += t; pagadoActual += p;
         if (!pacName && iPac > -1) pacName = String(data[r][iPac] || '');
@@ -6235,9 +6266,21 @@ function deleteIngreso(payload) {
       sheet.deleteRow(rowNums[d]);
     }
 
+    // Borrar la venta se lleva su CUENTA POR COBRAR auto-generada. Sin esto el renglón
+    // de deuda sobrevivía a la venta que lo creó: quedaba un adeudo HUÉRFANO en Cobranza,
+    // a nombre del paciente, con una OP que ya no existe en Ingresos — y nadie podía
+    // borrarlo desde Cobranza (borrarCuentaCobrar rechaza los renglones auto).
+    // Importa ahora más que antes: borrar la venta es la ruta que borrarCuentaCobrar
+    // RECOMIENDA para deshacer una venta a crédito capturada por error.
+    var _cxcDel = null;
+    try {
+      if (typeof _cobBorrarSaldoIngreso === 'function') _cxcDel = _cobBorrarSaldoIngreso(opId);
+    } catch (eCxc) { Logger.log('deleteIngreso CxCobrar: ' + eCxc.message); }
+
     try {
       logAudit(payload.usuario || 'sistema', 'Ingresos', 'Borrar', opId, 'Eliminado',
-        rowNums.length + ' lineas · $' + origPagado.toFixed(2), 'FP: ' + origFP);
+        rowNums.length + ' lineas · $' + origPagado.toFixed(2),
+        'FP: ' + origFP + (_cxcDel && _cxcDel.borrado ? ' | CxCobrar borrada' : ''));
     } catch(ae) {}
 
     try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch(e) {}

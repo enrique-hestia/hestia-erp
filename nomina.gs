@@ -130,16 +130,44 @@ function nominaCfgSave(body) {
 }
 
 // ── Libro propio de Nómina ─────────────────────────────────────────────
-// Cada módulo en su propio spreadsheet para escalar. Si NOMINA_SS_ID no está
-// configurado, cae al libro principal (SHEET_ID) para no romper nada antes de migrar.
-function _nomBook() {
+// Cada módulo en su propio spreadsheet para escalar. La nómina vive en NOMINA_SS_ID.
+//
+// ── POR QUÉ ESTO FALLA RUIDOSAMENTE (y antes no) ──────────────────────────
+// Antes: si la propiedad no estaba, o el openById fallaba (permisos, libro en la
+// papelera), se caía AL LIBRO PRINCIPAL en silencio. Ahí quedó la hoja 'Empleados'
+// huérfana que dejó la migración (copia, no mueve) → el ERP leía y escribía sobre
+// una hoja VACÍA: los 8 empleados "desaparecían", la nómina se veía en blanco y NO
+// había ningún error. Peor: _nomEmpSheet es append-safe, así que hasta le habría
+// creado las columnas, dejando DOS hojas plausibles y divergentes.
+// Ya mordió una vez: el usuario abrió el respaldo, lo vio vacío y creyó que la base
+// de empleados no existía.
+// Ahora: si el libro de nómina no se puede abrir, se AVIENTA el error. Nunca se
+// escribe nómina en SHEET_ID por accidente. Los callers viven dentro de try/catch
+// que devuelven {ok:false, error} → el mensaje llega íntegro a la pantalla.
+//
+// opts.permitirPrincipal = true SOLO para la migración (setupNominaBook), que
+// legítimamente necesita leer las hojas originales del libro principal.
+function _nomBook(opts) {
   var id = '';
   try { id = PropertiesService.getScriptProperties().getProperty('NOMINA_SS_ID') || ''; } catch (e) {}
-  if (id) { try { return SpreadsheetApp.openById(id); } catch (e) {} }
-  return SpreadsheetApp.openById(SHEET_ID);
+  if (id) {
+    try { return SpreadsheetApp.openById(id); }
+    catch (e) {
+      throw new Error('El libro de Nómina no se pudo abrir: ' + id + '. No se usará el libro principal '
+        + 'para no escribir datos en el lugar equivocado. Revisa que el libro exista (que no esté en la '
+        + 'papelera) y que la cuenta del script tenga acceso. Detalle: ' + e.message);
+    }
+  }
+  if (opts && opts.permitirPrincipal) return SpreadsheetApp.openById(SHEET_ID);
+  throw new Error('Nómina no está configurada: falta la propiedad NOMINA_SS_ID. Corre setupNominaBook() '
+    + 'una vez desde el editor de Apps Script para crear/enlazar el libro de Nómina. '
+    + 'NO se usará el libro principal: ahí sólo hay un respaldo vacío de la migración.');
 }
-// Crea el libro propio de Nómina y COPIA ahí las hojas existentes (las originales
-// quedan como respaldo en el libro principal). Correr una vez: setupNominaBook()
+// Crea el libro propio de Nómina y COPIA ahí las hojas existentes. Correr una vez:
+// setupNominaBook(). Es RE-EJECUTABLE (idempotente).
+// NO llama a _nomBook() para resolver el destino: abre/crea el libro por su cuenta,
+// así que sigue funcionando cuando la propiedad todavía NO existe (que es el caso
+// para el que fue escrita).
 function setupNominaBook() {
   try {
     var props = PropertiesService.getScriptProperties();
@@ -154,8 +182,38 @@ function setupNominaBook() {
     });
     var def = ss.getSheetByName('Hoja 1') || ss.getSheetByName('Sheet1') || ss.getSheetByName('Hoja1');
     if (def && ss.getSheets().length > 1) { try { ss.deleteSheet(def); } catch (e) {} }
-    return { ok: true, id: ss.getId(), url: ss.getUrl(), migradas: migradas };
+    var respaldos = _nomMarcarRespaldos(main, ss);
+    return { ok: true, id: ss.getId(), url: ss.getUrl(), migradas: migradas, respaldos: respaldos };
   } catch (ex) { return { ok: false, error: ex.message }; }
+}
+// Deja RASTRO del respaldo huérfano que la migración dejó en el libro principal.
+// Se RENOMBRA (no se borra: es el respaldo) y se le pone una nota en A1.
+//   · Renombrar = lo único que se ve en la tira de pestañas, que es exactamente
+//     donde el usuario se confundió al abrir 'Empleados' y verla vacía.
+//   · La nota va en A1 con setNote(): NO pisa el valor, así el respaldo queda intacto.
+// Sólo se marca si la copia YA existe en el libro de Nómina: jamás se rotula como
+// respaldo una hoja que sea la única fuente viva.
+function _nomMarcarRespaldos(main, nomSS) {
+  var out = [];
+  try {
+    var SUF = '_RESPALDO_NO_USAR';
+    [NOM_EMP_TAB, NOM_MESES_TAB, NOM_BONOS_TAB].forEach(function (tab) {
+      try {
+        if (!nomSS.getSheetByName(tab)) return;          // no hay copia viva → no tocar
+        var src = main.getSheetByName(tab);
+        if (!src) return;                                 // ya renombrada o nunca existió
+        src.setName(tab + SUF);
+        try {
+          src.getRange('A1').setNote('RESPALDO de la migración a libro propio de Nómina ('
+            + (new Date()).toISOString().substring(0, 10) + ').\n'
+            + 'La nómina VIVA está en el libro "Nómina — Hestia Fertility": ' + nomSS.getUrl() + '\n'
+            + 'Esta hoja NO la lee ni la escribe el ERP. Se conserva sólo como respaldo. No captures aquí.');
+        } catch (_n) {}
+        out.push(tab + SUF);
+      } catch (_t) {}
+    });
+  } catch (_e) {}
+  return out;
 }
 
 // ── Catálogo de Empleados (hoja "Empleados" en el libro de Nómina) ──────
@@ -187,8 +245,14 @@ function _nomEmpSheet() {
 function readEmpleados() {
   try {
     var sh = _nomEmpSheet();
+    // URL del libro REAL de donde salen estos empleados. Viaja al front para que el
+    // enlace "Abrir libro de Nómina" apunte SIEMPRE al libro vivo: hasta ahora el ID
+    // sólo se descubría corriendo setupNominaPeriodos() y leyendo la respuesta, y esa
+    // opacidad es lo que llevó a abrir el respaldo huérfano y creerlo la fuente.
+    var _libro = '';
+    try { _libro = sh.getParent().getUrl(); } catch (_u) {}
     var data = sh.getDataRange().getValues();
-    if (data.length < 2) return { ok: true, empleados: [] };
+    if (data.length < 2) return { ok: true, empleados: [], libro: _libro };
     var h = data[0], out = [];
     for (var i = 1; i < data.length; i++) {
       var o = {};
@@ -202,7 +266,7 @@ function readEmpleados() {
       out.push(o);
     }
     out.sort(function (a, b) { return String(a.Nombre || '').localeCompare(String(b.Nombre || '')); });
-    return { ok: true, empleados: out };
+    return { ok: true, empleados: out, libro: _libro };
   } catch (ex) { return { ok: false, error: ex.message }; }
 }
 function saveEmpleado(body) {

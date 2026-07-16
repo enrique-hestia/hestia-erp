@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.15.208 -->
+﻿<!-- app-build:2026.07.15.209 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -27736,12 +27736,39 @@ function _gfEnsureStyles(){
  * Lee CFDI de nómina emitidos por mes (backend nomina.gs) y desglosa por
  * empleado; catálogo de Empleados (CRUD) y configuración (ISN, CxP). */
 var _nomTab='captura', _nomAnio=null, _nomMes=null, _nomData=null, _nomEmpleados=null, _nomCfg=null, _nomExpanded={};
+// URL del libro VIVO de Nómina (la manda readEmpleados). Hace visible dónde viven de
+// verdad los empleados: antes el ID sólo se descubría corriendo setupNominaPeriodos()
+// y leyendo la respuesta, y esa opacidad llevó a abrir el respaldo vacío del libro
+// principal y concluir que la base de empleados no existía.
+var _nomLibroUrl='';
 var _nomEstado=null, _nomBonos=null; // estado de validación del mes + bonos capturados
 function _nomFmt(v){ return (typeof fmtMoney==='function') ? fmtMoney(Math.abs(Number(v)||0),'Egresos') : '$'+(Number(v)||0).toFixed(2); }
 function _nomMesNombre(m){ var M=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']; return M[(parseInt(m,10)||1)-1]||m; }
 function _nomPuede(){ return (typeof hasPermission==='function')?hasPermission('editar_egresos'):true; }
+/* Enlace discreto al libro VIVO de Nómina. Sólo se pinta si el backend mandó la URL
+ * (readEmpleados la toma del libro que de verdad acaba de leer, no de una constante):
+ * así el enlace no puede apuntar al libro equivocado. */
+function _nomLibroLink(){
+  if(!_nomLibroUrl) return '';
+  return '<a href="'+_cxpEsc(_nomLibroUrl)+'" target="_blank" rel="noopener"'
+    +' title="Abre la hoja de cálculo donde vive la nómina. Es el único libro que el ERP lee y escribe."'
+    +' style="font-size:11px;color:var(--color-text-muted,#9ca3af);text-decoration:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;padding:5px 10px;white-space:nowrap">↗ Abrir libro de Nómina</a>';
+}
 function _nomEscQ(s){ return _cxpEsc(String(s==null?'':s).replace(/'/g,"\\'")); }
 function _nomBackendBanner(err){
+  var e=String(err||'');
+  // El libro de Nómina no abre / no está configurado NO es "falta desplegar": mandar
+  // al usuario a redesplegar no arreglaría nada y esconde la causa real. El backend
+  // ahora falla ruidosamente en vez de caer al libro principal (donde sólo hay un
+  // respaldo vacío), así que aquí se dice exactamente qué pasó y qué correr.
+  if(/NOMINA_SS_ID|libro de N[oó]mina/i.test(e)){
+    return '<div style="background:rgba(217,119,6,.07);border:1px solid #fed7aa;border-radius:10px;padding:14px 16px;font-size:12px;color:#92400e;line-height:1.55">'
+      +'<b>⚠ La nómina no se pudo leer de su libro.</b><br>'
+      +'<b>No se está mostrando una nómina vacía por error</b>: el ERP se detuvo a propósito para no escribir los datos en el libro equivocado.<br>'
+      +'En Apps Script: <b>Ejecutar → setupNominaBook()</b> (crea o reenlaza el libro de Nómina y es seguro re-correrla). Si el libro existe, revisa que no esté en la papelera y que la cuenta del script tenga acceso.'
+      +'<br><span style="color:#6b7280;font-size:10.5px">Detalle: '+_cxpEsc(e)+'</span>'
+    +'</div>';
+  }
   return '<div style="background:rgba(220,38,38,.06);border:1px solid #fecaca;border-radius:10px;padding:14px 16px;font-size:12px;color:#991b1b;line-height:1.55">'
     +'<b>⚠ El módulo de nómina aún no está publicado en el servidor.</b><br>'
     +'En Apps Script: crea el archivo <b>nomina.gs</b> (pégalo del repo), confirma <b>core.gs</b> y <b>finance.gs</b>, y <b>Implementar → Administrar implementaciones → Versión nueva</b>.'
@@ -28039,6 +28066,7 @@ async function _nomCargarEmpleados(){
     var r=await fetch(APPS_SCRIPT_URL+'?action=empleados&token='+tok);
     var d=await r.json();
     _nomEmpleados=(d&&d.ok&&d.empleados)?d.empleados:[];
+    if(d&&d.ok&&d.libro) _nomLibroUrl=d.libro;
     _nomRenderEmpleados(d);
   }catch(e){ body.innerHTML='<div style="color:#dc2626;padding:20px">Error: '+_cxpEsc(e.message)+'</div>'; }
 }
@@ -28046,7 +28074,10 @@ function _nomRenderEmpleados(d){
   var body=document.getElementById('nom-body'); if(!body) return;
   if(d&&!d.ok){ body.innerHTML=_nomBackendBanner(d.error); return; }
   var puede=_nomPuede(), emps=_nomEmpleados||[], h='';
-  if(puede) h+='<div style="margin-bottom:12px"><button onclick="_nomEmpForm()" style="background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer">+ Nuevo empleado</button></div>';
+  h+='<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap">'
+    +(puede?'<button onclick="_nomEmpForm()" style="background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:700;cursor:pointer">+ Nuevo empleado</button>':'<span></span>')
+    +_nomLibroLink()
+  +'</div>';
   if(!emps.length){ h+='<div style="padding:20px;color:#9ca3af">Aún no hay empleados. Agrégalos aquí, o márcalos como "empleado" desde la configuración de Usuarios.</div>'; body.innerHTML=h; return; }
   h+='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
     +'<thead><tr style="text-align:left;color:#9ca3af;border-bottom:2px solid var(--color-divider,#e5e7eb);font-size:9.5px;text-transform:uppercase;font-weight:700">'
@@ -34559,9 +34590,17 @@ var NOVEDADES=[
   /* `destacada:true` = se anuncia con el aviso emergente (default del código; el admin lo
      puede cambiar desde Panel de Control → Novedades sin tocar el código).
      `perm:'clave'` = audiencia restringida a quien tenga ese permiso (vacío = todos). */
+  { build:'2026.07.15b', fecha:'15 jul 2026', area:'Nómina', icon:'🔒', destacada:true, perm:'editar_egresos',
+    titulo:'La nómina ya no puede aparecer vacía "por su cuenta" (y ya se ve dónde vive)',
+    puntos:['⚠ El problema: la nómina vive en su PROPIO libro. Si ese libro no se podía abrir (o se perdía su configuración), el ERP se cambiaba solo al libro principal —donde sólo quedó un RESPALDO VACÍO de la migración— y mostraba la nómina en blanco SIN NINGÚN ERROR. Los empleados parecían haber desaparecido. Ya pasó una vez.','Ahora es imposible que pase en silencio: si el libro de Nómina no abre, el ERP se DETIENE y te lo dice (con qué correr para arreglarlo), en vez de enseñarte una hoja vacía como si fuera la verdad. Nunca va a escribir la nómina en el libro equivocado.','El respaldo huérfano dejó de ser una trampa: se llama «Empleados_RESPALDO_NO_USAR» y trae una nota en A1 que apunta al libro bueno. No se borró: sigue siendo el respaldo.','Y ya no hay que adivinar dónde vive la nómina: en la pestaña Empleados hay un enlace «↗ Abrir libro de Nómina» que siempre apunta al libro real del que se acaban de leer los datos.'],
+    comoUsar:['Nómina → pestaña Empleados → «↗ Abrir libro de Nómina» (arriba a la derecha).','Si algún día ves el aviso naranja de que la nómina no se pudo leer: en Apps Script, Ejecutar → setupNominaBook(). Es seguro re-correrla.','Si abres el libro principal y ves «Empleados_RESPALDO_NO_USAR»: esa NO es la nómina. Es el respaldo. No captures ahí.'] },
+  { build:'2026.07.15b', fecha:'15 jul 2026', area:'Cobranza', icon:'↩️', destacada:true,
+    titulo:'Capturaste mal una cuenta por cobrar: ahora sí puedes deshacerla',
+    puntos:['⚠ El problema: si capturabas mal una cuenta por cobrar, quedabas atrapado. Borrarla no se podía (dejaría la venta cobrando sola en Ingresos) y el ERP te mandaba a «⊘ Cancelar», que casi nadie tiene permiso de usar. Resultado: una venta falsa sumando en el Estado de Resultados hasta que un administrador la quitara.','Ahora el ERP te manda al camino que de verdad corresponde, según si el dinero se movió: si la venta TODAVÍA NO tiene un peso cobrado, no hay nada que devolver — se borra completa en Ingresos → «🗑» y el adeudo se va con ella; si YA entró dinero, se sigue usando «⊘ Cancelar», que lo reversa en bancos y deja el registro para devolvérselo a la paciente.','No se aflojó ningún permiso: cancelar (que mueve dinero hacia afuera) sigue pidiendo exactamente lo mismo que antes. Lo que cambió es que dejó de esconderse la salida que ya existía.','Y el mensaje ahora te dice a QUIÉN pedirle ayuda y qué permiso, en vez de mandarte a un botón que no te aparece.','De paso: borrar una venta ya se lleva su cuenta por cobrar. Antes el adeudo sobrevivía a la venta y quedaba un saldo huérfano que nadie podía quitar.'],
+    comoUsar:['Cobranza → el saldo mal capturado → «🗑». El ERP te dirá qué camino te toca.','Si aún no se ha cobrado nada: Ingresos → busca la operación → «🗑». Se va todo junto.','Si ya te pagaron algo y hay que devolverlo: Ingresos → la operación → «⊘ Cancelar» (si no te aparece el botón, pídeselo al administrador o al director).'] },
   { build:'2026.07.15', fecha:'15 jul 2026', area:'Cobranza', icon:'📥', destacada:true,
     titulo:'Cuenta por cobrar: ya se registra sola como venta (deja de capturarla dos veces)',
-    puntos:['El problema: al abonar una cuenta por cobrar el dinero SÍ llegaba a bancos, pero el ingreso NO llegaba a Ingresos. O lo capturabas a mano —y quedaba DUPLICADO al cobrarlo— o no lo capturabas y el ingreso nunca contaba en el Estado de Resultados.','La causa estaba en el ALTA, no en el cobro: «+ Cuenta por cobrar» creaba la DEUDA pero nunca la VENTA. Al cobrar ya era imposible adivinar si esa venta existía o no.','Ahora «+ Cuenta por cobrar» es lo que siempre quiso ser: VENDER A CRÉDITO. Registra la venta sola en Ingresos (con la fecha del cargo y pagado en $0) y de esa venta nace la cuenta por cobrar. Un solo paso.','⚠ LO ÚNICO QUE TIENES QUE CAMBIAR: ya NO la captures también en Ingresos. Si lo haces, ahora sí la duplicas tú. Al cobrarla no hay nada que capturar: el ingreso ya estaba contado.','El ingreso cuenta en el mes en que VENDISTE, no en el que cobres (devengado). Vender a crédito no mueve dinero: el alta no toca ningún banco — el banco se toca al cobrar.','Se cobra con el MISMO botón «Cobrar / Abonar» de siempre, con el mismo motor que cualquier venta: sube lo pagado, manda el dinero al banco por forma de pago y cierra el saldo. Los abonos parciales funcionan igual.','En agencias (REPROVIDA) la deuda queda a nombre de la AGENCIA, como debe ser — y el nombre de cada paciente real se conserva por partida y en las observaciones de la venta.','La fecha del cargo debe ser del año en curso (ahí se escribe la venta). Un cargo de otro año se rechaza y te explica por qué, en vez de esconderlo en el libro equivocado.','Ya no se pide «OP relacionada»: la venta genera su propio folio.','Los saldos que manda una venta ya no se editan ni se borran desde Cobranza (borrarlos dejaría la venta cobrando sola). Se corrigen en Ingresos → editar la operación, o se deshacen con «⊘ Cancelar», que cierra el saldo solo.','Doble clic más seguro: si el saldo ya cambió, el cobro se rechaza en vez de mandar el dinero al banco dos veces. Y si se cae la red, ya no te ofrece «Reintentar» a ciegas: recarga y te pide verificar.'],
+    puntos:['El problema: al abonar una cuenta por cobrar el dinero SÍ llegaba a bancos, pero el ingreso NO llegaba a Ingresos. O lo capturabas a mano —y quedaba DUPLICADO al cobrarlo— o no lo capturabas y el ingreso nunca contaba en el Estado de Resultados.','La causa estaba en el ALTA, no en el cobro: «+ Cuenta por cobrar» creaba la DEUDA pero nunca la VENTA. Al cobrar ya era imposible adivinar si esa venta existía o no.','Ahora «+ Cuenta por cobrar» es lo que siempre quiso ser: VENDER A CRÉDITO. Registra la venta sola en Ingresos (con la fecha del cargo y pagado en $0) y de esa venta nace la cuenta por cobrar. Un solo paso.','⚠ LO ÚNICO QUE TIENES QUE CAMBIAR: ya NO la captures también en Ingresos. Si lo haces, ahora sí la duplicas tú. Al cobrarla no hay nada que capturar: el ingreso ya estaba contado.','El ingreso cuenta en el mes en que VENDISTE, no en el que cobres (devengado). Vender a crédito no mueve dinero: el alta no toca ningún banco — el banco se toca al cobrar.','Se cobra con el MISMO botón «Cobrar / Abonar» de siempre, con el mismo motor que cualquier venta: sube lo pagado, manda el dinero al banco por forma de pago y cierra el saldo. Los abonos parciales funcionan igual.','En agencias (REPROVIDA) la deuda queda a nombre de la AGENCIA, como debe ser — y el nombre de cada paciente real se conserva por partida y en las observaciones de la venta.','La fecha del cargo debe ser del año en curso (ahí se escribe la venta). Un cargo de otro año se rechaza y te explica por qué, en vez de esconderlo en el libro equivocado.','Ya no se pide «OP relacionada»: la venta genera su propio folio.','Los saldos que manda una venta ya no se editan ni se borran desde Cobranza (borrarlos dejaría la venta cobrando sola). Se corrigen en Ingresos → editar la operación. Para deshacerlos, el ERP te manda al camino que corresponde: si la venta TODAVÍA NO tiene un peso cobrado (la capturaste por error), se borra completa en Ingresos → «🗑» y el adeudo se va con ella; si YA entró dinero, se deshace con «⊘ Cancelar», que lo reversa en bancos y deja el registro para devolvérselo a la paciente.','Doble clic más seguro: si el saldo ya cambió, el cobro se rechaza en vez de mandar el dinero al banco dos veces. Y si se cae la red, ya no te ofrece «Reintentar» a ciegas: recarga y te pide verificar.'],
     comoUsar:['Cobranza → Cuentas por Cobrar → «+ Cuenta por cobrar».','Captura el cliente (en agencias, la agencia), las partidas y la fecha. Registra.','Listo: la venta YA quedó en Ingresos y el adeudo en la lista. No captures nada más.','Cuando te paguen: «Cobrar / Abonar» como siempre.','⚠ Las cuentas por cobrar de ANTES de este cambio no tienen venta. No las toques todavía: el administrador tiene un reporte para revisarlas una por una y decidir.'] },
   { build:'2026.07.16', fecha:'16 jul 2026', area:'Operación', icon:'🌐', destacada:true,
     titulo:'Documentos del paciente en otro idioma — ahora sí, completos',
@@ -36601,7 +36640,7 @@ async function _novCfgGuardar(){
       { k:'+ Cuenta por cobrar', d:'Vende a crédito: registra la venta en Ingresos (fecha del cargo, pagado $0) y de ahí nace el adeudo. No la captures también en Ingresos. Avisa si ese cliente ya tiene saldos.' },
       { k:'Cobrar / Abonar', d:'Cobra el saldo en un solo paso: sube lo pagado, manda el dinero al banco según la forma de pago y quita el saldo de la lista al liquidarlo. En los saldos de venta puedes aplicar el crédito a favor del paciente. Requiere el permiso «editar_ingresos».' },
       { k:'Abonar (suscripciones)', d:'Registra el cobro de una suscripción: marca los periodos pagados del más viejo al más nuevo (FIFO) y crea el ingreso real.' },
-      { k:'Editar', d:'Abre el editor de partidas por bloque (paciente + fecha + productos). Solo en cargos capturados a mano: los saldos que manda una venta se corrigen en Ingresos (editar la operación) o se deshacen con «⊘ Cancelar».' },
+      { k:'Editar', d:'Abre el editor de partidas por bloque (paciente + fecha + productos). Solo en cargos capturados a mano: los saldos que manda una venta se corrigen en Ingresos (editar la operación). Para deshacerlos: si aún no se cobra nada, se borra la venta en Ingresos → «🗑»; si ya entró dinero, «⊘ Cancelar».' },
       { k:'+ Otro paciente / fecha (en el editor)', d:'Agrega otro bloque de paciente a la misma nota.' },
       { k:'Toggle Tipo (Hestia / Externo)', d:'Define si aplica el primer año gratis (solo Hestia).' },
       { k:'Toggle Plan (Anual / Mensual)', d:'Define cómo se cobra la suscripción.' },

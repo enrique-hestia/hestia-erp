@@ -280,6 +280,15 @@ function _cobReadCargos() {  // registro manual de saldos iniciales / cargos a c
 // saldo baja a 0 (ya se pagó completo), el renglón se cierra (Estatus 'Pagado',
 // Monto 0) sin borrarlo → queda como histórico y sale de Cuentas por Cobrar.
 // 'monto' aquí es el SALDO (TotalPagar − Pagado) de la OP, no el total.
+//
+// DEVUELVE lo que de verdad hizo (antes no devolvía nada y el caller no podía saberlo):
+//   { ok:true, accion:'actualizado'|'cerrado'|'creado'|'sin-cambio', row:<fila|0> }
+//   { ok:false, error:'…' }
+// 'sin-cambio' = no había renglón auto de esta OP y el saldo era 0 → NO HAY NADA que
+// crear ni que cerrar. Es el caso que hacía que _canCerrarCxCobrar reportara éxito sin
+// cerrar nada. Sigue sin tumbar la venta: los errores se atrapan y se reportan, no se
+// avientan (todos los callers la llaman dentro de try/catch y descartan el resultado,
+// así que devolver un objeto es retrocompatible).
 function _cobRegistrarSaldoIngreso(op, paciente, categoria, monto, fecha) {
   try {
     op = String(op || '').trim();
@@ -309,12 +318,12 @@ function _cobRegistrarSaldoIngreso(op, paciente, categoria, monto, fecha) {
         sh.getRange(foundRow, iConc + 1).setValue('Saldo pendiente de OP ' + op);
         if (paciente) sh.getRange(foundRow, iPac + 1).setValue(String(paciente).trim());
         if (categoria) sh.getRange(foundRow, iCat + 1).setValue(String(categoria));
-      } else {
-        // Sin saldo → cerrar (no borrar): sale de Cuentas por Cobrar, queda traza.
-        sh.getRange(foundRow, iMonto + 1).setValue(0);
-        sh.getRange(foundRow, iEst + 1).setValue('Pagado');
+        return { ok: true, accion: 'actualizado', row: foundRow };
       }
-      return;
+      // Sin saldo → cerrar (no borrar): sale de Cuentas por Cobrar, queda traza.
+      sh.getRange(foundRow, iMonto + 1).setValue(0);
+      sh.getRange(foundRow, iEst + 1).setValue('Pagado');
+      return { ok: true, accion: 'cerrado', row: foundRow };
     }
     // No existe todavía → solo se crea si de verdad hay saldo.
     if (saldo > 0.01) {
@@ -323,8 +332,12 @@ function _cobRegistrarSaldoIngreso(op, paciente, categoria, monto, fecha) {
         op, String(paciente || '').trim(), String(categoria || ''),
         'Saldo pendiente de OP ' + op, saldo, 'Pendiente', 'auto-ingreso', '', new Date()
       ]);
+      return { ok: true, accion: 'creado', row: sh.getLastRow() };
     }
-  } catch (e) {}
+    // Ni renglón que tocar ni saldo que registrar: NO SE HIZO NADA. Se dice, no se
+    // finge (un 'cerrado' aquí es lo que hacía mentir a la pantalla al cancelar).
+    return { ok: true, accion: 'sin-cambio', row: 0 };
+  } catch (e) { return { ok: false, error: e.message }; }
 }
 // Editar / borrar una cuenta por cobrar. Permisos AMARRADOS a los de Cuentas por
 // Pagar (editar_egresos / borrar_egresos) para no crear permisos nuevos.
@@ -369,15 +382,90 @@ function borrarCuentaCobrar(body) {
     if (!sh || rn > sh.getLastRow()) return { ok: false, error: 'Cuenta por cobrar no encontrada' };
     // ── Borrar el renglón de una VENTA a crédito dejaría el REVENUE huérfano: la venta
     // seguiría viva en Ingresos (sumando al P&L) sin nadie a quién cobrarle, y volver a
-    // capturar el cargo duplicaría el ingreso. Deshacer una venta es CANCELARLA (queda
-    // registro del motivo y su saldo se cierra solo), no borrar su deuda. ──
+    // capturar el cargo duplicaría el ingreso. Deshacer una venta no es borrar su deuda:
+    // se deshace EN LA VENTA. Esto NO cambia (el bloqueo es correcto) — lo que cambia es
+    // A DÓNDE se manda al usuario, que hasta ahora era siempre «⊘ Cancelar».
+    //
+    // ── POR QUÉ SE RUTEA POR "¿YA SE COBRÓ ALGO?" ────────────────────────────────
+    // Mandar todo a «⊘ Cancelar» dejaba un CALLEJÓN SIN SALIDA: cancelar_ingresos es un
+    // permiso que POR DISEÑO ningún rol trae (cancelacion.gs), así que quien capturaba mal
+    // una cuenta por cobrar no podía ni borrarla ni cancelarla, y el revenue falso se
+    // quedaba en el P&L hasta que interviniera un admin. Y el alta ni siquiera pide
+    // permiso (saveIngreso no tiene gate): cualquiera podía crear lo que nadie podía
+    // deshacer.
+    // El criterio correcto es si EL DINERO SE MOVIÓ:
+    //   · Pagado = 0 → no se cobró un peso, no hay banco que reversar, no hay reembolso
+    //     que hacer. Es un TYPEO, no una devolución. Se deshace BORRANDO la venta
+    //     (borrar_ingresos), permiso que ya existe y que los roles sí pueden traer.
+    //   · Pagado > 0 → entró dinero: deshacerla implica REVERSARLO y devolvérselo a la
+    //     paciente. Eso es cancelar, y sigue exigiendo cancelar_ingresos.
+    // No se abre ningún boquete: cancelar_ingresos sigue guardando TODOS los casos en que
+    // hubo dinero, y borrar_ingresos ya permitía borrar ventas (con reverso de banco).
+    // No se concede un solo poder nuevo; se deja de esconder la salida que ya existía.
     var _au = _cobRowAuto(sh, rn);
-    if (_au.auto)
-      return { ok: false, version: COBRANZA_VER, op: _au.op,
-        error: 'Este saldo viene de la venta ' + _au.op + ': borrarlo aquí dejaría la venta cobrando en Ingresos sin cuenta por cobrar. Si la venta no va, cancélala: Ingresos → operación ' + _au.op + ' → «⊘ Cancelar» (pide motivo y cierra el saldo solo).' };
+    if (_au.auto) {
+      var _pg = _cobOPPagado(_au.op);
+      if (!_pg.determinado)
+        return { ok: false, version: COBRANZA_VER, op: _au.op, ruta: 'revisar',
+          error: 'Este saldo viene de la venta ' + _au.op + ', pero esa venta no está en el libro de Ingresos de este año '
+            + '(puede ser de un año anterior). No se borra desde aquí: dejaría la venta cobrando en Ingresos sin cuenta por cobrar, '
+            + 'y no puedo verificar si ya tiene cobros. Pídele al administrador que la revise en el libro del año que corresponda.' };
+      if (_pg.pagado > 0.01)
+        return { ok: false, version: COBRANZA_VER, op: _au.op, ruta: 'cancelar',
+          error: 'Este saldo viene de la venta ' + _au.op + ', que ya tiene $' + _pg.pagado.toFixed(2)
+            + ' cobrados: borrarlo aquí dejaría la venta cobrando en Ingresos sin cuenta por cobrar. '
+            + 'Como ya entró dinero, deshacerla es CANCELARLA (reversa el cobro en bancos y deja el registro para devolvérselo a la paciente): '
+            + 'Ingresos → operación ' + _au.op + ' → «⊘ Cancelar». Si no te aparece ese botón, pídele al administrador '
+            + '(o al director) que la cancele él, o que te otorgue el permiso "cancelar_ingresos" en Panel de Control → Roles.' };
+      return { ok: false, version: COBRANZA_VER, op: _au.op, ruta: 'borrar',
+        error: 'Este saldo viene de la venta a crédito ' + _au.op + ': borrarlo aquí dejaría la venta cobrando en Ingresos sin cuenta por cobrar. '
+          + 'Como todavía NO se ha cobrado nada de esa venta, no hay dinero que devolver: si la capturaste por error, '
+          + 'bórrala completa en Ingresos → operación ' + _au.op + ' → «🗑» y el adeudo se va con ella. '
+          + 'Si no te aparece ese botón, pídele al administrador el permiso "borrar_ingresos" en Panel de Control → Roles.' };
+    }
     sh.deleteRow(rn);
     return { ok: true, version: COBRANZA_VER, rowNum: rn };
   } catch (ex) { return { ok: false, error: ex.message, version: COBRANZA_VER }; }
+}
+/* ¿Cuánto se ha COBRADO ya de la venta <op>? Decide la ruta para deshacerla:
+ * pagado 0 → typeo, se borra (borrar_ingresos); pagado > 0 → entró dinero, se cancela
+ * (cancelar_ingresos, que además lo reversa en bancos).
+ * Misma definición de "Pagado" que abonarIngreso y el estado de cuenta: celda VACÍA ⇒
+ * línea asumida PAGADA POR COMPLETO (histórico); celda CAPTURADA (incluido el 0 de una
+ * venta a crédito) ⇒ literal. Con la lectura ingenua `num(celda)`, una venta histórica
+ * en blanco se vería como "pagado 0" y mandaría a borrar algo ya cobrado.
+ *
+ * `determinado:false` = NO SE PUDO SABER, que NO es lo mismo que "pagado 0". La OP puede
+ * no estar en el libro del año en curso (INGRESOS_SS_ID es de un año; hay un libro por
+ * año) o la hoja puede no leerse. En ese caso NO se afirma nada y el caller manda a
+ * revisión humana en vez de adivinar una ruta. */
+function _cobOPPagado(op) {
+  try {
+    op = String(op || '').trim();
+    if (!op) return { determinado: false, total: 0, pagado: 0 };
+    var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var sh = ss.getSheetByName(BD_INGRESOS_TAB);
+    if (!sh) return { determinado: false, total: 0, pagado: 0 };
+    var data = sh.getDataRange().getValues();
+    var H = (data[0] || []).map(function (x) { return _cobLower(x); });
+    var iOp = H.indexOf('op'); if (iOp < 0) iOp = 0;
+    var iTot = H.indexOf('totalpagar'); if (iTot < 0) iTot = H.indexOf('total');
+    var iPag = H.indexOf('pagado');
+    if (iPag < 0) return { determinado: false, total: 0, pagado: 0 };
+    var total = 0, pagado = 0, existe = false;
+    for (var r = 1; r < data.length; r++) {
+      if (String(data[r][iOp] || '').trim() !== op) continue;
+      existe = true;
+      var t = _cobNum(iTot > -1 ? data[r][iTot] : 0);
+      var raw = data[r][iPag];
+      total += t;
+      pagado += (String(raw == null ? '' : raw).trim() === '') ? t : _cobNum(raw);
+    }
+    // Sin filas en ESTE libro: la venta puede vivir en el libro de otro año. No se
+    // concluye "no se ha cobrado nada" a partir de no haberla encontrado.
+    if (!existe) return { determinado: false, total: 0, pagado: 0 };
+    return { determinado: true, total: total, pagado: pagado };
+  } catch (e) { return { determinado: false, total: 0, pagado: 0 }; }
 }
 /* ¿El renglón <rn> de Cuentas_Cobrar lo manda una venta? (Nota 'auto-ingreso' + OP —
  * mismo criterio que _cobBuildSaldos para decidir auto:true, y que abonarCargo para
@@ -1305,6 +1393,31 @@ function _cobFindAutoRow(sh, op) {
         String(vals[r][iNota] || '').toLowerCase().indexOf('auto-ingreso') > -1) return r + 1;
   }
   return -1;
+}
+/* Borra el renglón auto-generado de deuda de la OP <op>. Lo llama deleteIngreso
+ * (finance.gs) cuando la VENTA se borra por completo.
+ *
+ * ¿Por qué BORRAR y no cerrar en 0 como hace la cancelación? Porque son cosas distintas:
+ *   · CANCELAR conserva la venta como registro histórico (Cancelada=true, con motivo) →
+ *     su deuda se cierra y se re-etiqueta 'Cancelado': queda traza de que existió.
+ *   · BORRAR elimina la venta del libro: no queda nada de qué ser deuda. Dejar el renglón
+ *     (aunque fuera en 0) sería traza de una venta que ya no existe, y en Cuentas por
+ *     Cobrar aparecería un adeudo HUÉRFANO con una OP inexistente — justo lo que
+ *     auditarCargosSinVenta tiene que salir a cazar después.
+ * Sólo toca renglones con Nota 'auto-ingreso' (los que manda la venta). Un cargo
+ * capturado a mano NO se borra: no nació de esta venta y no le toca a este flujo.
+ * Devuelve { ok, borrado:bool, row } y NUNCA avienta: borrar el ingreso ya ocurrió y no
+ * puede tumbarse por esto. */
+function _cobBorrarSaldoIngreso(op) {
+  try {
+    op = String(op || '').trim();
+    if (!op) return { ok: false, borrado: false, error: 'OP vacía' };
+    var sh = _cobEnsureCargos();
+    var rn = _cobFindAutoRow(sh, op);
+    if (rn < 2) return { ok: true, borrado: false, row: 0 };   // no había deuda auto: nada que hacer
+    sh.deleteRow(rn);
+    return { ok: true, borrado: true, row: rn };
+  } catch (e) { return { ok: false, borrado: false, error: e.message }; }
 }
 // ¿Se registró hace <ventanaSeg> una cuenta por cobrar idéntica? (anti doble-alta)
 function _cobCargoDuplicadoReciente(paciente, fecha, monto, ventanaSeg) {

@@ -126,7 +126,16 @@ function _canCerrarCxCobrar(op, paciente, categoria, fecha) {
   try {
     if (typeof _cobRegistrarSaldoIngreso !== 'function') return { cerrada: false, motivo: 'cobranza.gs no disponible' };
     // saldo 0 → la fila auto-generada queda en MontoCargo 0 y sale de Cuentas por Cobrar.
-    _cobRegistrarSaldoIngreso(op, paciente, categoria, 0, fecha);
+    // El upsert AVISA si no encontró renglón auto de esta OP ('sin-cambio'): entonces no
+    // cerró nada y decir lo contrario sería mentir. Pasa con un cargo legacy cuya OP se
+    // llenó a mano (sin la Nota 'auto-ingreso' que el upsert usa para localizarlo), y con
+    // la venta de contado que nunca tuvo deuda. Se reporta tal cual y el caller decide.
+    var _up = _cobRegistrarSaldoIngreso(op, paciente, categoria, 0, fecha);
+    if (_up && _up.ok === false)
+      return { cerrada: false, motivo: 'no se pudo cerrar la cuenta por cobrar: ' + (_up.error || 'error') };
+    if (_up && _up.accion === 'sin-cambio')
+      return { cerrada: false, motivo: 'la venta no tenía cuenta por cobrar auto-generada que cerrar '
+        + '(venta de contado, o cargo capturado a mano sin la marca auto-ingreso: revísalo en Cobranza)' };
     // Re-etiquetar el estatus: 'Pagado' (lo que pone el upsert) mentiría en el histórico.
     try {
       var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
@@ -397,7 +406,7 @@ function cancelarVenta(body) {
           + (opBanco ? ' | op. bancaria: ' + opBanco : '')
           + (ev.url ? ' | evidencia: ' + ev.url : ' | sin evidencia')
           + ' | ' + rowNums.length + ' lineas'
-          + (cxc.cerrada ? ' | CxCobrar cerrada' : '')
+          + (cxc.cerrada ? ' | CxCobrar cerrada' : ' | CxCobrar NO cerrada: ' + (cxc.motivo || 'sin motivo'))
           + (bancos.movimientos.length
               ? ' | reverso banco: ' + bancos.movimientos.map(function (m) { return m.banco; }).join(',')
               : ' | sin reverso de banco'));
@@ -405,7 +414,10 @@ function cancelarVenta(body) {
 
       return {
         ok: true, op: op, version: CANCEL_VER, lineas: rowNums.length,
-        cancelacion: exp, cxCobrarCerrada: cxc.cerrada,
+        // cxCobrarCerrada viaja SIN maquillar: false + motivo cuando no se cerró nada.
+        // La cancelación en sí es válida igual (la venta ya quedó marcada y el banco
+        // reversado); lo que no se puede es afirmar que se cerró una deuda que no se tocó.
+        cancelacion: exp, cxCobrarCerrada: cxc.cerrada, cxCobrarMotivo: cxc.motivo || '',
         evidenciaError: ev.error || '',
         bancos: bancos.movimientos, bancosError: bancos.error || '',
         productos: productos
