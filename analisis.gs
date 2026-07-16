@@ -683,6 +683,23 @@ function readAnalisisRentabilidad() {
    Lee BD_Ingresos de todos los años disponibles y filtra por nombre
    ============================================================== */
 
+/* Cantidad de una línea de BD_Ingresos, o null si NO se sabe.
+   Devuelve null —nunca un 1 de relleno— en los tres casos en que la hoja no nos
+   dice la cantidad: la columna no existe, la celda está vacía (filas históricas
+   previas a que se capturara Cantidad) o el contenido no es un número. El
+   documento de la paciente imprime "—" en esos casos: no saber cuántas unidades
+   fueron es un hecho, e imprimir "1" para taparlo es inventar una venta distinta
+   de la que ocurrió. saveIngreso (finance.gs) siempre escribe una cantidad real,
+   así que en la práctica esto solo afecta a filas anteriores al ERP.
+   El 0 es un valor legítimo y se respeta: solo se descarta lo no numérico. */
+function _anCantCelda(iCant, row) {
+  if (iCant < 0) return null;
+  var raw = row[iCant];
+  if (raw == null || String(raw).trim() === '') return null;
+  var n = (typeof raw === 'number') ? raw : parseFloat(String(raw).replace(/[,\s]/g, ''));
+  return isFinite(n) ? n : null;
+}
+
 function readEstadoCuentaPaciente(pacienteNombre) {
   try {
     if (!pacienteNombre) return { ok: false, error: 'Nombre de paciente requerido' };
@@ -789,7 +806,15 @@ function readEstadoCuentaPaciente(pacienteNombre) {
         cat:      String(row[iCat]  || '').trim(),
         producto: String(row[iProd] || '').trim(),
         desc:     iDesc >= 0 ? String(row[iDesc] || '').trim() : '',
-        cant:     iCant >= 0 ? (parseFloat(String(row[iCant]||'1'))||1) : 1,
+        // La cantidad se reporta TAL CUAL o no se reporta. Antes esta línea decía
+        // `iCant >= 0 ? (parseFloat(String(row[iCant]||'1'))||1) : 1` — y ese `||'1'`
+        // convertía en un 1 tres cosas distintas: que la hoja no tenga la columna,
+        // que la celda esté vacía (filas históricas anteriores a la captura de
+        // Cantidad) y que traiga basura no numérica. Mientras nadie pintaba la
+        // cantidad daba igual; en cuanto sale impresa en el estado de cuenta de una
+        // paciente, ese 1 inventado es una afirmación falsa sobre lo que se le
+        // vendió. Ahora: null = "no lo sé", y el documento imprime "—".
+        cant:     _anCantCelda(iCant, row),
         total:    total,
         pagado:   pagadoRow,
         saldo:    saldoRow,
@@ -873,6 +898,12 @@ function readEstadoCuentaPaciente(pacienteNombre) {
       totalPagado: totalPagado,
       saldoNeto: saldoNeto,
       totalMovimientos: movimientos.length,
+      // Bandera de contrato, no de datos: le dice al frontend que este backend ya
+      // distingue "cantidad 1" de "cantidad desconocida" (ver _anCantCelda). Un
+      // backend viejo no la manda, y entonces el estado de cuenta OMITE la columna
+      // de cantidad en vez de imprimir el 1 inventado que mandaba antes. Preferimos
+      // un documento sin la columna a un documento con un dato falso.
+      cantFiable: true,
       movimientos: movimientos,
       porCategoria: porCategoria,
       porAnio: porAnio,

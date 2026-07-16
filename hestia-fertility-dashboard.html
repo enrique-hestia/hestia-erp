@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.219 -->
+﻿<!-- app-build:2026.07.16.220 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -5066,14 +5066,32 @@ function _ingCancelBuildData(op, info, lang) {
   // catálogo. Se listan por separado (una fila por producto) en vez de un
   // "a, b, c" pegado: así el embudo puede traducir cada uno y sabemos cuál falta.
   var prods = (op.productos && op.productos.length)
-    ? op.productos.map(function (p) { return String(p.producto || '').trim(); }).filter(Boolean)
+    ? op.productos.map(function (p) { return { nom: String(p.producto || '').trim(), cant: Number(p.cantidad) }; })
+                  .filter(function (p) { return p.nom; })
     : [];
 
   var rows = [], conceptos = [];
   rows.push([T.operacion, op.id || '—']);                        conceptos.push(null);
   if (prods.length) {
     prods.forEach(function (p, i) {
-      rows.push([i === 0 ? T.descripcion : '', p]);              conceptos.push(p);
+      // ── Por qué la cantidad va PEGADA al nombre y no en su propia columna ──────
+      // Este documento NO es una tabla de partidas: es una lista llave/valor
+      // (Operación, Descripción, Fecha, Medio de pago…). Una columna de cantidad
+      // dejaría una celda vacía en cada fila de metadatos, y una de subtotales
+      // abriría un agujero peor: Σ subtotales es el BRUTO de la operación, mientras
+      // que el importe de este comprobante es lo que se le devuelve a la paciente
+      // (op.pagado, y además editable a mano en ing-can-importe). En cualquier
+      // cancelación con pago parcial o devolución negociada el papel se
+      // contradiría solo delante de ella: partidas que suman 80,000 y un "Importe a
+      // devolver" de 50,000, sin explicación. Así se ve la cantidad sin convertir
+      // un acta de cancelación en una factura con dos totales que no cuadran.
+      //
+      // "× N" solo cuando N > 1: un "× 1" no aporta nada, y si la cantidad no es un
+      // número (dato viejo) no se inventa ninguna. El nombre exacto sigue yendo en
+      // `conceptos`, así que el embudo lo resuelve contra el catálogo y traduce
+      // conservando el "× N" como adorno (_hfTraduceData).
+      var cel = p.nom + ((isFinite(p.cant) && p.cant > 1) ? ' × ' + p.cant : '');
+      rows.push([i === 0 ? T.descripcion : '', cel]);            conceptos.push(p.nom);
     });
   } else {
     rows.push([T.descripcion, T.servicioContratado]); conceptos.push(null);
@@ -5096,6 +5114,13 @@ function _ingCancelBuildData(op, info, lang) {
     rowConcepts: conceptos,
     totalLabel: T.importeDevolver,
     totalValue: _f(imp),
+    // UN solo importe, el de la devolución — sin comisiones ni netos, que ni
+    // siquiera se cargan aquí (_ingOpById solo copia producto/cantidad/totalPagar).
+    // Con 2 columnas, el histórico "dos desde el final" daba 0, y como la celda 0
+    // la ocupa la etiqueta, el valor NO SE IMPRIMÍA en las 6 plantillas que pintan
+    // el total como fila (ejecutivo, contable, clínica, bicolor, certificado,
+    // moderno): salía "Importe a devolver" seguido de una celda vacía.
+    totalCol: 1,
     nota: notaFn(_f(imp))
   };
 }
@@ -8668,9 +8693,18 @@ async function proveedorReporte(){
         {label:'Último pago',value:(t.ultimoPago||'—').substring(0,10),sub:t.ultimaFormaPago||'—'}
       ],
       tendencia:d.tendencia||[],
-      cols:['Fecha','Concepto','Tipo','Subtipo','Monto','Forma pago'],
+      // SIN columna de cantidad, y no es un olvido: la hoja Egresos no la lleva
+      // (readEgresosData, finance.gs:~2644, no mapea ninguna columna de cantidad),
+      // así que aquí no hay cantidad que mostrar. Un egreso registra el monto
+      // pagado, no cantidad × precio; poner "1" sería inventarlo. Si algún día la
+      // hoja capture cantidad, este es el sitio.
+      // Alineación declarada: antes "Forma pago" (texto) salía a la derecha por ser
+      // la última columna, y el Monto acertaba de pura casualidad.
+      cols:['Fecha','Concepto','Tipo','Subtipo',{label:'Monto',r:true},'Forma pago'],
       rows:d.rows.map(function(r){return[(r.fecha||'—').substring(0,10),_escH(r.concepto||'—'),r.tipo||'—',r.subtipo||'—',_tplFmt(r.monto,2),r.formaPago||'—'];}),
-      totalLabel:'Total general',totalValue:_tplFmt(t.total,2)};
+      // t.total = Σ monto de estas mismas filas (finance.gs:~2916), así que el gran
+      // total sí es la suma de la columna Monto.
+      totalLabel:'Total general',totalValue:_tplFmt(t.total,2),totalCol:4};
     window._provRepData=pd;
     _renderProvReporte(d.rows,pd);
   } catch(err){
@@ -19649,10 +19683,15 @@ function ocImprimir(i){
       {value: o.estadoRecepcion || '—', label: 'Recepción'},
       {value: o.pagado ? 'Pagada' : 'Pendiente', label: 'Pago (CxP)'}
     ],
-    cols: ['SKU','Producto','Cant.','Costo unit.','Importe'],
+    // "Importe" → "Subtotal": inventario.gs ya lo calcula como cantidad × costo y
+    // acumula el total con esas mismas líneas, así que el gran total ES su suma.
+    cols: ['SKU','Producto',{label:'Cant.',r:true},{label:'Costo unit.',r:true},{label:'Subtotal',r:true}],
     rows: (o.lineas||[]).map(function(l){ return [l.sku, l.nombre, String(l.cantidad), _medsFmt(l.costoUnitario), _medsFmt(l.subtotal)]; }),
     totalLabel: 'Total',
     totalValue: _medsFmt(o.total) + ' MXN',
+    // Sin esto el total caía bajo "Costo unit." (dos desde el final) en vez de bajo
+    // la columna que suma.
+    totalCol: 4,
     nota: 'El inventario ingresa al marcar la orden como recibida.' + (o.cxpId ? ' Cuenta por pagar vinculada: ' + o.cxpId + '.' : '')
   });
 }
@@ -19843,7 +19882,10 @@ function movImprimir(){
       {value: '−' + sal, label: 'Salidas (unidades)'},
       {value: String(rows.length), label: 'Movimientos'}
     ],
-    cols: ['Fecha','Producto','Tipo','Cant.','Motivo · Ref.','Saldo'],
+    // Sin gran total a propósito: aquí no hay dinero, son unidades. Declarar la
+    // alineación arregla de paso que "Motivo · Ref." (texto) saliera alineado a la
+    // derecha y "Cant." a la izquierda, por contar dos columnas desde el final.
+    cols: ['Fecha','Producto','Tipo',{label:'Cant.',r:true},'Motivo · Ref.',{label:'Saldo',r:true}],
     rows: rows.map(function(m){
       var pill = m.tipo === 'Entrada'
         ? '<span style="font-size:9px;padding:2px 9px;border-radius:20px;background:#E1F5EE;color:#085041">Entrada</span>'
@@ -23813,29 +23855,65 @@ function _tplBarChart(tendencia,color){
   });
   return h+'</div>';
 }
+/* ── Columnas: alineación DECLARADA, no adivinada ──────────────────────────────
+ * Durante mucho tiempo las tres tablas de reportes (_tplTableHTML, _tplTablaFina
+ * y la lista de `minimalista`) decidían qué alinear a la derecha contando desde
+ * el final: "las últimas dos son números". Es una heurística que solo acierta si
+ * la tabla termina exactamente en dos columnas numéricas, y ya fallaba en
+ * producción: en el reporte de proveedor alineaba "Forma pago" (texto) a la
+ * derecha, y en cobranza dejaba la columna de dinero pegada a la izquierda.
+ * Agregar una columna de cantidad la habría roto en todos lados a la vez.
+ *
+ * Ahora una columna puede DECIRLO:
+ *     'Importe'                 → forma histórica: se infiere por posición.
+ *     {label:'Cant.', r:true}   → forma declarada: la columna manda.
+ * Es la misma forma que ya usan los mocks del manual (ver _hfmTabla). Basta con
+ * que UNA columna venga declarada para que la tabla entera lo esté — mezclar
+ * declaración y heurística en la misma tabla es justo el error que se corrige.
+ * Las tablas que siguen mandando strings se pintan exactamente igual que antes. */
+function _tplColMeta(cols){
+  cols=cols||[];
+  var explicit=false;
+  for(var i=0;i<cols.length;i++){ if(cols[i]&&typeof cols[i]==='object'){ explicit=true; break; } }
+  var out=cols.map(function(c,i){
+    if(c&&typeof c==='object') return {label:c.label==null?'':c.label, right:!!c.r};
+    return {label:c==null?'':c, right: explicit ? false : (i>0&&i>=(cols.length-2))};
+  });
+  out.explicit=explicit;
+  return out;
+}
+/* Columna bajo la que se imprime el GRAN TOTAL en las plantillas que lo pintan
+ * como una fila más de la tabla. `d.totalCol` manda; sin él se conserva el
+ * histórico (cols.length-2), que solo acierta cuando la última columna no lleva
+ * dinero. Sin declararlo, el estado de cuenta imprimía su total bajo "Forma de
+ * pago" y dejaba la columna de dinero vacía. */
+function _tplTotalCol(d){
+  var n=((d&&d.cols)||[]).length;
+  var c=(d&&d.totalCol!=null)?d.totalCol:(n-2);
+  return (c>=0&&c<n)?c:(n-2);
+}
 function _tplTableHTML(data,headerBg,headerColor){
   headerBg=headerBg||'#f0f0f0'; headerColor=headerColor||'#333';
+  var M=_tplColMeta(data.cols), TC=_tplTotalCol(data);
   var h='<table style="width:100%;border-collapse:collapse;font-size:9.5px">'
     +'<thead><tr style="background:'+headerBg+'">';
-  (data.cols||[]).forEach(function(c,i){
-    var right=i>0&&i>=(data.cols.length-2);
-    h+='<th style="padding:5px 6px;text-align:'+(right?'right':'left')+';font-weight:700;font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;color:'+headerColor+';border-bottom:1px solid rgba(0,0,0,.15)">'+c+'</th>';
+  M.forEach(function(c){
+    h+='<th style="padding:5px 6px;text-align:'+(c.right?'right':'left')+';font-weight:700;font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;color:'+headerColor+';border-bottom:1px solid rgba(0,0,0,.15)">'+c.label+'</th>';
   });
   h+='</tr></thead><tbody>';
   (data.rows||[]).forEach(function(r,ri){
     h+='<tr style="background:'+(ri%2?'rgba(0,0,0,.025)':'transparent')+'">';
     r.forEach(function(cell,ci){
-      var right=ci>0&&ci>=(r.length-2);
+      var right=M.explicit ? !!(M[ci]&&M[ci].right) : (ci>0&&ci>=(r.length-2));
       h+='<td style="padding:3.5px 6px;border-bottom:0.5px solid rgba(0,0,0,.07);text-align:'+(right?'right':'left')+'">'+cell+'</td>';
     });
     h+='</tr>';
   });
   if(data.totalValue){
     h+='<tr style="background:rgba(0,0,0,.04)">';
-    (data.cols||[]).forEach(function(c,i){
-      var right=i>0&&i>=(data.cols.length-2);
+    M.forEach(function(c,i){
       if(i===0) h+='<td style="padding:5px 6px;font-weight:700;border-top:1.5px solid #333;font-size:10px">'+data.totalLabel+'</td>';
-      else if(i===(data.cols.length-2)) h+='<td style="padding:5px 6px;font-weight:700;text-align:right;border-top:1.5px solid #333;font-size:10px">'+data.totalValue+'</td>';
+      else if(i===TC) h+='<td style="padding:5px 6px;font-weight:700;text-align:right;border-top:1.5px solid #333;font-size:10px">'+data.totalValue+'</td>';
       else h+='<td style="border-top:1.5px solid #333"></td>';
     });
     h+='</tr>';
@@ -23913,9 +23991,16 @@ var _REPORT_TEMPLATES={
         +'<div style="font-size:17px;font-weight:700;color:#111">'+k.value+'</div>'
         +'<div style="font-size:8.5px;color:#aaa;margin-top:2px">'+k.label+'</div>'
         +(k.sub?'<div style="font-size:9px;color:#888;margin-top:1px">'+k.sub+'</div>':'')+'</div>';}).join('')+'</div>'
-      +(d.rows||[]).map(function(r){return'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:0.5px solid #f0f0f0">'
+      // Esta plantilla pinta UNA sola cifra por fila, así que tiene que saber cuál
+      // es la de dinero. Antes asumía r[r.length-2] y en el estado de cuenta eso
+      // era la FORMA DE PAGO: imprimía "Transferencia" donde va el importe. Ahora
+      // usa la misma columna bajo la que va el gran total, para que la fila y el
+      // total hablen de lo mismo.
+      +(function(){ var _mc=_tplTotalCol(d);
+        return (d.rows||[]).map(function(r){ var _i=(_mc>=0&&_mc<r.length)?_mc:(r.length-2);
+          return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:0.5px solid #f0f0f0">'
         +'<span style="font-size:10px;color:#666">'+r[0]+' &nbsp;·&nbsp; '+r[1]+'</span>'
-        +'<span style="font-size:11px;font-weight:600;color:#111">'+r[r.length-2]+'</span></div>';}).join('')
+        +'<span style="font-size:11px;font-weight:600;color:#111">'+r[_i]+'</span></div>';}).join(''); })()
       +'<div style="display:flex;justify-content:space-between;padding:9px 0;border-top:1.5px solid #111;margin-top:3px">'
       +'<span style="font-size:12px;font-weight:700">'+d.totalLabel+'</span>'
       +'<span style="font-size:13px;font-weight:700;color:#c46a7a">'+d.totalValue+'</span></div>'
@@ -24146,17 +24231,17 @@ function _tplKpiChips(kpis,bg,labelColor,valueColor){
 function _tplTablaFina(d,o){
   o=o||{};
   var line=o.line||'#eadade';
+  var M=_tplColMeta(d.cols);
   var h='<table style="width:100%;border-collapse:collapse;font-size:10.5px'+(o.serif?';font-family:Georgia,\'Times New Roman\',serif':'')+'"><thead><tr>';
-  (d.cols||[]).forEach(function(c2,i){
-    var right=i>0&&i>=(d.cols.length-2);
-    h+='<th style="text-align:'+(right?'right':'left')+';padding:6px 8px 6px 0;font-size:8.5px;letter-spacing:.08em;text-transform:uppercase;color:#9a9a94;font-weight:600;font-family:\'Helvetica Neue\',Arial,sans-serif;border-bottom:'+(o.headBorder||('1px solid '+line))+'">'+c2+'</th>';
+  M.forEach(function(c2){
+    h+='<th style="text-align:'+(c2.right?'right':'left')+';padding:6px 8px 6px 0;font-size:8.5px;letter-spacing:.08em;text-transform:uppercase;color:#9a9a94;font-weight:600;font-family:\'Helvetica Neue\',Arial,sans-serif;border-bottom:'+(o.headBorder||('1px solid '+line))+'">'+c2.label+'</th>';
   });
   h+='</tr></thead><tbody>';
   (d.rows||[]).forEach(function(r,ri){
     var last=ri===d.rows.length-1;
     h+='<tr>';
     r.forEach(function(cell,ci){
-      var right=ci>0&&ci>=(r.length-2);
+      var right=M.explicit ? !!(M[ci]&&M[ci].right) : (ci>0&&ci>=(r.length-2));
       h+='<td style="padding:6.5px 8px 6.5px 0;text-align:'+(right?'right':'left')+';color:#2c2c2a;border-bottom:'+(last?'none':'1px solid #f4eeee')+'">'+cell+'</td>';
     });
     h+='</tr>';
@@ -24233,7 +24318,7 @@ function hfLangOk(l){ return HF_LANGS.indexOf(String(l||'').toLowerCase().substr
    hfDict(reportId,lang) fusiona comunes + sección del reporte. */
 var HF_L_COMMON={
   es:{ fecha:'Fecha', concepto:'Concepto', categoria:'Categoría', formaPago:'Forma de pago',
-       importe:'Importe', cantidad:'Cant', total:'Total', pagado:'Pagado', saldo:'Saldo',
+       importe:'Importe', cantidad:'Cant', subtotal:'Subtotal', total:'Total', pagado:'Pagado', saldo:'Saldo',
        detalle:'Detalle', emitidoEl:'Emitido el', generadoPor:'Hestia ERP',
        totalFacturado:'Total facturado', totalPagado:'Total pagado', nosDebe:'Nos debe',
        saldoAFavor:'Saldo a favor', alCorriente:'Al corriente', movimientos:'Movimientos',
@@ -24251,7 +24336,7 @@ var HF_L_COMMON={
        reembolsoProceso:'Reembolso en proceso', suscripcionCrio:'Suscripción crío',
        servicioContratado:'Servicio contratado' },
   en:{ fecha:'Date', concepto:'Description', categoria:'Category', formaPago:'Payment method',
-       importe:'Amount', cantidad:'Qty', total:'Total', pagado:'Paid', saldo:'Balance',
+       importe:'Amount', cantidad:'Qty', subtotal:'Subtotal', total:'Total', pagado:'Paid', saldo:'Balance',
        detalle:'Detail', emitidoEl:'Issued on', generadoPor:'Hestia ERP',
        totalFacturado:'Total billed', totalPagado:'Total paid', nosDebe:'Balance due',
        saldoAFavor:'Credit balance', alCorriente:'Paid in full', movimientos:'Transactions',
@@ -24269,7 +24354,7 @@ var HF_L_COMMON={
        reembolsoProceso:'Refund in progress', suscripcionCrio:'Cryostorage subscription',
        servicioContratado:'Contracted service' },
   fr:{ fecha:'Date', concepto:'Description', categoria:'Catégorie', formaPago:'Mode de paiement',
-       importe:'Montant', cantidad:'Qté', total:'Total', pagado:'Payé', saldo:'Solde',
+       importe:'Montant', cantidad:'Qté', subtotal:'Sous-total', total:'Total', pagado:'Payé', saldo:'Solde',
        detalle:'Détail', emitidoEl:'Émis le', generadoPor:'Hestia ERP',
        totalFacturado:'Total facturé', totalPagado:'Total payé', nosDebe:'Solde dû',
        saldoAFavor:'Solde créditeur', alCorriente:'Soldé', movimientos:'Opérations',
@@ -24287,7 +24372,7 @@ var HF_L_COMMON={
        reembolsoProceso:'Remboursement en cours', suscripcionCrio:'Abonnement cryoconservation',
        servicioContratado:'Service contracté' },
   pt:{ fecha:'Data', concepto:'Descrição', categoria:'Categoria', formaPago:'Forma de pagamento',
-       importe:'Valor', cantidad:'Qtd', total:'Total', pagado:'Pago', saldo:'Saldo',
+       importe:'Valor', cantidad:'Qtd', subtotal:'Subtotal', total:'Total', pagado:'Pago', saldo:'Saldo',
        detalle:'Detalhe', emitidoEl:'Emitido em', generadoPor:'Hestia ERP',
        totalFacturado:'Total faturado', totalPagado:'Total pago', nosDebe:'Saldo devedor',
        saldoAFavor:'Saldo credor', alCorriente:'Quitado', movimientos:'Movimentações',
@@ -24762,17 +24847,21 @@ function hfReportPrintAsk(reportId,paciente,buildFn){
 }
 
 function hfReportExcel(data,filename){
-  var ths=(data.cols||[]).map(function(c){return'<th style="background:#c46a7a;color:#fff;padding:4px 8px;font-size:10px">'+c+'</th>';}).join('');
+  var M=_tplColMeta(data.cols), TC=_tplTotalCol(data);
+  var ths=M.map(function(c){return'<th style="background:#c46a7a;color:#fff;padding:4px 8px;font-size:10px">'+c.label+'</th>';}).join('');
   var trs=(data.rows||[]).map(function(r,ri){
     return '<tr style="background:'+(ri%2?'#fdf5f7':'#fff')+'">'
       +r.map(function(c){return'<td style="padding:3px 7px;border:0.5px solid #eee;font-size:10px">'+c+'</td>';}).join('')+'</tr>';
   }).join('');
   var totalRow='';
   if(data.totalValue){
-    totalRow='<tr style="background:#fdf5f7"><td style="padding:5px 7px;font-weight:bold;border:0.5px solid #ddd;font-size:10px">'+data.totalLabel+'</td>'
-      +(data.cols||[]).slice(1,-2).map(function(){return'<td style="border:0.5px solid #ddd"></td>';}).join('')
-      +'<td style="padding:5px 7px;font-weight:bold;border:0.5px solid #ddd;font-size:10px;text-align:right">'+data.totalValue+'</td>'
-      +'<td style="border:0.5px solid #ddd"></td></tr>';
+    // La celda del total se coloca en la MISMA columna que en el PDF (_tplTotalCol),
+    // no contando dos desde el final: el Excel y el papel tienen que decir lo mismo.
+    totalRow='<tr style="background:#fdf5f7">'+M.map(function(c,i){
+      if(i===0) return '<td style="padding:5px 7px;font-weight:bold;border:0.5px solid #ddd;font-size:10px">'+data.totalLabel+'</td>';
+      if(i===TC) return '<td style="padding:5px 7px;font-weight:bold;border:0.5px solid #ddd;font-size:10px;text-align:right">'+data.totalValue+'</td>';
+      return '<td style="border:0.5px solid #ddd"></td>';
+    }).join('')+'</tr>';
   }
   var html='<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">'
     +'<head><meta charset="utf-8"></head>'
@@ -24840,17 +24929,25 @@ function _tplSampleData(){
   return {
     title:'Estado de cuenta', subject:'María Fernanda López García',
     period:'Emitido el 5 Jul 2026', generado:'Hestia ERP · vista previa con datos de ejemplo',
-    kpis:[{value:'$203,400.00',label:'Total histórico'},{value:'5',label:'Movimientos'},{value:'$187,800.00',label:'2026'}],
-    tendencia:[{label:'Mar',monto:92500},{label:'Abr',monto:45000},{label:'May',monto:65900}],
-    cols:['Fecha','Concepto','Categoría','Forma de pago','Importe'],
+    // KPIs cuadrados con las filas de abajo: histórico $232,600 = suma de los 5
+    // subtotales; 2026 = $47,600 = los cuatro de 2026. Antes decían $203,400 y
+    // $187,800, que no salían de ningún lado — una vista previa que no cuadra
+    // consigo misma enseña a desconfiar del reporte de verdad.
+    kpis:[{value:'$232,600.00',label:'Total histórico'},{value:'5',label:'Movimientos'},{value:'$47,600.00',label:'2026'}],
+    tendencia:[{label:'Mar',monto:15600},{label:'Abr',monto:30800},{label:'May',monto:1200}],
+    // Espeja al Estado de cuenta real (_ecBuildPrintData): mismas columnas, misma
+    // alineación declarada y mismo totalCol. Si aquí se queda el layout viejo, la
+    // vista previa del Panel de Control miente sobre cómo se va a imprimir.
+    // Los subtotales suman exactamente el total, igual que en el reporte de verdad.
+    cols:['Fecha','Concepto',{label:'Cant',r:true},'Categoría','Forma de pago',{label:'Subtotal',r:true}],
     rows:[
-      ['12 Feb 2026','FIV ciclo completo · OP-01089','Tratamientos','Transferencia','$185,000.00'],
-      ['3 Mar 2026','Medicamentos · Gonal-F 900UI ×3','Medicamento','TDC','$15,600.00'],
-      ['15 Abr 2026','Perfil hormonal','Estudios','Efectivo','$2,800.00'],
-      ['28 Abr 2026','Congelación de óvulos (EF)','Tratamientos','Transferencia','$28,000.00'],
-      ['12 May 2026','Consulta de seguimiento','Consulta','TDC','$1,200.00']
+      ['12 Feb 2025','FIV ciclo completo · OP-01089','1','Tratamientos','Transferencia','$185,000.00'],
+      ['3 Mar 2026','Medicamentos · Gonal-F 900UI','3','Medicamento','TDC','$15,600.00'],
+      ['15 Abr 2026','Perfil hormonal','1','Estudios','Efectivo','$2,800.00'],
+      ['28 Abr 2026','Congelación de óvulos (EF)','1','Tratamientos','Transferencia','$28,000.00'],
+      ['12 May 2026','Consulta de seguimiento','1','Consulta','TDC','$1,200.00']
     ],
-    totalLabel:'Total histórico', totalValue:'$203,400.00',
+    totalLabel:'Total histórico', totalValue:'$232,600.00', totalCol:5,
     nota:cfg.frase||''
   };
 }
@@ -33803,6 +33900,7 @@ function _ecBuildPrintData(lang) {
   // ni un carácter. Los demás idiomas usan el `loc` que les toca.
   var _f  = function(n){ return lang==='es' ? ecFmt(n)       : hfFmtMoney(n, lang); };
   var _fd = function(s){ return lang==='es' ? ecFmtFecha(s)  : hfFmtDate(s, lang); };
+  var _fq = function(n){ return (n==null) ? '—' : (lang==='es' ? String(n) : Number(n).toLocaleString(hfLoc(lang))); };
   var hoy = _fd(new Date().toISOString().substring(0,10));
   // Facturado / Pagado / Saldo — misma lógica que la pantalla (ecRenderResult):
   // Nos debe = saldoPendiente (canónico CxCobrar); Saldo a favor = −saldoNeto.
@@ -33823,19 +33921,43 @@ function _ecBuildPrintData(lang) {
   Object.keys(d.porAnio||{}).sort().slice(-2).forEach(function(a){
     kpis.push({value: _f(d.porAnio[a]), label: a});
   });
+  // ── Columna de cantidad: solo si el backend sabe lo que no sabe ──────────────
+  // `cantFiable` lo manda analisis.gs desde que distingue una cantidad capturada
+  // de una desconocida (celda vacía en filas históricas). Un backend anterior
+  // mandaba cant:1 SIEMPRE, así que ahí la columna se omite entera: este
+  // documento se le entrega a la paciente y un "1" de relleno afirmaría cuántas
+  // unidades se le vendieron sin que nadie lo sepa. Sin columna se pierde detalle;
+  // con un 1 inventado se pierde la verdad.
+  var _cant = (d.cantFiable === true);
+  // "Importe" pasa a llamarse "Subtotal" porque es exactamente eso desde siempre:
+  // finance.gs escribe TotalPagar = PVP × Cantidad × (1 − descuento). No se agrega
+  // una columna "Subtotal" al lado de "Importe" — serían la misma cifra dos veces.
+  var cols = _cant
+    ? [T.fecha, T.concepto, {label:T.cantidad, r:true}, T.categoria, T.formaPago, {label:T.subtotal, r:true}]
+    : [T.fecha, T.concepto, T.categoria, T.formaPago, {label:T.subtotal, r:true}];
+  var rows = movs.map(function(m){
+    return _cant
+      ? [_fd(m.fecha), m.producto||m.desc||'—', _fq(m.cant), m.cat||'—', m.pago||'—', _f(m.total)]
+      : [_fd(m.fecha), m.producto||m.desc||'—', m.cat||'—', m.pago||'—', _f(m.total)];
+  });
   return {
     title: T.estadoCuenta,
     subject: d.paciente,
     period: T.emitidoEl + ' ' + hoy,
     generado: T.generadoPor + ' · ' + hoy,
     kpis: kpis,
-    cols: [T.fecha, T.concepto, T.categoria, T.formaPago, T.importe],
-    rows: movs.map(function(m){ return [_fd(m.fecha), m.producto||m.desc||'—', m.cat||'—', m.pago||'—', _f(m.total)]; }),
+    cols: cols,
+    rows: rows,
     // El embudo resuelve estos nombres contra el catálogo; si falta uno, no imprime.
+    // La cantidad se inserta DESPUÉS del concepto, así que conceptCol sigue siendo 1.
     conceptCol: 1,
     rowConcepts: movs.map(function(m){ return m.producto||m.desc||''; }),
     totalLabel: T.totalFacturado,
     totalValue: _f(_pFact),
+    // El gran total va bajo la columna de Subtotal, que es la suma que representa
+    // (analisis.gs: totalFacturado = Σ TotalPagar de estas mismas filas). Antes se
+    // colocaba contando dos desde el final y caía bajo "Forma de pago".
+    totalCol: cols.length - 1,
     nota: cfg.frase || ''
   };
 }
@@ -35150,10 +35272,16 @@ function _cobBuildPrintData(lang){
   var T=hfDict('cobranza',lang);
   var ccFmt=function(n){ return _cobMoney(n,lang); };
   var ccFch=function(s){ return _cobDate(s,lang); };
+  // Cantidad: la real, o "—". Aquí decía String(v.cantidad||1), y ese `||1` era un
+  // dato inventado: _cobNum (cobranza.gs) devuelve 0 cuando la celda Cantidad está
+  // vacía, así que toda línea histórica sin cantidad capturada salía impresa como
+  // "1" en el documento de la paciente. Un 0 real no existe (saveIngreso escribe
+  // num(cantidad)||1), así que 0 aquí significa "la hoja no lo dice".
+  var _cq=function(n){ n=Number(n); return (isFinite(n)&&n>0) ? String(n) : '—'; };
   var hoy=ccFch(new Date().toISOString().substring(0,10));
   // El PDF lleva el detalle de lo vendido según la vista elegida (histórico o periodo)
   var _vv=_cobVentasVista(d), _vvTot=0; _vv.forEach(function(v){ _vvTot+=v.total; });
-  var rows=_vv.map(function(v){ return [ccFch(v.fecha), (v.producto||'—')+(v.op?' · OP '+v.op:''), String(v.cantidad||1), ccFmt(v.total), ccFmt(v.pagado), v.saldo>0.01?ccFmt(v.saldo):'—']; });
+  var rows=_vv.map(function(v){ return [ccFch(v.fecha), (v.producto||'—')+(v.op?' · OP '+v.op:''), _cq(v.cantidad), ccFmt(v.total), ccFmt(v.pagado), v.saldo>0.01?ccFmt(v.saldo):'—']; });
   // `conceptos` va en paralelo a `rows`: el nombre EXACTO del producto de cada
   // fila, o null si la fila no lleva producto (saldos, suscripción, descuentos:
   // esas son etiquetas del sistema y se traducen con el diccionario).
@@ -35164,7 +35292,7 @@ function _cobBuildPrintData(lang){
   (d.saldos||[]).forEach(function(o){
     if(o.origen!=='registro') return;
     var partes=(o.items||[]).filter(function(x){return x.pac;});
-    if(partes.length){ partes.forEach(function(x){ rows.push([ccFch(x.fecha||o.fecha), x.pac+' · '+(x.producto||'—'), String(x.cantidad||1), ccFmt(x.total), '', ccFmt(x.total)]); conceptos.push(x.producto||''); }); }
+    if(partes.length){ partes.forEach(function(x){ rows.push([ccFch(x.fecha||o.fecha), x.pac+' · '+(x.producto||'—'), _cq(x.cantidad), ccFmt(x.total), '', ccFmt(x.total)]); conceptos.push(x.producto||''); }); }
     else { rows.push([ccFch(o.fecha), o.concepto||T.saldo, '—', ccFmt(o.total), ccFmt((o.total||0)-(o.saldo||0)), ccFmt(o.saldo)]); conceptos.push(null); }
   });
   if(sus&&sus.montoDebe>0){ rows.push([ccFch(sus.proximoCobro),T.suscripcionCrio+' ('+sus.plan+')', '—', ccFmt(sus.montoDebe), ccFmt(0), ccFmt(sus.montoDebe)]); conceptos.push(null); }
@@ -35172,7 +35300,7 @@ function _cobBuildPrintData(lang){
   var _desc=(d.descuentos&&d.descuentos.aplica)?d.descuentos:null;
   var _descTot=_desc?(_desc.total||0):0;
   var _neto=totalDebe-_descTot; if(_neto<0) _neto=0;
-  if(_desc){ _desc.lineas.forEach(function(l){ rows.push([ccEsc(l.mes), T.descuento+' '+l.pct+'% · '+(l.paciente?ccEsc(l.paciente)+' · ':'')+ccEsc(l.producto), String(l.cantidad||1), '', '', '−'+ccFmt(l.descuento)]); conceptos.push(l.producto||''); }); }
+  if(_desc){ _desc.lineas.forEach(function(l){ rows.push([ccEsc(l.mes), T.descuento+' '+l.pct+'% · '+(l.paciente?ccEsc(l.paciente)+' · ':'')+ccEsc(l.producto), _cq(l.cantidad), '', '', '−'+ccFmt(l.descuento)]); conceptos.push(l.producto||''); }); }
   var kpis = _desc
     ? [{value:ccFmt(_neto),label:T.netoACobrar},{value:ccFmt(totalDebe),label:T.bruto},{value:'−'+ccFmt(_descTot),label:T.descuentoVol},{value:susDebe>0?ccFmt(susDebe):T.alDia,label:T.suscripcion}]
     : [{value:ccFmt(totalDebe),label:T.totalPorCobrar},{value:ccFmt(d.totalSaldo||0),label:T.saldos},{value:susDebe>0?ccFmt(susDebe):T.alDia,label:T.suscripcion},{value:ccFmt(_vvTot),label:(_cobVista==='pendiente'?T.porCobrarDetalle:T.totalVendido)}];
@@ -35183,11 +35311,36 @@ function _cobBuildPrintData(lang){
     var _parts=[]; if(_dep.banco)_parts.push(T.banco+': <b>'+ccEsc(_dep.banco)+'</b>'); if(_dep.beneficiario)_parts.push(T.beneficiario+': <b>'+ccEsc(_dep.beneficiario)+'</b>'); if(_dep.cuenta)_parts.push(T.cuenta+': <b>'+ccEsc(_dep.cuenta)+'</b>'); if(_dep.clabe)_parts.push(T.clabe+': <b>'+ccEsc(_dep.clabe)+'</b>');
     notaHtml='<div style="margin:16px 22px;padding:10px 14px;border:1px dashed #bbb;border-radius:8px;font-size:11px;color:#333;page-break-inside:avoid"><span style="text-transform:uppercase;letter-spacing:.05em;font-weight:700;color:#777;font-size:9px">'+ccEsc(T.datosDeposito)+'</span><br>'+_parts.join(' &nbsp;·&nbsp; ')+'</div>';
   }
+  // "Total" pasa a llamarse "Subtotal": es el TotalPagar de la línea, o sea
+  // PVP × Cantidad × (1 − descuento) — el subtotal de siempre, mal nombrado.
+  // Las cuatro columnas de números se declaran a la derecha en vez de dejar que
+  // se adivine por posición: con 6 columnas la heurística vieja alineaba solo
+  // "Pagado" y "Saldo", y dejaba la columna de dinero (Total) pegada a la izquierda.
+  var cols=[T.fecha, T.concepto, {label:T.cantidad,r:true}, {label:T.subtotal,r:true},
+            {label:T.pagado,r:true}, {label:T.saldo,r:true}];
   return { title:T.estadoCobranza, subject:d.paciente, period:periodTxt, generado:T.generadoPor+' · '+hoy,
-    kpis:kpis, cols:[T.fecha,T.concepto,T.cantidad,T.total,T.pagado,T.saldo], rows:rows,
+    kpis:kpis, cols:cols, rows:rows,
     conceptCol:1, rowConcepts:conceptos,
-    totalLabel:_desc?T.netoACobrar:T.totalPorCobrar, totalValue:ccFmt(_desc?_neto:totalDebe), notaHtml:notaHtml };
+    totalLabel:_desc?T.netoACobrar:T.totalPorCobrar, totalValue:ccFmt(_desc?_neto:totalDebe),
+    // El total es un ADEUDO, así que va bajo Saldo. Antes caía bajo "Pagado" (dos
+    // desde el final), que insinuaba justo lo contrario: que el "Total por cobrar"
+    // era la suma de lo ya cobrado. OJO: sigue sin ser la suma exacta de la columna
+    // Saldo — ver la nota de _cobTotalNoCuadra() más abajo.
+    totalCol:5, notaHtml:notaHtml };
 }
+/* ── Por qué el "Total por cobrar" de cobranza NO es la suma de la columna Saldo ──
+ * Documentado aquí porque es una diferencia REAL que este build no resuelve (toca
+ * el motor de CxCobrar, no el reporte), y conviene que el próximo que lo lea no
+ * crea que es un descuido del renderizador:
+ *   · totalDebe = d.totalSaldo + suscripción. `d.totalSaldo` sale de la hoja
+ *     Cuentas_Cobrar (Motor A, saldos EXPLÍCITOS — cobranza.gs:1152).
+ *   · La columna Saldo de las filas de venta sale de otra cosa: el saldo INFERIDO
+ *     de un pago parcial (cobranza.gs:~952). Son dos motores distintos y sumarlos
+ *     sería contar dos veces.
+ *   · Además solo se listan los saldos con origen 'registro', mientras que
+ *     d.totalSaldo suma todos los orígenes.
+ * Resultado: el gran total y la columna Saldo pueden no coincidir. Colocarlo bajo
+ * Saldo es lo más cercano a la verdad disponible sin tocar el motor. */
 /* ── Búsqueda de pacientes TOLERANTE a errores de dedo (fuzzy) ── */
 function _fzNorm(s){ return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9 ]/g,''); }
 function _fzLev(a,b){
@@ -35725,7 +35878,11 @@ function notaGenerar(){
   Array.prototype.forEach.call(chks,function(chk){
     var i=chk.getAttribute('data-i'); var v=_notaData.ventas[i];
     var monto=parseFloat((document.getElementById('nota-monto-'+i)||{}).value||v.total||0)||0;
-    total+=monto; rows.push({desc:v.producto||'—', op:v.op, fecha:v.fecha, monto:monto});
+    // La cantidad real de la venta, o null. _cobNum devuelve 0 cuando la celda
+    // Cantidad está vacía, y un 0 no es una cantidad vendida: es "no se capturó".
+    // El recibo imprime "—" antes que inventar un 1.
+    var cant=Number(v.cantidad); if(!(isFinite(cant)&&cant>0)) cant=null;
+    total+=monto; rows.push({desc:v.producto||'—', op:v.op, fecha:v.fecha, monto:monto, cant:cant});
   });
   // Los nombres de los servicios se resuelven contra el catálogo. Si falta
   // alguno, hfTradGate bloquea y ofrece capturarlo — el recibo no sale a medias.
@@ -35743,7 +35900,10 @@ function _notaWrite(rows,total,idioma,receptor,folio,formaPago,fechaSel){
   var fechaDoc = fechaSel ? dLarga(fechaSel) : new Date().toLocaleDateString(T.loc,{year:'numeric',month:'long',day:'numeric'});
   var w=window.open('','_blank');
   if(!w){ alert('Habilita las ventanas emergentes para este sitio e intenta de nuevo.'); return; }
-  var trs=rows.map(function(r){ return '<tr><td style="text-align:center;white-space:nowrap">'+dLarga(r.fecha)+'</td><td>'+_esc(r.desc)+(r.op?' <span style="color:#999">· OP '+_esc(r.op)+'</span>':'')+'</td><td style="text-align:right;white-space:nowrap">'+money(r.monto)+'</td></tr>'; }).join('');
+  // OJO al diccionario: la cabecera de esta columna es T.cantidad ('Cant'/'Qty'),
+  // NO T.nCantidad — esa es la frase de dinero "Recibí … la cantidad de $X" y
+  // agarrarla por el nombre imprimiría "La cantidad de" como encabezado.
+  var trs=rows.map(function(r){ return '<tr><td style="text-align:center;white-space:nowrap">'+dLarga(r.fecha)+'</td><td>'+_esc(r.desc)+(r.op?' <span style="color:#999">· OP '+_esc(r.op)+'</span>':'')+'</td><td style="text-align:right;white-space:nowrap">'+(r.cant==null?'—':_esc(String(r.cant)))+'</td><td style="text-align:right;white-space:nowrap">'+money(r.monto)+'</td></tr>'; }).join('');
   var logo=(typeof _HF_LOGO_DEFAULT!=='undefined'?_HF_LOGO_DEFAULT:'');
   var firma=(typeof hfFirmaBloque==='function')?hfFirmaBloque('nota',T.nRecibi):'';
   var sig= firma
@@ -35765,7 +35925,11 @@ function _notaWrite(rows,total,idioma,receptor,folio,formaPago,fechaSel){
     +'<div class="meta"><div><b>'+_esc(T.nFolio)+':</b> '+_esc(folio||'—')+'</div><div><b>'+_esc(T.fecha)+':</b> '+fechaDoc+'</div></div>'
     +'<div style="font-size:13px;margin:6px 0 2px">'+_esc(T.nRecibiDe)+': <b>'+_esc(receptor)+'</b></div>'
     +'<div style="font-size:12px;color:#555;margin-bottom:6px">'+_esc(T.nCantidad)+' <b>'+money(total)+'</b> '+_esc(T.nPorConcepto)+'</div>'
-    +'<table><thead><tr><th style="text-align:center;width:120px">'+_esc(T.fecha)+'</th><th>'+_esc(T.concepto)+'</th><th style="text-align:right;width:130px">'+_esc(T.importe)+'</th></tr></thead><tbody>'+trs+'</tbody></table>'
+    // La columna de dinero sigue siendo "Importe" y NO "Subtotal", a diferencia del
+    // estado de cuenta: aquí el monto es editable (nota-monto-<i>) y su razón de ser
+    // es poder recibir un pago PARCIAL de la línea. Llamarle "Subtotal" afirmaría
+    // que es el valor completo de esas N unidades, que es justo lo que no siempre es.
+    +'<table><thead><tr><th style="text-align:center;width:120px">'+_esc(T.fecha)+'</th><th>'+_esc(T.concepto)+'</th><th style="text-align:right;width:52px">'+_esc(T.cantidad)+'</th><th style="text-align:right;width:130px">'+_esc(T.importe)+'</th></tr></thead><tbody>'+trs+'</tbody></table>'
     +'<div class="tot">'+_esc(T.total.toUpperCase())+': '+money(total)+' MXN</div>'
     // El importe con letra es una convención de los comprobantes mexicanos y
     // _notaImporteLetra solo sabe deletrear en español. En otros idiomas se omite
@@ -35798,6 +35962,14 @@ var NOVEDADES=[
       '**Ves el número real antes de guardar.** Mientras editas, el panel te dice en vivo qué % de la venta acaba recibiendo cada quien («Del **10%** del escalón: 50% al médico = **5%** de la venta») y te pone un ejemplo en pesos. Es la diferencia entre el 5% y el 0.5%: ahí se ve.',
       '**No se puede guardar un reparto descuadrado.** Si las partes no suman exactamente 100%, se marca en rojo y el botón Guardar se bloquea — ni de más ni de menos.'],
     comoUsar:['Comisiones → abre **⚙️ Configurar reglas** (abajo en la misma pantalla).','Sin reglas: **✨ Empezar con un ejemplo** y ajusta. Con reglas: elige la regla del menú, o **＋ Nueva regla**.','Llena grupo (menú), procedimientos que aplican (chips del catálogo), escalones (desde/hasta/%, «Hasta» vacío = sin límite), beneficiarios (quién · parte % · nota de crédito o efectivo) y el diferido.','Revisa el recuadro del **% efectivo** y pulsa **Guardar reglas**. Ya puedes Calcular el mes.','¿El grupo no sale en el menú? Dalo de alta en **Orígenes externos** primero; el panel te pone el enlace directo.'] },
+  { build:'2026.07.16', fecha:'16 jul 2026', area:'Reportes', icon:'🧾', destacada:true,
+    titulo:'Los reportes ya dicen la cantidad, y el gran total cae donde debe',
+    puntos:['**Ya se ve cuántas unidades se vendieron.** El **Estado de cuenta**, la **Cobranza** y el **Recibo** llevan columna de **Cant** al lado del concepto. Antes solo se veía el importe y no había forma de saber si eran 1 o 3 ampolletas.',
+      '**«Importe» ahora se llama «Subtotal»** en el estado de cuenta, la cobranza y la orden de compra. No es un cambio de nombre por gusto: esa cifra **siempre fue** el subtotal (precio × cantidad − descuento). Poner una columna «Subtotal» aparte habría repetido el mismo número dos veces.',
+      '**Se arreglaron tres columnas que mentían.** El gran total del estado de cuenta se imprimía debajo de **«Forma de pago»** (con la columna de dinero vacía); el de la orden de compra, debajo de **«Costo unit.»**; y en el comprobante de cancelación el **importe a devolver no se imprimía en absoluto** con la mitad de las plantillas. Ya no.',
+      '**Si no sabemos la cantidad, sale «—» y no «1».** En las líneas viejas, anteriores a que se capturara la cantidad, el sistema rellenaba un **1** inventado. En un documento que se le entrega a una paciente eso es afirmar algo que nadie sabe: ahora se dice que no se sabe.',
+      'La **Carta de Seguro no se tocó**: sigue idéntica al formato Word que pide la aseguradora.'],
+    comoUsar:['No hay que hacer nada: imprime como siempre y las columnas ya salen.','Las cabeceras salen en el idioma de la ficha de la paciente (Cant / Qty / Qté / Qtd, Subtotal / Sous-total).','⚠️ La columna de cantidad del **Estado de cuenta** solo aparece cuando el backend está actualizado (`analisis.gs`). Mientras no se redespliegue, el reporte sale **sin** esa columna — a propósito: preferimos que falte el dato a que salga inventado.','En **Panel de Control → Reportes** la vista previa ya refleja el layout nuevo.'] },
   { build:'2026.07.16', fecha:'16 jul 2026', area:'Reportes', icon:'📄',
     titulo:'Los PDF ya se guardan con un nombre útil',
     puntos:['Antes, al «Guardar como PDF» todos los documentos salían llamándose igual («Reporte · Hestia Fertility») o sin nombre, y había que renombrarlos a mano uno por uno.',
@@ -36771,16 +36943,22 @@ async function _novCfgGuardar(){
   },
 
   { id:'reportes', group:'documentos', icon:'🧾', title:'Reportes: Estado de Cuenta y Cobranza',
-    keywords:'reportes estado de cuenta paciente cobranza imprimir pdf excel drill saldo',
+    keywords:'reportes estado de cuenta paciente cobranza imprimir pdf excel drill saldo cantidad subtotal gran total columnas alineacion',
     intro:'En **Reportes** están los documentos imprimibles al paciente/agencia. El **Estado de Cuenta** lista los movimientos del paciente; el reporte de **Cobranza** es su estado de adeudos (con descuentos y datos de depósito para agencias).',
     pasos:[
       'Abre **Reportes → Estado de Cuenta** (o **Cobranza**) y busca al paciente/agencia.',
       'Revisa el detalle; el de Cobranza expande **una fila por paciente** (fecha · paciente · servicio · importe) y muestra Bruto − Descuento = Neto.',
       'Pulsa **Imprimir/PDF**. Sale con la plantilla configurada y (si activaste) la firma autógrafa y la marca de agua.'
     ],
+    bloques:[
+      { h:'Concepto · Cantidad · Subtotal · Gran total', p:'El impreso lleva **Cant** junto al concepto y la columna de dinero se llama **Subtotal**, porque eso es: `PVP × Cantidad × (1 − descuento)`. Es el mismo número que antes se llamaba «Importe» — no se agregó una columna nueva de dinero, se le puso el nombre correcto. El **gran total** es la suma exacta de los subtotales listados y se imprime **debajo de esa columna**.' },
+      { h:'¿Por qué a veces la cantidad sale como «—»?', p:'Porque **no la sabemos**. Las líneas capturadas antes de que existiera la columna Cantidad en `BD_Ingresos` no la traen, y el sistema **no inventa un 1** para rellenar: en un documento que se le entrega a una paciente, un 1 supuesto es afirmar cuántas unidades se le vendieron sin tener el dato. Si te aparecen muchas rayas, captura la cantidad en la venta y el reporte se corrige solo.' },
+      { h:'La columna de cantidad no me aparece en el Estado de Cuenta', p:'Falta **redesplegar `analisis.gs`**. Mientras el backend sea el anterior, el reporte **omite** la columna entera en vez de arriesgarse a imprimir un dato falso (el backend viejo mandaba «1» siempre y era imposible distinguirlo de un 1 real). Cobranza y Recibo no dependen de eso y ya la muestran.' },
+      { h:'El «Total por cobrar» de Cobranza no cuadra con la columna Saldo', p:'Es correcto que no cuadre, y es conocido: el total sale de la hoja **Cuentas_Cobrar** (saldos explícitos), mientras que el Saldo de cada línea de venta se **deduce** de los pagos parciales. Son dos motores distintos y sumarlos contaría dos veces. El Estado de Cuenta sí cuadra exacto.' }
+    ],
     datos:{
-      funciones:['ecImprimir','cobImprimir','readEstadoCuentaPaciente','readEstadoCobranza','hfReportPrint'],
-      nota:'Todos los reportes pasan por el motor de plantillas (ver «Plantillas de impresión»). El pie de depósito y la nota se inyectan vía `data.notaHtml`.'
+      funciones:['ecImprimir','cobImprimir','readEstadoCuentaPaciente','readEstadoCobranza','hfReportPrint','_tplColMeta','_tplTotalCol'],
+      nota:'Todos los reportes pasan por el motor de plantillas (ver «Plantillas de impresión»). El pie de depósito y la nota se inyectan vía `data.notaHtml`. La alineación de columnas se **declara** por columna (`{label:\'Cant\', r:true}`) y el gran total se ancla con `data.totalCol`; antes se adivinaba contando dos columnas desde el final y caía bajo la columna equivocada.'
     }
   },
 
@@ -36825,7 +37003,9 @@ async function _novCfgGuardar(){
     bloques:[
       { h:'Plantillas', p:'Hay 3 diseños de marca (**Célula** minimal, **Editorial** serif, **Vida** banda rosa) más 7 base (ejecutivo, contable, minimalista, clínica, bicolor, certificado, moderno). Se eligen en **Panel de Control → Reportes** por cada tipo de reporte.' },
       { h:'Marca de agua', p:'Selector global (blastocisto / llama / ondas / ninguna / auto) en Panel de Control → Reportes.' },
-      { h:'Firma autógrafa', p:'Sube tu firma como imagen y marca en qué documentos «lleva firma autógrafa». La firma **no se corta** al imprimir: si no cabe, se va completa a la página siguiente.' }
+      { h:'Firma autógrafa', p:'Sube tu firma como imagen y marca en qué documentos «lleva firma autógrafa». La firma **no se corta** al imprimir: si no cabe, se va completa a la página siguiente.' },
+      { h:'Columnas: la alineación se declara, no se adivina', p:'Al armar un reporte, una columna puede ser un texto (`\'Importe\'`) o un objeto (`{label:\'Cant\', r:true}`). Con objeto, **la columna dice si va a la derecha**; con texto se conserva la regla antigua (las dos últimas a la derecha) para no mover los reportes viejos. **Si declaras una columna, declara todas las de esa tabla** — basta una para que la tabla entera pase a modo declarado y las de texto se vayan a la izquierda. Vale para las 10 plantillas y para el Excel.' },
+      { h:'Dónde cae el gran total: `data.totalCol`', p:'Es el **índice de la columna** bajo la que se imprime el gran total. Sin declararlo se usa el histórico (dos columnas desde el final), que solo acierta si la tabla termina en dos columnas de números — por eso el Estado de Cuenta imprimía su total bajo «Forma de pago» y la Orden de Compra bajo «Costo unit.». Declara `totalCol` apuntando a la columna que ese total realmente suma.' }
     ],
     pasos:[
       'Ve a **Panel de Control → Reportes**.',
@@ -36834,8 +37014,8 @@ async function _novCfgGuardar(){
     ],
     datos:{
       scriptProps:['`localStorage`: firma (`hfSig*`), toggle por reporte (`hfFirma*`), marca de agua (`hf_tpl_watermark`)'],
-      funciones:['hfReportPrint','hfReportExcel','_REPORT_TEMPLATES','_REPORT_TYPES','hfSigGet/hfSigSet','hfFirmaGet/hfFirmaSet','hfFirmaBloque'],
-      nota:'Todo es frontend (localStorage), NO requiere redeploy. El logo sale de `getFmtConfig().logo` con un emblema SVG de respaldo.'
+      funciones:['hfReportPrint','hfReportExcel','_REPORT_TEMPLATES','_REPORT_TYPES','_tplColMeta','_tplTotalCol','hfSigGet/hfSigSet','hfFirmaGet/hfFirmaSet','hfFirmaBloque'],
+      nota:'Todo es frontend (localStorage), NO requiere redeploy. El logo sale de `getFmtConfig().logo` con un emblema SVG de respaldo. Hay **tres** renderizadores de tabla, no uno: `_tplTableHTML` (ejecutivo/contable/clínica/bicolor/certificado/moderno), `_tplTablaFina` (célula/editorial/vida) y la lista propia de `minimalista` — cualquier cambio de columnas hay que probarlo en los tres. `_REPORT_TYPES` tiene 5 tipos sin ningún llamador (ingresos-res, presupuesto, conciliacion, pnl, cxp): configuran una plantilla que nadie usa.'
     }
   },
 
