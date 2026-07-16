@@ -296,9 +296,17 @@ function readSaldosCxP(cxpIds) {
 /* ── Ruteo a banco/caja chica — copia del bloque ya probado en pagarCxP,
    factorizado para poder reusarlo desde aplicarAbonoCxP sin tocar pagarCxP ── */
 function _cxpRutearABanco(formaPago, monto, fechaPago, ref) {
-  if (!formaPago || monto <= 0) return;
+  if (monto <= 0) return;                       // nada que rutear
+  // El ruteo forma→banco vive en UNA sola tabla (_egRutaBanco, finance.gs). Esta
+  // función tenía su PROPIA lista cerrada y divergía de la del resync: una forma
+  // de pago nueva del dropdown ('Cheque') salía por el `return` silencioso de
+  // arriba y el dinero no llegaba a ningún banco. Ahora una forma desconocida es
+  // un ERROR DURO — quien llama decide, pero nadie pierde el movimiento en silencio.
+  var _r = (typeof _egRutaBanco === 'function') ? _egRutaBanco(formaPago) : null;
+  if (!_r) throw new Error('No sé a qué banco mandar la forma de pago "' + (formaPago || '(vacía)') +
+                           '" (' + ref + '). Agrégala al ruteo o corrige el pago.');
   var mesStr = fechaPago.substring(0, 7);
-  if (formaPago === 'Efectivo') {
+  if (_r.banco === 'cajachica') {
     try {
       var ccSh = getCajaChicaSheet();
       var ccData = ccSh.getDataRange().getValues();
@@ -316,17 +324,15 @@ function _cxpRutearABanco(formaPago, monto, fechaPago, ref) {
     } catch (ccErr) { Logger.log('_cxpRutearABanco Efectivo→CajaChica error: ' + ccErr.message); }
     return;
   }
-  var banco = '', bankRow = null;
-  if (formaPago === 'Santander' || formaPago === 'Transferencia') {
-    banco = 'santander'; bankRow = [fechaPago, 0, monto, 0, ref, '', '', '', ''];
-  } else if (formaPago === 'AMEX') {
-    banco = 'amex'; bankRow = [fechaPago, monto, 0, ref, '', '', '', '', mesStr];
-  } else if (formaPago === 'Mercado Pago' || formaPago === 'TDC' || formaPago === 'TDD') {
-    banco = 'mercadopago'; bankRow = [mesStr, fechaPago, 0, 0, 0, -monto, 0, false, ref, 'PAGO'];
-  }
-  if (banco && bankRow) {
-    try { saveBankRow(banco, bankRow); } catch (bErr) { Logger.log('_cxpRutearABanco banco error: ' + bErr.message); }
-  }
+  var banco = _r.banco, bankRow = null;
+  if (banco === 'santander')        bankRow = [fechaPago, 0, monto, 0, ref, '', '', '', ''];
+  else if (banco === 'amex')        bankRow = [fechaPago, monto, 0, ref, '', '', '', '', mesStr];
+  else if (banco === 'mercadopago') bankRow = [mesStr, fechaPago, 0, 0, 0, -monto, 0, false, ref, 'PAGO'];
+  if (!bankRow) throw new Error('Destino de banco desconocido: ' + banco);
+  // saveBankRow ya NO se traga el error: si la fila no se escribió, el movimiento
+  // no existe y el saldo queda mal. Que truene y se entere quien pagó.
+  var _res = saveBankRow(banco, bankRow);
+  if (_res && _res.ok === false) throw new Error(_res.error || ('No se pudo escribir en ' + banco));
 }
 
 /* ── Devolución de dinero del proveedor: ENTRADA a banco/caja ─────────
