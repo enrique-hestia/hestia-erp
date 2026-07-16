@@ -34458,12 +34458,65 @@ function ccSaldoAcciones(o){
     if(canEdit) h+=' <button onclick="ccEditarSaldo('+o.rowNum+','+ccQ(o.paciente)+','+(o.saldo||0)+','+ccQ(o.concepto||'')+')" title="Editar" style="'+abtn+'">✎</button>';
     if(canDel)  h+=' <button onclick="ccBorrarSaldo('+o.rowNum+','+ccQ(o.paciente)+','+(o.saldo||0)+')" title="Borrar" style="'+dbtn+'">✕</button>';
   } else if(o.origen==='registro' && o.auto && o.op && o.op!=='—'){
-    h+=' <span title="Este saldo lo manda la venta '+ccEsc(o.op)+': se corrige o se cancela desde Ingresos, no aquí." style="font-size:10px;color:var(--color-text-muted);padding:0 4px;cursor:help">venta '+ccEsc(o.op)+'</span>';
+    // Este saldo lo MANDA la venta, así que aquí no se edita ni se borra (arriba se
+    // explica por qué). Pero antes esto era sólo un texto gris: un CALLEJÓN SIN SALIDA
+    // que decía "corrígelo en Ingresos" sin llevarte a Ingresos. Ahora es un botón que
+    // abre esa venta lista para editar; al guardarla, la venta, el banco y este saldo
+    // se mueven juntos (updateIngresoConBancos). Gated por editar_ingresos, que es lo
+    // que de verdad exige editar la venta — sin el permiso queda el texto de siempre.
+    if(typeof hasPermission==='function' && hasPermission('editar_ingresos')){
+      h+=' <button onclick="ccCorregirVenta('+ccQ(o.op)+')" title="Abre la venta '+ccEsc(o.op)+' en Ingresos para corregir paciente, monto o producto. Al guardar se ajustan la venta, el banco y este saldo." style="'+abtn+';border-color:var(--color-primary);color:var(--color-primary);font-weight:600">Corregir la venta →</button>';
+    } else {
+      h+=' <span title="Este saldo lo manda la venta '+ccEsc(o.op)+': se corrige o se cancela desde Ingresos, no aquí (necesitas el permiso editar_ingresos)." style="font-size:10px;color:var(--color-text-muted);padding:0 4px;cursor:help">venta '+ccEsc(o.op)+'</span>';
+    }
   } else if(o.origen==='ingreso'){
     if(canEdit) h+=' <button onclick="ccAjustarIngreso('+ccQ(o.op)+','+ccQ(o.paciente)+','+(o.total||0)+','+(o.abonado||0)+')" title="Ajustar lo pagado" style="'+abtn+'">✎</button>';
     if(canEdit) h+=' <button onclick="ccSaldarIngreso('+ccQ(o.op)+','+ccQ(o.paciente)+','+(o.saldo||0)+')" title="Marcar como pagado (saldar)" style="'+abtn+';color:#16a34a;border-color:#a7d7b5">✓</button>';
   }
   return h;
+}
+/* ── Puente Cuentas por Cobrar → editar LA VENTA ─────────────────────────────
+ * El saldo de un renglón "auto" es un DERIVADO de la venta (Facturado − Pagado):
+ * corregirlo aquí no serviría. La corrección de verdad (paciente, monto, producto)
+ * se hace en la venta, y al guardarla el backend mueve TODO junto: BD_Ingresos, las
+ * filas de banco y este mismo renglón de deuda (updateIngresoConBancos).
+ *
+ * ingEditOp() exige _ingData cargado y, llamado desde aquí, eso NO se cumple:
+ * Cuentas por Cobrar nunca carga la vista Ingresos → daría "Datos no cargados.
+ * Recarga la página." Por eso aquí se carga primero y se abre después.
+ *
+ * Se usa _fetchIngresosRaw() (el libro COMPLETO del año) en vez de loadIngresosERP(),
+ * que filtra por el periodo global: una deuda puede venir de una venta de un trimestre
+ * anterior al seleccionado, y con la lista filtrada ingEditOp no la encontraría y
+ * gritaría "Operación no encontrada" sobre una venta que sí existe.
+ *
+ * El año se fuerza al periodo actual: un renglón auto sólo puede nacer en el libro del
+ * año en curso (saveIngreso/cargarSaldoInicial escriben en INGRESOS_SS_ID), y si la
+ * vista Ingresos se quedó en un año histórico, _ingHistBlock() bloquearía la edición. */
+async function ccCorregirVenta(op){
+  op = String(op||'').trim();
+  if(!op || op==='—') return;
+  if(typeof hasPermission==='function' && !hasPermission('editar_ingresos')){
+    alert('No tienes permiso para editar ventas.\n\nPídele al administrador el permiso "editar_ingresos" en Panel de Control → Roles.');
+    return;
+  }
+  try{
+    if(typeof _ingAnioSel!=='undefined') _ingAnioSel = null;   // la venta vive en el libro del año en curso
+    if(typeof _ingPage!=='undefined') _ingPage = 1;
+    navigateTo('ingresos');
+    var raw = await _fetchIngresosRaw();
+    if(!raw || !raw.rows){ alert('No se pudo cargar Ingresos para abrir la venta '+op+'.'); return; }
+    _ingData = raw;
+    try{ if(typeof _renderIngresosERP==='function') _renderIngresosERP(); }catch(eR){}
+    if(!raw.rows.some(function(r){ return r.id===op; })){
+      alert('La venta '+op+' no está en el libro de Ingresos del año en curso.\n\n'
+        + 'Puede ser de un año anterior: ábrela desde Ingresos eligiendo el año que corresponda.');
+      return;
+    }
+    ingEditOp(op);
+  }catch(e){
+    alert('No se pudo abrir la venta '+op+': '+((e&&e.message)||e));
+  }
 }
 function ccToggleDetalle(id, el){ var r=document.getElementById(id); if(r){ var open=r.style.display!=='none'; r.style.display=open?'none':'table-row'; if(el) el.textContent=open?'▸':'▾'; } }
 function ccAjustarIngreso(op, paciente, total, abonado){
@@ -36017,6 +36070,15 @@ var NOVEDADES=[
   /* `destacada:true` = se anuncia con el aviso emergente (default del código; el admin lo
      puede cambiar desde Panel de Control → Novedades sin tocar el código).
      `perm:'clave'` = audiencia restringida a quien tenga ese permiso (vacío = todos). */
+  { build:'2026.07.16', fecha:'16 jul 2026', area:'Cobranza', icon:'📥', destacada:true, perm:'editar_ingresos',
+    titulo:'Corregir una cuenta por cobrar: ahora sí se puede, y mueve TODO',
+    puntos:['**El callejón sin salida se acabó.** Si te equivocabas al capturar (el nombre de la paciente, la cantidad, el producto — lo que sea), en Cuentas por Cobrar solo veías un texto gris que decía «venta OP-…» con un aviso de que eso «se corrige desde Ingresos»… pero no te llevaba a ningún lado. Había que salir, adivinar el folio y buscarlo a mano.',
+      'Ahora ese renglón trae un botón **«Corregir la venta →»**: un clic y se abre **esa misma venta** en Ingresos, ya cargada y lista para editar. Funciona igual para los cargos tipo **REPROVIDA** dados de alta con «+ Cuenta por cobrar».',
+      '**Al guardar, se mueve todo lo que está involucrado, en un solo paso:** la venta en Ingresos, el **movimiento del banco** (se re-etiqueta con el nombre nuevo y el monto nuevo, sin apilar filas) y la **cuenta por cobrar** (saldo, nombre y concepto).',
+      '**Si cambias el nombre de la paciente, la deuda se pasa al nombre nuevo.** Queda **un solo renglón**: no se queda un adeudo huérfano con el nombre viejo, ni aparece duplicado bajo dos nombres. Y si la corrección deja la venta **saldada**, el adeudo **se cierra solo** en vez de quedar colgado.',
+      '**Blindaje extra por dentro:** el recálculo de la deuda ya no depende de lo que mande la pantalla — el servidor **relee la venta ya guardada** (Facturado − Pagado) y deja la cuenta por cobrar en su espejo. Guardar dos veces (o un doble clic) no duplica ni la deuda ni el movimiento del banco.',
+      'Lo que **no** cambió: sobre una venta sigue sin haber ✎/✕ en Cobranza (borrar su deuda dejaría la venta cobrando sola). Para deshacerla: **⊘ Cancelar** si ya entró dinero, o **🗑** si todavía no se ha cobrado un peso. Los cargos viejos sin venta detrás se siguen editando con ✎/✕ como siempre. Y una venta **cancelada** sigue sin poder editarse.'],
+    comoUsar:['**Cuentas por Cobrar** → busca el renglón → **«Corregir la venta →»**.','Corrige lo que esté mal (paciente, monto, producto, fecha, forma de pago) y **Guardar operación**.','Vuelve a **Cuentas por Cobrar**: el saldo y el nombre ya salen corregidos (la lista se recarga sola).','¿No te aparece el botón? Necesitas el permiso **editar_ingresos** (Panel de Control → Roles).','¿Te dice que la venta es de un año anterior? Ábrela desde **Ingresos** eligiendo ese año.'] },
   { build:'2026.07.16', fecha:'16 jul 2026', area:'Comisiones', icon:'🤝', destacada:true, perm:'generar_comisiones',
     titulo:'Ya puedes capturar las reglas de comisión tú mismo (se acabó el JSON)',
     puntos:['El motor de comisiones ya estaba listo, pero no se podía **encender**: para dar de alta una regla había que escribir JSON a mano en una configuración interna, o pedírselo a sistemas. Ahora hay un **editor completo** en Comisiones → **⚙️ Configurar reglas**, igual de sencillo que el panel de Descuentos por agencia.',
@@ -36612,7 +36674,7 @@ async function _novCfgGuardar(){
   },
 
   { id:'ingresos', group:'operacion', icon:'💵', title:'Ingresos (captura y pago parcial)',
-    keywords:'ingresos venta captura cobro pago mixto multipago mercado pago comision factura banco pago parcial cuenta por cobrar nota credito producto teclado atajos enter tab agregar linea captura rapida guardar y capturar otro tanda folios sesion',
+    keywords:'ingresos venta captura cobro pago mixto multipago mercado pago comision factura banco pago parcial cuenta por cobrar nota credito producto teclado atajos enter tab agregar linea captura rapida guardar y capturar otro tanda folios sesion editar venta editar operacion corregir venta corregir la venta me equivoque error de captura cambiar nombre paciente nombre equivocado corregir monto cambiar producto mover todo cascada deuda huerfana',
     intro:'**Ingresos** es donde se captura cada venta/cobro a paciente. Cada operación (OP) puede tener varias líneas de producto y **varias formas de pago**, cada una ruteada a su banco. Incluye una pestaña de **Facturación** para conciliar los CFDI contra las ventas.',
     pasos:[
       'Abre **Ingresos → + Nuevo** (formulario estilo Odoo).',
@@ -36625,6 +36687,7 @@ async function _novCfgGuardar(){
       { h:'Atajos de teclado en los artículos', p:'La tabla de productos se captura sin soltar el teclado. Orden del tabulador: **Categoría → Producto → P.V.P. → Desc. % → Cant.** (los botones ✏ y × de la fila quedan fuera del recorrido).\n\n· `Enter` → siguiente campo.\n· `Enter` en **Cant.** → baja a la línea siguiente; en la última, **crea una nueva** y enfoca su primer campo.\n· `Tab` en **Cant.** de la última línea → igual que Enter (el tabulador no se sale de la tabla a media captura). Si la línea está vacía, `Tab` sale normal: esa es la puerta de salida.\n· `Ctrl+Enter` o `Alt+A` → agrega línea desde cualquier campo.\n· `Ctrl+Supr` → borra la línea si está vacía.\n\nEn el buscador de **Producto**, escribe para filtrar y `Enter` toma la **primera coincidencia** (busca primero dentro de la categoría elegida).' },
       { h:'Guardar y capturar otro', p:'Botón secundario al pie del formulario, para capturar **en tanda** sin volver a la lista entre venta y venta.\n\nGuarda exactamente igual que «Guardar operación» (mismo movimiento bancario, misma comisión MP, mismo aviso de cuenta por cobrar), pero **no sale de la pantalla**: limpia el formulario **conservando la Fecha y la forma de pago** — lo que se repite en una tanda — y devuelve el cursor al campo de **Paciente**.\n\nLos folios guardados se van listando como **chips verdes** («Capturados en esta sesión») arriba del formulario; dando clic se abre esa operación. Al cerrar la captura, la lista de Ingresos se refresca sola.\n\n**Si el guardado falla, el formulario NO se limpia** — la captura se conserva para corregir y reintentar. El botón no aparece en modo edición.' },
       { h:'Pago parcial → Cuenta por Cobrar', p:'`saveIngreso` reparte el pago real por líneas; si `Pagado < Total`, el saldo se **registra** en la hoja `Cuentas_Cobrar` (llama `_cobRegistrarSaldoIngreso`) y devuelve `saldoGenerado`. El frontend confirma antes de guardar y muestra el aviso `_ingAvisoCxC`. Pago completo = igual que siempre.' },
+      { h:'Editar una venta ya guardada: se mueve TODO', p:'Corregir una operación (**Ingresos → ✎**, o el botón **«Corregir la venta →»** desde Cuentas por Cobrar) **arrastra todo lo que cuelga de ella en un solo guardado**. Puedes cambiar **cualquier cosa** — el **nombre del paciente**, el monto, el producto, la fecha, la forma de pago — y el sistema ajusta:\n\n· **La venta** en `BD_Ingresos` (todas sus líneas).\n· **Los bancos**: las filas de la OP se **borran y se re-crean** limpias, ya con el **nombre y el monto nuevos**, y se recalcula el saldo corrido. Editar N veces deja **una sola fila por forma de pago** (nunca se apilan reversos), y la comisión de Mercado Pago se **conserva**.\n· **La cuenta por cobrar**: el saldo se recalcula como **Facturado − Pagado**. Si cambiaste el **paciente**, la deuda **se pasa** al nombre nuevo — **un solo renglón**, sin dejar un adeudo huérfano con el nombre viejo ni duplicarlo bajo dos nombres. Si la venta quedó **saldada**, el adeudo **se cierra solo**.\n· **La nota de crédito**: el crédito a favor se re-consume o **se devuelve** según el nuevo monto.\n\n**Una venta CANCELADA no se edita** (su registro es histórico y editarla destruiría el reverso del cobro): primero se descancela o se captura de nuevo.' },
       { h:'Pago mixto', p:'El desglose de pagos vive en la columna dinámica `PagosDetalle` (JSON `[{fp,monto}]`) de la primera línea de la OP. La lista muestra «FP1 + FP2»; al editar o borrar, el reverso bancario reversa **cada** forma por su monto.' },
       { h:'Facturación (pestaña dentro de Ingresos)', p:'Concilia los XML de Drive contra `BD_Ingresos` por folio/nombre/monto, detecta duplicados, permite subir un XML suelto y asignarlo a una OP, y genera el reporte **ContaDigital** (Ya facturado / Pendiente por facturar). Cualquier lector por OP fusiona los campos de **todas** las líneas (Factura#/URL puede vivir en una línea que no es la primera).' }
     ],
@@ -36763,11 +36826,11 @@ async function _novCfgGuardar(){
   },
 
   { id:'cobranza', group:'operacion', icon:'📥', title:'Cobranza / Cuentas por Cobrar',
-    keywords:'cobranza cuentas por cobrar cxc adeudo saldo abono abonar cobrar cobro credito a favor comision mp banco conciliacion pagado abonarcargo abonaringreso abonos huerfanos auditoria descuadre suscripcion crio criopreservacion almacenamiento agencia reprovida descuento volumen deposito partida bloque paciente aging motor a motor b anual mensual conciliar mp mercado pago payer id recordar cobro',
+    keywords:'cobranza cuentas por cobrar cxc adeudo saldo abono abonar cobrar cobro credito a favor comision mp banco conciliacion pagado abonarcargo abonaringreso abonos huerfanos auditoria descuadre suscripcion crio criopreservacion almacenamiento agencia reprovida descuento volumen deposito partida bloque paciente aging motor a motor b anual mensual conciliar mp mercado pago payer id recordar cobro corregir la venta corregir venta editar cuenta por cobrar editar cxc editar adeudo me equivoque error de captura capture mal nombre mal nombre equivocado cambiar nombre paciente cambiar el nombre corregir nombre corregir monto monto equivocado cambiar monto cambiar producto deuda huerfana adeudo huerfano nombre viejo mover todo callejon sin salida venta op editar la venta desde cobranza',
     intro:'**Cobranza (Cuentas por Cobrar)** controla lo que te deben. Tiene **dos motores independientes** que no mezclan datos: **Motor A — Saldos** (adeudos de ventas) y **Motor B — Suscripciones de criopreservación**. Se ve en la vista *Cuentas por Cobrar* (2 pestañas) y en el reporte *Cobranza*.',
     bloques:[
       { h:'«+ Cuenta por cobrar» = VENDER A CRÉDITO (registra la venta sola)', p:'⚠ Lo más importante de entender: **«+ Cuenta por cobrar» es siempre una venta NUEVA** que todavía no está en Ingresos. Por eso el botón hace **las dos cosas en un solo paso**: captura la **venta** en `BD_Ingresos` (con la **fecha del cargo** y **Pagado en $0**) y de esa venta nace la **cuenta por cobrar**. **NO la captures también en Ingresos: la duplicarías.**\n\n**Por qué cambió:** antes solo escribía la deuda y nunca la venta. Al cobrarla, el dinero entraba al banco pero el ingreso **no existía en el Estado de Resultados** — y quien lo notaba lo capturaba a mano, **duplicando** el ingreso. La venta ahora nace desde el principio, así que al cobrar no hay nada que capturar.\n\n**Consecuencias (todas a favor):** el ingreso cuenta en el **mes en que se vendió** (devengado), no en el que se cobre; el saldo se cobra con el **mismo botón y el mismo motor** que cualquier venta (sube el Pagado + manda el dinero al banco); los **abonos parciales** funcionan solos. Vender a crédito **no mueve dinero**: el alta no toca ningún banco — el banco se toca al **cobrar**.\n\n**Reglas del alta:** el **titular** es a quien se le cobra (en agencias, la **agencia** — el nombre de cada paciente real se guarda por partida y en las observaciones de la venta); la **fecha debe ser del año en curso** (la venta se escribe en el libro de ingresos activo; un cargo de otro año se rechaza explicando por qué); y ya **no se pide OP**: la venta genera su propio folio.' },
-      { h:'Corregir o deshacer una cuenta por cobrar que nació de una venta', p:'Los renglones que manda una venta (los que traen la nota `auto-ingreso` y su OP) **ya no se editan ni se borran desde Cobranza** — en su lugar aparece la etiqueta «venta OP-…».\n\n**Por qué:** su monto es un **derivado** (Facturado − Pagado de la venta) que se recalcula solo; editarlo aquí se **evaporaría** al primer abono, y mientras tanto la deuda diría una cosa y la venta otra. Y **borrarlo** dejaría la **venta cobrando sola** en Ingresos, sin nadie a quién cobrarle (ingreso fantasma).\n\n**Qué hacer:** ¿el monto está mal? → **Ingresos → editar la operación**; el saldo se ajusta solo. ¿La venta no va? → **Ingresos → «⊘ Cancelar»** (pide motivo, queda registro y **cierra el saldo solo**). Los cargos **viejos** (los de antes de este cambio) siguen editándose y borrándose normal.' },
+      { h:'Corregir una cuenta por cobrar: el botón «Corregir la venta →»', p:'Los renglones que manda una venta (los que traen la nota `auto-ingreso` y su OP) **no se editan ni se borran desde Cobranza**. En su lugar aparece el botón **«Corregir la venta →»**, que te lleva **directo** a esa venta en Ingresos, ya abierta y lista para editar.\n\n**Por qué no se edita aquí:** su monto es un **derivado** (Facturado − Pagado de la venta) que se recalcula solo; editarlo aquí se **evaporaría** al primer abono, y mientras tanto la deuda diría una cosa y la venta otra. Y **borrarlo** dejaría la **venta cobrando sola** en Ingresos, sin nadie a quién cobrarle (ingreso fantasma).\n\n**Corriges TODO desde la venta.** Ahí puedes cambiar **cualquier cosa**: el **nombre del paciente**, el **monto**, el **producto**, la fecha o la forma de pago. Al guardar, el sistema **mueve todo lo que cuelga de esa venta en un solo paso**: la venta en `BD_Ingresos`, las **filas de banco** (se re-etiquetan con el nombre nuevo y el monto nuevo) y **esta cuenta por cobrar** (saldo, nombre y concepto). Si cambias el paciente, la deuda **se pasa** al nombre nuevo: no queda un adeudo huérfano con el nombre viejo ni se duplica bajo dos nombres — es **siempre un solo renglón**. Y si la corrección deja la venta **saldada**, el adeudo **se cierra solo** en vez de quedar colgado.\n\n**Esto también aplica a los cargos tipo REPROVIDA** dados de alta con «+ Cuenta por cobrar»: como el alta creó una venta, su renglón es `auto-ingreso` → se corrigen con este mismo botón.\n\n**Requiere el permiso `editar_ingresos`** (es lo que exige editar la venta). Sin él sigues viendo la etiqueta «venta OP-…» informativa.\n\n**¿La venta no va?** → **Ingresos → «⊘ Cancelar»** (pide motivo, queda registro y **cierra el saldo solo**). Si todavía no se ha cobrado un peso, **Ingresos → «🗑»** la borra y el adeudo se va con ella. Los cargos **viejos** (los de antes de que el alta creara la venta) no tienen venta detrás y siguen editándose y borrándose normal con ✎/✕.' },
       { h:'Motor A — Saldos (SOLO registro explícito)', p:'⚠ Regla clave: el sistema **NO deduce** adeudos de la columna Pagado de `BD_Ingresos` (los precios de años pasados eran más bajos y darían saldos falsos). Un adeudo **solo nace** al: (1) capturar un ingreso con **pago parcial**, (2) **cargar un saldo inicial**, o (3) hacer un **cargo a crédito**. Se lee **solo** de la hoja `Cuentas_Cobrar`. Segmenta Pacientes / Médicos / Agencias, con antigüedad (aging) 0-30, 31-60, 61-90 y +90 días.' },
       { h:'Editor de partidas por bloque (agencias/externos)', p:'En agencias/externos NUESTRO cliente es la agencia (ej. REPROVIDA), pero el reporte debe listar a los **pacientes reales**. El editor trabaja por **bloques**: cada bloque = **un paciente + la fecha de su tratamiento + sus productos**. El botón **«+ Otro paciente / fecha»** (cierre parcial) te deja seguir capturando otro paciente en la **misma** nota. En pacientes normales es un solo bloque sin cabecera.' },
       { h:'Motor B — Suscripciones de criopreservación', p:'Universo = hoja `Inventario Crío`. **Solo se cobra a quien tenga inventario** (óvulos OOV o embriones EMB > 0); en ceros se excluye. Reglas: **año 1 gratis solo para Hestia** (externos pagan desde el inicio); plan **anual $5,700** cubre un año desde el pago; plan **mensual $475** el día 1 de cada mes acumulando atrasos. El plan se define por **inscripción**, default **anual**. **Autopay** es informativo (montoDebe 0, muestra el próximo cobro). Estatus: Cortesía / Vigente / Por vencer / Vencida / Falta suscripción.' },
@@ -36788,7 +36851,7 @@ async function _novCfgGuardar(){
     datos:{
       hojas:['`Cuentas_Cobrar` y `Abonos_Cobrar` (INGRESOS_SS_ID) — Motor A; columna `Items` = JSON de partidas (pac, fecha, producto, cant, importe)','`Suscripciones_Crio` (INGRESOS_SS_ID) — Motor B','`Inventario Crío` (LAB_SS_ID): NOMBRE / FECHA CRÍO / OOV / EMB / EXTERNO','`Descuentos_Agencia` (INGRESOS_SS_ID)'],
       scriptProps:['`COBRANZA_CONFIG` (tarifas/reglas)','`COBRANZA_PAC_CFG` (por paciente: {externo, mensual, autopay})','`COBRANZA_DESCUENTOS` (mapeo hoja de descuentos)','`COBRANZA_DEPOSITO` (datos bancarios)','`AGENCIAS` (lista de agencias, default [reprovida])'],
-      funciones:['readEstadoCobranza','cuentasCobrar','suscripcionesCrio','cargarSaldoInicial (alta = saveIngreso con pagado:0 → la CxC nace de la venta)','abonarIngreso (saldo de venta: sube Pagado + banco + cierra · valida saldoEsperado)','abonarCargo (cargo explícito: baja MontoCargo + banco + cierra)','auditarCargosSinVenta (SOLO LECTURA, correr a mano: cargos viejos sin venta)','auditarAbonosHuerfanos (SOLO LECTURA, correr a mano)','registrarAbono (solo anota en Abonos_Cobrar — NO cobra)','editarCuentaCobrar / borrarCuentaCobrar (rechazan renglones auto-ingreso)','generarSuscripciones','_cobSanitizeNota','_cobCargoDuplicadoReciente','_cobFindAutoRow','_cobRowAuto','_cobDescuentosAgencia','_cobDeposito','_cobParseItems'],
+      funciones:['readEstadoCobranza','cuentasCobrar','suscripcionesCrio','cargarSaldoInicial (alta = saveIngreso con pagado:0 → la CxC nace de la venta)','abonarIngreso (saldo de venta: sube Pagado + banco + cierra · valida saldoEsperado)','abonarCargo (cargo explícito: baja MontoCargo + banco + cierra)','ccCorregirVenta (front: puente CxC → editar la venta; carga el libro completo y abre ingEditOp)','updateIngresoConBancos (cascada: venta + banco + CxC en un paso · reafirma el saldo autoritativo)','_cobRegistrarSaldoIngreso (UPSERT por OP + nota auto-ingreso, NUNCA por nombre → renombrar reescribe el mismo renglón)','auditarCargosSinVenta (SOLO LECTURA, correr a mano: cargos viejos sin venta)','auditarAbonosHuerfanos (SOLO LECTURA, correr a mano)','registrarAbono (solo anota en Abonos_Cobrar — NO cobra)','editarCuentaCobrar / borrarCuentaCobrar (rechazan renglones auto-ingreso y rutean a Ingresos)','generarSuscripciones','_cobSanitizeNota','_cobCargoDuplicadoReciente','_cobFindAutoRow','_cobRowAuto','_cobOPPagado','_cobDescuentosAgencia','_cobDeposito','_cobParseItems'],
       permisos:['editar_ingresos (cobrar/abonar un saldo)','editar_egresos (alta/edición y toggles Tipo/Plan)','borrar_egresos'],
       motorVer:'cobranza-2026.07.13p',
       nota:'`cobranza.gs` requiere **agregar al Apps Script + redeploy + `setupCobranzaConfig()`** una vez. ⚠ `abonarCargo` y `cargarSaldoInicial` necesitan **`cobranza.gs` + `finance.gs` redesplegados JUNTOS**: el alta llama a `saveIngreso` (finance.gs) para crear la venta, y el cobro usa `_abonoRutearABanco` (finance.gs). Si falta alguno, **falla cerrado** con un mensaje que dice qué desplegar — nunca escribe a medias. Cuentas por Cobrar también aparece resumido dentro de **Flujo de Efectivo**.'
@@ -38439,7 +38502,7 @@ async function _novCfgGuardar(){
       deploy:'`poliza_concil.gs` devuelve los movimientos del ERP del periodo y escribe el Folio en la columna Póliza.' } },
 
   { id:'cobranza', group:'operacion', icon:'📥', title:'Cobranza / Cuentas por Cobrar',
-    keywords:'cobranza cuentas por cobrar cxc adeudo saldo abono abonar cobrar cobro credito a favor comision mp banco conciliacion pagado abonos huerfanos descuadre suscripcion crio criopreservacion almacenamiento agencia reprovida descuento volumen deposito partida bloque paciente aging motor a motor b anual mensual saldo inicial conciliar mp mercado pago payer id recordar cobro',
+    keywords:'cobranza cuentas por cobrar cxc adeudo saldo abono abonar cobrar cobro credito a favor comision mp banco conciliacion pagado abonos huerfanos descuadre suscripcion crio criopreservacion almacenamiento agencia reprovida descuento volumen deposito partida bloque paciente aging motor a motor b anual mensual saldo inicial conciliar mp mercado pago payer id recordar cobro corregir la venta corregir venta editar cuenta por cobrar editar adeudo me equivoque error de captura nombre equivocado cambiar nombre paciente corregir monto deuda huerfana mover todo',
     para:'**Cobranza** controla lo que te deben. Tiene **dos motores** que no mezclan datos: **Motor A — Saldos** (adeudos de ventas) y **Motor B — Suscripciones de criopreservación**. Se ve en *Cuentas por Cobrar* (2 pestañas) y en el reporte *Cobranza*.',
     where:'Menú → **Cuentas por Cobrar** (operación) · Menú → Reportes → **Cobranza** (estado de cuenta imprimible).',
     mock:{ title:'Cuentas por Cobrar', crumb:'Cobranza', period:'Julio 2026',
@@ -38447,13 +38510,13 @@ async function _novCfgGuardar(){
       toolbar:[ {t:'search', label:'Buscar paciente / agencia…'}, {t:'btn', label:'Cargar saldo inicial', pri:true, n:3} ],
       table:{ cols:['Cliente','Concepto','Saldo','Antigüedad',''],
         rows:[ ['REPROVIDA','5 × Prep. endometrial','$23,250',{label:'31-60 d',n:5},{raw:'<span class="hfm-mini">Cobrar / Abonar · Editar</span>',n:4}],
-               ['A. López','Ciclo FIV (parcial)','$12,000','0-30 d',{raw:'<span class="hfm-mini">Cobrar / Abonar</span>',n:6}] ] },
+               ['A. López','Ciclo FIV (parcial)','$12,000','0-30 d',{raw:'<span class="hfm-mini">Cobrar / Abonar · Corregir la venta →</span>',n:6}] ] },
       callouts:[ {n:1,text:'**Motor A — Saldos**: adeudos de ventas. Segmenta Pacientes / Médicos / Agencias.'},
                  {n:2,text:'**Motor B — Suscripciones Crío**: almacenamiento de óvulos/embriones (cobro anual/mensual).'},
                  {n:3,text:'**+ Cuenta por cobrar** = **vender a crédito**: registra la **venta** en Ingresos (con la fecha del cargo y pagado en $0) y de ahí nace el adeudo. **No la captures también en Ingresos.**'},
                  {n:4,text:'**Cobrar / Abonar** en un **cargo capturado a mano** (saldo inicial, sin OP): baja el saldo del cargo y manda el dinero al banco. **Editar** abre las partidas por bloque.'},
                  {n:5,text:'**Antigüedad (aging)**: 0-30 / 31-60 / 61-90 / +90 días.'},
-                 {n:6,text:'**Cobrar / Abonar** en un **saldo de venta** (con OP): sube lo **Pagado** de la venta, manda el dinero al banco y cierra el saldo. Aquí puedes aplicar el **crédito a favor** del paciente.'} ] },
+                 {n:6,text:'**Cobrar / Abonar** en un **saldo de venta** (con OP): sube lo **Pagado** de la venta, manda el dinero al banco y cierra el saldo. Aquí puedes aplicar el **crédito a favor** del paciente.\n\n**¿Te equivocaste al capturar?** **Corregir la venta →** abre esa venta en Ingresos lista para editar. Al guardar se mueven **la venta, el banco y este saldo** juntos; si cambias el **nombre**, la deuda se pasa al nombre nuevo (un solo renglón, sin huérfanos). Requiere **editar_ingresos**.'} ] },
     steps:[
       'Para un adeudo **desde cero**: pestaña **Saldos → + Cuenta por cobrar**. Eso **vende a crédito**: captura la **venta** sola en Ingresos (fecha del cargo, pagado $0) y de ahí sale el adeudo. ⚠ **No la captures también en Ingresos: se duplicaría.**',
       'La **fecha del cargo** debe ser del **año en curso** (ahí se escribe la venta). Un cargo de otro año se rechaza y te explica por qué.',
@@ -38461,6 +38524,7 @@ async function _novCfgGuardar(){
       'Para **cobrar** un saldo: pulsa **Cobrar / Abonar**, captura monto, fecha y **forma de pago** — la forma de pago decide el banco (Efectivo → Caja · Santander → Santander · Transferencia/TDC/TDD/AMEX/Mercado Pago → Mercado Pago). Con TDC/TDD/AMEX captura también la comisión de Mercado Pago.',
       'El cobro es **un solo paso**: sube lo pagado, crea el movimiento en conciliación y quita el saldo de la lista al liquidarlo. Si el paciente tiene **crédito a favor** (saldos de venta), puedes aplicarlo con la casilla verde.',
       'Si te dice que **el saldo cambió**, alguien más lo movió: recarga la lista y reintenta (evita cobrarle al renglón equivocado o cobrar dos veces).',
+      '**¿Capturaste algo mal (nombre, cantidad, producto)?** Pulsa **«Corregir la venta →»** en ese renglón: abre la venta en Ingresos lista para editar. Al guardar se ajustan **la venta, el banco y la cuenta por cobrar** de una sola vez, y si cambiaste el paciente la deuda queda **solo** a nombre del nuevo. Aplica también a los cargos **REPROVIDA** dados de alta con «+ Cuenta por cobrar» (nacieron con una venta detrás). Necesitas **editar_ingresos**.',
       'Para **cobrar** una suscripción: pestaña **Suscripciones Crío → Abonar** (marca periodos FIFO y crea el ingreso real).',
       'Para el estado de cuenta imprimible: **Reportes → Cobranza**, busca la agencia/paciente e imprime (muestra Bruto − Descuento = Neto y datos de depósito).'
     ],
