@@ -819,6 +819,18 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(vincularComprobantesLote(body));
     }
+    // Migración de las columnas fiscales de Egresos (idempotente; sin `anio` migra
+    // TODOS los años configurados). Vive en finance.gs, así que no lleva guard.
+    if (body.action === 'migrateEgresosFacturaDetalle') {
+      return jsonResponse(migrateEgresosFacturaDetalle(body.anio));
+    }
+    // Back-fill del UUID/folio/RFC/razón de los egresos YA vinculados. Reanudable:
+    // si devuelve truncado:true, se vuelve a llamar con desde:<siguiente>.
+    if (body.action === 'backfillFacturasEgresos') {
+      if (typeof backfillFacturasEgresos !== 'function')
+        return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(backfillFacturasEgresos(body));
+    }
     if (body.action === 'enviarDocumentoCorreo') {
       if (typeof enviarDocumentoCorreo !== 'function')
         return jsonResponse({ok:false, error:'Agrega comprobantes.gs al proyecto de Apps Script y redespliega.'});
@@ -2011,6 +2023,217 @@ function _ingColEnsure(sh, want, headerText) {
   return lastCol + 1;
 }
 
+/* ══════════════════════════════════════════════════════════════
+   EGRESOS — COLUMNAS FISCALES DE LA FACTURA (UUID/folio/RFC/razón)
+   ------------------------------------------------------------
+   Espejo de FacturaRFC/FacturaUUID de BD_Ingresos (facturacion.gs,
+   migrateBDIngresosFacturaDetalle). Hasta el build .208 el folio
+   fiscal de un egreso SOLO vivía como texto de la etiqueta del
+   hipervínculo de "Link Factura" y dentro del XML de Drive: no se
+   podía buscar, ni detectar un CFDI repetido, sin abrir el archivo.
+
+   OJO con la SEMÁNTICA — es la INVERSA de Ingresos:
+     · Ingresos → Hestia EMITE  ⇒ contraparte = RECEPTOR (paciente)
+     · Egresos  → Hestia RECIBE ⇒ contraparte = EMISOR   (proveedor)
+   En los dos casos la columna guarda a LA CONTRAPARTE — por eso
+   comparten nombre. NUNCA guardan el RFC de Hestia.
+
+   Las 4 columnas se agregan AL FINAL (append-safe, vía _egColEnsure)
+   y jamás se referencian por posición: cada año tiene su propio libro
+   (_egIdDeAnio/_egTabDeAnio) y las hojas no son idénticas entre años.
+   ══════════════════════════════════════════════════════════════ */
+
+/* header = nombre real de la columna; want = fragmento en minúsculas con el
+   que se localiza. Cada `want` es lo bastante específico para NO colisionar
+   con las búsquedas por substring que ya existen sobre esta hoja:
+   col('facturación') / col('facturacion') / findCol('facturaci') /
+   indexOf('facturaci') / col('link factura'). Ver readEgresosData y
+   updateEgresoField: ninguna de esas cadenas es substring de estos headers. */
+var EG_FAC_COLS = [
+  { key:'uuid',  want:'facturauuid',        header:'FacturaUUID' },
+  { key:'folio', want:'facturafolio',       header:'FacturaFolio' },
+  { key:'rfc',   want:'facturarfc',         header:'FacturaRFC' },
+  { key:'razon', want:'facturarazonsocial', header:'FacturaRazonSocial' }
+];
+
+/* Folio "legible" tal como viene impreso en la factura y como ya lo muestra el
+   ERP en el detalle del egreso: SERIE-FOLIO (ej. "A-1234"). */
+function _egFolioFiscal(serie, folio) {
+  serie = String(serie == null ? '' : serie).trim();
+  folio = String(folio == null ? '' : folio).trim();
+  if (serie && folio) return serie + '-' + folio;
+  return folio || serie || '';
+}
+
+/* Devuelve {uuid,folio,rfc,razon} → columna 1-indexed de cada campo, creando
+   al final las que falten. Idempotente: si ya existen, no toca nada. */
+function _egFacturaCols(sh) {
+  var out = {};
+  for (var i = 0; i < EG_FAC_COLS.length; i++) {
+    out[EG_FAC_COLS[i].key] = _egColEnsure(sh, EG_FAC_COLS[i].want, EG_FAC_COLS[i].header);
+  }
+  return out;
+}
+
+/* Migración idempotente de las columnas fiscales, en el libro del AÑO pedido.
+   Sin argumento migra TODOS los años configurados en EGRESOS_IDS (2024/25/26):
+   cada año es un spreadsheet distinto, así que migrar "el de 2026" no arregla
+   el histórico. Correrla dos veces no duplica nada (_egColEnsure solo crea lo
+   que falta). Devuelve, por año, qué columnas agregó. */
+function migrateEgresosFacturaDetalle(anio) {
+  try {
+    var anios = (anio === undefined || anio === null || anio === '')
+      ? Object.keys(EGRESOS_IDS).map(function (y) { return parseInt(y, 10); })
+      : [parseInt(anio, 10)];
+    var res = [];
+    for (var i = 0; i < anios.length; i++) {
+      var y = anios[i];
+      if (!EGRESOS_IDS[y]) { res.push({ anio:y, ok:false, error:'Año no configurado en EGRESOS_IDS' }); continue; }
+      var sh = null;
+      try {
+        var ss = SpreadsheetApp.openById(_egIdDeAnio(y));
+        sh = ss.getSheetByName(_egTabDeAnio(y));
+      } catch (eo) { res.push({ anio:y, ok:false, error:eo.message }); continue; }
+      if (!sh) { res.push({ anio:y, ok:false, error:'Pestaña ' + _egTabDeAnio(y) + ' no encontrada' }); continue; }
+
+      var antes = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0]
+                    .map(function (h) { return String(h).trim().toLowerCase(); });
+      var faltaban = EG_FAC_COLS.filter(function (c) {
+        for (var k = 0; k < antes.length; k++) if (antes[k].indexOf(c.want) > -1) return false;
+        return true;
+      }).map(function (c) { return c.header; });
+
+      var cols = _egFacturaCols(sh); // crea SOLO lo que falte, al final
+      // Mismo formato de header que el resto de la hoja (ver setupEgresosAnio)
+      EG_FAC_COLS.forEach(function (c) {
+        if (faltaban.indexOf(c.header) > -1)
+          sh.getRange(1, cols[c.key]).setFontWeight('bold').setBackground('#fce7f3');
+      });
+      res.push({ anio:y, ok:true, tab:_egTabDeAnio(y), agregadas:faltaban, cols:cols });
+    }
+    return { ok:true, resultados:res };
+  } catch (ex) { return { ok:false, error: ex.message }; }
+}
+
+/* Normaliza un CFDI (texto XML) a lo que guardan las columnas del egreso.
+   REUSA los parsers que ya existen — aquí NO se reimplementa el CFDI:
+     1) _facParseCfdiFullFromContent (facturacion.gs, XmlService, exacto)
+     2) _compParseXmlLight            (comprobantes.gs, regex, respaldo)
+   Se toma SIEMPRE al EMISOR (el proveedor que nos factura).
+   Sin UUID devuelve null: sin folio fiscal no hay nada que guardar ni que
+   buscar, y no se inventan datos. */
+function _egParseFacturaXml(content) {
+  if (!content) return null;
+  if (typeof _facParseCfdiFullFromContent === 'function') {
+    try {
+      var p = _facParseCfdiFullFromContent(content);
+      if (p && p.ok && p.uuid) return {
+        uuid:  String(p.uuid).toUpperCase().trim(),
+        folio: _egFolioFiscal(p.serie, p.folio),
+        rfc:   String((p.emisor && p.emisor.rfc) || '').toUpperCase().trim(),
+        razon: String((p.emisor && p.emisor.nombre) || '').trim()
+      };
+    } catch (e) {}
+  }
+  if (typeof _compParseXmlLight === 'function') {
+    try {
+      var q = _compParseXmlLight(content);
+      if (q && q.uuid) return {
+        uuid:  String(q.uuid).toUpperCase().trim(),
+        folio: _egFolioFiscal(q.serie, q.folio),
+        rfc:   String(q.emisorRfc || '').toUpperCase().trim(),
+        razon: String(q.emisorNombre || '').trim()
+      };
+    } catch (e) {}
+  }
+  return null;
+}
+
+/* Lee un archivo de Drive y, SOLO si es XML, saca sus datos fiscales.
+   Devuelve {tipo:'xml'|'otro'|'error', datos, fileName}:
+     xml   → CFDI parseado
+     otro  → PDF/imagen (o XML sin UUID): no hay nada que extraer
+     error → no se pudo leer (Drive caído, permiso, id inválido) */
+function _egLeerFacturaDrive(fileId) {
+  try {
+    var file = DriveApp.getFileById(fileId);
+    var nombre = file.getName();
+    var esXml = /\.xml$/i.test(nombre);
+    if (!esXml) { // algunos XML llegan sin extensión pero con MIME de xml
+      var mt = ''; try { mt = file.getMimeType() || ''; } catch (e) {}
+      if (mt.indexOf('xml') === -1) return { tipo:'otro', datos:null, fileName:nombre };
+    }
+    var d = _egParseFacturaXml(file.getBlob().getDataAsString('UTF-8'));
+    return d ? { tipo:'xml', datos:d, fileName:nombre } : { tipo:'otro', datos:null, fileName:nombre };
+  } catch (ex) { return { tipo:'error', datos:null, error: ex.message }; }
+}
+
+/* Escribe (datos) o LIMPIA (datos = null) las 4 columnas fiscales de una fila. */
+function _egSetFacturaFiscal(sh, rowNum, datos) {
+  var cols = _egFacturaCols(sh);
+  sh.getRange(rowNum, cols.uuid ).setValue(datos ? datos.uuid  : '');
+  sh.getRange(rowNum, cols.folio).setValue(datos ? datos.folio : '');
+  sh.getRange(rowNum, cols.rfc  ).setValue(datos ? datos.rfc   : '');
+  sh.getRange(rowNum, cols.razon).setValue(datos ? datos.razon : '');
+  return cols;
+}
+
+/* ¿Este UUID ya está vinculado a OTRO egreso del mismo libro? Devuelve [] o la
+   lista de {rowNum, id} que ya lo traen. La MISMA fila nunca cuenta como
+   duplicado: re-subir el XML del propio egreso (para corregirlo) es legítimo. */
+function _egUuidDuplicado(sh, uuid, rowNum) {
+  var out = [];
+  var want = String(uuid || '').toUpperCase().trim();
+  if (!want) return out;
+  var last = sh.getLastRow();
+  if (last < 2) return out;
+  var cols = _egFacturaCols(sh);
+  var vals = sh.getRange(2, cols.uuid, last - 1, 1).getValues();
+  var ids  = sh.getRange(2, 1, last - 1, 1).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    var r = i + 2;
+    if (r === rowNum) continue;
+    if (String(vals[i][0] || '').toUpperCase().trim() === want)
+      out.push({ rowNum:r, id:String(ids[i][0] || '').trim() });
+  }
+  return out;
+}
+
+/* PUNTO ÚNICO por el que pasa toda vinculación de una factura a un egreso.
+   Cualquier vía (vincularComprobanteEgreso, uploadFile, uploadEgresoPDF, el
+   lote…) llama aquí para que el UUID quede PERSISTIDO en la hoja y no solo
+   dentro del XML de Drive.
+     · XML   → llena UUID/folio/RFC/razón social DEL EMISOR (el proveedor).
+     · PDF   → LIMPIA las columnas. El adjunto anterior pudo ser un XML: dejar
+               el UUID viejo pegado a una factura distinta es peor que no tener
+               dato (la búsqueda encontraría un fantasma). De un PDF no se
+               inventa nada.
+     · error → NO toca nada (un fallo transitorio de Drive no debe borrar datos
+               buenos), salvo que quien llama ya traiga el UUID del índice.
+   Anti-duplicado: AVISA, no bloquea (ver notas del build). Nunca lanza: el
+   archivo ya se vinculó y eso no puede fallar por esto. */
+function _egAplicarFacturaFiscal(sh, rowNum, fileId, hintUuid) {
+  var out = { aplicado:false, datos:null, avisoDuplicado:'' };
+  try {
+    var lec = fileId ? _egLeerFacturaDrive(fileId) : { tipo:'otro', datos:null };
+    var datos = lec.datos;
+    if (!datos && lec.tipo === 'error') {
+      if (hintUuid) datos = { uuid:String(hintUuid).toUpperCase().trim(), folio:'', rfc:'', razon:'' };
+      else { out.error = lec.error || 'No se pudo leer el archivo'; return out; }
+    }
+    _egSetFacturaFiscal(sh, rowNum, datos);
+    out.aplicado = true; out.datos = datos;
+    if (datos && datos.uuid) {
+      var dups = _egUuidDuplicado(sh, datos.uuid, rowNum);
+      if (dups.length) out.avisoDuplicado = 'Ese CFDI ya está vinculado a '
+        + (dups.length === 1 ? 'el egreso ' : 'los egresos ')
+        + dups.map(function (d) { return d.id ? d.id : 'fila ' + d.rowNum; }).join(', ')
+        + '. Se vinculó de todos modos: verifica que no se esté pagando dos veces la misma factura.';
+    }
+  } catch (ex) { out.error = ex.message; }
+  return out;
+}
+
 /* ¿La celda de la columna 'Cancelada' de BD_Ingresos marca una venta cancelada?
    Una venta cancelada NO suma en ningún reporte (mismo criterio que la fila
    histórica 'Cancelada' de Egresos, board.gs:47 / semanal.gs:87).
@@ -2296,9 +2519,9 @@ function uploadEgresoPDF(payload) {
     if (!base64) return {ok:false, error:'No se recibió archivo'};
     if (!rowNum || rowNum < 2) return {ok:false, error:'Fila inválida'};
 
-    // Determinar mes desde la fecha del egreso
-    var ssId = EGRESOS_IDS[anio] || EGRESOS_SS_2026;
-    var tabName = EGRESOS_TABS[anio] || 'Egresos' + anio;
+    // Determinar mes desde la fecha del egreso (libro/pestaña del AÑO pedido)
+    var ssId = _egIdDeAnio(anio);
+    var tabName = _egTabDeAnio(anio);
     var ss = SpreadsheetApp.openById(ssId);
     var sheet = null;
     var sheets = ss.getSheets();
@@ -2357,7 +2580,17 @@ function uploadEgresoPDF(payload) {
       sheet.getRange(rowNum, iCheck + 1).setValue(true);
     }
 
-    return {ok:true, url:fileUrl, fileName:displayName, tipo:tipo, rowNum:rowNum};
+    // Datos fiscales: esta vía sube SIEMPRE un PDF (fuerza el MIME), así que no
+    // hay UUID que extraer — pero sí hay que LIMPIAR: si la fila traía un XML,
+    // su UUID ya no corresponde al archivo que quedó vinculado.
+    var _fiscalPdf = null;
+    if (tipo === 'factura' && typeof _egAplicarFacturaFiscal === 'function') {
+      _fiscalPdf = _egAplicarFacturaFiscal(sheet, rowNum, file.getId(), '');
+    }
+
+    var _outPdf = {ok:true, url:fileUrl, fileName:displayName, tipo:tipo, rowNum:rowNum};
+    if (_fiscalPdf && _fiscalPdf.avisoDuplicado) _outPdf.avisoDuplicado = _fiscalPdf.avisoDuplicado;
+    return _outPdf;
   } catch(ex) {
     return {ok:false, error:ex.message};
   }
@@ -2394,7 +2627,12 @@ function readEgresosData(anio) {
         iLinkPago=col('link pago'), iLinkCotiz=col('cotiz'),
         iUSD=col('usd'), iTC=col('tipo de cambio'), iEstatus=col('estatus'),
         iRec=col('recurrente'), iDeveng=col('devengado'),
-        iMpCom=col('mpcomisionid');  // etiqueta MPCOM-YYYY-MM de la partida automática de comisiones MP
+        iMpCom=col('mpcomisionid'),  // etiqueta MPCOM-YYYY-MM de la partida automática de comisiones MP
+        // Datos fiscales del CFDI vinculado (build .209). Se leen por HEADER, no
+        // por posición: son columnas agregadas al final y puede que un año viejo
+        // todavía no las tenga (col() devuelve -1 → se exponen vacías).
+        iFacUuid=col('facturauuid'), iFacFolio=col('facturafolio'),
+        iFacRfc=col('facturarfc'), iFacRazon=col('facturarazonsocial');
 
     function num(v) { if (typeof v==='number') return v; var n=parseFloat(String(v||'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
     function dt(v) { if(!v)return''; if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0')+'-'+String(v.getDate()).padStart(2,'0'); return String(v); }
@@ -2464,7 +2702,17 @@ function readEgresosData(anio) {
         recurrenteId: iRec>-1 ? String(row[iRec]||'').trim() : '',
         mesDevengado: iDeveng>-1 ? (function(v){ if(v instanceof Date) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0'); return String(v||'').trim(); })(row[iDeveng]) : '',
         mpComisionId: mpComId,
-        esAuto: esAuto
+        esAuto: esAuto,
+        // ── Datos fiscales del CFDI vinculado (para el buscador) ──
+        // UUID y folio son identificadores del documento: no traen nombres, así
+        // que se exponen siempre. RFC y razón social SÍ identifican al proveedor
+        // → se enmascaran igual que `proveedor`/`concepto`, para no reabrir por
+        // la puerta de atrás lo que la privacidad cierra por la de enfrente
+        // (un socio no debe poder buscar "quién nos factura" por RFC).
+        facturaUUID:  iFacUuid>-1  ? String(row[iFacUuid]||'').trim()  : '',
+        facturaFolio: iFacFolio>-1 ? String(row[iFacFolio]||'').trim() : '',
+        facturaRFC:   _egMask ? '' : (iFacRfc>-1   ? String(row[iFacRfc]||'').trim()   : ''),
+        facturaRazonSocial: _egMask ? '' : (iFacRazon>-1 ? String(row[iFacRazon]||'').trim() : '')
       });
     }
 
@@ -3003,6 +3251,16 @@ function updateEgresoField(payload) {
     for (var key in fields) {
       var ci2 = findCol(key);
       if (ci2 > -1) sheet.getRange(rowNum, ci2+1).setValue(fields[key]);
+    }
+    // Si esta edición TOCÓ "Link Factura", los datos fiscales que hubiera ya no
+    // valen y se limpian. Por aquí pasan las dos vías que reescriben esa celda
+    // SIN un CFDI detrás:
+    //   · egDesvincularFactura → la deja vacía
+    //   · egGuardarReferencia  → la deja con una referencia de TEXTO
+    // Dejar el UUID viejo haría que el buscador encontrara un fantasma: un
+    // egreso que ya no tiene esa factura vinculada.
+    if (('link factura' in fields) && typeof _egSetFacturaFiscal === 'function') {
+      try { _egSetFacturaFiscal(sheet, rowNum, null); } catch(_lf) {}
     }
     // Si en esta edición inline se puso una Póliza no vacía → marca Contabilidad = true
     // (el CONT queda palomeado y persiste). Póliza vacía no toca el CONT manual.
@@ -5373,8 +5631,14 @@ function uploadFile(body) {
     var sh = null, hdrs = null, iCol = -1;
     if (rowNum && rowNum > 1) {
       try {
-        var ss = SpreadsheetApp.openById(body.ssId || EGRESOS_SS_2026);
-        sh = ss.getSheetByName(body.sheetName || (EGRESOS_TABS[2026] || 'Egresos2026'));
+        // Libro/pestaña del AÑO. Precedencia: ssId/sheetName explícitos (compat con
+        // quien ya los mandaba) → body.anio → año en curso. Antes caía SIEMPRE en
+        // EGRESOS_SS_2026/'Egresos2026': al subir la factura de un egreso de otro
+        // año, el hipervínculo y los datos fiscales se escribían en el libro
+        // equivocado (o en la fila que ocupara ese rowNum en 2026).
+        var _anioUp = parseInt(body.anio, 10) || new Date().getFullYear();
+        var ss = SpreadsheetApp.openById(body.ssId || _egIdDeAnio(_anioUp));
+        sh = ss.getSheetByName(body.sheetName || _egTabDeAnio(_anioUp));
         if (sh) {
           hdrs = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0]
                    .map(function(h){ return String(h).trim().toLowerCase(); });
@@ -5418,8 +5682,22 @@ function uploadFile(body) {
       }
       if (iChk > -1) sh.getRange(rowNum, iChk + 1).setValue(true);
     }
+    // 4) Si lo que se subió es un CFDI (.xml), persistir UUID/folio/RFC/razón
+    //    social en la fila. uploadFile es la vía del "📎 Subir factura" del alta
+    //    de egresos y del dropzone de factura de CxP: los dos aceptan .xml.
+    //    Si es PDF, _egAplicarFacturaFiscal LIMPIA las columnas — el adjunto
+    //    anterior pudo ser un XML y su UUID ya no corresponde a este archivo.
+    var _fiscalUp = null;
+    if (sh && tipo === 'factura' && typeof _egAplicarFacturaFiscal === 'function') {
+      _fiscalUp = _egAplicarFacturaFiscal(sh, rowNum, file.getId(), '');
+    }
     logAudit(body.usuario||'sistema', 'Upload', 'Subir '+tipo, prefix||'', 'Archivo', '', fullName);
-    return {ok:true, url:url, fileName:fullName};
+    var _outUp = {ok:true, url:url, fileName:fullName};
+    if (_fiscalUp) {
+      if (_fiscalUp.datos) _outUp.fiscal = _fiscalUp.datos;
+      if (_fiscalUp.avisoDuplicado) _outUp.avisoDuplicado = _fiscalUp.avisoDuplicado;
+    }
+    return _outUp;
   } catch(ex) { return {ok:false, error:ex.message}; }
 }
 

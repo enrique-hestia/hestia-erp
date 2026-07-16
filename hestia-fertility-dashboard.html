@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.15.209 -->
+﻿<!-- app-build:2026.07.15.210 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -8033,10 +8033,27 @@ function _egFilterRows() {
     if (f.proveedor && r.proveedor !== f.proveedor) return false;
     if (f.formaPago && r.formaPago !== f.formaPago) return false;
     if (f.buscar) {
-      var q = f.buscar.toLowerCase();
-      // Incluye el nombre COMERCIAL del proveedor (del catálogo) para poder buscarlo por cualquiera de sus nombres.
-      var haystack = (r.proveedor+' '+_egComercial(r.proveedor)+' '+r.concepto+' '+r.subtipo+' '+r.observaciones).toLowerCase();
-      if (haystack.indexOf(q) === -1) return false;
+      var q = f.buscar.toLowerCase().trim();
+      if (q) {
+      // Incluye el nombre COMERCIAL del proveedor (del catálogo) para poder buscarlo por cualquiera de sus nombres,
+      // y la RAZÓN SOCIAL de la factura (el nombre con que factura el proveedor casi nunca es con el que lo conocemos).
+      var haystack = (r.proveedor+' '+_egComercial(r.proveedor)+' '+r.concepto+' '+r.subtipo+' '+r.observaciones+' '+(r.facturaRazonSocial||'')).toLowerCase();
+      // Folio fiscal: exacto o por PREFIJO sobre cada token, NO substring —
+      // mismo criterio que Ingresos: un folio corto como "807" no debe
+      // "encontrar" el RFC o el UUID de otra factura solo porque esos dígitos
+      // aparecen sueltos ahí. Se compara contra el folio COMPLETO y contra sus
+      // partes, para que "A-1234" se encuentre igual escribiendo "A-1234" que
+      // "1234" (la serie casi nunca se teclea).
+      var _fol = String(r.facturaFolio||'').toLowerCase();
+      var matchFolio = !!_fol && [_fol].concat(_fol.split(/[\s\-\/]+/)).some(function(tok){
+        return tok && (tok===q || tok.indexOf(q)===0);
+      });
+      // RFC/UUID solo cuentan como match si la búsqueda ya es lo bastante
+      // específica — evita falsos positivos con fragmentos cortos.
+      var matchRFC  = q.length>=6 && String(r.facturaRFC||'').toLowerCase().indexOf(q)!==-1;
+      var matchUUID = q.length>=8 && String(r.facturaUUID||'').toLowerCase().indexOf(q)!==-1;
+      if (!(matchFolio || matchRFC || matchUUID || haystack.indexOf(q) !== -1)) return false;
+      }
     }
     return true;
   });
@@ -8282,7 +8299,7 @@ function _renderEgresosERP() {
     +'<div class="eg-fg"><div class="eg-fl">Contable</div><select class="eg-sel" onchange="_egSetFilter(\'contable\',this.value)">'+selOpts(contables,_egFilters.contable,'Todos')+'</select></div>'
     +'<div class="eg-fg"><div class="eg-fl">Subtipo</div><select class="eg-sel" onchange="_egSetFilter(\'subtipo\',this.value)">'+selOpts(subtipos,_egFilters.subtipo,'Todos')+'</select></div>'
     +'<div class="eg-fg"><div class="eg-fl">Forma pago</div><select class="eg-sel" onchange="_egSetFilter(\'formaPago\',this.value)">'+selOpts(fps,_egFilters.formaPago,'Todas')+'</select></div>'
-    +'<div class="eg-fg"><div class="eg-fl">Buscar</div><input class="eg-search" placeholder="Proveedor, comercial, concepto…" value="'+(_egFilters.buscar||'')+'" oninput="_egSearchDebounce(this.value)"></div>'
+    +'<div class="eg-fg"><div class="eg-fl">Buscar</div><input class="eg-search" placeholder="Proveedor, comercial, concepto, factura#, RFC, UUID…" value="'+(_egFilters.buscar||'')+'" oninput="_egSearchDebounce(this.value)"></div>'
     +'<div style="margin-left:auto;font-size:11px;font-weight:700;color:var(--text-primary,#111)">Filtrado: '+fE(totalFiltered)+'</div>'
     +'</div>');
 
@@ -8639,10 +8656,14 @@ function egOpenUpload(rowNum, tipo, proveedor) {
     dz.dataset.prefix = 'EG-' + rowNum;
     dz.dataset.onupload = 'egAfterUpload';
     dz.classList.remove('uploading','done','drag-over');
+    // En FACTURA se acepta también .xml: si suben el CFDI, el sistema le saca el
+    // folio fiscal (UUID), el RFC y la razón social y los deja buscables. De un
+    // PDF no se puede sacar nada de eso, por eso se sugiere el XML.
+    var _esFac = (tipo === 'factura');
     dz.innerHTML = '<div class="erp-dz-icon">📄</div>'
-      + '<div class="erp-dz-text">Arrastra tu PDF aquí o <span class="erp-dz-link">selecciona archivo</span></div>'
-      + '<div class="erp-dz-sub">PDF, JPG, PNG · Máx 10MB</div>'
-      + '<input type="file" class="erp-dz-input" accept=".pdf,.jpg,.jpeg,.png" onchange="erpHandleFile(this,\'eg-erp-drop\')">';
+      + '<div class="erp-dz-text">Arrastra tu '+(_esFac?'XML o PDF':'PDF')+' aquí o <span class="erp-dz-link">selecciona archivo</span></div>'
+      + '<div class="erp-dz-sub">'+(_esFac?'XML (recomendado: guarda UUID/RFC y se puede buscar), PDF, JPG, PNG':'PDF, JPG, PNG')+' · Máx 10MB</div>'
+      + '<input type="file" class="erp-dz-input" accept="'+(_esFac?'.xml,.pdf,.jpg,.jpeg,.png':'.pdf,.jpg,.jpeg,.png')+'" onchange="erpHandleFile(this,\'eg-erp-drop\')">';
   }
   var st = document.getElementById('eg-upload-status'); if (st) st.innerHTML = '';
   document.getElementById('eg-upload-title').textContent =
@@ -8943,11 +8964,20 @@ async function egVincularXmlDetectado(rowNum, fileId, etiqueta, anio, btn){
     })});
     var d = await r.json();
     if (!d.ok){ alert(d.error||'No se pudo vincular'); if(btn){btn.disabled=false;btn.textContent='Vincular';} return; }
+    // CFDI ya usado en otro egreso: se vinculó igual (puede ser legítimo), pero
+    // hay que decirlo — es la señal típica de una factura pagada dos veces.
+    if (d.avisoDuplicado) alert('⚠ '+d.avisoDuplicado);
     // Reflejar en local y recargar el bloque como "XML vinculado"
     var urlNueva = 'https://drive.google.com/file/d/'+fileId+'/view';
     if (typeof _egData !== 'undefined' && _egData && _egData.rows) {
       var lr = _egData.rows.find(function(x){ return x._rowNum === rowNum; });
-      if (lr) lr.linkFacturaUrl = urlNueva;
+      if (lr) {
+        lr.linkFacturaUrl = urlNueva;
+        // Los datos fiscales que acaba de persistir el backend se reflejan en el
+        // estado local para que el buscador los encuentre YA, sin recargar.
+        if (d.fiscal) { lr.facturaUUID=d.fiscal.uuid||''; lr.facturaFolio=d.fiscal.folio||'';
+                        lr.facturaRFC=d.fiscal.rfc||''; lr.facturaRazonSocial=d.fiscal.razon||''; }
+      }
     }
     var box = document.getElementById('eg-fiscal-'+rowNum);
     if (box){ box.dataset.url = urlNueva; box.dataset.loaded = ''; egCargarFiscal(rowNum); }
@@ -9443,8 +9473,12 @@ function egOnDocDefer(dz, file){
 async function _egUploadDocTo(rowNum, file, tipo){
   var base64 = await _fileToBase64(file);
   var s = getSession()||{};
+  // El alta siempre escribe en el libro del año en curso; se manda explícito para
+  // no depender del default del backend. Si el archivo es un .xml, uploadFile le
+  // saca UUID/folio/RFC/razón social y los deja buscables.
   var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
     action:'uploadFile', tipo:tipo, prefix:'EG-'+rowNum, rowNum:rowNum,
+    anio:(typeof _egAnio!=='undefined' && _egAnio) ? _egAnio : new Date().getFullYear(),
     fileName:file.name, base64:base64, mimeType:file.type||'application/pdf',
     usuario:s.email||'sistema'
   })});
@@ -9615,6 +9649,9 @@ async function egSubmit() {
           try {
             var up = await _egUploadDocTo(res.rowNum, _doc, _k);
             if (!up || !up.ok) { try { setStatus('Egreso guardado, pero '+_EG_DZ[_k].label+' no se pudo adjuntar: '+((up&&up.error)||'error'),'err'); } catch(_s){} }
+            // CFDI repetido: el egreso YA se guardó y la factura YA se adjuntó — el
+            // aviso no puede cancelar nada, solo advertir para que se revise.
+            else if (up.avisoDuplicado) alert('⚠ '+up.avisoDuplicado);
           } catch(fe){ try { setStatus('Egreso guardado, pero '+_EG_DZ[_k].label+' no se pudo adjuntar: '+fe.message,'err'); } catch(_s2){} }
         }
         // Sin fecha de pago la partida se guardó como cuenta por pagar: el
@@ -30536,8 +30573,12 @@ async function _erpUploadFile(dz, file) {
     var base64 = await _fileToBase64(file);
     var s = getSession()||{};
     var rowNum = (String(prefix).match(/(\d+)/) || [])[1] || '';
+    // El AÑO decide el libro de egresos donde se escribe el vínculo: sin él el
+    // backend cae al año en curso y un adjunto de un egreso histórico acabaría
+    // en la fila que ocupe ese rowNum en el libro de este año.
+    var _anioDz = parseInt(dz.dataset.anio,10) || (typeof _egAnio!=='undefined' ? _egAnio : 0) || undefined;
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', signal: controller.signal, body:JSON.stringify({
-      action:'uploadFile', tipo:tipo, prefix:prefix, rowNum:rowNum,
+      action:'uploadFile', tipo:tipo, prefix:prefix, rowNum:rowNum, anio:_anioDz,
       fileName:file.name, base64:base64, mimeType:file.type,
       usuario:s.email||'sistema'
     })});
@@ -30546,13 +30587,23 @@ async function _erpUploadFile(dz, file) {
     if (res.ok) {
       dz.classList.remove('uploading');
       dz.classList.add('done');
+      // Si era un CFDI, se confirma qué se guardó (folio + UUID): así se ve de
+      // inmediato que el egreso ya quedó buscable por su folio fiscal.
+      var _fx = res.fiscal;
       dz.innerHTML = '<div class="erp-dz-icon">✅</div><div class="erp-dz-text" style="color:#16a34a;font-weight:700">Archivo subido</div>'
-        + '<div class="erp-dz-file"><span class="erp-dz-fname">'+file.name+'</span><a href="'+res.url+'" target="_blank" style="font-size:10px;color:var(--color-primary,#c46a7a);font-weight:600">Ver ↗</a></div>';
+        + '<div class="erp-dz-file"><span class="erp-dz-fname">'+file.name+'</span><a href="'+res.url+'" target="_blank" style="font-size:10px;color:var(--color-primary,#c46a7a);font-weight:600">Ver ↗</a></div>'
+        + (_fx&&_fx.uuid ? '<div class="erp-dz-sub" style="color:#166534">CFDI leído — folio '+(_fx.folio||'S/F')+' · UUID '+String(_fx.uuid).substring(0,8)+'… guardado</div>' : '');
       // Guardar URL en el hidden input correspondiente
       var linkInput = dz.parentElement.querySelector('input[type=hidden]');
       if (linkInput) linkInput.value = res.url;
       var statusEl = dz.parentElement.querySelector('[id$="-status"]');
       if (statusEl) statusEl.innerHTML = '<span style="color:#16a34a">✓ '+file.name+' subido</span>';
+      // CFDI ya vinculado a otro egreso: se avisa (no se bloquea). Es la señal
+      // típica de una misma factura pagada dos veces.
+      if (res.avisoDuplicado) {
+        if (statusEl) statusEl.innerHTML += '<br><span style="color:#b45309">⚠ '+res.avisoDuplicado+'</span>';
+        else alert('⚠ '+res.avisoDuplicado);
+      }
       // Callback opcional (ej. refrescar tabla de Egresos tras subir)
       var cb = dz.dataset.onupload;
       if (cb && typeof window[cb] === 'function') { try { window[cb](res); } catch(_e){} }
@@ -34598,6 +34649,10 @@ var NOVEDADES=[
     titulo:'Capturaste mal una cuenta por cobrar: ahora sí puedes deshacerla',
     puntos:['⚠ El problema: si capturabas mal una cuenta por cobrar, quedabas atrapado. Borrarla no se podía (dejaría la venta cobrando sola en Ingresos) y el ERP te mandaba a «⊘ Cancelar», que casi nadie tiene permiso de usar. Resultado: una venta falsa sumando en el Estado de Resultados hasta que un administrador la quitara.','Ahora el ERP te manda al camino que de verdad corresponde, según si el dinero se movió: si la venta TODAVÍA NO tiene un peso cobrado, no hay nada que devolver — se borra completa en Ingresos → «🗑» y el adeudo se va con ella; si YA entró dinero, se sigue usando «⊘ Cancelar», que lo reversa en bancos y deja el registro para devolvérselo a la paciente.','No se aflojó ningún permiso: cancelar (que mueve dinero hacia afuera) sigue pidiendo exactamente lo mismo que antes. Lo que cambió es que dejó de esconderse la salida que ya existía.','Y el mensaje ahora te dice a QUIÉN pedirle ayuda y qué permiso, en vez de mandarte a un botón que no te aparece.','De paso: borrar una venta ya se lleva su cuenta por cobrar. Antes el adeudo sobrevivía a la venta y quedaba un saldo huérfano que nadie podía quitar.'],
     comoUsar:['Cobranza → el saldo mal capturado → «🗑». El ERP te dirá qué camino te toca.','Si aún no se ha cobrado nada: Ingresos → busca la operación → «🗑». Se va todo junto.','Si ya te pagaron algo y hay que devolverlo: Ingresos → la operación → «⊘ Cancelar» (si no te aparece el botón, pídeselo al administrador o al director).'] },
+  { build:'2026.07.16', fecha:'16 jul 2026', area:'Egresos', icon:'🔎', destacada:true, perm:'editar_egresos',
+    titulo:'Buscar un egreso por el UUID o el folio de su factura',
+    puntos:['Te llega una factura y no sabes a qué gasto corresponde. Antes, para averiguarlo había que abrir los XML de Drive uno por uno: el folio solo existía como TEXTO del enlace y el UUID solo vivía DENTRO del archivo. El buscador de Egresos no los conocía.','Ahora el buscador de Egresos encuentra por FOLIO FISCAL, UUID, RFC y RAZÓN SOCIAL, además de proveedor, comercial y concepto de siempre. Copia el UUID de la factura, pégalo y ahí está el egreso.','Al vincular un CFDI, el ERP le saca UUID, folio, RFC y razón social y los GUARDA en el renglón. Ya no se pierde dentro del archivo.','El folio se guarda como SERIE-FOLIO (ej. A-1234) y lo encuentras igual escribiendo «A-1234» que «1234» — la serie casi nunca se teclea.','Funciona por todas las vías: el botón «Vincular» del detalle del egreso, Comprobantes (uno por uno o «vincular todo» del mes), el «📎 Subir factura» del alta y el dropzone de factura de Cuentas por Pagar.','⚠ SUBE EL XML, NO SOLO EL PDF: un PDF no tiene UUID (es una foto del documento). Si adjuntas solo el PDF, ese egreso NO será buscable por folio ni UUID. El «Subir factura» ya acepta .xml.','El sistema NO inventa: con un PDF las columnas fiscales quedan vacías. Y si sustituyes un XML por un PDF, o desvinculas, o dejas una referencia de texto, el UUID viejo se borra solo — para que el buscador no te encuentre el fantasma de una factura que ese egreso ya no tiene.','⚠ NUEVO AVISO DE FACTURA REPETIDA: si vinculas un CFDI que ya está en otro egreso, te dice a cuál. Avisa pero NO bloquea (una misma factura sí puede repartirse entre varias partidas), aunque lo más común es que sea la misma factura pagándose dos veces: vale la pena revisar.','Privacidad respetada: el RFC y la razón social identifican al proveedor, así que solo los ve quien tiene «ver datos sensibles» — igual que ya pasaba con el nombre del proveedor. El UUID y el folio sí se ven: identifican al documento, no a una persona.','Las facturas que YA estaban vinculadas también se pueden buscar: el administrador corre una carga única que las recorre y les saca el UUID del XML.'],
+    comoUsar:['Egresos → campo «Buscar»: pega el UUID, el folio fiscal, el RFC o la razón social.','¿Vas a adjuntar una factura? Usa «📎 Subir factura» y sube el XML (.xml), no solo el PDF.','Si sale «⚠ Ese CFDI ya está vinculado al egreso EG-…», abre los dos egresos y verifica que no se esté pagando dos veces.','Administrador: tras el redeploy, correr migrateEgresosFacturaDetalle() y luego backfillFacturasEgresos({anio:2026}) — si contesta truncado:true, volver a llamarla con desde:<siguiente> hasta que faltan llegue a 0.'] },
   { build:'2026.07.15', fecha:'15 jul 2026', area:'Cobranza', icon:'📥', destacada:true,
     titulo:'Cuenta por cobrar: ya se registra sola como venta (deja de capturarla dos veces)',
     puntos:['El problema: al abonar una cuenta por cobrar el dinero SÍ llegaba a bancos, pero el ingreso NO llegaba a Ingresos. O lo capturabas a mano —y quedaba DUPLICADO al cobrarlo— o no lo capturabas y el ingreso nunca contaba en el Estado de Resultados.','La causa estaba en el ALTA, no en el cobro: «+ Cuenta por cobrar» creaba la DEUDA pero nunca la VENTA. Al cobrar ya era imposible adivinar si esa venta existía o no.','Ahora «+ Cuenta por cobrar» es lo que siempre quiso ser: VENDER A CRÉDITO. Registra la venta sola en Ingresos (con la fecha del cargo y pagado en $0) y de esa venta nace la cuenta por cobrar. Un solo paso.','⚠ LO ÚNICO QUE TIENES QUE CAMBIAR: ya NO la captures también en Ingresos. Si lo haces, ahora sí la duplicas tú. Al cobrarla no hay nada que capturar: el ingreso ya estaba contado.','El ingreso cuenta en el mes en que VENDISTE, no en el que cobres (devengado). Vender a crédito no mueve dinero: el alta no toca ningún banco — el banco se toca al cobrar.','Se cobra con el MISMO botón «Cobrar / Abonar» de siempre, con el mismo motor que cualquier venta: sube lo pagado, manda el dinero al banco por forma de pago y cierra el saldo. Los abonos parciales funcionan igual.','En agencias (REPROVIDA) la deuda queda a nombre de la AGENCIA, como debe ser — y el nombre de cada paciente real se conserva por partida y en las observaciones de la venta.','La fecha del cargo debe ser del año en curso (ahí se escribe la venta). Un cargo de otro año se rechaza y te explica por qué, en vez de esconderlo en el libro equivocado.','Ya no se pide «OP relacionada»: la venta genera su propio folio.','Los saldos que manda una venta ya no se editan ni se borran desde Cobranza (borrarlos dejaría la venta cobrando sola). Se corrigen en Ingresos → editar la operación. Para deshacerlos, el ERP te manda al camino que corresponde: si la venta TODAVÍA NO tiene un peso cobrado (la capturaste por error), se borra completa en Ingresos → «🗑» y el adeudo se va con ella; si YA entró dinero, se deshace con «⊘ Cancelar», que lo reversa en bancos y deja el registro para devolvérselo a la paciente.','Doble clic más seguro: si el saldo ya cambió, el cobro se rechaza en vez de mandar el dinero al banco dos veces. Y si se cae la red, ya no te ofrece «Reintentar» a ciegas: recarga y te pide verificar.'],
@@ -35148,7 +35203,7 @@ async function _novCfgGuardar(){
   },
 
   { id:'egresos', group:'operacion', icon:'💳', title:'Egresos y Cuentas por Pagar (CxP)',
-    keywords:'egresos gasto cxp cuentas por pagar proveedor pagar credito abono cancelar devolucion moneda extranjera usd tipo de cambio clasificacion auto factura pago correo de pago duplicado nuevo proveedor inline poliza conciliar subir factura enviar nombre comercial razon social buscar seleccionar checkbox suma total seleccionado informativo adjuntos arrastrar drag and drop cotizacion comprobante de pago zonas opcional recomendado contable tipo subtipo aplicar fijar detalle',
+    keywords:'egresos gasto cxp cuentas por pagar proveedor pagar credito abono cancelar devolucion moneda extranjera usd tipo de cambio clasificacion auto factura pago correo de pago duplicado nuevo proveedor inline poliza conciliar subir factura enviar nombre comercial razon social buscar seleccionar checkbox suma total seleccionado informativo adjuntos arrastrar drag and drop cotizacion comprobante de pago zonas opcional recomendado contable tipo subtipo aplicar fijar detalle uuid folio fiscal rfc cfdi xml buscar factura folio backfill columnas fiscales',
     intro:'**Egresos** son los gastos ya pagados; **Cuentas por Pagar (CxP)** son los que aún no. Físicamente viven en la misma hoja `Egresos2026`: una fila con `PAGADO=TRUE` es un egreso; sin pagar es una CxP. Incluye créditos de proveedor, abonos parciales, cancelación y moneda extranjera.',
     pasos:[
       'Registra un gasto en **CxP → + Registrar CxP** (proveedor, contable/tipo/subtipo, monto, vencimiento). Al capturar el proveedor, el sistema **recomienda** la clasificación (histórica 💡 o fija 📌); pulsa «Aplicar». Es el **mismo panel** que ya salía en «Nuevo egreso».',
@@ -35166,13 +35221,16 @@ async function _novCfgGuardar(){
       { h:'Regresar a programación (↩)', p:'Si una CxP vino de un **gasto fijo** (tiene `RecurrenteID`) y no está pagada, el botón **↩** la borra y el gasto fijo reaparece «por programar» para recapturarlo por el monto correcto.' },
       { h:'Nombre comercial en la tabla', p:'La columna **Proveedor** de «Detalle de cuentas por pagar» muestra el **nombre comercial** arriba y la **razón social** abajo en chico. El comercial sale del catálogo de **Proveedores** (columna `Nombre comercial`); si ese proveedor no lo tiene capturado, se muestra solo la razón social. El **buscador** de la vista encuentra por **cualquiera de los dos**.' },
       { h:'Suma de lo seleccionado (informativa)', p:'Al palomear partidas, la barra azul muestra «**N partidas seleccionadas · Total: $X**». Es **solo informativo**: no cambia montos ni dispara acciones — sirve para ver cuánto suma un grupo de pagos antes de decidir. El monto que se suma es el **saldo pendiente** (o el monto si no hay abonos) y **ya está en MXN**, también en las partidas en dólares. Si hay partidas USD seleccionadas, además se desglosa «incluye US$ …» (con abono parcial, el US$ se calcula con el TC sobre lo que sigue pendiente).' },
-      { h:'Herramientas de la fila (✉ correo, factura, pólizas)', p:'Cada egreso tiene **✉ Enviar correo de pago** (rellena la plantilla con proveedor/concepto/monto/fecha/póliza/folio, adjunta el comprobante de pago y la factura si están vinculados, prefila el correo del proveedor y **siempre pide confirmar** antes de enviar — nunca automático), **📄** para subir/ver la factura y **🔗** el comprobante de pago. El botón **+ Nuevo proveedor** dentro de la captura da de alta al proveedor sin salir del egreso. Al capturar, si ya hay un pago al **mismo proveedor por un monto similar en el mes** (±1% o ±$1) aparece **⚠ Posible pago duplicado** (solo avisa, no bloquea). Para cruzar contra contabilidad, usa **🧾 Conciliar pólizas** (ver su propia sección).' }
+      { h:'Herramientas de la fila (✉ correo, factura, pólizas)', p:'Cada egreso tiene **✉ Enviar correo de pago** (rellena la plantilla con proveedor/concepto/monto/fecha/póliza/folio, adjunta el comprobante de pago y la factura si están vinculados, prefila el correo del proveedor y **siempre pide confirmar** antes de enviar — nunca automático), **📄** para subir/ver la factura y **🔗** el comprobante de pago. El botón **+ Nuevo proveedor** dentro de la captura da de alta al proveedor sin salir del egreso. Al capturar, si ya hay un pago al **mismo proveedor por un monto similar en el mes** (±1% o ±$1) aparece **⚠ Posible pago duplicado** (solo avisa, no bloquea). Para cruzar contra contabilidad, usa **🧾 Conciliar pólizas** (ver su propia sección).' },
+      { h:'Buscar por UUID, folio fiscal, RFC o razón social (build .209)', p:'El buscador de Egresos encuentra por **folio fiscal**, **UUID**, **RFC** y **razón social** de la factura, además de proveedor / comercial / concepto / subtipo / observaciones.\n\nAntes no se podía: el folio solo existía como **texto del hipervínculo** y el UUID únicamente **dentro del XML** en Drive — para saber a qué egreso correspondía una factura había que abrir los archivos uno por uno. Ahora, al vincular un CFDI, el sistema le saca `FacturaUUID`, `FacturaFolio`, `FacturaRFC` y `FacturaRazonSocial` y los **guarda en la fila**.\n\nPrecisión (igual que en Ingresos): el **folio** se compara exacto o por prefijo, no como fragmento suelto — así un folio corto como «807» no pesca el RFC ni el UUID de otra factura. El **RFC** requiere ≥6 caracteres y el **UUID** ≥8. El folio se guarda como `SERIE-FOLIO`, y se encuentra igual escribiendo `A-1234` que `1234`.\n\n**Privacidad**: a quien no tiene `ver_datos_sensibles` se le ocultan **RFC y razón social** (identifican al proveedor), igual que ya se le oculta el nombre del proveedor. El UUID y el folio sí se ven: identifican al documento, no a una persona.' },
+      { h:'De dónde sale el UUID (y de dónde NO)', p:'El UUID se lee del **propio XML**, no de lo que mande la pantalla — así funciona por cualquier vía: el botón **Vincular** del detalle del egreso, **Comprobantes** (uno por uno o «vincular todo» del mes), el **📎 Subir factura** del alta y el dropzone de factura de CxP.\n\n**Un PDF no tiene UUID.** Si adjuntas un PDF, las columnas fiscales quedan **vacías** — no se inventa nada. Es más: si esa fila traía un XML y lo sustituyes por un PDF, el UUID viejo **se borra** (dejarlo pegado a otra factura sería peor que no tener dato). Lo mismo al **desvincular** o al dejar una **referencia de texto**. Por eso, cuando tengas el XML, **sube el XML** y no solo el PDF: es lo que hace buscable el egreso.' },
+      { h:'⚠ CFDI repetido: te avisa, no te bloquea', p:'Si vinculas un CFDI que **ya está en otro egreso**, el sistema te dice **a cuál** («Ese CFDI ya está vinculado al egreso EG-123») y **vincula de todos modos**.\n\nAvisa en vez de bloquear porque **una misma factura sí puede repartirse legítimamente en varios renglones** (un gasto dividido entre áreas, o pagado en partes). Bloquear haría imposible ese caso real. Pero repetir un CFDI también es la señal típica de **una factura pagada dos veces**, así que nunca pasa callado. Re-subir el XML del **mismo** egreso (para corregirlo) no avisa nada: no es un duplicado.' }
     ],
     datos:{
-      hojas:['`Egresos2026` (EGRESOS_SS_2026 = 1iRj…RAQw): A=ID, B=Fecha, C=Mes, E=Proveedor, F=Contable, G=Tipo, H=Subtipo, I=Concepto, J=Monto, N=PAGADO, Q=Forma de Pago, S=Link Factura(19), T=Link Pago(20), + `Estatus`, `RecurrenteID`, `Divisa/Monto USD/TC`','Multi-año: `Egresos2025` y `Egresos2024`','`Creditos_Proveedor` y `Abonos_CxP` (EGRESOS_SS_2026)'],
-      funciones:['saveCxP','pagarCxP','cancelarOrdenCxP','aplicarAbonoCxP','readTrazaCancelacion','readClasificacionProveedores','guardarClasifProveedor','regresarCxPaProgramacion','uploadFile'],
-      permisos:['editar_egresos','borrar_egresos','bank_capture'],
-      nota:'Requiere (una vez) `setupCxPCreditosAbonos()`. La clasificación automática vive en `prov_defaults.gs` (columnas `Def Contable/Tipo/Subtipo/Concepto` en la hoja Proveedores) y la sirve el mismo endpoint `?action=clasifProveedores` a Egresos y a CxP. Los adjuntos usan `uploadFile` (finance.gs): `tipo` = `factura` | `cotizacion` | `pago` decide la carpeta — `EGRESOS_DRIVE_FACTURAS` / `EGRESOS_DRIVE_COTIZACIONES` / `EGRESOS_DRIVE_PAGOS`, con subcarpeta `<Año>\\<Mes>`. La razón social sale del catálogo de Proveedores (`providers.gs`, col B `Nombre / Razón social`).'
+      hojas:['`Egresos2026` (EGRESOS_SS_2026 = 1iRj…RAQw): A=ID, B=Fecha, C=Mes, E=Proveedor, F=Contable, G=Tipo, H=Subtipo, I=Concepto, J=Monto, N=PAGADO, Q=Forma de Pago, S=Link Factura(19), T=Link Pago(20), + `Estatus`, `RecurrenteID`, `Divisa/Monto USD/TC`','Columnas fiscales (build .209, agregadas AL FINAL y leídas por header, nunca por posición): `FacturaUUID`, `FacturaFolio`, `FacturaRFC`, `FacturaRazonSocial`. Guardan al **EMISOR** (el proveedor que nos factura) — al revés que en Ingresos, donde guardan al receptor (la paciente). En los dos casos: la contraparte, nunca Hestia.','Multi-año: `Egresos2025` y `Egresos2024`','`Creditos_Proveedor` y `Abonos_CxP` (EGRESOS_SS_2026)'],
+      funciones:['saveCxP','pagarCxP','cancelarOrdenCxP','aplicarAbonoCxP','readTrazaCancelacion','readClasificacionProveedores','guardarClasifProveedor','regresarCxPaProgramacion','uploadFile','migrateEgresosFacturaDetalle','backfillFacturasEgresos','_egAplicarFacturaFiscal','_egUuidDuplicado','_egFacturaCols'],
+      permisos:['editar_egresos','borrar_egresos','bank_capture','ver_datos_sensibles (RFC/razón social)'],
+      nota:'Requiere (una vez) `setupCxPCreditosAbonos()`. La clasificación automática vive en `prov_defaults.gs` (columnas `Def Contable/Tipo/Subtipo/Concepto` en la hoja Proveedores) y la sirve el mismo endpoint `?action=clasifProveedores` a Egresos y a CxP. Los adjuntos usan `uploadFile` (finance.gs): `tipo` = `factura` | `cotizacion` | `pago` decide la carpeta — `EGRESOS_DRIVE_FACTURAS` / `EGRESOS_DRIVE_COTIZACIONES` / `EGRESOS_DRIVE_PAGOS`, con subcarpeta `<Año>\\<Mes>`. La razón social sale del catálogo de Proveedores (`providers.gs`, col B `Nombre / Razón social`).\n\n**Build .209 — columnas fiscales**: redesplegar `finance.gs` + `comprobantes.gs`. Correr `migrateEgresosFacturaDetalle()` (sin argumento migra 2026/2025/2024; idempotente). Para lo YA vinculado: `backfillFacturasEgresos({anio:2026})` — es reanudable; si devuelve `truncado:true`, re-llamar con `desde:<siguiente>` hasta que `faltan` llegue a 0.'
     },
     ejemplo:'LEPSI PRISMA: egreso pagado $2,463.39 en Santander que se cancela en modo **crédito** → queda saldo a favor de LEPSI que luego se abona a otra orden del **mismo** proveedor.'
   },
@@ -36487,7 +36545,10 @@ async function _novCfgGuardar(){
       { h:'Razón social en el detalle del egreso', p:'Despliega un egreso con **▼** y el detalle ahora trae la **RAZÓN SOCIAL** junto al concepto y el monto — el nombre con el que ese proveedor factura, que es el que necesitas para contabilidad. Sale del catálogo de **Proveedores** y aparece aunque el egreso se haya capturado con el nombre comercial. Si el proveedor **no está dado de alta**, en vez de un hueco verás el nombre tal como se capturó, en gris y con **«· sin catálogo»**: es el recordatorio de que ahí falta darlo de alta en Proveedores.' },
       { h:'Suma de lo seleccionado (solo informativa)', p:'Al palomear partidas, la barra azul muestra «**N partidas seleccionadas · Total: $X**» en un recuadro. **No cambia nada**: solo te dice cuánto suma ese grupo antes de decidir. Suma el **saldo pendiente** (o el monto si no hay abonos), que **ya está en MXN** incluso en las partidas en dólares; si hay USD seleccionados, desglosa además «incluye US$ …».' },
       { h:'Moneda extranjera', p:'CxP acepta **Divisa MXN/USD + tipo de cambio**; guarda el monto ya en pesos (USD × TC) para cuadrar totales. Al pagar aplica el USD con el TC real.' },
-      { h:'Correo de pago, factura y aviso de duplicado', p:'El icono **✉** de cada fila abre **Enviar correo de pago**: rellena la plantilla con proveedor/concepto/monto/fecha/póliza/folio, adjunta el comprobante de pago y la factura si están vinculados, prefila el correo del proveedor y **siempre pide confirmar** antes de enviar. Con **+ Nuevo proveedor** das de alta al proveedor sin salir de la captura. Al capturar, si ya hay un pago al **mismo proveedor por un monto similar en el mes** (±1% o ±$1) aparece **⚠ Posible pago duplicado** (solo avisa, no bloquea). Para cruzar contra contabilidad, **🧾 Conciliar pólizas** (tiene su propia sección).' }
+      { h:'Correo de pago, factura y aviso de duplicado', p:'El icono **✉** de cada fila abre **Enviar correo de pago**: rellena la plantilla con proveedor/concepto/monto/fecha/póliza/folio, adjunta el comprobante de pago y la factura si están vinculados, prefila el correo del proveedor y **siempre pide confirmar** antes de enviar. Con **+ Nuevo proveedor** das de alta al proveedor sin salir de la captura. Al capturar, si ya hay un pago al **mismo proveedor por un monto similar en el mes** (±1% o ±$1) aparece **⚠ Posible pago duplicado** (solo avisa, no bloquea). Para cruzar contra contabilidad, **🧾 Conciliar pólizas** (tiene su propia sección).' },
+      { h:'Buscar un egreso por su factura (UUID / folio / RFC)', p:'Escribe en **Buscar** el **folio fiscal**, el **UUID**, el **RFC** o la **razón social** y sale el egreso — además de lo de siempre (proveedor, comercial, concepto).\n\nEs justo lo que antes no se podía: el folio vivía como texto del enlace y el UUID solo dentro del XML, así que «¿de qué egreso es esta factura?» se contestaba abriendo archivos a mano. Al vincular un CFDI, el ERP le saca UUID/folio/RFC/razón social y los deja **guardados en la fila**.\n\nDetalles útiles: el folio se guarda como `SERIE-FOLIO` y lo encuentras igual con `A-1234` que con `1234`; el RFC pide ≥6 caracteres y el UUID ≥8 (para que un fragmento corto no pesque facturas ajenas).' },
+      { h:'Sube el XML, no solo el PDF', p:'De un **PDF no se puede sacar UUID** — es una imagen del documento. Si adjuntas solo el PDF, ese egreso **no será buscable** por folio ni por UUID, y las columnas fiscales quedan vacías (el sistema no inventa datos).\n\nPor eso el **📎 Subir factura** acepta `.xml`: cuando tengas el CFDI, súbelo. Si sustituyes un XML por un PDF, o **desvinculas**, o dejas una **referencia de texto**, el UUID anterior **se borra solo** — para que el buscador no te encuentre un fantasma de una factura que ese egreso ya no tiene.' },
+      { h:'⚠ «Ese CFDI ya está vinculado al egreso EG-…»', p:'Sale cuando vinculas una factura que **ya está en otro egreso**. **Avisa, pero no bloquea**: una misma factura sí puede repartirse entre varios renglones (gasto dividido entre áreas, o pagado en partes), y bloquearlo haría imposible ese caso.\n\nPero tómatelo en serio: lo más común es que sea **la misma factura pagándose dos veces**. Abre los dos egresos y verifica. Re-subir el XML del **mismo** egreso no avisa nada — eso no es un duplicado.' }
     ],
     ejemplo:'**LEPSI PRISMA**: egreso pagado $2,463.39 en Santander que se cancela en modo **crédito** → queda saldo a favor de LEPSI que luego abonas a otra orden **del mismo** proveedor.',
     tips:[
@@ -36495,12 +36556,14 @@ async function _novCfgGuardar(){
       'La clasificación recomendada al capturar sale del historial de ese proveedor (💡) o de su valor fijo (📌) — y ya sale igual en Egresos y en Cuentas por Pagar.',
       '¿Un proveedor siempre se clasifica igual? Captúralo bien una vez y pulsa **📌 Fijar esta clasificación al proveedor**: de ahí en adelante se sugiere solo, con 📌.',
       'Los tres adjuntos son **opcionales**: si no tienes la cotización, guarda sin ella y súbela después con los iconos de la fila.',
-      'Si el detalle de un egreso dice **«· sin catálogo»** en la razón social, es que ese proveedor no está en Proveedores: dalo de alta y se llenará solo.'
+      'Si el detalle de un egreso dice **«· sin catálogo»** en la razón social, es que ese proveedor no está en Proveedores: dalo de alta y se llenará solo.',
+      '¿Te llegó una factura y no sabes de qué egreso es? Copia su **UUID** o su **folio** y pégalo en el buscador de Egresos.',
+      'Si no ves **RFC** ni **razón social** en los resultados, es la privacidad: identifican al proveedor y requieren el permiso `ver_datos_sensibles`.'
     ],
-    tech:{ hojas:['`Egresos2026` (EGRESOS_SS_2026 = 1iRj…RAQw): A=ID, B=Fecha, C=Mes, E=Proveedor, F=Contable, G=Tipo, H=Subtipo, I=Concepto, J=Monto, N=PAGADO, Q=Forma de Pago, S=Link Factura(19), T=Link Pago(20), + Estatus, RecurrenteID, Divisa/Monto USD/TC','Multi-año: `Egresos2025` y `Egresos2024`','`Creditos_Proveedor` y `Abonos_CxP` (EGRESOS_SS_2026)'],
-      funciones:['saveCxP','pagarCxP','cxpCancelarOrden','aplicarAbonoCxP','readTrazaCancelacion','readClasificacionProveedores','guardarClasifProveedor','regresarCxPaProgramacion','egEditRow','egDeleteRow','uploadFile'],
-      permisos:['editar_egresos','borrar_egresos','bank_capture'],
-      deploy:'La primera vez, correr `setupCxPCreditosAbonos()`. Las 3 zonas de adjuntos y el panel de clasificación en CxP son **solo frontend**: no requieren redeploy del Apps Script.',
+    tech:{ hojas:['`Egresos2026` (EGRESOS_SS_2026 = 1iRj…RAQw): A=ID, B=Fecha, C=Mes, E=Proveedor, F=Contable, G=Tipo, H=Subtipo, I=Concepto, J=Monto, N=PAGADO, Q=Forma de Pago, S=Link Factura(19), T=Link Pago(20), + Estatus, RecurrenteID, Divisa/Monto USD/TC','Columnas fiscales (.209): `FacturaUUID`, `FacturaFolio`, `FacturaRFC`, `FacturaRazonSocial` — al FINAL de la hoja, leídas por header. Guardan al **EMISOR** (proveedor); en Ingresos las columnas gemelas guardan al receptor (paciente). Siempre la contraparte, nunca Hestia.','Multi-año: `Egresos2025` y `Egresos2024`','`Creditos_Proveedor` y `Abonos_CxP` (EGRESOS_SS_2026)'],
+      funciones:['saveCxP','pagarCxP','cxpCancelarOrden','aplicarAbonoCxP','readTrazaCancelacion','readClasificacionProveedores','guardarClasifProveedor','regresarCxPaProgramacion','egEditRow','egDeleteRow','uploadFile','migrateEgresosFacturaDetalle','backfillFacturasEgresos','_egAplicarFacturaFiscal','_egUuidDuplicado'],
+      permisos:['editar_egresos','borrar_egresos','bank_capture','ver_datos_sensibles (RFC/razón social)'],
+      deploy:'La primera vez, correr `setupCxPCreditosAbonos()`.\n\n**Build .209**: redesplegar `finance.gs` + `comprobantes.gs`; correr `migrateEgresosFacturaDetalle()` (idempotente, migra los 3 años) y luego `backfillFacturasEgresos({anio:2026})` para lo ya vinculado — es reanudable: si vuelve `truncado:true`, re-llamar con `desde:<siguiente>`.',
       nota:'La clasificación automática vive en `prov_defaults.gs` (columnas Def Contable/Tipo/Subtipo/Concepto en la hoja Proveedores); la sirve `?action=clasifProveedores` y la consumen Egresos y CxP con el mismo componente (`provClasifSugerir/Aplicar/Fijar`). Los adjuntos usan `uploadFile` (finance.gs): el `tipo` (`factura`/`cotizacion`/`pago`) elige la carpeta `EGRESOS_DRIVE_FACTURAS` / `EGRESOS_DRIVE_COTIZACIONES` / `EGRESOS_DRIVE_PAGOS` + subcarpeta `<Año>\\<Mes>`, y marca Facturación cuando es factura. La razón social sale de `providers.gs` (col B `Nombre / Razón social`) vía el mismo mapa `_egProvMap()` del nombre comercial. Botón admin **🔧 Reparar créditos cruzados** para casos históricos.' } },
 
   { id:'xml-cfdi', group:'operacion', icon:'🧷', title:'Vinculación de facturas XML / CFDI',
