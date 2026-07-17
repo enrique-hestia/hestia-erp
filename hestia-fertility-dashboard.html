@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.230 -->
+﻿<!-- app-build:2026.07.16.231 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -40719,7 +40719,15 @@ try {
     return String(s||'').toLowerCase()
       .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i')
       .replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').replace(/ñ/g,'n')
+      // Signos: sin esto "¿cuánto debe X?" empezaba con "¿" y NINGÚN patrón casaba
+      // (^cuanto no ve el ¿). Era el motivo de que el ejemplo estrella no hiciera nada.
+      .replace(/[¿?¡!.,;:]/g,' ')
       .replace(/\s+/g,' ').trim();
+  }
+  // Las últimas k palabras del texto CRUDO (conserva acentos/mayúsculas del nombre).
+  function _asisUltimas(raw, k){
+    var w = String(raw||'').replace(/^[¿¡\s]+/,'').replace(/[?!.\s]+$/,'').trim().split(/\s+/);
+    return w.slice(Math.max(0, w.length-k)).join(' ');
   }
   function _asisEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
@@ -40758,31 +40766,64 @@ try {
   /* ── EL PARSER. Detecta la intención por el verbo y delega. Orden importa:
      lo más específico primero. Devuelve un objeto {intencion, ...} que la UI
      pinta; NO ejecuta nada por sí solo salvo navegar (que es idempotente). ── */
+  /* Atajos para el FALLBACK: si la frase menciona un área pero no es una orden que
+     el asistente sepa ejecutar, en vez de un seco "no entendí" ofrece llevar a la
+     pantalla donde ESO se hace. Cada uno se resuelve contra menuItems por su label
+     (así respeta permisos: si el rol no tiene la vista, no la ofrece). */
+  var _ASIS_ATAJOS = [
+    { kw:/medic|externo|agencia|coordinador|origen|paladino|lozano|reprovida/, label:'comisiones', que:'médicos externos, agencias y comisiones' },
+    { kw:/producto|precio|catalog|sku|activa|desactiva|surrogacy|paquete/,     label:'catalogo',   que:'productos y precios' },
+    { kw:/egres|gast|proveedor|cuenta por pagar|cxp|factura de/,               label:'egresos',    que:'egresos y cuentas por pagar' },
+    { kw:/ingres|venta|cobr/,                                                   label:'ingresos',   que:'ingresos' },
+    { kw:/nomin|empleado|sueldo|recibo|quincena/,                              label:'nomina',     que:'nómina' },
+    { kw:/inventari|stock|almacen|insumo|medicamento/,                          label:'inventario', que:'inventario' },
+    { kw:/banco|concilia|saldo del banco|movimiento/,                           label:'conciliaci', que:'conciliación bancaria' }
+  ];
+  function _asisBuscarVistaPorTexto(txt){
+    var mi = (typeof menuItems !== 'undefined' && menuItems) ? menuItems : [];
+    var nav = mi.filter(function(i){ return i && i.id && i.tipo !== 'grupo'; });
+    var t = _asisNorm(txt);
+    var hit = nav.filter(function(i){ return _asisNorm(i.label).indexOf(t) > -1 || t.indexOf(_asisNorm(i.label)) > -1; })[0];
+    return hit || null;
+  }
+
   function _asisInterpretar(fraseRaw){
-    var frase = String(fraseRaw||'').trim();
+    // Se limpia de una vez: los signos ¿ ¡ ? ! sólo estorban y rompían el match.
+    var frase = String(fraseRaw||'').replace(/^[¿¡\s]+/,'').replace(/[?!.\s]+$/,'').trim();
     var n = _asisNorm(frase);
     if (!n) return { intencion:'vacio' };
 
-    // NAVEGAR — "ve a X", "abre X", "llévame a X"
-    if (/^(ve(te)?|ir|abre(me)?|llevame|muestrame|abreme|vamos)\b/.test(n)){
+    // NAVEGAR — "ve a X", "abre X", "llévame a X", "muéstrame X"
+    if (/^(ve(te)?|ir|abre(me)?|llevame|muestrame|abreme|vamos|ll[ée]vame|entra(r)?|quiero ver|ver)\b/.test(n)){
       var v = _asisResolverVista(frase);
       if (v.ok) return { intencion:'navegar', id:v.id, label:v.label };
       return { intencion:'navegar_ambiguo', candidatos:v.candidatos, q:frase };
     }
 
-    // CONSULTAR SALDO — "cuánto debe X", "saldo de X"
-    var mSaldo = n.match(/^(cuanto\s+debe|saldo\s+de|adeudo\s+de|que\s+debe)\s+(.+)$/);
-    if (mSaldo){ return { intencion:'saldo', paciente:frase.replace(/^\s*\S+\s+\S+\s+/,'').trim() || mSaldo[2] }; }
+    // CONSULTAR SALDO — "cuánto (le) debe X", "saldo de X", "cuánto me debe X", "deuda de X"
+    var mSaldo = n.match(/^(cuanto\s+(?:me\s+|le\s+|nos\s+)?debe|saldo\s+(?:de\s+la\s+paciente\s+|de\s+)|adeudo\s+de\s+|que\s+debe|deuda\s+de\s+)\s*(.+)$/);
+    if (mSaldo){ return { intencion:'saldo', paciente:_asisUltimas(frase, mSaldo[2].split(' ').length) || mSaldo[2] }; }
 
-    // IMPRIMIR ESTADO DE CUENTA — "imprime el estado de cuenta de X"
-    var mImp = n.match(/^(imprime|imprimir|dame|genera)\s+(el\s+)?(estado\s+de\s+cuenta)\s+(de\s+)?(.+)$/);
-    if (mImp){ return { intencion:'imprimir_ec', paciente:frase.replace(/.*?(estado de cuenta)\s+(de\s+)?/i,'').trim() }; }
+    // IMPRIMIR ESTADO DE CUENTA — "imprime (el) estado de cuenta (de) X"
+    var mImp = n.match(/^(imprime|imprimir|imprimeme|dame|genera|generar|saca)\s+(el\s+)?(estado\s+de\s+cuenta)\s+(de\s+(?:la\s+paciente\s+)?)?(.+)$/);
+    if (mImp){ return { intencion:'imprimir_ec', paciente:_asisUltimas(frase, mImp[5].split(' ').length) || mImp[5] }; }
 
-    // CREAR CXP — se detecta el verbo; la extracción de campos va en su handler
-    if (/^(crea|crear|nueva|registra|da\s+de\s+alta)\b.*(cuenta\s+por\s+pagar|cxp|orden\s+de\s+pago)/.test(n)){
+    // BUSCAR PACIENTE — "busca a X", "búscame a X", "encuentra a X" → su saldo
+    var mBus = n.match(/^(busca(me)?|encuentra|localiza)\s+(a\s+(?:la\s+paciente\s+)?)?(.+)$/);
+    if (mBus){ return { intencion:'saldo', paciente:_asisUltimas(frase, mBus[4].split(' ').length) || mBus[4] }; }
+
+    // CREAR CXP — verbo + "cuenta por pagar/cxp/orden de pago"
+    if (/^(crea|crear|nueva|nuevo|registra|registrar|da\s+de\s+alta|agrega)\b.*(cuenta\s+por\s+pagar|cxp|orden\s+de\s+pago)/.test(n)){
       return _asisParsearCxP(frase);
     }
 
+    // FALLBACK — no es una orden ejecutable, pero ¿menciona un área? Ofrece llevar ahí.
+    var destinoLabel = null, queHay = null;
+    for (var a=0; a<_ASIS_ATAJOS.length; a++){ if (_ASIS_ATAJOS[a].kw.test(n)){ destinoLabel = _ASIS_ATAJOS[a].label; queHay = _ASIS_ATAJOS[a].que; break; } }
+    if (destinoLabel){
+      var vista = _asisBuscarVistaPorTexto(destinoLabel);
+      if (vista) return { intencion:'sugerir_nav', id:vista.id, label:vista.label, que:queHay, q:frase };
+    }
     return { intencion:'desconocido', q:frase };
   }
 
@@ -40966,9 +41007,17 @@ try {
       _asisPintarCxP(cuerpo, f, cand.length === 1);
       return;
     }
+    // No es una orden que sepa ejecutar, pero menciona un área: ofrece llevar ahí.
+    if (res.intencion === 'sugerir_nav'){
+      cuerpo.innerHTML = '<div class="asis-warn">No puedo hacer «'+_asisEsc(res.q)+'» directamente — eso se hace en la pantalla de <b>'+_asisEsc(res.label)+'</b> ('+_asisEsc(res.que)+').</div>'+
+        '<div style="margin-top:8px"><button class="asis-cand" id="asis-goto" style="border-color:var(--color-primary,#c46a7a);color:#fff;background:var(--color-primary,#c46a7a);font-weight:700">Ir a '+_asisEsc(res.label)+' →</button></div>';
+      var g = document.getElementById('asis-goto');
+      if (g) g.onclick = function(){ try{ navigateTo(res.id); }catch(e){} _asisClose(); };
+      return;
+    }
     if (res.intencion === 'desconocido'){
       cuerpo.innerHTML = '<div class="asis-warn">No entendí «'+_asisEsc(res.q)+'». '+
-        'Prueba con una de las formas de abajo — el asistente aún es de vocabulario acotado, no adivina.</div>'+_asisEjemplosHTML();
+        'El asistente entiende un conjunto de órdenes (no es una IA que adivine). Prueba con una de estas formas:</div>'+_asisEjemplosHTML();
       return;
     }
   }
