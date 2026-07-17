@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.232 -->
+﻿<!-- app-build:2026.07.16.233 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -3424,6 +3424,16 @@ async function loadProductosView(catFilter, isCatalog) {
   var el = document.getElementById('view-productos-catalogo');
   if (!el) return;
   el.innerHTML = hestiaLoader('Cargando catálogo…');
+  // Precarga las listas de precios administradas (BD_Listas) para que aparezcan
+  // en el desplegable "Lista de precios" del formulario. En segundo plano: si
+  // falla o tarda, el form cae a las listas por defecto + agencias.
+  try {
+    if (!window._listasCache || !window._listasCache.length) {
+      fetch(APPS_SCRIPT_URL+'?action=listas&token='+encodeURIComponent(getToken())+'&_t='+Date.now(),{redirect:'follow'})
+        .then(function(r){ return r.json(); })
+        .then(function(j){ if(j&&j.ok&&j.listas) window._listasCache=j.listas; }).catch(function(){});
+    }
+  } catch(e){}
   try {
     if (!_prodData || _prodData.error) {
       _prodData = null;
@@ -3636,6 +3646,7 @@ function _renderProductosView() {
       +'<button id="prod-import-btn" onclick="document.getElementById(\'prod-import-file\').click()" title="Subir el .xlsx editado para actualizar/crear productos en lote" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">'
       +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Importar Excel</button>'
       +'<input type="file" id="prod-import-file" accept=".xlsx" style="display:none" onchange="prodImportarExcel(this)">'
+      +'<button onclick="listasAdminOpen()" title="Listas de precios: dar de alta, editar o borrar las listas (General, Grupo Médico, etc.)" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">💲 Listas de precios</button>'
       +'<button onclick="agenciasAdminOpen()" title="Administrar agencias (cada agencia = su lista de precios)" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🏢 Agencias</button>'
       +'<button onclick="navigateTo(\'origenes\')" title="Orígenes externos: agencias y médicos que refieren ingresos (para atribución)" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🏷️ Orígenes externos</button>'
     +(hasPermission('sheets_access')?'<a href="https://docs.google.com/spreadsheets/d/'+PRODUCTOS_SS_ID+'/edit" target="_blank" style="display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--color-primary,#c46a7a);text-decoration:none">'
@@ -3780,6 +3791,98 @@ async function _agenciaPost(body){
   } catch(e){ alert('No se pudo guardar: '+(e.message||e)+'\n(Requiere summary.gs redesplegado.)'); }
 }
 
+/* ── Administración de LISTAS DE PRECIOS (BD_Listas) ──────────────────────────
+   Dar de alta, editar y borrar las listas (General, Grupo Médico, Surrogacy…).
+   Cada lista es una columna de precios en el catálogo. 'General' no se borra
+   (es la lista por defecto). Backend: readListas / saveLista / deleteLista
+   (permiso editar_productos). */
+window._listasCache = window._listasCache || [];
+async function listasAdminOpen(){
+  var ov=document.getElementById('lst-adm-ov');
+  if(!ov){ ov=document.createElement('div'); ov.id='lst-adm-ov'; document.body.appendChild(ov); }
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9600;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.innerHTML='<div style="background:var(--color-surface,#fff);border-radius:14px;padding:24px;font-size:13px;color:var(--color-text,#1a252f)">Cargando listas de precios…</div>';
+  try {
+    var r=await fetch(APPS_SCRIPT_URL+'?action=listas&token='+encodeURIComponent(getToken())+'&_t='+Date.now(),{redirect:'follow'});
+    var j=await r.json();
+    window._listasCache=(j&&j.ok&&j.listas)?j.listas:[];
+  } catch(e){ window._listasCache=[]; }
+  _listasAdminRender();
+}
+function _listasAdminRender(){
+  var ov=document.getElementById('lst-adm-ov'); if(!ov) return;
+  var L=window._listasCache||[];
+  var rows=L.map(function(x){
+    var nm=String(x.lista||''); var esGeneral=nm.toLowerCase()==='general';
+    var nmJs=nm.replace(/'/g,"\\'");
+    return '<div style="border:1px solid var(--color-border,#e5e7eb);border-radius:9px;padding:10px 12px;margin-bottom:7px">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;gap:8px">'
+        +'<span style="font-weight:700">'+_esc(nm)+(x.activo?'':' <span style="font-weight:500;font-size:10.5px;color:#b45309">(inactiva)</span>')+'</span>'
+        +'<span style="display:flex;gap:6px;align-items:center">'
+          +'<button onclick="listaEditar(\''+nmJs+'\')" title="Editar" style="background:none;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;padding:3px 9px;cursor:pointer;font-size:11px">✎ Editar</button>'
+          +(esGeneral?'':'<button onclick="listaBorrar(\''+nmJs+'\')" title="Borrar lista" style="background:none;border:none;color:#c0505c;cursor:pointer;font-size:16px">✕</button>')
+        +'</span></div>'
+      +(x.descripcion?'<div style="font-size:11px;color:var(--color-text-muted,#6b7280);margin-top:3px">'+_esc(x.descripcion)+'</div>':'')
+      +'<div style="font-size:10.5px;color:var(--color-text-muted,#9ca3af);margin-top:3px">Moneda '+_esc(x.moneda||'MXN')+' · multiplicador '+(x.multiplicador||1)+'x</div>'
+      +'</div>';
+  }).join('');
+  ov.innerHTML='<div style="background:var(--color-surface,#fff);color:var(--color-text,#1a252f);border-radius:14px;padding:24px 26px;max-width:600px;width:100%;max-height:88vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35)">'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px"><div style="font-weight:800;font-size:16px">💲 Listas de precios</div>'
+    +'<button onclick="document.getElementById(\'lst-adm-ov\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--color-text-muted,#9ca3af)">✕</button></div>'
+    +'<p style="font-size:12.5px;color:var(--color-text-muted,#4b5563);margin:0 0 16px;line-height:1.6">Cada lista es una <b>columna de precios</b> del catálogo (ej. General, Grupo Médico). Al fijar el precio de un producto puedes darle un precio distinto por lista. «General» es la lista por defecto y no se puede borrar.</p>'
+    +(rows||'<div style="font-size:12px;color:var(--color-text-muted,#9ca3af)">Sin listas aún.</div>')
+    +'<div id="lst-form" style="margin-top:14px;border-top:1px solid var(--color-divider,#e5e7eb);padding-top:14px">'+_listaFormHTML(null)+'</div>'
+    +'<div style="font-size:11px;color:var(--color-text-muted,#9ca3af);margin-top:12px">Tras crear/editar/borrar, dale a <b>🔄 Actualizar</b> para refrescar el catálogo y los formularios.</div>'
+    +'</div>';
+}
+function _listaFormHTML(x){
+  x=x||{}; var edit=!!x.lista;
+  var S='style="padding:8px 10px;border:1px solid var(--color-border,#e5e7eb);border-radius:8px;font-size:12.5px;color:var(--color-text,#1a252f);background:var(--color-surface,#fff)"';
+  return '<div style="font-size:12px;font-weight:700;margin-bottom:8px">'+(edit?'Editar «'+_esc(x.lista)+'»':'Nueva lista de precios')+'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
+      +'<div style="grid-column:1/3"><label style="font-size:10px;color:var(--color-text-muted,#6b7280)">Nombre *</label><input id="lst-f-nombre" '+S+' style="width:100%;box-sizing:border-box;'+(edit?'background:var(--color-surface-2,#f5f5f5)':'')+'" value="'+_esc(x.lista||'')+'" '+(edit?'readonly title="El nombre no se cambia (es la clave de la columna de precios)"':'placeholder="Ej. Grupo Médico"')+'></div>'
+      +'<div style="grid-column:1/3"><label style="font-size:10px;color:var(--color-text-muted,#6b7280)">Descripción</label><input id="lst-f-desc" '+S+' style="width:100%;box-sizing:border-box" value="'+_esc(x.descripcion||'')+'" placeholder="Para qué es esta lista"></div>'
+      +'<div><label style="font-size:10px;color:var(--color-text-muted,#6b7280)">Moneda</label><select id="lst-f-moneda" '+S+' style="width:100%"><option'+((x.moneda||'MXN')==='MXN'?' selected':'')+'>MXN</option><option'+(x.moneda==='USD'?' selected':'')+'>USD</option><option'+(x.moneda==='EUR'?' selected':'')+'>EUR</option></select></div>'
+      +'<div><label style="font-size:10px;color:var(--color-text-muted,#6b7280)">Multiplicador</label><input id="lst-f-mult" type="number" step="0.01" min="0" '+S+' style="width:100%;box-sizing:border-box" value="'+(x.multiplicador||1)+'"></div>'
+      +'<label style="grid-column:1/3;display:flex;align-items:center;gap:6px;font-size:12px"><input id="lst-f-activo" type="checkbox" '+(x.activo!==false?'checked':'')+'> Activa (aparece como opción de lista)</label>'
+    +'</div>'
+    +'<div style="display:flex;gap:8px;margin-top:10px">'
+      +'<button onclick="listaGuardar()" style="padding:9px 18px;border:none;background:var(--color-primary,#c46a7a);color:#fff;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:700">'+(edit?'Guardar cambios':'+ Crear lista')+'</button>'
+      +(edit?'<button onclick="_listasAdminRender()" style="padding:9px 14px;border:1px solid var(--color-divider,#e5e7eb);background:none;border-radius:8px;cursor:pointer;font-size:12.5px">Cancelar</button>':'')
+    +'</div>';
+}
+function listaEditar(nombre){
+  var x=(window._listasCache||[]).filter(function(l){ return String(l.lista)===String(nombre); })[0];
+  var f=document.getElementById('lst-form'); if(f) f.innerHTML=_listaFormHTML(x||{lista:nombre});
+}
+async function listaGuardar(){
+  var nombre=(document.getElementById('lst-f-nombre')||{}).value||'';
+  nombre=String(nombre).trim(); if(!nombre){ alert('Ponle un nombre a la lista.'); return; }
+  var s=getSession()||{};
+  var payload={ action:'saveLista', lista:nombre,
+    descripcion:(document.getElementById('lst-f-desc')||{}).value||'',
+    moneda:(document.getElementById('lst-f-moneda')||{}).value||'MXN',
+    multiplicador:parseFloat((document.getElementById('lst-f-mult')||{}).value)||1,
+    activo:!!(document.getElementById('lst-f-activo')||{}).checked,
+    usuario:s.email||'' };
+  try {
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(payload)});
+    var j=await r.json();
+    if(!j.ok) throw new Error(j.error||'Error');
+    await listasAdminOpen();   // recarga la lista
+  } catch(e){ alert('No se pudo guardar: '+(e.message||e)); }
+}
+async function listaBorrar(nombre){
+  if(!confirm('¿Borrar la lista de precios «'+nombre+'»?\n\nNo borra los precios ya capturados; solo la retira de las opciones.')) return;
+  var s=getSession()||{};
+  try {
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'deleteLista',lista:nombre,usuario:s.email||''})});
+    var j=await r.json();
+    if(!j.ok) throw new Error(j.error||'Error');
+    await listasAdminOpen();
+  } catch(e){ alert('No se pudo borrar: '+(e.message||e)); }
+}
+
 /* ── Formulario agregar producto (página completa estilo Odoo) ── */
 /* ── Traducciones del producto (Catálogo General) ─────────────────────────────
  * Aquí NACE la traducción con la que se imprimen los documentos del paciente.
@@ -3848,7 +3951,11 @@ function prodOpenForm(defaultCat) {
   var tipos = _ddVals('Productos','tipo', _PROD_TIPOS_FALLBACK);
   var monedas = ['MXN','USD'];
   // Listas de precios = base + cada AGENCIA (REPROVIDA + las que se vayan creando).
-  var listas = ['General','GM','Surrogacy'].concat(window._agencias || ['REPROVIDA']);
+  // Las listas de precios que ofrece el form = las administradas (BD_Listas, activas)
+  // + las agencias + los defaults del sistema. Así una lista nueva creada en
+  // "💲 Listas de precios" aparece aquí en cuanto se refresca.
+  var _bdListas = (window._listasCache||[]).filter(function(x){ return x && x.activo!==false && x.lista; }).map(function(x){ return String(x.lista); });
+  var listas = ['General','GM','Surrogacy'].concat(window._agencias || ['REPROVIDA']).concat(_bdListas);
   listas = listas.filter(function(v,i,a){ return a.findIndex(function(x){ return String(x).toLowerCase()===String(v).toLowerCase(); })===i; });
 
   function opts(arr,sel){return arr.map(function(v){return '<option value="'+v+'"'+(v===sel?' selected':'')+'>'+v+'</option>';}).join('');}
@@ -10854,6 +10961,23 @@ async function loadMenu() {
           id:'comisiones', label:'Comisiones', padre:_cxcRef.padre||'',
           icono:'handshake', tipo:'vista', orden:(Number(_cxcRef.orden)||130)+0.01,
           seccion:_cxcRef.seccion, fuente:'comisiones'
+        });
+      }
+    }
+    // Inyectar "Orígenes externos" (grupos/agencias/médicos que refieren pacientes).
+    // La vista (view-origenes, fuente 'origenes') existe y es completa, pero no está
+    // en la hoja Menu — solo se alcanzaba por botones sueltos y Ctrl+K. La ayuda
+    // decía "→ Orígenes externos" y no había cómo llegar desde el menú. Va junto a
+    // Ingresos: cada ingreso externo se atribuye a un origen de este catálogo.
+    if (!menuItems.some(function(i){ return i.id==='origenes'; })) {
+      var _ingRef = menuItems.filter(function(i){ return i.id==='fin-ingresos'; })[0]
+                 || menuItems.filter(function(i){ return /^ingresos$/i.test(String(i.label||'')); })[0]
+                 || menuItems.filter(function(i){ return i.id==='fin-cxc'; })[0];
+      if (_ingRef) {
+        menuItems.push({
+          id:'origenes', label:'Orígenes externos', padre:_ingRef.padre||'',
+          icono:'tag', tipo:'vista', orden:(Number(_ingRef.orden)||90)+0.02,
+          seccion:_ingRef.seccion, fuente:'origenes'
         });
       }
     }
@@ -25866,7 +25990,7 @@ function pcLoadMenu() {
             // al Guardar, saveMenu crea su fila (preserva id/fuente/tipo) y la inyección los
             // salta a partir de ahí, así que su posición ya la manda la hoja.
             var _sids = {}; _sheet.forEach(function(i){ if(i&&i.id) _sids[i.id]=1; });
-            var _dynAllow = {novedades:1,manual:1,cobranza:1,seguro:1,nota:1,semanal:1,'gastos-fijos':1,recordatorios:1,comisiones:1};
+            var _dynAllow = {novedades:1,manual:1,cobranza:1,seguro:1,nota:1,semanal:1,'gastos-fijos':1,recordatorios:1,comisiones:1,origenes:1};
             var _live = (typeof menuItems!=='undefined' && menuItems) ? menuItems : [];
             var _dyn = _live.filter(function(i){ return i && i.id && !_sids[i.id] && _dynAllow[i.id]; })
               .map(function(i){ return {id:i.id, padre:i.padre||'', label:i.label||'', icono:i.icono||'', orden:i.orden||0, activo:i.activo!==false, seccion:i.seccion||'', tipo:i.tipo||'vista', fuente:i.fuente||i.id}; });
@@ -36576,6 +36700,18 @@ var NOVEDADES=[
   /* `destacada:true` = se anuncia con el aviso emergente (default del código; el admin lo
      puede cambiar desde Panel de Control → Novedades sin tocar el código).
      `perm:'clave'` = audiencia restringida a quien tenga ese permiso (vacío = todos). */
+  { build:'2026.07.17', fecha:'17 jul 2026', area:'Catálogo', icon:'💲', destacada:true, perm:'editar_productos',
+    titulo:'Ya puedes administrar las listas de precios (dar de alta, editar, borrar)',
+    puntos:['**Nuevo botón «💲 Listas de precios»** en el Catálogo General (junto a Agencias). Ahí das de alta una lista nueva (ej. «Grupo Médico», «Alta Complejidad»), editas su descripción/moneda/multiplicador, la activas o desactivas, y borras las que ya no uses.',
+      '**«General» no se puede borrar** — es la lista por defecto del sistema; si no la usas, desactívala desde Editar. Borrar una lista **no borra los precios ya capturados**, solo la retira de las opciones.',
+      'Al crear una lista, aparece como opción de precio en el formulario de cada producto (dale 🔄 Actualizar para refrescar).',
+      'Cambiar listas de precios exige el permiso **editar_productos** (de entrada, admin/director).'],
+    comoUsar:['Menú **Catálogo General** → botón **💲 Listas de precios** → **+ Crear lista** (o ✎ Editar / ✕ Borrar en cada una).'] },
+  { build:'2026.07.17', fecha:'17 jul 2026', area:'Ingresos', icon:'🏷️', destacada:true,
+    titulo:'«Orígenes externos» ya está en el menú',
+    puntos:['El catálogo de **grupos, agencias, médicos externos y coordinadores** (donde das de alta a quién refiere a cada paciente) ya tiene su lugar en el **menú**, junto a Ingresos. Antes existía pero solo se llegaba por botones sueltos o Ctrl+K — la ayuda lo mencionaba y no había cómo abrirlo desde el menú.',
+      'Desde ahí das de alta cada grupo/agencia/médico, marcas a qué grupo pertenece cada uno, y esos nombres alimentan el Canal y el Médico Tratante de la ficha del paciente y la atribución de los ingresos.'],
+    comoUsar:['Menú **🏷️ Orígenes externos** (junto a Ingresos), o Ctrl+K y escribe «orígenes».'] },
   { build:'2026.07.16', fecha:'16 jul 2026', area:'Cobranza', icon:'🕓', destacada:true,
     titulo:'Ya se ve el historial completo de pacientes de 2024 y 2025',
     puntos:['**El estado de cuenta ya encuentra a las pacientes de años anteriores.** Antes salía vacío para casi todo 2024/2025 — no porque faltaran los datos (siempre estuvieron), sino porque esas ventas se guardaron con el nombre **abreviado** («Melina PA») y el buscador te ofrece el **completo** («Melina Piña Amaros»). El sistema no los reconocía como la misma persona.',
@@ -39135,7 +39271,7 @@ async function _novCfgGuardar(){
                  {n:3,text:'**«Pertenece a»**: los integrantes salen indentados debajo de su grupo. Un médico sin grupo es **independiente** (es su propio grupo).'},
                  {n:4,text:'**📌 Atribuir histórico**: asigna origen a los ingresos ya capturados sin origen.'} ] },
     steps:[
-      'Abre **Panel de Control → 🏷️ Orígenes externos** y da de alta cada grupo, agencia, médico o coordinador.',
+      'Abre el menú **🏷️ Orígenes externos** (junto a Ingresos) — o Ctrl+K y escribe «orígenes» — y da de alta cada grupo, agencia, médico o coordinador.',
       'Elige el **Tipo** y, si pertenece a un grupo, marca **«Pertenece a»**. Un Grupo no puede pertenecer a otro.',
       'En la **ficha del paciente**, *Canal* (grupos/agencias) y *Médico Tratante* ya salen de este catálogo; al elegir un Canal que es Grupo, el médico se filtra a sus integrantes.',
       'Al capturar un ingreso, el **origen se precarga** desde la ficha de la paciente. Puedes cambiarlo.',

@@ -1016,6 +1016,9 @@ function doPost(e) {
     if (body.action === 'saveLista') {
       return jsonResponse(saveLista(body));
     }
+    if (body.action === 'deleteLista') {
+      return jsonResponse(deleteLista(body));
+    }
     if (body.action === 'setupProveedores') {
       return jsonResponse(setupProveedores());
     }
@@ -4719,6 +4722,9 @@ function readListas() {
 
 function saveLista(body) {
   try {
+    // Una lista de precios decide cuánto se le cobra a una paciente: permiso.
+    if (!_tokenHasPermission(body.token || '', 'editar_productos'))
+      return { ok:false, error:'Sin autorización para editar listas de precios (editar_productos). Pídeselo al administrador.' };
     var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
     var sh = ss.getSheetByName('BD_Listas');
     if (!sh) { setupBDListas(); sh = ss.getSheetByName('BD_Listas'); }
@@ -4736,6 +4742,32 @@ function saveLista(body) {
     logAudit(body.usuario||'sistema','Listas','Guardar',nombre,'','',JSON.stringify(row));
     return {ok:true,lista:nombre};
   } catch(e){return {ok:false,error:e.message};}
+}
+
+/* Borra una lista de precios de BD_Listas. NO borra 'General' (es la lista por
+   defecto de todo el catálogo y de las pacientes sin lista asignada; borrarla
+   dejaría a media base sin precio). Tampoco borra la columna de precios de esa
+   lista en BD_Productos — solo la retira de las opciones; los precios quedan
+   como historial inerte. Idempotente: si ya no está, devuelve ok igual. */
+function deleteLista(body) {
+  try {
+    if (!_tokenHasPermission(body.token || '', 'editar_productos'))
+      return { ok:false, error:'Sin autorización para borrar listas de precios (editar_productos). Pídeselo al administrador.' };
+    var nombre = String(body.lista||'').trim();
+    if (!nombre) return { ok:false, error:'Nombre vacío' };
+    if (nombre.toLowerCase() === 'general')
+      return { ok:false, error:'«General» es la lista por defecto del sistema y no se puede borrar. Puedes desactivarla desde Editar si no la usas.' };
+    var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+    var sh = ss.getSheetByName('BD_Listas');
+    if (!sh) return { ok:true, borrada:false, msg:'No hay hoja de listas.' };
+    var data = sh.getDataRange().getValues();
+    for (var i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][0]).trim().toLowerCase() === nombre.toLowerCase()) { sh.deleteRow(i + 1); }
+    }
+    _syncListasDropdown();
+    try { logAudit(body.usuario||'sistema','Listas','Borrar',nombre,'','',''); } catch(e){}
+    return { ok:true, borrada:true, lista:nombre };
+  } catch(e){ return { ok:false, error:e.message }; }
 }
 
 function _syncListasDropdown() {
