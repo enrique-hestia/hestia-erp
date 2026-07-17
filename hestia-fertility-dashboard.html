@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.17.239 -->
+﻿<!-- app-build:2026.07.17.240 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -3624,7 +3624,7 @@ function _renderProductosView() {
     totalPages = Math.ceil(displayRows.length / _prodPerPage) || 1;
 
     pgRows.forEach(function(p) {
-      var pj = encodeURIComponent(JSON.stringify({id:p.id,sku:p.sku,descripcion:p.descripcion,categoria:p.categoria,tipo:p.tipo,notas:p.notas,precio:p.precio,activo:p.activo,precios:p.precios||{},inventariable:p.inventariable,unidad:p.unidad,stockMinimo:p.stockMinimo,stockMaximo:p.stockMaximo,costoUnitario:p.costoUnitario,proveedorPreferido:p.proveedorPreferido}));
+      var pj = encodeURIComponent(JSON.stringify({id:p.id,sku:p.sku,descripcion:p.descripcion,categoria:p.categoria,tipo:p.tipo,notas:p.notas,precio:p.precio,activo:p.activo,precios:p.precios||{},inventariable:p.inventariable,unidad:p.unidad,stockMinimo:p.stockMinimo,stockMaximo:p.stockMaximo,costoUnitario:p.costoUnitario,proveedorPreferido:p.proveedorPreferido,claveProdServ:p.claveProdServ,claveUnidad:p.claveUnidad,unidadTexto:p.unidadTexto,objetoImp:p.objetoImp,tipoFactor:p.tipoFactor,tasaIVA:p.tasaIVA}));
       var esMed = (p.categoria||'').trim().toLowerCase()==='medicamento';
       h.push('<tr>'
         +'<td style="font-family:monospace;font-size:11px;color:'+titleColor+'">'+(p.sku||p.id)+'</td>'
@@ -3713,7 +3713,7 @@ function _renderProductosView() {
 
     pgRows2.forEach(function(p) {
       var color = catColors[p.categoria] || '#6b7280';
-      var pj2 = encodeURIComponent(JSON.stringify({id:p.id,sku:p.sku,descripcion:p.descripcion,categoria:p.categoria,tipo:p.tipo,notas:p.notas,precio:p.precio,activo:p.activo,precios:p.precios||{},inventariable:p.inventariable,unidad:p.unidad,stockMinimo:p.stockMinimo,stockMaximo:p.stockMaximo,costoUnitario:p.costoUnitario,proveedorPreferido:p.proveedorPreferido}));
+      var pj2 = encodeURIComponent(JSON.stringify({id:p.id,sku:p.sku,descripcion:p.descripcion,categoria:p.categoria,tipo:p.tipo,notas:p.notas,precio:p.precio,activo:p.activo,precios:p.precios||{},inventariable:p.inventariable,unidad:p.unidad,stockMinimo:p.stockMinimo,stockMaximo:p.stockMaximo,costoUnitario:p.costoUnitario,proveedorPreferido:p.proveedorPreferido,claveProdServ:p.claveProdServ,claveUnidad:p.claveUnidad,unidadTexto:p.unidadTexto,objetoImp:p.objetoImp,tipoFactor:p.tipoFactor,tasaIVA:p.tasaIVA}));
       var esMed2 = (p.categoria||'').trim().toLowerCase()==='medicamento';
       h.push('<tr>'
         +'<td style="font-family:monospace;font-size:11px;color:var(--color-primary,#c46a7a)">'+(p.sku||p.id)+'</td>'
@@ -4028,6 +4028,28 @@ function prodOpenForm(defaultCat) {
     +'<input id="prod-f-imagen" '+S+' placeholder="URL de imagen o dejar vacío para agregar después"></div>'
     +'</div>';
 
+  // Sección: Datos fiscales (CFDI) — lo que pide el SAT por producto para timbrar.
+  h += '<div class="ingf-card" style="background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;padding:20px;margin-bottom:16px">';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">'
+    +'<div class="ingf-sectitle" style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--color-primary,#c46a7a);display:flex;align-items:center;gap:8px">'
+      +'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/></svg>Datos fiscales (CFDI)</div>'
+    +'<button type="button" onclick="prodAutofillFiscal()" title="Buscar estos datos en las facturas ya emitidas y rellenar lo que esté vacío" style="display:flex;align-items:center;gap:5px;font-size:11px;background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:8px;padding:6px 12px;cursor:pointer;font-weight:700">✨ Autocompletar desde facturas</button>'
+    +'</div>';
+  h += '<div style="font-size:10.5px;color:var(--text-secondary,#9ca3af);margin-bottom:12px;line-height:1.5">Lo que pide el SAT por producto para timbrar. Si ya emitiste una factura con este producto, «Autocompletar» lo busca en tus CFDIs y rellena lo vacío.</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">'
+    +'<div><label '+LBL+'>Clave SAT (ProdServ)</label><input id="prod-f-claveprodserv" '+S+' list="prod-clavesat-list" placeholder="85121600" autocomplete="off"></div>'
+    +'<div><label '+LBL+'>Clave Unidad</label><input id="prod-f-claveunidad" '+S+' list="prod-claveuni-list" placeholder="E48" autocomplete="off"></div>'
+    +'<div><label '+LBL+'>Unidad (texto)</label><input id="prod-f-unidadsat" '+S+' placeholder="Servicio"></div>'
+    +'<div><label '+LBL+'>Objeto de impuesto</label><select id="prod-f-objetoimp" '+S+'><option value="">—</option><option value="01">01 — No objeto de impuesto</option><option value="02">02 — Sí objeto de impuesto</option><option value="03">03 — Sí objeto, no obligado a desglose</option></select></div>'
+    +'<div><label '+LBL+'>Tipo factor</label><select id="prod-f-tipofactor" '+S+'><option value="">—</option><option value="Tasa">Tasa</option><option value="Cuota">Cuota</option><option value="Exento">Exento</option></select></div>'
+    +'<div><label '+LBL+'>Tasa IVA</label><input id="prod-f-tasaiva" '+S+' list="prod-tasaiva-list" placeholder="0.160000" autocomplete="off"></div>'
+    +'</div>'
+    +'<datalist id="prod-clavesat-list"><option value="85121600">85121600 — Servicios de medicina</option><option value="51241000">51241000 — Medicamentos</option><option value="85121800">85121800 — Servicios de laboratorio médico</option></datalist>'
+    +'<datalist id="prod-claveuni-list"><option value="E48">E48 — Unidad de servicio</option><option value="H87">H87 — Pieza</option><option value="ACT">ACT — Actividad</option><option value="XUN">XUN — Unidad</option></datalist>'
+    +'<datalist id="prod-tasaiva-list"><option value="0.160000">0.160000 — 16%</option><option value="0.080000">0.080000 — 8% frontera</option><option value="0.000000">0.000000 — 0% / exento</option></datalist>'
+    +'<div id="prod-fiscal-msg" style="display:none;margin-top:12px;padding:9px 12px;border-radius:8px;font-size:11.5px;line-height:1.5"></div>';
+  h += '</div>';
+
   // Sección: Inventario — automático para "Medicamento", opcional (checkbox)
   // para cualquier otra categoría (insumos, reactivos, etc.). Al marcarlo,
   // el producto queda disponible como componente de Combos.
@@ -4276,6 +4298,13 @@ function prodEditForm(jsonStr) {
   if(_el('prod-f-stockmax')) _el('prod-f-stockmax').value = p.stockMaximo||'';
   if(_el('prod-f-costo')) _el('prod-f-costo').value = p.costoUnitario||'';
   if(_el('prod-f-inventariable')) _el('prod-f-inventariable').checked = !!p.inventariable;
+  // Datos fiscales (CFDI) — prellenar para no blanquearlos al re-guardar.
+  if(_el('prod-f-claveprodserv')) _el('prod-f-claveprodserv').value = p.claveProdServ||'';
+  if(_el('prod-f-claveunidad')) _el('prod-f-claveunidad').value = p.claveUnidad||'';
+  if(_el('prod-f-unidadsat')) _el('prod-f-unidadsat').value = p.unidadTexto||'';
+  _selEnsureValue('prod-f-objetoimp', p.objetoImp||'');
+  _selEnsureValue('prod-f-tipofactor', p.tipoFactor||'');
+  if(_el('prod-f-tasaiva')) _el('prod-f-tasaiva').value = p.tasaIVA||'';
   _prodInvToggle();
   var titleEl = document.querySelector('#view-productos-catalogo h1');
   if(titleEl) titleEl.textContent = 'Editar producto — '+(p.sku||p.id);
@@ -4286,6 +4315,48 @@ function prodEditForm(jsonStr) {
   }
 }
 
+/* ✨ Autocompletar los datos fiscales de ESTE producto desde los CFDIs emitidos. */
+window.prodAutofillFiscal = async function(){
+  var box=document.getElementById('prod-fiscal-msg');
+  function show(html,bg,col){ if(box){box.style.display='block';box.style.background=bg;box.style.color=col;box.innerHTML=html;} }
+  show('Buscando en tus facturas emitidas… (puede tardar unos segundos)','var(--color-surface,#f3f4f6)','var(--text-secondary,#6b7280)');
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'autocompletarFiscalDesdeCFDI',aplicar:false,token:getToken()})});
+    var j=await r.json();
+    if(!j.ok){ show('Error: '+(j.error||'no se pudo'),'#fde8ea','#b91c1c'); return; }
+    var sku=(document.getElementById('prod-f-sku')||{}).value||'', desc=(document.getElementById('prod-f-desc')||{}).value||'';
+    var mine=(j.propuestas||[]).filter(function(p){ return (sku&&p.sku===sku) || (desc&&p.descripcion===desc); })[0];
+    var map={claveProdServ:'prod-f-claveprodserv',claveUnidad:'prod-f-claveunidad',unidadTexto:'prod-f-unidadsat',objetoImp:'prod-f-objetoimp',tipoFactor:'prod-f-tipofactor',tasaIVA:'prod-f-tasaiva'};
+    var extra = j.total>0 ? ' <a href="#" onclick="prodAutofillFiscalTodo();return false" style="color:var(--color-primary,#c46a7a);font-weight:700">Aplicar a los '+j.total+' del catálogo »</a>' : '';
+    if(mine){
+      var n=0;
+      for(var k in mine.campos){ var el=document.getElementById(map[k]); if(el && !el.value){ if(el.tagName==='SELECT'){_selEnsureValue(map[k],mine.campos[k]);} else el.value=mine.campos[k]; n++; } }
+      show('✓ Rellené '+n+' campo(s) de este producto (origen: '+mine.origen+'). Revísalos y Guarda.'+extra,'var(--color-primary-hl,#f2dfe3)','var(--color-primary-active,#8c3848)');
+    } else {
+      show('Este producto no apareció en tus CFDIs (leí '+j.xmlLeidos+' facturas'+(j.capado?', tope alcanzado — acota el rango':'')+'). '+(j.total>0?('Hay '+j.total+' producto(s) del catálogo con datos por completar.'+extra):'Nada por completar.'),'var(--color-surface,#f3f4f6)','var(--text-secondary,#6b7280)');
+    }
+  }catch(e){ show('Error de conexión','#fde8ea','#b91c1c'); }
+};
+window.prodAutofillFiscalTodo = async function(){
+  if(!confirm('Se llenarán los campos fiscales VACÍOS de todos los productos que aparezcan en tus facturas emitidas. NO se pisa nada capturado. ¿Continuar?')) return;
+  var box=document.getElementById('prod-fiscal-msg');
+  if(box){box.style.display='block';box.innerHTML='Aplicando a todo el catálogo…';}
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'autocompletarFiscalDesdeCFDI',aplicar:true,token:getToken()})});
+    var j=await r.json();
+    if(box){ if(j.ok){ box.style.background='var(--color-primary-hl,#f2dfe3)';box.style.color='var(--color-primary-active,#8c3848)';box.innerHTML='✓ Listo: '+j.aplicados+' producto(s) actualizados desde '+j.xmlLeidos+' facturas.'; } else { box.innerHTML='Error: '+(j.error||'no se pudo'); } }
+  }catch(e){ if(box) box.innerHTML='Error de conexión'; }
+};
+function _prodFiscalPayload(){
+  return {
+    claveProdServ: (document.getElementById('prod-f-claveprodserv')||{}).value||'',
+    claveUnidad:   (document.getElementById('prod-f-claveunidad')||{}).value||'',
+    unidadTexto:   (document.getElementById('prod-f-unidadsat')||{}).value||'',
+    objetoImp:     (document.getElementById('prod-f-objetoimp')||{}).value||'',
+    tipoFactor:    (document.getElementById('prod-f-tipofactor')||{}).value||'',
+    tasaIVA:       (document.getElementById('prod-f-tasaiva')||{}).value||''
+  };
+}
 async function prodSubmitEdit(productoId) {
   var desc = (document.getElementById('prod-f-desc')||{}).value||'';
   if (!desc) { alert('Ingresa la descripción'); return; }
@@ -4313,6 +4384,7 @@ async function prodSubmitEdit(productoId) {
       traducciones: _prodTradPayload(),
       usuario: s.email||'sistema'
     };
+    Object.assign(payload, _prodFiscalPayload());
     var invChk = document.getElementById('prod-f-inventariable');
     if (invChk) {
       payload.inventariable = invChk.checked;
@@ -4413,6 +4485,7 @@ async function prodSubmitForm() {
       traducciones: _prodTradPayload(),
       usuario: s.email||'sistema'
     };
+    Object.assign(savePayload, _prodFiscalPayload());
     var invChk2 = document.getElementById('prod-f-inventariable');
     if (invChk2) {
       savePayload.inventariable = invChk2.checked;

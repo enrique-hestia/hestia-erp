@@ -1064,15 +1064,15 @@ function _facParseCfdiFullFromContent(content) {
       var cEls = conceptosEl.getChildren('Concepto', ns);
       for (var i = 0; i < cEls.length; i++) {
         var c = cEls[i];
-        var ivaPct = 'EXENTO', ivaMonto = 0;
+        var ivaPct = 'EXENTO', ivaMonto = 0, tipoFactor = '';
         var impEl = c.getChild('Impuestos', ns);
         if (impEl) {
           var traslEl = impEl.getChild('Traslados', ns);
           if (traslEl) {
             var ts = traslEl.getChildren('Traslado', ns);
             if (ts.length) {
-              var factor = attr(ts[0], 'TipoFactor');
-              if (factor !== 'Exento') {
+              tipoFactor = attr(ts[0], 'TipoFactor');
+              if (tipoFactor !== 'Exento') {
                 ivaPct = parseFloat(attr(ts[0], 'TasaOCuota')) || 0;
                 ivaMonto = parseFloat(attr(ts[0], 'Importe')) || 0;
               }
@@ -1081,6 +1081,8 @@ function _facParseCfdiFullFromContent(content) {
         }
         conceptos.push({
           claveProdServ: attr(c, 'ClaveProdServ'), noIdentificacion: attr(c, 'NoIdentificacion'),
+          claveUnidad: attr(c, 'ClaveUnidad'), unidad: attr(c, 'Unidad'), objetoImp: attr(c, 'ObjetoImp'),
+          tipoFactor: tipoFactor,
           cantidad: parseFloat(attr(c, 'Cantidad')) || 1, descripcion: attr(c, 'Descripcion'),
           valorUnitario: parseFloat(attr(c, 'ValorUnitario')) || 0, importe: parseFloat(attr(c, 'Importe')) || 0,
           descuento: parseFloat(attr(c, 'Descuento')) || 0,
@@ -1111,6 +1113,94 @@ function _facParseCfdiFullFromContent(content) {
       conceptos: conceptos
     };
   } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+/* Autocompleta los campos fiscales de BD_Productos desde los CFDIs YA EMITIDOS.
+   Por cada concepto arma {ClaveProdServ, ClaveUnidad, Unidad, ObjetoImp, TipoFactor,
+   TasaIVA}; empareja el producto por SKU (=NoIdentificacion) o por descripción
+   normalizada; y rellena SOLO las celdas fiscales VACÍAS (nunca pisa lo capturado).
+   Dry-run por default; aplicar:true escribe. Gated por editar_productos en el POST. */
+function autocompletarFiscalDesdeCFDI(body){
+  try{
+    body = body || {};
+    var aplicar = (body.aplicar === true || body.aplicar === 'true');
+    var CAP = 2500; // tope de XMLs leídos para no exceder el límite de 6 min
+    var hoy = new Date();
+    var anioFin = hoy.getFullYear();
+    var anioIni = body.desdeAnio ? Number(body.desdeAnio) : (anioFin - 1);
+    function norm(s){ return String(s||'').trim().toLowerCase().replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i').replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').replace(/\s+/g,' '); }
+    function fiscalDeConcepto(c){
+      var tasa='';
+      if(c.tipoFactor && c.tipoFactor!=='Exento' && typeof c.ivaPct==='number') tasa=c.ivaPct;
+      return {
+        claveProdServ:String(c.claveProdServ||''), claveUnidad:String(c.claveUnidad||''),
+        unidadTexto:String(c.unidad||''), objetoImp:String(c.objetoImp||''),
+        tipoFactor:String(c.tipoFactor||''),
+        tasaIVA:(tasa!=='' ? Number(tasa).toFixed(6) : (c.tipoFactor==='Exento'?'0.000000':''))
+      };
+    }
+    // 1. Recolectar conceptos fiscales de los CFDIs emitidos del rango.
+    //    "Gana la factura MÁS RECIENTE" (refleja correcciones de clave); si una
+    //    misma descripción tuvo claves SAT distintas, se marca en CONFLICTO y NO
+    //    se propone por descripción (evita estampar una clave equivocada). SKU manda.
+    var bySku={}, bySkuFecha={}, byDesc={}, byDescFecha={}, byDescConflict={}, xmlLeidos=0, capado=false;
+    var t0 = Date.now();
+    for(var a=anioIni; a<=anioFin && !capado; a++){
+      for(var mo=1; mo<=12 && !capado; mo++){
+        var folder=null; try{ folder=_facMonthFolder(a,mo); }catch(e){}
+        if(!folder) continue;
+        var it=folder.getFiles();
+        while(it.hasNext()){
+          if(xmlLeidos>=CAP || (Date.now()-t0)>270000){ capado=true; break; } // tope por conteo O por tiempo (4.5 min)
+          var file=it.next();
+          if(!/\.xml$/i.test(file.getName())) continue;
+          var parsed=null;
+          try{ parsed=_facParseCfdiFullFromContent(file.getBlob().getDataAsString('UTF-8')); }catch(e){ continue; }
+          if(!parsed || !parsed.ok || !parsed.conceptos) continue;
+          xmlLeidos++;
+          var fch=String(parsed.fecha||'');
+          parsed.conceptos.forEach(function(c){
+            var fis=fiscalDeConcepto(c);
+            if(!fis.claveProdServ) return; // sin clave SAT no aporta
+            var sk=norm(c.noIdentificacion), dk=norm(c.descripcion);
+            if(sk){ if(!bySku[sk] || fch>bySkuFecha[sk]){ bySku[sk]=fis; bySkuFecha[sk]=fch; } }
+            if(dk){
+              if(!byDesc[dk]){ byDesc[dk]=fis; byDescFecha[dk]=fch; }
+              else { if(byDesc[dk].claveProdServ!==fis.claveProdServ) byDescConflict[dk]=true; if(fch>byDescFecha[dk]){ byDesc[dk]=fis; byDescFecha[dk]=fch; } }
+            }
+          });
+        }
+      }
+    }
+    // 2. Recorrer BD_Productos y proponer/llenar los campos fiscales VACÍOS.
+    var ss=SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+    var sh=ss.getSheetByName('BD_Productos');
+    if(!sh) return {ok:false, error:'BD_Productos no encontrada'};
+    var cols = aplicar ? _bdProdEnsureFiscalCols(sh) : null;
+    var data=sh.getDataRange().getValues();
+    var hdrs=data[0].map(function(h){return String(h).trim().toLowerCase();});
+    var ix={ claveProdServ:hdrs.indexOf('claveprodserv'), claveUnidad:hdrs.indexOf('claveunidad'), unidadTexto:hdrs.indexOf('unidadtexto'),
+      objetoImp:hdrs.indexOf('objetoimp'), tipoFactor:hdrs.indexOf('tipofactor'), tasaIVA:hdrs.indexOf('tasaiva') };
+    var headerFor={claveProdServ:'ClaveProdServ',claveUnidad:'ClaveUnidad',unidadTexto:'UnidadTexto',objetoImp:'ObjetoImp',tipoFactor:'TipoFactor',tasaIVA:'TasaIVA'};
+    var campoKeys=['claveProdServ','claveUnidad','unidadTexto','objetoImp','tipoFactor','tasaIVA'];
+    var propuestas=[], aplicados=0;
+    for(var ri=1; ri<data.length; ri++){
+      var r=data[ri], id=String(r[0]||'').trim(); if(!id) continue;
+      var sku=String(r[1]||''), desc=String(r[2]||''), _nk=norm(desc);
+      var porSku=bySku[norm(sku)];
+      var match = porSku || (byDescConflict[_nk] ? null : byDesc[_nk]); // desc en conflicto → no propone
+      if(!match) continue;
+      var llenar={};
+      campoKeys.forEach(function(k){
+        var cur = ix[k]>-1 ? String(r[ix[k]]||'').trim() : '';
+        if(!cur && match[k]) llenar[k]=match[k]; // SOLO lo vacío
+      });
+      if(!Object.keys(llenar).length) continue;
+      propuestas.push({id:id, sku:sku, descripcion:desc, origen:(porSku?'SKU':'descripción'), campos:llenar});
+      if(aplicar){ for(var k in llenar){ sh.getRange(ri+1, cols[headerFor[k]]).setValue(llenar[k]); } aplicados++; }
+    }
+    return {ok:true, aplicar:aplicar, xmlLeidos:xmlLeidos, capado:capado, indice:{porSku:Object.keys(bySku).length, porDesc:Object.keys(byDesc).length}, propuestas:propuestas, aplicados:aplicados, total:propuestas.length};
+  }catch(ex){ return {ok:false, error:ex.message}; }
 }
 
 // Índice paciente (nombre normalizado) -> {razonSocial, rfc} desde Registro de Pacientes

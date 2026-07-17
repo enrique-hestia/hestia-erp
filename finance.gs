@@ -539,6 +539,12 @@ function doPost(e) {
       }
       return jsonResponse(_formaBorrar(body.forma, body.ctx));
     }
+    if (body.action === 'autocompletarFiscalDesdeCFDI') {
+      if (!_tokenHasPermission(body.token || '', 'editar_productos')) {
+        return jsonResponse({ok:false, error:'Sin autorización para editar productos (editar_productos).'});
+      }
+      return jsonResponse(autocompletarFiscalDesdeCFDI(body));
+    }
     if (body.action === 'saveLiberado') {
       var result = saveLiberado(body.rowNum, body.liberado);
       try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
@@ -4525,6 +4531,15 @@ function _bdProdEnsureInventarioCols(sh) {
   return cols;
 }
 
+/* Campos fiscales por producto para el CFDI 4.0 (se agregan por-encabezado, no
+   por posición; 'Unidad' se reusa de inventario para el texto de unidad). */
+var BDPROD_FISCAL_HEADERS = ['ClaveProdServ','ClaveUnidad','UnidadTexto','ObjetoImp','TipoFactor','TasaIVA'];
+function _bdProdEnsureFiscalCols(sh) {
+  var cols = {};
+  BDPROD_FISCAL_HEADERS.forEach(function(h){ cols[h] = _bdProdColEnsure(sh, h); });
+  return cols;
+}
+
 // Categoría "Medicamento" siempre es inventariable de forma automática;
 // otras categorías pueden marcarse manualmente vía el checkbox del formulario.
 function _bdProdEsInventariable(body) {
@@ -4660,6 +4675,11 @@ function readProductos() {
         iStockMin = prodHdrs.indexOf('stockminimo'), iStockMax = prodHdrs.indexOf('stockmaximo'),
         iCosto = prodHdrs.indexOf('costounitario'), iProv = prodHdrs.indexOf('proveedorpreferido'),
         iStockAct = prodHdrs.indexOf('stockactual');
+    // Campos fiscales CFDI (por encabezado, toleran ausencia).
+    var iClaveProd = prodHdrs.indexOf('claveprodserv'), iClaveUni = prodHdrs.indexOf('claveunidad'),
+        iUnidadTxt = prodHdrs.indexOf('unidadtexto'),
+        iObjImp = prodHdrs.indexOf('objetoimp'), iTipoFac = prodHdrs.indexOf('tipofactor'),
+        iTasaIVA = prodHdrs.indexOf('tasaiva');
 
     // Traducciones del producto (Descripcion_EN / _FR / _PT). Mismo criterio que
     // inventario: se leen por encabezado exacto y toleran no existir todavía.
@@ -4700,7 +4720,13 @@ function readProductos() {
         stockMaximo: iStockMax>-1 ? (Number(r[iStockMax])||0) : 0,
         costoUnitario: iCosto>-1 ? (Number(r[iCosto])||0) : 0,
         proveedorPreferido: iProv>-1 ? String(r[iProv]||'') : '',
-        stockActual: iStockAct>-1 ? (Number(r[iStockAct])||0) : 0
+        stockActual: iStockAct>-1 ? (Number(r[iStockAct])||0) : 0,
+        claveProdServ: iClaveProd>-1 ? String(r[iClaveProd]||'') : '',
+        claveUnidad:   iClaveUni>-1  ? String(r[iClaveUni]||'')  : '',
+        unidadTexto:   iUnidadTxt>-1 ? String(r[iUnidadTxt]||'') : '',
+        objetoImp:     iObjImp>-1    ? String(r[iObjImp]||'')    : '',
+        tipoFactor:    iTipoFac>-1   ? String(r[iTipoFac]||'')   : '',
+        tasaIVA:       iTasaIVA>-1   ? String(r[iTasaIVA]||'')   : ''
       });
     }
 
@@ -5002,6 +5028,13 @@ function updateProducto(body) {
       if (body.proveedorPreferido !== undefined) prodSheet.getRange(found, invCols.ProveedorPreferido).setValue(String(body.proveedorPreferido||''));
     }
 
+    // Campos fiscales CFDI — solo si vienen en el body (omitir uno no lo borra).
+    var _fiscalMap = {claveProdServ:'ClaveProdServ', claveUnidad:'ClaveUnidad', unidadTexto:'UnidadTexto', objetoImp:'ObjetoImp', tipoFactor:'TipoFactor', tasaIVA:'TasaIVA'};
+    if (Object.keys(_fiscalMap).some(function(f){ return body[f] !== undefined; })) {
+      var fiscCols = _bdProdEnsureFiscalCols(prodSheet);
+      for (var _ff in _fiscalMap) { if (body[_ff] !== undefined) prodSheet.getRange(found, fiscCols[_fiscalMap[_ff]]).setValue(String(body[_ff]||'')); }
+    }
+
     // Si hay nuevo precio: borrar TODAS las filas existentes del mismo prodId+lista
     // y agregar una sola fila nueva. Esto evita la acumulación de duplicados.
     var precio = parseFloat(String(body.precio||'').replace(/[$,]/g,''))||0;
@@ -5231,6 +5264,13 @@ function saveNewProducto(body) {
       prodSheet.getRange(newRowNum, invCols.CostoUnitario).setValue(Number(body.costoUnitario)||0);
       prodSheet.getRange(newRowNum, invCols.ProveedorPreferido).setValue(String(body.proveedorPreferido||''));
       prodSheet.getRange(newRowNum, invCols.StockActual).setValue(0);
+    }
+
+    // Campos fiscales CFDI — se escriben si vienen en el body.
+    var _fnMap = {claveProdServ:'ClaveProdServ', claveUnidad:'ClaveUnidad', unidadTexto:'UnidadTexto', objetoImp:'ObjetoImp', tipoFactor:'TipoFactor', tasaIVA:'TasaIVA'};
+    if (Object.keys(_fnMap).some(function(f){ return body[f] !== undefined && String(body[f]||'')!==''; })) {
+      var fnCols = _bdProdEnsureFiscalCols(prodSheet);
+      for (var _fn in _fnMap) { if (body[_fn] !== undefined) prodSheet.getRange(newRowNum, fnCols[_fnMap[_fn]]).setValue(String(body[_fn]||'')); }
     }
 
     var precio = parseFloat(String(body.precio||'').replace(/[$,]/g,''))||0;
