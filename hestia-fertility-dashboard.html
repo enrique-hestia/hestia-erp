@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.229 -->
+﻿<!-- app-build:2026.07.16.230 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -36528,7 +36528,7 @@ var NOVEDADES=[
       '**No es una IA que adivina.** Entiende ciertas formas y, si duda, pregunta en vez de inventar. Al abrirlo te muestra **ejemplos clicables** para que descubras qué puedes pedir.',
       '**Lo que crea o cambia algo, primero te lo muestra para confirmar.** Ves proveedor, importe, folio y fecha ANTES de que se cree nada. Si dictaste «32 mil» y entendió «320 mil», lo corriges ahí.',
       '**Para dictar: Win+H de Windows**, no el micrófono del ERP. El audio con nombres de pacientes **no sale de tu equipo** — es un pilar de privacidad de la clínica.',
-      'Esta primera versión ya **navega** de verdad; **preguntar/imprimir/crear** se terminan de conectar en el siguiente paso (verás una vista previa de lo que entendió).'],
+      'Ya funcionan las cuatro: **navegar**, **preguntar el saldo** (respeta la privacidad: si tu rol no ve datos de pacientes, no lo muestra), **imprimir** el estado de cuenta, y **crear la cuenta por pagar** (con confirmación obligatoria antes de escribir). Si el nombre o el proveedor es ambiguo, te pregunta en vez de adivinar.'],
     comoUsar:['Pulsa **💡** (abajo a la derecha) o **Ctrl+I** desde cualquier pantalla.','¿Prefieres dictar? Activa **Win+H**, habla, y el texto aparece solo.'] },
   { build:'2026.07.16', fecha:'16 jul 2026', area:'Cobranza', icon:'📥', destacada:true, perm:'editar_ingresos',
     titulo:'Corregir una cuenta por cobrar: ahora sí se puede, y mueve TODO',
@@ -40845,6 +40845,39 @@ try {
 
   /* ── Ejecuta lo que devolvió el parser. Solo NAVEGAR corre directo (idempotente
      y ya filtrado por permisos). El resto pinta su UI (respuesta o tarjeta). ── */
+  /* Resuelve el nombre dictado contra el catálogo de pacientes (fuzzy). cb recibe
+     (nombre|null, candidatos[]). Nunca adivina entre varios: si hay ambigüedad,
+     devuelve la lista para que el usuario elija. */
+  function _asisResolverPaciente(query, cb){
+    function run(){
+      var lista = (typeof _ecPacientesList!=='undefined' && _ecPacientesList) ? _ecPacientesList : [];
+      var q = String(query||'').trim();
+      // exacto (normalizado) primero
+      var exact = lista.filter(function(n){ return _asisNorm(n) === _asisNorm(q); });
+      if (exact.length === 1) return cb(exact[0], []);
+      var cand = (typeof _pacFuzzy==='function') ? _pacFuzzy(lista, q, 6) : [];
+      if (cand.length === 1) return cb(cand[0], []);
+      if (cand.length > 1)  return cb(null, cand);
+      return cb(null, []);   // ninguno
+    }
+    if (typeof _ensurePacList==='function') { try { _ensurePacList(run); return; } catch(e){} }
+    run();
+  }
+  function _asisNoPac(nombre, candidatos){
+    if (candidatos && candidatos.length){
+      var h = '<div class="asis-q">¿A cuál te refieres?</div><div class="asis-cands">';
+      candidatos.forEach(function(c){ h += '<button class="asis-cand" data-pac="'+_asisEsc(c)+'">'+_asisEsc(c)+'</button>'; });
+      return h + '</div>';
+    }
+    return '<div class="asis-warn">No encontré a ninguna paciente que se llame «'+_asisEsc(nombre)+'» en el catálogo. '+
+      'Revisa el nombre, o si es de años anteriores puede que aún no esté dada de alta.</div>';
+  }
+  // Reejecuta el asistente con una frase (para los botones de acción encadenada).
+  function _asisRunFrase(frase){
+    var inp = document.getElementById('asis-input');
+    if (inp){ inp.value = frase; _asisRun(); }
+  }
+
   function _asisEjecutar(res){
     var cuerpo = document.getElementById('asis-resp');
     if (!cuerpo) return;
@@ -40864,27 +40897,73 @@ try {
       });
       return;
     }
-    // Intenciones que aún no cablo en esta v2 inicial: se anuncian honestamente.
-    if (res.intencion === 'saldo' || res.intencion === 'imprimir_ec'){
-      cuerpo.innerHTML = '<div class="asis-warn">Entendí que quieres <b>'+
-        (res.intencion==='saldo'?'consultar el saldo':'imprimir el estado de cuenta')+
-        '</b> de <b>'+_asisEsc(res.paciente)+'</b>. Esta parte se está terminando de conectar '+
-        'junto con el arreglo de los nombres de 2024/2025. Por ahora, ábrelo desde el menú Cobranza.</div>';
+    // ── CONSULTAR SALDO ── vía estadoCobranza (GET), que SÍ respeta el enmascarado
+    // de privacidad. "Debe" = totalSaldo + lo pendiente de la suscripción.
+    if (res.intencion === 'saldo'){
+      cuerpo.innerHTML = '<div class="asis-ok">Consultando el saldo de <b>'+_asisEsc(res.paciente)+'</b>…</div>';
+      _asisResolverPaciente(res.paciente, function(nom, cands){
+        if (!nom){ cuerpo.innerHTML = _asisNoPac(res.paciente, cands); _asisBindPacBtns(cuerpo, 'saldo'); return; }
+        var tok = encodeURIComponent((typeof getToken==='function')?getToken():'');
+        fetch(APPS_SCRIPT_URL+'?action=estadoCobranza&paciente='+encodeURIComponent(nom)+'&token='+tok+'&_t='+Date.now(), {redirect:'follow'})
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            if (!d || !d.ok){ cuerpo.innerHTML = '<div class="asis-warn">No pude consultar el saldo: '+_asisEsc((d&&d.error)||'error')+'</div>'; return; }
+            if (d.masked){ cuerpo.innerHTML = '<div class="asis-warn">Tu rol no puede ver datos de pacientes, así que no puedo mostrar este saldo.</div>'; return; }
+            var debe = (d.totalSaldo||0) + ((d.suscripcion&&d.suscripcion.montoDebe)||0);
+            var fmt = function(n){ return '$'+Number(n||0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+            cuerpo.innerHTML = '<div class="asis-card">'+
+              _asisFila('Paciente', d.paciente||nom)+
+              _asisFila('Debe', fmt(debe))+
+              (d.totalVendido!=null?_asisFila('Facturado', fmt(d.totalVendido)):'')+
+              (d.totalPagadoVentas!=null?_asisFila('Pagado', fmt(d.totalPagadoVentas)):'')+
+            '</div>'+
+            '<div style="margin-top:8px"><button class="asis-cand" data-print="'+_asisEsc(d.paciente||nom)+'">🖨️ Imprimir su estado de cuenta</button></div>';
+            var pb = cuerpo.querySelector('[data-print]');
+            if (pb) pb.onclick = function(){ _asisRunFrase('imprime el estado de cuenta de '+pb.getAttribute('data-print')); };
+          })
+          .catch(function(e){ cuerpo.innerHTML = '<div class="asis-warn">Error de red: '+_asisEsc(e.message)+'</div>'; });
+      });
       return;
     }
+    // ── IMPRIMIR estado de cuenta ── navega a la vista, busca a la paciente e imprime.
+    if (res.intencion === 'imprimir_ec'){
+      cuerpo.innerHTML = '<div class="asis-ok">Preparando el estado de cuenta de <b>'+_asisEsc(res.paciente)+'</b>…</div>';
+      _asisResolverPaciente(res.paciente, function(nom, cands){
+        if (!nom){ cuerpo.innerHTML = _asisNoPac(res.paciente, cands); _asisBindPacBtns(cuerpo, 'imprimir'); return; }
+        try { if (typeof navigateTo==='function') navigateTo('estado-cuenta'); } catch(e){}
+        // El panel se pinta async: se espera a que exista #ec-search antes de buscar.
+        setTimeout(function(){
+          var inp = document.getElementById('ec-search');
+          if (!inp || typeof ecBuscar!=='function'){ cuerpo.innerHTML = '<div class="asis-warn">No pude abrir Estado de Cuenta. Ábrela desde el menú Cobranza.</div>'; return; }
+          inp.value = nom;
+          try {
+            var p = ecBuscar();
+            var doImp = function(){ try{ if(typeof ecImprimir==='function') ecImprimir(); }catch(e){} _asisClose(); };
+            if (p && typeof p.then==='function'){ p.then(doImp); } else { setTimeout(doImp, 900); }
+          } catch(e){ cuerpo.innerHTML = '<div class="asis-warn">No pude imprimir: '+_asisEsc(e.message)+'</div>'; }
+        }, 350);
+      });
+      return;
+    }
+    // ── CREAR CxP ── resuelve el proveedor contra el catálogo y pide confirmación
+    // ANTES de escribir. El backend ya valida el permiso (build .226): si el rol no
+    // puede, la creación se rechaza ahí. El asistente no es una puerta trasera.
     if (res.intencion === 'crear_cxp'){
       var f = res;
-      cuerpo.innerHTML =
-        '<div class="asis-q">Voy a crear esta cuenta por pagar. Revisa <b>antes</b> de confirmar:</div>'+
-        '<div class="asis-card">'+
-          _asisFila('Proveedor', f.proveedor || '⚠ no lo entendí')+
-          _asisFila('Importe', f.monto!=null ? ('$'+f.monto.toLocaleString('es-MX',{minimumFractionDigits:2})) : '⚠ no lo entendí')+
-          _asisFila('Folio', f.folio || '—')+
-          _asisFila('Vence', f.vencimiento || '—')+
-        '</div>'+
-        '<div class="asis-warn" style="margin-top:8px">Esta parte (crear la CxP de verdad) se conecta en el siguiente paso, con la '+
-        'resolución del proveedor contra tu catálogo. Por ahora es una vista previa de lo que el asistente entendió — '+
-        'no se ha creado nada.</div>';
+      var provs = ((window._proveedores||[]).map(function(p){ return p.nombre; })).filter(Boolean);
+      var cand = f.proveedor ? ((typeof _pacFuzzy==='function')?_pacFuzzy(provs, f.proveedor, 6):[]) : [];
+      // resuelto: exactamente 1 candidato. Si 0, se usa lo dictado (crearía proveedor nuevo, se avisa). Si >1, se pregunta.
+      if (cand.length > 1){
+        var hc = '<div class="asis-q">¿Cuál proveedor? Encontré varios parecidos a «'+_asisEsc(f.proveedor)+'»:</div><div class="asis-cands">';
+        cand.forEach(function(c){ hc += '<button class="asis-cand" data-prov="'+_asisEsc(c)+'">'+_asisEsc(c)+'</button>'; });
+        cuerpo.innerHTML = hc + '</div>';
+        Array.prototype.forEach.call(cuerpo.querySelectorAll('[data-prov]'), function(b){
+          b.onclick = function(){ f.proveedor = b.getAttribute('data-prov'); _asisPintarCxP(cuerpo, f, true); };
+        });
+        return;
+      }
+      if (cand.length === 1) f.proveedor = cand[0];
+      _asisPintarCxP(cuerpo, f, cand.length === 1);
       return;
     }
     if (res.intencion === 'desconocido'){
@@ -40894,6 +40973,63 @@ try {
     }
   }
   function _asisFila(k,v){ return '<div class="asis-cf"><span>'+_asisEsc(k)+'</span><b>'+_asisEsc(v)+'</b></div>'; }
+
+  // Enlaza los botones de candidatos de paciente (cuando el nombre fue ambiguo) a
+  // reintentar la MISMA intención con el nombre ya elegido.
+  function _asisBindPacBtns(cuerpo, modo){
+    Array.prototype.forEach.call(cuerpo.querySelectorAll('[data-pac]'), function(b){
+      b.onclick = function(){
+        var nom = b.getAttribute('data-pac');
+        _asisRunFrase(modo==='imprimir' ? ('imprime el estado de cuenta de '+nom) : ('cuánto debe '+nom));
+      };
+    });
+  }
+
+  // Tarjeta de confirmación de CxP + botón que de verdad la crea. Nada se escribe
+  // hasta pulsar Confirmar. Si el monto no se entendió, NO se puede confirmar.
+  function _asisPintarCxP(cuerpo, f, resuelto){
+    var fmt = function(n){ return '$'+Number(n||0).toLocaleString('es-MX',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+    var concepto = f.folio ? ('Ref. '+f.folio) : 'Cuenta por pagar';
+    var faltaMonto = (f.monto==null || !isFinite(f.monto) || f.monto<=0);
+    var provAviso = resuelto ? '' :
+      '<div class="asis-warn" style="margin-top:8px">Ese proveedor no está en tu catálogo tal cual. Si confirmas, se creará como proveedor nuevo con ese nombre. Cancela si prefieres capturarlo bien primero.</div>';
+    cuerpo.innerHTML =
+      '<div class="asis-q">Voy a crear esta cuenta por pagar. Revisa <b>antes</b> de confirmar:</div>'+
+      '<div class="asis-card">'+
+        _asisFila('Proveedor', f.proveedor || '⚠ no lo entendí')+
+        _asisFila('Importe', faltaMonto ? '⚠ no lo entendí' : fmt(f.monto))+
+        _asisFila('Concepto', concepto)+
+        _asisFila('Folio / Ref.', f.folio || '—')+
+        _asisFila('Vence', f.vencimiento || '—')+
+      '</div>'+
+      provAviso+
+      (faltaMonto
+        ? '<div class="asis-warn" style="margin-top:8px">No entendí el importe, así que no puedo crearla. Vuelve a dictarla con el monto claro, ej. «…por $32,615».</div>'
+        : (!f.proveedor
+          ? '<div class="asis-warn" style="margin-top:8px">No entendí el proveedor. Repite la orden nombrándolo, ej. «crea una CxP de VIANTO por…».</div>'
+          : '<div style="display:flex;gap:8px;margin-top:10px"><button id="asis-cxp-ok" class="asis-cand" style="border-color:var(--color-primary,#c46a7a);color:#fff;background:var(--color-primary,#c46a7a);font-weight:700">✓ Confirmar y crear</button><button id="asis-cxp-no" class="asis-cand" style="flex:0 0 auto">Cancelar</button></div>'));
+    var ok = document.getElementById('asis-cxp-ok'), no = document.getElementById('asis-cxp-no');
+    if (no) no.onclick = function(){ cuerpo.innerHTML = '<div class="asis-ok">Cancelado. No se creó nada.</div>'+_asisEjemplosHTML(); _asisBindEjemplos(); };
+    if (ok) ok.onclick = function(){
+      ok.disabled = true; ok.textContent = 'Creando…';
+      var sesion = (typeof getSession==='function')?(getSession()||{}):{};
+      var payload = { action:'saveCxP', proveedor:f.proveedor, monto:f.monto, concepto:concepto,
+        vencimiento:f.vencimiento||'', mes:(f.vencimiento||'').substring(0,7), poliza:f.folio||'',
+        usuario:sesion.email||'' };  // el token lo inyecta el envoltorio global de POST
+      fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify(payload)})
+        .then(function(r){ return r.json(); })
+        .then(function(res){
+          if (res && res.ok){
+            cuerpo.innerHTML = '<div class="asis-ok">✓ Cuenta por pagar creada para <b>'+_asisEsc(f.proveedor)+'</b> por '+_asisEsc(fmt(f.monto))+'.</div>';
+            try { if (typeof loadCxPData==='function') loadCxPData(); } catch(e){}
+          } else {
+            cuerpo.innerHTML = '<div class="asis-warn">No se creó: '+_asisEsc((res&&res.error)||'error')+'</div>';
+            ok.disabled = false; ok.textContent = '✓ Confirmar y crear';
+          }
+        })
+        .catch(function(e){ cuerpo.innerHTML = '<div class="asis-warn">Error de red: '+_asisEsc(e.message)+'</div>'; });
+    };
+  }
 
   function _asisEjemplosHTML(){
     var h = '<div class="asis-ejs">';
