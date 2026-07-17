@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.224 -->
+﻿<!-- app-build:2026.07.16.225 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -26009,6 +26009,57 @@ function sessionAlias(s) {
 }
 
 function getToken() { var s = getSession(); return s ? s.token : ''; }
+
+/* ── TODO POST al backend lleva el token de sesión ──────────────────────────
+   Por qué existe: hay 173 POST al Apps Script y 110 NO mandaban token. Eso deja
+   al backend sin forma de saber QUIÉN pide la operación, y por eso hoy 65 de 75
+   funciones de escritura no validan permiso: no tienen contra qué validar.
+   deleteBankRow, pagarCxP, deleteCxPRow y deleteEgreso incluidas — lo único que
+   las protege es que la UI esconde el botón, y ese chequeo vive en
+   sessionStorage, editable desde la consola. Los roles son una cortina, no una
+   cerradura.
+
+   Por qué UN envoltorio y no parchear las 173 llamadas: son 173 sitios en un
+   archivo de 1.5MB sin build. Parchear a mano garantiza olvidar algunas, y las
+   olvidadas revientan en producción justo cuando el backend empiece a exigir el
+   token. Aquí es imposible olvidarlo: toda llamada pasa por fuerza.
+
+   Este cambio por sí solo NO cambia nada: el backend ignora un campo de más.
+   Es el PRERREQUISITO para poder ponerle cerradura al backend sin romper a
+   nadie. Primero todos mandan la llave; después la puerta empieza a pedirla.
+
+   Reglas: solo POST, solo al Apps Script, solo si el cuerpo es JSON, y nunca
+   pisa un token que la llamada ya traiga. Si algo falla, deja pasar la petición
+   intacta: este envoltorio jamás debe ser el que tumbe el sistema. */
+(function _hfTokenEnPost(){
+  if (typeof window === 'undefined' || !window.fetch) return;
+  if (window.__hfTokenWrap) return;          // idempotente: no envolver dos veces
+  window.__hfTokenWrap = true;
+  var _fetchOriginal = window.fetch;
+  window.fetch = function(url, opts){
+    try {
+      var esBackend = (typeof url === 'string') && (typeof APPS_SCRIPT_URL === 'string') &&
+                      url.indexOf(APPS_SCRIPT_URL) === 0;
+      var esPost = opts && String(opts.method || '').toUpperCase() === 'POST';
+      if (esBackend && esPost && typeof opts.body === 'string' && opts.body.charAt(0) === '{') {
+        var b = JSON.parse(opts.body);
+        if (b && typeof b === 'object' && !b.token) {
+          var t = (typeof getToken === 'function') ? getToken() : '';
+          if (t) {
+            b.token = t;
+            // Copia: no se muta el objeto del que llama.
+            var o2 = {}; for (var k in opts) if (Object.prototype.hasOwnProperty.call(opts, k)) o2[k] = opts[k];
+            o2.body = JSON.stringify(b);
+            // OJO: hay que pasar `o2`, no `arguments` — `arguments` sigue trayendo
+            // el opts viejo y el token se perdería en silencio.
+            return _fetchOriginal.call(this, url, o2);
+          }
+        }
+      }
+    } catch (e) { /* jamás romper la petición por culpa del envoltorio */ }
+    return _fetchOriginal.apply(this, arguments);
+  };
+})();
 function canEdit()  { var s = getSession(); return s ? !s.soloLectura : true; }
 function isAdmin()  { var s = getSession(); return s ? s.rol === 'admin' : false; }
 function getUserRole() { var s = getSession(); return s ? (s.rol||'').toLowerCase() : 'viewer'; }
