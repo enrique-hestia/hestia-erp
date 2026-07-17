@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.227 -->
+﻿<!-- app-build:2026.07.16.228 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -693,6 +693,12 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
     </button>
     <button class="icon-btn" aria-label="Exportar CSV" onclick="exportCSV()" title="Exportar">
       <i data-lucide="download"></i>
+    </button>
+    <!-- Ayuda: se movió del botón flotante «?» al encabezado, porque abajo a la
+         derecha chocaba con el nuevo botón del Asistente (💡). Mismo destino:
+         abre el manual buscable. hfhelpOpen se define en el bloque del manual. -->
+    <button class="icon-btn" aria-label="Ayuda / Manual" onclick="if(window.hfhelpOpen)hfhelpOpen()" title="Ayuda / Manual del ERP">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
     </button>
     <span id="sync-status" style="font-size:var(--text-xs);color:var(--color-text-faint)">Cargando…</span>
     <button class="icon-btn" data-theme-toggle aria-label="Cambiar tema">
@@ -28074,7 +28080,7 @@ function _cxpBuildNewRows(rows) {
       + '<td style="font-size:11px">'+(row.vencimiento||'—')+'</td>'
       + '<td style="text-align:center;font-size:12px">'+factIcon+'</td>'
       + '<td style="text-align:center;white-space:nowrap">'
-        + '<button onclick="cxpOpenPay('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),'+(row.saldoPendiente!=null?row.saldoPendiente:row.monto)+',\''+(row.divisa||'MXN')+'\')" style="padding:4px 10px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;margin-right:4px">Pagar</button>'
+        + '<button onclick="cxpOpenPay('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),'+(row.saldoPendiente!=null?row.saldoPendiente:row.monto)+',\''+(row.divisa||'MXN')+'\',decodeURIComponent(\''+encodeURIComponent(row.linkCotizacionUrl||'')+'\'))" style="padding:4px 10px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;margin-right:4px">Pagar</button>'
         + (row.recurrenteId ? '<button onclick="cxpRegresarProgramacion('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor||'')+'\'))" style="padding:4px 9px;background:#f59e0b;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;margin-right:4px;white-space:nowrap" title="Regresar a Programación del mes (Gastos Fijos) para reprogramarla por el monto correcto — solo aparece en cuentas que vienen de un gasto fijo">↩ Reprogramar</button>' : '')
         + '<button onclick="cxpOpenEdit('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(JSON.stringify(row))+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:6px;font-size:12px;cursor:pointer" title="Editar">✎</button>'
         + '<button onclick="cxpFactura('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),decodeURIComponent(\''+encodeURIComponent(row.linkFacturaUrl||'')+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.08);border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px;opacity:'+(row.linkFacturaUrl?'1':'.45')+'" title="'+(row.linkFacturaUrl?'Ver factura':'Subir factura')+'">📄</button>'
@@ -31759,7 +31765,10 @@ window.cxpCancelarConfirmar = async function(rowNum, proveedor) {
 };
 
 // ── CxP Payment modal ──
-window.cxpOpenPay = async function(rowNum, proveedor, monto, divisa) {
+// cotizUrl: la cotización adjunta de ESTA CxP (row.linkCotizacionUrl). Se muestra
+// dentro del modal porque a veces el documento trae la REFERENCIA de pago, y sin
+// verla hay que ir a buscar el archivo original — que ya está cargado aquí.
+window.cxpOpenPay = async function(rowNum, proveedor, monto, divisa, cotizUrl) {
   var m=document.getElementById('cxp-pay-modal'),o=document.getElementById('cxp-pay-ovl');
   if(m)m.style.display='block'; if(o)o.style.display='block';
   var title = document.getElementById('cxp-pay-title');
@@ -31820,6 +31829,22 @@ window.cxpOpenPay = async function(rowNum, proveedor, monto, divisa) {
     }
   } catch(eCl){}
 
+  // Cotización adjunta: botón para verla dentro del sistema + enlace para abrirla
+  // en pestaña (donde se puede seleccionar/copiar la referencia). Solo si existe.
+  // Va justo bajo el banner del monto, encima de los datos bancarios.
+  var cotizHtml = '';
+  if (cotizUrl) {
+    var _cu = String(cotizUrl).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    var _pv = _esc(proveedor).replace(/'/g, "\\'");
+    cotizHtml = '<div style="background:var(--color-surface,#f8fafc);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:10px 12px;margin-bottom:14px">'
+      + '<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text-secondary,#9ca3af);margin-bottom:5px">📋 Cotización adjunta</div>'
+      + '<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-bottom:8px">Si el pago lleva una referencia, ábrela aquí para verla o copiarla.</div>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+        + '<button type="button" onclick="egViewPDF(\''+_cu+'\',\'Cotización · '+_pv+'\')" style="padding:6px 12px;border:1.5px solid var(--color-primary,#c46a7a);background:none;color:var(--color-primary,#c46a7a);border-radius:7px;cursor:pointer;font-size:11.5px;font-weight:700">Ver cotización</button>'
+        + '<a href="'+_esc(cotizUrl)+'" target="_blank" rel="noopener" style="padding:6px 12px;border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:11.5px;color:var(--text-primary,#111);text-decoration:none;display:inline-flex;align-items:center">Abrir en pestaña ↗</a>'
+      + '</div></div>';
+  }
+
   body.innerHTML = '<div style="padding:4px">'
     + creditoHtml
     + '<div id="cxp-pay-monto-box" style="background:linear-gradient(135deg,#166534,#15803d);border-radius:12px;padding:16px;color:#fff;margin-bottom:16px">'
@@ -31827,6 +31852,7 @@ window.cxpOpenPay = async function(rowNum, proveedor, monto, divisa) {
       + '<div id="cxp-pay-monto-display" style="font-size:24px;font-weight:800;margin-top:4px">$'+monto.toLocaleString('en-US',{minimumFractionDigits:2})+(divisa==='USD'?' <span style="font-size:13px;font-weight:700;opacity:.9">USD</span>':'')+'</div>'
       + (divisa==='USD'?'<div style="font-size:10.5px;margin-top:5px;opacity:.92;line-height:1.4">Partida en dólares — elige Santander o AMEX y captura el tipo de cambio; el sistema lo manda a su columna correcta.</div>':'')
     + '</div>'
+    + cotizHtml
     + clabeHtml
     + '<div style="display:flex;flex-direction:column;gap:12px">'
       + '<div><label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Fecha de pago *</label>'
@@ -38138,19 +38164,15 @@ async function _novCfgGuardar(){
     });
   }
 
-  /* ──────────────────────── BOTÓN FLOTANTE «?» ──────────────────────── */
-  function mountFab(){
-    if(document.getElementById('hfh-fab')) return;
-    var b=document.createElement('button'); b.id='hfh-fab'; b.type='button';
-    b.setAttribute('aria-label','Ayuda / Manual del ERP'); b.title='Ayuda / Manual del ERP';
-    b.innerHTML='?';
-    // Se coloca ENCIMA del botón de chat (chat: right20/bottom20, 54px) sin encimarlo.
-    b.style.cssText='position:fixed;right:20px;bottom:84px;width:46px;height:46px;border-radius:50%;background:var(--color-surface-2,#fff);color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);box-shadow:0 6px 20px rgba(0,0,0,.22);cursor:pointer;z-index:9150;font-size:23px;font-weight:800;font-family:inherit;display:flex;align-items:center;justify-content:center;line-height:1;padding:0';
-    b.onclick=function(){ window.hfhelpOpen(); };
-    document.body.appendChild(b);
-  }
-  if(document.body) mountFab();
-  else if(document.addEventListener) document.addEventListener('DOMContentLoaded', mountFab);
+  /* La ayuda YA NO es un botón flotante «?». Se movió al ícono de ayuda del
+     encabezado (topbar, junto a Buscar/Actualizar/Exportar) porque abajo a la
+     derecha chocaba con el nuevo botón del Asistente (💡). El destino es el
+     mismo: window.hfhelpOpen. Si quedara un FAB viejo de una sesión anterior, se
+     retira por si acaso. */
+  try {
+    var _viejo = document.getElementById('hfh-fab');
+    if (_viejo && _viejo.parentNode) _viejo.parentNode.removeChild(_viejo);
+  } catch(e){}
 
 })();
 

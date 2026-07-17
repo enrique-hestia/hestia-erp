@@ -596,6 +596,140 @@ function altaPacienteRapida(body) {
   }
 }
 
+/* ── ALTA EN LOTE DE PACIENTES HISTÓRICOS QUE FALTAN EN EL CATÁLOGO ──────────
+   Por qué existe: las ventas de 2024/2025 traen ~pacientes que NUNCA se dieron
+   de alta en el catálogo, así que el buscador no las ofrece y su estado de
+   cuenta es inalcanzable (no puedes ni escribir el nombre). Esta función las
+   agrega — pero SOLO a las que de verdad faltan.
+
+   "Asegurar que no existan antes de dar de alta" (pedido del usuario): cada
+   nombre histórico se compara contra TODO el catálogo con DOS reglas:
+     · exacta (_identNorm), y
+     · tolerante (_ecMismoPaciente, analisis.gs) — la MISMA que ahora usa el
+       estado de cuenta. Si el matcher ya la encuentra, NO se agrega: sería un
+       duplicado, y además ya es consultable.
+   Además dedup entre las propias candidatas ("Jenny Rocio Ch" == "Jenny Rocío
+   C") para no agregar a la misma persona dos veces.
+
+   PAREJAS ("X y Y" / "X / Y") se REPORTAN pero NO se agregan: son una decisión
+   de negocio aparte (¿el estado de cuenta de la pareja va bajo ambos titulares?).
+
+   Seguridad:
+     · Dry-run por defecto. Solo escribe con {aplicar:true}.
+     · Idempotente: correrla otra vez no duplica (lo agregado ya existe → se salta).
+     · Permiso identificar_pacientes (es exactamente "dar de alta pacientes").
+     · El nombre se registra TAL CUAL aparece en BD_Ingresos (abreviado). No es
+       bonito, pero es findable: al buscarlo, el match exacto encuentra sus
+       ventas. El usuario puede pulir el nombre después.
+
+   Uso desde el editor: altaPacientesHistoricosFaltantes({token:'...'}) → dry-run;
+   altaPacientesHistoricosFaltantes({token:'...', aplicar:true}) → agrega. */
+function altaPacientesHistoricosFaltantes(body) {
+  body = body || {};
+  if (!_tokenHasPermission(body.token || '', 'identificar_pacientes'))
+    return { ok: false, error: 'Sin autorización (identificar_pacientes).' };
+  var aplicar = (body.aplicar === true || String(body.aplicar) === 'true');
+  var anios = (body.anios && body.anios.length) ? body.anios : [2024, 2025];
+
+  // 1) Catálogo actual (nombres)
+  var lp = (typeof listaPacientesAll === 'function') ? listaPacientesAll() : null;
+  if (!lp || !lp.ok || !lp.pacientes) return { ok: false, error: 'No se pudo leer el catálogo de pacientes.' };
+  var catalogo = [];
+  for (var ci = 0; ci < lp.pacientes.length; ci++) {
+    var cn = String(lp.pacientes[ci].nombre || '').replace(/^\s+|\s+$/g, '');
+    if (cn) catalogo.push(cn);
+  }
+
+  // 2) Nombres históricos DISTINTOS de BD_Ingresos (solo los años pedidos)
+  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+  var sh = ss.getSheetByName(BD_INGRESOS_TAB);
+  if (!sh) return { ok: false, error: 'No se encontró la hoja ' + BD_INGRESOS_TAB + '.' };
+  var data = sh.getDataRange().getValues();
+  var H = data[0].map(function (x) { return String(x || '').replace(/^\s+|\s+$/g, '').toLowerCase(); });
+  var iPac = H.indexOf('paciente'), iFecha = H.indexOf('fecha');
+  if (iPac < 0) return { ok: false, error: 'BD_Ingresos sin columna Paciente.' };
+
+  function anioDe(v) {
+    if (v instanceof Date && !isNaN(v)) return v.getFullYear();
+    var m = String(v || '').match(/(\d{4})/);
+    return m ? parseInt(m[1], 10) : 0;
+  }
+  var distintos = {}, orden = [];
+  for (var r = 1; r < data.length; r++) {
+    var nom = String(data[r][iPac] || '').replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, '');
+    if (!nom) continue;
+    if (iFecha > -1 && anios.indexOf(anioDe(data[r][iFecha])) < 0) continue;   // solo históricos
+    if (/^\d+$/.test(nom.replace(/\s/g, ''))) continue;    // "31","33" = basura de captura
+    if (_identEsNoLocalizado(nom)) continue;
+    var k = _identNorm(nom);
+    if (!k) continue;
+    if (!distintos[k]) { distintos[k] = nom; orden.push(k); }
+  }
+
+  // Marcadores de que un renglón NO es una paciente: médicos, subrogadas, notas,
+  // labs/productos. En los datos reales colados como "paciente" hay "Dra. Peggy M",
+  // "Life Extension Prenatal", "... (donadora de X)". NO se dan de alta a ciegas:
+  // van a un balde "revisar" para que el usuario decida uno por uno.
+  function _noEsPaciente(n) {
+    var t = ' ' + n.toLowerCase() + ' ';
+    return /\bdr\.?\b|\bdra\.?\b|\bpx\b|\bdonad|\bsubrogad|due[nñ]|vecin|referencia externa|life extension|prenatal\b|embrion/.test(t);
+  }
+  // 3) Clasificar: no-paciente / pareja / ya existe / se agrega (dedup entre candidatas)
+  var yaExiste = [], parejas = [], revisar = [], aAgregar = [];
+  for (var o = 0; o < orden.length; o++) {
+    var nomh = distintos[orden[o]];
+    if (/\s+y\s+|\s+e\s+|\s*\/\s*/.test(nomh.toLowerCase())) { parejas.push(nomh); continue; }
+    if (_noEsPaciente(nomh)) { revisar.push(nomh); continue; }
+    var found = null;
+    for (var c = 0; c < catalogo.length; c++) {
+      if (_identNorm(catalogo[c]) === orden[o] ||
+          (typeof _ecMismoPaciente === 'function' && _ecMismoPaciente(nomh, catalogo[c]))) { found = catalogo[c]; break; }
+    }
+    if (found) { yaExiste.push({ historico: nomh, catalogo: found }); continue; }
+    // ¿ya es la misma persona que otra candidata aceptada?
+    var dup = false;
+    for (var a = 0; a < aAgregar.length; a++) {
+      if (typeof _ecMismoPaciente === 'function' && _ecMismoPaciente(nomh, aAgregar[a])) { dup = true; break; }
+    }
+    if (!dup) aAgregar.push(nomh);
+  }
+
+  if (!aplicar) {
+    return { ok: true, dryRun: true,
+      resumen: { distintosHistoricos: orden.length, yaExisten: yaExiste.length, parejas: parejas.length, revisarNoPaciente: revisar.length, seAgregarian: aAgregar.length },
+      seAgregarian: aAgregar, parejas: parejas, revisar: revisar, muestraYaExisten: yaExiste.slice(0, 12),
+      nota: 'Dry-run: NO se escribió nada. {aplicar:true} agrega SOLO "seAgregarian". Las parejas y los "revisar" (médicos/labs/notas) NO se agregan — decídelos aparte.' };
+  }
+
+  // 4) Agregar al catálogo
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(30000); } catch (eLk) { return { ok: false, error: 'El sistema está ocupado. Intenta de nuevo.' }; }
+  try {
+    var pss = SpreadsheetApp.openById(PACIENTES_SS_ID);
+    var psh = pss.getSheets()[0];
+    var hdrs = psh.getRange(1, 1, 1, psh.getLastColumn()).getValues()[0];
+    var ancho = Math.max(hdrs.length, PAC_COL_LISTA);
+    var iAlta = _pacColIdx(hdrs, 'Fecha de Alta');
+    if (iAlta === -1) iAlta = _pacColIdx(hdrs, 'Fecha Alta');
+    var agregados = [];
+    for (var g = 0; g < aAgregar.length; g++) {
+      var nuevoId = _identNextPacId(psh);
+      var fila = []; for (var z = 0; z < ancho; z++) fila.push('');
+      fila[0] = nuevoId;
+      fila[1] = aAgregar[g];
+      fila[PAC_COL_LISTA - 1] = 'General';
+      if (iAlta > -1 && iAlta < ancho) fila[iAlta] = new Date();
+      psh.appendRow(fila);
+      agregados.push({ id: nuevoId, nombre: aAgregar[g] });
+    }
+    try { CacheService.getScriptCache().removeAll(['gas_pacientes_v1']); } catch (eC) {}
+    try { logAudit(body.usuario || 'sistema', 'Identificar pacientes', 'AltaHistoricosLote', '—', 'Pacientes', '—', agregados.length + ' pacientes históricos agregados'); } catch (eA) {}
+    return { ok: true, total: agregados.length, agregados: agregados, parejasNoAgregadas: parejas, omitidosYaExisten: yaExiste.length };
+  } catch (ex) {
+    return { ok: false, error: ex.message };
+  } finally { try { lock.releaseLock(); } catch (eR) {} }
+}
+
 /* Siguiente ID del catálogo de pacientes.
    Usa el patrón de _maxIdNum (finance.gs): BARRE toda la columna buscando el
    MÁXIMO real. Leer la última fila daba folios duplicados en producción
