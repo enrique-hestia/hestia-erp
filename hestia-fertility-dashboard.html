@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.222 -->
+﻿<!-- app-build:2026.07.16.223 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -35602,8 +35602,29 @@ function _cobBuildPrintData(lang){
   // Saldos de registro (saldo inicial / cargo a crédito) que no vienen de una venta.
   // Si el saldo trae partidas con paciente (agencias/externos), se expande una fila por
   // paciente para que el reporte muestre a cada paciente con su procedimiento.
+  //
+  // ── Por qué existe _opsImpresos ─────────────────────────────────────────────
+  // La misma deuda vive en DOS motores: la venta en BD_Ingresos (arriba, `_vv`) y
+  // su espejo en Cuentas_Cobrar, que escribe _cobRegistrarSaldoIngreso con Nota
+  // 'auto-ingreso' al vender a crédito. Sin filtrar, el documento imprimía los
+  // mismos $60,000 dos veces —"Captura + Vitrificación · OP-00123" y "Saldo
+  // pendiente de OP OP-00123"— mientras el gran total los contaba UNA vez: las
+  // filas no sumaban su propio total, en un papel que se le manda a la agencia.
+  //
+  // Aquí había un `if(o.origen!=='registro') return;` que parecía cubrir esto pero
+  // era CÓDIGO MUERTO: _cobBuildSaldos escribe `origen:'registro'` en todas las
+  // filas, sin excepción (es su único valor), así que nunca saltaba ninguna. El
+  // discriminador de verdad es `auto`.
+  //
+  // Y no basta con saltar todo lo `auto`: si la venta NO llegó a imprimirse
+  // (enmascarado por privacidad, o vive en el libro de otro año), su espejo es la
+  // ÚNICA evidencia de la deuda y borrarlo la desaparecería del estado de cuenta.
+  // Esconder deuda es peor que duplicarla. Por eso se salta solo el espejo de una
+  // venta que SÍ está impresa arriba.
+  var _opsImpresos={};
+  _vv.forEach(function(v){ if(v.op) _opsImpresos[String(v.op)]=true; });
   (d.saldos||[]).forEach(function(o){
-    if(o.origen!=='registro') return;
+    if(o.auto && o.op && _opsImpresos[String(o.op)]) return;
     var partes=(o.items||[]).filter(function(x){return x.pac;});
     if(partes.length){ partes.forEach(function(x){ rows.push([ccFch(x.fecha||o.fecha), x.pac+' · '+(x.producto||'—'), _cq(x.cantidad), ccFmt(x.total), '', ccFmt(x.total)]); conceptos.push(x.producto||''); }); }
     else { rows.push([ccFch(o.fecha), o.concepto||T.saldo, '—', ccFmt(o.total), ccFmt((o.total||0)-(o.saldo||0)), ccFmt(o.saldo)]); conceptos.push(null); }
@@ -36298,6 +36319,14 @@ var NOVEDADES=[
       '**Ves el número real antes de guardar.** Mientras editas, el panel te dice en vivo qué % de la venta acaba recibiendo cada quien («Del **10%** del escalón: 50% al médico = **5%** de la venta») y te pone un ejemplo en pesos. Es la diferencia entre el 5% y el 0.5%: ahí se ve.',
       '**No se puede guardar un reparto descuadrado.** Si las partes no suman exactamente 100%, se marca en rojo y el botón Guardar se bloquea — ni de más ni de menos.'],
     comoUsar:['Comisiones → abre **⚙️ Configurar reglas** (abajo en la misma pantalla).','Sin reglas: **✨ Empezar con un ejemplo** y ajusta. Con reglas: elige la regla del menú, o **＋ Nueva regla**.','Llena grupo (menú), procedimientos que aplican (chips del catálogo), escalones (desde/hasta/%, «Hasta» vacío = sin límite), beneficiarios (quién · parte % · nota de crédito o efectivo) y el diferido.','Revisa el recuadro del **% efectivo** y pulsa **Guardar reglas**. Ya puedes Calcular el mes.','¿El grupo no sale en el menú? Dalo de alta en **Orígenes externos** primero; el panel te pone el enlace directo.'] },
+  { build:'2026.07.16', fecha:'16 jul 2026', area:'Cobranza', icon:'🧮', destacada:true,
+    titulo:'El estado de cuenta de cobranza ya no cobraba dos veces lo mismo',
+    puntos:['**La misma deuda se imprimía dos veces.** Cuando vendías a crédito, el adeudo aparecía como la venta («Captura + Vitrificación · OP-00123») **y otra vez** abajo como «Saldo pendiente de OP OP-00123», con el mismo importe. Es un papel que se le manda a la agencia o a la paciente: leído de corrido, parecía que debía el doble.',
+      '**El gran total sí estaba bien** — lo contaba una sola vez. Por eso las filas no sumaban su propio total, y era imposible cuadrar el documento a mano.',
+      'La causa: la deuda vive en **dos motores** (la venta en Ingresos y su espejo en Cuentas por Cobrar, que se crea solo al vender a crédito). El reporte los pintaba a los dos.',
+      '**Lo que NO se hizo:** borrar todos los renglones de saldo. Si la venta no llegó a imprimirse (por privacidad, o porque es de otro año), ese renglón es la **única** evidencia de la deuda — esconderla habría sido peor que duplicarla. Solo se quita el espejo cuando su venta ya está impresa arriba.',
+      'Los **cargos manuales** (saldo inicial, cargo extra) no se tocan: siguen saliendo aunque compartan la OP de una venta.'],
+    comoUsar:['No hay que hacer nada: vuelve a imprimir el estado de cuenta de Cobranza y las filas ya cuadran con el total.'] },
   { build:'2026.07.16', fecha:'16 jul 2026', area:'Reportes', icon:'🪷', destacada:true,
     titulo:'El sistema ya tiene nombre: VestaOS, y firma todo lo que imprime',
     puntos:['**Todo documento que salga del sistema lleva el mismo sello**, abajo: `Generated by VestaOS | Hestia Fertility © 2026 | 16 Jul 2026, 14:32`. Es la firma de la casa, como en cualquier ERP profesional: dice quién lo generó y **cuándo**, al minuto.',
