@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.221 -->
+﻿<!-- app-build:2026.07.16.222 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1650,7 +1650,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
       </div>
       <div>
         <div style="font-size:var(--text-lg);font-weight:700">Panel de Control</div>
-        <div style="font-size:var(--text-xs);color:var(--color-text-muted)">Administración del sistema · Hestia ERP</div>
+        <div style="font-size:var(--text-xs);color:var(--color-text-muted)">Administración del sistema · VestaOS</div>
       </div>
     </div>
 
@@ -1919,7 +1919,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
         </div>
         <div>
           <label style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--color-text-muted);display:block;margin-bottom:5px">Nota al pie del documento</label>
-          <input id="fmt-nota-pie" type="text" placeholder="Documento generado por Hestia ERP · Uso interno y para paciente" style="width:100%">
+          <input id="fmt-nota-pie" type="text" placeholder="Uso interno y para paciente" style="width:100%">
         </div>
       </div>
       <div class="pc-card">
@@ -5112,7 +5112,7 @@ function _ingCancelBuildData(op, info, lang) {
     title: T.compCancelacion,
     subject: info.paciente || op.paciente || '',
     period: T.emitidoEl + ' ' + (lang === 'es' ? hoy : hfFmtDate(hoy, lang)),
-    generado: T.generadoPor + ' · ' + (lang === 'es' ? hoy : hfFmtDate(hoy, lang)) + (info.usuario ? ' · ' + info.usuario : ''),
+    generado: hfSello() + (info.usuario ? ' | ' + info.usuario : ''),
     kpis: [{ value: _f(imp), label: T.importeDevolver, sub: T.reembolsoProceso }],
     cols: [T.concepto, T.detalle],
     rows: rows,
@@ -7532,7 +7532,7 @@ function ingShowManual(){
   ovl.innerHTML='<div style="background:'+CB+';border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.3);width:740px;max-width:96vw;max-height:88vh;overflow:hidden;display:flex;flex-direction:column">'
     +'<div style="padding:18px 24px;border-bottom:1px solid '+DV+';display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
       +'<div>'
-        +'<div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Hestia ERP · Finanzas</div>'
+        +'<div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">VestaOS · Finanzas</div>'
         +'<div style="font-size:18px;font-weight:800;color:'+TP+';margin-top:2px">Manual de Ingresos</div>'
       +'</div>'
       +'<div style="display:flex;gap:8px">'
@@ -8691,7 +8691,7 @@ async function proveedorReporte(){
     var t=d.totales;
     var pd={type:'proveedor',title:'Reporte de proveedor',subject:subject,
       period:(ini||'—')+' → '+(fin||'—'),
-      generado:new Date().toLocaleString('es-MX',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}),
+      generado:hfSello(),
       kpis:[
         {label:'Total gastado',value:_tplFmt(t.total,2)},
         {label:'Pagos',value:String(t.count)},
@@ -19168,7 +19168,7 @@ function presShowManual(){
     // Header
     +'<div style="padding:18px 24px;border-bottom:1px solid '+DV+';display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
       +'<div>'
-        +'<div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Hestia ERP · Finanzas</div>'
+        +'<div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">VestaOS · Finanzas</div>'
         +'<div style="font-size:18px;font-weight:800;color:'+TP+';margin-top:2px">Manual de Presupuesto</div>'
       +'</div>'
       +'<div style="display:flex;gap:8px">'
@@ -19833,7 +19833,7 @@ function ocImprimir(i){
     title: 'Orden de compra',
     subject: o.id + ' · ' + o.proveedor,
     period: o.fecha,
-    generado: 'Hestia ERP · ' + hoy,
+    generado: hfSello(),
     kpis: [
       {value: _medsFmt(o.total), label: 'Total'},
       {value: o.estadoRecepcion || '—', label: 'Recepción'},
@@ -20032,7 +20032,7 @@ function movImprimir(){
     title: 'Movimientos de inventario',
     subject: 'Inventario clínico',
     period: desde + ' — ' + hasta,
-    generado: 'Hestia ERP · ' + hoy,
+    generado: hfSello(),
     kpis: [
       {value: '+' + ent, label: 'Entradas (unidades)'},
       {value: '−' + sal, label: 'Salidas (unidades)'},
@@ -23273,7 +23273,7 @@ function _pacSyncOpenModal() {
   ovl.innerHTML = '<div style="background:var(--card-bg,#fff);border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.3);width:820px;max-width:96vw;max-height:90vh;overflow:hidden;display:flex;flex-direction:column">'
     +'<div style="padding:18px 24px;border-bottom:1px solid var(--color-divider,#e5e7eb);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">'
       +'<div>'
-        +'<div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">Hestia ERP · Pacientes</div>'
+        +'<div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-secondary,#9ca3af)">VestaOS · Pacientes</div>'
         +'<div style="font-size:18px;font-weight:800;color:var(--text-primary,#111);margin-top:2px">Sincronizar datos fiscales desde facturas</div>'
       +'</div>'
       +'<button onclick="document.getElementById(\'pac-sync-ovl\').remove()" style="border:1.5px solid var(--color-divider,#e5e7eb);background:var(--card-bg,#fff);border-radius:9px;padding:6px 14px;cursor:pointer;font-size:13px;font-weight:600">✕</button>'
@@ -23779,7 +23779,10 @@ var FMT_DEFAULTS = {
   colorText: '#2c2622',
   colorAccent: '#fdf5f6',
   frase: 'Gracias por confiar en Hestia Fertility en este camino. Cada paso que das es un acto de amor y esperanza, y nosotros estamos aquí para acompañarte.',
-  notaPie: 'Documento generado por Hestia ERP · Uso interno y para paciente'
+  // Ya no dice "Documento generado por Hestia ERP": de eso se encarga el sello
+  // (hfSello), que va aparte y no se puede editar desde aquí. Esta nota es solo
+  // para lo que el usuario quiera advertir del documento.
+  notaPie: 'Uso interno y para paciente'
 };
 function getFmtConfig() {
   try { return Object.assign({}, FMT_DEFAULTS, JSON.parse(localStorage.getItem(FMT_KEY)||'{}')); }
@@ -24045,6 +24048,41 @@ function _tplColMeta(cols){
   out.explicit=explicit;
   return out;
 }
+/* ══ EL SELLO ═══════════════════════════════════════════════════════════════
+ * El sistema se llama VestaOS. Todo documento que se imprima o se mande sale
+ * firmado igual:
+ *
+ *     Generated by VestaOS | Hestia Fertility © 2026 | 16 Jul 2026, 14:32
+ *
+ * Reglas, decididas por el usuario:
+ *  · SIEMPRE en inglés, en los cuatro idiomas de impresión (es/en/fr/pt). Es
+ *    marca, no texto traducible — como los ERP profesionales. De paso, el gate
+ *    de traducción (hfTradGate) nunca podría frenar un documento por el pie.
+ *  · El año es el EN CURSO, no una constante: con un 2026 fijo, en enero todos
+ *    los documentos seguirían firmando 2026.
+ *  · Después de la última barra va la fecha y hora de generación.
+ *
+ * UNA sola fuente. Antes esto vivía regado en 4 diccionarios, 10 constructores
+ * y ~20 pies de plantilla, cada uno armando su propia cadena ('Hestia ERP · ',
+ * 'Hestia Fertility Clinic · ', 'Sistema ERP Hestia Fertility · '); una de las
+ * plantillas ni siquiera imprimía la fecha. Cambiar la marca era cazar strings.
+ * Ahora se toca aquí y sale en todos.
+ *
+ * La fecha se arma a mano y no con toLocaleString: el sello es inglés fijo, y
+ * dejarlo al locale del navegador daría "16/07/2026" o "7/16/2026" según la
+ * máquina — ambiguo justo en el dato que fecha el documento. */
+var _HF_SELLO_MES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function hfSello(fecha){
+  var d = (fecha instanceof Date && !isNaN(fecha)) ? fecha : new Date();
+  var p = function(n){ return (n < 10 ? '0' : '') + n; };
+  return 'Generated by VestaOS | Hestia Fertility © ' + d.getFullYear() + ' | '
+       + p(d.getDate()) + ' ' + _HF_SELLO_MES[d.getMonth()] + ' ' + d.getFullYear()
+       + ', ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+/* Lo que pintan las plantillas. Si un reporte no declaró `generado`, igual sale
+   firmado: el sello no es opcional, y un constructor nuevo que lo olvide no debe
+   poder emitir un documento anónimo. */
+function _tplSello(d){ return (d && d.generado) ? d.generado : hfSello(); }
 /* CUIDADO CON EL NOMBRE: hoy `totalCol` NO mueve el gran total. Ninguna plantilla
  * ancla el gran total a una columna — todas lo pintan como un bloque flotado a la
  * derecha (ver _tplTablaFina y el pie de `minimalista`), así que ahí este valor ni
@@ -24136,8 +24174,7 @@ var _REPORT_TEMPLATES={
       +'<div style="font-size:10px;color:#888;margin-top:1px">'+d.title+'</div></div>'
       +'</div>'
       +'<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:'+c+'">'+d.subject+'</div>'
-      +'<div style="font-size:10px;color:#999;margin-top:2px">'+d.period+'</div>'
-      +'<div style="font-size:9px;color:#bbb;margin-top:1px">'+d.generado+'</div></div>'
+      +'<div style="font-size:10px;color:#999;margin-top:2px">'+d.period+'</div></div>'
       +'</div>'
       +'<div style="display:grid;grid-template-columns:repeat('+d.kpis.length+',1fr);gap:10px;margin-bottom:20px">'
       +d.kpis.map(function(k){return'<div style="background:#fdf5f7;border-radius:7px;padding:12px 14px;border-left:3px solid '+c+'">'
@@ -24148,9 +24185,11 @@ var _REPORT_TEMPLATES={
       +(d.tendencia&&d.tendencia.length?'<div style="background:#fafafa;border-radius:7px;padding:13px 16px;margin-bottom:20px"><div style="font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#bbb;margin-bottom:6px">Gasto mensual</div>'+_tplBarChart(d.tendencia,c)+'</div>':'')
       +'<div style="font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#bbb;margin-bottom:8px">Detalle de movimientos</div>'
       +_tplTableHTML(d,'#fdf5f7','#c46a7a')
-      +'<div style="margin-top:20px;padding-top:10px;border-top:0.5px solid #eee;display:flex;justify-content:space-between">'
-      +'<span style="font-size:8.5px;color:#ccc">Sistema ERP · Hestia Fertility Clinic</span>'
-      +'<span style="font-size:8.5px;color:#ccc">'+d.generado+'</span></div></div>';
+      // El sello va UNA vez y en el pie, que es donde lo lleva un ERP. Antes esta
+      // barra tenía la marca a la izquierda ("Sistema ERP · Hestia Fertility
+      // Clinic") y la fecha a la derecha: el sello ya incluye ambas.
+      +'<div style="margin-top:20px;padding-top:10px;border-top:0.5px solid #eee;text-align:right">'
+      +'<span style="font-size:8.5px;color:#ccc">'+_tplSello(d)+'</span></div></div>';
     return _tplPage(b);
   },
   contable:function(d){
@@ -24158,8 +24197,9 @@ var _REPORT_TEMPLATES={
       +'<div style="background:#1a365d;padding:12px 16px;border-radius:5px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:flex-end">'
       +'<div><div style="font-size:13px;font-weight:800;color:#fff;letter-spacing:.04em;text-transform:uppercase">HESTIA FERTILITY CLINIC</div>'
       +'<div style="font-size:10px;color:#90caf9;margin-top:2px">'+d.title+' · '+d.subject+'</div></div>'
-      +'<div style="text-align:right"><div style="font-size:10px;color:#cfe2ff">Período: '+d.period+'</div>'
-      +'<div style="font-size:9px;color:#90caf9;margin-top:1px">Emitido: '+d.generado+'</div></div></div>'
+      // Sin sello aquí: va una sola vez, en el pie. (Antes la cabecera repetía la
+      // fecha de generación que el pie ya traía.)
+      +'<div style="text-align:right"><div style="font-size:10px;color:#cfe2ff">Período: '+d.period+'</div></div></div>'
       +'<div style="display:flex;border:1px solid #ddd;border-radius:4px;overflow:hidden;margin-bottom:14px">'
       +d.kpis.map(function(k,i){return'<div style="flex:1;padding:9px 12px;text-align:center;border-right:'+(i<d.kpis.length-1?'1px solid #ddd':'none')+'">'
         +'<div style="font-size:16px;font-weight:800;color:#1a365d">'+k.value+'</div>'
@@ -24167,7 +24207,7 @@ var _REPORT_TEMPLATES={
         +(k.sub?'<div style="font-size:9px;color:#666;margin-top:1px">'+k.sub+'</div>':'')+'</div>';}).join('')
       +'</div>'
       +_tplTableHTML(d,'#e8eef7','#1a365d')
-      +'<div style="margin-top:18px;font-size:8.5px;color:#aaa;text-align:right">Reporte contable · Sistema ERP Hestia Fertility · '+d.generado+'</div></div>';
+      +'<div style="margin-top:18px;font-size:8.5px;color:#aaa;text-align:right">'+_tplSello(d)+'</div></div>';
     return _tplPage(b);
   },
   minimalista:function(d){
@@ -24204,7 +24244,7 @@ var _REPORT_TEMPLATES={
       +'<div style="display:flex;justify-content:space-between;padding:9px 0;border-top:1.5px solid #111;margin-top:3px">'
       +'<span style="font-size:12px;font-weight:700">'+d.totalLabel+'</span>'
       +'<span style="font-size:13px;font-weight:700;color:#c46a7a">'+d.totalValue+'</span></div>'
-      +'<div style="margin-top:28px;font-size:8.5px;color:#ccc">Hestia Fertility · '+d.generado+'</div></div>';
+      +'<div style="margin-top:28px;font-size:8.5px;color:#ccc">'+_tplSello(d)+'</div></div>';
     return _tplPage(b);
   },
   clinica:function(d){
@@ -24218,8 +24258,8 @@ var _REPORT_TEMPLATES={
       +'<div style="font-size:9px;color:rgba(255,255,255,.75);letter-spacing:.06em;text-transform:uppercase;margin-top:1px">'+d.title+'</div></div>'
       +'</div>'
       +'<div style="text-align:right"><div style="font-size:12px;font-weight:700;color:#fff">'+d.subject+'</div>'
-      +'<div style="font-size:9px;color:rgba(255,255,255,.75);margin-top:2px">'+d.period+'</div>'
-      +'<div style="font-size:8.5px;color:rgba(255,255,255,.55);margin-top:1px">'+d.generado+'</div></div>'
+      // Sin sello aquí: va una sola vez, en el pie.
+      +'<div style="font-size:9px;color:rgba(255,255,255,.75);margin-top:2px">'+d.period+'</div></div>'
       +'</div></div>'
       +'<div style="display:grid;grid-template-columns:repeat('+d.kpis.length+',1fr);gap:10px;margin-bottom:18px">'
       +d.kpis.map(function(k){return'<div style="background:#fdf5f7;border-radius:7px;padding:10px 12px;border-left:3px solid '+c+'">'
@@ -24229,7 +24269,7 @@ var _REPORT_TEMPLATES={
       +'</div>'
       +(d.tendencia&&d.tendencia.length?'<div style="background:#fdf5f7;border-radius:7px;padding:12px 16px;margin-bottom:18px"><div style="font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:'+c+';margin-bottom:6px">Evolución mensual</div>'+_tplBarChart(d.tendencia,c)+'</div>':'')
       +_tplTableHTML(d,'#fdf5f7',c)
-      +'<div style="margin-top:18px;padding-top:10px;border-top:1px solid #fde0e7;text-align:right"><span style="font-size:8.5px;color:#dbb0bc">Hestia Fertility Clinic · '+d.generado+'</span></div></div>';
+      +'<div style="margin-top:18px;padding-top:10px;border-top:1px solid #fde0e7;text-align:right"><span style="font-size:8.5px;color:#dbb0bc">'+_tplSello(d)+'</span></div></div>';
     return _tplPage(b);
   },
   bicolor:function(d){
@@ -24242,13 +24282,13 @@ var _REPORT_TEMPLATES={
         +'<div style="font-size:14px;font-weight:800;color:#fff">'+k.value+'</div>'
         +'<div style="font-size:7.5px;color:rgba(255,255,255,.55);margin-top:2px;text-transform:uppercase;letter-spacing:.05em">'+k.label+'</div>'
         +(k.sub?'<div style="font-size:8px;color:rgba(255,255,255,.45);margin-top:1px">'+k.sub+'</div>':'')+'</div>';}).join('')
-      +'<div style="color:rgba(255,255,255,.25);font-size:7px;text-align:center;margin-top:16px;writing-mode:vertical-rl;transform:rotate(180deg);margin:auto">Sistema ERP</div>'
+      +'<div style="color:rgba(255,255,255,.25);font-size:7px;text-align:center;margin-top:16px;writing-mode:vertical-rl;transform:rotate(180deg);margin:auto">VestaOS</div>'
       +'</td>'
       +'<td style="vertical-align:top;padding:16px 20px">'
       +'<div style="border-bottom:2px solid '+c+';padding-bottom:10px;margin-bottom:14px">'
       +'<div style="font-size:16px;font-weight:700;color:'+c+'">'+d.subject+'</div>'
       +'<div style="font-size:10px;color:#999;margin-top:2px">'+d.title+' · '+d.period+'</div>'
-      +'<div style="font-size:8.5px;color:#bbb;margin-top:1px">'+d.generado+'</div>'
+      +'<div style="font-size:8.5px;color:#bbb;margin-top:1px">'+_tplSello(d)+'</div>'
       +'</div>'
       +(d.tendencia&&d.tendencia.length?'<div style="margin-bottom:14px"><div style="font-size:8.5px;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Gasto mensual</div>'+_tplBarChart(d.tendencia,c)+'</div>':'')
       +_tplTableHTML(d,'#ecf0f1',c)
@@ -24273,9 +24313,11 @@ var _REPORT_TEMPLATES={
       +'</div>'
       +(d.tendencia&&d.tendencia.length?'<div style="margin-bottom:16px"><div style="font-size:8.5px;font-weight:700;color:'+g+';text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px">Evolución mensual</div>'+_tplBarChart(d.tendencia,'#d4a843')+'</div>':'')
       +_tplTableHTML(d,'#faf6e8','#7a5c00')
+      // Aquí había una frase artesanal ("Documento generado por el Sistema ERP de
+      // Hestia Fertility Clinic") justo encima de la fecha. El sello dice ambas
+      // cosas en un renglón, así que la frase sobra.
       +'<div style="text-align:center;margin-top:20px;padding-top:12px;border-top:1px solid #d4a843">'
-      +'<div style="font-size:8.5px;color:'+g+';font-style:italic">Documento generado por el Sistema ERP de Hestia Fertility Clinic</div>'
-      +'<div style="font-size:8.5px;color:#aaa;margin-top:2px">'+d.generado+'</div>'
+      +'<div style="font-size:8.5px;color:#aaa">'+_tplSello(d)+'</div>'
       +'</div></div></div>';
     return _tplPage(b);
   },
@@ -24285,8 +24327,8 @@ var _REPORT_TEMPLATES={
       +'<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px">'
       +'<div><div style="font-size:10px;color:#aaa;font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px">'+d.title+'</div>'
       +'<div style="font-size:20px;font-weight:700;color:#111">'+d.subject+'</div></div>'
-      +'<div style="text-align:right"><div style="font-size:11px;color:#888">'+d.period+'</div>'
-      +'<div style="font-size:9.5px;color:#bbb;margin-top:2px">Hestia Fertility · '+d.generado+'</div></div>'
+      // Sin sello aquí: va una sola vez, en el pie.
+      +'<div style="text-align:right"><div style="font-size:11px;color:#888">'+d.period+'</div></div>'
       +'</div>'
       +'<div style="display:flex;border:0.5px solid #e0e0e0;border-radius:6px;overflow:hidden;margin-bottom:18px">'
       +d.kpis.map(function(k,i){return'<div style="flex:1;padding:10px 12px;border-right:'+(i<d.kpis.length-1?'0.5px solid #e0e0e0':'none')+'">'
@@ -24297,7 +24339,7 @@ var _REPORT_TEMPLATES={
       +_tplTableHTML(d,'#f8f8f8','#555')
       +'<div style="margin-top:7px;display:flex;justify-content:space-between;align-items:center">'
       +'<div style="height:2px;flex:1;background:linear-gradient(90deg,#c46a7a,#1D9E75);border-radius:1px;margin-right:14px"></div>'
-      +'<span style="font-size:8.5px;color:#ccc">Hestia Fertility · Sistema ERP</span></div></div>';
+      +'<span style="font-size:8.5px;color:#ccc">'+_tplSello(d)+'</span></div></div>';
     return _tplPage(b);
   },
   celula:function(d){
@@ -24317,7 +24359,7 @@ var _REPORT_TEMPLATES={
       +(d.nota?'<div style="margin-top:20px;padding:12px 16px;border-left:3px solid '+c+';background:#faf4f5"><span style="font-style:italic;font-size:10px;color:#8a7a7d;line-height:1.6">'+d.nota+'</span></div>':'')
       +'<div style="height:1px;background:#eadade;margin:26px 0 10px"></div>'
       +'<div style="text-align:center;font-size:9px;color:#9a9a94">'+cfg.nombre+' \xb7 '+cfg.ciudad+' \xb7 '+cfg.web+'</div>'
-      +'<div style="text-align:center;font-size:8.5px;color:#c4bfbf;margin-top:3px">'+(cfg.notaPie||'')+(d.generado?' \xb7 '+d.generado:'')+'</div>'
+      +'<div style="text-align:center;font-size:8.5px;color:#c4bfbf;margin-top:3px">'+(cfg.notaPie?cfg.notaPie+' \xb7 ':'')+_tplSello(d)+'</div>'
       +'</div></div>';
     return _tplPage(b,'body{-webkit-print-color-adjust:exact;print-color-adjust:exact}');
   },
@@ -24341,7 +24383,7 @@ var _REPORT_TEMPLATES={
       +(d.nota?'<div style="margin-top:20px;font-size:10.5px;font-style:italic;color:#6b6b66;line-height:1.6">'+d.nota+'</div>':'')
       +'<div style="margin-top:26px;border-top:1px solid #eadade"></div><div style="margin-top:2.5px;border-top:1px solid #c9a9b1"></div>'
       +'<div style="text-align:center;font-size:9.5px;font-style:italic;color:#9a9a94;margin-top:11px">'+cfg.nombre+' \xb7 '+cfg.ciudad+' \xb7 '+cfg.web+'</div>'
-      +'<div style="text-align:center;font-size:8.5px;color:#c4bfbf;margin-top:3px">'+(cfg.notaPie||'')+(d.generado?' \xb7 '+d.generado:'')+'</div>'
+      +'<div style="text-align:center;font-size:8.5px;color:#c4bfbf;margin-top:3px">'+(cfg.notaPie?cfg.notaPie+' \xb7 ':'')+_tplSello(d)+'</div>'
       +'</div></div>';
     return _tplPage(b,'body{-webkit-print-color-adjust:exact;print-color-adjust:exact}');
   },
@@ -24369,7 +24411,7 @@ var _REPORT_TEMPLATES={
       +(kpiCards?'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:18px">'+kpiCards+'</div>':'')
       +_tplTablaFina(d,{line:c,headBorder:'1.5px solid '+c,totalBg:'#f7eef0',totalColor:'#8e4756'})
       +(d.nota?'<div style="margin-top:18px;font-size:9.5px;color:#9a9a94;line-height:1.6">'+d.nota+'</div>':'')
-      +(d.generado?'<div style="margin-top:14px;font-size:8.5px;color:#c4bfbf">'+d.generado+'</div>':'')
+      +'<div style="margin-top:14px;font-size:8.5px;color:#c4bfbf">'+_tplSello(d)+'</div>'
       +'</div>'
       +'<div style="background:'+c+';padding:8px 26px;border-radius:0 0 8px 8px;text-align:center;font-size:9px;color:#fff">'+cfg.nombre+' \xb7 '+cfg.ciudad+' \xb7 '+cfg.web+'</div>'
       +'</div></div>';
@@ -24519,7 +24561,7 @@ function hfLangOk(l){ return HF_LANGS.indexOf(String(l||'').toLowerCase().substr
 var HF_L_COMMON={
   es:{ fecha:'Fecha', concepto:'Concepto', categoria:'Categoría', formaPago:'Forma de pago',
        importe:'Importe', cantidad:'Cant', subtotal:'Subtotal', total:'Total', pagado:'Pagado', saldo:'Saldo',
-       detalle:'Detalle', emitidoEl:'Emitido el', generadoPor:'Hestia ERP',
+       detalle:'Detalle', emitidoEl:'Emitido el',
        totalFacturado:'Total facturado', totalPagado:'Total pagado', nosDebe:'Nos debe',
        saldoAFavor:'Saldo a favor', alCorriente:'Al corriente', movimientos:'Movimientos',
        estadoCuenta:'Estado de cuenta', estadoCobranza:'Estado de cobranza',
@@ -24537,7 +24579,7 @@ var HF_L_COMMON={
        servicioContratado:'Servicio contratado' },
   en:{ fecha:'Date', concepto:'Description', categoria:'Category', formaPago:'Payment method',
        importe:'Amount', cantidad:'Qty', subtotal:'Subtotal', total:'Total', pagado:'Paid', saldo:'Balance',
-       detalle:'Detail', emitidoEl:'Issued on', generadoPor:'Hestia ERP',
+       detalle:'Detail', emitidoEl:'Issued on',
        totalFacturado:'Total billed', totalPagado:'Total paid', nosDebe:'Balance due',
        saldoAFavor:'Credit balance', alCorriente:'Paid in full', movimientos:'Transactions',
        estadoCuenta:'Account statement', estadoCobranza:'Collection statement',
@@ -24555,7 +24597,7 @@ var HF_L_COMMON={
        servicioContratado:'Contracted service' },
   fr:{ fecha:'Date', concepto:'Description', categoria:'Catégorie', formaPago:'Mode de paiement',
        importe:'Montant', cantidad:'Qté', subtotal:'Sous-total', total:'Total', pagado:'Payé', saldo:'Solde',
-       detalle:'Détail', emitidoEl:'Émis le', generadoPor:'Hestia ERP',
+       detalle:'Détail', emitidoEl:'Émis le',
        totalFacturado:'Total facturé', totalPagado:'Total payé', nosDebe:'Solde dû',
        saldoAFavor:'Solde créditeur', alCorriente:'Soldé', movimientos:'Opérations',
        estadoCuenta:'Relevé de compte', estadoCobranza:'État des créances',
@@ -24573,7 +24615,7 @@ var HF_L_COMMON={
        servicioContratado:'Service contracté' },
   pt:{ fecha:'Data', concepto:'Descrição', categoria:'Categoria', formaPago:'Forma de pagamento',
        importe:'Valor', cantidad:'Qtd', subtotal:'Subtotal', total:'Total', pagado:'Pago', saldo:'Saldo',
-       detalle:'Detalhe', emitidoEl:'Emitido em', generadoPor:'Hestia ERP',
+       detalle:'Detalhe', emitidoEl:'Emitido em',
        totalFacturado:'Total faturado', totalPagado:'Total pago', nosDebe:'Saldo devedor',
        saldoAFavor:'Saldo credor', alCorriente:'Quitado', movimientos:'Movimentações',
        estadoCuenta:'Extrato de conta', estadoCobranza:'Extrato de cobrança',
@@ -25128,7 +25170,7 @@ function _tplSampleData(){
   var cfg=getFmtConfig();
   return {
     title:'Estado de cuenta', subject:'María Fernanda López García',
-    period:'Emitido el 5 Jul 2026', generado:'Hestia ERP · vista previa con datos de ejemplo',
+    period:'Emitido el 5 Jul 2026', generado:hfSello()+' | vista previa con datos de ejemplo',
     // KPIs cuadrados con las filas de abajo: histórico $232,600 = suma de los 5
     // subtotales; 2026 = $47,600 = los cuatro de 2026. Antes decían $203,400 y
     // $187,800, que no salían de ningún lado — una vista previa que no cuadra
@@ -34155,7 +34197,7 @@ function _ecBuildPrintData(lang) {
     title: T.estadoCuenta,
     subject: d.paciente,
     period: T.emitidoEl + ' ' + hoy,
-    generado: T.generadoPor + ' · ' + hoy,
+    generado: hfSello(),
     kpis: kpis,
     cols: cols,
     rows: rows,
@@ -35589,7 +35631,7 @@ function _cobBuildPrintData(lang){
   // "Pagado" y "Saldo", y dejaba la columna de dinero (Total) pegada a la izquierda.
   var cols=[T.fecha, T.concepto, {label:T.cantidad,r:true}, {label:T.subtotal,r:true},
             {label:T.pagado,r:true}, {label:T.saldo,r:true}];
-  return { title:T.estadoCobranza, subject:d.paciente, period:periodTxt, generado:T.generadoPor+' · '+hoy,
+  return { title:T.estadoCobranza, subject:d.paciente, period:periodTxt, generado:hfSello(),
     kpis:kpis, cols:cols, rows:rows,
     conceptCol:1, rowConcepts:conceptos,
     totalLabel:_desc?T.netoACobrar:T.totalPorCobrar, totalValue:ccFmt(_desc?_neto:totalDebe),
@@ -36005,6 +36047,9 @@ function _segWrite(w, cfg, L, currency, pac, rows, total){
           +(cfg.provAddr?'<div>'+_esc(cfg.provAddr)+'</div>':'')
           +'<div>'+_esc(cfg.provEmail||'')+' &nbsp;|&nbsp; <a href="'+_esc(fWebUrl)+'">'+_esc(fWeb)+'</a></div>'
           +'<div class="disc">'+_esc(disc)+'</div>'
+          // El sello. Este reporte no pasa por _REPORT_TEMPLATES (arma su propia
+          // ventana), así que se firma aquí a mano o saldría sin marca.
+          +'<div class="disc" style="margin-top:6px;opacity:.7">'+_esc(hfSello())+'</div>'
         +'</div>';
     }
     return '';
@@ -36216,6 +36261,10 @@ function _notaWrite(rows,total,idioma,receptor,folio,formaPago,fechaSel){
     +'<div class="fp"><b>'+_esc(T.formaPago)+':</b> '+_esc(formaPago)+'</div>'
     +sig
     +'<div class="leg">'+_esc(T.nLegal)+'</div>'
+    // El sello. Igual que el reporte de seguro, esta nota arma su propia ventana
+    // y no pasa por _REPORT_TEMPLATES: si no se firma aquí, sale anónima. Va en
+    // inglés incluso en la nota en español — es marca, no texto traducible.
+    +'<div class="leg" style="margin-top:8px;opacity:.65">'+_esc(hfSello())+'</div>'
     +'</body></html>');
   w.document.close();
   // Nombre sugerido al "Guardar como PDF" — ver la nota en _segWrite. El folio va
@@ -36249,8 +36298,16 @@ var NOVEDADES=[
       '**Ves el número real antes de guardar.** Mientras editas, el panel te dice en vivo qué % de la venta acaba recibiendo cada quien («Del **10%** del escalón: 50% al médico = **5%** de la venta») y te pone un ejemplo en pesos. Es la diferencia entre el 5% y el 0.5%: ahí se ve.',
       '**No se puede guardar un reparto descuadrado.** Si las partes no suman exactamente 100%, se marca en rojo y el botón Guardar se bloquea — ni de más ni de menos.'],
     comoUsar:['Comisiones → abre **⚙️ Configurar reglas** (abajo en la misma pantalla).','Sin reglas: **✨ Empezar con un ejemplo** y ajusta. Con reglas: elige la regla del menú, o **＋ Nueva regla**.','Llena grupo (menú), procedimientos que aplican (chips del catálogo), escalones (desde/hasta/%, «Hasta» vacío = sin límite), beneficiarios (quién · parte % · nota de crédito o efectivo) y el diferido.','Revisa el recuadro del **% efectivo** y pulsa **Guardar reglas**. Ya puedes Calcular el mes.','¿El grupo no sale en el menú? Dalo de alta en **Orígenes externos** primero; el panel te pone el enlace directo.'] },
+  { build:'2026.07.16', fecha:'16 jul 2026', area:'Reportes', icon:'🪷', destacada:true,
+    titulo:'El sistema ya tiene nombre: VestaOS, y firma todo lo que imprime',
+    puntos:['**Todo documento que salga del sistema lleva el mismo sello**, abajo: `Generated by VestaOS | Hestia Fertility © 2026 | 16 Jul 2026, 14:32`. Es la firma de la casa, como en cualquier ERP profesional: dice quién lo generó y **cuándo**, al minuto.',
+      '**Siempre en inglés**, incluso en los documentos en español, francés o portugués. Es una marca, no un texto que se traduzca — igual que nadie traduce el logotipo.',
+      '**El año se pone solo.** En enero dirá 2027 sin que nadie lo toque.',
+      'Antes la marca estaba **regada por todo el sistema**: cada reporte armaba su propia versión («Hestia ERP ·», «Hestia Fertility Clinic ·», «Sistema ERP Hestia Fertility ·») y **una plantilla ni siquiera ponía la fecha**. Ahora es una sola fuente: todas las plantillas firman igual, exactamente una vez.',
+      'La nota del pie que tú controlas (Panel de Control → Formato) **sigue siendo tuya**: ya no arranca diciendo «Documento generado por Hestia ERP» porque de eso se encarga el sello. Déjala para lo que quieras advertir, como «Uso interno y para paciente».'],
+    comoUsar:['No hay que hacer nada: imprime cualquier reporte y el sello ya sale abajo.','¿Quieres cambiar la nota del pie? **Panel de Control → Formato → Nota al pie**. El sello no se toca desde ahí, a propósito.'] },
   { build:'2026.07.16', fecha:'16 jul 2026', area:'Reportes', icon:'🧾', destacada:true,
-    titulo:'Los reportes ya dicen la cantidad, y el gran total cae donde debe',
+    titulo:'Los reportes ya dicen la cantidad, y ninguno se la inventa',
     puntos:['**Ya se ve cuántas unidades se vendieron.** El **Estado de cuenta**, la **Cobranza** y el **Recibo** llevan columna de **Cant** al lado del concepto. Antes solo se veía el importe y no había forma de saber si eran 1 o 3 ampolletas.',
       '**«Importe» ahora se llama «Subtotal»** en el estado de cuenta, la cobranza y la orden de compra. No es un cambio de nombre por gusto: esa cifra **siempre fue** el subtotal (precio × cantidad − descuento). Poner una columna «Subtotal» aparte habría repetido el mismo número dos veces.',
       '**Se arreglaron columnas que mentían, con la plantilla «Minimalista».** Esa plantilla resume cada renglón a una sola cifra, y elegía mal cuál: en el estado de cuenta imprimía **«Transferencia»** (la forma de pago) donde va el importe, y en la orden de compra el **costo unitario** en lugar del subtotal. En el comprobante de cancelación el **importe a devolver no se imprimía en absoluto**. Ya no. El gran total nunca estuvo mal: va flotado a la derecha en todas las plantillas.',
@@ -37290,13 +37347,14 @@ async function _novCfgGuardar(){
   },
 
   { id:'plantillas', group:'documentos', icon:'🎨', title:'Plantillas de impresión + firma autógrafa',
-    keywords:'plantilla impresion celula editorial vida marca de agua watermark firma autografa logo reporte panel de control diseño',
+    keywords:'plantilla impresion celula editorial vida marca de agua watermark firma autografa logo reporte panel de control diseño sello vestaos generated by marca pie de pagina',
     intro:'Todos los documentos imprimibles pasan por un **motor de plantillas**. Puedes elegir el diseño por tipo de reporte, una **marca de agua**, y subir tu **firma autógrafa** para que aparezca en los documentos que elijas.',
     bloques:[
       { h:'Plantillas', p:'Hay 3 diseños de marca (**Célula** minimal, **Editorial** serif, **Vida** banda rosa) más 7 base (ejecutivo, contable, minimalista, clínica, bicolor, certificado, moderno). Se eligen en **Panel de Control → Reportes** por cada tipo de reporte.' },
       { h:'Marca de agua', p:'Selector global (blastocisto / llama / ondas / ninguna / auto) en Panel de Control → Reportes.' },
       { h:'Firma autógrafa', p:'Sube tu firma como imagen y marca en qué documentos «lleva firma autógrafa». La firma **no se corta** al imprimir: si no cabe, se va completa a la página siguiente.' },
       { h:'Columnas: la alineación se declara, no se adivina', p:'Al armar un reporte, una columna puede ser un texto (`\'Importe\'`) o un objeto (`{label:\'Cant\', r:true}`). Con objeto, **la columna dice si va a la derecha**; con texto se conserva la regla antigua (las dos últimas a la derecha) para no mover los reportes viejos. **Si declaras una columna, declara todas las de esa tabla** — basta una para que la tabla entera pase a modo declarado y las de texto se vayan a la izquierda. Vale para las 10 plantillas y para el Excel.' },
+      { h:'El sello VestaOS', p:'Todo documento imprimible lleva abajo la misma firma: **`Generated by VestaOS | Hestia Fertility © 2026 | 16 Jul 2026, 14:32`**. Sale **siempre en inglés**, en los cuatro idiomas de impresión — es marca, no texto traducible. El **año es el en curso** (en enero dirá 2027 solo), y tras la última barra va la **fecha y hora de generación**, al minuto. Es una **sola fuente** (`hfSello()`): las 10 plantillas y los dos documentos de formato fijo (Carta de Seguro y Recibo) firman desde ahí, exactamente una vez. Un reporte nuevo que olvide declarar `generado` **igual sale firmado** — el sello no es opcional. La **nota al pie** de Panel de Control → Formato es cosa aparte y sigue siendo editable.' },
       { h:'Qué cifra sale en cada renglón: `data.lineCol`', p:'Solo importa en las plantillas que resumen cada fila a **una sola cifra** (hoy, «Minimalista»); las demás pintan la tabla completa y no consultan nada de esto. `lineCol` es el **índice de la columna** con la cifra de dinero de cada renglón. Sin declararlo se cae a `totalCol` y, sin ese, al histórico (dos columnas desde el final) — que solo acierta si la tabla termina en dos columnas de números. Por eso el Estado de Cuenta llegó a imprimir «Transferencia» donde iba el importe. **`totalCol` no mueve el gran total**, pese al nombre: el gran total va flotado a la derecha en todas las plantillas. Y `qtyCol` marca la columna de cantidad, que «Minimalista» pega al concepto como «× 2».' }
     ],
     pasos:[
@@ -38016,7 +38074,7 @@ async function _novCfgGuardar(){
     if (!m) return '';
     var h = '<figure class="hfm-mock">';
     h += '<div class="hfm-mbar"><span class="hfm-dots"><i></i><i></i><i></i></span>';
-    h += '<span class="hfm-mtitle">'+esc(m.title||'Hestia ERP')+'</span>';
+    h += '<span class="hfm-mtitle">'+esc(m.title||'VestaOS')+'</span>';
     if (m.crumb)  h += '<span class="hfm-mcrumb">'+esc(m.crumb)+'</span>';
     if (m.period) h += '<span class="hfm-mperiod">📅 '+esc(m.period)+pin(m.periodN)+'</span>';
     h += '</div><div class="hfm-mrow">';
@@ -38304,7 +38362,7 @@ async function _novCfgGuardar(){
     keywords:'menu periodo tema oscuro claro dark segmento local internacional filtro fechas navegacion sidebar topbar barra superior',
     para:'Tres controles globales mandan sobre casi todo: el **menú lateral** (izquierda), el **selector de periodo** (arriba) y el **tema** claro/oscuro. Aprende dónde están una vez y sirven en todos los módulos.',
     where:'Están siempre visibles: menú a la izquierda, barra superior (topbar) arriba.',
-    mock:{ title:'Hestia ERP', crumb:'Barra superior (topbar)', period:'Julio 2026', periodN:3,
+    mock:{ title:'VestaOS', crumb:'Barra superior (topbar)', period:'Julio 2026', periodN:3,
       sidebar:[ {label:'Resumen', icon:'📈', active:true}, {label:'Finanzas', icon:'💰', n:1}, {label:'Ingresos', icon:'💵', sub:true}, {label:'Cuentas por Pagar', icon:'💳', sub:true}, {label:'Reportes', icon:'📄'}, {label:'Panel de Control', icon:'⚙️'} ],
       toolbar:[ {t:'date', label:'Del 01/07 — Al 31/07', n:2}, {t:'select', label:'Todos / Local / Internacional', n:4}, {t:'pill', label:'☀️ / 🌙 Tema', n:5} ],
       note:'El menú se puede reordenar y renombrar sin tocar código (ver «Menú editable»).',
@@ -39113,8 +39171,8 @@ async function _novCfgGuardar(){
       nota:'Frontend-only. No sustituye a un CFDI (lleva la leyenda).' } },
 
   { id:'plantillas', group:'documentos', icon:'🎨', title:'Plantillas de impresión + firma',
-    keywords:'plantilla impresion celula editorial vida marca de agua watermark firma autografa logo reporte panel de control diseño',
-    para:'Todos los documentos imprimibles pasan por un **motor de plantillas**. Eliges el diseño por tipo de reporte, una **marca de agua**, y subes tu **firma autógrafa** para que aparezca donde elijas.',
+    keywords:'plantilla impresion celula editorial vida marca de agua watermark firma autografa logo reporte panel de control diseño sello vestaos generated by marca pie de pagina',
+    para:'Todos los documentos imprimibles pasan por un **motor de plantillas** y salen firmados con el **sello VestaOS** (`Generated by VestaOS | Hestia Fertility © 2026 | fecha y hora`), que no se configura: sale solo. Eliges el diseño por tipo de reporte, una **marca de agua**, y subes tu **firma autógrafa** para que aparezca donde elijas.',
     where:'Menú → **Panel de Control → Reportes**.',
     mock:{ title:'Panel de Control · Reportes', crumb:'Panel de Control › Reportes',
       form:[ {label:'Plantilla (por reporte)', val:'Célula / Editorial / Vida', sel:true, n:1}, {label:'Marca de agua', val:'blastocisto / llama / ondas / ninguna', sel:true, n:2}, {label:'Firma autógrafa', val:'Subir imagen…', n:3, wide:true} ],
