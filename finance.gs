@@ -505,8 +505,15 @@ function doPost(e) {
       return jsonResponse(result);
     }
     if (body.action === 'createBankSheet') {
-      var result = createBankSheet(body.nombre, body.color);
+      if (!_tokenHasPermission(body.token || '', 'bank_create')) {
+        return jsonResponse({ok:false, error:'Sin autorización para crear cuentas bancarias (bank_create). Pídeselo al administrador.'});
+      }
+      var result = createBankSheet(body.nombre, body.tipo, body.color);
+      try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
       return jsonResponse(result);
+    }
+    if (body.action === 'readCuentas') {
+      return jsonResponse({ok:true, cuentas:_cuentas()});
     }
     if (body.action === 'saveLiberado') {
       var result = saveLiberado(body.rowNum, body.liberado);
@@ -1360,22 +1367,28 @@ function readBanksData(fechaInicio, fechaFin) {
     var mp  =rMP(byGid(BANKS_GID.mercadopago));
     var bancos={santander:sant,amex:amex,mercadopago:mp};
 
-    // Bancos adicionales (cualquier clave en BANKS_GID que no sea los tres estándar)
+    // Bancos adicionales — cuentas registradas en Config_Cuentas que no son
+    // las 3 estándar. Hoy no hay ninguna (los 3 se saltan), así que este
+    // bloque es byte-idéntico al estado actual; queda listo para las cuentas
+    // que se den de alta. El saldo se lee de la columna que dicta el Tipo.
     var std=['santander','amex','mercadopago'];
-    for (var key in BANKS_GID) {
+    var _cts=_cuentas();
+    for (var ci=0; ci<_cts.length; ci++) {
+      var cta=_cts[ci], key=cta.key;
       if (std.indexOf(key) >= 0) continue;
-      var extraSheet = byGid(BANKS_GID[key]);
+      if (cta.activo===false) continue;
+      var extraSheet = byGid(cta.gid);
       if (!extraSheet) continue;
-      // Lector genérico: Fecha|Depósito|Retiro|Saldo|Referencia|...
+      var _saldoIdx = _cuentaLayout(cta.tipo).saldoIdx;
       var rExtra = extraSheet.getDataRange().getValues();
-      var EB = {id:key, nombre:extraSheet.getName(), color:'#6b7280', saldo:0, movimientos:[], totalRows:0};
+      var EB = {id:key, nombre:extraSheet.getName(), color:cta.color||'#6b7280', saldo:0, movimientos:[], totalRows:0, tipo:cta.tipo};
       if (rExtra.length > 1) {
-        for (var ei=rExtra.length-1;ei>=1;ei--){ var es=num(rExtra[ei][3]); if(es!==0){EB.saldo=es;break;} }
+        for (var ei=rExtra.length-1;ei>=1;ei--){ var es=num(rExtra[ei][_saldoIdx]); if(es!==0){EB.saldo=es;break;} }
         EB.totalRows = rExtra.length-1;
         EB.movimientos = rExtra.slice(1).map(function(x,idx){
           var d=num(x[1]),t=num(x[2]);
           return{rowNum:idx+2,fecha:dt(x[0]),deposito:d,retiro:t,monto:d>0?d:-t,
-                 saldo:num(x[3]),referencia:_privRef(x[4]),tipo:d>0?'deposito':'retiro'};
+                 saldo:num(x[_saldoIdx]),referencia:_privRef(x[4]),tipo:d>0?'deposito':'retiro'};
         }).filter(function(m){ return inRange(m.fecha); }).reverse();
       }
       bancos[key]=EB;
@@ -1394,7 +1407,7 @@ function deleteBankRow(banco, rowNum) {
     var ss=SpreadsheetApp.openById(BANKS_SS_ID);
     var sh=ss.getSheets();
     var key=String(banco).toLowerCase().replace(/[\s-]/g,'');
-    var gid=BANKS_GID[key];
+    var gid=_cuentaGid(key);
     if (gid===undefined) return {ok:false, error:'Banco desconocido: '+banco};
     var sheet=null;
     for(var i=0;i<sh.length;i++) if(sh[i].getSheetId()===gid){sheet=sh[i];break;}
@@ -1412,7 +1425,7 @@ function updateBankRow(banco, rowNum, row) {
     var ss=SpreadsheetApp.openById(BANKS_SS_ID);
     var sh=ss.getSheets();
     var key=String(banco).toLowerCase().replace(/[\s-]/g,'');
-    var gid=BANKS_GID[key];
+    var gid=_cuentaGid(key);
     if (gid===undefined) return {ok:false, error:'Banco desconocido: '+banco};
     var sheet=null;
     for(var i=0;i<sh.length;i++) if(sh[i].getSheetId()===gid){sheet=sh[i];break;}
@@ -1429,17 +1442,20 @@ function updateBankRow(banco, rowNum, row) {
 function _recalcSaldos(sheet, key) {
   var lr=sheet.getLastRow(); if(lr<2) return;
   function num(v){var n=parseFloat(String(v||'').replace(/[$,\s]/g,''));return isNaN(n)?0:n;}
-  if(key==='santander') {
+  // Ramas por Tipo (no por key): bancaria=Santander, credito=AMEX, tpv=MP.
+  // Byte-idéntico para los 3; una cuenta nueva del mismo tipo recalcula igual.
+  var _cta=_cuentaByKey(key); if(!_cta) return; var _tipo=_cta.tipo;
+  if(_tipo==='bancaria') {
     var vals=sheet.getRange(2,1,lr-1,4).getValues();
     var run=0;
     for(var i=0;i<vals.length;i++){run+=num(vals[i][1])-num(vals[i][2]); vals[i][3]=run;}
     sheet.getRange(2,4,lr-1,1).setValues(vals.map(function(r){return[r[3]];}));
-  } else if(key==='amex') {
+  } else if(_tipo==='credito') {
     var vals=sheet.getRange(2,1,lr-1,3).getValues();
     var run=0;
     for(var i=0;i<vals.length;i++){run+=num(vals[i][1]); vals[i][2]=run;}
     sheet.getRange(2,3,lr-1,1).setValues(vals.map(function(r){return[r[2]];}));
-  } else if(key==='mercadopago') {
+  } else if(_tipo==='tpv') {
     // Recalcula col G (saldo corrido) = suma acumulada de col F (Total de Venta)
     var vals=sheet.getRange(2,6,lr-1,1).getValues(); // col F = totalVenta (index 5, col 6)
     var run=0;
@@ -1448,21 +1464,153 @@ function _recalcSaldos(sheet, key) {
   }
 }
 
-function createBankSheet(nombre, color) {
+/* ═══════════════════════════════════════════════════════════════════════
+   CUENTAS BANCARIAS DATA-DRIVEN  (Config_Cuentas en el libro de bancos)
+   Etapa 1 del modelo administrable de bancos (2026-07-17).
+
+   El campo **Tipo** gobierna a la vez el LAYOUT de la pestaña y el
+   COMPORTAMIENTO del dinero — es el único eje. Tres tipos:
+     • bancaria (Santander): Depósito/Retiro/Saldo.  Sin comisión.
+     • credito  (AMEX): 100% deuda, nadie deposita; un solo Movimiento
+                 que sube el saldo. Sin comisión. Igual toda cuenta de
+                 crédito futura.
+     • tpv      (Mercado Pago): cuenta bancaria con Terminal Punto de
+                 Venta; cobra comisión por venta.
+
+   Fallback: si Config_Cuentas no existe/está vacía, se usan los 3
+   defaults → comportamiento byte-idéntico al de antes de esta etapa.
+   BANKS_GID (config.gs) sigue existiendo como semilla de gids. ═══════ */
+function _cuentasDefault(){
+  // Se lee BANKS_GID en tiempo de llamada (no al cargar el archivo) para
+  // no depender del orden de carga de los .gs.
+  return [
+    {key:'santander',   nombre:'Santander',    gid:BANKS_GID.santander,   tipo:'bancaria', color:'#EC0000', activo:true},
+    {key:'amex',        nombre:'AMEX',         gid:BANKS_GID.amex,        tipo:'credito',  color:'#016FD0', activo:true},
+    {key:'mercadopago', nombre:'Mercado Pago', gid:BANKS_GID.mercadopago, tipo:'tpv',      color:'#00AEEF', activo:true}
+  ];
+}
+var _CUENTAS_MEMO = null;   // cache por ejecución (GAS resetea globals por request)
+function _cuentas(){
+  if (_CUENTAS_MEMO) return _CUENTAS_MEMO;
+  var out = null;
   try {
+    var ss = SpreadsheetApp.openById(BANKS_SS_ID);
+    var sh = ss.getSheetByName('Config_Cuentas');
+    if (sh && sh.getLastRow() > 1) {
+      var vals = sh.getRange(2,1,sh.getLastRow()-1,6).getValues();
+      out = [];
+      for (var i=0;i<vals.length;i++){
+        var k = String(vals[i][0]||'').toLowerCase().replace(/[\s-]/g,'');
+        if (!k) continue;
+        var g = Number(vals[i][2]);
+        if (isNaN(g)) continue;
+        out.push({
+          key:k,
+          nombre:String(vals[i][1]||k),
+          gid:g,
+          tipo:String(vals[i][3]||'bancaria').toLowerCase().trim(),
+          color:String(vals[i][4]||'#6b7280'),
+          activo:(String(vals[i][5]).toLowerCase()!=='false' && vals[i][5]!==false)
+        });
+      }
+    }
+  } catch(e) {}
+  if (!out || !out.length) out = _cuentasDefault();
+  // Nunca perder los 3 core aunque la hoja los omita.
+  var def = _cuentasDefault();
+  for (var d=0; d<def.length; d++){
+    var found=false; for(var j=0;j<out.length;j++){ if(out[j].key===def[d].key){found=true;break;} }
+    if(!found) out.push(def[d]);
+  }
+  _CUENTAS_MEMO = out;
+  return out;
+}
+function _cuentaByKey(key){
+  var k=String(key).toLowerCase().replace(/[\s-]/g,'');
+  var arr=_cuentas();
+  for(var i=0;i<arr.length;i++){ if(arr[i].key===k) return arr[i]; }
+  return null;
+}
+function _cuentaGid(key){ var c=_cuentaByKey(key); return c?c.gid:undefined; }
+/* Layout derivado del Tipo: sc = columna del Saldo (1-based), saldoIdx =
+   índice 0-based del Saldo en la fila. Es la ÚNICA fuente de estos números;
+   ya no se decide por key. Byte-idéntico a los 3 hardcodes: santander(bancaria)
+   sc4/idx3, amex(credito) sc3/idx2, mp(tpv) sc7/idx6. */
+function _cuentaLayout(tipo){
+  switch(String(tipo||'bancaria').toLowerCase()){
+    case 'credito': return {sc:3, saldoIdx:2};
+    case 'tpv':     return {sc:7, saldoIdx:6};
+    default:        return {sc:4, saldoIdx:3};
+  }
+}
+/* Alta/actualización de una cuenta en Config_Cuentas (crea la hoja y la
+   siembra con los 3 core si no existe). Invalida el memo. */
+function _cuentaRegistrar(obj){
+  var ss=SpreadsheetApp.openById(BANKS_SS_ID);
+  var sh=ss.getSheetByName('Config_Cuentas');
+  if(!sh){
+    sh=ss.insertSheet('Config_Cuentas');
+    sh.getRange(1,1,1,6).setValues([['Key','Nombre','Gid','Tipo','Color','Activo']]);
+    sh.getRange(1,1,1,6).setFontWeight('bold').setBackground('#f3f4f6');
+    sh.setFrozenRows(1);
+    var def=_cuentasDefault();
+    for(var d=0; d<def.length; d++){ var c=def[d]; if(c.key!==obj.key) sh.appendRow([c.key,c.nombre,c.gid,c.tipo,c.color,c.activo]); }
+  }
+  var lr=sh.getLastRow();
+  var keys = lr>1 ? sh.getRange(2,1,lr-1,1).getValues().map(function(r){return String(r[0]).toLowerCase().replace(/[\s-]/g,'');}) : [];
+  var idx = keys.indexOf(obj.key);
+  var rowVals=[obj.key, obj.nombre, obj.gid, obj.tipo, obj.color, obj.activo];
+  if(idx>=0) sh.getRange(idx+2,1,1,6).setValues([rowVals]);
+  else sh.appendRow(rowVals);
+  _CUENTAS_MEMO=null;
+  return true;
+}
+/* Mantenimiento del dueño — crea/rellena Config_Cuentas con los 3 core.
+   Idempotente: sólo agrega las keys faltantes. SEGURO correr 2 veces. */
+function setupConfigCuentas(){
+  var ss=SpreadsheetApp.openById(BANKS_SS_ID);
+  var sh=ss.getSheetByName('Config_Cuentas');
+  var created=false;
+  if(!sh){
+    sh=ss.insertSheet('Config_Cuentas');
+    sh.getRange(1,1,1,6).setValues([['Key','Nombre','Gid','Tipo','Color','Activo']]);
+    sh.getRange(1,1,1,6).setFontWeight('bold').setBackground('#f3f4f6');
+    sh.setFrozenRows(1);
+    created=true;
+  }
+  var lr=sh.getLastRow();
+  var existing = lr>1 ? sh.getRange(2,1,lr-1,1).getValues().map(function(r){return String(r[0]).toLowerCase().replace(/[\s-]/g,'');}) : [];
+  var def=_cuentasDefault(), added=[];
+  for(var d=0; d<def.length; d++){ var c=def[d]; if(existing.indexOf(c.key)<0){ sh.appendRow([c.key,c.nombre,c.gid,c.tipo,c.color,c.activo]); added.push(c.key); } }
+  _CUENTAS_MEMO=null;
+  return {ok:true, created:created, added:added, total:sh.getLastRow()-1};
+}
+
+function createBankSheet(nombre, tipo, color) {
+  try {
+    if (!nombre || !String(nombre).trim()) return {ok:false, error:'El nombre del banco es obligatorio'};
+    nombre = String(nombre).trim();
+    tipo = String(tipo||'bancaria').toLowerCase().trim();
+    if (['bancaria','credito','tpv'].indexOf(tipo) < 0) return {ok:false, error:'Tipo de cuenta inválido: '+tipo+' (usa bancaria | credito | tpv)'};
+    color = color || '#6b7280';
     var ss=SpreadsheetApp.openById(BANKS_SS_ID);
-    // Verificar que no exista ya
     var sheets=ss.getSheets();
     var key=nombre.toLowerCase().replace(/[\s-]/g,'');
+    if (_cuentaByKey(key)) return {ok:false, error:'Ya existe una cuenta registrada con esa clave: '+key};
     for(var i=0;i<sheets.length;i++) if(sheets[i].getName().toLowerCase().replace(/[\s-]/g,'')=== key) return {ok:false,error:'Ya existe una pestaña con ese nombre'};
     var newSheet=ss.insertSheet(nombre);
-    // Headers: Fecha | Depósito | Retiro | Saldo | Referencia | USD | T.Cambio | Póliza | Observaciones
-    newSheet.getRange(1,1,1,9).setValues([['Fecha','Depósito','Retiro','Saldo','Referencia','USD','T.Cambio','Póliza','Observaciones']]);
-    newSheet.getRange(1,1,1,9).setFontWeight('bold').setBackground('#f3f4f6');
+    // Layout según Tipo (coincide con lo que espera saveBankRow/_recalcSaldos).
+    var headers;
+    if (tipo==='credito')      headers=['Fecha','Movimiento','Saldo','Referencia','USD','T.Cambio','Póliza','Observaciones'];
+    else if (tipo==='tpv')     headers=['Mes','Fecha','Cobro','Comisiones','% Comisión','Total de Venta','Saldo','Póliza','Observaciones'];
+    else                       headers=['Fecha','Depósito','Retiro','Saldo','Referencia','USD','T.Cambio','Póliza','Observaciones'];
+    newSheet.getRange(1,1,1,headers.length).setValues([headers]);
+    newSheet.getRange(1,1,1,headers.length).setFontWeight('bold').setBackground('#f3f4f6');
     newSheet.setFrozenRows(1);
     var gid=newSheet.getSheetId();
-    return {ok:true, nombre:nombre, gid:gid, key:key,
-            instruccion:'Agrega esta línea a BANKS_GID en config.gs: '+key+': '+gid};
+    // Registro automático — ya NO hay que editar config.gs a mano.
+    _cuentaRegistrar({key:key, nombre:nombre, gid:gid, tipo:tipo, color:color, activo:true});
+    return {ok:true, nombre:nombre, gid:gid, key:key, tipo:tipo};
   } catch(ex) { return {ok:false, error:ex.message}; }
 }
 
@@ -1471,34 +1619,39 @@ function saveBankRow(banco, row) {
     var ss=SpreadsheetApp.openById(BANKS_SS_ID);
     var sh=ss.getSheets();
     var key=String(banco).toLowerCase().replace(/[\s-]/g,'');
-    var gid=BANKS_GID[key];
-    if (gid===undefined) return {ok:false, error:'Banco desconocido: '+banco};
+    var cta=_cuentaByKey(key);
+    if (!cta) return {ok:false, error:'Banco desconocido: '+banco};
+    var gid=cta.gid;
     var sheet=null;
     for(var i=0;i<sh.length;i++) if(sh[i].getSheetId()===gid){sheet=sh[i];break;}
     if(!sheet) return {ok:false, error:'Pestaña no encontrada'};
-    // Columna del saldo por banco: Santander=col4, AMEX=col3, MP=col7
-    var sc=(key==='santander')?4:(key==='amex')?3:7;
+    // Columna del saldo derivada del Tipo (bancaria=4, credito=3, tpv=7).
+    var sc=_cuentaLayout(cta.tipo).sc;
     var lr=sheet.getLastRow(), ls=0;
     if(lr>1){
       var sv=sheet.getRange(lr,sc).getValue();
       ls=(typeof sv==='number')?sv:parseFloat(String(sv).replace(/[$,]/g,''))||0;
     }
-    if (key==='santander') {
+    if (cta.tipo==='bancaria') {
       row[3]=ls+(parseFloat(row[1])||0)-(parseFloat(row[2])||0);
-    } else if (key==='amex') {
+    } else if (cta.tipo==='credito') {
       row[2]=ls+(parseFloat(row[1])||0);
-    } else {
-      // MP col E (idx 4): pct = 1-(totalVenta/cobro) como fracción decimal (ej. 0.0406)
+    } else if (cta.tipo==='tpv') {
+      // TPV col E (idx 4): pct = 1-(totalVenta/cobro) como fracción decimal (ej. 0.0406)
       var mpCobro = parseFloat(row[2]) || 0;
       var mpNeto  = parseFloat(row[5]) || 0;
       row[4] = (mpCobro !== 0) ? (1 - (mpNeto / mpCobro)) : 0;
-      // MP col G (idx 6): saldo corrido = suma acumulada de col F
+      // TPV col G (idx 6): saldo corrido = suma acumulada de col F
       var allVals=sheet.getLastRow()>1?sheet.getRange(2,6,sheet.getLastRow()-1,1).getValues():[];
       var runSum=0; for(var k=0;k<allVals.length;k++) runSum+=parseFloat(allVals[k][0])||0;
       row[6]=runSum+(parseFloat(row[5])||0);
+    } else {
+      return {ok:false, error:'Tipo de cuenta desconocido: '+cta.tipo};
     }
     sheet.appendRow(row);
     // Comisión de Mercado Pago movida → recalcular la partida automática de egreso del mes.
+    // (Ligado a la key MP, no al tipo tpv: la maquinaria de recálculo es MP-específica;
+    //  generalizar a cualquier TPV es trabajo de la Etapa 3.)
     if (key === 'mercadopago') { try { _egRecalcComisionesMPFecha((row && row[1]) || '', ''); } catch(e) {} }
     return {ok:true, banco:banco, newSaldo:row[sc-1], totalRows:sheet.getLastRow()-1};
   } catch(ex) { return {ok:false, error:ex.message}; }
@@ -6630,7 +6783,7 @@ function _reverseIngresoBankTodos(opId, hdrRow, origRows, origFP, origFecha, ori
    recalcula el saldo corrido (consistente con saveBankRow). Así editar N
    veces siempre deja UNA sola fila por forma de pago. Solo Santander/MP. */
 function _bankSheetByKey(key) {
-  var ss = SpreadsheetApp.openById(BANKS_SS_ID), sh = ss.getSheets(), gid = BANKS_GID[key];
+  var ss = SpreadsheetApp.openById(BANKS_SS_ID), sh = ss.getSheets(), gid = _cuentaGid(key);
   for (var i = 0; i < sh.length; i++) if (sh[i].getSheetId() === gid) return sh[i];
   return null;
 }

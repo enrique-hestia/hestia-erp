@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.235 -->
+﻿<!-- app-build:2026.07.17.236 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -13226,27 +13226,40 @@ window.cbDeleteRow = async function(banco, rowNum, obs) {
   } catch(e) { alert('Error de conexión'); }
 };
 
-/* ── Crear nueva pestaña de banco ──────────────────────── */
+/* ── Ayuda dinámica del tipo de cuenta ─────────────────── */
+function _cbTipoHint(){
+  var sel = document.getElementById('cb-nuevo-tipo'), box = document.getElementById('cb-tipo-hint');
+  if(!sel||!box) return;
+  var t = sel.value;
+  if(t==='credito') box.innerHTML = '<strong>Crédito:</strong> Fecha · Movimiento · Saldo. Es 100% deuda — cada cargo sube el saldo (lo que debes). Nadie deposita aquí; se paga desde otra cuenta.';
+  else if(t==='tpv') box.innerHTML = '<strong>TPV:</strong> Cobro · Comisiones · % · Neto · Saldo. Cuenta con terminal punto de venta; cobra comisión por cada venta (web o terminal), como Mercado Pago.';
+  else box.innerHTML = '<strong>Bancaria:</strong> Fecha · Depósito · Retiro · Saldo · Referencia. El saldo sube con depósitos y baja con retiros.';
+}
+/* ── Crear nueva cuenta bancaria ───────────────────────── */
 window.cbCrearBanco = async function() {
-  if (!hasPermission('bank_create')) { alert('No tienes permisos para crear bancos. Contacta al administrador.'); return; }
-  var nombre = document.getElementById('cb-nuevo-nombre') && document.getElementById('cb-nuevo-nombre').value.trim();
-  if (!nombre) { alert('El nombre del banco es obligatorio'); return; }
+  if (!hasPermission('bank_create')) { alert('No tienes permisos para crear cuentas. Contacta al administrador.'); return; }
+  var elN = document.getElementById('cb-nuevo-nombre');
+  var nombre = elN && elN.value.trim();
+  if (!nombre) { alert('El nombre de la cuenta es obligatorio'); return; }
+  var elT = document.getElementById('cb-nuevo-tipo');
+  var tipo = (elT && elT.value) || 'bancaria';
+  var etq = {bancaria:'Bancaria', credito:'Crédito', tpv:'TPV (terminal, como Mercado Pago)'}[tipo] || tipo;
+  if (!confirm('¿Crear la cuenta "'+nombre+'" como tipo '+etq+'?\n\nSe crea su pestaña en el libro de bancos y queda activa en el ERP de inmediato.')) return;
   var btn = document.getElementById('cb-crear-btn');
   if (btn) { btn.disabled=true; btn.textContent='Creando…'; }
   try {
-    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'createBankSheet', nombre:nombre, color:'#6b7280'})});
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'createBankSheet', nombre:nombre, tipo:tipo, color:'#6b7280', token:getToken()})});
     var res = await r.json();
     if (res.ok) {
-      var msg = '✅ Pestaña "'+res.nombre+'" creada en Sheets.\n\n'
-        +'Para activarla en el ERP, agrega esta línea a BANKS_GID en config.gs:\n\n'
-        +res.key + ': ' + res.gid;
-      alert(msg);
-      if(btn){btn.disabled=false;btn.textContent='Crear banco';}
+      alert('✅ Cuenta "'+res.nombre+'" creada y activa (tipo '+etq+').');
+      if(elN) elN.value='';
+      if(typeof loadConciliacionData==='function') loadConciliacionData();
+      if(typeof loadCashFlowData==='function') loadCashFlowData();
     } else {
       alert('Error: '+(res.error||'No se pudo crear'));
-      if(btn){btn.disabled=false;btn.textContent='Crear banco';}
     }
-  } catch(e) { alert('Error de conexión'); if(btn){btn.disabled=false;btn.textContent='Crear banco';} }
+  } catch(e) { alert('Error de conexión'); }
+  if(btn){btn.disabled=false;btn.textContent='Crear cuenta';}
 };
 
 var APP_VERSION = '2026.06.19.3';
@@ -13747,20 +13760,24 @@ function renderConciliacion(data) {
       +'Los saldos se calculan de los movimientos registrados en Sheets.'
     +'</div></div>');
 
-  // ── Agregar banco (solo bank_create) ────────────────────
+  // ── Agregar cuenta (solo bank_create) ────────────────────
   if (hasPermission('bank_create')) {
     hh.push('<div class="cb-sc" style="border:1.5px dashed var(--color-divider,#d1d5db);background:transparent">'
-      +'<div class="cb-sh">+ Agregar banco</div>'
+      +'<div class="cb-sh">+ Agregar cuenta</div>'
       +'<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-bottom:10px;line-height:1.5">'
-        +'Crea una nueva pestaña en el Spreadsheet de bancos. Después agrega el GID a <code style="background:var(--color-surface,#f3f4f6);padding:1px 5px;border-radius:4px;font-size:10px">config.gs</code> para activarlo.'
+        +'Crea una cuenta nueva. Se activa al instante — ya no hay que tocar código. Elige el <strong>tipo</strong>, que define cómo se comporta:'
       +'</div>'
-      +'<div style="display:flex;gap:8px">'
-        +'<input id="cb-nuevo-nombre" class="cbf-inp" style="flex:1;font-size:12px;padding:8px 10px" placeholder="Ej: BBVA, HSBC…">'
-        +'<button id="cb-crear-btn" onclick="cbCrearBanco()" style="padding:8px 14px;border-radius:8px;border:none;background:var(--color-primary,#c46a7a);color:#fff;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">Crear</button>'
+      +'<div style="display:flex;flex-direction:column;gap:8px">'
+        +'<input id="cb-nuevo-nombre" class="cbf-inp" style="font-size:12px;padding:8px 10px" placeholder="Nombre. Ej: BBVA, HSBC, AMEX Oro…">'
+        +'<select id="cb-nuevo-tipo" class="cbf-inp" style="font-size:12px;padding:8px 10px" onchange="_cbTipoHint()">'
+          +'<option value="bancaria">Bancaria — banco normal (Depósito / Retiro)</option>'
+          +'<option value="credito">Crédito — 100% deuda, nadie deposita (como AMEX)</option>'
+          +'<option value="tpv">TPV — terminal, cobra comisión por venta (como Mercado Pago)</option>'
+        +'</select>'
+        +'<button id="cb-crear-btn" onclick="cbCrearBanco()" style="padding:9px 14px;border-radius:8px;border:none;background:var(--color-primary,#c46a7a);color:#fff;font-size:12px;font-weight:700;cursor:pointer">Crear cuenta</button>'
       +'</div>'
-      +'<div style="margin-top:10px;padding:8px 10px;background:var(--color-surface,#f9fafb);border-radius:8px;font-size:10.5px;color:var(--text-secondary,#6b7280)">'
-        +'<strong>Estructura de la pestaña nueva:</strong><br>'
-        +'Fecha · Depósito · Retiro · Saldo · Referencia · USD · T.Cambio · Póliza · Observaciones'
+      +'<div id="cb-tipo-hint" style="margin-top:10px;padding:8px 10px;background:var(--color-surface,#f9fafb);border-radius:8px;font-size:10.5px;color:var(--text-secondary,#6b7280);line-height:1.5">'
+        +'<strong>Bancaria:</strong> Fecha · Depósito · Retiro · Saldo · Referencia. El saldo sube con depósitos y baja con retiros.'
       +'</div>'
       +'</div>');
   }
