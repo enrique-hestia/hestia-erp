@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.231 -->
+﻿<!-- app-build:2026.07.16.232 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -24174,11 +24174,18 @@ function _tplTableHTML(data,headerBg,headerColor){
     h+='<th style="padding:5px 6px;text-align:'+(c.right?'right':'left')+';font-weight:700;font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;color:'+headerColor+';border-bottom:1px solid rgba(0,0,0,.15)">'+c.label+'</th>';
   });
   h+='</tr></thead><tbody>';
+  var _cc=(data.conceptCol!=null?data.conceptCol:1);
   (data.rows||[]).forEach(function(r,ri){
-    h+='<tr style="background:'+(ri%2?'rgba(0,0,0,.025)':'transparent')+'">';
+    var kind=(data.rowKinds&&data.rowKinds[ri])||'normal';
+    var trBg=kind==='header'?'rgba(196,106,122,.10)':(ri%2?'rgba(0,0,0,.025)':'transparent');
+    h+='<tr style="background:'+trBg+'">';
     r.forEach(function(cell,ci){
       var right=M.explicit ? !!(M[ci]&&M[ci].right) : (ci>0&&ci>=(r.length-2));
-      h+='<td style="padding:3.5px 6px;border-bottom:0.5px solid rgba(0,0,0,.07);text-align:'+(right?'right':'left')+'">'+cell+'</td>';
+      var isCon=(ci===_cc);
+      var pad=(kind==='item'&&isCon)?'padding:3.5px 6px 3.5px 22px':'padding:3.5px 6px';
+      var fw=kind==='header'?';font-weight:700':(kind==='item'&&isCon?';color:#555':'');
+      var pre=(kind==='item'&&isCon)?'<span style="color:#c9a9b1">└ </span>':'';
+      h+='<td style="'+pad+';border-bottom:0.5px solid rgba(0,0,0,.07);text-align:'+(right?'right':'left')+fw+'">'+pre+cell+'</td>';
     });
     h+='</tr>';
   });
@@ -24192,6 +24199,36 @@ function _tplTableHTML(data,headerBg,headerColor){
     h+='</tr>';
   }
   return h+'</tbody></table>';
+}
+/* ── AGRUPAR EN PARTIDAS ─────────────────────────────────────────────────────
+   Un cobro con varios ítems (misma OP) se mostraba como si fueran cobros
+   separados. Esto los junta bajo una PARTIDA: una fila de encabezado con el
+   título y el total del grupo, y sus ítems como desglose indentado — así se ve
+   que ESOS conceptos pertenecen a ese cobro, no que son todos distintos.
+   Devuelve {rows, rowKinds, rowConcepts} alineados. Las plantillas (vía
+   _tplTableHTML / _tplTablaFina) pintan 'header' resaltado y 'item' indentado;
+   el gran total NO cambia (se calcula aparte de las filas). Grupos de 1 ítem =
+   fila normal (sin encabezado). Sin OP = partida propia (no se junta con otras). */
+function _agruparPorOp(movs, mkRow, mkHeader){
+  var grupos={}, orden=[];
+  (movs||[]).forEach(function(m){
+    var op=String((m&&m.op)||'').trim();
+    var key=(op && op!=='—') ? ('op:'+op) : ('u:'+orden.length);
+    if(!grupos[key]){ grupos[key]=[]; orden.push(key); }
+    grupos[key].push(m);
+  });
+  var rows=[], kinds=[], cons=[];
+  orden.forEach(function(key){
+    var g=grupos[key];
+    if(g.length===1){
+      rows.push(mkRow(g[0], false)); kinds.push('normal'); cons.push((g[0].producto||g[0].desc||''));
+    } else {
+      var tot=0; g.forEach(function(m){ tot+=(parseFloat(m.total)||0); });
+      rows.push(mkHeader(g, tot)); kinds.push('header'); cons.push(null);
+      g.forEach(function(m){ rows.push(mkRow(m, true)); kinds.push('item'); cons.push((m.producto||m.desc||'')); });
+    }
+  });
+  return { rows:rows, rowKinds:kinds, rowConcepts:cons };
 }
 function _tplPage(bodyHTML,extraCSS){
   return '<!DOCTYPE html><html><head><meta charset="utf-8">'
@@ -24595,12 +24632,19 @@ function _tplTablaFina(d,o){
     h+='<th style="text-align:'+(c2.right?'right':'left')+';padding:6px 8px 6px 0;font-size:8.5px;letter-spacing:.08em;text-transform:uppercase;color:#9a9a94;font-weight:600;font-family:\'Helvetica Neue\',Arial,sans-serif;border-bottom:'+(o.headBorder||('1px solid '+line))+'">'+c2.label+'</th>';
   });
   h+='</tr></thead><tbody>';
+  var _ccF=(d.conceptCol!=null?d.conceptCol:1);
   (d.rows||[]).forEach(function(r,ri){
     var last=ri===d.rows.length-1;
-    h+='<tr>';
+    var kind=(d.rowKinds&&d.rowKinds[ri])||'normal';
+    var trBg=kind==='header'?'background:rgba(196,106,122,.08);':'';
+    h+='<tr style="'+trBg+'">';
     r.forEach(function(cell,ci){
       var right=M.explicit ? !!(M[ci]&&M[ci].right) : (ci>0&&ci>=(r.length-2));
-      h+='<td style="padding:6.5px 8px 6.5px 0;text-align:'+(right?'right':'left')+';color:#2c2c2a;border-bottom:'+(last?'none':'1px solid #f4eeee')+'">'+cell+'</td>';
+      var isCon=(ci===_ccF);
+      var padL=(kind==='item'&&isCon)?'22px':'0';
+      var fw=kind==='header'?';font-weight:700;color:#8e4756':(kind==='item'&&isCon?';color:#6b6b66':'');
+      var pre=(kind==='item'&&isCon)?'<span style="color:#c9a9b1">└ </span>':'';
+      h+='<td style="padding:6.5px 8px 6.5px '+padL+';text-align:'+(right?'right':'left')+';color:#2c2c2a;border-bottom:'+(last?'none':'1px solid #f4eeee')+fw+'">'+pre+cell+'</td>';
     });
     h+='</tr>';
   });
@@ -34401,11 +34445,24 @@ function _ecBuildPrintData(lang) {
   var cols = _cant
     ? [T.fecha, T.concepto, {label:T.cantidad, r:true}, T.categoria, T.formaPago, {label:T.subtotal, r:true}]
     : [T.fecha, T.concepto, T.categoria, T.formaPago, {label:T.subtotal, r:true}];
-  var rows = movs.map(function(m){
+  // Título de la partida, localizado (el documento sale en 4 idiomas).
+  var _lblCob = (lang==='en')?'Charge':(lang==='fr')?'Prestation':(lang==='pt')?'Cobrança':'Cobro';
+  var _lblCon = (lang==='en')?'items':(lang==='fr')?'éléments':(lang==='pt')?'itens':'conceptos';
+  var _mkRow = function(m){
     return _cant
       ? [_fd(m.fecha), m.producto||m.desc||'—', _fq(m.cant), m.cat||'—', m.pago||'—', _f(m.total)]
       : [_fd(m.fecha), m.producto||m.desc||'—', m.cat||'—', m.pago||'—', _f(m.total)];
-  });
+  };
+  var _mkHeader = function(g,tot){
+    var op=String((g[0].op)||'').trim();
+    var catU=g.every(function(m){ return (m.cat||'')===(g[0].cat||''); }) ? (g[0].cat||'') : '';
+    var titulo=_lblCob+' · '+g.length+' '+_lblCon+((op&&op!=='—')?' · '+op:'');
+    return _cant
+      ? [_fd(g[0].fecha), titulo, '', catU, '', _f(tot)]
+      : [_fd(g[0].fecha), titulo, catU, '', _f(tot)];
+  };
+  var _ag = _agruparPorOp(movs, _mkRow, _mkHeader);
+  var rows = _ag.rows;
   return {
     title: T.estadoCuenta,
     subject: d.paciente,
@@ -34419,7 +34476,11 @@ function _ecBuildPrintData(lang) {
     conceptCol: 1,
     // Sin columna de cantidad, qtyCol:-1 → la plantilla minimalista no pega "× N".
     qtyCol: _cant ? 2 : -1,
-    rowConcepts: movs.map(function(m){ return m.producto||m.desc||''; }),
+    // rowConcepts y rowKinds los produce _agruparPorOp, alineados con las filas
+    // agrupadas (headers → concepto null = el embudo no los traduce; items → su
+    // producto; las plantillas indentan los items y resaltan el header).
+    rowConcepts: _ag.rowConcepts,
+    rowKinds: _ag.rowKinds,
     totalLabel: T.totalFacturado,
     totalValue: _f(_pFact),
     // El gran total va bajo la columna de Subtotal, que es la suma que representa
