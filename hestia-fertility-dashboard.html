@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.226 -->
+﻿<!-- app-build:2026.07.16.227 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -36419,6 +36419,21 @@ var NOVEDADES=[
   /* `destacada:true` = se anuncia con el aviso emergente (default del código; el admin lo
      puede cambiar desde Panel de Control → Novedades sin tocar el código).
      `perm:'clave'` = audiencia restringida a quien tenga ese permiso (vacío = todos). */
+  { build:'2026.07.16', fecha:'16 jul 2026', area:'Cobranza', icon:'🕓', destacada:true,
+    titulo:'Ya se ve el historial completo de pacientes de 2024 y 2025',
+    puntos:['**El estado de cuenta ya encuentra a las pacientes de años anteriores.** Antes salía vacío para casi todo 2024/2025 — no porque faltaran los datos (siempre estuvieron), sino porque esas ventas se guardaron con el nombre **abreviado** («Melina PA») y el buscador te ofrece el **completo** («Melina Piña Amaros»). El sistema no los reconocía como la misma persona.',
+      '**Ahora los empata solo**, con una regla conservadora: mismo primer nombre + las iniciales del apellido en orden. Si hay una sola coincidencia, la usa; si dudara entre dos personas, **no adivina**.',
+      'Aplica igual al **Estado de cobranza**. No se tocó ni un dato: es solo que ahora el sistema sabe que «Melina PA» y «Melina Piña Amaros» son la misma paciente.',
+      'Quedan pendientes, aparte: unas **47 pacientes** puramente históricas que **no están en el catálogo** (hay que darlas de alta para que salgan en el buscador) y las ventas a **nombre de pareja** («X y Y»). Te aviso cuando estén.'],
+    comoUsar:['No hay que hacer nada: busca a la paciente como siempre en **Estado de Cuenta** o **Cobranza** y ya aparece su historial.'] },
+  { build:'2026.07.16', fecha:'16 jul 2026', area:'General', icon:'💡', destacada:true,
+    titulo:'Nuevo: Asistente de comandos — dale órdenes escribiendo (o dictando con Win+H)',
+    puntos:['**Botón 💡 abajo a la derecha (o Ctrl+I).** Le escribes una orden en lenguaje normal y la ejecuta: «ve a cobranza», «¿cuánto debe Diana García?», «imprime el estado de cuenta de X», «crea una cuenta por pagar de VIANTO por $32,615 folio A-123 vence 30 de agosto».',
+      '**No es una IA que adivina.** Entiende ciertas formas y, si duda, pregunta en vez de inventar. Al abrirlo te muestra **ejemplos clicables** para que descubras qué puedes pedir.',
+      '**Lo que crea o cambia algo, primero te lo muestra para confirmar.** Ves proveedor, importe, folio y fecha ANTES de que se cree nada. Si dictaste «32 mil» y entendió «320 mil», lo corriges ahí.',
+      '**Para dictar: Win+H de Windows**, no el micrófono del ERP. El audio con nombres de pacientes **no sale de tu equipo** — es un pilar de privacidad de la clínica.',
+      'Esta primera versión ya **navega** de verdad; **preguntar/imprimir/crear** se terminan de conectar en el siguiente paso (verás una vista previa de lo que entendió).'],
+    comoUsar:['Pulsa **💡** (abajo a la derecha) o **Ctrl+I** desde cualquier pantalla.','¿Prefieres dictar? Activa **Win+H**, habla, y el texto aparece solo.'] },
   { build:'2026.07.16', fecha:'16 jul 2026', area:'Cobranza', icon:'📥', destacada:true, perm:'editar_ingresos',
     titulo:'Corregir una cuenta por cobrar: ahora sí se puede, y mueve TODO',
     puntos:['**El callejón sin salida se acabó.** Si te equivocabas al capturar (el nombre de la paciente, la cantidad, el producto — lo que sea), en Cuentas por Cobrar solo veías un texto gris que decía «venta OP-…» con un aviso de que eso «se corrige desde Ingresos»… pero no te llevaba a ningún lado. Había que salir, adivinar el folio y buscarlo a mano.',
@@ -37733,6 +37748,21 @@ async function _novCfgGuardar(){
     }
   },
 
+
+  { id:'asistente', group:'admin', icon:'💡', title:'Asistente de comandos (escribir o dictar)',
+    keywords:'asistente comando comandos voz dictar dictado win+h escribir natural lenguaje interpretar navegar ir a cuanto debe estado de cuenta crear cxp flotante bombilla ctrl+i',
+    intro:'El **Asistente de comandos** te deja darle una orden al sistema **escribiendo** en lenguaje normal, en vez de buscar el menú. Es de **vocabulario acotado** (no es una IA que adivina): entiende ciertas formas y, si duda, pregunta en vez de inventar. Para **dictar** en lugar de teclear, usa **Win+H** de Windows — el audio lo procesa tu sistema operativo, **no sale de tu equipo por VestaOS** (regla de privacidad de la clínica).',
+    pasos:[
+      'Pulsa el botón flotante **💡** (abajo a la derecha) o el atajo **Ctrl+I**.',
+      'Al abrir verás **ejemplos por categoría** (Navegar, Preguntar, Imprimir, Crear). Un clic los ejecuta — así descubres qué puedes pedir.',
+      'Escribe tu orden y **Enter**. Para dictarla: activa **Win+H**, habla, y el texto aparece en el campo; luego Enter.'
+    ],
+    bloques:[
+      { h:'Qué entiende hoy', p:'**Navegar** («ve a cobranza», «ábreme egresos», «llévame a nómina») — respeta las pantallas que tu rol tenga bloqueadas. **Preguntar** («¿cuánto debe Diana García?»). **Imprimir** («imprime el estado de cuenta de X»). **Crear** («crea una cuenta por pagar de VIANTO por $32,615 folio A-123 vence 30 de agosto»).' },
+      { h:'Siempre confirmas antes de que escriba', p:'Todo lo que **crea o cambia** algo (como una cuenta por pagar) primero te muestra una **tarjeta con los datos que entendió** para que la revises **antes** de confirmar. Si dictaste «32 mil» y entendió «320 mil», lo ves ahí y lo corriges. Nunca toca nada sin tu confirmación.' },
+      { h:'Dictar sin exponer datos', p:'El reconocimiento de voz de Chrome mandaría el audio a Google, y aquí van nombres de pacientes — eso está **prohibido**. Por eso VestaOS **no** enciende el micrófono. Para dictar se usa **Win+H**, que transcribe en tu propia computadora.' }
+    ],
+    comoUsar:['El botón 💡 está siempre visible, abajo a la derecha.','Ábrelo con **Ctrl+I** desde cualquier pantalla.'] },
   { id:'chat', group:'admin', icon:'💬', title:'Chat interno',
     keywords:'chat mensaje directo dm canal general equipo adjunto tarea emoji flotante sondeo online alias nombre',
     intro:'El **Chat interno** permite conversar con el equipo dentro del ERP: un **canal general** y **mensajes directos**. Funciona por **sondeo cada 7 segundos** (no es tiempo real; los mensajes llegan en el siguiente sondeo).',
@@ -40568,6 +40598,325 @@ try {
 } catch(e){}
 
 /* ══ HF-BUSCADOR-MANUAL (FIN) ══ */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ASISTENTE DE COMANDOS  ·  VestaOS  ·  SIN IA
+   ───────────────────────────────────────────────────────────────────────────
+   Le das una orden por texto y la ejecuta: "ve a cobranza", "cuánto debe Diana
+   García", "imprime el estado de cuenta de X", "crea una CxP de VIANTO por
+   $32,615 folio A-123 vence 30 ago".
+
+   NO es IA. Es un parser de reglas: reconoce el VERBO (navegar/consultar/
+   imprimir/crear) y extrae las ENTIDADES contra los catálogos REALES del
+   sistema. Una IA inventaría un proveedor plausible; esto resuelve contra tu
+   catálogo y, si duda, pregunta. Para tu caso es MÁS confiable, no menos.
+
+   Reglas de la casa, no negociables:
+   · Nada de voz: el ASR de Chrome sube el audio a Google, y aquí van nombres de
+     pacientes. Para dictar, Win+H del sistema operativo escribe en el campo.
+   · Toda intención que ESCRIBA (crear CxP) muestra una tarjeta de confirmación
+     con los datos ya resueltos ANTES de tocar nada. Si oyó "320 mil" donde iban
+     "32 mil", se ve y se corrige ahí.
+   · Lo que escribe pasa por el backend, que ya valida permiso (build .226). El
+     asistente no es una puerta trasera: si el rol no puede, el backend lo frena.
+   ═══════════════════════════════════════════════════════════════════════════ */
+(function(){
+  var _asisOpen = false, _asisBusy = false;
+
+  function _asisNorm(s){
+    return String(s||'').toLowerCase()
+      .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i')
+      .replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').replace(/ñ/g,'n')
+      .replace(/\s+/g,' ').trim();
+  }
+  function _asisEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+
+  /* ── Los ejemplos que se muestran al abrir (así el usuario DESCUBRE qué
+     puede pedir). Se agrupan por intención; un clic los ejecuta. Cuando se
+     agregue una intención nueva, se agrega aquí y aparece sola. ── */
+  var _ASIS_EJEMPLOS = [
+    { grupo:'Navegar', icon:'🧭', ítems:['ve a cobranza','ábreme egresos','llévame a nómina','ir a cuentas por cobrar'] },
+    { grupo:'Preguntar (solo lectura)', icon:'💬', ítems:['¿cuánto debe Diana García?','saldo de Melina Piña'] },
+    { grupo:'Imprimir', icon:'🖨️', ítems:['imprime el estado de cuenta de Diana García'] },
+    { grupo:'Crear (pide confirmación)', icon:'✍️', ítems:['crea una cuenta por pagar de VIANTO por $32,615 folio A-123 vence 30 de agosto'] }
+  ];
+
+  /* ── Resolver de VISTA: contra menuItems, que loadMenu ya dejó filtrado por
+     permisos y vistas bloqueadas. Nunca contra una lista propia. Devuelve
+     {ok, id, label} o {ok:false, candidatos:[]}. ── */
+  function _asisResolverVista(frase){
+    var mi = (typeof menuItems !== 'undefined' && menuItems) ? menuItems : [];
+    var q = _asisNorm(frase);
+    // Quita el verbo de navegación para quedarse con el destino
+    q = q.replace(/^(ve(te)?|ir|abre(me)?|llevame|muestrame|ábreme|entra(r)?|vamos)\s+(a(l)?\s+)?/,'').trim();
+    if (!q) return { ok:false, candidatos:[] };
+    var navegables = mi.filter(function(i){ return i && i.id && i.tipo !== 'grupo'; });
+    var exact = navegables.filter(function(i){ return _asisNorm(i.label) === q; });
+    if (exact.length === 1) return { ok:true, id:exact[0].id, label:exact[0].label };
+    // Prefijo / substring del label
+    var pref = navegables.filter(function(i){ return _asisNorm(i.label).indexOf(q) === 0; });
+    var subs = navegables.filter(function(i){ return _asisNorm(i.label).indexOf(q) > -1; });
+    var cand = (pref.length ? pref : subs);
+    if (cand.length === 1) return { ok:true, id:cand[0].id, label:cand[0].label };
+    if (cand.length > 1) return { ok:false, candidatos:cand.slice(0,6).map(function(i){ return {id:i.id,label:i.label}; }) };
+    return { ok:false, candidatos:[] };
+  }
+
+  /* ── EL PARSER. Detecta la intención por el verbo y delega. Orden importa:
+     lo más específico primero. Devuelve un objeto {intencion, ...} que la UI
+     pinta; NO ejecuta nada por sí solo salvo navegar (que es idempotente). ── */
+  function _asisInterpretar(fraseRaw){
+    var frase = String(fraseRaw||'').trim();
+    var n = _asisNorm(frase);
+    if (!n) return { intencion:'vacio' };
+
+    // NAVEGAR — "ve a X", "abre X", "llévame a X"
+    if (/^(ve(te)?|ir|abre(me)?|llevame|muestrame|abreme|vamos)\b/.test(n)){
+      var v = _asisResolverVista(frase);
+      if (v.ok) return { intencion:'navegar', id:v.id, label:v.label };
+      return { intencion:'navegar_ambiguo', candidatos:v.candidatos, q:frase };
+    }
+
+    // CONSULTAR SALDO — "cuánto debe X", "saldo de X"
+    var mSaldo = n.match(/^(cuanto\s+debe|saldo\s+de|adeudo\s+de|que\s+debe)\s+(.+)$/);
+    if (mSaldo){ return { intencion:'saldo', paciente:frase.replace(/^\s*\S+\s+\S+\s+/,'').trim() || mSaldo[2] }; }
+
+    // IMPRIMIR ESTADO DE CUENTA — "imprime el estado de cuenta de X"
+    var mImp = n.match(/^(imprime|imprimir|dame|genera)\s+(el\s+)?(estado\s+de\s+cuenta)\s+(de\s+)?(.+)$/);
+    if (mImp){ return { intencion:'imprimir_ec', paciente:frase.replace(/.*?(estado de cuenta)\s+(de\s+)?/i,'').trim() }; }
+
+    // CREAR CXP — se detecta el verbo; la extracción de campos va en su handler
+    if (/^(crea|crear|nueva|registra|da\s+de\s+alta)\b.*(cuenta\s+por\s+pagar|cxp|orden\s+de\s+pago)/.test(n)){
+      return _asisParsearCxP(frase);
+    }
+
+    return { intencion:'desconocido', q:frase };
+  }
+
+  /* ── Extractor de la CxP. Todo lo que saca lo marca para que la tarjeta de
+     confirmación lo muestre: montos y fechas mal oídos se ven ANTES de escribir. ── */
+  function _asisParsearCxP(frase){
+    var out = { intencion:'crear_cxp', proveedor:'', monto:null, folio:'', vencimiento:'', crudo:frase };
+    // Monto. Dos trampas ya vistas en prueba, ambas costaban dinero:
+    //  · La alternancia "miles|simple" probaba miles PRIMERO y en "8814.26"
+    //    casaba "881" y paraba en el punto -> $881 en vez de $8,814.26.
+    //  · Un folio "A-123" trae dígitos: si el monto se busca en toda la frase
+    //    sin ancla, podría pescarlos.
+    // Solución: se busca PRIMERO un monto con "$" o con "por <número>" (las dos
+    // formas en que la gente dice el importe); solo si no hay, se cae al primer
+    // número decimal/entero de la frase. Y el patrón numérico exige que los
+    // grupos de miles sean COMPLETOS (\d{3}), así "8814.26" no se parte.
+    function _num(str){ return parseFloat(String(str).replace(/[,\s]/g,'')); }
+    var NUMPAT = '(\\d{1,3}(?:[,\\s]\\d{3})+(?:\\.\\d{1,2})?|\\d+(?:\\.\\d{1,2})?)';
+    var mMonto = frase.match(new RegExp('\\$\\s*' + NUMPAT))          // "$32,615"
+              || frase.match(new RegExp('\\bpor\\s+\\$?\\s*' + NUMPAT, 'i'));  // "por 8814.26"
+    if (!mMonto){
+      // Último recurso: primer número, PERO no si va pegado a "folio" (evita
+      // tragarse el número del folio).
+      var sinFolio = frase.replace(/folio\s+[A-Za-z0-9\-\/]+/ig,' ');
+      mMonto = sinFolio.match(new RegExp(NUMPAT));
+    }
+    if (mMonto){ var v = _num(mMonto[1]); if (isFinite(v)) out.monto = v; }
+    // Folio: "folio X"
+    var mFolio = frase.match(/folio\s+([A-Za-z0-9\-\/]+)/i);
+    if (mFolio){ out.folio = mFolio[1]; }
+    // Vencimiento: "vence/vencimiento <fecha>" en español natural o ISO
+    var mVenc = frase.match(/venc\w*\s+(?:a(?:l)?\s+|el\s+)?(.+?)(?:\s*$|\s+folio|\s+por)/i);
+    if (mVenc){ out.vencimiento = _asisFecha(mVenc[1]); }
+    // Proveedor: "de <PROVEEDOR>" hasta el primer conector
+    var mProv = frase.match(/\bde\s+([^,]+?)(?:\s+por\b|\s+folio\b|\s+venc\w*|\s*$)/i);
+    if (mProv){ out.proveedor = mProv[1].trim(); }
+    return out;
+  }
+
+  /* Convierte "30 de agosto" / "30 ago" / "2026-08-30" a ISO. Sin año explícito
+     usa el en curso (o el siguiente si la fecha ya pasó, para un vencimiento). */
+  var _ASIS_MESES = {enero:1,febrero:2,marzo:3,abril:4,mayo:5,junio:6,julio:7,agosto:8,septiembre:9,setiembre:9,octubre:10,noviembre:11,diciembre:12,
+    ene:1,feb:2,mar:3,abr:4,may:5,jun:6,jul:7,ago:8,sep:9,oct:10,nov:11,dic:12};
+  function _asisFecha(txt){
+    var s = _asisNorm(txt);
+    var iso = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (iso) return iso[1]+'-'+('0'+iso[2]).slice(-2)+'-'+('0'+iso[3]).slice(-2);
+    var m = s.match(/(\d{1,2})\s*(?:de\s+)?([a-z]+)(?:\s+(?:de\s+)?(\d{4}))?/);
+    if (m && _ASIS_MESES[m[2]]){
+      var d = parseInt(m[1],10), mes = _ASIS_MESES[m[2]], anio = m[3]?parseInt(m[3],10):null;
+      if (!anio){
+        // GAS/JS: sin año, se resuelve en el handler que conoce "hoy". Aquí se
+        // deja el año en curso; el backend/tarjeta pueden ajustarlo.
+        anio = (new Date()).getFullYear();
+      }
+      return anio+'-'+('0'+mes).slice(-2)+'-'+('0'+d).slice(-2);
+    }
+    return txt.trim(); // se muestra tal cual en la tarjeta si no se pudo normalizar
+  }
+
+  /* ── Ejecuta lo que devolvió el parser. Solo NAVEGAR corre directo (idempotente
+     y ya filtrado por permisos). El resto pinta su UI (respuesta o tarjeta). ── */
+  function _asisEjecutar(res){
+    var cuerpo = document.getElementById('asis-resp');
+    if (!cuerpo) return;
+    if (res.intencion === 'navegar'){
+      cuerpo.innerHTML = '<div class="asis-ok">Abriendo <b>'+_asisEsc(res.label)+'</b>…</div>';
+      try { if (typeof navigateTo === 'function') navigateTo(res.id); } catch(e){}
+      setTimeout(_asisClose, 400);
+      return;
+    }
+    if (res.intencion === 'navegar_ambiguo'){
+      if (!res.candidatos.length){ cuerpo.innerHTML = '<div class="asis-warn">No encontré ninguna pantalla que se llame así. Prueba con el nombre del menú, ej. «ve a cobranza».</div>'; return; }
+      var h = '<div class="asis-q">¿Cuál de estas querías abrir?</div><div class="asis-cands">';
+      res.candidatos.forEach(function(c){ h += '<button class="asis-cand" data-nav="'+_asisEsc(c.id)+'">'+_asisEsc(c.label)+'</button>'; });
+      cuerpo.innerHTML = h + '</div>';
+      Array.prototype.forEach.call(cuerpo.querySelectorAll('.asis-cand'), function(b){
+        b.onclick = function(){ try{ navigateTo(b.getAttribute('data-nav')); }catch(e){} _asisClose(); };
+      });
+      return;
+    }
+    // Intenciones que aún no cablo en esta v2 inicial: se anuncian honestamente.
+    if (res.intencion === 'saldo' || res.intencion === 'imprimir_ec'){
+      cuerpo.innerHTML = '<div class="asis-warn">Entendí que quieres <b>'+
+        (res.intencion==='saldo'?'consultar el saldo':'imprimir el estado de cuenta')+
+        '</b> de <b>'+_asisEsc(res.paciente)+'</b>. Esta parte se está terminando de conectar '+
+        'junto con el arreglo de los nombres de 2024/2025. Por ahora, ábrelo desde el menú Cobranza.</div>';
+      return;
+    }
+    if (res.intencion === 'crear_cxp'){
+      var f = res;
+      cuerpo.innerHTML =
+        '<div class="asis-q">Voy a crear esta cuenta por pagar. Revisa <b>antes</b> de confirmar:</div>'+
+        '<div class="asis-card">'+
+          _asisFila('Proveedor', f.proveedor || '⚠ no lo entendí')+
+          _asisFila('Importe', f.monto!=null ? ('$'+f.monto.toLocaleString('es-MX',{minimumFractionDigits:2})) : '⚠ no lo entendí')+
+          _asisFila('Folio', f.folio || '—')+
+          _asisFila('Vence', f.vencimiento || '—')+
+        '</div>'+
+        '<div class="asis-warn" style="margin-top:8px">Esta parte (crear la CxP de verdad) se conecta en el siguiente paso, con la '+
+        'resolución del proveedor contra tu catálogo. Por ahora es una vista previa de lo que el asistente entendió — '+
+        'no se ha creado nada.</div>';
+      return;
+    }
+    if (res.intencion === 'desconocido'){
+      cuerpo.innerHTML = '<div class="asis-warn">No entendí «'+_asisEsc(res.q)+'». '+
+        'Prueba con una de las formas de abajo — el asistente aún es de vocabulario acotado, no adivina.</div>'+_asisEjemplosHTML();
+      return;
+    }
+  }
+  function _asisFila(k,v){ return '<div class="asis-cf"><span>'+_asisEsc(k)+'</span><b>'+_asisEsc(v)+'</b></div>'; }
+
+  function _asisEjemplosHTML(){
+    var h = '<div class="asis-ejs">';
+    _ASIS_EJEMPLOS.forEach(function(g){
+      h += '<div class="asis-ejg"><div class="asis-ejt">'+g.icon+' '+_asisEsc(g.grupo)+'</div>';
+      g['ítems'].forEach(function(t){ h += '<button class="asis-ej" data-ej="'+_asisEsc(t)+'">'+_asisEsc(t)+'</button>'; });
+      h += '</div>';
+    });
+    return h + '</div>';
+  }
+
+  function _asisRun(){
+    var inp = document.getElementById('asis-input');
+    if (!inp || _asisBusy) return;
+    var frase = inp.value.trim();
+    if (!frase) return;
+    _asisBusy = true;
+    try { _asisEjecutar(_asisInterpretar(frase)); }
+    catch(e){ var c=document.getElementById('asis-resp'); if(c) c.innerHTML='<div class="asis-warn">Algo falló al interpretar: '+_asisEsc(e.message)+'</div>'; }
+    _asisBusy = false;
+  }
+
+  function _asisEnsureDom(){
+    if (document.getElementById('asis-panel')) return;
+    var st = document.createElement('style');
+    st.textContent =
+      '#asis-fab{position:fixed;right:20px;bottom:84px;width:54px;height:54px;border-radius:50%;background:var(--color-primary,#c46a7a);color:#fff;border:none;font-size:22px;cursor:pointer;z-index:9000;box-shadow:0 6px 20px rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center}'+
+      '#asis-panel{position:fixed;right:20px;bottom:148px;width:380px;max-width:92vw;max-height:74vh;background:var(--card-bg,#fff);border:1px solid var(--color-divider,#e5e7eb);border-radius:14px;box-shadow:0 16px 48px rgba(0,0,0,.24);z-index:9001;display:none;flex-direction:column;overflow:hidden}'+
+      '#asis-panel.open{display:flex}'+
+      '.asis-hd{padding:13px 16px;border-bottom:1px solid var(--color-divider,#e5e7eb);font-weight:800;font-size:14px;color:var(--color-text,#111);display:flex;align-items:center;gap:8px}'+
+      '.asis-hd small{font-weight:500;color:var(--color-text-muted,#888);font-size:11px}'+
+      '.asis-bd{padding:14px 16px;overflow-y:auto}'+
+      '#asis-input{width:100%;padding:11px 13px;border:1.5px solid var(--color-divider,#ddd);border-radius:9px;font-family:inherit;font-size:13.5px;background:var(--color-surface-2,#fafafa);color:var(--color-text,#111);box-sizing:border-box}'+
+      '#asis-input:focus{outline:none;border-color:var(--color-primary,#c46a7a)}'+
+      '.asis-hint{font-size:11px;color:var(--color-text-muted,#999);margin:7px 2px 0}'+
+      '.asis-ejs{margin-top:12px}.asis-ejg{margin-bottom:11px}'+
+      '.asis-ejt{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--color-text-muted,#999);margin-bottom:5px}'+
+      '.asis-ej{display:block;width:100%;text-align:left;padding:7px 10px;margin-bottom:4px;border:1px solid var(--color-divider,#eee);border-radius:7px;background:var(--color-surface-2,#fafafa);color:var(--color-text,#333);font-size:12.5px;font-family:inherit;cursor:pointer}'+
+      '.asis-ej:hover{border-color:var(--color-primary,#c46a7a);color:var(--color-primary,#c46a7a)}'+
+      '.asis-ok{color:#166534;font-size:13px;font-weight:600}'+
+      '.asis-warn{color:#8a5a00;background:#fff8e6;border:1px solid #f5e0a8;border-radius:8px;padding:9px 11px;font-size:12.5px;line-height:1.5}'+
+      '.asis-q{font-size:12.5px;font-weight:700;color:var(--color-text,#111);margin-bottom:8px}'+
+      '.asis-cands,.asis-card{display:flex;flex-direction:column;gap:6px}'+
+      '.asis-cand{text-align:left;padding:8px 11px;border:1px solid var(--color-divider,#ddd);border-radius:7px;background:var(--color-surface-2,#fafafa);color:var(--color-text,#111);font-size:12.5px;font-family:inherit;cursor:pointer}'+
+      '.asis-cand:hover{border-color:var(--color-primary,#c46a7a)}'+
+      '.asis-card{background:var(--color-surface-2,#fafafa);border:1px solid var(--color-divider,#e5e7eb);border-radius:9px;padding:11px}'+
+      '.asis-cf{display:flex;justify-content:space-between;gap:12px;padding:4px 0;font-size:12.5px;border-bottom:1px dashed var(--color-divider,#eee)}'+
+      '.asis-cf:last-child{border-bottom:none}.asis-cf span{color:var(--color-text-muted,#888)}.asis-cf b{color:var(--color-text,#111);text-align:right}';
+    document.head.appendChild(st);
+
+    var fab = document.createElement('button');
+    fab.id='asis-fab'; fab.setAttribute('aria-label','Asistente de comandos'); fab.innerHTML='💡';
+    fab.title='Asistente de comandos (Ctrl+I)';
+    fab.onclick=_asisToggle;
+    document.body.appendChild(fab);
+
+    var pnl = document.createElement('div');
+    pnl.id='asis-panel';
+    pnl.innerHTML =
+      '<div class="asis-hd">💡 Asistente <small>escribe o dicta con Win+H</small></div>'+
+      '<div class="asis-bd">'+
+        '<input id="asis-input" type="text" autocomplete="off" placeholder="Escribe qué necesitas… ej. «ve a cobranza»">'+
+        '<div class="asis-hint">Enter para ejecutar. Para dictar, activa <b>Win+H</b> y habla — el audio no sale de tu equipo por VestaOS.</div>'+
+        '<div id="asis-resp"></div>'+
+      '</div>';
+    document.body.appendChild(pnl);
+
+    var inp = document.getElementById('asis-input');
+    inp.addEventListener('keydown', function(e){
+      var k = e.key || '';
+      if (k === 'Enter'){ e.preventDefault(); _asisRun(); }
+      else if (k === 'Escape'){ _asisClose(); }
+    });
+    document.getElementById('asis-resp').innerHTML = _asisEjemplosHTML();
+    _asisBindEjemplos();
+  }
+
+  function _asisBindEjemplos(){
+    var c = document.getElementById('asis-resp'); if (!c) return;
+    Array.prototype.forEach.call(c.querySelectorAll('.asis-ej'), function(b){
+      b.onclick = function(){
+        var inp = document.getElementById('asis-input');
+        if (inp){ inp.value = b.getAttribute('data-ej'); _asisRun(); }
+      };
+    });
+  }
+
+  function _asisToggle(){ _asisOpen ? _asisClose() : _asisOpen_(); }
+  function _asisOpen_(){
+    _asisEnsureDom();
+    document.getElementById('asis-panel').classList.add('open');
+    _asisOpen = true;
+    var inp = document.getElementById('asis-input');
+    if (inp){ inp.value=''; setTimeout(function(){ inp.focus(); }, 30); }
+    var r = document.getElementById('asis-resp'); if (r){ r.innerHTML=_asisEjemplosHTML(); _asisBindEjemplos(); }
+  }
+  function _asisClose(){ var p=document.getElementById('asis-panel'); if(p) p.classList.remove('open'); _asisOpen=false; }
+
+  // Atajo Ctrl+I (Ctrl+K ya es la paleta). preventDefault para no chocar con el
+  // "itálica" del navegador en campos de texto.
+  document.addEventListener('keydown', function(e){
+    var k = (e.key||'').toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && (k === 'i' || e.keyCode === 73)){
+      e.preventDefault(); _asisToggle();
+    }
+  }, true);
+
+  try { window.asisOpen = _asisOpen_; window.asisToggle = _asisToggle; } catch(e){}
+  // El FAB se crea al primer uso o al cargar; se pinta en cuanto el DOM esté listo.
+  try {
+    if (document.body) _asisEnsureDom();
+    else document.addEventListener('DOMContentLoaded', _asisEnsureDom);
+  } catch(e){}
+})();
+/* ══ ASISTENTE DE COMANDOS (FIN) ══ */
 
 </script>
 

@@ -941,7 +941,10 @@ function readSuscripcionesCrio(body) {
 
 /* ═════════════════ Estado de cuenta de cobranza (por paciente) ═════════════════ */
 // Detalle COMPLETO de lo que se le vendió al paciente (todas sus líneas de BD_Ingresos).
-function _cobVentasPaciente(keyBuscar) {
+// nombreOrig: el nombre SIN normalizar, para el match tolerante de abreviados
+// (keyBuscar ya viene aplastado por _cobKeyNom y perdió la forma "Melina PA").
+function _cobVentasPaciente(keyBuscar, nombreOrig) {
+  var pacienteNombre = nombreOrig || keyBuscar;
   var out = [];
   var sh = SpreadsheetApp.openById(INGRESOS_SS_ID).getSheetByName(BD_INGRESOS_TAB);
   if (!sh) return out;
@@ -954,7 +957,10 @@ function _cobVentasPaciente(keyBuscar) {
       iPag = hc('pagado'), iFP = hc('formapago', 'forma de pago', 'forma pago');
   for (var r = 1; r < data.length; r++) {
     var row = data[r];
-    if (_cobKeyNom(row[iPac]) !== keyBuscar) continue;
+    // Exacto O tolerante (abreviado 2024/2025 "Melina PA" ↔ "Melina Piña Amaros").
+    // _ecMismoPaciente vive en analisis.gs; en Apps Script comparten scope global.
+    if (_cobKeyNom(row[iPac]) !== keyBuscar &&
+        !(typeof _ecMismoPaciente === 'function' && _ecMismoPaciente(row[iPac], pacienteNombre))) continue;
     var total = _cobNum(row[iTotal]);
     var pag = iPag > -1 ? _cobNum(row[iPag]) : 0;
     var saldoL = (pag > 0.01 && pag < total - 0.01) ? (total - pag) : 0; // saldo real solo si pago parcial
@@ -1151,9 +1157,10 @@ function readEstadoCobranza(pacienteNombre) {
     if (!pacienteNombre) return { ok: false, error: 'Nombre de paciente requerido' };
     var keyBuscar = _cobKeyNom(pacienteNombre);
 
-    // Motor A: saldos de este paciente
+    // Motor A: saldos de este paciente. Exacto O tolerante (abreviado 2024/2025).
     var saldos = _cobBuildSaldos().ops.filter(function (o) {
-      return _cobKeyNom(o.paciente) === keyBuscar || o.paciente === pacienteNombre;
+      return _cobKeyNom(o.paciente) === keyBuscar || o.paciente === pacienteNombre ||
+             (typeof _ecMismoPaciente === 'function' && _ecMismoPaciente(o.paciente, pacienteNombre));
     });
     // Si está enmascarado, _cobBuildSaldos ya devolvió OP-#### y no se puede filtrar por nombre;
     // en ese caso no exponemos detalle por nombre.
@@ -1180,7 +1187,7 @@ function readEstadoCobranza(pacienteNombre) {
     var susCargosTotal = 0; susCargos.forEach(function (r) { susCargosTotal += r.monto; });
 
     // Detalle completo de lo vendido (todas las líneas de ingresos del paciente)
-    var ventas = _cobMasked() ? [] : _cobVentasPaciente(keyBuscar);
+    var ventas = _cobMasked() ? [] : _cobVentasPaciente(keyBuscar, pacienteNombre);
     var totalVendido = 0, totalPagadoVentas = 0;
     ventas.forEach(function (v) { totalVendido += v.total; totalPagadoVentas += v.pagado; });
 

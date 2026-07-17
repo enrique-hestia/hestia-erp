@@ -700,6 +700,93 @@ function _anCantCelda(iCant, row) {
   return isFinite(n) ? n : null;
 }
 
+/* ── MATCH TOLERANTE DE NOMBRE DE PACIENTE ──────────────────────────────────
+   Por qué existe: las ventas de 2024/2025 guardan el nombre ABREVIADO ("Melina
+   PA") mientras el buscador ofrece el COMPLETO del catálogo ("Melina Piña
+   Amaros"). Un match exacto (el que había) devolvía el estado de cuenta VACÍO
+   para casi todo 2024/2025 — el 75% del historial. Los datos siempre estuvieron
+   ahí; el sistema no los reconocía.
+
+   Regla, sacada de los patrones reales (analizados sobre los datos vivos):
+   el patrón dominante es "primer nombre + iniciales de apellido". Entonces una
+   fila abreviada empata con el nombre buscado si:
+     · el PRIMER nombre es igual, y
+     · las demás palabras de la fila (iniciales o palabras) aparecen EN ORDEN
+       como inicial de las palabras del nombre buscado.
+   "melina pa"  vs  "melina piña amaros"  → primer nombre melina=melina;
+   "p","a" son iniciales de "piña","amaros" en orden → MATCH.
+   "melina g"   vs  "melina piña amaros"  → "g" no es inicial de ninguna → NO.
+
+   NUNCA adivina de más: exige que el primer nombre sea idéntico. No hace
+   Levenshtein ni fonética — eso traería falsos positivos, y aquí un falso
+   positivo mezcla el dinero de DOS pacientes. Ante la duda, no empata. */
+function _ecTokens(s){
+  return String(s||'').toLowerCase()
+    .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i')
+    .replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').replace(/ñ/g,'n')
+    .replace(/\([^)]*\)/g,' ')          // quita "(Ciclo 1)" y similares
+    .replace(/[^a-z0-9\s]/g,' ')         // guiones, puntos, etc. → espacio
+    .replace(/\s+/g,' ').trim()
+    .split(' ').filter(Boolean);
+}
+/* ¿La fila `filaNom` (abreviada) corresponde al paciente `buscadoNom` (completo)?
+   Simétrica en la práctica: se prueba en ambos sentidos y basta con que uno case,
+   porque no se sabe cuál de los dos es el abreviado. */
+/* El abreviado se aplana a una SECUENCIA de "piezas": cada pieza es o una
+   palabra ("piña") o una inicial. El truco de los datos reales: "PA" es UN token
+   pero son DOS iniciales pegadas (Piña Amaros). Regla: un token del lado corto
+   que sea puras consonantes o de ≤3 letras y NO aparezca como palabra en el lado
+   largo se descompone en iniciales (P, A). Un token que SÍ es palabra ("fuentes")
+   se deja entero. Así "melina pa" → [melina, P, A] y "carolina pm" → [carolina, P, M]. */
+function _ecPiezas(tokens, refLargo){
+  var refSet = {}; for (var i=0;i<refLargo.length;i++) refSet[refLargo[i]] = 1;
+  var out = [];
+  for (var t=0;t<tokens.length;t++){
+    var w = tokens[t];
+    if (t === 0){ out.push({ini:false, v:w}); continue; }   // primer nombre entero
+    // ¿es una palabra real del nombre largo? entonces palabra entera
+    if (refSet[w]){ out.push({ini:false, v:w}); continue; }
+    // token corto sin vocales-como-palabra → cadena de iniciales
+    if (w.length <= 3 && !/[aeiou]{2}/.test(w)){
+      for (var c=0;c<w.length;c++) out.push({ini:true, v:w.charAt(c)});
+    } else {
+      out.push({ini:false, v:w});   // palabra larga que no está en la ref: se exige igual
+    }
+  }
+  return out;
+}
+function _ecMismoPaciente(filaNom, buscadoNom){
+  var a = _ecTokens(filaNom), b = _ecTokens(buscadoNom);
+  if (!a.length || !b.length) return false;
+  if (a.join(' ') === b.join(' ')) return true;      // exacto (camino 2026)
+  if (a[0] !== b[0]) return false;                   // el primer nombre TIENE que coincidir
+
+  // corto = el abreviado; largo = el completo. NO se puede decidir por número de
+  // tokens: "Marene M A" y "Marene Mendez Ayala" tienen 3 tokens cada uno. El
+  // abreviado es el que tiene MENOS letras totales (iniciales sueltas pesan poco).
+  var lenA = a.join('').length, lenB = b.join('').length;
+  var corto = lenA <= lenB ? a : b;
+  var largo = lenA <= lenB ? b : a;
+  var piezas = _ecPiezas(corto, largo);
+
+  var li = 1; // el primer nombre (índice 0) ya casó
+  for (var pi = 1; pi < piezas.length; pi++){
+    var p = piezas[pi], ok = false;
+    for (; li < largo.length; li++){
+      var lw = largo[li];
+      if (p.ini){
+        // inicial: basta que la palabra del largo empiece con esa letra
+        if (lw.charAt(0) === p.v){ ok = true; li++; break; }
+      } else {
+        // palabra: igual, o el largo empieza con ella (subcadena de apellido)
+        if (lw === p.v || lw.indexOf(p.v) === 0){ ok = true; li++; break; }
+      }
+    }
+    if (!ok) return false;
+  }
+  return true;
+}
+
 function readEstadoCuentaPaciente(pacienteNombre) {
   try {
     if (!pacienteNombre) return { ok: false, error: 'Nombre de paciente requerido' };
@@ -754,7 +841,9 @@ function readEstadoCuentaPaciente(pacienteNombre) {
     for (var r = 1; r < data.length; r++) {
       var row = data[r];
       var pac = String(row[iPac] || '').trim().toLowerCase();
-      if (pac !== nombreBuscar) continue;
+      // Exacto O tolerante (abreviado 2024/2025). El tolerante solo se consulta si
+      // el exacto falla, así no cambia nada del comportamiento de 2026.
+      if (pac !== nombreBuscar && !_ecMismoPaciente(pac, nombreBuscar)) continue;
       // ── VENTA CANCELADA → no existe para el estado de cuenta ───────────────────
       // cancelacion.gs marca Cancelada=true pero DEJA TotalPagar y Pagado intactos
       // (es el registro histórico de lo que pasó, y el reverso del dinero ya se
