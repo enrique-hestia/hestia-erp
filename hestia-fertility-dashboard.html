@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.228 -->
+﻿<!-- app-build:2026.07.16.229 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -24009,7 +24009,8 @@ var _REPORT_TPL_LIST=[
   {id:'moderno',     label:'Moderno l\xedneas',desc:'Degradado accent · montos en rosa'},
   {id:'celula',      label:'C\xe9lula',        desc:'Minimal org\xe1nico · marca de agua blastocisto'},
   {id:'editorial',   label:'Hestia Editorial', desc:'Serif boutique · llama de Hestia · doble filete'},
-  {id:'vida',        label:'Vida',             desc:'Banda rosa · logo blanco · ondas de ultrasonido'}
+  {id:'vida',        label:'Vida',             desc:'Banda rosa · logo blanco · ondas de ultrasonido'},
+  {id:'pacienteagua',label:'Paciente',         desc:'Logo Hestia de marca de agua · para estados de cuenta y documentos del paciente'}
 ];
 var _REPORT_TYPES=[
   {id:'proveedor',     label:'Reporte de proveedor',       defaultTpl:'ejecutivo'},
@@ -24211,12 +24212,12 @@ function _tplPage(bodyHTML,extraCSS){
 /* ── 7 Plantillas ──────────────────────────────────────────── */
 var _REPORT_TEMPLATES={
   ejecutivo:function(d){
-    var c='#c46a7a';
+    var c='#c46a7a', cfg=getFmtConfig();
     var b='<div style="max-width:780px;margin:0 auto;padding:24px 32px">'
       +'<div style="display:flex;align-items:flex-start;justify-content:space-between;padding-bottom:14px;border-bottom:2.5px solid '+c+';margin-bottom:20px">'
-      +'<div style="display:flex;align-items:center;gap:10px">'
-      +'<div style="width:36px;height:36px;background:'+c+';border-radius:7px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;font-weight:800">H</div>'
-      +'<div><div style="font-size:16px;font-weight:700;letter-spacing:-.01em">Hestia Fertility Clinic</div>'
+      +'<div style="display:flex;align-items:center;gap:11px">'
+      +_tplBrandLogo(cfg,34,false)
+      +'<div><div style="font-size:16px;font-weight:700;letter-spacing:-.01em;color:'+c+'">'+(cfg.nombre||'Hestia Fertility Clinic')+'</div>'
       +'<div style="font-size:10px;color:#888;margin-top:1px">'+d.title+'</div></div>'
       +'</div>'
       +'<div style="text-align:right"><div style="font-size:14px;font-weight:700;color:'+c+'">'+d.subject+'</div>'
@@ -24239,10 +24240,11 @@ var _REPORT_TEMPLATES={
     return _tplPage(b);
   },
   contable:function(d){
+    var cfg=getFmtConfig();
     var b='<div style="max-width:900px;margin:0 auto;padding:20px 28px">'
       +'<div style="background:#1a365d;padding:12px 16px;border-radius:5px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:flex-end">'
-      +'<div><div style="font-size:13px;font-weight:800;color:#fff;letter-spacing:.04em;text-transform:uppercase">HESTIA FERTILITY CLINIC</div>'
-      +'<div style="font-size:10px;color:#90caf9;margin-top:2px">'+d.title+' · '+d.subject+'</div></div>'
+      +'<div style="display:flex;align-items:center;gap:11px">'+_tplBrandLogo(cfg,28,true)+'<div><div style="font-size:13px;font-weight:800;color:#fff;letter-spacing:.04em;text-transform:uppercase">'+(cfg.nombre?cfg.nombre.toUpperCase():'HESTIA FERTILITY CLINIC')+'</div>'
+      +'<div style="font-size:10px;color:#90caf9;margin-top:2px">'+d.title+' · '+d.subject+'</div></div></div>'
       // Sin sello aquí: va una sola vez, en el pie. (Antes la cabecera repetía la
       // fecha de generación que el pie ya traía.)
       +'<div style="text-align:right"><div style="font-size:10px;color:#cfe2ff">Período: '+d.period+'</div></div></div>'
@@ -24257,7 +24259,9 @@ var _REPORT_TEMPLATES={
     return _tplPage(b);
   },
   minimalista:function(d){
+    var cfg=getFmtConfig();
     var b='<div style="max-width:620px;margin:0 auto;padding:28px 36px">'
+      +'<div style="margin-bottom:16px">'+_tplLogoIMG(cfg,28,'#c46a7a','block')+'</div>'
       +'<div style="margin-bottom:22px"><div style="font-size:22px;font-weight:700;color:#111">'+d.subject+'</div>'
       +'<div style="font-size:11px;color:#aaa;margin-top:3px">'+d.title+' · '+d.period+'</div></div>'
       +'<div style="display:flex;border:0.5px solid #ddd;border-radius:4px;overflow:hidden;margin-bottom:22px">'
@@ -24294,13 +24298,13 @@ var _REPORT_TEMPLATES={
     return _tplPage(b);
   },
   clinica:function(d){
-    var c='#c46a7a';
+    var c='#c46a7a', cfg=getFmtConfig();
     var b='<div style="max-width:780px;margin:0 auto;padding:24px 32px">'
       +'<div style="background:'+c+';padding:14px 18px;border-radius:8px;margin-bottom:18px">'
       +'<div style="display:flex;align-items:center;justify-content:space-between">'
-      +'<div style="display:flex;align-items:center;gap:10px">'
-      +'<div style="width:32px;height:32px;background:rgba(255,255,255,.25);border-radius:5px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:800">H</div>'
-      +'<div><div style="font-size:14px;font-weight:800;color:#fff;letter-spacing:.03em">HESTIA FERTILITY CLINIC</div>'
+      +'<div style="display:flex;align-items:center;gap:11px">'
+      +_tplBrandLogo(cfg,30,true)
+      +'<div><div style="font-size:14px;font-weight:800;color:#fff;letter-spacing:.03em">'+(cfg.nombre?cfg.nombre.toUpperCase():'HESTIA FERTILITY CLINIC')+'</div>'
       +'<div style="font-size:9px;color:rgba(255,255,255,.75);letter-spacing:.06em;text-transform:uppercase;margin-top:1px">'+d.title+'</div></div>'
       +'</div>'
       +'<div style="text-align:right"><div style="font-size:12px;font-weight:700;color:#fff">'+d.subject+'</div>'
@@ -24319,11 +24323,11 @@ var _REPORT_TEMPLATES={
     return _tplPage(b);
   },
   bicolor:function(d){
-    var c='#2c3e50';
+    var c='#2c3e50', cfg=getFmtConfig();
     var b='<div style="max-width:820px;margin:0 auto;padding:24px 32px">'
       +'<table style="width:100%;border-collapse:collapse"><tr>'
       +'<td style="width:90px;background:'+c+';vertical-align:top;padding:16px 8px;border-radius:6px 0 0 6px">'
-      +'<div style="color:rgba(255,255,255,.5);font-size:8px;letter-spacing:.1em;text-transform:uppercase;text-align:center;margin-bottom:16px">Hestia</div>'
+      +'<div style="text-align:center;margin-bottom:16px">'+_tplLogoIMG(cfg,30,'#ffffff','inline-block',true)+'</div>'
       +d.kpis.map(function(k){return'<div style="text-align:center;margin-bottom:14px;padding-bottom:14px;border-bottom:0.5px solid rgba(255,255,255,.15)">'
         +'<div style="font-size:14px;font-weight:800;color:#fff">'+k.value+'</div>'
         +'<div style="font-size:7.5px;color:rgba(255,255,255,.55);margin-top:2px;text-transform:uppercase;letter-spacing:.05em">'+k.label+'</div>'
@@ -24342,11 +24346,14 @@ var _REPORT_TEMPLATES={
     return _tplPage(b);
   },
   certificado:function(d){
-    var g='#b08030';
+    var g='#b08030', cfg=getFmtConfig();
     var b='<div style="max-width:720px;margin:0 auto;padding:28px 36px">'
       +'<div style="border:2px solid '+g+';border-radius:5px;padding:24px 28px">'
       +'<div style="text-align:center;border-bottom:1px solid #d4a843;padding-bottom:16px;margin-bottom:16px">'
-      +'<div style="font-size:10px;font-weight:700;color:'+g+';letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px">HESTIA FERTILITY CLINIC</div>'
+      +'<div style="margin-bottom:8px">'+_tplBrandLogo(cfg,50,false)+'</div>'
+      // El nombre "Hestia" va en color de marca (#c46a7a), no en el dorado del
+      // marco: el usuario pidió que el texto Hestia siempre lleve el color de marca.
+      +'<div style="font-size:10px;font-weight:700;color:#c46a7a;letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px">'+(cfg.nombre?cfg.nombre.toUpperCase():'HESTIA FERTILITY CLINIC')+'</div>'
       +'<div style="font-size:9px;color:#999;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px">'+d.title+'</div>'
       +'<div style="font-size:18px;font-weight:700;color:#111;margin-bottom:4px">'+d.subject+'</div>'
       +'<div style="font-size:10px;color:#999">Período: '+d.period+'</div>'
@@ -24368,11 +24375,12 @@ var _REPORT_TEMPLATES={
     return _tplPage(b);
   },
   moderno:function(d){
+    var cfg=getFmtConfig();
     var b='<div style="max-width:780px;margin:0 auto;padding:24px 32px">'
       +'<div style="height:4px;background:linear-gradient(90deg,#c46a7a,#1D9E75);border-radius:2px;margin-bottom:18px"></div>'
       +'<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px">'
-      +'<div><div style="font-size:10px;color:#aaa;font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px">'+d.title+'</div>'
-      +'<div style="font-size:20px;font-weight:700;color:#111">'+d.subject+'</div></div>'
+      +'<div style="display:flex;align-items:center;gap:12px">'+_tplBrandLogo(cfg,34,false)+'<div><div style="font-size:10px;color:#aaa;font-weight:600;text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px">'+d.title+'</div>'
+      +'<div style="font-size:20px;font-weight:700;color:#111">'+d.subject+'</div></div></div>'
       // Sin sello aquí: va una sola vez, en el pie.
       +'<div style="text-align:right"><div style="font-size:11px;color:#888">'+d.period+'</div></div>'
       +'</div>'
@@ -24462,6 +24470,41 @@ var _REPORT_TEMPLATES={
       +'<div style="background:'+c+';padding:8px 26px;border-radius:0 0 8px 8px;text-align:center;font-size:9px;color:#fff">'+cfg.nombre+' \xb7 '+cfg.ciudad+' \xb7 '+cfg.web+'</div>'
       +'</div></div>';
     return _tplPage(b,'body{-webkit-print-color-adjust:exact;print-color-adjust:exact}');
+  },
+  /* PACIENTE — plantilla para estados de cuenta y documentos que se le entregan a
+     la paciente. El logotipo de Hestia va como MARCA DE AGUA de fondo (grande y
+     tenue) en cada página, y arriba en grande. Diseño cálido y limpio: crema
+     suave, acentos rosa marca, tarjetas y tabla delicadas. */
+  pacienteagua:function(d){
+    var cfg=getFmtConfig(), c=cfg.colorPrimary||'#c46a7a';
+    var kpiCards=(d.kpis||[]).map(function(k){
+      return '<div style="flex:1;min-width:118px;background:rgba(255,255,255,.72);border:1px solid #efdfe3;border-radius:10px;padding:12px 15px;text-align:center">'
+        +'<div style="font-size:8.5px;letter-spacing:.09em;text-transform:uppercase;color:#b58a94">'+k.label+'</div>'
+        +'<div style="font-size:18px;font-weight:700;color:'+c+';margin-top:3px">'+k.value+'</div>'
+        +(k.sub?'<div style="font-size:8.5px;color:#b58a94;margin-top:1px">'+k.sub+'</div>':'')+'</div>';
+    }).join('');
+    var pieCentro=[cfg.nombre,cfg.ciudad,cfg.telefono,cfg.web].filter(Boolean).join('  \xb7  ');
+    var b='<div style="max-width:720px;margin:0 auto;position:relative;padding:30px 40px;background:linear-gradient(180deg,#fffdfc,#fff8f6)">'
+      +_tplLogoWatermark()
+      +'<div style="position:relative;z-index:1">'
+      +'<div style="text-align:center;margin-bottom:6px">'+_tplLogoIMG(cfg,66,c,'inline-block')+'</div>'
+      +'<div style="text-align:center;font-size:12px;font-weight:600;letter-spacing:.34em;text-transform:uppercase;color:'+c+'">'+(cfg.nombre||'Hestia Fertility')+'</div>'
+      +((cfg.ciudad||cfg.web)?'<div style="text-align:center;font-size:8.5px;letter-spacing:.12em;color:#b58a94;margin-top:3px">'+[cfg.ciudad,cfg.web].filter(Boolean).join(' \xb7 ')+'</div>':'')
+      +'<div style="width:54px;height:2px;background:'+c+';margin:14px auto 18px;border-radius:2px"></div>'
+      +'<div style="text-align:center;margin-bottom:20px">'
+        +'<div style="font-size:16px;font-weight:700;color:#3a2e31">'+(d.title||'')+'</div>'
+        +'<div style="font-size:13px;color:'+c+';font-weight:600;margin-top:3px">'+(d.subject||'')+'</div>'
+        +(d.period?'<div style="font-size:9.5px;color:#a99298;margin-top:2px">'+d.period+'</div>':'')
+      +'</div>'
+      +(kpiCards?'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">'+kpiCards+'</div>':'')
+      +_tplTablaFina(d,{line:'#e7cdd4',headBorder:'1.5px solid '+c,totalBg:'rgba(196,106,122,.08)',totalColor:c})
+      +(d.nota?'<div style="margin-top:18px;font-size:10px;color:#6b5b5f;line-height:1.6;background:rgba(255,255,255,.6);border-left:2px solid '+c+';padding:8px 12px;border-radius:0 6px 6px 0">'+d.nota+'</div>':'')
+      +'<div style="margin-top:26px;text-align:center;border-top:1px solid #efdfe3;padding-top:12px">'
+        +'<div style="font-size:9.5px;color:#a99298">'+pieCentro+'</div>'
+        +'<div style="font-size:8px;color:#c9bcc0;margin-top:5px">'+(function(){var _np=_tplNotaPie(cfg); return _np?_np+' \xb7 ':'';})()+_tplSello(d)+'</div>'
+      +'</div>'
+      +'</div></div>';
+    return _tplPage(b,'body{-webkit-print-color-adjust:exact;print-color-adjust:exact}');
   }
 };
 /* ── Marca de agua + identidad para las plantillas Célula/Editorial/Vida.
@@ -24504,6 +24547,33 @@ function _tplEmblema(color,size){
 }
 function _tplLogoBlock(cfg,c){
   return '<div style="display:flex;align-items:center">'+_tplLogoIMG(cfg,48,c)+'</div>';
+}
+/* Versión CUADRADA y centrada del logo (Hestia Logo Pink.png), ideal para la
+   marca de agua de fondo — el PNG oficial es apaisado y de marca de agua se vería
+   desplazado. El espacio en el nombre lo codifica new URL a %20. */
+var _HF_LOGO_WATERMARK = (function(){
+  try { return new URL('Hestia Logo Pink.png', window.location.href).href; }
+  catch(e){ return 'Hestia Logo Pink.png'; }
+})();
+/* El logo de marca para las cabeceras de reporte, que sirve sobre CUALQUIER color
+   de fondo. El PNG oficial tiene fondo blanco: sobre un header oscuro o de color
+   se vería como un recuadro. Solución: sobre fondo oscuro/de color (dark=true) el
+   logo va en un "chip" blanco redondeado — el área segura que usan las marcas en
+   fondos de color; sobre fondo claro va directo. Siempre el logo REAL (o el que
+   el usuario haya subido), no el emblema SVG. */
+function _tplBrandLogo(cfg,size,dark){
+  size = size || 38;
+  var img = _tplLogoIMG(cfg, size, dark?'#ffffff':((cfg&&cfg.colorPrimary)||'#c46a7a'), 'block', false);
+  if (dark){
+    return '<div style="background:#fff;border-radius:9px;padding:5px 10px;display:inline-flex;align-items:center;box-shadow:0 1px 4px rgba(0,0,0,.15)">'+img+'</div>';
+  }
+  return img;
+}
+/* Marca de agua con el LOGO (no el SVG genérico), grande y muy tenue, centrada y
+   fija en cada página impresa. Para la plantilla de pacientes. */
+function _tplLogoWatermark(){
+  return '<div style="position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);opacity:.06;pointer-events:none;z-index:0">'
+    +'<img src="'+_HF_LOGO_WATERMARK+'" style="width:480px;max-width:72vw;object-fit:contain" alt=""></div>';
 }
 function _tplKpiChips(kpis,bg,labelColor,valueColor){
   if(!kpis||!kpis.length) return '';
