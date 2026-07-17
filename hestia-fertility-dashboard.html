@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.234 -->
+﻿<!-- app-build:2026.07.16.235 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2574,6 +2574,21 @@ async function loadIngresosERP() {
   }
 }
 
+/* Refresco SILENCIOSO tras guardar: NO blanquea la vista (no hestiaLoader). Deja
+   la lista visible y la actualiza EN SU LUGAR cuando llega la data fresca. Así el
+   guardado SE SIENTE inmediato: el drawer se cierra y la lista sigue ahí; ~1-2 s
+   después aparece la fila nueva, sin la pantalla en blanco que había antes
+   (loadIngresosERP, al borrarse la caché, mostraba «Cargando…» sobre todo y
+   refetchaba el año entero para enseñar una fila que ya se conocía). */
+function _ingRefreshSilent(){
+  var fi = currentFechaInicio || '', ff = currentFechaFin || '';
+  _fetchIngresosRaw().then(function(raw){
+    var d = _ingApplyDateFilter(raw);
+    try { _swrSet(_ingSwrKey(), d, fi, ff); } catch(e){}
+    _ingData = d;
+    if (document.getElementById('view-ingresos')) _renderIngresosERP();
+  }).catch(function(){});
+}
 function _ingInSel(sel, v) { return !sel || !sel.length || sel.indexOf(v) > -1; }
 function _ingSetFacturaFilter(v) {
   _ingFilters.factura = v;
@@ -8063,7 +8078,7 @@ async function _ingSaveAndBank(payload, comisionMP) {
     _swrDel('ingresos'); // invalidar caché para que recargue datos frescos
     if (payload.action === 'updateIngreso' || payload.action === 'updateIngresoConBancos') {
       ingCloseDrawer(true);
-      loadIngresosERP();
+      _ingRefreshSilent();   // sin pantalla en blanco
       return;
     }
     var fecha  = payload.fecha;
@@ -8136,9 +8151,9 @@ async function _ingSaveAndBank(payload, comisionMP) {
       _ingResetForNext(res.op || '');
       return;
     }
-    // 6. Cerrar y refrescar
+    // 6. Cerrar y refrescar (sin blanquear la vista → se siente inmediato)
     ingCloseDrawer(true);
-    loadIngresosERP();
+    _ingRefreshSilent();
   } catch(e) {
     // Falló la conexión: NO se limpia nada — la captura se conserva.
     alert('Error de conexión: ' + e.message);
@@ -8248,6 +8263,17 @@ async function loadEgresosERP(force) {
   }
 }
 
+/* Refresco SILENCIOSO tras guardar un egreso: no blanquea #eg-root, deja la lista
+   visible y la actualiza al llegar la data fresca. Igual que en ingresos, quita la
+   pantalla en blanco que hacía sentir lento el guardado. */
+function _egRefreshSilent(){
+  var swrKey = 'egresos_'+_egAnio;
+  var tok = encodeURIComponent(getToken());
+  fetch(APPS_SCRIPT_URL+'?action=egresos&anio='+_egAnio+'&token='+tok, {redirect:'follow'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if (d && !d.error){ try{ _swrSet(swrKey,d,'',''); }catch(e){} _egData=d; if(document.getElementById('eg-root')) _renderEgresosERP(); } })
+    .catch(function(){});
+}
 function _egFilterRows() {
   if (!_egData || !_egData.rows) return [];
   var f = _egFilters;
@@ -9934,7 +9960,7 @@ async function egSubmit() {
       }
       _swrDel('egresos');
       egCloseForm();
-      loadEgresosERP();
+      _egRefreshSilent();   // sin pantalla en blanco → el guardado se siente inmediato
     } else {
       alert('Error: '+(res.error||'No se pudo guardar'));
       if (btn){btn.disabled=false;btn.textContent='Guardar egreso';}
