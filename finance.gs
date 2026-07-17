@@ -477,6 +477,9 @@ function doPost(e) {
       return jsonResponse(handleLogin(body.email || '', body.password || ''));
     }
     if (body.action === 'saveBankRow') {
+      if (!_tokenHasPermission(body.token || '', 'bank_capture')) {
+        return jsonResponse({ok:false, error:'Sin autorización para capturar movimientos bancarios (bank_capture). Pídeselo al administrador.'});
+      }
       var result = saveBankRow(body.banco, body.row);
       try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
       return jsonResponse(result);
@@ -532,6 +535,9 @@ function doPost(e) {
       return jsonResponse(saveNewProducto(body));
     }
     if (body.action === 'saveProductoPrecio') {
+      if (!_tokenHasPermission(body.token || '', 'editar_productos')) {
+        return jsonResponse({ok:false, error:'Sin autorización para cambiar precios de productos (editar_productos). Pídeselo al administrador.'});
+      }
       return jsonResponse(saveProductoPrecio(body.productoId, body.precio, body.vigencia, body.usuario));
     }
     /* ── TRADUCCIONES: la traducción es un atributo del producto (traducciones.gs) ── */
@@ -556,6 +562,9 @@ function doPost(e) {
       return jsonResponse(setupTraducciones());
     }
     if (body.action === 'saveCxP') {
+      if (!_tokenHasPermission(body.token || '', 'editar_egresos')) {
+        return jsonResponse({ok:false, error:'Sin autorización para crear cuentas por pagar (editar_egresos). Pídeselo al administrador.'});
+      }
       return jsonResponse(saveCxP(body));
     }
     // ── Comisiones por volumen de grupo ──────────────────────────────────────
@@ -576,11 +585,22 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega comisiones.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(setupComisionesConfig());
     }
-    if (body.action === 'deleteCxPRow')            return jsonResponse(deleteCxPRow(body));
+    if (body.action === 'deleteCxPRow') {
+      if (!_tokenHasPermission(body.token || '', 'borrar_egresos')) {
+        return jsonResponse({ok:false, error:'Sin autorización para eliminar cuentas por pagar (borrar_egresos). Pídeselo al administrador.'});
+      }
+      return jsonResponse(deleteCxPRow(body));
+    }
     if (body.action === 'updateCxP') {
+      if (!_tokenHasPermission(body.token || '', 'editar_egresos')) {
+        return jsonResponse({ok:false, error:'Sin autorización para editar cuentas por pagar (editar_egresos). Pídeselo al administrador.'});
+      }
       return jsonResponse(updateCxP(body));
     }
     if (body.action === 'pagarCxP') {
+      if (!_tokenHasPermission(body.token || '', 'editar_egresos')) {
+        return jsonResponse({ok:false, error:'Sin autorización para pagar cuentas por pagar (mueve el banco) (editar_egresos). Pídeselo al administrador.'});
+      }
       return jsonResponse(pagarCxP(body));
     }
     // Gastos fijos (recurrentes)
@@ -591,7 +611,12 @@ function doPost(e) {
     if (body.action === 'reconstruirCatalogoGF')   return jsonResponse(reconstruirCatalogoGF(body));
     if (body.action === 'updateGastoFijo')         return jsonResponse(updateGastoFijo(body));
     if (body.action === 'toggleGastoFijo')         return jsonResponse(toggleGastoFijo(body));
-    if (body.action === 'deleteGastoFijo')         return jsonResponse(deleteGastoFijo(body));
+    if (body.action === 'deleteGastoFijo') {
+      if (!_tokenHasPermission(body.token || '', 'editar_egresos')) {
+        return jsonResponse({ok:false, error:'Sin autorización para eliminar gastos fijos (editar_egresos). Pídeselo al administrador.'});
+      }
+      return jsonResponse(deleteGastoFijo(body));
+    }
     if (body.action === 'programarGastoFijo')      return jsonResponse(programarGastoFijo(body));
     if (body.action === 'programarGastosFijosBatch') return jsonResponse(programarGastosFijosBatch(body));
     if (body.action === 'regresarCxPaProgramacion') {
@@ -599,7 +624,12 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Actualiza gastosfijos.gs en Apps Script y redespliega.'});
       return jsonResponse(regresarCxPaProgramacion(body));
     }
-    if (body.action === 'bulkUpdateCxPMonto')         return jsonResponse(bulkUpdateCxPMonto(body));
+    if (body.action === 'bulkUpdateCxPMonto') {
+      if (!_tokenHasPermission(body.token || '', 'editar_egresos')) {
+        return jsonResponse({ok:false, error:'Sin autorización para cambiar montos de cuentas por pagar en lote (editar_egresos). Pídeselo al administrador.'});
+      }
+      return jsonResponse(bulkUpdateCxPMonto(body));
+    }
     if (body.action === 'conciliaAMEX')              return jsonResponse(conciliaAMEX(body));
     if (body.action === 'amexCorte')                 return jsonResponse(readAmexCorte(body));
     if (body.action === 'estadoCuenta') {
@@ -622,6 +652,9 @@ function doPost(e) {
       return jsonResponse(registrarAbono(body));
     }
     if (body.action === 'cargarSaldoInicial') {
+      if (!_tokenHasPermission(body.token || '', 'editar_ingresos')) {
+        return jsonResponse({ok:false, error:'Sin autorización para cargar saldos iniciales (editar_ingresos). Pídeselo al administrador.'});
+      }
       if (typeof cargarSaldoInicial !== 'function')
         return jsonResponse({ok:false, error:'Agrega cobranza.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(cargarSaldoInicial(body));
@@ -809,6 +842,9 @@ function doPost(e) {
     }
     if (body.action === 'deleteRecordatorio')      return jsonResponse(deleteRecordatorio(body));
     if (body.action === 'updateProducto') {
+      if (!_tokenHasPermission(body.token || '', 'editar_productos')) {
+        return jsonResponse({ok:false, error:'Sin autorización para editar productos (editar_productos). Pídeselo al administrador.'});
+      }
       return jsonResponse(updateProducto(body));
     }
     if (body.action === 'createProducto') {
@@ -913,6 +949,9 @@ function doPost(e) {
       return jsonResponse(aplicarAbonoCxP(body));
     }
     if (body.action === 'cancelarOrdenCxP') {
+      if (!_tokenHasPermission(body.token || '', 'editar_egresos')) {
+        return jsonResponse({ok:false, error:'Sin autorización para cancelar ordenes de pago (editar_egresos). Pídeselo al administrador.'});
+      }
       if (typeof cancelarOrdenCxP !== 'function')
         return jsonResponse({ok:false, error:'Agrega cxp_creditos.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(cancelarOrdenCxP(body));
@@ -1071,18 +1110,30 @@ function doPost(e) {
       return jsonResponse(saveSemanalConfig(body));
     }
     if (body.action === 'updateProductoSKU') {
+      if (!_tokenHasPermission(body.token || '', 'editar_productos')) {
+        return jsonResponse({ok:false, error:'Sin autorización para cambiar el SKU de un producto (editar_productos). Pídeselo al administrador.'});
+      }
       return jsonResponse(updateProductoSKU(body.productoId, body.sku, body.usuario));
     }
     if (body.action === 'updateProductoID') {
+      if (!_tokenHasPermission(body.token || '', 'editar_productos')) {
+        return jsonResponse({ok:false, error:'Sin autorización para cambiar el ID de un producto (editar_productos). Pídeselo al administrador.'});
+      }
       return jsonResponse(updateProductoID(body.productoIdViejo, body.productoIdNuevo, body.usuario));
     }
     if (body.action === 'saveEgreso') {
+      if (!_tokenHasPermission(body.token || '', 'editar_egresos')) {
+        return jsonResponse({ok:false, error:'Sin autorización para capturar egresos (editar_egresos). Pídeselo al administrador.'});
+      }
       return jsonResponse(saveEgreso(body));
     }
     if (body.action === 'uploadEgresoPDF') {
       return jsonResponse(uploadEgresoPDF(body));
     }
     if (body.action === 'updateEgresoField') {
+      if (!_tokenHasPermission(body.token || '', 'editar_egresos')) {
+        return jsonResponse({ok:false, error:'Sin autorización para editar egresos (editar_egresos). Pídeselo al administrador.'});
+      }
       return jsonResponse(updateEgresoField(body));
     }
     if (body.action === 'repararEgresosSinFecha') {
@@ -1092,6 +1143,9 @@ function doPost(e) {
       return jsonResponse(guardarReferenciaEgreso(body));
     }
     if (body.action === 'deleteEgreso') {
+      if (!_tokenHasPermission(body.token || '', 'borrar_egresos')) {
+        return jsonResponse({ok:false, error:'Sin autorización para eliminar egresos (borrar_egresos). Pídeselo al administrador.'});
+      }
       return jsonResponse(deleteEgreso(body));
     }
     if (body.action === 'saveDropdown') {
