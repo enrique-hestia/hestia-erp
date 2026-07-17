@@ -977,6 +977,31 @@ function doGet(e) {
         if (!shUpd) return jsonResponse({ error: 'Hoja no encontrada: ' + sheetName });
         var hdrInfo = getSheetHeaders(shUpd);
         var hdrs = hdrInfo.headers;
+        // Duplicado en Pacientes al EDITAR: correo/nombre ya en OTRO paciente
+        // (se excluye la propia fila). Cierra la puerta trasera del alta.
+        if (sheetName.trim().toLowerCase() === 'pacientes') {
+          var uNombreIdx=-1, uEmailIdx=-1, uIdIdx=-1;
+          for (var uh=0; uh<hdrs.length; uh++){
+            var uhl=hdrs[uh].toLowerCase();
+            if(uNombreIdx<0 && uhl.indexOf('nombre')>-1) uNombreIdx=uh;
+            if(uEmailIdx<0 && (uhl.indexOf('mail')>-1||uhl==='correo')) uEmailIdx=uh;
+            if(uIdIdx<0 && uhl==='id') uIdIdx=uh;
+          }
+          var uNom   = uNombreIdx>-1 ? String(e.parameter[hdrs[uNombreIdx]]||'').trim().toLowerCase() : '';
+          var uEmail = uEmailIdx >-1 ? String(e.parameter[hdrs[uEmailIdx]] ||'').trim().toLowerCase() : '';
+          if (uNom || uEmail) {
+            var uAll = shUpd.getDataRange().getValues();
+            for (var ur=hdrInfo.dataStart; ur<uAll.length; ur++){
+              if (ur === rowNum-1) continue; // la propia fila que se edita
+              if (uNom && String(uAll[ur][uNombreIdx]||'').trim().toLowerCase()===uNom)
+                return jsonResponse({ error:'Ya existe otro paciente con el nombre "'+e.parameter[hdrs[uNombreIdx]]+'".', duplicado:true });
+              if (uEmail && String(uAll[ur][uEmailIdx]||'').trim().toLowerCase()===uEmail){
+                var uqId=uIdIdx>-1?String(uAll[ur][uIdIdx]||''):'', uqNom=uNombreIdx>-1?String(uAll[ur][uNombreIdx]||''):'';
+                return jsonResponse({ error:'El correo "'+e.parameter[hdrs[uEmailIdx]]+'" ya está registrado'+((uqId||uqNom)?' en el paciente '+(uqId?uqId+' — ':'')+uqNom:'')+'.', duplicado:true, duplicadoCorreo:true });
+              }
+            }
+          }
+        }
         var cur  = shUpd.getRange(rowNum, 1, 1, hdrs.length).getValues()[0];
         var newRow = hdrs.map(function(h, i) {
           return (e.parameter[h] !== undefined) ? e.parameter[h] : cur[i];

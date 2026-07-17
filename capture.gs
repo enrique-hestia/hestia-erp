@@ -102,21 +102,33 @@ function insertRow(ss, e) {
     var hdrInfo = getSheetHeaders(shIns);
     var hdrs = hdrInfo.headers;
 
-    // Validación de duplicados: en Pacientes no se permite repetir el mismo nombre
+    // Validación de duplicados en Pacientes: ni el mismo nombre ni el mismo
+    // correo. Si el correo ya existe, se dice QUÉ paciente lo tiene (para no
+    // duplicar cuando dieron otro nombre con el mismo correo).
     if (sheetName.trim().toLowerCase() === 'pacientes') {
-      var nombreIdx = -1;
+      var nombreIdx = -1, emailIdx = -1, idIdx = -1;
       for (var hi = 0; hi < hdrs.length; hi++) {
-        if (hdrs[hi].toLowerCase().indexOf('nombre') > -1) { nombreIdx = hi; break; }
+        var hl = hdrs[hi].toLowerCase();
+        if (nombreIdx < 0 && hl.indexOf('nombre') > -1) nombreIdx = hi;
+        if (emailIdx < 0 && (hl.indexOf('mail') > -1 || hl === 'correo')) emailIdx = hi;
+        if (idIdx < 0 && hl === 'id') idIdx = hi;
       }
-      if (nombreIdx > -1) {
-        var nombreNuevo = String(e.parameter[hdrs[nombreIdx]] || '').trim().toLowerCase();
-        if (nombreNuevo) {
-          var allData = shIns.getDataRange().getValues();
-          for (var ri = hdrInfo.dataStart; ri < allData.length; ri++) {
-            var existente = String(allData[ri][nombreIdx] || '').trim().toLowerCase();
-            if (existente && existente === nombreNuevo) {
-              return { error: 'Ya existe un paciente registrado con el nombre "' + e.parameter[hdrs[nombreIdx]] + '".', duplicado: true };
-            }
+      var nombreNuevo = nombreIdx > -1 ? String(e.parameter[hdrs[nombreIdx]] || '').trim().toLowerCase() : '';
+      var emailNuevo  = emailIdx  > -1 ? String(e.parameter[hdrs[emailIdx]]  || '').trim().toLowerCase() : '';
+      if (nombreNuevo || emailNuevo) {
+        var allData = shIns.getDataRange().getValues();
+        for (var ri = hdrInfo.dataStart; ri < allData.length; ri++) {
+          if (nombreNuevo && String(allData[ri][nombreIdx] || '').trim().toLowerCase() === nombreNuevo) {
+            return { error: 'Ya existe un paciente registrado con el nombre "' + e.parameter[hdrs[nombreIdx]] + '".', duplicado: true };
+          }
+          if (emailNuevo && String(allData[ri][emailIdx] || '').trim().toLowerCase() === emailNuevo) {
+            var quienId  = idIdx     > -1 ? String(allData[ri][idIdx] || '')     : '';
+            var quienNom = nombreIdx > -1 ? String(allData[ri][nombreIdx] || '') : '';
+            return {
+              error: 'El correo "' + e.parameter[hdrs[emailIdx]] + '" ya está registrado' +
+                     ((quienId || quienNom) ? ' en el paciente ' + (quienId ? quienId + ' — ' : '') + quienNom : '') + '.',
+              duplicado: true, duplicadoCorreo: true, pacienteId: quienId, pacienteNombre: quienNom
+            };
           }
         }
       }
