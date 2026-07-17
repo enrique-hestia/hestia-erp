@@ -4770,6 +4770,49 @@ function deleteLista(body) {
   } catch(e){ return { ok:false, error:e.message }; }
 }
 
+/* Re-etiqueta las filas de BD_Precios que tienen la lista `de` para que queden
+   como `a`, y quita `de` de BD_Listas si estaba. Núcleo sin permiso: lo llaman
+   tanto el wrapper de mantenimiento (editor = dueño) como una ruta con permiso. */
+function _renombrarListaCore(de, a, usuario) {
+  de = String(de || '').trim(); a = String(a || '').trim();
+  if (!de || !a) return { ok:false, error:'Faltan los nombres (de/a).' };
+  var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+  var sh = ss.getSheetByName('BD_Precios');
+  if (!sh) return { ok:false, error:'No hay hoja BD_Precios.' };
+  var lr = sh.getLastRow();
+  var n = 0;
+  if (lr >= 2) {
+    // La lista vive en la columna 7 (índice 6, col G), sin encabezado.
+    var rng = sh.getRange(2, 7, lr - 1, 1);
+    var vals = rng.getValues();
+    for (var i = 0; i < vals.length; i++) {
+      if (String(vals[i][0] || '').trim() === de) { vals[i][0] = a; n++; }
+    }
+    if (n) rng.setValues(vals);
+  }
+  // Si `de` estaba como lista propia en BD_Listas, se quita (ya se consolidó en `a`).
+  try {
+    var shL = ss.getSheetByName('BD_Listas');
+    if (shL) {
+      var dataL = shL.getDataRange().getValues();
+      for (var j = dataL.length - 1; j >= 1; j--) {
+        if (String(dataL[j][0]).trim().toLowerCase() === de.toLowerCase()) shL.deleteRow(j + 1);
+      }
+    }
+  } catch (e) {}
+  _syncListasDropdown();
+  try { logAudit(usuario || 'sistema', 'Listas', 'Consolidar', de + ' → ' + a, '', '', n + ' filas'); } catch (e) {}
+  return { ok:true, de:de, a:a, filasReetiquetadas:n };
+}
+/* MANTENIMIENTO (correr desde el editor, una sola vez): consolida la etiqueta
+   legacy "GM" de los precios en el nombre real "GrupoMedico" (el que ya está en
+   BD_Listas). Sin esto, tras leer el desplegable solo de BD_Listas, los 11
+   precios etiquetados "GM" quedarían huérfanos (invisibles en el form). Seguro
+   de correr dos veces: la 2ª no encuentra "GM" y devuelve filasReetiquetadas:0. */
+function consolidarGMaGrupoMedico() {
+  return _renombrarListaCore('GM', 'GrupoMedico', 'mantenimiento');
+}
+
 function _syncListasDropdown() {
   try {
     var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);

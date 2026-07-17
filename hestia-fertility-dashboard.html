@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.16.233 -->
+﻿<!-- app-build:2026.07.16.234 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -3951,11 +3951,15 @@ function prodOpenForm(defaultCat) {
   var tipos = _ddVals('Productos','tipo', _PROD_TIPOS_FALLBACK);
   var monedas = ['MXN','USD'];
   // Listas de precios = base + cada AGENCIA (REPROVIDA + las que se vayan creando).
-  // Las listas de precios que ofrece el form = las administradas (BD_Listas, activas)
-  // + las agencias + los defaults del sistema. Así una lista nueva creada en
-  // "💲 Listas de precios" aparece aquí en cuanto se refresca.
+  // FUENTE ÚNICA: las listas de precios salen SOLO de BD_Listas (lo que el usuario
+  // administra en "💲 Listas de precios"). Antes esto era una unión de 3 fuentes
+  // (defaults hardcodeados + agencias + BD_Listas) y salían opciones redundantes:
+  // "GM" (etiqueta legacy) junto a "GrupoMedico" (el nombre real) → parecía que
+  // había que capturar el precio dos veces; y "DANIEL MADERO" (un coordinador del
+  // módulo de Agencias) que no es una lista de precios. Ahora hay una sola fuente.
+  // Fallback a los defaults sembrados si el catálogo aún no cargó BD_Listas.
   var _bdListas = (window._listasCache||[]).filter(function(x){ return x && x.activo!==false && x.lista; }).map(function(x){ return String(x.lista); });
-  var listas = ['General','GM','Surrogacy'].concat(window._agencias || ['REPROVIDA']).concat(_bdListas);
+  var listas = _bdListas.length ? _bdListas : ['General','GrupoMedico','Surrogacy','REPROVIDA'];
   listas = listas.filter(function(v,i,a){ return a.findIndex(function(x){ return String(x).toLowerCase()===String(v).toLowerCase(); })===i; });
 
   function opts(arr,sel){return arr.map(function(v){return '<option value="'+v+'"'+(v===sel?' selected':'')+'>'+v+'</option>';}).join('');}
