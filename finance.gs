@@ -515,6 +515,30 @@ function doPost(e) {
     if (body.action === 'readCuentas') {
       return jsonResponse({ok:true, cuentas:_cuentas()});
     }
+    if (body.action === 'readFormasPago') {
+      return jsonResponse({ok:true, formas:_formasPago(), cuentas:_cuentas()});
+    }
+    if (body.action === 'saveFormaPago') {
+      if (!_tokenHasPermission(body.token || '', 'bank_create')) {
+        return jsonResponse({ok:false, error:'Sin autorización para administrar formas de pago (bank_create). Pídeselo al administrador.'});
+      }
+      if (!body.forma || !body.ctx || !body.banco) return jsonResponse({ok:false, error:'forma, ctx y banco son obligatorios'});
+      // El banco DEBE existir (caja chica o una cuenta de Config_Cuentas); si no,
+      // la fila del banco se perdería en silencio al capturar. Rechazar el huérfano.
+      var _bk = String(body.banco).toLowerCase().replace(/[\s-]/g,'');
+      var _valid = (_bk === 'cajachica');
+      if(!_valid){ var _cs=_cuentas(); for(var _i=0;_i<_cs.length;_i++){ if(_cs[_i].key===_bk){_valid=true;break;} } }
+      if(!_valid) return jsonResponse({ok:false, error:'La cuenta "'+body.banco+'" no existe. Créala primero en "Agregar cuenta".'});
+      var _pct = (body.pct===''||body.pct==null || isNaN(Number(body.pct))) ? '' : Number(body.pct);
+      _formaRegistrar({forma:String(body.forma).trim(), ctx:String(body.ctx).toLowerCase(), banco:_bk, comision:(body.comision===true||body.comision==='true'), pct:_pct, activo:(body.activo===false?false:true), origForma:body.origForma, origCtx:body.origCtx});
+      return jsonResponse({ok:true});
+    }
+    if (body.action === 'deleteFormaPago') {
+      if (!_tokenHasPermission(body.token || '', 'bank_create')) {
+        return jsonResponse({ok:false, error:'Sin autorización para administrar formas de pago (bank_create). Pídeselo al administrador.'});
+      }
+      return jsonResponse(_formaBorrar(body.forma, body.ctx));
+    }
     if (body.action === 'saveLiberado') {
       var result = saveLiberado(body.rowNum, body.liberado);
       try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
@@ -1583,6 +1607,146 @@ function setupConfigCuentas(){
   var def=_cuentasDefault(), added=[];
   for(var d=0; d<def.length; d++){ var c=def[d]; if(existing.indexOf(c.key)<0){ sh.appendRow([c.key,c.nombre,c.gid,c.tipo,c.color,c.activo]); added.push(c.key); } }
   _CUENTAS_MEMO=null;
+  return {ok:true, created:created, added:added, total:sh.getLastRow()-1};
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   FORMAS DE PAGO → BANCO + COMISIÓN, DATA-DRIVEN  (Config_FormasPago)
+   Etapa 2/3 del modelo administrable (2026-07-17).
+
+   El ruteo forma→banco y el "cobra comisión" estaban HARDCODEADOS en ~8
+   routers. Ahora la DECISIÓN (a qué banco va + si comisiona + %) sale de
+   una hoja. Patrón "config al frente, código viejo atrás": si la config
+   coincide con la semilla (o no existe), el comportamiento es byte-idéntico;
+   agregar una fila enlaza una forma nueva sin tocar código.
+
+   OJO contexto: la MISMA forma rutea distinto en ingreso vs egreso
+   (AMEX ingreso→MP+comisión / egreso→amex; Transferencia ingreso→MP /
+   egreso→santander). Por eso cada fila lleva Contexto. ═══════════════════ */
+function _formasPagoDefault(){
+  // Semilla byte-idéntica a los routers actuales (ver mapa de routing).
+  return [
+    // ── Egreso (canónica _egRutaBanco) ──
+    {forma:'Efectivo',      ctx:'egreso',  banco:'cajachica',   comision:false, pct:''},
+    {forma:'Santander',     ctx:'egreso',  banco:'santander',   comision:false, pct:''},
+    {forma:'Transferencia', ctx:'egreso',  banco:'santander',   comision:false, pct:''},
+    {forma:'AMEX',          ctx:'egreso',  banco:'amex',        comision:false, pct:''},
+    {forma:'Mercado Pago',  ctx:'egreso',  banco:'mercadopago', comision:false, pct:''},
+    {forma:'TDC',           ctx:'egreso',  banco:'mercadopago', comision:false, pct:''},
+    {forma:'TDD',           ctx:'egreso',  banco:'mercadopago', comision:false, pct:''},
+    // ── Ingreso (frontend loop / _abonoRutearABanco / updateIngresoConBancos / _reverse) ──
+    {forma:'Efectivo',      ctx:'ingreso', banco:'cajachica',   comision:false, pct:''},
+    {forma:'Santander',     ctx:'ingreso', banco:'santander',   comision:false, pct:''},
+    {forma:'Transferencia', ctx:'ingreso', banco:'mercadopago', comision:false, pct:''},
+    {forma:'AMEX',          ctx:'ingreso', banco:'mercadopago', comision:true,  pct:''},
+    {forma:'TDC',           ctx:'ingreso', banco:'mercadopago', comision:true,  pct:''},
+    {forma:'TDD',           ctx:'ingreso', banco:'mercadopago', comision:true,  pct:''},
+    {forma:'Mercado Pago',  ctx:'ingreso', banco:'mercadopago', comision:false, pct:''}
+  ];
+}
+var _FORMAS_MEMO = null;
+function _formasPago(){
+  if(_FORMAS_MEMO) return _FORMAS_MEMO;
+  var out=null;
+  try{
+    var ss=SpreadsheetApp.openById(SHEET_ID);
+    var sh=ss.getSheetByName('Config_FormasPago');
+    if(sh && sh.getLastRow()>1){
+      var v=sh.getRange(2,1,sh.getLastRow()-1,6).getValues();
+      out=[];
+      for(var i=0;i<v.length;i++){
+        var f=String(v[i][0]||'').trim(); if(!f) continue;
+        out.push({
+          forma:f,
+          ctx:String(v[i][1]||'').toLowerCase().trim(),
+          banco:String(v[i][2]||'').toLowerCase().replace(/[\s-]/g,''),
+          comision:(String(v[i][3]).toLowerCase()==='true' || v[i][3]===true),
+          pct:(v[i][4]===''||v[i][4]==null)?'':Number(v[i][4]),
+          activo:(String(v[i][5]).toLowerCase()!=='false' && v[i][5]!==false)
+        });
+      }
+    }
+  }catch(e){}
+  if(!out||!out.length) out=_formasPagoDefault();
+  _FORMAS_MEMO=out;
+  return out;
+}
+/* Decisión de ruteo para (forma, contexto). Devuelve
+   {banco, forma, aplicaComision, comisionPct} o null si la forma no está en
+   config para ese contexto → quien llama usa su fallback hardcodeado. */
+function _rutaFormaPago(fp, ctx){
+  var n=_egNormForma(fp); if(!n) return null;
+  var arr=_formasPago(), amb=null;
+  for(var i=0;i<arr.length;i++){
+    var r=arr[i];
+    if(r.activo===false) continue;
+    if(_egNormForma(r.forma)!==n) continue;
+    var hit={banco:r.banco, forma:r.forma, aplicaComision:!!r.comision, comisionPct:r.pct};
+    if(r.ctx===ctx) return hit;
+    if(r.ctx==='ambos') amb=hit;
+  }
+  return amb;
+}
+/* Fila de banco de INGRESO según el TIPO de la cuenta destino — para que una
+   forma enlazada a una cuenta NUEVA reciba el dinero con el layout correcto.
+   Byte-idéntico a lo hardcodeado para los 3 actuales: santander(bancaria),
+   mercadopago(tpv). credito (nadie deposita) se maneja como movimiento. */
+function _ingRowByTipo(tipo, fecha, monto, obs, com, mesStr){
+  com = com || 0;
+  if(tipo==='tpv') return [mesStr, fecha, monto, com, 0, monto+com, 0, false, obs, 'CARGO'];
+  if(tipo==='credito') return [fecha, monto, 0, obs, 0, 0, '', '', mesStr];
+  return [fecha, monto, 0, 0, obs, 0, 0, '', '']; // bancaria
+}
+function _formaRegistrar(obj){
+  var ss=SpreadsheetApp.openById(SHEET_ID);
+  var sh=ss.getSheetByName('Config_FormasPago');
+  if(!sh){
+    sh=ss.insertSheet('Config_FormasPago');
+    sh.getRange(1,1,1,6).setValues([['FormaPago','Contexto','BancoKey','AplicaComision','ComisionPct','Activo']]);
+    sh.getRange(1,1,1,6).setFontWeight('bold').setBackground('#f3f4f6'); sh.setFrozenRows(1);
+    var def=_formasPagoDefault();
+    for(var d=0; d<def.length; d++){ var c=def[d]; sh.appendRow([c.forma,c.ctx,c.banco,c.comision,c.pct,true]); }
+  }
+  var lr=sh.getLastRow();
+  var keys = lr>1 ? sh.getRange(2,1,lr-1,2).getValues().map(function(r){return _egNormForma(r[0])+'|'+String(r[1]).toLowerCase().trim();}) : [];
+  // Al EDITAR una fila (origForma/origCtx) se busca por la clave ORIGINAL, así
+  // renombrar la forma o cambiar el contexto ACTUALIZA la fila en vez de duplicarla.
+  var lookKey = (obj.origForma!=null && obj.origForma!=='' && obj.origCtx!=null && obj.origCtx!=='')
+    ? _egNormForma(obj.origForma)+'|'+String(obj.origCtx).toLowerCase().trim()
+    : _egNormForma(obj.forma)+'|'+String(obj.ctx).toLowerCase().trim();
+  var idx=keys.indexOf(lookKey);
+  var rowVals=[obj.forma, obj.ctx, obj.banco, !!obj.comision, (obj.pct===''||obj.pct==null?'':obj.pct), (obj.activo===false?false:true)];
+  if(idx>=0) sh.getRange(idx+2,1,1,6).setValues([rowVals]); else sh.appendRow(rowVals);
+  _FORMAS_MEMO=null;
+  return true;
+}
+function _formaBorrar(forma, ctx){
+  var ss=SpreadsheetApp.openById(SHEET_ID);
+  var sh=ss.getSheetByName('Config_FormasPago');
+  if(!sh) return {ok:false, error:'No existe Config_FormasPago'};
+  var lr=sh.getLastRow(); if(lr<2) return {ok:false, error:'Vacía'};
+  var v=sh.getRange(2,1,lr-1,2).getValues();
+  var k=_egNormForma(forma)+'|'+String(ctx||'').toLowerCase().trim();
+  for(var i=0;i<v.length;i++){
+    if(_egNormForma(v[i][0])+'|'+String(v[i][1]).toLowerCase().trim()===k){ sh.deleteRow(i+2); _FORMAS_MEMO=null; return {ok:true}; }
+  }
+  return {ok:false, error:'No encontrada'};
+}
+/* Mantenimiento del dueño — crea/rellena Config_FormasPago con la semilla.
+   Idempotente (solo agrega formas+contexto faltantes). SEGURO correr 2 veces. */
+function setupConfigFormasPago(){
+  var ss=SpreadsheetApp.openById(SHEET_ID);
+  var sh=ss.getSheetByName('Config_FormasPago'); var created=false;
+  if(!sh){
+    sh=ss.insertSheet('Config_FormasPago');
+    sh.getRange(1,1,1,6).setValues([['FormaPago','Contexto','BancoKey','AplicaComision','ComisionPct','Activo']]);
+    sh.getRange(1,1,1,6).setFontWeight('bold').setBackground('#f3f4f6'); sh.setFrozenRows(1); created=true;
+  }
+  var lr=sh.getLastRow();
+  var existing = lr>1 ? sh.getRange(2,1,lr-1,2).getValues().map(function(r){return _egNormForma(r[0])+'|'+String(r[1]).toLowerCase().trim();}) : [];
+  var def=_formasPagoDefault(), added=0;
+  for(var d=0; d<def.length; d++){ var c=def[d]; var k=_egNormForma(c.forma)+'|'+c.ctx; if(existing.indexOf(k)<0){ sh.appendRow([c.forma,c.ctx,c.banco,c.comision,c.pct,true]); added++; } }
+  _FORMAS_MEMO=null;
   return {ok:true, created:created, added:added, total:sh.getLastRow()-1};
 }
 
@@ -3256,6 +3420,10 @@ function _egNormForma(fp) {
     .replace(/\s+/g,' ');
 }
 function _egRutaBanco(formaPago) {
+  // Config al frente: si Config_FormasPago tiene la forma para egreso, manda.
+  var _cfg = _rutaFormaPago(formaPago, 'egreso');
+  if (_cfg && _cfg.banco) return { banco: _cfg.banco, forma: _cfg.forma };
+  // Fallback hardcodeado (byte-idéntico; también cubre si la hoja no existe).
   var n = _egNormForma(formaPago);
   if (!n) return null;
   if (n === 'efectivo') return { banco: 'cajachica', forma: 'Efectivo' };
@@ -3543,7 +3711,14 @@ function _egCrearFilaSimple(banco, monto, fechaPago, ref) {
   if (banco === 'santander')        res = saveBankRow('santander', [fechaPago, 0, monto, 0, ref, '', '', '', '']);
   else if (banco === 'amex')        res = saveBankRow('amex', [fechaPago, monto, 0, ref, '', '', '', '', mesStr]);
   else if (banco === 'mercadopago') res = saveBankRow('mercadopago', [mesStr, fechaPago, -monto, 0, 0, -monto, 0, true, ref, 'PAGO']);
-  else throw new Error('Destino de banco desconocido: ' + banco);
+  else {
+    // Banco NUEVO enlazado a un egreso: fila según su Tipo (mismo layout que los 3 base).
+    var _bcta = _cuentaByKey(banco), _btipo = _bcta ? _bcta.tipo : '';
+    if (_btipo === 'bancaria')     res = saveBankRow(banco, [fechaPago, 0, monto, 0, ref, '', '', '', '']);
+    else if (_btipo === 'credito') res = saveBankRow(banco, [fechaPago, monto, 0, ref, '', '', '', '', mesStr]);
+    else if (_btipo === 'tpv')     res = saveBankRow(banco, [mesStr, fechaPago, -monto, 0, 0, -monto, 0, true, ref, 'PAGO']);
+    else throw new Error('Destino de banco desconocido: ' + banco); // desconocido → error duro, NUNCA borrado silencioso
+  }
   if (res && res.ok === false) throw new Error(res.error || ('No se pudo escribir en ' + banco));
 }
 
@@ -6062,18 +6237,18 @@ function _abonoRutearABanco(op, paciente, monto, formaPago, fecha, comisionMP, o
     var obs = obsOverride || ('Cobro/abono · Px. ' + (paciente || '') + ' [OP #' + op + ']');
     var mesStr = String(fecha || '').substring(0, 7);
     var fp = String(formaPago || '').trim();
-    if (fp === 'Efectivo') {
+    var _cfg = _rutaFormaPago(fp, 'ingreso');
+    // Desconocida → Mercado Pago (fall-through histórico de esta función).
+    var banco = (_cfg && _cfg.banco) ? _cfg.banco : 'mercadopago';
+    var aplicaCom = _cfg ? _cfg.aplicaComision : (fp === 'TDC' || fp === 'TDD' || fp === 'AMEX');
+    if (banco === 'cajachica') {
       saveCajaChicaIngreso({ fecha: fecha, concepto: obs, entrada: monto });
       return { banco: 'cajachica', monto: monto };
     }
-    if (fp === 'Santander') {
-      saveBankRow('santander', [fecha, monto, 0, 0, obs, 0, 0, '', '']);
-      return { banco: 'santander', monto: monto };
-    }
-    // Transferencia / TDC / TDD / AMEX / Mercado Pago → Mercado Pago (CARGO).
-    var com = ((fp === 'TDC' || fp === 'TDD' || fp === 'AMEX') && comisionMP) ? -Math.abs(comisionMP) : 0;
-    saveBankRow('mercadopago', [mesStr, fecha, monto, com, 0, monto + com, 0, false, obs, 'CARGO']);
-    return { banco: 'mercadopago', monto: monto, comision: com };
+    var _cta = _cuentaByKey(banco), _tipo = _cta ? _cta.tipo : 'tpv';
+    var com = (aplicaCom && _tipo === 'tpv' && comisionMP) ? -Math.abs(comisionMP) : 0;
+    saveBankRow(banco, _ingRowByTipo(_tipo, fecha, monto, obs, com, mesStr));
+    return { banco: banco, monto: monto, comision: com };
   } catch (e) { return { error: e.message }; }
 }
 
@@ -6721,11 +6896,16 @@ function _reverseIngresoBank(opId, formaPago, fecha, monto, obs) {
     var mesHoy   = todayStr.substring(0, 7);
     var label    = 'REVERSO [' + opId + '] ' + String(obs || '').substring(0, 80);
 
-    if (fp === 'Santander') {
-      saveBankRow('santander', [todayStr, 0, monto, 0, label, 0, 0, '', '']);
-    } else if (fp === 'TDC' || fp === 'TDD' || fp === 'AMEX' || fp === 'Transferencia') {
-      saveBankRow('mercadopago', [mesHoy, todayStr, 0, 0, 0, -Math.abs(monto), 0, false, label, 'REVERSO']);
-    } else if (fp === 'Efectivo') {
+    var _rcfg = _rutaFormaPago(fp, 'ingreso');
+    var _rbanco = (_rcfg && _rcfg.banco) ? _rcfg.banco
+      : (fp === 'Santander' ? 'santander' : (fp === 'Efectivo' ? 'cajachica'
+        : ((fp==='TDC'||fp==='TDD'||fp==='AMEX'||fp==='Transferencia') ? 'mercadopago' : '')));
+    var _rcta = _cuentaByKey(_rbanco), _rtipo = _rcta ? _rcta.tipo : '';
+    if (_rbanco === 'santander' || _rtipo === 'bancaria') {
+      saveBankRow(_rbanco, [todayStr, 0, monto, 0, label, 0, 0, '', '']);
+    } else if (_rbanco === 'mercadopago' || _rtipo === 'tpv') {
+      saveBankRow(_rbanco, [mesHoy, todayStr, 0, 0, 0, -Math.abs(monto), 0, false, label, 'REVERSO']);
+    } else if (_rbanco === 'cajachica') {
       var sh = getCajaChicaSheet();
       var data = sh.getDataRange().getValues();
       var headers = data[0].map(function(h) { return String(h).trim().toUpperCase(); });
@@ -6963,14 +7143,18 @@ function updateIngresoConBancos(payload) {
       var amt = parseFloat(pay.monto) || 0;
       if (!amt) continue;
 
-      if (fp === 'Efectivo') {
+      var _ucfg = _rutaFormaPago(fp, 'ingreso');
+      var _ubanco = (_ucfg && _ucfg.banco) ? _ucfg.banco
+        : (fp === 'Efectivo' ? 'cajachica' : (fp === 'Santander' ? 'santander'
+          : ((fp==='TDC'||fp==='TDD'||fp==='AMEX'||fp==='Transferencia') ? 'mercadopago' : '')));
+      if (_ubanco === 'cajachica') {
         saveCajaChicaIngreso({fecha: newFecha, concepto: bankObs, entrada: amt});
-      } else if (fp === 'Santander') {
-        saveBankRow('santander', [newFecha, amt, 0, 0, bankObs, 0, 0, '', '']);
-      } else if (fp === 'TDC' || fp === 'TDD' || fp === 'AMEX' || fp === 'Transferencia') {
-        // Conserva la comisión MP ya registrada (se aplica una sola vez)
-        var com = _mpComApplied ? 0 : _mpCom; _mpComApplied = true;
-        saveBankRow('mercadopago', [mesStr, newFecha, amt, com, 0, amt + com, 0, false, bankObs, 'CARGO']);
+      } else if (_ubanco) {
+        var _ucta = _cuentaByKey(_ubanco), _utipo = _ucta ? _ucta.tipo : (_ubanco==='mercadopago'?'tpv':'bancaria');
+        var com = 0;
+        // Comisión MP ya registrada: se aplica una sola vez, al primer movimiento TPV.
+        if (_utipo === 'tpv') { com = _mpComApplied ? 0 : _mpCom; _mpComApplied = true; }
+        saveBankRow(_ubanco, _ingRowByTipo(_utipo, newFecha, amt, bankObs, com, mesStr));
       }
     }
 

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.17.238 -->
+﻿<!-- app-build:2026.07.17.239 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -5263,6 +5263,59 @@ function _ingCancelBuildData(op, info, lang) {
   };
 }
 
+/* ── Ruteo forma de pago → banco/comisión, servido por el backend (E2/E3) ──
+   Espejo de _rutaFormaPago/_ingRowByTipo del backend: la captura de ingreso
+   decide banco + comisión desde Config_FormasPago (no hardcode). Fallback a
+   la tabla vieja si la config no cargó → byte-idéntico. */
+var _ingRutas = null;
+async function _ingLoadRutas(force){
+  if(_ingRutas && !force) return _ingRutas;
+  try{
+    var r = await fetch(APPS_SCRIPT_URL + '?action=rutasBancos&token=' + encodeURIComponent(getToken()), {redirect:'follow'});
+    var j = await r.json();
+    if(j && j.ok) _ingRutas = {formas:j.formas||[], cuentas:j.cuentas||[]};
+  }catch(e){}
+  return _ingRutas;
+}
+function _ingNormForma(s){ return String(s==null?'':s).trim().toLowerCase().replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i').replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').replace(/\s+/g,' '); }
+function _ingRutaForma(fp, ctx){
+  if(!_ingRutas || !_ingRutas.formas) return null;
+  var n=_ingNormForma(fp), amb=null;
+  for(var i=0;i<_ingRutas.formas.length;i++){ var r=_ingRutas.formas[i];
+    if(r.activo===false) continue;
+    if(_ingNormForma(r.forma)!==n) continue;
+    if(r.ctx===ctx) return r;
+    if(r.ctx==='ambos') amb=r;
+  }
+  return amb;
+}
+function _cuentaTipo(banco){
+  if(!_ingRutas || !_ingRutas.cuentas) return '';
+  var k=String(banco||'').toLowerCase().replace(/[\s-]/g,'');
+  for(var i=0;i<_ingRutas.cuentas.length;i++){ if(_ingRutas.cuentas[i].key===k) return _ingRutas.cuentas[i].tipo; }
+  return '';
+}
+function _ingRowByTipoFront(tipo, fecha, monto, obs, com, mesStr){
+  com = com || 0;
+  if(tipo==='tpv') return [mesStr, fecha, monto, com, 0, monto+com, 0, false, obs, 'CARGO'];
+  if(tipo==='credito') return [fecha, monto, 0, obs, 0, 0, '', '', mesStr];
+  return [fecha, monto, 0, 0, obs, 0, 0, '', ''];
+}
+function _ingFormaComisiona(fp){
+  var r=_ingRutaForma(fp,'ingreso');
+  if(r) return !!r.comision;
+  return fp==='TDC'||fp==='TDD'||fp==='AMEX';
+}
+function _ingComisionSugerida(payments){
+  var sug=0, hay=false;
+  (payments||[]).forEach(function(p){
+    var r=_ingRutaForma(p.formaPago,'ingreso');
+    var pct = (r && r.pct!=='' && r.pct!=null) ? Number(r.pct) : NaN;
+    if(_ingFormaComisiona(p.formaPago) && !isNaN(pct) && pct>0){ sug += p.monto * (pct>1?pct/100:pct); hay=true; }
+  });
+  return hay ? Math.round(sug*100)/100 : 0;
+}
+
 /* Capa visual de la captura de ingreso (inyectada 1 vez). NO toca la
    estructura: retokeniza las vars viejas indefinidas (--card-bg/--text-*)
    a los tokens reales del sistema → dark mode correcto + look nativo, y
@@ -5296,7 +5349,7 @@ async function ingOpenDrawer() {
   view.style.display = 'block';
   // Siempre fresco al abrir la captura: refleja al instante cualquier cambio
   // de precio/producto/paciente hecho en la BD, sin depender del caché.
-  await Promise.all([ingLoadProductos(true), ingLoadPacientes(true)]);
+  await Promise.all([ingLoadProductos(true), ingLoadPacientes(true), _ingLoadRutas()]);
 
   var today = new Date().toISOString().substring(0,10);
   // Autocomplete pacientes — desde Registro de Pacientes (base real)
@@ -7980,7 +8033,7 @@ async function ingSubmit(saveNew) {
   // comisión actualmente registrada (leída del banco) para conservarla con un
   // clic, o corregirla si un edit anterior la borró. Otras formas de pago: directo.
   if (_ingEditMode) {
-    var mpEdit = payload._payments.filter(function(p){ return p.formaPago==='TDC'||p.formaPago==='TDD'||p.formaPago==='AMEX'; });
+    var mpEdit = payload._payments.filter(function(p){ return _ingFormaComisiona(p.formaPago); });
     var mpEditTotal = mpEdit.reduce(function(s,p){ return s + p.monto; }, 0);
     if (mpEditTotal > 0) {
       var prevCom = 0;
@@ -8001,19 +8054,21 @@ async function ingSubmit(saveNew) {
     return;
   }
 
-  // Nuevo ingreso con TDC/TDD/AMEX → pedir comisión
-  var mpPayments = payload._payments.filter(function(p){ return p.formaPago === 'TDC' || p.formaPago === 'TDD' || p.formaPago === 'AMEX'; });
+  // Nuevo ingreso con forma que comisiona (config) → pedir comisión
+  var mpPayments = payload._payments.filter(function(p){ return _ingFormaComisiona(p.formaPago); });
   var mpTotal = mpPayments.reduce(function(s,p){ return s + p.monto; }, 0);
 
   if (mpTotal > 0) {
     _ingPendingBankData = payload;
+    // Si la forma tiene % configurado, pre-llenar el monto (editable); si no, en blanco (manual).
+    var _sug = _ingComisionSugerida(mpPayments);
     var display = document.getElementById('ing-com-cobro-display');
     if (display) display.textContent = '$' + mpTotal.toLocaleString('en-US', {minimumFractionDigits:2});
     var cobroVal = document.getElementById('ing-com-cobro-val');
     if (cobroVal) cobroVal.textContent = '$' + mpTotal.toLocaleString('en-US', {minimumFractionDigits:2});
-    document.getElementById('ing-com-com-val').textContent = '$0.00';
-    document.getElementById('ing-com-neto-val').textContent = '$' + mpTotal.toLocaleString('en-US', {minimumFractionDigits:2});
-    document.getElementById('ing-com-monto').value = '';
+    document.getElementById('ing-com-com-val').textContent = '$' + _sug.toLocaleString('en-US', {minimumFractionDigits:2});
+    document.getElementById('ing-com-neto-val').textContent = '$' + (mpTotal - _sug).toLocaleString('en-US', {minimumFractionDigits:2});
+    document.getElementById('ing-com-monto').value = _sug > 0 ? _sug.toFixed(2) : '';
     document.getElementById('modal-ing-comision').style.display = 'flex';
     return;
   }
@@ -8023,7 +8078,7 @@ async function ingSubmit(saveNew) {
 
 function ingCalcComision() {
   if (!_ingPendingBankData) return;
-  var mpPays = _ingPendingBankData._payments.filter(function(p){ return p.formaPago==='TDC'||p.formaPago==='TDD'; });
+  var mpPays = _ingPendingBankData._payments.filter(function(p){ return _ingFormaComisiona(p.formaPago); });
   var cobro = mpPays.reduce(function(s,p){ return s+p.monto; }, 0);
   var com   = parseFloat((document.getElementById('ing-com-monto')||{}).value) || 0;
   var neto  = cobro - com;
@@ -8114,18 +8169,19 @@ async function _ingSaveAndBank(payload, comisionMP) {
       var bankRow = null;
       var banco   = '';
 
-      if (fp === 'Efectivo') {
-        banco = 'cajachica';
+      // Decisión banco + comisión desde la config (fallback hardcode → byte-idéntico).
+      var _rf = _ingRutaForma(fp, 'ingreso');
+      banco = (_rf && _rf.banco) ? _rf.banco
+        : (fp === 'Efectivo' ? 'cajachica' : (fp === 'Santander' ? 'santander'
+          : ((fp==='TDC'||fp==='TDD'||fp==='AMEX'||fp==='Transferencia') ? 'mercadopago' : '')));
+      if (banco === 'cajachica') {
         bankRow = { action: 'saveCajaChicaIngreso', fecha: fecha, concepto: obs, entrada: amt };
-      } else if (fp === 'Santander') {
-        banco = 'santander';
-        bankRow = [fecha, amt, 0, 0, obs, 0, 0, '', ''];
-      } else if (fp === 'TDC' || fp === 'TDD' || fp === 'AMEX' || fp === 'Transferencia') {
-        banco = 'mercadopago';
-        var com  = (fp === 'TDC' || fp === 'TDD' || fp === 'AMEX') && comisionMP ? -Math.abs(comisionMP) : 0;
-        var neto = amt + com;
-        bankRow = [mesStr, fecha, amt, com, 0, neto, 0, false, obs, 'CARGO'];
-        comisionMP = 0; // solo aplicar comisión una vez
+      } else if (banco) {
+        var _tp = _cuentaTipo(banco) || (banco==='mercadopago'?'tpv':'bancaria');
+        var _aplica = _rf ? !!_rf.comision : (fp==='TDC'||fp==='TDD'||fp==='AMEX');
+        var com = (_tp==='tpv' && _aplica && comisionMP) ? -Math.abs(comisionMP) : 0;
+        bankRow = _ingRowByTipoFront(_tp, fecha, amt, obs, com, mesStr);
+        if (_tp==='tpv') comisionMP = 0; // la comisión MP se aplica una sola vez
       }
 
       if (banco && bankRow) {
@@ -13283,6 +13339,83 @@ window.cbCrearBanco = async function() {
   if(btn){btn.disabled=false;btn.textContent='Crear cuenta';}
 };
 
+/* ── Administrar formas de pago → banco + comisión (E2/E3) ──────── */
+var _fpAdmData = null;
+function _fpBankSel(cuentas, sel){
+  var opts=['cajachica'].concat((cuentas||[]).map(function(c){return c.key;}));
+  var seen={}; opts=opts.filter(function(o){ if(seen[o])return false; seen[o]=1; return true; });
+  return opts.map(function(o){ return '<option value="'+o+'"'+(o===sel?' selected':'')+'>'+o+'</option>'; }).join('');
+}
+window.fpAdmClose = function(){ var ov=document.getElementById('fp-adm-ov'); if(ov) ov.style.display='none'; };
+window.fpAdmOpen = async function(){
+  if(!hasPermission('bank_create')){ alert('No tienes permisos para administrar formas de pago.'); return; }
+  var ov=document.getElementById('fp-adm-ov');
+  if(!ov){
+    ov=document.createElement('div'); ov.id='fp-adm-ov';
+    ov.style.cssText='position:fixed;inset:0;z-index:1200;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.onclick=function(e){ if(e.target===ov) fpAdmClose(); };
+    ov.innerHTML='<div style="background:var(--color-surface-2,#fff);color:var(--color-text,#111);border-radius:16px;max-width:780px;width:100%;max-height:86vh;overflow:auto;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.3)">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="font-size:16px;font-weight:800;color:var(--color-primary,#c46a7a)">Formas de pago → banco</div><button onclick="fpAdmClose()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--color-text-muted,#888)">✕</button></div>'
+      +'<div style="font-size:12px;color:var(--color-text-muted,#6b7280);margin-bottom:14px;line-height:1.5">Cada fila enlaza una forma de pago a una cuenta, por contexto. Marca si cobra comisión y, opcional, el % (pre-llena el monto al capturar). <b>La misma forma puede rutear distinto en ingreso vs egreso.</b></div>'
+      +'<div id="fp-adm-body">Cargando…</div></div>';
+    document.body.appendChild(ov);
+  }
+  ov.style.display='flex';
+  var body=document.getElementById('fp-adm-body'); body.innerHTML='Cargando…';
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'readFormasPago',token:getToken()})});
+    _fpAdmData=await r.json(); _fpAdmRender();
+  }catch(e){ body.innerHTML='Error de conexión'; }
+};
+function _fpAdmRender(){
+  var body=document.getElementById('fp-adm-body'); if(!body||!_fpAdmData) return;
+  var formas=_fpAdmData.formas||[], cuentas=_fpAdmData.cuentas||[];
+  var inp='padding:5px 7px;border:1px solid var(--color-divider);border-radius:6px;background:var(--card-bg,#fff);color:var(--text-primary,#111);font-size:12px';
+  var rows=formas.map(function(f,i){
+    return '<tr style="border-bottom:1px solid var(--color-divider,#eee)">'
+      +'<td style="padding:6px 4px"><input value="'+String(f.forma).replace(/"/g,'&quot;')+'" id="fp-forma-'+i+'" style="width:108px;'+inp+'"></td>'
+      +'<td style="padding:6px 4px"><select id="fp-ctx-'+i+'" style="'+inp+'"><option value="ingreso"'+(f.ctx==='ingreso'?' selected':'')+'>ingreso</option><option value="egreso"'+(f.ctx==='egreso'?' selected':'')+'>egreso</option><option value="ambos"'+(f.ctx==='ambos'?' selected':'')+'>ambos</option></select></td>'
+      +'<td style="padding:6px 4px"><select id="fp-banco-'+i+'" style="'+inp+'">'+_fpBankSel(cuentas,f.banco)+'</select></td>'
+      +'<td style="padding:6px 4px;text-align:center"><input type="checkbox" id="fp-com-'+i+'"'+(f.comision?' checked':'')+'></td>'
+      +'<td style="padding:6px 4px"><input value="'+(f.pct===''||f.pct==null?'':f.pct)+'" id="fp-pct-'+i+'" placeholder="%" style="width:50px;'+inp+'"></td>'
+      +'<td style="padding:6px 4px;white-space:nowrap"><button onclick="fpGuardar('+i+')" style="padding:5px 10px;border:none;border-radius:6px;background:var(--color-primary,#c46a7a);color:#fff;font-size:11px;font-weight:700;cursor:pointer">Guardar</button> '
+        +'<button onclick="fpBorrar('+i+')" title="Borrar" style="padding:5px 8px;border:1px solid #f0c0c0;border-radius:6px;background:#fff;color:#dc2626;font-size:11px;cursor:pointer">✕</button></td></tr>';
+  }).join('');
+  body.innerHTML='<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="text-align:left;color:var(--color-text-muted,#888);font-size:10px;text-transform:uppercase">'
+    +'<th style="padding:4px">Forma</th><th style="padding:4px">Contexto</th><th style="padding:4px">Banco</th><th style="padding:4px;text-align:center">Comisión</th><th style="padding:4px">%</th><th style="padding:4px"></th></tr></thead><tbody>'
+    +rows+'</tbody></table></div>'
+    +'<div style="margin-top:14px;border-top:1px dashed var(--color-divider,#ccc);padding-top:12px"><div style="font-weight:700;font-size:12px;margin-bottom:8px">+ Nueva forma de pago</div>'
+      +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
+        +'<input id="fp-new-forma" placeholder="Forma (ej. Cheque)" style="'+inp+'">'
+        +'<select id="fp-new-ctx" style="'+inp+'"><option value="ingreso">ingreso</option><option value="egreso">egreso</option><option value="ambos">ambos</option></select>'
+        +'<select id="fp-new-banco" style="'+inp+'">'+_fpBankSel(cuentas,'')+'</select>'
+        +'<label style="font-size:12px;display:flex;align-items:center;gap:4px"><input type="checkbox" id="fp-new-com"> comisión</label>'
+        +'<input id="fp-new-pct" placeholder="%" style="width:50px;'+inp+'">'
+        +'<button onclick="fpGuardar(-1)" style="padding:6px 14px;border:none;border-radius:6px;background:var(--color-primary,#c46a7a);color:#fff;font-size:12px;font-weight:700;cursor:pointer">Agregar</button>'
+      +'</div></div>';
+}
+window.fpGuardar = async function(i){
+  var forma,ctx,banco,com,pct,origForma='',origCtx='';
+  if(i<0){ forma=(document.getElementById('fp-new-forma')||{}).value; ctx=(document.getElementById('fp-new-ctx')||{}).value; banco=(document.getElementById('fp-new-banco')||{}).value; com=(document.getElementById('fp-new-com')||{}).checked; pct=(document.getElementById('fp-new-pct')||{}).value; }
+  else { forma=document.getElementById('fp-forma-'+i).value; ctx=document.getElementById('fp-ctx-'+i).value; banco=document.getElementById('fp-banco-'+i).value; com=document.getElementById('fp-com-'+i).checked; pct=document.getElementById('fp-pct-'+i).value;
+    var _orig=(_fpAdmData.formas||[])[i]||{}; origForma=_orig.forma||''; origCtx=_orig.ctx||''; }
+  if(!forma||!forma.trim()){ alert('La forma es obligatoria'); return; }
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'saveFormaPago',forma:forma.trim(),ctx:ctx,banco:banco,comision:com,pct:pct,origForma:origForma,origCtx:origCtx,token:getToken()})});
+    var j=await r.json();
+    if(j.ok){ _ingRutas=null; fpAdmOpen(); } else alert('Error: '+(j.error||'no se pudo guardar'));
+  }catch(e){ alert('Error de conexión'); }
+};
+window.fpBorrar = async function(i){
+  var f=(_fpAdmData.formas||[])[i]; if(!f) return;
+  if(!confirm('¿Borrar la forma "'+f.forma+'" ('+f.ctx+')?')) return;
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'deleteFormaPago',forma:f.forma,ctx:f.ctx,token:getToken()})});
+    var j=await r.json();
+    if(j.ok){ _ingRutas=null; fpAdmOpen(); } else alert('Error: '+(j.error||'no se pudo borrar'));
+  }catch(e){ alert('Error de conexión'); }
+};
+
 var APP_VERSION = '2026.06.19.3';
 
 // Detalle expandible de un movimiento bancario: muestra TODOS los campos
@@ -13800,6 +13933,12 @@ function renderConciliacion(data) {
       +'<div id="cb-tipo-hint" style="margin-top:10px;padding:8px 10px;background:var(--color-surface,#f9fafb);border-radius:8px;font-size:10.5px;color:var(--text-secondary,#6b7280);line-height:1.5">'
         +'<strong>Bancaria:</strong> Fecha · Depósito · Retiro · Saldo · Referencia. El saldo sube con depósitos y baja con retiros.'
       +'</div>'
+      +'</div>');
+    // Vincular formas de pago a bancos + comisión
+    hh.push('<div class="cb-sc" style="border:1.5px dashed var(--color-divider,#d1d5db);background:transparent;margin-top:12px">'
+      +'<div class="cb-sh">💳 Formas de pago → banco</div>'
+      +'<div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-bottom:10px;line-height:1.5">Vincula cada forma de pago a su cuenta (por contexto ingreso/egreso) y marca si cobra comisión y con qué %.</div>'
+      +'<button onclick="fpAdmOpen()" style="width:100%;padding:9px 14px;border-radius:8px;border:1.5px solid var(--color-primary,#c46a7a);background:var(--card-bg,#fff);color:var(--color-primary,#c46a7a);font-size:12px;font-weight:700;cursor:pointer">Administrar formas de pago</button>'
       +'</div>');
   }
 

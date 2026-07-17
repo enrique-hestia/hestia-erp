@@ -811,6 +811,13 @@ function doGet(e) {
         return jsonResponse({ok:false, error:'Falta readDropdowns() — actualiza finance.gs en Apps Script y redespliega.'});
       return jsonResponse(readDropdowns());
     }
+    // Ruteo de bancos (formas de pago → banco + comisión) + catálogo de cuentas,
+    // para que el frontend decida banco/comisión desde la config (no hardcode).
+    if (action === 'rutasBancos') {
+      if (typeof _formasPago !== 'function')
+        return jsonResponse({ok:false, error:'Falta _formasPago() — actualiza finance.gs y redespliega.'});
+      return jsonResponse({ok:true, formas:_formasPago(), cuentas:_cuentas()});
+    }
 
     if (action === 'saveDropdown') {
       if (typeof saveDropdownValues !== 'function')
