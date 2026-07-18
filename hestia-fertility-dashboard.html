@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.18.242 -->
+﻿<!-- app-build:2026.07.18.243 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -11171,6 +11171,30 @@ async function loadMenu() {
         });
       }
     }
+    // ── MÓDULO CONTABILIDAD ──────────────────────────────────────────────
+    // Junta en un solo lugar lo fiscal / XML, para que se entienda dónde vive
+    // cada cosa: Comprobantes (CFDIs en Drive) y Conciliar pólizas
+    // (ContaDigital). Aquí se sumarán Declaraciones y Resumen contable.
+    // Respeta la hoja Menu: si un item YA está colocado bajo un padre concreto,
+    // no se le mueve (solo se agrupa lo que estaba suelto o lo que faltaba).
+    (function(){
+      var _cRef = menuItems.filter(function(i){ return i.id==='cfo'; })[0]
+               || menuItems.filter(function(i){ return i.id==='fin-ingresos'; })[0]
+               || menuItems.filter(function(i){ return i.seccion; })[0];
+      var _cSec = _cRef ? _cRef.seccion : '';
+      if (!menuItems.some(function(i){ return i.id==='contabilidad'; })) {
+        menuItems.push({ id:'contabilidad', label:'Contabilidad', padre:'', icono:'calculator',
+          tipo:'grupo', orden:(_cRef?(Number(_cRef.orden)||140)+0.5:200), seccion:_cSec, fuente:'' });
+      }
+      [ {id:'comprobantes',  label:'Comprobantes (CFDI)', icono:'file-text', fuente:'comprobantes',  orden:1},
+        {id:'poliza-concil', label:'Conciliar pólizas',   icono:'book-open', fuente:'poliza-concil', orden:2}
+      ].forEach(function(h){
+        var ex = menuItems.filter(function(i){ return i.id===h.id; })[0];
+        if (ex) { if (!ex.padre) ex.padre = 'contabilidad'; }   // suelto → agrupar; ya anidado → respetar
+        else menuItems.push({ id:h.id, label:h.label, padre:'contabilidad', icono:h.icono,
+          tipo:'vista', orden:h.orden, seccion:_cSec, fuente:h.fuente });
+      });
+    })();
     // Inyectar "Novedades" (qué hay de nuevo + tutorial) al inicio del primer grupo
     if (!menuItems.some(function(i){ return i.id==='novedades'; })) {
       var _sec0=(menuItems.filter(function(i){ return i.seccion; })[0]||{}).seccion || '';
@@ -26397,7 +26421,7 @@ function pcLoadMenu() {
             // al Guardar, saveMenu crea su fila (preserva id/fuente/tipo) y la inyección los
             // salta a partir de ahí, así que su posición ya la manda la hoja.
             var _sids = {}; _sheet.forEach(function(i){ if(i&&i.id) _sids[i.id]=1; });
-            var _dynAllow = {novedades:1,manual:1,cobranza:1,seguro:1,nota:1,semanal:1,'gastos-fijos':1,recordatorios:1,comisiones:1,origenes:1};
+            var _dynAllow = {novedades:1,manual:1,cobranza:1,seguro:1,nota:1,semanal:1,'gastos-fijos':1,recordatorios:1,comisiones:1,origenes:1,contabilidad:1,comprobantes:1,'poliza-concil':1};
             var _live = (typeof menuItems!=='undefined' && menuItems) ? menuItems : [];
             var _dyn = _live.filter(function(i){ return i && i.id && !_sids[i.id] && _dynAllow[i.id]; })
               .map(function(i){ return {id:i.id, padre:i.padre||'', label:i.label||'', icono:i.icono||'', orden:i.orden||0, activo:i.activo!==false, seccion:i.seccion||'', tipo:i.tipo||'vista', fuente:i.fuente||i.id}; });
