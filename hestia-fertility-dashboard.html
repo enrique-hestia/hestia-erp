@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.18.241 -->
+﻿<!-- app-build:2026.07.18.242 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1714,6 +1714,16 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
         <div id="pc-menu-table-wrap" style="overflow-x:auto">
           <div style="padding:32px;text-align:center;color:var(--color-text-muted);font-size:13px" id="pc-menu-empty">Cargando menú…</div>
         </div>
+      </div>
+      <!-- Detector de vistas sin acceso desde el menú (regla: TODO debe abrirse
+           desde el menú; ya pasó 3 veces que una vista quedara solo por buscador). -->
+      <div class="pc-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+          <div class="pc-card-title" style="margin-bottom:0">🔎 Vistas sin acceso desde el menú</div>
+          <button onclick="pcAuditVistas()" style="padding:6px 12px;font-size:12px;font-weight:600;background:var(--color-surface-offset);border:1px solid var(--color-divider);border-radius:7px;cursor:pointer;color:var(--color-text);font-family:inherit">Revisar ahora</button>
+        </div>
+        <div style="font-size:11.5px;color:var(--color-text-muted);line-height:1.5;margin-bottom:10px">Compara las pantallas que existen en el sistema contra las que tu menú puede abrir. Si algo aparece aquí, esa pantalla solo se alcanza por el buscador — y no debería.</div>
+        <div id="pc-audit-vistas" style="font-size:12.5px">Pulsa «Revisar ahora».</div>
       </div>
       <div class="pc-card" style="background:rgba(196,106,122,.04);border-color:rgba(196,106,122,.2)">
         <div style="display:flex;gap:10px;align-items:flex-start">
@@ -26426,12 +26436,61 @@ function pcFilterMenu() {
   pcMenuRenderEditable();
 }
 
+/* ── Detector de vistas sin acceso desde el menú ─────────────────────────
+   REGLA del proyecto: toda pantalla debe poder abrirse desde el menú (con los
+   permisos de cada quien). Ya pasó 3 veces que una vista quedara solo por
+   buscador (Comisiones, Orígenes externos…). Esto lo detecta en vivo: compara
+   los `view-*` que existen en el DOM contra los ids que el menú vivo puede
+   abrir (menuItems ya viene filtrado por permisos). */
+var _PC_SUBVISTAS = {
+  /* Sub-pantallas que se abren DESDE su módulo padre y por diseño no llevan
+     item propio. Si alguna de éstas sí debería estar en el menú, quítala. */
+  'analisis-ingresos':1,'analisis-egresos':1,'analisis-pacientes':1,'analisis-rentabilidad':1,
+  'analisis-servicios':1,'analisis-surrogacy':1,'qx-resumen':1,'med-resumen':1,'lab-resumen':1,
+  'meds-combos':1,'meds-movimientos':1,'oc-lista':1,'gestion-roles':1,'gestion-usuarios':1,
+  'atribuir-externos':1,'nota':1,'seguro':1,'manual':1
+};
+window.pcAuditVistas = function(){
+  var box=document.getElementById('pc-audit-vistas'); if(!box) return;
+  var nodes=document.querySelectorAll('[id^="view-"]'), vistas=[], i;
+  for(i=0;i<nodes.length;i++){ var id=String(nodes[i].id||'').replace(/^view-/,''); if(id && vistas.indexOf(id)<0) vistas.push(id); }
+  vistas.sort();
+  var mi=(typeof menuItems!=='undefined' && menuItems)?menuItems:[], enMenu={};
+  for(i=0;i<mi.length;i++){ if(mi[i]&&mi[i].id) enMenu[mi[i].id]=mi[i]; }
+  var huerfanas=[], subs=[];
+  for(i=0;i<vistas.length;i++){ var v=vistas[i];
+    if(enMenu[v]) continue;
+    if(_PC_SUBVISTAS[v]) subs.push(v); else huerfanas.push(v);
+  }
+  function chip(v, warn){
+    return '<span style="display:inline-flex;align-items:center;gap:6px;margin:0 6px 6px 0;padding:4px 10px;border-radius:999px;font-size:11.5px;font-weight:600;'
+      +(warn?'background:rgba(220,38,38,.10);color:#b91c1c':'background:var(--color-surface-offset);color:var(--color-text-muted)')+'">'
+      +v+'<button onclick="navigateTo(\''+v+'\')" title="Abrir para ver qué es" style="background:none;border:none;cursor:pointer;font-size:11px;color:inherit;padding:0">↗</button></span>';
+  }
+  var h='';
+  h+='<div style="margin-bottom:10px"><b>'+vistas.length+'</b> pantallas existen · <b>'+(vistas.length-huerfanas.length-subs.length)+'</b> alcanzables desde tu menú · <b style="color:'+(huerfanas.length?'#b91c1c':'var(--color-green,#4d8c5a)')+'">'+huerfanas.length+'</b> sin acceso</div>';
+  if(huerfanas.length){
+    h+='<div style="padding:10px 12px;border-radius:9px;background:rgba(220,38,38,.06);border:1px solid rgba(220,38,38,.25);margin-bottom:10px">'
+      +'<div style="font-weight:700;color:#b91c1c;margin-bottom:7px;font-size:12px">⚠ Sin acceso desde el menú — hay que agregarlas</div>';
+    for(i=0;i<huerfanas.length;i++) h+=chip(huerfanas[i],true);
+    h+='<div style="margin-top:7px;font-size:11px;color:var(--color-text-muted);line-height:1.5">Agrégalas arriba en «Items del menú» (o en la hoja <b>Menu</b>) con su sección y orden. El ↗ las abre para que veas qué son.</div></div>';
+  } else {
+    h+='<div style="padding:10px 12px;border-radius:9px;background:rgba(77,140,90,.08);border:1px solid rgba(77,140,90,.25);color:var(--color-green,#3f7a4c);font-weight:600;margin-bottom:10px">✓ Todas las pantallas se pueden abrir desde el menú.</div>';
+  }
+  if(subs.length){
+    h+='<div style="font-size:11.5px;color:var(--color-text-muted);margin-bottom:6px">Sub-pantallas (se abren desde su módulo, no llevan item propio):</div>';
+    for(i=0;i<subs.length;i++) h+=chip(subs[i],false);
+  }
+  box.innerHTML=h;
+};
+
 var _pcMenuEdit = null, _pcMenuFilter = '', _pcMenuDirty = false, _pcMenuDragIdx = null;
 // Compat: algunos llamadores antiguos usan pcRenderMenuTable
 function pcRenderMenuTable(items) {
   _pcMenuEdit = (items||[]).slice().sort(function(a,b){ return (a.orden||0)-(b.orden||0); });
   _pcMenuDirty = false;
   pcMenuRenderEditable();
+  try { pcAuditVistas(); } catch(e) {}   // avisa solo si quedó una pantalla sin acceso
 }
 function _pcMenuIsGrupoMap(){ var m={}; _pcMenuEdit.forEach(function(it){ if(it.tipo==='grupo') m[it.id]=1; }); return m; }
 function _pcMenuEP(it, isGrupo){ return (it.padre && isGrupo[it.padre]) ? it.padre : ''; } // padre efectivo
@@ -38973,6 +39032,7 @@ async function _novCfgGuardar(){
       +'<div class="hfh-title">📖 <span class="hfh-title-txt">Manual del ERP</span></div>'
       +'<div class="hfh-search"><input id="hfh-q" type="search" autocomplete="off" placeholder="Buscar en el manual… (cobranza, CFDI, presupuesto…)" oninput="hfhelpSearch()"></div>'
       +'<button class="hfh-tbtn" onclick="hfhelpDeVista()" title="Explica la pantalla en la que estás">🧭 ¿Qué hace esta pantalla?</button>'
+      +'<button class="hfh-tbtn" onclick="hfhelpClose();navigateTo(\'manual\')" title="Abrir el manual ilustrado, paso a paso">📖 Manual ilustrado</button>'
       +'<button class="hfh-tbtn" onclick="hfhelpPrint()" title="Imprimir el manual completo">🖨 Imprimir</button>'
       +'<button class="hfh-tbtn hfh-close" onclick="hfhelpClose()" title="Cerrar (Esc)">✕</button>'
       +'</div>'
@@ -40864,6 +40924,7 @@ async function _novCfgGuardar(){
       +'<div class="hfm-htitle">📖 Manual del ERP '+badge+'<span class="hfm-hsub">Guía ilustrada · aprende a usar y configurar todo el sistema</span></div>'
       +'<div class="hfm-hactions">'
       +'<div class="hfm-search"><input id="hfm-q" type="search" autocomplete="off" placeholder="Buscar… (ej: cuentas por pagar, CFDI, cobranza, presupuesto)" oninput="hfManSearch()"></div>'
+      +'<button class="hfm-pbtn" onclick="hfhelpOverlayOpen()" title="Buscador rápido: pregunta y te contesta al instante (también Ctrl+K)">🔎 Buscador rápido</button>'
       +'<button class="hfm-pbtn" onclick="hfManPrint()" title="Imprimir el manual completo">🖨 Imprimir</button>'
       +'</div></div>'
       +'<div class="hfm-body"><nav id="hfm-toc" class="hfm-toc"></nav><div id="hfm-cont" class="hfm-cont"></div></div>'
