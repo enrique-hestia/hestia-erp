@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.17.240 -->
+﻿<!-- app-build:2026.07.18.241 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -38681,6 +38681,78 @@ async function _novCfgGuardar(){
 
   /* ──────────────────────── TOC ──────────────────────── */
   function curQuery(){ var q=document.getElementById('hfh-q'); return q?q.value:''; }
+  /* ── Índice por ORDEN DEL MENÚ ──────────────────────────────────────────
+     Por default el índice sigue la barra lateral (donde el usuario realmente
+     busca las cosas), no los 7 temas inventados. `_hfTocMode` alterna. */
+  var _hfTocMode = 'menu';   // 'menu' | 'tema'
+  function _hfNorm(s){ return String(s==null?'':s).trim().toLowerCase()
+    .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i')
+    .replace(/[óòö]/g,'o').replace(/[úùü]/g,'u').replace(/\s+/g,' '); }
+  function _hfMenu(){ return (typeof menuItems!=='undefined' && menuItems) ? menuItems : []; }
+  /* ¿A qué item del menú pertenece esta ficha? id exacto → alias (sec.menu) →
+     coincidencia por etiqueta. null = va al grupo "General y referencia". */
+  function _hfMenuMatch(sec){
+    var mi=_hfMenu(), i;
+    for(i=0;i<mi.length;i++){ if(mi[i].id===sec.id) return mi[i].id; }
+    if(sec.menu){ for(i=0;i<mi.length;i++){ if(mi[i].id===sec.menu) return mi[i].id; } }
+    var t=_hfNorm(sec.title);
+    for(i=0;i<mi.length;i++){ var lb=_hfNorm(mi[i].label); if(lb.length>4 && t.indexOf(lb)>-1) return mi[i].id; }
+    return null;
+  }
+  function _hfTocHeader(){
+    return '<div class="hfh-mode">'
+      +'<button class="hfh-mode-b'+(_hfTocMode==='menu'?' on':'')+'" onclick="hfhelpTocMode(\'menu\')" title="Ordenado como tu menú">Por menú</button>'
+      +'<button class="hfh-mode-b'+(_hfTocMode==='tema'?' on':'')+'" onclick="hfhelpTocMode(\'tema\')" title="Agrupado por tema">Por tema</button>'
+      +'</div>';
+  }
+  function _hfTocPorMenu(q){
+    var mi=_hfMenu(); if(!mi.length) return null;   // menú aún no cargado → cae a temas
+    var porMenu={}, sinMenu=[], i;
+    for(i=0;i<HELP.length;i++){ var s=HELP[i];
+      if(q && s._search.indexOf(q)<0) continue;
+      var m=_hfMenuMatch(s);
+      if(m){ (porMenu[m]=porMenu[m]||[]).push(s); } else sinMenu.push(s);
+    }
+    function botón(hs){
+      return '<button class="hfh-tl'+(hs.id===_hfCur?' on':'')+'" onclick="hfhelpShow(\''+hs.id+'\')">'
+        +'<span class="hfh-tl-ic">'+(hs.icon||'•')+'</span>'+esc(hs.title)+'</button>';
+    }
+    var html='', secciones=[], vistos={};
+    for(i=0;i<mi.length;i++){ var sc=mi[i].seccion||'General'; if(!vistos[sc]){ vistos[sc]=1; secciones.push(sc); } }
+    for(var k=0;k<secciones.length;k++){
+      var sname=secciones[k], items='';
+      for(i=0;i<mi.length;i++){
+        var it=mi[i]; if((it.seccion||'General')!==sname) continue;
+        var arr=porMenu[it.id]; if(!arr||!arr.length) continue;
+        for(var j=0;j<arr.length;j++) items+=botón(arr[j]);
+      }
+      if(!items) continue;
+      html+='<div class="hfh-grp"><div class="hfh-grp-h" style="cursor:default">'+esc(sname)+'</div>'
+          +'<div class="hfh-grp-items">'+items+'</div></div>';
+    }
+    if(sinMenu.length){
+      var o=''; for(i=0;i<sinMenu.length;i++) o+=botón(sinMenu[i]);
+      html+='<div class="hfh-grp"><div class="hfh-grp-h" style="cursor:default">📚 General y referencia</div>'
+          +'<div class="hfh-grp-items">'+o+'</div></div>';
+    }
+    return html;
+  }
+  /* Respuesta directa arriba del contenido: contesta "¿qué hace esto?" sin
+     obligar a leerse la sección entera. */
+  function _hfRespuestaBox(s){
+    if(!s || !s.intro) return '';
+    return '<div class="hfh-answer"><div class="hfh-answer-t">✅ En corto — ¿qué hace '+esc(s.title)+'?</div>'
+      +'<div class="hfh-answer-b">'+fmt(s.intro)+'</div></div>';
+  }
+  /* Pinta una ficha SIN re-renderizar el índice (evita recursión con renderToc). */
+  function _hfShowSilent(id, qh){
+    var s=null; for(var i=0;i<HELP.length;i++){ if(HELP[i].id===id){ s=HELP[i]; break; } }
+    if(!s) return; _hfCur=id;
+    var c=document.getElementById('hfh-cont'); if(!c) return;
+    c.innerHTML=_hfRespuestaBox(s)+sectionHtml(s); c.scrollTop=0;
+    if(qh && qh.length>=2 && typeof hfManualResaltar==='function'){ try{ hfManualResaltar(c,qh); }catch(e){} }
+  }
+
   function renderToc(q){
     var side=document.getElementById('hfh-toc'); if(!side) return;
     q=String(q||'').replace(/^\s+|\s+$/g,'');
@@ -38709,6 +38781,10 @@ async function _novCfgGuardar(){
       side.innerHTML=html2; return;
     }
     q=q.toLowerCase();
+    if(_hfTocMode==='menu'){
+      var mh=_hfTocPorMenu(q);
+      if(mh!==null){ side.innerHTML=_hfTocHeader()+(mh||'<div class="hfh-nores">Sin resultados.</div>'); return; }
+    }
     var html=''; var any=false;
     for(var g=0;g<HELP_GROUPS.length;g++){
       var grp=HELP_GROUPS[g]; var items=[];
@@ -38726,7 +38802,7 @@ async function _novCfgGuardar(){
       html+='</div></div>';
     }
     if(!any) html='<div class="hfh-nores">Sin resultados para «'+esc(q)+'».</div>';
-    side.innerHTML=html;
+    side.innerHTML=_hfTocHeader()+html;
   }
 
   /* ──────────────────────── API PÚBLICA ──────────────────────── */
@@ -38734,14 +38810,36 @@ async function _novCfgGuardar(){
   window.hfhelpShow=function(id){
     var s=null; for(var i=0;i<HELP.length;i++){ if(HELP[i].id===id){ s=HELP[i]; break; } }
     if(!s) return; _hfCur=id;
-    var c=document.getElementById('hfh-cont'); if(c){ c.innerHTML=sectionHtml(s); c.scrollTop=0; }
+    var c=document.getElementById('hfh-cont'); if(c){ c.innerHTML=_hfRespuestaBox(s)+sectionHtml(s); c.scrollTop=0; }
     renderToc(curQuery());
     /* si hay búsqueda activa: resalta los términos en la sección y hace scroll al primero */
     var qh=String(curQuery()||'').replace(/^\s+|\s+$/g,'');
     if(c && qh.length>=2 && typeof hfManualResaltar==='function'){ try{ hfManualResaltar(c, qh); }catch(e){} }
     var ov=document.getElementById('hfh-ov'); if(ov) ov.className='hfh-ov open'; // cierra el nav móvil
   };
-  window.hfhelpSearch=function(){ renderToc(curQuery()); };
+  /* Buscar CONTESTA: abre el mejor resultado con su respuesta directa arriba,
+     en vez de dejar solo una lista de enlaces que hay que ir picando. */
+  window.hfhelpSearch=function(){
+    var q=curQuery(); renderToc(q);
+    var qq=String(q||'').replace(/^\s+|\s+$/g,'');
+    if(qq.length>=2 && typeof hfBuscarManual==='function'){
+      var res=hfBuscarManual(qq,1,'ayuda');
+      if(res && res.length) _hfShowSilent(res[0].id, qq);
+    }
+  };
+  window.hfhelpTocMode=function(m){ _hfTocMode=(m==='tema')?'tema':'menu'; renderToc(curQuery()); };
+  /* "¿Qué hace esta pantalla?" — abre la ficha de la vista donde estás parado. */
+  window.hfhelpDeVista=function(){
+    var v=(typeof currentView!=='undefined')?currentView:'', sec=null, i;
+    for(i=0;i<HELP.length;i++){ if(HELP[i].id===v){ sec=HELP[i]; break; } }
+    if(!sec) for(i=0;i<HELP.length;i++){ if(_hfMenuMatch(HELP[i])===v){ sec=HELP[i]; break; } }
+    window.hfhelpOverlayOpen(sec?sec.id:undefined);
+    if(!sec){
+      var c=document.getElementById('hfh-cont');
+      if(c) c.innerHTML='<div class="hfh-answer"><div class="hfh-answer-t">Aún no hay ficha para esta pantalla</div>'
+        +'<div class="hfh-answer-b">Busca arriba por nombre o elige del índice (ordenado como tu menú).</div></div>'+c.innerHTML;
+    }
+  };
   /* clic en una sugerencia de «sin resultados»: rellena el buscador y re-busca */
   window.hfhelpBuscar=function(t){ var q=document.getElementById('hfh-q'); if(q) q.value=t; renderToc(t); };
   window.hfhelpNavToggle=function(){ var ov=document.getElementById('hfh-ov'); if(ov) ov.className = (ov.className.indexOf('nav')>=0) ? 'hfh-ov open' : 'hfh-ov open nav'; };
@@ -38783,6 +38881,12 @@ async function _novCfgGuardar(){
     +'.hfh-close{font-size:15px;font-weight:700;line-height:1;padding:8px 12px}'
     +'.hfh-navbtn{display:none;background:none;border:1px solid var(--color-border,#d8d4cd);border-radius:8px;padding:7px 11px;font-size:15px;cursor:pointer;color:var(--color-text,#28251d)}'
     +'.hfh-main{flex:1 1 auto;display:flex;min-height:0}'
+    +'.hfh-answer{background:var(--color-primary-hl,#f2dfe3);border-left:4px solid var(--color-primary,#c46a7a);border-radius:10px;padding:13px 16px;margin:0 0 18px}'
+    +'.hfh-answer-t{font-size:12px;font-weight:800;color:var(--color-primary-active,#8c3848);margin-bottom:5px;letter-spacing:.2px}'
+    +'.hfh-answer-b{font-size:13.5px;line-height:1.6;color:var(--color-text,#28251d)}'
+    +'.hfh-mode{display:flex;gap:5px;padding:8px 10px 10px;position:sticky;top:0;background:inherit;z-index:2}'
+    +'.hfh-mode-b{flex:1;padding:6px 8px;border-radius:999px;border:1px solid var(--color-border,#d8d4cd);background:transparent;color:var(--color-text-muted,#7a7670);font-size:11.5px;font-weight:700;cursor:pointer}'
+    +'.hfh-mode-b.on{background:var(--color-primary-hl,#f2dfe3);border-color:var(--color-primary,#c46a7a);color:var(--color-primary,#c46a7a)}'
     +'.hfh-side{width:290px;flex:0 0 auto;overflow-y:auto;border-right:1px solid var(--color-divider,#e5e2dc);background:var(--color-surface,#faf9f7);padding:12px 10px}'
     +'.hfh-grp{margin-bottom:6px}'
     +'.hfh-grp-h{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;background:none;border:none;cursor:pointer;padding:8px 8px;font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-muted,#7a7670);font-family:inherit;text-align:left}'
@@ -38868,6 +38972,7 @@ async function _novCfgGuardar(){
       +'<button class="hfh-navbtn" onclick="hfhelpNavToggle()" title="Índice">☰</button>'
       +'<div class="hfh-title">📖 <span class="hfh-title-txt">Manual del ERP</span></div>'
       +'<div class="hfh-search"><input id="hfh-q" type="search" autocomplete="off" placeholder="Buscar en el manual… (cobranza, CFDI, presupuesto…)" oninput="hfhelpSearch()"></div>'
+      +'<button class="hfh-tbtn" onclick="hfhelpDeVista()" title="Explica la pantalla en la que estás">🧭 ¿Qué hace esta pantalla?</button>'
       +'<button class="hfh-tbtn" onclick="hfhelpPrint()" title="Imprimir el manual completo">🖨 Imprimir</button>'
       +'<button class="hfh-tbtn hfh-close" onclick="hfhelpClose()" title="Cerrar (Esc)">✕</button>'
       +'</div>'
