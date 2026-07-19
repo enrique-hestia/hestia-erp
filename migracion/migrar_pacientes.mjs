@@ -83,18 +83,31 @@ function parseCSV(text) {
 // ── Normalizadores (mismo criterio que el blueprint) ───────────────────────
 const norm = s => String(s == null ? '' : s).trim();
 const nn = s => { const v = norm(s); return v === '' ? null : v; };            // vacío → null
+const FECHAS_RARAS = [];   // fechas que no se pudieron interpretar (se reportan)
+const MESES_ES = { ene:1, feb:2, mar:3, abr:4, may:5, jun:6, jul:7, ago:8, sep:9, set:9, oct:10, nov:11, dic:12 };
+// Año de 2 dígitos → pivote por el año actual: si 20yy quedara en el FUTURO
+// (imposible para una fecha de nacimiento), es 19yy. Ej. '89'→1989, '05'→2005.
+function _fixYear(y) {
+  if (y.length <= 2) { const yy = parseInt(y,10), cur = new Date().getFullYear()%100; return String((yy <= cur ? 2000 : 1900) + yy); }
+  return y.padStart(4,'0');
+}
+function _armaFecha(d, mo, y) {
+  if (mo > 12 && d <= 12) { const t = d; d = mo; mo = t; }   // venía M/D → corrige a D/M
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return `${_fixYear(String(y))}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
 function normFecha(s) {
   const v = norm(s); if (!v) return null;
-  let m = v.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`;
-  m = v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
-  if (m) { let [_, a, b, y] = m;
-    // Año de 2 dígitos → pivote por el año actual: si 20yy quedara en el FUTURO
-    // (imposible para una fecha de nacimiento), es 19yy. Ej. '89'→1989, '05'→2005.
-    if (y.length === 2) { const yy = parseInt(y,10), cur = new Date().getFullYear()%100; y = String((yy <= cur ? 2000 : 1900) + yy); }
-    // DD/MM/YYYY salvo que el primero sea > 12 (entonces ya es claro)
-    const dd = String(a).padStart(2,'0'), mm = String(b).padStart(2,'0');
-    return `${y}-${mm}-${dd}`; }
-  return v; // deja el crudo para que la comparación lo marque si no cuadra
+  let m = v.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`;   // ISO
+  // D/mmm/Y con mes en español (13/abr/85, 13-abr-1985, "13 abr 85")
+  m = v.match(/^(\d{1,2})[\/\-. ]+([a-záéíóúñ]{3,})[\/\-. ]+(\d{2,4})$/i);
+  if (m) { const mo = MESES_ES[H(m[2]).slice(0,3)];
+    if (mo) { const f = _armaFecha(parseInt(m[1],10), mo, m[3]); if (f) return f; } }
+  // D/M/Y numérico (acepta / - .)
+  m = v.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if (m) { const f = _armaFecha(parseInt(m[1],10), parseInt(m[2],10), m[3]); if (f) return f; }
+  FECHAS_RARAS.push(v);   // no se pudo: se guarda null (no aborta la carga) y se reporta
+  return null;
 }
 const H = h => norm(h).toLowerCase()
   .replace(/[áàä]/g,'a').replace(/[éèë]/g,'e').replace(/[íìï]/g,'i')
@@ -149,6 +162,10 @@ async function main() {
   const headers = rows[0];
   const src = rows.slice(1).map(r => mapRow(headers, r, tenantId)).filter(x => x.nombre); // descarta filas sin nombre
   console.log(`CSV: ${src.length} pacientes con nombre (de ${rows.length - 1} filas).`);
+  if (FECHAS_RARAS.length) {
+    const u = [...new Set(FECHAS_RARAS)];
+    console.warn(`⚠ ${FECHAS_RARAS.length} fecha(s) de nacimiento no reconocidas → se guardan VACÍAS (no bloquean la carga). Corrige el formato en la hoja. Ejemplos: ${u.slice(0,10).join('  ·  ')}`);
+  }
 
   if (cmd === 'cargar') {
     // El upsert es idempotente por (tenant_id, folio). Un paciente SIN folio (ID)
