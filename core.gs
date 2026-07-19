@@ -65,8 +65,12 @@ function handleLogin(email, password) {
   var user = getUserRow(ss, email);
   if (!user)        return { error: 'Usuario no encontrado.' };
   if (!user.activo) return { error: 'Usuario inactivo. Contacta al administrador.' };
-  if (user.password && user.password !== password)
-                    return { error: 'Contraseña incorrecta.' };
+  // ANTES: `if (user.password && user.password !== password)` — si la celda
+  // Contraseña estaba VACÍA, el `user.password &&` cortocircuitaba y se aceptaba
+  // CUALQUIER contraseña. Bastaba conocer el email de un admin sin contraseña
+  // para entrar como admin. Ahora una contraseña vacía RECHAZA el login.
+  if (!user.password)             return { error: 'Tu usuario no tiene contraseña configurada. Contacta al administrador para que te asigne una.' };
+  if (user.password !== password) return { error: 'Contraseña incorrecta.' };
   var rolCfg = getRolConfig(ss, user.rol);
   // Permisos operativos efectivos: admin/director = todo.
   var rl = String(user.rol||'').toLowerCase();
@@ -501,6 +505,16 @@ function doGet(e) {
     }
 
     // ── Nómina ──
+    // Todo lo de nómina (sueldos, RFC, NSS, bonos) exige el permiso 'editar_egresos'
+    // —el MISMO que ya piden sus escrituras (nomina.gs)—, así que quien hace la
+    // nómina ya lo tiene y no se rompe nada; admin/director pasan siempre. ANTES
+    // estas lecturas solo pedían token: cualquier sesión (recepción, una vendedora)
+    // se bajaba RFC+NSS+sueldos de toda la plantilla. EXCEPCIÓN: 'misRecibos' NO se
+    // gatea — es autoservicio, ya filtrado a los recibos propios del empleado.
+    var _NOMINA_GATED = { empleados:1, nominaMes:1, nominaCfg:1, nominaMesEstado:1, nominaBonos:1, nominaPeriodos:1, nominaCaptura:1, nominaSBC:1 };
+    if (_NOMINA_GATED[action] && !_tokenHasPermission((e && e.parameter.token) || '', 'editar_egresos')) {
+      return jsonResponse({ ok:false, error:'Sin autorización para ver nómina (editar_egresos). Pídeselo al administrador.', code:403 });
+    }
     if (action === 'empleados') {
       if (typeof readEmpleados !== 'function') return jsonResponse({ ok: false, error: 'nomina.gs no desplegado' });
       return jsonResponse(readEmpleados());

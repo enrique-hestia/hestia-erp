@@ -789,6 +789,12 @@ function _ecMismoPaciente(filaNom, buscadoNom){
 
 function readEstadoCuentaPaciente(pacienteNombre) {
   try {
+    // Estado de cuenta financiero de un paciente: los roles sin
+    // 'ver_datos_sensibles' (socio, viewer…) no ven saldos de pacientes.
+    // admin/director y los roles operativos (recepción, cobranza) pasan.
+    if (typeof _privVer === 'function' && !_privVer()) {
+      return { ok:false, error:'Sin autorización para ver el estado de cuenta de pacientes (ver_datos_sensibles).', code:403 };
+    }
     if (!pacienteNombre) return { ok: false, error: 'Nombre de paciente requerido' };
     var nombreBuscar = String(pacienteNombre).trim().toLowerCase();
 

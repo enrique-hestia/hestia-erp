@@ -5444,6 +5444,11 @@ function listaPacientesAll() {
     var idxRS = _pacColIdx(hdrs,'Razon Social'), idxRFC = _pacColIdx(hdrs,'RFC'),
         idxCP = _pacColIdx(hdrs,'Codigo Postal'), idxUso = _pacColIdx(hdrs,'Uso CFDI'),
         idxReg = _pacColIdx(hdrs,'Regimen Fiscal'), idxFP = _pacColIdx(hdrs,'Forma de Pago Habitual');
+    // Enmascarado en el BACKEND: los roles sin 'ver_datos_sensibles' (socio, viewer…)
+    // reciben nombre+lista (recepción los necesita) pero NO el correo ni los datos
+    // fiscales de TODO el padrón. admin/director ven todo. Antes esto volcaba correos
+    // y RFC de cada paciente a cualquier sesión — el leak más grande de la auditoría.
+    var _ver = (typeof _privVer !== 'function') || _privVer();
     var result = [];
     for (var i = 1; i < data.length; i++) {
       var nombre = String(data[i][1] || '').trim();
@@ -5451,16 +5456,17 @@ function listaPacientesAll() {
       var lista  = String(data[i][PAC_COL_LISTA - 1] || '').trim() || 'General';
       var email  = String(data[i][3] || '').trim();
       result.push({
-        id: String(data[i][0]||'').trim(), nombre: nombre, lista: lista, email: email,
-        razonSocial: idxRS>-1 ? String(data[i][idxRS]||'') : '',
-        rfc: idxRFC>-1 ? String(data[i][idxRFC]||'') : '',
-        codigoPostal: idxCP>-1 ? String(data[i][idxCP]||'') : '',
-        usoCfdi: idxUso>-1 ? String(data[i][idxUso]||'') : '',
-        regimenFiscal: idxReg>-1 ? String(data[i][idxReg]||'') : '',
-        formaPagoHabitual: idxFP>-1 ? String(data[i][idxFP]||'') : ''
+        id: String(data[i][0]||'').trim(), nombre: nombre, lista: lista,
+        email: _ver ? email : '',
+        razonSocial: (_ver && idxRS>-1) ? String(data[i][idxRS]||'') : '',
+        rfc: (_ver && idxRFC>-1) ? String(data[i][idxRFC]||'') : '',
+        codigoPostal: (_ver && idxCP>-1) ? String(data[i][idxCP]||'') : '',
+        usoCfdi: (_ver && idxUso>-1) ? String(data[i][idxUso]||'') : '',
+        regimenFiscal: (_ver && idxReg>-1) ? String(data[i][idxReg]||'') : '',
+        formaPagoHabitual: (_ver && idxFP>-1) ? String(data[i][idxFP]||'') : ''
       });
     }
-    return { ok: true, pacientes: result };
+    return { ok: true, pacientes: result, masked: !_ver };
   } catch(e) { return { ok: false, error: e.message, pacientes: [] }; }
 }
 
@@ -5503,6 +5509,13 @@ function readPacienteLista(pacienteNombre) {
    de ingresos con el mismo flujo del catálogo (openEditModal). */
 function readPacienteFull(query) {
   try {
+    // Ficha COMPLETA y EDITABLE (RFC, correo, fiscales). Se GATEA en vez de
+    // enmascarar: enmascarar un form editable arriesga el bug de blanqueo (un
+    // campo oculto que se re-guarda vacío borra el dato). Un rol que no ve datos
+    // sensibles tampoco edita pacientes. admin/director pasan.
+    if (typeof _privVer === 'function' && !_privVer()) {
+      return {ok:false, error:'Sin autorización para ver la ficha completa del paciente (ver_datos_sensibles).', code:403};
+    }
     var q = String(query||'').trim().toLowerCase();
     if (!q) return {ok:false, error:'Falta el nombre del paciente'};
     var ss = SpreadsheetApp.openById(PACIENTES_SS_ID);
