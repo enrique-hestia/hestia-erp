@@ -7,11 +7,11 @@
    ============================================================== */
 
 /* ══════════════════════════════════════════════════════════════
-   api_config.gs — Constantes globales del ERP Hestia
+   config.gs — Constantes globales del ERP Hestia
    ──────────────────────────────────────────────────────────────
    INSTRUCCIONES: Copiar este archivo como un .gs separado dentro
    del mismo proyecto de Google Apps Script. Todas las constantes
-   aquí son accesibles globalmente por api_core.gs y api_finance.gs
+   aquí son accesibles globalmente por core.gs y finance.gs
    ══════════════════════════════════════════════════════════════ */
 
 var API_VERSION  = 'v2026-06-15';
@@ -88,7 +88,7 @@ var SHEET_ALIASES = {
 var CAPTURA_SHEET_ID_DEFAULT = SHEET_ID;
 
 /* ══════════════════════════════════════════════════════════════
-   api_finance.gs — Módulo Financiero del ERP Hestia
+   finance.gs — Módulo Financiero del ERP Hestia
    ──────────────────────────────────────────────────────────────
    Funciones:
      · readCashFlow       — Flujo mensual desde hoja CashFlow

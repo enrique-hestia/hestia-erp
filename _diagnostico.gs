@@ -1,4 +1,4 @@
-// _diagnostico_catalogo.gs
+// _diagnostico.gs
 // Ejecuta diagnosticarFuentes() y comparte el log completo
 
 var _MP_ID  = '1qIc9x0JJrb0e2qVxrGiZqHA3CD36r0Wh';

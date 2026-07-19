@@ -463,7 +463,7 @@ function readMensual(ss, sheetName, fechaInicio, fechaFin, sucursal) {
   };
 }
 
-/* ── Funciones financieras definidas en api_finance.gs (mismo proyecto GAS) ──
+/* ── Funciones financieras definidas en finance.gs (mismo proyecto GAS) ──
    readCashFlow, readServicios, readFunnel, readAlertas, readDonut,
    readPaisesOrigen, readCostos, readEstadoResultados, readOperatingPL,
    _buildPLReport, readBanksData, saveBankRow, doPost

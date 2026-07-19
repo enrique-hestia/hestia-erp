@@ -1,4 +1,4 @@
-// revisar_catalogo.gs — Revisión y corrección del catálogo de productos
+// productos_ss_id.gs — Revisión y corrección del catálogo de productos
 //
 // INSTRUCCIONES DE USO:
 //   PASO 1: Ejecuta revisarCatalogoProductos()

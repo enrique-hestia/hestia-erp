@@ -6915,7 +6915,7 @@ function readAmexCorte(body) {
   }
 }
 
-/* ── Constantes definidas en api_config.gs (mismo proyecto GAS) ──
+/* ── Constantes definidas en config.gs (mismo proyecto GAS) ──
    SHEET_ID, AUTH_SECRET, ER_SS_ID, BANKS_SS_ID, LAB_SS_ID, MED_SS_ID,
    PAC_SS_ID, PROD_SS_ID, QX_SS_ID, ER_GID, BUDGET_GID, PL_GID,
    BANKS_GID, CAPTURA_SHEETS, SHEET_ALIASES, CAPTURA_SHEET_ID_DEFAULT
