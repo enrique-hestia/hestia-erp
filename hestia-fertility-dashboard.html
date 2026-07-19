@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.18.245 -->
+﻿<!-- app-build:2026.07.18.246 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -638,10 +638,12 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
   <div class="sidebar-spacer"></div>
   <div class="sidebar-footer">
     <div class="user-row">
-      <div class="avatar">HF</div>
-      <div>
-        <div style="font-size:var(--text-xs);font-weight:600">Hestia Admin</div>
-        <div style="font-size:var(--text-xs);color:var(--color-text-muted)">May 2026</div>
+      <!-- Se llena con la sesión real en showUserChip(). El texto de aquí es solo
+           lo que se ve un instante antes de que cargue (no un dato inventado). -->
+      <div class="avatar" id="sb-avatar">·</div>
+      <div style="min-width:0">
+        <div id="sb-user" style="font-size:var(--text-xs);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Cargando…</div>
+        <div id="sb-sub" style="font-size:var(--text-xs);color:var(--color-text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
       </div>
     </div>
   </div>
@@ -26875,6 +26877,19 @@ function showUserChip(session) {
   var full = String(session.nombre || '').trim();
   nameEl.title = full ? full + ' · ' + (session.email || '') : (session.email || '');
   document.getElementById('user-rol').textContent  = '(' + (session.rol || '') + ')';
+  // Pie del menú: quién eres y con qué rol. Antes decía "Hestia Admin / May 2026"
+  // fijo en el HTML — un placeholder del template que no informaba nada.
+  var alias = sessionAlias(session) || full || (session.email || '').split('@')[0] || 'Usuario';
+  var ini = String(alias).trim().split(/\s+/).filter(Boolean).slice(0,2)
+              .map(function(w){ return w.charAt(0); }).join('').toUpperCase() || 'U';
+  var av = document.getElementById('sb-avatar'); if (av) av.textContent = ini;
+  var un = document.getElementById('sb-user');   if (un) { un.textContent = alias; un.title = nameEl.title; }
+  var sb = document.getElementById('sb-sub');
+  if (sb) {
+    var rol = String(session.rol || '').trim();
+    sb.textContent = rol ? (rol.charAt(0).toUpperCase() + rol.slice(1)) : (session.email || '');
+    sb.title = (session.email || '');
+  }
 }
 
 function logout() {
@@ -41606,6 +41621,56 @@ async function _novCfgGuardar(){
       {n:2, t:'La sugerencia es solo una sugerencia', d:'El traductor automático propone un texto. Revísalo: es terminología médica y va en un documento que lee la paciente. Nunca se guarda solo.'},
       {n:3, t:'Lo que falta, lo escribes tú', d:'Si el traductor no supo, escríbelo a mano. El documento no sale hasta que estén todos: es preferible eso a mandar una carta mitad inglés, mitad español.'},
       {n:4, t:'Se arregla para siempre', d:'Al guardar, la traducción se guarda EN EL CATÁLOGO del producto. La próxima vez que ese servicio salga en un documento, ya no te lo va a pedir.'}
+    ],
+    buttons:[
+     {
+      "k": "Idioma del documento",
+      "d": "Menú del diálogo de impresión con Español, English, Français y Português. Llega ya puesto con el idioma de la ficha de la paciente; si lo cambias aquí, aplica solo a ESTE documento y no toca su ficha."
+     },
+     {
+      "k": "Imprimir",
+      "d": "Genera el documento en el idioma elegido. Antes de salir, el sistema revisa que todos los servicios tengan traducción; si falta alguna, se detiene y te la pide."
+     },
+     {
+      "k": "Cancelar",
+      "d": "Cierra el diálogo sin imprimir nada. También aparece en el aviso de traducciones faltantes: si lo pulsas ahí, el documento no sale."
+     },
+     {
+      "k": "Escribe la traducción…",
+      "d": "Casilla donde escribes cómo se llama ese servicio en el idioma del documento. Si el traductor automático propuso algo, aparece ya escrito para que lo revises y corrijas."
+     },
+     {
+      "k": "Guardar al catálogo e imprimir",
+      "d": "Guarda las traducciones que escribiste dentro del catálogo del producto y luego imprime. Como quedan guardadas, la próxima vez que ese servicio salga en un documento ya no te las va a volver a pedir."
+     },
+     {
+      "k": "✨ Sugerir",
+      "d": "Propone una traducción automática del nombre del producto. Es solo una sugerencia: se escribe en la casilla pero no se guarda sola, tú la revisas porque es terminología médica que lee la paciente."
+     },
+     {
+      "k": "English (Descripcion_EN)",
+      "d": "Nombre del producto en inglés. Es el que aparecerá en el estado de cuenta, la cobranza, el recibo, la cancelación y la carta de seguro cuando el documento salga en inglés."
+     },
+     {
+      "k": "Français (Descripcion_FR)",
+      "d": "Nombre del producto en francés, para los documentos que salen en ese idioma. Si lo dejas vacío, esos documentos no se podrán imprimir en francés."
+     },
+     {
+      "k": "Português (Descripcion_PT)",
+      "d": "Nombre del producto en portugués, para los documentos que salen en ese idioma. Si lo dejas vacío, esos documentos no se podrán imprimir en portugués."
+     },
+     {
+      "k": "Guardar producto",
+      "d": "Guarda el producto junto con sus traducciones. Al editar un producto ya existente el botón dice «Actualizar producto» y hace lo mismo."
+     },
+     {
+      "k": "Idioma de sus documentos",
+      "d": "Campo de la ficha de la paciente que decide en qué idioma salen sus documentos. Se llena solo al elegir su país, pero lo que pongas aquí manda sobre el país. Déjalo en «— Según su país —» si prefieres que lo decida el país."
+     },
+     {
+      "k": "Idioma",
+      "d": "Selector de idioma dentro de la pantalla del recibo/nota y de la carta de seguro. Viene precargado con el idioma de la ficha de la paciente (la carta de seguro arranca en inglés) y puedes cambiarlo antes de generar el documento."
+     }
     ] },
 
   /* ============ IDENTIFICAR PACIENTES ============ */
@@ -42008,6 +42073,64 @@ async function _novCfgGuardar(){
       'Pulsa **Calcular**: verás **cuántos procedimientos hizo el grupo** y **qué escalón alcanzó**, el detalle por médico y los totales por beneficiario.',
       'Revisa los **avisos** (ej. un crédito que quedaría a nombre de un médico sin cuenta) y el detalle de las ventas que forman cada base.',
       'Pulsa **Generar**: se crean los créditos y las cuentas por pagar. Si el mes **ya se generó**, el ERP se niega y te dice qué existe; **↻ Regenerar** solo funciona si nadie lo ha cobrado.'
+    ],
+    buttons:[
+     {
+      "k": "Regla",
+      "d": "Elige qué regla de comisión quieres calcular. Cada regla define un grupo de médicos, qué procedimientos cuentan, los escalones y cómo se reparte. Las inactivas aparecen marcadas."
+     },
+     {
+      "k": "Mes de los procedimientos",
+      "d": "El mes en que se hicieron los procedimientos, no el mes en que se paga. La comisión suele pagarse el mes siguiente."
+     },
+     {
+      "k": "Año",
+      "d": "Año de los procedimientos que quieres calcular. Puedes revisar hasta dos años atrás."
+     },
+     {
+      "k": "Calcular",
+      "d": "Muestra cuántos procedimientos hizo el grupo, qué escalón alcanzó y cuánto le toca a cada quien. Es solo lectura: no crea ni mueve un peso."
+     },
+     {
+      "k": "Ver el detalle",
+      "d": "Despliega la tabla médico por médico (sus procedimientos, su base, el escalón, el % efectivo, el beneficiario y el monto) y las ventas que forman cada base, para que puedas revisar de dónde salió cada cifra."
+     },
+     {
+      "k": "Generar",
+      "d": "El único botón que mueve dinero: crea los créditos a los médicos y las cuentas por pagar a los coordinadores. Antes te muestra una confirmación con cada beneficiario y su monto. Aparece solo si tienes el permiso y el mes todavía no se ha generado."
+     },
+     {
+      "k": "↻ Regenerar",
+      "d": "Vuelve a generar un mes que ya se había generado, borrando lo anterior. Solo funciona si nadie ha cobrado todavía; si ya se cobró, el sistema se niega y te dice qué existe."
+     },
+     {
+      "k": "⚙️ Configurar reglas",
+      "d": "Abre el panel donde se arman las reglas: qué grupo cuenta, qué procedimientos aplican, los escalones y cómo se reparte. Se abre solo la primera vez, cuando aún no hay ninguna regla."
+     },
+     {
+      "k": "✨ Empezar con un ejemplo",
+      "d": "Deja una regla ya armada de ejemplo (3 o más procedimientos → 10%, repartido mitad y mitad, pagado el mes siguiente) para que solo la ajustes en vez de empezar de cero. Aparece únicamente cuando no hay ninguna regla."
+     },
+     {
+      "k": "＋ Nueva regla",
+      "d": "Crea una regla en blanco para configurarla desde cero. Junto a ella, «✕ Quitar regla» elimina la que tengas seleccionada (te pide confirmación)."
+     },
+     {
+      "k": "Grupo cuyo volumen cuenta",
+      "d": "Elige del catálogo de Orígenes externos qué grupo junta procedimientos para desbloquear el escalón. Un médico que trabaja solo es su propio grupo. Si el catálogo está vacío, el enlace «Dar de alta el grupo y sus médicos →» te lleva a crearlo."
+     },
+     {
+      "k": "+ Agregar escalón",
+      "d": "Añade un tramo de volumen: desde cuántos procedimientos, hasta cuántos (vacío = sin límite) y qué porcentaje se desbloquea. Así defines, por ejemplo, que de 3 en adelante aplique 10%."
+     },
+     {
+      "k": "+ Agregar beneficiario",
+      "d": "Añade a quién le toca parte del escalón: puede ser el propio médico del procedimiento o alguien fijo del catálogo, y se le paga como nota de crédito o en efectivo. Las partes deben sumar exactamente 100%; el panel te lo va marcando."
+     },
+     {
+      "k": "Guardar reglas",
+      "d": "Guarda toda la configuración. Se queda bloqueado mientras alguna regla tenga errores (por ejemplo, un reparto que no suma 100%) y te dice cuántas hay que corregir."
+     }
     ],
     tips:[
       'Si un mes sale en **0%**, no es un error: el grupo no llegó al escalón. La pantalla te dice cuántos procedimientos hizo y cuántos le faltaban.',
