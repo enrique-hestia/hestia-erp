@@ -181,7 +181,8 @@ where deleted_at is null
 
 -- La tabla base NO se lee directo (solo por la vista); las escrituras del staff
 -- siguen entrando por INSERT/UPDATE (gateadas por las policies de arriba). La
--- carga de migración usa service_role, que ignora RLS y grants.
+-- carga de migración usa service_role, que ignora la RLS (pero NO los grants:
+-- por eso se le conceden abajo, junto a los demás objetos).
 revoke all      on clinico.pacientes  from authenticated, anon;
 grant  insert, update on clinico.pacientes to authenticated;   -- NO select
 grant  select   on clinico.v_pacientes to authenticated;
@@ -202,6 +203,17 @@ grant usage on schema core, clinico to authenticated;
 grant select on core.tenants, core.usuarios, core.roles, core.permisos, core.rol_permiso, core.auditoria to authenticated;
 -- clinico.pacientes: NO se concede SELECT (se lee por v_pacientes, ya concedida);
 -- insert/update ya concedidos arriba. La bitácora se escribe vía core.audit().
+
+-- service_role (llave SECRETA del backend / scripts de migración): ignora la RLS
+-- pero necesita GRANTS sobre estos esquemas creados a mano; sin esto da
+-- "permission denied for schema core" (código 42501). Es la llave de servidor,
+-- acceso total es lo correcto y esperado. Incluye default privileges para las
+-- tablas que se agreguen después (ingresos, egresos, etc.).
+grant usage on schema core, clinico to service_role;
+grant all on all tables    in schema core, clinico to service_role;
+grant all on all sequences in schema core, clinico to service_role;
+alter default privileges in schema core, clinico grant all on tables    to service_role;
+alter default privileges in schema core, clinico grant all on sequences to service_role;
 --
 -- ⚠ NOTA de escritura (fase futura, no la fase espejo): como se revocó el SELECT
 --    en clinico.pacientes, un INSERT/UPDATE con `Prefer: return=representation`
