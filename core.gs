@@ -142,30 +142,15 @@ function doGet(e) {
       return jsonResponse(handleLogin(loginEmail, loginPass));
     }
 
-    // tabs: muestra pestañas de cualquier spreadsheet (sin auth, solo para debug)
-    if (action === 'tabs') {
-      var sid = (e && e.parameter.sid) || CAPTURA_SHEETS['Medicamentos'];
-      try {
-        var ssTabs = SpreadsheetApp.openById(sid);
-        var tabs   = ssTabs.getSheets().map(function(s){
-          return { name: s.getName(), gid: s.getSheetId() };
-        });
-        return jsonResponse({ spreadsheetId: sid, tabs: tabs });
-      } catch(ex) { return jsonResponse({ error: ex.message }); }
-    }
-
-    // labinspect: lee las primeras filas del spreadsheet de Lab (sin auth, solo debug)
-    if (action === 'labinspect') {
-      try {
-        var ssLab   = SpreadsheetApp.openById('1hYmIl4gSTVrvghP7KY0y0dC200o8w0zShXj63zP-TrQ');
-        var allShts = ssLab.getSheets();
-        var result  = allShts.map(function(sh) {
-          var preview = sh.getRange(1, 1, Math.min(3, sh.getLastRow()), Math.min(10, sh.getLastColumn())).getValues();
-          return { name: sh.getName(), gid: sh.getSheetId(), preview: preview };
-        });
-        return jsonResponse({ sheets: result });
-      } catch(ex) { return jsonResponse({ error: ex.message }); }
-    }
+    /* ELIMINADOS 2026-07-18 por auditoría de seguridad — eran endpoints de debug
+       SIN autenticación, servidos en una URL pública:
+         · 'tabs'       — abría CUALQUIER spreadsheet cuyo id se pasara en ?sid=.
+                          Como el Web App corre con la cuenta dueña, servía de
+                          oráculo para sondear Nómina, Pacientes o Bancos.
+         · 'labinspect' — devolvía un preview de TODAS las hojas del libro de
+                          Laboratorio: resultados de pacientes en abierto.
+       Ninguno lo usaba el frontend (0 referencias). No se re-agregan: si hace
+       falta inspeccionar hojas, se hace desde el editor de Apps Script. */
 
     // Rango de fechas — default: últimos 6 meses
     var hoy        = new Date();
@@ -193,7 +178,17 @@ function doGet(e) {
     // Clave propia e independiente de AUTH_SECRET para evitar depender de cuál definición
     // de AUTH_SECRET esté activa en el proyecto (hardcoded vs. Script Properties).
     if (action === 'egresos_raw') {
-      var ECRAW_KEY = 'hestia-ecraw-9f2a71';
+      /* La clave estaba HARDCODEADA aquí y quedó en el historial de git →
+         debe considerarse COMPROMETIDA. Ahora vive en una Script Property, que
+         no viaja en el repo. Mientras no se defina, el endpoint queda CERRADO:
+         así la clave filtrada deja de servir desde este mismo deploy.
+         Para reactivarlo: Apps Script → Configuración → Propiedades del script →
+         agregar `ECRAW_KEY` con una clave NUEVA (larga y aleatoria). */
+      var ECRAW_KEY = '';
+      try { ECRAW_KEY = PropertiesService.getScriptProperties().getProperty('ECRAW_KEY') || ''; } catch(ePK) {}
+      if (!ECRAW_KEY) {
+        return jsonResponse({ error: 'Endpoint deshabilitado: falta definir la Script Property ECRAW_KEY.', code: 403 });
+      }
       var apiKey = (e && e.parameter.key) || '';
       if (!apiKey || apiKey !== ECRAW_KEY) {
         return jsonResponse({ error: 'API key inválida.', code: 401 });
@@ -206,10 +201,19 @@ function doGet(e) {
       return jsonResponse({ ok: true, egresos: rows, anio: anioRaw, fp: fpRaw, total: rows.length });
     }
 
-    // ── VALIDAR TOKEN en todas las acciones (si la hoja Usuarios existe) ──
+    // ── VALIDAR TOKEN en todas las acciones ──────────────────────────────────
+    // ANTES esto era `if (shUsuariosExiste) { …validar… }`: si la hoja Usuarios
+    // se renombraba, ocultaba o borraba, el candado se SALTABA ENTERO y las ~110
+    // acciones quedaban públicas — y además _privResuelve() daba por bueno "ver
+    // todo", apagando también el enmascarado de nombres de pacientes. Un cambio
+    // accidental en una hoja de cálculo abría el ERP a internet.
+    // Ahora falla CERRADO: sin módulo de usuarios no se atiende nada.
     var currentUser = null;
     var shUsuariosExiste = !!ss.getSheetByName('Usuarios');
-    if (shUsuariosExiste) {
+    if (!shUsuariosExiste) {
+      return jsonResponse({ error: 'Módulo de usuarios no disponible: la hoja Usuarios no existe. Por seguridad no se atienden solicitudes.', code: 503 });
+    }
+    {
       var tkn = (e && e.parameter.token) || '';
       var tkEmail = verifyToken(tkn);
       if (!tkEmail) return jsonResponse({ error: 'Sesión inválida. Inicia sesión nuevamente.', code: 401 });
