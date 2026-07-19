@@ -473,6 +473,16 @@ function doPost(e) {
     var raw = e && e.postData && e.postData.contents;
     if (!raw) return jsonResponse({error:'Sin datos POST'});
     var body = JSON.parse(raw);
+    // ── CANDADO GLOBAL: salvo 'login', TODO POST exige un token de sesión válido ──
+    // ANTES no había gate aquí: cualquier acción no listada con su propio
+    // _tokenHasPermission corría SIN autenticación. Como APPS_SCRIPT_URL viaja en
+    // el HTML público, un DESCONOCIDO con esa URL podía crear ingresos, editar
+    // catálogos, mandar correos, etc. Ahora se exige token para todo menos login;
+    // las acciones que además checan permiso siguen haciéndolo (defensa en capas).
+    if (body.action !== 'login') {
+      var _postEmail = (typeof verifyToken === 'function') ? verifyToken(body.token || '') : null;
+      if (!_postEmail) return jsonResponse({ ok:false, error:'Sesión inválida. Inicia sesión nuevamente.', code:401 });
+    }
     if (body.action === 'login') {
       return jsonResponse(handleLogin(body.email || '', body.password || ''));
     }
