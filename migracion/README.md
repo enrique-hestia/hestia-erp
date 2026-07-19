@@ -27,9 +27,26 @@ En el SQL Editor puedes simular ser un usuario y ver que la RLS funciona:
 - Como `socio` → la MISMA consulta muestra esos campos en `null` (enmascarado por la base, no por el frontend).
 - Como un usuario **paciente** (portal) → solo ve **su propia** fila.
 
+## Cargar pacientes en modo espejo + red de seguridad
+
+`migrar_pacientes.mjs` copia la hoja Pacientes a la base nueva **sin apagar nada** (el ERP viejo sigue vivo) y luego **compara Sheets vs Postgres campo por campo** para probar que cuadran. Solo Node 18+ (sin instalar dependencias).
+
+1. **Exporta la hoja Pacientes a CSV**: en Google Sheets, con la hoja Pacientes activa → *Archivo → Descargar → CSV*.
+2. **Pon los secretos en variables de entorno** (nunca en el código ni en el repo). La `service_role` está en Supabase → *Project Settings → API*. En PowerShell:
+   ```powershell
+   $env:SUPABASE_URL = "https://xxxx.supabase.co"
+   $env:SUPABASE_SERVICE_KEY = "<tu service_role>"   # SECRETA — ignora la RLS
+   ```
+3. **Carga (upsert idempotente por folio)** y luego **verifica**:
+   ```powershell
+   node migrar_pacientes.mjs cargar    pacientes.csv
+   node migrar_pacientes.mjs verificar pacientes.csv   # debe dar 0 diferencias
+   ```
+
+`verificar` imprime la **RED DE SEGURIDAD**: iguales / difieren / faltan / de más / sin ID. Correr `cargar` de nuevo es seguro (no duplica; re-actualiza por folio). Pacientes **sin ID** se avisan y se omiten (sin llave no hay upsert idempotente ni comparación). La comparación pagina, así que es fiable con más de 1000 pacientes.
+
 ## Lo que sigue (no en este cimiento)
 
-- **Cargar pacientes en modo espejo** (solo lectura) desde la hoja Pacientes + el **script de comparación** que confirma que Sheets y Postgres cuadran (siguiente entrega).
 - Resto de dominios por estrangulamiento: catálogos → ingresos/egresos → **bancos al final**.
 - Portal de pacientes sobre este esquema.
 
