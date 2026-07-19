@@ -44,10 +44,11 @@ create table clinico.pacientes (
   unique (tenant_id, folio)
 );
 
--- Antiduplicado por correo (lo que hoy valida el ERP a mano): un correo no se
--- repite dentro del mismo tenant. Índice parcial: ignora correos vacíos y
--- pacientes borrados.
-create unique index pacientes_tenant_email_uniq
+-- Índice por correo (para búsqueda y para el antiduplicado). NO es único a
+-- propósito: en fertilidad las parejas comparten un correo, y el ERP de hoy
+-- AVISA del correo repetido pero no lo bloquea. El antiduplicado vive en la capa
+-- de aplicación (una consulta que avisa), no como constraint dura de la BD.
+create index pacientes_tenant_email
   on clinico.pacientes (tenant_id, lower(email))
   where email is not null and email <> '' and deleted_at is null;
 

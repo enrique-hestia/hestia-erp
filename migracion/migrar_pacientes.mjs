@@ -84,7 +84,10 @@ function parseCSV(text) {
 const norm = s => String(s == null ? '' : s).trim();
 const nn = s => { const v = norm(s); return v === '' ? null : v; };            // vacío → null
 const FECHAS_RARAS = [];   // fechas que no se pudieron interpretar (se reportan)
-const MESES_ES = { ene:1, feb:2, mar:3, abr:4, may:5, jun:6, jul:7, ago:8, sep:9, set:9, oct:10, nov:11, dic:12 };
+// Meses en español E inglés (la hoja mezcla ambos: "abr" y "Aug"). Clave = 3
+// primeras letras en minúscula sin acento.
+const MESES = { ene:1, jan:1, feb:2, mar:3, abr:4, apr:4, may:5, jun:6, jul:7,
+  ago:8, aug:8, sep:9, set:9, oct:10, nov:11, dic:12, dec:12 };
 // Año de 2 dígitos → pivote por el año actual: si 20yy quedara en el FUTURO
 // (imposible para una fecha de nacimiento), es 19yy. Ej. '89'→1989, '05'→2005.
 function _fixYear(y) {
@@ -101,7 +104,7 @@ function normFecha(s) {
   let m = v.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`;   // ISO
   // D/mmm/Y con mes en español (13/abr/85, 13-abr-1985, "13 abr 85")
   m = v.match(/^(\d{1,2})[\/\-. ]+([a-záéíóúñ]{3,})[\/\-. ]+(\d{2,4})$/i);
-  if (m) { const mo = MESES_ES[H(m[2]).slice(0,3)];
+  if (m) { const mo = MESES[H(m[2]).slice(0,3)];
     if (mo) { const f = _armaFecha(parseInt(m[1],10), mo, m[3]); if (f) return f; } }
   // D/M/Y numérico (acepta / - .)
   m = v.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
@@ -165,6 +168,17 @@ async function main() {
   if (FECHAS_RARAS.length) {
     const u = [...new Set(FECHAS_RARAS)];
     console.warn(`⚠ ${FECHAS_RARAS.length} fecha(s) de nacimiento no reconocidas → se guardan VACÍAS (no bloquean la carga). Corrige el formato en la hoja. Ejemplos: ${u.slice(0,10).join('  ·  ')}`);
+  }
+  // Correos repetidos: NO se bloquean (en fertilidad las parejas comparten correo),
+  // pero se avisan para que decidas si es pareja legítima o duplicado real — el
+  // mismo valor que hoy da el antiduplicado del ERP, pero sin frenar la migración.
+  const porCorreo = new Map();
+  for (const p of src) { const e = (p.email || '').toLowerCase(); if (!e) continue; (porCorreo.get(e) || porCorreo.set(e, []).get(e)).push(p.folio || '(sin ID)'); }
+  const repetidos = [...porCorreo.entries()].filter(([, fs]) => fs.length > 1);
+  if (repetidos.length) {
+    console.warn(`⚠ ${repetidos.length} correo(s) compartidos por >1 paciente (normal en parejas; revisa si alguno es duplicado real):`);
+    repetidos.slice(0, 15).forEach(([e, fs]) => console.warn(`   · ${e}  →  ${fs.join(', ')}`));
+    if (repetidos.length > 15) console.warn(`   … y ${repetidos.length - 15} más.`);
   }
 
   if (cmd === 'cargar') {
