@@ -1253,8 +1253,11 @@ function doPost(e) {
       var oldRowU = (rowNum > 1) ? shU.getRange(rowNum, 1, 1, hdrs.length).getValues()[0] : null;
       var newRow = hdrs.map(function(h, i) {
         var key = String(h).trim();
-        if (key === 'Contraseña' && !body[key] && rowNum > 1) {
-          return oldRowU[i];
+        if (key === 'Contraseña') {
+          // Sin contraseña nueva en edición → conservar la de la fila (no borrar).
+          if (!body[key]) return (rowNum > 1 && oldRowU) ? oldRowU[i] : '';
+          // Con contraseña nueva → guardar HASHEADA, nunca en texto plano.
+          return (typeof _pwHash === 'function') ? _pwHash(String(body[key]), _pwSalt()) : body[key];
         }
         if (body[key] !== undefined) return body[key];
         return oldRowU ? oldRowU[i] : '';

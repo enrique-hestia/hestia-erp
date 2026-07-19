@@ -10,6 +10,57 @@ function sha256Hex(str) {
   return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, str)
     .map(function(b){ return ('0'+(b&0xFF).toString(16)).slice(-2); }).join('');
 }
+
+/* ── Contraseñas: hash con sal (transición desde texto plano) ──────────────
+   ANTES la hoja Usuarios guardaba la contraseña EN CLARO: cualquiera con lectura
+   del libro las veía todas. Ahora se guardan como `h1$<sal>$<hash>` (SHA-256
+   salado e iterado). _pwVerify acepta AMBOS formatos durante la transición, así
+   que ninguna cuenta se bloquea: las contraseñas viejas (texto plano) siguen
+   entrando y se convierten a hash al cambiarlas o al correr una vez
+   hashearContrasenasExistentes(). Nota: esto es un ESCALÓN — el destino real es
+   bcrypt/argon2 en Postgres (ver docs/ARQUITECTURA_ERP.md). NO se toca el token
+   (usa sha256Hex+AUTH_SECRET, aparte). */
+var _PW_VER  = 'h1';
+var _PW_ITER = 300;                 // costo por verificación (login es poco frecuente)
+function _pwSalt(){ return Utilities.getUuid().replace(/-/g,''); }   // 32 hex aleatorios
+function _pwHash(pw, salt){
+  var h = sha256Hex(salt + '|' + String(pw==null?'':pw));
+  for (var i = 0; i < _PW_ITER; i++) h = sha256Hex(h + salt);
+  return _PW_VER + '$' + salt + '$' + h;
+}
+function _pwIsHashed(stored){ return typeof stored === 'string' && stored.indexOf(_PW_VER + '$') === 0; }
+function _pwVerify(stored, input){
+  stored = String(stored == null ? '' : stored);
+  input  = String(input  == null ? '' : input);
+  if (stored === '') return false;              // vacío NUNCA pasa (fix previo)
+  if (_pwIsHashed(stored)) {
+    var parts = stored.split('$');              // h1$sal$hash
+    if (parts.length !== 3) return false;
+    return _pwHash(input, parts[1]) === stored; // recomputa con la MISMA sal
+  }
+  return stored === input;                       // legado: texto plano (transición)
+}
+/* Mantenimiento del dueño — convierte a hash las contraseñas que aún estén en
+   texto plano. Idempotente (salta las ya hasheadas y las vacías). SEGURO 2×.
+   Tras correrlo, ya no queda texto plano y el login sigue funcionando igual. */
+function hashearContrasenasExistentes(){
+  try {
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var sh = ss.getSheetByName('Usuarios'); if (!sh) return {ok:false, error:'Hoja Usuarios no encontrada'};
+    var data = sh.getDataRange().getValues();
+    var h = data[0].map(function(c){ return String(c).trim().toLowerCase(); });
+    var pI = h.indexOf('contraseña'); if (pI < 0) return {ok:false, error:'No hay columna Contraseña'};
+    var hasheadas=0, yaHash=0, vacias=0;
+    for (var i=1;i<data.length;i++){
+      var stored = String(data[i][pI]==null?'':data[i][pI]);
+      if (stored === '') { vacias++; continue; }
+      if (_pwIsHashed(stored)) { yaHash++; continue; }
+      sh.getRange(i+1, pI+1).setValue(_pwHash(stored, _pwSalt()));
+      hasheadas++;
+    }
+    return {ok:true, hasheadas:hasheadas, yaHasheadas:yaHash, vacias:vacias, total:data.length-1};
+  } catch(ex){ return {ok:false, error:ex.message}; }
+}
 function generateToken(email, day) {
   day = day || fmtDate(new Date());
   return Utilities.base64Encode(email+'|'+day+'|'+sha256Hex(email+'|'+day+'|'+AUTH_SECRET));
@@ -69,8 +120,8 @@ function handleLogin(email, password) {
   // Contraseña estaba VACÍA, el `user.password &&` cortocircuitaba y se aceptaba
   // CUALQUIER contraseña. Bastaba conocer el email de un admin sin contraseña
   // para entrar como admin. Ahora una contraseña vacía RECHAZA el login.
-  if (!user.password)             return { error: 'Tu usuario no tiene contraseña configurada. Contacta al administrador para que te asigne una.' };
-  if (user.password !== password) return { error: 'Contraseña incorrecta.' };
+  if (!user.password)                    return { error: 'Tu usuario no tiene contraseña configurada. Contacta al administrador para que te asigne una.' };
+  if (!_pwVerify(user.password, password)) return { error: 'Contraseña incorrecta.' };
   var rolCfg = getRolConfig(ss, user.rol);
   // Permisos operativos efectivos: admin/director = todo.
   var rl = String(user.rol||'').toLowerCase();
