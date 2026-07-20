@@ -620,6 +620,15 @@ function sugerirOrigenesHistorico(anio){
       var r = data[i];
       var op = String(r[0] || '').trim(); if (!op) continue;
 
+      // Filtro por AÑO de la fila. BD_Ingresos suele estar CONSOLIDADO (todos los
+      // años en un solo libro) y _ingIdDeAnio devuelve el mismo libro para
+      // cualquier año → sin esto se colaban filas de otros años (ej. 2024
+      // apareciendo con el filtro en 2026). Solo se descarta cuando el año es
+      // CONOCIDO y distinto; fechas ilegibles no se ocultan.
+      var fRow = r[2];
+      var yRow = (fRow instanceof Date) ? fRow.getFullYear() : parseInt(String(dt(fRow)).substring(0,4), 10);
+      if (yRow && yRow !== anio) continue;
+
       // Ya atribuido → se salta.
       var yaTiene = (iOrig > -1) ? String(r[iOrig] || '').trim() : '';
       if (yaTiene) continue;
