@@ -498,6 +498,14 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega dashboard.gs en Apps Script y redespliega.'});
       return jsonResponse(deleteDashboardLayout(_postEmail, body.layoutId));
     }
+    // Médicos tratantes: alta/edición/baja del catálogo (gate editar_pacientes).
+    if (body.action === 'saveMedico' || body.action === 'deleteMedico') {
+      if (typeof saveMedico !== 'function')
+        return jsonResponse({ok:false, error:'Agrega medicos.gs en Apps Script y redespliega.'});
+      if (!_tokenHasPermission(body.token || '', 'editar_pacientes'))
+        return jsonResponse({ok:false, error:'Sin autorización para editar el catálogo de médicos (editar_pacientes).'});
+      return jsonResponse(body.action === 'saveMedico' ? saveMedico(body) : deleteMedico(body));
+    }
     // Avisos generales (broadcast): publicar/editar exige permiso explícito.
     // El autor sale de _postEmail (token verificado), no del cliente.
     if (body.action === 'avisosPublicar') {

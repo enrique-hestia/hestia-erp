@@ -26,7 +26,7 @@ $FILES = @(
   '_diagnostico','analisis','avisos','board','cancelacion','capture','catalogo','chat','cobranza',
   'comisiones','comprobantes','config','core','dashboard','cxp_creditos','declaraciones',
   'devengado','egresos_auditoria','facturacion','finance','gastosfijos','identificar','inventario','inventario_migracion',
-  'lab','medical','nomina','novedades','origenes','poliza_concil','presupuesto','privacidad',
+  'lab','medical','medicos','nomina','novedades','origenes','poliza_concil','presupuesto','privacidad',
   'productos_ss_id','prov_defaults','providers','recordatorios','scheduler','semanal','summary',
   'traducciones'
 )

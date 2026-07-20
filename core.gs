@@ -433,6 +433,15 @@ function doGet(e) {
       return jsonResponse(readRecordatoriosPendientes(e.parameter.usuario || ''));
     }
 
+    // Catálogo de Médicos Tratantes (por nombre + canal). Lectura abierta a
+    // cualquier sesión válida (llena el dropdown de la ficha). Alta/edición por
+    // POST con permiso editar_pacientes.
+    if (action === 'medicos') {
+      if (typeof readMedicos !== 'function')
+        return jsonResponse({ok:false, error:'Agrega medicos.gs en Apps Script y redespliega.', medicos:[]});
+      return jsonResponse(readMedicos((e && e.parameter.inactivos) === '1'));
+    }
+
     // Avisos generales del equipo (broadcast): lectura abierta a cualquier
     // sesión válida (el gate global de GET ya exigió token). Publicar/editar
     // van por POST con permiso publicar_avisos.
