@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.20.260 -->
+﻿<!-- app-build:2026.07.20.261 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -11034,7 +11034,16 @@ async function loadMenu() {
     if (handleApiError(json)) return;
     if (json.error) throw new Error(json.error);
     var session = getSession();
-    var bloqueadas = (session && session.vistasBloqueadas) || [];
+    // Bloqueos FRESCOS del servidor (reflejan el rol actual) con prioridad sobre
+    // los de la sesión (que quedaban viejos hasta re-login). Así un cambio de rol
+    // se ve con solo recargar. Se sincroniza la sesión para el resto de la app.
+    var bloqueadas;
+    if (json.vistasBloqueadas !== undefined) {
+      bloqueadas = json.vistasBloqueadas || [];
+      try { if (session) { session.vistasBloqueadas = bloqueadas; if (json.soloLectura !== undefined) session.soloLectura = json.soloLectura; setSession(session); } } catch(eSy){}
+    } else {
+      bloqueadas = (session && session.vistasBloqueadas) || [];
+    }
     window._agencias = (json.agencias && json.agencias.length) ? json.agencias : ['REPROVIDA'];
     // Fusionar "Gastos Operativos" y "Costos" en un solo ítem "Egresos"
     // Detecta por ID O por label (insensible a mayúsculas/acentos)
@@ -36338,12 +36347,30 @@ function ecCargarPlan(paciente, abonado){
     else { var er = document.getElementById('ec-result'); if (er) er.appendChild(host); }
   }
   host.innerHTML = ''; host.style.display = 'none';
+  _ecPlanData = null; _ecPlanAbonado = abonado;
   fetch(APPS_SCRIPT_URL + '?action=planesPago&paciente=' + encodeURIComponent(paciente) + '&token=' + encodeURIComponent(getToken()) + '&_t=' + Date.now(), {redirect:'follow'})
     .then(function(r){ return r.json(); }).then(function(d){
       if (!d || !d.ok || !d.planes || !d.planes.length) return;
+      _ecPlanData = d.planes;   // se guarda para el reporte impreso
       host.innerHTML = d.planes.map(function(pl){ return _ecPlanCard(pl, abonado); }).join('');
       host.style.display = '';
     }).catch(function(){});
+}
+var _ecPlanData = null, _ecPlanAbonado = 0;
+// Filas del plan para el reporte impreso (fecha, monto, estado). Devuelve [] si no hay plan.
+function _ecPlanPrintRows(){
+  if (!_ecPlanData || !_ecPlanData.length) return [];
+  var hoy = _planFmtJS(new Date()), rows = [];
+  _ecPlanData.forEach(function(pl){
+    var acum = 0;
+    (pl.calendario||[]).forEach(function(c){
+      acum = Math.round((acum + c.monto)*100)/100;
+      var cubierto = (_ecPlanAbonado + 0.01) >= acum;
+      var estado = cubierto ? 'Cubierto' : (c.fecha < hoy ? 'VENCIDO' : 'Pendiente');
+      rows.push({ n:c.n, fecha:c.fecha, monto:c.monto, estado:estado, frecuencia:pl.frecuencia });
+    });
+  });
+  return rows;
 }
 function _ecPlanCard(pl, abonado){
   var hoy = _planFmtJS(new Date()), acum = 0;
@@ -36591,8 +36618,22 @@ function _ecBuildPrintData(lang) {
     // (analisis.gs: totalFacturado = Σ TotalPagar de estas mismas filas). Antes se
     // colocaba contando dos desde el final y caía bajo "Forma de pago".
     totalCol: cols.length - 1,
-    nota: cfg.frase || ''
+    nota: (cfg.frase || '') + _ecPlanNota()
   };
+}
+// Resumen del plan de pagos para el reporte impreso: próximo pago + vencidos.
+function _ecPlanNota(){
+  var rows = (typeof _ecPlanPrintRows === 'function') ? _ecPlanPrintRows() : [];
+  if (!rows.length) return '';
+  var venc = rows.filter(function(r){ return r.estado === 'VENCIDO'; });
+  var prox = rows.filter(function(r){ return r.estado !== 'Cubierto'; })[0];
+  var s = '  ·  Plan de pagos (' + (rows[0].frecuencia||'') + '): ';
+  if (venc.length) s += '⚠ ' + venc.length + ' pago(s) VENCIDO(S) (' + venc.map(function(r){ return r.fecha; }).join(', ') + ').';
+  else if (prox) s += 'próximo pago ' + prox.fecha + '.';
+  else s += 'al corriente.';
+  var pend = rows.filter(function(r){ return r.estado !== 'Cubierto'; });
+  if (pend.length) s += ' Fechas por pagar: ' + pend.map(function(r){ return r.fecha + ' $' + r.monto.toLocaleString('es-MX'); }).join(' · ') + '.';
+  return s;
 }
 
 </script>
@@ -36654,11 +36695,33 @@ function ccLoad(force){
   var tok = encodeURIComponent(getToken());
   var p1 = fetch(_ccApiBase()+'action=cuentasCobrar&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();}).catch(function(e){return {ok:false,error:String(e)};});
   var p2 = fetch(_ccApiBase()+'action=suscripcionesCrio&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();}).catch(function(e){return {ok:false,error:String(e)};});
-  Promise.all([p1,p2]).then(function(res){
+  var p3 = fetch(_ccApiBase()+'action=planesPago&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();}).catch(function(){return {ok:false};});
+  Promise.all([p1,p2,p3]).then(function(res){
     _ccData=res[0]; _ccSus=res[1]; _ccLoading=false;
+    _ccPlanMap={};
+    if(res[2]&&res[2].ok&&res[2].planes){ res[2].planes.forEach(function(pl){ _ccPlanMap[String(pl.paciente||'').toLowerCase()+'|'+String(pl.op||'')]=pl; }); }
     var b=document.getElementById('cc-refresh'); if(b){ b.textContent='↻ Actualizar'; }
     ccRenderKpis(); ccRenderBody();
   });
+}
+var _ccPlanMap=null;
+// Badge de plan de pagos en la fila del adeudo: próximo pago o vencidos.
+function _ccPlanBadge(o){
+  if(!_ccPlanMap) return '';
+  var pac=String(o.paciente||'').toLowerCase(), op=String(o.op||'');
+  var pl=_ccPlanMap[pac+'|'+op] || _ccPlanMap[pac+'|'];
+  if(!pl||!pl.calendario) return '';
+  var abonado=parseFloat(o.abonado)||0, hoy=(typeof _planFmtJS==='function'?_planFmtJS(new Date()):new Date().toISOString().slice(0,10));
+  var acum=0, prox=null, venc=0;
+  pl.calendario.forEach(function(c){
+    acum=Math.round((acum+c.monto)*100)/100;
+    if((abonado+0.01) < acum){ if(!prox) prox=c; if(c.fecha<hoy) venc++; }
+  });
+  var txt='📅 Plan';
+  if(venc>0) txt+=' · <span style="color:#c83c3c;font-weight:700">'+venc+' vencido'+(venc>1?'s':'')+'</span>';
+  else if(prox) txt+=' · próx. '+prox.fecha;
+  else txt+=' · <span style="color:#16a34a">al día</span>';
+  return '<span style="display:inline-block;margin-top:3px;font-size:10px;background:var(--color-primary-hl);color:var(--color-primary);padding:2px 8px;border-radius:20px;font-weight:600">'+txt+'</span>';
 }
 
 function ccRenderKpis(){
@@ -36730,7 +36793,7 @@ function ccRenderSaldos(){
     var rid='ccdet-'+i;
     var chev=(o.items&&o.items.length)?'<span onclick="ccToggleDetalle(\''+rid+'\',this)" title="Ver desglose" style="cursor:pointer;color:var(--color-primary);font-weight:800;margin-right:6px;display:inline-block;width:10px">▸</span>':'<span style="display:inline-block;width:16px"></span>';
     h+='<tr style="border-bottom:1px solid var(--color-divider);'+bg+'">'
-      +'<td style="padding:9px 12px">'+chev+'<b>'+ccEsc(o.paciente)+'</b><div style="font-size:10px;color:var(--color-text-muted);margin-left:16px">'+ccEsc(o.op)+' · '+ccFch(o.fecha)+' · '+(o.origen==='ingreso'?'venta':'registro')+'</div></td>'
+      +'<td style="padding:9px 12px">'+chev+'<b>'+ccEsc(o.paciente)+'</b><div style="font-size:10px;color:var(--color-text-muted);margin-left:16px">'+ccEsc(o.op)+' · '+ccFch(o.fecha)+' · '+(o.origen==='ingreso'?'venta':'registro')+'</div><div style="margin-left:16px">'+_ccPlanBadge(o)+'</div></td>'
       +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccEsc(o.segmento)+'</td>'
       +'<td style="padding:9px 12px;color:var(--color-text-muted);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+ccEsc(o.concepto)+'</td>'
       +'<td style="padding:9px 12px;text-align:right;color:var(--color-text-muted)">'+ccFmt(o.total)+'</td>'

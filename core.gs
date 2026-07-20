@@ -365,23 +365,40 @@ function doGet(e) {
     }
 
     if (action === 'menu') {
+      // Bloqueos del rol FRESCOS (por-usuario). Antes el frontend usaba los de la
+      // SESIÓN (guardados al login) → un cambio de rol no se veía hasta cerrar y
+      // volver a entrar (ni con hard refresh). Ahora viajan aquí, FUERA de la
+      // caché del menú (que es compartida entre usuarios, por eso no se puede
+      // cachear algo por-usuario dentro de ella).
+      var uBloq = [], uSoloLec = false;
+      try {
+        if (typeof getRolConfig === 'function' && currentUser) {
+          var _rc = getRolConfig(ss, currentUser.rol);
+          uBloq = (_rc && _rc.vistasBloqueadas) || [];
+          uSoloLec = !!(_rc && _rc.soloLectura);
+        }
+      } catch(eRc) {}
       var menuCache    = CacheService.getScriptCache();
       var menuCacheKey = 'erp_menu_v3_' + fechaInicio + '_' + fechaFin;
       var menuCached   = menuCache.get(menuCacheKey);
+      var menuResult;
       if (menuCached) {
-        return ContentService.createTextOutput(menuCached).setMimeType(ContentService.MimeType.JSON);
+        menuResult = JSON.parse(menuCached);
+      } else {
+        menuResult = {
+          menu:        readMenu(ss),
+          sucursales:  readSucursales(ss),
+          agencias:    (typeof _summaryAgencias === 'function' ? _summaryAgencias() : ['reprovida']),
+          fechaInicio: fechaInicio,
+          fechaFin:    fechaFin,
+          version:     API_VERSION
+        };
+        try { menuCache.put(menuCacheKey, JSON.stringify(menuResult), 1800); } catch(e) {}
       }
-      var menuResult = {
-        menu:        readMenu(ss),
-        sucursales:  readSucursales(ss),
-        agencias:    (typeof _summaryAgencias === 'function' ? _summaryAgencias() : ['reprovida']),
-        fechaInicio: fechaInicio,
-        fechaFin:    fechaFin,
-        version:     API_VERSION
-      };
-      var menuJson = JSON.stringify(menuResult);
-      try { menuCache.put(menuCacheKey, menuJson, 1800); } catch(e) {}
-      return ContentService.createTextOutput(menuJson).setMimeType(ContentService.MimeType.JSON);
+      // Se adjuntan DESPUÉS de la caché → siempre reflejan el rol actual del usuario.
+      menuResult.vistasBloqueadas = uBloq;
+      menuResult.soloLectura = uSoloLec;
+      return jsonResponse(menuResult);
     }
 
     // Caja Chica: dashboard con saldo y resumen de gasto
