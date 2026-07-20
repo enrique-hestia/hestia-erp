@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.18.246 -->
+﻿<!-- app-build:2026.07.19.247 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -451,6 +451,34 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 .chart-wrap{position:relative;width:100%;height:200px}
 .chart-wrap-tall{position:relative;width:100%;height:260px}
 
+/* MIS PENDIENTES · mini-calendario (E1) */
+.ppc-wrap{display:flex;gap:var(--space-5);flex-wrap:wrap}
+.ppc-calbox{flex:0 0 300px;max-width:100%}
+.ppc-sidebox{flex:1;min-width:220px}
+.ppc-newbtn{padding:8px 14px;background:var(--color-primary);color:#fff;border:none;border-radius:var(--radius-md);font-size:var(--text-xs);font-weight:700;cursor:pointer;font-family:inherit}
+.ppc-newbtn:hover{filter:brightness(1.05)}
+.ppc-nav{width:26px;height:26px;border:1px solid var(--color-divider);background:var(--color-surface-2);color:var(--color-text);border-radius:7px;cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center;line-height:1;font-family:inherit}
+.ppc-nav.wide{width:auto;padding:0 10px;font-size:11px;font-weight:600}
+.ppc-nav:hover{background:var(--color-surface-offset)}
+.ppc-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.ppc-dow{height:22px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--color-text-faint)}
+.ppc-day{position:relative;height:34px;display:flex;align-items:center;justify-content:center;font-size:12px;border-radius:8px;color:var(--color-text);cursor:pointer;transition:background .12s;font-variant-numeric:tabular-nums}
+.ppc-day.empty{cursor:default}
+.ppc-day:not(.empty):hover{background:var(--color-surface-offset)}
+.ppc-day.today{box-shadow:inset 0 0 0 1.5px var(--color-primary);font-weight:700}
+.ppc-day.sel{background:var(--color-primary);color:#fff;font-weight:700}
+.ppc-dot{position:absolute;bottom:4px;left:50%;transform:translateX(-50%);width:5px;height:5px;border-radius:50%}
+.ppc-n{position:absolute;top:1px;right:3px;font-size:8px;font-weight:700}
+.ppc-side-t{font-size:var(--text-xs);font-weight:700;color:var(--color-text);margin-bottom:var(--space-2)}
+.ppc-empty{font-size:var(--text-sm);color:var(--color-text-muted);padding:10px 0}
+.ppc-item{display:flex;gap:8px;align-items:flex-start;padding:9px 10px;border:1px solid var(--color-divider);border-radius:var(--radius-md);margin-bottom:7px;background:var(--color-surface)}
+.ppc-item-t{font-size:12.5px;font-weight:600;color:var(--color-text);line-height:1.3}
+.ppc-item-d{font-size:11px;color:var(--color-text-muted);margin-top:2px}
+.ppc-chip{display:inline-block;font-size:9px;font-weight:700;padding:2px 8px;border-radius:20px}
+.ppc-acts{display:flex;gap:3px;flex-shrink:0}
+.ppc-act{width:26px;height:26px;border:none;background:var(--color-surface-offset);border-radius:6px;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;justify-content:center;line-height:1}
+.ppc-act:hover{filter:brightness(.95)}
+
 /* TABLA SERVICIOS */
 .services-table{width:100%;border-collapse:collapse}
 .services-table th{font-size:var(--text-xs);font-weight:600;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.06em;padding:var(--space-2) var(--space-3);text-align:left;border-bottom:1px solid var(--color-divider);position:sticky;top:0;background:var(--color-surface-2);z-index:1}
@@ -819,6 +847,21 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
     </div>
 
   </section>
+
+  <!-- MIS PENDIENTES · calendario personal (E1) -->
+  <div class="card" id="ppc-card" style="margin-bottom:var(--space-4)">
+    <div class="card-header">
+      <div>
+        <div class="card-title">Mis pendientes</div>
+        <div class="card-sub">Tu agenda personal · haz clic en un día para ver o agregar</div>
+      </div>
+      <button class="ppc-newbtn" onclick="hfPendCalNuevo()">+ Nuevo</button>
+    </div>
+    <div class="ppc-wrap">
+      <div id="ppc-cal" class="ppc-calbox"></div>
+      <div id="ppc-side" class="ppc-sidebox"></div>
+    </div>
+  </div>
 
   <!-- FILA: Ingresos por mes + Donut servicios -->
   <div class="row-2">
@@ -24020,6 +24063,7 @@ async function loadResumenGeneral(){
   renderResumen(base);
 }
 function renderResumen(data) {
+  if (typeof hfPendCalLoad === 'function') hfPendCalLoad();   // calendario de pendientes (independiente de la data del ERP)
   if (!data || !data.todos) return;
   var d = data[currentSegment] || data.todos;
   updateKPIs(d);
@@ -31772,8 +31816,9 @@ function _renderRecordatorios(){
   } else {
     h+=sec('Hoy y vencidos',pend,'#dc2626')+sec('Próximos',prox,'#2563eb')+sec('Hechos / descartados',hechos);
   }
-  h+='</div>'+_recModalHTML();
+  h+='</div>';
   root.innerHTML=h;
+  hfRecEnsureModal();
 }
 
 function _recModalHTML(){
@@ -31857,17 +31902,144 @@ async function recSaveForm(){
   } else {
     res=await crearRecordatorio({titulo:titulo, fecha:fecha, detalle:detalle, origen:'manual', recurrencia:recur, recDia:recDia, recMes:recMes});
   }
-  if(res&&res.ok){ recCloseForm(); loadRecordatorios(); } else { alert('Error: '+((res&&res.error)||'')); if(btn){btn.disabled=false;btn.textContent='Guardar';} }
+  if(res&&res.ok){ recCloseForm(); hfRecRefreshAll(); } else { alert('Error: '+((res&&res.error)||'')); if(btn){btn.disabled=false;btn.textContent='Guardar';} }
 }
 async function recEstado(rowNum, estado){
   var s=getSession()||{};
-  try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'updateRecordatorioEstado', rowNum:rowNum, estado:estado, usuario:s.email||''})}); var res=await r.json(); if(res.ok) loadRecordatorios(); else alert('Error: '+(res.error||'')); }catch(e){ alert('Error: '+e.message); }
+  try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'updateRecordatorioEstado', rowNum:rowNum, estado:estado, usuario:s.email||''})}); var res=await r.json(); if(res.ok) hfRecRefreshAll(); else alert('Error: '+(res.error||'')); }catch(e){ alert('Error: '+e.message); }
 }
 function recDone(rowNum){ recEstado(rowNum,'hecho'); }
 async function recDelete(rowNum){
   if(!confirm('¿Eliminar este recordatorio?')) return;
   var s=getSession()||{};
-  try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'deleteRecordatorio', rowNum:rowNum, usuario:s.email||''})}); var res=await r.json(); if(res.ok) loadRecordatorios(); else alert('Error: '+(res.error||'')); }catch(e){ alert('Error: '+e.message); }
+  try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'deleteRecordatorio', rowNum:rowNum, usuario:s.email||''})}); var res=await r.json(); if(res.ok) hfRecRefreshAll(); else alert('Error: '+(res.error||'')); }catch(e){ alert('Error: '+e.message); }
+}
+
+/* ══════════════ MINI-CALENDARIO DE PENDIENTES (E1) ══════════════
+   Calendario mensual + panel del día montado en el Resumen. Lee la MISMA
+   fuente que la vista Recordatorios (window._recData) y reusa sus acciones
+   (recDone/recEstado/recDelete/recOpenForm). El modal de alta/edición es un
+   singleton en <body> para que funcione desde cualquier vista sin duplicar ids. */
+var _ppcYM = null;    // {y, m} mes visible (m: 0-11)
+var _ppcSel = null;   // 'YYYY-MM-DD' día seleccionado (o null)
+var _PPC_MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+var _PPC_DIAS  = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+
+// Modal de recordatorio como singleton en <body> (una sola instancia global).
+function hfRecEnsureModal(){
+  if (document.getElementById('rec-modal')) return;
+  var host = document.createElement('div'); host.innerHTML = _recModalHTML();
+  while (host.firstChild) document.body.appendChild(host.firstChild);
+}
+
+// Re-fetch de recordatorios + re-render de TODA superficie visible (vista + calendario),
+// sin depender de #rec-root (que no existe en el Resumen).
+async function hfRecRefreshAll(){
+  try{
+    var tok=encodeURIComponent(getToken()), u=encodeURIComponent(recCurrentUser());
+    var d=await fetch(APPS_SCRIPT_URL+'?action=recordatorios&usuario='+u+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();});
+    if(d&&!d.error) window._recData=d;
+  }catch(e){}
+  if(document.getElementById('rec-root')) _renderRecordatorios();
+  if(document.getElementById('ppc-cal'))  hfPendCalRender();
+}
+
+function _ppcParse(s){ var p=String(s||'').split('-'); return p.length===3 ? {y:+p[0], m:+p[1]-1, d:+p[2]} : null; }
+function _ppcKey(y,m,d){ return y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0'); }
+function _ppcFechaLarga(key){ var p=_ppcParse(key); if(!p) return key; var dt=new Date(p.y,p.m,p.d); return _PPC_DIAS[dt.getDay()]+' '+p.d+' de '+_PPC_MESES[p.m]; }
+function _ppcActivos(){ var d=window._recData||{}; return (d.pendientes||[]).concat(d.proximos||[]); }
+
+// Carga (o reusa el cache) y pinta. Se llama desde renderResumen.
+async function hfPendCalLoad(force){
+  if(!document.getElementById('ppc-cal')) return;
+  if(window._recData && !force){ hfPendCalRender(); return; }
+  try{
+    var tok=encodeURIComponent(getToken()), u=encodeURIComponent(recCurrentUser());
+    var d=await fetch(APPS_SCRIPT_URL+'?action=recordatorios&usuario='+u+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'}).then(function(r){return r.json();});
+    if(d&&!d.error) window._recData=d;
+  }catch(e){}
+  hfPendCalRender();
+}
+
+function hfPendCalMove(delta){
+  var ht=_ppcParse((window._recData||{}).hoy||_recToday());
+  if(!_ppcYM) _ppcYM={y:ht.y,m:ht.m};
+  var m=_ppcYM.m+delta, y=_ppcYM.y;
+  while(m<0){m+=12;y--;} while(m>11){m-=12;y++;}
+  _ppcYM={y:y,m:m}; hfPendCalRender();
+}
+function hfPendCalHoy(){ var ht=_ppcParse((window._recData||{}).hoy||_recToday()); _ppcYM={y:ht.y,m:ht.m}; _ppcSel=null; hfPendCalRender(); }
+function hfPendCalPick(key){ _ppcSel = (_ppcSel===key ? null : key); hfPendCalRender(); }
+function hfPendCalNuevo(){ hfRecEnsureModal(); recOpenForm({fecha:_ppcSel||((window._recData||{}).hoy||_recToday())}); }
+
+function hfPendCalRender(){
+  var mount=document.getElementById('ppc-cal'); if(!mount) return;
+  var d=window._recData||{}; var hoy=d.hoy||_recToday(); var ht=_ppcParse(hoy);
+  if(!_ppcYM) _ppcYM={y:ht.y,m:ht.m};
+  var y=_ppcYM.y, m=_ppcYM.m;
+  var byDate={}; _ppcActivos().forEach(function(r){ if(r.fecha){ (byDate[r.fecha]=byDate[r.fecha]||[]).push(r); } });
+
+  var head='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'
+    +'<div style="font-size:13px;font-weight:700;color:var(--color-text)">'+_PPC_MESES[m]+' '+y+'</div>'
+    +'<div style="display:flex;gap:4px">'
+    +'<button class="ppc-nav" onclick="hfPendCalMove(-1)" title="Mes anterior">‹</button>'
+    +'<button class="ppc-nav wide" onclick="hfPendCalHoy()">Hoy</button>'
+    +'<button class="ppc-nav" onclick="hfPendCalMove(1)" title="Mes siguiente">›</button>'
+    +'</div></div>';
+  var dow=['D','L','M','M','J','V','S'].map(function(x){return '<div class="ppc-dow">'+x+'</div>';}).join('');
+  var first=new Date(y,m,1).getDay(), dim=new Date(y,m+1,0).getDate(), cells='', i;
+  for(i=0;i<first;i++) cells+='<div class="ppc-day empty"></div>';
+  for(var day=1; day<=dim; day++){
+    var key=_ppcKey(y,m,day), items=byDate[key]||[];
+    var cls='ppc-day'; if(key===_ppcSel) cls+=' sel'; else if(key===hoy) cls+=' today';
+    var venc=items.some(function(r){ return r.fecha<hoy; });
+    var col = key===_ppcSel ? '#fff' : (venc? '#dc2626':'var(--color-primary)');
+    var dot = items.length ? '<span class="ppc-dot" style="background:'+col+'"></span>' : '';
+    var n   = items.length>1 ? '<span class="ppc-n" style="color:'+(key===_ppcSel?'#fff':'var(--color-text-muted)')+'">'+items.length+'</span>' : '';
+    cells+='<div class="'+cls+'" onclick="hfPendCalPick(\''+key+'\')">'+day+dot+n+'</div>';
+  }
+  mount.innerHTML=head+'<div class="ppc-grid">'+dow+cells+'</div>';
+  _ppcRenderSide();
+}
+
+function _ppcRenderSide(){
+  var side=document.getElementById('ppc-side'); if(!side) return;
+  var d=window._recData||{}; var hoy=d.hoy||_recToday(); var h='';
+  if(_ppcSel){
+    var items=_ppcActivos().filter(function(r){return r.fecha===_ppcSel;});
+    var hechos=(d.hechos||[]).filter(function(r){return r.fecha===_ppcSel;});
+    h+='<div class="ppc-side-t">'+_ppcFechaLarga(_ppcSel)+'</div>';
+    if(!items.length && !hechos.length){
+      h+='<div class="ppc-empty">Sin pendientes este día.</div><button class="ppc-newbtn" onclick="hfPendCalNuevo()">+ Agregar aquí</button>';
+    } else {
+      h+=items.map(function(r){return _ppcItemRow(r,hoy);}).join('');
+      if(hechos.length) h+='<div style="opacity:.6">'+hechos.map(function(r){return _ppcItemRow(r,hoy);}).join('')+'</div>';
+    }
+  } else {
+    var act=_ppcActivos().slice().sort(function(a,b){return String(a.fecha||'').localeCompare(String(b.fecha||''));});
+    h+='<div class="ppc-side-t">Próximos pendientes</div>';
+    if(!act.length) h+='<div class="ppc-empty">🎉 Nada pendiente. Toca un día para agregar algo.</div>';
+    else h+=act.slice(0,6).map(function(r){return _ppcItemRow(r,hoy);}).join('');
+  }
+  side.innerHTML=h;
+}
+
+function _ppcItemRow(r, hoy){
+  var pend=r.estado==='pendiente';
+  var venc=r.fecha && r.fecha<hoy && pend, esHoy=r.fecha===hoy;
+  var chip = !pend ? '<span class="ppc-chip" style="background:var(--color-surface-offset);color:var(--color-text-muted)">'+(r.estado==='hecho'?'Hecho':'Descartado')+'</span>'
+    : venc ? '<span class="ppc-chip" style="background:#fee2e2;color:#991b1b">Vencido · '+r.fecha+'</span>'
+    : esHoy ? '<span class="ppc-chip" style="background:#fef9c3;color:#854d0e">Hoy</span>'
+    : '<span class="ppc-chip" style="background:var(--color-surface-offset);color:var(--color-text-muted)">'+(r.fecha||'sin fecha')+'</span>';
+  var acc = pend
+    ? '<button class="ppc-act" onclick="recDone('+r.rowNum+')" title="Marcar hecho" style="color:#166534">✓</button>'
+    : '<button class="ppc-act" onclick="recEstado('+r.rowNum+',\'pendiente\')" title="Reabrir" style="color:#2563eb">↺</button>';
+  var edit=encodeURIComponent(JSON.stringify({rowNum:r.rowNum,titulo:r.titulo||'',fecha:r.fecha||'',detalle:r.detalle||'',recurrencia:r.recurrencia||''}));
+  acc+='<button class="ppc-act" onclick="hfRecEnsureModal();recOpenForm(JSON.parse(decodeURIComponent(\''+edit+'\')))" title="Editar / reprogramar" style="color:var(--color-text-muted)">✎</button>';
+  acc+='<button class="ppc-act" onclick="recDelete('+r.rowNum+')" title="Eliminar" style="color:#dc2626">🗑</button>';
+  return '<div class="ppc-item"><div style="flex:1;min-width:0"><div class="ppc-item-t">'+_cxpEsc(r.titulo)+'</div>'
+    +(r.detalle?'<div class="ppc-item-d">'+_cxpEsc(r.detalle)+'</div>':'')
+    +'<div style="margin-top:4px">'+chip+'</div></div><div class="ppc-acts">'+acc+'</div></div>';
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
