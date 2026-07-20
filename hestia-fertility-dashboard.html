@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.20.269 -->
+﻿<!-- app-build:2026.07.20.270 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -38463,59 +38463,53 @@ function _cobBuildPrintData(lang){
   var hoy=ccFch(new Date().toISOString().substring(0,10));
   // El PDF lleva el detalle de lo vendido según la vista elegida (histórico o periodo)
   var _vv=_cobVentasVista(d), _vvTot=0; _vv.forEach(function(v){ _vvTot+=v.total; });
-  var rows=_vv.map(function(v){ return [ccFch(v.fecha), (v.producto||'—')+(v.op?' · OP '+v.op:''), _cq(v.cantidad), ccFmt(v.total), ccFmt(v.pagado), v.saldo>0.01?ccFmt(v.saldo):'—', _cobEstadoLinea(v.op, v.saldo, lang)]; });
-  // `conceptos` va en paralelo a `rows`: el nombre EXACTO del producto de cada
-  // fila, o null si la fila no lleva producto (saldos, suscripción, descuentos:
-  // esas son etiquetas del sistema y se traducen con el diccionario).
-  var conceptos=_vv.map(function(v){ return v.producto||''; });
-  // Saldos de registro (saldo inicial / cargo a crédito) que no vienen de una venta.
-  // Si el saldo trae partidas con paciente (agencias/externos), se expande una fila por
-  // paciente para que el reporte muestre a cada paciente con su procedimiento.
-  //
-  // ── Por qué existe _opsImpresos ─────────────────────────────────────────────
-  // La misma deuda vive en DOS motores: la venta en BD_Ingresos (arriba, `_vv`) y
-  // su espejo en Cuentas_Cobrar, que escribe _cobRegistrarSaldoIngreso con Nota
-  // 'auto-ingreso' al vender a crédito. Sin filtrar, el documento imprimía los
-  // mismos $60,000 dos veces —"Captura + Vitrificación · OP-00123" y "Saldo
-  // pendiente de OP OP-00123"— mientras el gran total los contaba UNA vez: las
-  // filas no sumaban su propio total, en un papel que se le manda a la agencia.
-  //
-  // Aquí había un `if(o.origen!=='registro') return;` que parecía cubrir esto pero
-  // era CÓDIGO MUERTO: _cobBuildSaldos escribe `origen:'registro'` en todas las
-  // filas, sin excepción (es su único valor), así que nunca saltaba ninguna. El
-  // discriminador de verdad es `auto`.
-  //
-  // Y no basta con saltar todo lo `auto`: si la venta NO llegó a imprimirse
-  // (enmascarado por privacidad, o vive en el libro de otro año), su espejo es la
-  // ÚNICA evidencia de la deuda y borrarlo la desaparecería del estado de cuenta.
-  // Esconder deuda es peor que duplicarla. Por eso se salta solo el espejo de una
-  // venta que SÍ está impresa arriba.
-  var _opsImpresos={};
-  _vv.forEach(function(v){ if(v.op) _opsImpresos[String(v.op)]=true; });
+  // ── AGRUPAR POR OP: cabecera "Cobro · N conceptos · OP" + conceptos indentados ──
+  // Igual que el Estado de Cuenta. Así el paciente ve de un vistazo qué conceptos
+  // integran CADA cargo (p.ej. los 4 honorarios de una cirugía = un solo cobro) en
+  // vez de una lista plana donde no se distingue qué va junto. Se arma una lista de
+  // movimientos y _agruparPorOp los junta por OP (grupo de 1 = renglón suelto).
+  var _lblCobro=(lang==='en')?'Charge':(lang==='fr')?'Prestation':(lang==='pt')?'Cobrança':'Cobro';
+  var _lblConc =(lang==='en')?'items':(lang==='fr')?'éléments':(lang==='pt')?'itens':'conceptos';
+  var movs=[];
+  _vv.forEach(function(v){ movs.push({ op:v.op||'', fecha:v.fecha, producto:v.producto||'—', cantidad:v.cantidad, total:v.total, pagado:v.pagado, saldo:v.saldo }); });
+  // La misma deuda vive en dos motores (venta en BD_Ingresos + espejo en
+  // Cuentas_Cobrar): se salta el espejo SOLO si su venta ya está impresa arriba (si
+  // no —enmascarada o de otro año— el espejo es la única evidencia; esconder deuda
+  // es peor que duplicarla). El discriminador real es `auto`, no `origen`.
+  var _opsImpresos={}; _vv.forEach(function(v){ if(v.op) _opsImpresos[String(v.op)]=true; });
   (d.saldos||[]).forEach(function(o){
     if(o.auto && o.op && _opsImpresos[String(o.op)]) return;
     var partes=(o.items||[]).filter(function(x){return x.pac;});
-    // ── SEPARAR CONCEPTOS ──────────────────────────────────────────────────
-    // Si el saldo NO tiene partidas por paciente pero SÍ tiene desglose (items) y
-    // está totalmente SIN pagar y ese desglose suma el total, se abre una fila por
-    // concepto (en vez del texto concatenado "Honorarios A, Honorarios B, …"). Así
-    // siempre se ve qué se cobró Y cada producto se traduce por separado. Solo si
-    // está sin pagar y cuadra, para no repartir mal un pago parcial.
+    // SEPARAR CONCEPTOS: si el saldo trae desglose, está SIN pagar y cuadra con el
+    // total, se abre un movimiento por concepto (así se ve qué se cobró y se traduce
+    // cada uno). Con pago parcial se deja agregado para no repartir mal el abono.
     var _its=(o.items||[]), _sumIts=_its.reduce(function(a,x){ return a+(parseFloat(x.total)||0); },0);
     var _separable = !partes.length && _its.length && (parseFloat(o.abonado)||0)<=0.01 && Math.abs(_sumIts-(parseFloat(o.total)||0))<=1;
-    if(partes.length){ partes.forEach(function(x){ rows.push([ccFch(x.fecha||o.fecha), x.pac+' · '+(x.producto||'—'), _cq(x.cantidad), ccFmt(x.total), '', ccFmt(x.total), _cobEstadoLinea(o.op, x.total, lang)]); conceptos.push(x.producto||''); }); }
-    else if(_separable){ _its.forEach(function(x){ rows.push([ccFch(x.fecha||o.fecha), (x.producto||'—')+(o.op&&o.op!=='—'?' · OP '+o.op:''), _cq(x.cantidad), ccFmt(x.total), '', ccFmt(x.total), _cobEstadoLinea(o.op, x.total, lang)]); conceptos.push(x.producto||''); }); }
-    // El concepto del saldo se manda para que también se TRADUZCA en documentos en
-    // otro idioma (antes iba null → salía en español); si no está en catálogo, el
-    // diálogo de idioma lo pide una vez.
-    else { rows.push([ccFch(o.fecha), o.concepto||T.saldo, '—', ccFmt(o.total), ccFmt((o.total||0)-(o.saldo||0)), ccFmt(o.saldo), _cobEstadoLinea(o.op, o.saldo, lang)]); conceptos.push(o.concepto||null); }
+    if(partes.length){ partes.forEach(function(x){ movs.push({ op:o.op||'', fecha:(x.fecha||o.fecha), producto:x.pac+' · '+(x.producto||'—'), cantidad:x.cantidad, total:x.total, pagado:null, saldo:x.total }); }); }
+    else if(_separable){ _its.forEach(function(x){ movs.push({ op:o.op||'', fecha:(x.fecha||o.fecha), producto:x.producto||'—', cantidad:x.cantidad, total:x.total, pagado:null, saldo:x.total }); }); }
+    else { movs.push({ op:o.op||'', fecha:o.fecha, producto:o.concepto||T.saldo, cantidad:null, total:o.total, pagado:(o.total||0)-(o.saldo||0), saldo:o.saldo }); }
   });
-  if(sus&&sus.montoDebe>0){ rows.push([ccFch(sus.proximoCobro),T.suscripcionCrio+' ('+sus.plan+')', '—', ccFmt(sus.montoDebe), ccFmt(0), ccFmt(sus.montoDebe), _cobEstadoSusc(sus, lang)]); conceptos.push(null); }
+  var _mkRowCob=function(m, isItem){
+    return [ ccFch(m.fecha), m.producto, _cq(m.cantidad), ccFmt(m.total),
+             (m.pagado==null?'':ccFmt(m.pagado)), ((parseFloat(m.saldo)||0)>0.01?ccFmt(m.saldo):'—'),
+             isItem ? '' : _cobEstadoLinea(m.op, m.saldo, lang) ];
+  };
+  var _mkHeaderCob=function(g, tot){
+    var op=String((g[0].op)||'').trim(), sumPag=0, sumSal=0, hayPag=false;
+    g.forEach(function(m){ if(m.pagado!=null){ sumPag+=(parseFloat(m.pagado)||0); hayPag=true; } sumSal+=(parseFloat(m.saldo)||0); });
+    var titulo=_lblCobro+' · '+g.length+' '+_lblConc+((op&&op!=='—')?' · OP '+op:'');
+    return [ ccFch(g[0].fecha), titulo, '', ccFmt(tot), (hayPag?ccFmt(sumPag):''), (sumSal>0.01?ccFmt(sumSal):'—'), _cobEstadoLinea(op, sumSal, lang) ];
+  };
+  var _agCob=_agruparPorOp(movs, _mkRowCob, _mkHeaderCob);
+  var rows=_agCob.rows, rowKinds=_agCob.rowKinds, conceptos=_agCob.rowConcepts;
+  // Suscripción crío: renglón suelto (sin OP → no se agrupa); su etiqueta ya viene
+  // localizada por el diccionario, así que NO se manda a traducir como producto.
+  if(sus&&sus.montoDebe>0){ rows.push([ccFch(sus.proximoCobro),T.suscripcionCrio+' ('+sus.plan+')', '—', ccFmt(sus.montoDebe), ccFmt(0), ccFmt(sus.montoDebe), _cobEstadoSusc(sus, lang)]); rowKinds.push('normal'); conceptos.push(null); }
   var susDebe=(sus&&sus.montoDebe)||0, totalDebe=(d.totalSaldo||0)+susDebe;
   var _desc=(d.descuentos&&d.descuentos.aplica)?d.descuentos:null;
   var _descTot=_desc?(_desc.total||0):0;
   var _neto=totalDebe-_descTot; if(_neto<0) _neto=0;
-  if(_desc){ _desc.lineas.forEach(function(l){ rows.push([ccEsc(l.mes), T.descuento+' '+l.pct+'% · '+(l.paciente?ccEsc(l.paciente)+' · ':'')+ccEsc(l.producto), _cq(l.cantidad), '', '', '−'+ccFmt(l.descuento), '']); conceptos.push(l.producto||''); }); }
+  if(_desc){ _desc.lineas.forEach(function(l){ rows.push([ccEsc(l.mes), T.descuento+' '+l.pct+'% · '+(l.paciente?ccEsc(l.paciente)+' · ':'')+ccEsc(l.producto), _cq(l.cantidad), '', '', '−'+ccFmt(l.descuento), '']); rowKinds.push('normal'); conceptos.push(l.producto||''); }); }
   var kpis = _desc
     ? [{value:ccFmt(_neto),label:T.netoACobrar},{value:ccFmt(totalDebe),label:T.bruto},{value:'−'+ccFmt(_descTot),label:T.descuentoVol},{value:susDebe>0?ccFmt(susDebe):T.alDia,label:T.suscripcion}]
     : [{value:ccFmt(totalDebe),label:T.totalPorCobrar},{value:ccFmt(d.totalSaldo||0),label:T.saldos},{value:susDebe>0?ccFmt(susDebe):T.alDia,label:T.suscripcion},{value:ccFmt(_vvTot),label:(_cobVista==='pendiente'?T.porCobrarDetalle:T.totalVendido)}];
@@ -38535,7 +38529,7 @@ function _cobBuildPrintData(lang){
             {label:T.pagado,r:true}, {label:T.saldo,r:true}, _cobEstL(lang).col];
   return { title:T.estadoCobranza, subject:d.paciente, period:periodTxt, generado:hfSello(),
     kpis:kpis, cols:cols, rows:rows,
-    conceptCol:1, rowConcepts:conceptos,
+    conceptCol:1, rowConcepts:conceptos, rowKinds:rowKinds,
     totalLabel:_desc?T.netoACobrar:T.totalPorCobrar, totalValue:ccFmt(_desc?_neto:totalDebe),
     // El total es un ADEUDO, así que va bajo Saldo. Antes caía bajo "Pagado" (dos
     // desde el final), que insinuaba justo lo contrario: que el "Total por cobrar"
