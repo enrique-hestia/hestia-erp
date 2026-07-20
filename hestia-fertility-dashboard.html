@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.20.265 -->
+﻿<!-- app-build:2026.07.20.266 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -11049,6 +11049,11 @@ async function loadMenu() {
     // Fusionar "Gastos Operativos" y "Costos" en un solo ítem "Egresos"
     // Detecta por ID O por label (insensible a mayúsculas/acentos)
     var rawMenu = (json.menu || []);
+    // Ids que YA viven en la hoja Menu. Presencia de un GRUPO aquí = "el usuario
+    // lo acomodó desde el Panel de Control" → los bloques de auto-agrupado de
+    // abajo se hacen a un lado y la HOJA manda (así el reacomodo persiste en vez
+    // de que cada carga vuelva a forzar padre/orden). Es el fin del "menú fantasma".
+    var _sheetIds = {}; rawMenu.forEach(function(i){ if (i && i.id) _sheetIds[String(i.id).trim()] = 1; });
     function _isGastos(i){ return /^gastos?$/i.test(i.id) || /gastos?\s*operativos?/i.test(i.label); }
     function _isCostos(i){ return /^costos?$/i.test(i.id) || /^costos?$/i.test((i.label||'').trim()); }
     function _isToReplace(i){ return _isGastos(i) || _isCostos(i); }
@@ -11169,7 +11174,10 @@ async function loadMenu() {
     // ── Agrupar AGENCIAS bajo un grupo "Agencias" en Productos (REPROVIDA + futuras) ──
     // La lista viene de la Script Property AGENCIAS (json.agencias) → sumar agencias
     // es un solo lugar. Mueve los ítems de catálogo que sean agencia bajo el grupo.
-    (function(){
+    // Si el usuario ya materializó el grupo 'agencias' desde el Panel de Control,
+    // la HOJA manda: no auto-agrupar ni re-forzar padre/orden (ahí es donde antes
+    // era imposible reacomodar — el forEach de abajo pisaba la hoja en cada carga).
+    if (!_sheetIds['agencias']) (function(){
       var _agList = ((json.agencias && json.agencias.length) ? json.agencias : ['reprovida'])
         .map(function(a){ return String(a||'').toLowerCase(); }).filter(Boolean);
       var _prodGrp = menuItems.filter(function(i){ return (i.tipo==='grupo'||i.id==='productos') && /producto/i.test(i.label||i.id); })[0];
@@ -11367,7 +11375,9 @@ async function loadMenu() {
         {id:'poliza-concil', label:'Conciliar pólizas',   icono:'book-open', fuente:'poliza-concil', orden:2}
       ].forEach(function(h){
         var ex = menuItems.filter(function(i){ return i.id===h.id; })[0];
-        if (ex) { ex.padre = 'contabilidad'; ex.seccion = _cGrp.seccion; }   // forzar bajo Contabilidad + misma sección
+        // Forzar bajo Contabilidad SOLO si el usuario no controla el grupo desde el
+        // Panel (si 'contabilidad' ya vive en la hoja, respetar dónde puso cada hijo).
+        if (ex) { if (!_sheetIds['contabilidad']) { ex.padre = 'contabilidad'; ex.seccion = _cGrp.seccion; } }
         else menuItems.push({ id:h.id, label:h.label, padre:'contabilidad', icono:h.icono,
           tipo:'vista', orden:h.orden, seccion:_cGrp.seccion, fuente:h.fuente });
       });
@@ -11410,8 +11420,29 @@ async function loadMenu() {
         if (!menuItems.some(function(i){ return i.id==='cfo'; })){
           menuItems.push({ id:'cfo', label:'CFO', padre:_padreCFO, icono:'briefcase', tipo:'grupo', orden:_ordCFO-0.001, seccion:_sec });
         }
-        cfoMembers.forEach(function(m, idx){ m.padre='cfo'; m.orden=idx+1; m.seccion=_sec; });
+        // Solo auto-agrupar bajo CFO si el usuario no lo controla ya desde el Panel.
+        if (!_sheetIds['cfo']) cfoMembers.forEach(function(m, idx){ m.padre='cfo'; m.orden=idx+1; m.seccion=_sec; });
       }
+    })();
+    // ── Agrupar lo COMERCIAL (referidos externos) en un submenú ──────────────
+    // Orígenes externos · Comisiones · Médicos Tratantes van juntos: todo lo que
+    // tiene que ver con quién refiere pacientes y su comisión. Respeta la hoja: si
+    // el usuario ya materializó el grupo 'comercial' desde el Panel, no se re-fuerza
+    // (puede renombrarlo, moverlo o sacarle items y persiste).
+    if (!_sheetIds['comercial']) (function(){
+      var _cm = [
+        menuItems.filter(function(i){ return i.id==='origenes'; })[0],
+        menuItems.filter(function(i){ return i.id==='comisiones'; })[0],
+        menuItems.filter(function(i){ return i.id==='medicos'; })[0]
+      ].filter(Boolean);
+      if (_cm.length < 2) return;   // nada que agrupar
+      var _ref = _cm[0];
+      var _secC = _ref.seccion || (menuItems.filter(function(i){ return i.seccion; })[0]||{}).seccion || '';
+      var _ordC = Math.min.apply(null, _cm.map(function(m){ return Number(m.orden)||99; }));
+      if (!menuItems.some(function(i){ return i.id==='comercial'; })){
+        menuItems.push({ id:'comercial', label:'Comercial', padre:'', icono:'users', tipo:'grupo', orden:_ordC-0.001, seccion:_secC });
+      }
+      _cm.forEach(function(m, idx){ m.padre='comercial'; m.orden=idx+1; m.seccion=_secC; });
     })();
     // Default: mes en curso (no año completo)
     var _now = new Date();
@@ -26776,9 +26807,17 @@ function pcLoadMenu() {
             // al Guardar, saveMenu crea su fila (preserva id/fuente/tipo) y la inyección los
             // salta a partir de ahí, así que su posición ya la manda la hoja.
             var _sids = {}; _sheet.forEach(function(i){ if(i&&i.id) _sids[i.id]=1; });
-            var _dynAllow = {novedades:1,manual:1,cobranza:1,seguro:1,nota:1,semanal:1,'gastos-fijos':1,recordatorios:1,comisiones:1,origenes:1,contabilidad:1,comprobantes:1,'poliza-concil':1};
+            // Antes había una LISTA BLANCA (_dynAllow) que solo dejaba editar unos
+            // pocos items inyectados; el resto (Agencias, Médicos, Grupo Médico,
+            // Catálogo General, Análisis, Summary, Board, CFO, Comercial…) eran
+            // FANTASMA: no salían en el editor y no se podían mover ni anidar. Ahora
+            // se exponen TODOS los items vivos que no estén ya en la hoja. Al Guardar,
+            // saveMenu crea su fila (preserva id/fuente/tipo) y la posición la manda
+            // la hoja. Único excluido: 'egresos', que se SINTETIZA de Gastos+Costos
+            // (materializarlo duplicaría el ítem).
+            var _dynBlock = {egresos:1};
             var _live = (typeof menuItems!=='undefined' && menuItems) ? menuItems : [];
-            var _dyn = _live.filter(function(i){ return i && i.id && !_sids[i.id] && _dynAllow[i.id]; })
+            var _dyn = _live.filter(function(i){ return i && i.id && !_sids[i.id] && !_dynBlock[i.id]; })
               .map(function(i){ return {id:i.id, padre:i.padre||'', label:i.label||'', icono:i.icono||'', orden:i.orden||0, activo:i.activo!==false, seccion:i.seccion||'', tipo:i.tipo||'vista', fuente:i.fuente||i.id}; });
             var _full = _sheet.concat(_dyn);
             // ── El editor NO toca el menú vivo ─────────────────────────────────
