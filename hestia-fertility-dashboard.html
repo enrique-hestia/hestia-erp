@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.19.254 -->
+﻿<!-- app-build:2026.07.19.255 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -40276,6 +40276,8 @@ async function _novCfgGuardar(){
   var HFM_GOTO = {
     'identificar-pacientes': { view:'identificar', menu:['identificar'], tour:'identificar' },
     'resumen':               { view:'resumen',     menu:['resumen'], directo:true },
+    'mi-tablero':            { view:'resumen',     menu:['resumen'], directo:true },
+    'mis-pendientes':        { view:'resumen',     menu:['resumen'], directo:true },
     'ingresos':              { view:'ingresos',    menu:['ingresos'] },
     'ingresos-cancelar':     { view:'ingresos',    menu:['ingresos'] },
     'egresos':               { view:'gastos',      menu:['egresos','gastos','cxp'] },
@@ -40307,6 +40309,7 @@ async function _novCfgGuardar(){
     'formularios':           { view:'panel-control', menu:['panel-control','configuracion'] },
     'plantillas':            { view:'panel-control', menu:['panel-control','configuracion'] },
     'recordatorios':         { view:'recordatorios', menu:['recordatorios'], directo:true },
+    'avisos':                { view:'avisos',      menu:['avisos'], directo:true },
     'novedades':             { view:'novedades',   menu:['novedades'], directo:true }
     /* Sin botón a propósito: idioma-documentos, primeros-pasos, interfaz,
        chat (botón flotante), config-inicial y glosario no tienen una vista. */
@@ -40429,7 +40432,7 @@ async function _novCfgGuardar(){
    "group": "catalogos",
    "icon": "🧑‍⚕️",
    "title": "Registro de Pacientes",
-   "keywords": "pacientes paciente registro alta expediente correo duplicado rfc razon social uso cfdi regimen fiscal canal medico tratante origen idioma pais HEC sincronizar datos fiscales",
+   "keywords": "pacientes paciente registro alta expediente correo duplicado rfc razon social uso cfdi regimen fiscal canal medico tratante origen idioma pais HEC sincronizar datos fiscales buscador captura ingreso lupa",
    "para": "Es el **padrón único de pacientes** de la clínica: cada persona se da de alta una sola vez y de ahí toman su nombre los ingresos, los reportes y las facturas. Además del dato básico (nombre, nacimiento, correo, canal, médico tratante, país), guarda los **datos de facturación** de la paciente —razón social, RFC, código postal, uso de CFDI, régimen y forma de pago habitual— para no volver a preguntarlos en cada venta. El sistema **avisa cuando un correo o un nombre ya está registrado en otra paciente**, para que el padrón no se llene de duplicados. También puede **rellenar los datos fiscales solo**, leyendo las facturas ya timbradas.",
    "where": "Menú lateral → entrada **Registro de Pacientes** (vista `cap-pacientes`). El menú es editable desde **Panel de Control → Menú**, así que el nombre y el grupo donde aparece pueden variar. También se abre el alta directa desde el formulario de captura de ingreso, con el botón de **nuevo paciente**, que al guardar regresa el nombre al ingreso.",
    "mock": {
@@ -40603,7 +40606,8 @@ async function _novCfgGuardar(){
     "**Revisa el grupo con ⚠ antes de marcarlo.** Ahí caen los nombres que solo coinciden parcialmente o los pacientes con varias razones sociales distintas en su historial.",
     "**El bloque XML facturados sin paciente encontrado es solo informativo**: el nombre capturado en el ingreso no existe en el padrón. Se arregla capturando o corrigiendo el nombre, no desde el asistente.",
     "**Idioma manda sobre País.** Una paciente mexicana puede necesitar sus documentos en inglés para su aseguradora; el campo Idioma es el que decide.",
-    "**Analizar un rango amplio tarda uno o dos minutos** porque abre los XML de Drive uno por uno. Ten paciencia y no cierres la ventana."
+    "**Analizar un rango amplio tarda uno o dos minutos** porque abre los XML de Drive uno por uno. Ten paciencia y no cierres la ventana.",
+    "**El buscador de pacientes de la captura de ingresos también encuentra por correo.** Al capturar una venta, la lupa de paciente busca por nombre, correo, razón social o RFC, y cada renglón muestra el correo real (más RFC y razón social si los tiene) — útil para distinguir a dos pacientes con nombres casi iguales."
    ],
    "tech": {
     "hojas": [
@@ -42780,7 +42784,7 @@ async function _novCfgGuardar(){
       nota:'El HTML se sirve desde **GitHub Pages** (se actualiza solo al publicar). Si el ISP bloquea github.io se usa **githack** temporalmente. El backend (`core.gs` y demás `.gs`) se despliega **manual** en Apps Script.' } },
 
   { id:'interfaz', group:'inicio', icon:'🧭', title:'La interfaz: menú, periodo, tema',
-    keywords:'menu periodo tema oscuro claro dark segmento local internacional filtro fechas navegacion sidebar topbar barra superior',
+    keywords:'menu periodo tema oscuro claro dark segmento local internacional filtro fechas navegacion sidebar topbar barra superior actualizacion version nueva actualizar recargar refresh',
     para:'Tres controles globales mandan sobre casi todo: el **menú lateral** (izquierda), el **selector de periodo** (arriba) y el **tema** claro/oscuro. Aprende dónde están una vez y sirven en todos los módulos.',
     where:'Están siempre visibles: menú a la izquierda, barra superior (topbar) arriba.',
     mock:{ title:'VestaOS', crumb:'Barra superior (topbar)', period:'Julio 2026', periodN:3,
@@ -42804,19 +42808,21 @@ async function _novCfgGuardar(){
       { k:'Atajos de mes / trimestre', d:'Saltan a un rango común de un clic.' },
       { k:'Todos / Local / Internacional', d:'Segmenta la vista por tipo de paciente.' },
       { k:'☀️ / 🌙', d:'Cambia entre tema claro y oscuro.' },
-      { k:'☰ (en móvil)', d:'Abre o cierra el menú lateral.' }
+      { k:'☰ (en móvil)', d:'Abre o cierra el menú lateral.' },
+      { k:'Actualizar (aviso azul flotante)', d:'Aparece cuando sale una versión nueva del sistema mientras tienes la app abierta: al pulsarlo, recarga la página con la versión al día. Al ABRIR la página, la versión nueva se aplica sola, sin preguntar.' }
     ],
     tips:[
       'Si un reporte «no cambia», revisa el **periodo** de arriba — casi siempre el rango de fechas no incluye lo que buscas.',
-      'El menú es **editable** desde Panel de Control → Menú (arrastrar, renombrar, activar/desactivar).'
+      'El menú es **editable** desde Panel de Control → Menú (arrastrar, renombrar, activar/desactivar).',
+      '**La página se actualiza sola.** Al abrirla revisa si hay versión nueva y se recarga sola; con la app abierta, revisa cada minuto y al **volver a la pestaña** (o a la app en el teléfono) — si hay algo nuevo, sale el aviso azul **«Actualización disponible»** para que actualices cuando gustes, sin perder lo que estés haciendo. Ya no hace falta el «hard refresh» ni borrar caché.'
     ],
     tech:{ hojas:['`Menu` (SHEET_ID): A id · B padre · C label · D seccion · E icono · F orden · G tipo · H fuente · I activo'],
       funciones:['navigateTo','renderView','readMenu','currentPeriodo','currentSegment'] } },
 
   /* ============ OPERACIÓN DIARIA ============ */
   { id:'resumen', group:'operacion', icon:'📈', title:'Resumen / Dashboard',
-    keywords:'resumen dashboard kpi ingresos egresos utilidad margen grafica resumen contable facturado pendiente nota credito devengado',
-    para:'El **Resumen** es la foto rápida del negocio: KPIs del periodo (ingresos, egresos, utilidad, margen), gráficas y un **Resumen Contable** (facturado vs pendiente por facturar).',
+    keywords:'resumen dashboard kpi ingresos egresos utilidad margen grafica resumen contable facturado pendiente nota credito devengado mi tablero mis pendientes calendario widget personalizable clasico',
+    para:'El **Resumen** es la foto rápida del negocio: KPIs del periodo (ingresos, egresos, utilidad, margen), gráficas y un **Resumen Contable** (facturado vs pendiente por facturar). Arriba trae el interruptor **Clásico ⇄ Mi tablero**: el Clásico es la vista de siempre y **Mi tablero** es tu panel armado por ti con widgets (ver «Mi tablero»). En el Clásico vive además la tarjeta **Mis pendientes**, un mini-calendario con tu agenda personal (ver «Mis pendientes»).',
     where:'Menú → **Resumen** (es la pantalla de inicio al entrar).',
     mock:{ title:'Resumen', crumb:'Inicio', period:'Julio 2026',
       cards:[ {label:'Ingresos', val:'$1,240,000'}, {label:'Egresos', val:'$820,000'}, {label:'Utilidad', val:'$420,000', n:1}, {label:'Margen', val:'33.9%'} ],
@@ -42827,20 +42833,110 @@ async function _novCfgGuardar(){
     steps:[
       'Elige el **periodo** arriba. Los KPIs y gráficas se recalculan solos.',
       'Revisa el **Resumen Contable**: facturado, pendiente por facturar y notas de crédito.',
-      'Si aparece el memo teal **«Gasto que corresponde al periodo»**, es el ajuste por facturación vencida (informativo).'
+      'Si aparece el memo teal **«Gasto que corresponde al periodo»**, es el ajuste por facturación vencida (informativo).',
+      'Revisa la tarjeta **Mis pendientes**: tu calendario personal del mes, con un punto en los días que tienen algo (rojo si hay vencidos).',
+      '¿Prefieres armar tu propio panel? Pulsa **Mi tablero** en el interruptor de arriba y agrégale widgets (ver «Mi tablero»). El ERP recuerda el modo en que lo dejaste.'
     ],
     buttons:[
       { k:'Selector de periodo (arriba)', d:'Cambia el mes/rango; todo el resumen se recalcula.' },
+      { k:'Clásico / Mi tablero (interruptor)', d:'Cambia entre el resumen de siempre y tu panel personalizable de widgets. No se pierde nada al alternar.' },
+      { k:'Mis pendientes (tarjeta)', d:'Mini-calendario de tu agenda personal: clic en un día para ver o agregar pendientes (ver «Mis pendientes»).' },
       { k:'Facturación vencida', d:'Abre el ajuste informativo del gasto que corresponde al mes (no toca tu caja).' },
       { k:'Clic en una gráfica / segmento', d:'Resalta el detalle de esa categoría.' }
     ],
     ejemplo:'Con ingresos $1,240,000 y egresos $820,000, la **utilidad** = $420,000 y el **margen** = 420,000 ÷ 1,240,000 = **33.9%**.',
     tips:[
       'La forma de pago **«Nota de Crédito»** es un descuento **no fiscal**: no rutea a banco y se excluye de lo facturado. Descuenta el crédito a favor del paciente; si no alcanza, no deja guardar (salvo permiso `autorizar_credito_excedido`).',
-      'Los ingresos «sin fecha válida» se avisan aparte porque descuadran totales — corrige la fecha en Ingresos.'
+      'Los ingresos «sin fecha válida» se avisan aparte porque descuadran totales — corrige la fecha en Ingresos.',
+      'Las tarjetas con **dinero** del Clásico (ingresos, flujo de caja, distribución de costos…) solo las ve quien tiene esas áreas en su menú/permisos. Si a alguien «le faltan» tarjetas, es permisos, no un error de carga.'
     ],
     tech:{ funciones:['loadSummary','renderAll','_summaryReadIngresos','readEgresosData','gastoDevengado'],
       nota:'El Resumen combina Ingresos + Egresos del rango. Los ingresos con fecha no parseable se avisan aparte porque descuadran totales.' } },
+
+  { id:'mi-tablero', group:'operacion', icon:'🎛️', title:'Mi tablero (Resumen personalizable)',
+    keywords:'mi tablero dashboard personalizable configurable widget widgets agregar kpi barras linea pastel tabla arrastrar reordenar tamaño quitar clasico interruptor checkbox categoria permisos nube dispositivos editar chico mediano grande ancho',
+    para:'**Mi tablero** es la otra cara del Resumen: un panel **100% tuyo**. Tú eliges **qué datos ver** (ingresos, egresos, operación, servicios, caja, cuentas por pagar, estado de resultados, avisos) y **cómo verlos** (KPI, barras, línea, pastel o tabla), los acomodas a tu gusto y el armado se guarda **en la nube por usuario**: abres tu cuenta en otra computadora o en el teléfono y tu tablero es el mismo. Solo ofrece datos de las **áreas que tienes en tu menú/permisos** — lo que no puedes ver, no aparece ni se puede agregar.',
+    where:'Menú → **Resumen** → interruptor **Clásico ⇄ Mi tablero** (arriba de la pantalla).',
+    mock:{ title:'Resumen · Mi tablero', crumb:'Inicio › Resumen › Mi tablero', period:'Julio 2026',
+      toolbar:[ {t:'pill', label:'Clásico'}, {t:'pill', label:'● Mi tablero', n:1}, {t:'btn', label:'Editar', n:3}, {t:'btn', label:'+ Agregar widget', pri:true, n:2} ],
+      cards:[ {label:'Ingresos del periodo', val:'$1,240,000'}, {label:'CxP: monto vencido', val:'$85,300'}, {label:'P&L: EBITDA', val:'$310,000'} ],
+      note:'En modo **Editar**, cada widget muestra sus controles: **⋮⋮** arrastrar · **⤢** tamaño · **✕** quitar.',
+      callouts:[ {n:1,text:'El **interruptor** cambia entre Clásico y Mi tablero sin perder nada. El ERP recuerda el último modo que usaste.'},
+                 {n:2,text:'**+ Agregar widget** abre el panel de **checkboxes agrupados por categoría** (Ingresos, Egresos, Operación, Servicios, Caja, Cuentas por Pagar, Estado de Resultados, Comunicación): marcas el dato y eliges cómo verlo.'},
+                 {n:3,text:'**Editar** enciende el modo edición: arrastra con **⋮⋮** para reordenar, **⤢** cicla el tamaño (chico → mediano → grande → ancho) y **✕** quita el widget. Al terminar, el botón dice **Listo**.'} ] },
+    steps:[
+      'Entra al **Resumen** y pulsa **Mi tablero** en el interruptor de arriba. La primera vez está vacío: es normal, lo vas a armar tú.',
+      'Pulsa **+ Agregar widget**. Se abre el panel con los datos disponibles **agrupados por categoría** (Ingresos, Egresos, Operación, Servicios, Caja, Cuentas por Pagar, Estado de Resultados, Comunicación).',
+      '**Marca la casilla** de cada dato que quieras y, en su lista de la derecha, elige **cómo verlo**: KPI (número grande), Barras, Línea, Pastel o Tabla. No todo permite todas las formas — un total del periodo, por ejemplo, solo tiene sentido como KPI.',
+      'Pulsa **Agregar seleccionados**: los widgets aparecen en el tablero ya pintados con los datos del periodo elegido arriba.',
+      'Para acomodarlo, pulsa **Editar**: arrastra cada widget desde **⋮⋮** y suéltalo sobre otro para reordenar, pulsa **⤢** para cambiar su tamaño (chico → mediano → grande → ancho, en ciclo) y **✕** para quitar el que sobre.',
+      'Pulsa **Listo** al terminar. No hay botón de guardar: el tablero se guarda solo **en la nube** con tu cuenta, y en cualquier otro dispositivo lo verás igual.',
+      'Cambia el **periodo** de arriba cuando quieras: todos los widgets se recalculan con el nuevo rango, igual que en el Clásico.'
+    ],
+    buttons:[
+      { k:'Clásico / Mi tablero (interruptor)', d:'Cambia de modo sin perder nada: el Clásico sigue intacto y Mi tablero recuerda tu armado. El ERP abre en el último modo que usaste.' },
+      { k:'+ Agregar widget', d:'Abre el panel de checkboxes por categoría. Solo lista los datos de las áreas que tu usuario tiene en el menú; si no ves una categoría, es permisos.' },
+      { k:'Casilla + «cómo verlo»', d:'Marca el dato y elige la forma (KPI, Barras, Línea, Pastel o Tabla). El mismo dato se puede agregar dos veces con formas distintas.' },
+      { k:'Agregar seleccionados', d:'Inserta de un jalón todos los datos marcados al final del tablero.' },
+      { k:'Editar / Listo', d:'Enciende y apaga el modo edición (arrastrar, tamaño, quitar).' },
+      { k:'⋮⋮ (arrastrar)', d:'En modo Editar: toma el widget y suéltalo sobre otro para reordenarlos.' },
+      { k:'⤢ (tamaño)', d:'En modo Editar: cicla el ancho del widget — chico → mediano → grande → ancho (toda la fila).' },
+      { k:'✕ (quitar)', d:'Saca el widget del tablero. No borra ningún dato del ERP: solo deja de mostrarse, y lo puedes volver a agregar cuando quieras.' }
+    ],
+    ejemplo:'Una recepcionista sin acceso a Finanzas solo ve las categorías de **Operación** y **Comunicación** (ciclos, avisos); el director las ve todas. Cada quien arma su tablero con lo suyo, sobre los mismos datos.',
+    tips:[
+      '**No se puede ver lo que no te toca.** El panel solo ofrece datos de tus áreas y, si a alguien le quitan un área, sus widgets guardados de esa área **dejan de pintarse**. El Clásico aplica el mismo criterio con sus tarjetas de dinero.',
+      'El tablero es **por usuario, no por computadora**: se guarda en el servidor con tu cuenta (con respaldo local por si falla la conexión). Cámbialo en la oficina y en tu casa aparece igual.',
+      'Los datos de **Cuentas por Pagar, Estado de Resultados y Avisos** se cargan aparte: su widget dice «Cargando…» un momento la primera vez. Es normal.',
+      'Agregar, quitar o redimensionar widgets **no altera ninguna cifra** del ERP: Mi tablero es solo otra forma de VER los mismos datos del Resumen.'
+    ],
+    tech:{ hojas:['`Dashboard_Layouts` (SHEET_ID): Usuario · LayoutId · Nombre · EsPlantilla · Orden · Activo · ConfigJSON · ActualizadoEn — 1 fila = 1 layout; upsert in-place por (Usuario, LayoutId), nunca clear (hoja multiusuario)'],
+      props:['`localStorage hestia_erp_dash_<email>` (respaldo local del layout)','`localStorage hestia_erp_resumen_mode` (último modo usado)'],
+      funciones:['_dashSetMode','_dashInitMode','dashAddOpen','_dashRenderAddPanel','dashAddConfirm','dashToggleEdit','dashCycleSpan','dashRemove','dashRender','DASH_REGISTRY','_dashCanSee','_dashLoadServer / _dashSaveServer','_resumenGatearClasico','readDashboardLayouts / saveDashboardLayout (dashboard.gs)'],
+      deploy:'`dashboard.gs` requiere agregarse al Apps Script + redeploy (la hoja se auto-crea al primer guardado). El dueño del layout se deriva del TOKEN en el servidor: nadie puede leer ni pisar el tablero de otro. Para ofrecer un dato nuevo se agrega a `DASH_REGISTRY` (frontend) con su categoría, forma y gate de menú/permiso.' } },
+
+  { id:'mis-pendientes', group:'operacion', icon:'📅', title:'Mis pendientes (calendario del Resumen)',
+    keywords:'mis pendientes calendario mini calendario agenda recordatorios resumen dia punto rojo vencido hoy nuevo hecho editar borrar reprogramar personal proximos',
+    para:'En el Resumen (modo Clásico) vive la tarjeta **«Mis pendientes»**: un **mini-calendario del mes** con tu agenda personal. Resalta el día de **hoy**, pinta un **punto** en los días que tienen pendientes (**rojo** si hay algo vencido) y, al hacer clic en un día, muestra su lista al costado — o te deja **agregar** ahí mismo. Es la **misma agenda** de la vista Recordatorios: lo que hagas aquí se ve allá y viceversa, y es **por usuario** (cada quien ve solo lo suyo).',
+    where:'Menú → **Resumen** (modo Clásico) → tarjeta **Mis pendientes**, debajo de los KPIs.',
+    mock:{ title:'Mis pendientes', crumb:'Resumen › Mis pendientes',
+      toolbar:[ {t:'pill', label:'Julio 2026'}, {t:'pill', label:'‹ · Hoy · ›', n:1}, {t:'btn', label:'+ Nuevo', pri:true, n:2} ],
+      table:{ cols:['D','L','M','M','J','V','S'],
+        rows:[ ['','','','1','2','3','4'],
+               ['5','6',{label:'7 ●',n:3},'8','9','10','11'],
+               ['12','13','14',{label:'[15]',n:4},'16',{label:'17 ●'},'18'] ] },
+      note:'Al costado (o abajo, en pantallas chicas) sale la lista del día elegido — o los **Próximos pendientes** si no has elegido ninguno. Cada pendiente trae **✓ ✎ 🗑** para resolverlo sin salir del Resumen.',
+      callouts:[ {n:1,text:'**‹ ›** cambian el mes visible y **Hoy** te regresa al mes actual de un clic.'},
+                 {n:2,text:'**+ Nuevo** crea un pendiente en el día seleccionado (o en hoy). Es el mismo formulario de Recordatorios: título, fecha, detalle.'},
+                 {n:3,text:'El **punto** marca un día con pendientes; el numerito dice cuántos. Punto **rojo** = hay algo vencido ese día.'},
+                 {n:4,text:'**Hoy** viene resaltado. Clic en cualquier día muestra su lista; otro clic lo deselecciona.'} ] },
+    steps:[
+      'Abre el **Resumen**: la tarjeta **Mis pendientes** carga sola tu agenda (no depende del periodo ni del segmento de arriba).',
+      'Lee el calendario de un vistazo: **hoy** resaltado, un **punto** en cada día con pendientes (**rojo** si hay algo vencido) y un numerito cuando hay más de uno.',
+      'Haz **clic en un día** para ver su lista al costado (los ya hechos salen atenuados). Otro clic en el mismo día lo deselecciona y regresa a los **Próximos pendientes**.',
+      'Para agregar: pulsa **+ Nuevo** (usa el día seleccionado, o hoy), o entra a un día vacío y pulsa **+ Agregar aquí**. Captura título, fecha y detalle, y guarda.',
+      'Resuelve desde ahí mismo: **✓** marca hecho, **✎** edita o reprograma, **🗑** elimina, y **↺** reabre uno que ya estaba hecho.',
+      'Navega otros meses con **‹ ›** y regresa con **Hoy**.'
+    ],
+    buttons:[
+      { k:'+ Nuevo', d:'Crea un pendiente en el día seleccionado (o en hoy si no hay selección). Mismo formulario que Recordatorios.' },
+      { k:'‹ / › / Hoy', d:'Cambian el mes visible; Hoy regresa al mes actual y limpia la selección.' },
+      { k:'Día del calendario', d:'Clic muestra sus pendientes (incluidos los ya hechos, atenuados); otro clic lo deselecciona.' },
+      { k:'+ Agregar aquí', d:'Aparece al elegir un día sin pendientes: crea uno con esa fecha ya puesta.' },
+      { k:'✓ (en cada pendiente)', d:'Lo marca como hecho. Sigue visible atenuado en su día, por si hay que reabrirlo.' },
+      { k:'↺ (en un pendiente hecho)', d:'Lo reabre: vuelve a pendiente.' },
+      { k:'✎ (en cada pendiente)', d:'Abre el pendiente para cambiar título, fecha, detalle o recurrencia (reprogramar).' },
+      { k:'🗑 (en cada pendiente)', d:'Lo elimina de la agenda.' }
+    ],
+    tips:[
+      'Es la **misma agenda** de la vista **Recordatorios**: mismo dato, dos lugares. Marcar hecho aquí lo marca allá, y el banner de pendientes al iniciar sesión y el aviso por correo siguen funcionando igual (ver «Recordatorios»).',
+      'Los pendientes **vencidos no desaparecen**: siguen pintando su día en rojo y encabezan los «Próximos pendientes» hasta que los marques hechos o los reprogrames con ✎.',
+      'Otras áreas del ERP te **ofrecen** pendientes (ej. «Recibir <producto>» al capturar una orden de compra); caen a esta misma agenda y por tanto a este calendario.',
+      'Cada usuario ve **solo su agenda** — no es el calendario del equipo. Para anunciar algo a todos, usa **Avisos del equipo** (ver «Avisos»).'
+    ],
+    tech:{ hojas:['`Recordatorios` (SHEET_ID) — la misma hoja de la vista Recordatorios'],
+      funciones:['hfPendCalLoad','hfPendCalRender','hfPendCalPick','hfPendCalNuevo','hfPendCalMove','hfRecRefreshAll','recOpenForm','recDone','recEstado','recDelete'],
+      nota:'100% frontend sobre la API existente de Recordatorios (`action=recordatorios`). Guardar o editar refresca las DOS superficies (vista Recordatorios y calendario) vía `hfRecRefreshAll`; no hay endpoints nuevos.' } },
 
   { id:'ingresos', group:'operacion', icon:'💵', title:'Ingresos (venta y pago parcial)',
     keywords:'ingresos venta captura cobro pago mixto multipago mercado pago comision factura banco pago parcial cuenta por cobrar producto op operacion editar borrar',
@@ -43378,7 +43474,7 @@ async function _novCfgGuardar(){
       nota:'Cada fila programada lleva `RecurrenteID` (GF-xxx|mes) para el anti-duplicado.' } },
 
   { id:'nomina', group:'operacion', icon:'🧾', title:'Nómina (periodos, captura, SBC)',
-    keywords:'nomina periodo periodos semanal quincenal mensual mixta ordinaria extraordinaria captura empleado cfdi timbrado xml estimado real diferencia sbc bimestre imss validar cxp cuentas por pagar recibo bonos asimilados despacho impuestos aguinaldo finiquito puesto area',
+    keywords:'nomina periodo periodos semanal quincenal mensual mixta ordinaria extraordinaria captura empleado cfdi timbrado xml estimado real diferencia sbc bimestre imss validar cxp cuentas por pagar recibo bonos asimilados despacho impuestos aguinaldo finiquito puesto area cumpleaños fecha nacimiento',
     para:'Nómina trabaja **por periodos**: cada periodo junta a los empleados que se pagan con esa frecuencia, capturas lo de cada quien, y al validar el periodo se crean las **órdenes de pago en Cuentas por Pagar**.\n\n**El ERP no calcula impuestos.** Lo que ves antes de timbrar es un **estimado** (para presupuestar). **El despacho timbra** y el **CFDI es la verdad**.',
     where:'Menú → **Nómina**. La pestaña de trabajo es **«Captura por periodo»**.',
     mock:{ title:'Nómina', crumb:'Nómina › Captura por periodo',
@@ -43417,7 +43513,8 @@ async function _novCfgGuardar(){
       '⛔ **El pago se valida por PERIODO, nunca por mes.** La vista mensual de CFDI es de consulta. Antes había dos vías que **no se deduplicaban entre sí** y se podía pagar dos veces al mismo empleado.',
       'Si validas **antes** de que llegue el CFDI, la orden sale con el neto **ESTIMADO** y así lo dice en las notas. Al llegar el real, concilia.',
       'La periodicidad es **mixta**: puedes tener gente quincenal, semanal y mensual al mismo tiempo.',
-      '**Puesto** y **Área / Depto** se editan en **Panel de Control → Formularios** (`Empleados`), no en el código.'
+      '**Puesto** y **Área / Depto** se editan en **Panel de Control → Formularios** (`Empleados`), no en el código.',
+      'Captura la **Fecha de nacimiento** en la ficha de cada empleado (pestaña **Empleados**): de ahí salen los avisos automáticos de **cumpleaños 🎂🤖** en Avisos del equipo. Sin fecha capturada no hay felicitación; solo se anuncia el día, nunca la edad (ver «Avisos»).'
     ],
     tech:{ hojas:['`Nomina_Periodos` (NOMINA_SS_ID): PeriodoID · Tipo · FechaInicio · FechaFin · FechaPago · Estatus · Notas',
              '`Nomina_Captura` / `Nomina_Captura_Det`: una fila por empleado × periodo (estimado · real · diferencia · pago)',
@@ -44012,8 +44109,60 @@ async function _novCfgGuardar(){
       funciones:['_chatMount','chatSend','chatPoll','chatUpload','chatTareaSave','_chatAliasFor','_chatDirectorio'],
       deploy:'`chat.gs` requiere agregarse al Apps Script + redeploy. El alias del autor se resuelve por email contra el directorio que devuelve `chatPoll`.' } },
 
+  { id:'avisos', group:'admin', icon:'📣', title:'Avisos del equipo (+ animaciones 🎬 y cumpleaños 🤖)',
+    keywords:'avisos aviso equipo broadcast anuncio cumpleaños junta logro meta banner flotante publicar retirar permiso publicar_avisos animacion animación confeti pastel fuegos artificiales estrella telon vista previa automatico robot nomina fecha nacimiento tono informativo celebracion importante expira ocultar descartar',
+    para:'**Avisos** es el pizarrón del equipo: mensajes para **todos** («cumpleaños de Laura», «junta a las 10», «¡meta cumplida!»). **Leer puede todo el mundo**; **publicar o retirar** solo quien tiene el permiso `publicar_avisos`. Al publicarse, a cada persona le aparece un **banner flotante** (que cada quien descarta a su ritmo) y el aviso vive en esta página hasta su fecha de auto-ocultado. Un aviso puede llevar **animación 🎬** que el sistema genera solo según el texto — y los **cumpleaños de los empleados se anuncian solos 🤖** desde Nómina, sin que nadie los capture.',
+    where:'Menú → **Avisos** (visible para todo el equipo). El banner flotante aparece solo, abajo al centro, cuando hay un aviso que aún no descartas.',
+    mock:{ title:'Avisos del equipo', crumb:'Avisos',
+      toolbar:[ {t:'btn', label:'+ Publicar aviso', pri:true, n:1} ],
+      table:{ cols:['Aviso','Detalle',{label:'Acciones'}],
+        rows:[ [{label:'Feliz Cumpleaños Laura 🎂',n:4},'VestaOS · 📅 hoy · expira hoy',{raw:'<span class="hfm-mini">▶ Ver animación · 🤖 automático</span>'}],
+               [{label:'¡Meta del mes cumplida! 🎆',n:3},'E. García · 15 jul',{raw:'<span class="hfm-mini">▶ Ver animación · Retirar</span>'}],
+               [{label:'Junta general',n:2},'Dirección · 📅 22/07 · expira 22/07',{raw:'<span class="hfm-mini">Retirar</span>'}] ] },
+      note:'Cada tarjeta lleva el color de su **tono**: informativo (rosa), celebración (verde), importante (ámbar). El **banner flotante** muestra el aviso más reciente que no hayas descartado, con **▶ Ver** si trae animación.',
+      callouts:[ {n:1,text:'**+ Publicar aviso** solo aparece con el permiso `publicar_avisos` (admin, director y gerente lo traen; se otorga en Gestión de Roles). El servidor lo re-verifica: sin permiso no se publica, aunque el botón se forzara.'},
+                 {n:2,text:'Un aviso normal trae **Retirar**: deja de mostrarse pero la fila queda registrada — nunca se borra.'},
+                 {n:3,text:'**▶ Ver animación** reproduce la escena del aviso; en el banner flotante el botón dice **▶ Ver**.'},
+                 {n:4,text:'Los avisos **🤖 automáticos** (cumpleaños desde Nómina) no traen «Retirar»: expiran solos al terminar el día.'} ] },
+    steps:[
+      'Abre **Avisos** en el menú: verás los avisos vigentes, del más reciente al más viejo. Para **leer** no se necesita nada — es de todos.',
+      'Para publicar, pulsa **+ Publicar aviso** (requiere el permiso `publicar_avisos`). Escribe el **Título** — lo único obligatorio — y el mensaje.',
+      'Elige el **Tono** (Informativo, Celebración o Importante: cambia el color de la tarjeta) y, si aplica, la **Fecha del evento** (el día de la junta, del cumpleaños…).',
+      'Si quieres que desaparezca solo, pon fecha en **«Se oculta solo después de»**. Sin fecha, se queda visible hasta que alguien lo retire.',
+      '¿Con animación? Marca **🎬 Con animación**: el sistema **detecta solo la escena** según el texto (cumpleaños → pastel + confeti; meta → fuegos artificiales; logro → estrella; bienvenida → telón; aviso serio → escena sobria sin confeti). Pulsa **▶ Vista previa** para verla ANTES de publicar; si la detección no te convence, elige la plantilla a mano.',
+      'Pulsa **Publicar a todo el equipo**. A cada persona le saldrá el **banner flotante** con el aviso en unos segundos; quien lo descarte con ✕ ya no lo vuelve a ver (el descarte es individual).',
+      'Para dar de baja un aviso, pulsa **Retirar**: deja de mostrarse pero **queda registrado** quién publicó qué — nunca se borra.'
+    ],
+    buttons:[
+      { k:'+ Publicar aviso', d:'Abre el formulario de publicación. Solo con el permiso publicar_avisos; el backend lo vuelve a verificar al guardar.' },
+      { k:'Título * / Mensaje', d:'El título es obligatorio (además, la animación se arma con él). El mensaje es el detalle que sale debajo.' },
+      { k:'Tono', d:'Informativo (rosa) · Celebración (verde) · Importante (ámbar). Solo cambia el énfasis visual de la tarjeta.' },
+      { k:'Fecha del evento', d:'La fecha de lo anunciado. Sale en la tarjeta y en el banner.' },
+      { k:'Se oculta solo después de', d:'Fecha de auto-ocultado: pasada esa fecha, el aviso deja de mostrarse solo, sin que nadie lo retire.' },
+      { k:'🎬 Con animación', d:'Agrega la escena animada. En «Detectar sola (recomendado)», el sistema elige la plantilla leyendo el texto; también puedes forzar una a mano (🎂 Cumpleaños, 🎆 Meta, ⭐ Logro, 🎀 Bienvenida, 🔔 Aviso sobrio, 🎉 Genérica).' },
+      { k:'▶ Vista previa', d:'Reproduce la animación EXACTAMENTE como la verá el equipo, antes de publicar. Escribe primero el título: la escena se arma con él.' },
+      { k:'Publicar a todo el equipo', d:'Guarda el aviso y lo hace llegar a todos (viaja con el sondeo del chat: tarda unos segundos en aparecerles).' },
+      { k:'▶ Ver animación / ▶ Ver', d:'En la tarjeta y en el banner: reproduce la escena del aviso cuando quieras, las veces que quieras.' },
+      { k:'Retirar', d:'Da de baja el aviso SIN borrarlo: deja registro. Pide confirmación. Los avisos 🤖 automáticos no lo traen (expiran solos).' },
+      { k:'× (en el banner)', d:'Descarta el banner solo para ti; si hay otro aviso sin descartar, entra en su lugar.' }
+    ],
+    ejemplo:'Publicas «¡Llegamos a la meta de julio! 🎉» con 🎬 en «Detectar sola»: el sistema reconoce «meta», arma los **fuegos artificiales**, lo confirmas con ▶ Vista previa y publicas. Al equipo le sale el banner con **▶ Ver**; la tarjeta queda en Avisos con **▶ Ver animación** hasta su fecha de auto-ocultado.',
+    tips:[
+      '**Cumpleaños automáticos 🤖:** cada día, el sistema publica solo «Feliz Cumpleaños {nombre} 🎂» (con animación) por cada **empleado ACTIVO de Nómina** que cumpla años ese día. Sale del campo **Fecha de nacimiento** de su ficha en el módulo Nómina — si no está capturada, no hay felicitación. Solo se anuncia el **día**, nunca la edad ni el año de nacimiento. El aviso lleva sello 🤖, no se puede retirar y desaparece solo ese mismo día.',
+      '**Las animaciones se generan en tu navegador**: no son video y **nada se sube a servicios externos** — cero datos del equipo fuera del ERP. La vista previa y lo que ve el equipo son idénticos.',
+      'Para un **tema delicado**, la detección elige la escena **sobria, sin confeti**; también puedes forzarla eligiendo «🔔 Aviso sobrio» a mano.',
+      'Si el usuario tiene activado **reducir movimiento** en su sistema, la animación muestra su cuadro final estático en vez de moverse.',
+      'No lo confundas: **Avisos** es para todo el equipo (broadcast), **Recordatorios** es tu agenda personal y **Novedades** son los cambios del sistema.',
+      'El permiso `publicar_avisos` se otorga en **Panel de Control → Gestión de Roles**, categoría Comunicación (admin, director y gerente lo traen de fábrica).'
+    ],
+    tech:{ hojas:['`Avisos` (SHEET_ID): Id · CreadoEn · AutorEmail · AutorNombre · Titulo · Mensaje · Nivel · FechaEvento · Activo · Expira · Anim · Segmento. Baja = `Activo=FALSE` (soft-delete); Actualizar toca SOLO columnas presentes en el payload (regla anti-blanqueo).'],
+      props:['`localStorage hf_aviso_x_<id>` (descarte del banner, por usuario y por aviso)'],
+      funciones:['loadAvisosView','avisoPublicar','avisoBaja','_avisosBanner','hfAvisosRecibidos','avisoDetectTpl','avisoAnimPreview','avisoAnimPlay','avisosListActivos / avisosPublicar / avisosActualizar (avisos.gs)','_avisosCumplesHoy (lee readEmpleados de nomina.gs; caché 6 h)'],
+      permisos:['publicar_avisos'],
+      deploy:'`avisos.gs` requiere agregarse al Apps Script + redeploy; la hoja se auto-crea al primer uso (o con `setupAvisos()`). Los avisos viajan a caballo del sondeo del chat (`chatPoll` adjunta `avisos`): cero timers nuevos. Los cumpleaños son avisos **sintéticos**: no se escriben en la hoja, se calculan al vuelo con id estable persona+año (así el descarte por-usuario del banner funciona igual). El autor del aviso sale del TOKEN, no del cliente.' } },
+
   { id:'recordatorios', group:'admin', icon:'⏰', title:'Recordatorios (agenda)',
-    keywords:'recordatorios agenda tarea pendiente fecha banner correo programar ofrecer hecho descartado',
+    keywords:'recordatorios agenda tarea pendiente fecha banner correo programar ofrecer hecho descartado mis pendientes calendario resumen',
     para:'Los **Recordatorios** son una agenda personal por usuario. Al iniciar sesión aparece un banner si hay pendientes (hoy + vencidos). Cualquier área del ERP puede **ofrecer** crear uno.',
     where:'Menú → **Recordatorios**.',
     mock:{ title:'Recordatorios', crumb:'Agenda personal',
@@ -44028,7 +44177,8 @@ async function _novCfgGuardar(){
       { k:'+ Nuevo recordatorio', d:'Crea un recordatorio con título, fecha y detalle.' },
       { k:'Estado (pendiente / hecho / descartado)', d:'Actualiza el avance de la tarea.' }
     ],
-    tips:[ 'Otras áreas te «ofrecen» recordatorios: por ejemplo, la captura de inventario ofrece «Recibir <producto>».' ],
+    tips:[ 'Otras áreas te «ofrecen» recordatorios: por ejemplo, la captura de inventario ofrece «Recibir <producto>».',
+      'La misma agenda vive en el **Resumen** como la tarjeta **«Mis pendientes»** (mini-calendario del mes): marcar hecho, editar ✎ o borrar 🗑 en un lado se refleja en el otro (ver «Mis pendientes»).' ],
     tech:{ hojas:['`Recordatorios` (SHEET_ID)'],
       funciones:['crearRecordatorio','ofrecerRecordatorio','saveRecordatorio','updateRecordatorioEstado','recordatoriosDelDia'],
       nota:'`recordatorios.gs`. La tarea programada `recordatoriosDelDia` envía el recordatorio por correo.' } },
