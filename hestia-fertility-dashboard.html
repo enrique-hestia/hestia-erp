@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.20.267 -->
+﻿<!-- app-build:2026.07.20.268 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -36900,7 +36900,8 @@ function ccShell(){
       + '<div style="display:flex;gap:8px">'
         + '<button onclick="ccAbrirSaldoInicial()" title="Vender a crédito: registra la venta en Ingresos (fecha del cargo, pagado $0) y de ahí nace la cuenta por cobrar. No la captures también en Ingresos: se duplicaría." style="padding:8px 14px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">+ Cuenta por cobrar</button>'
         + (hasPermission('editar_egresos') ? '<button onclick="cobDescOpen()" title="Configura los descuentos por volumen de cada agencia: qué productos cuentan, escalones, y si aplica el mes actual o el anterior" style="padding:8px 14px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;margin-left:6px">🏷️ Descuentos agencia</button>' : '')
-        + '<button onclick="ccImprimirGeneral()" title="Imprimir el reporte de TODOS los deudores con montos, vencimientos y documentos vencidos" style="padding:8px 14px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;margin-left:6px">🖨️ Reporte general</button>'
+        + '<select id="cc-gen-seg" title="Segmento del reporte general" style="padding:8px 10px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;margin-left:6px"><option value="">Todos los segmentos</option><option value="Pacientes">Solo Pacientes</option><option value="Médicos">Solo Médicos</option><option value="Agencias">Solo Agencias</option></select>'
+        + '<button onclick="ccImprimirGeneral()" title="Imprimir el reporte de TODOS los deudores (del segmento elegido) con montos, vencimientos y documentos vencidos" style="padding:8px 14px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;margin-left:6px">🖨️ Reporte general</button>'
         + '<button onclick="ccLoad(true)" id="cc-refresh" style="padding:8px 16px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">↻ Actualizar</button>'
       + '</div>'
     + '</div>'
@@ -36969,11 +36970,17 @@ function _ccGenVenc(o){
   if(dias>0) return dias+' días'+(o.bucket?' ('+ccEsc(o.bucket)+')':'');
   return o.fecha?ccFch(o.fecha):'—';
 }
-function ccImprimirGeneral(){
+function ccImprimirGeneral(seg){
   if(!_ccData || !_ccData.ops){ if(typeof setStatus==='function') setStatus('Aún cargando cobranza…','err'); else alert('Aún cargando cobranza…'); return; }
-  var ops=(_ccData.ops||[]).filter(function(o){ return (parseFloat(o.saldo)||0)>0.01; })
+  // Filtro por segmento (Todos / Pacientes / Médicos / Agencias). Del selector si no se pasa.
+  seg = (seg!=null) ? seg : ((document.getElementById('cc-gen-seg')||{}).value||'');
+  var _segN=function(s){ return _origNormJS ? _origNormJS(s) : String(s||'').toLowerCase(); };
+  var segOk=function(o){ return !seg || _segN(o.segmento)===_segN(seg); };
+  var ops=(_ccData.ops||[]).filter(function(o){ return (parseFloat(o.saldo)||0)>0.01 && segOk(o); })
     .slice().sort(function(a,b){ return (parseFloat(b.saldo)||0)-(parseFloat(a.saldo)||0); });
-  var sus=((_ccSus&&_ccSus.pacientes)||[]).filter(function(p){ return (parseFloat(p.montoDebe)||0)>0.01; })
+  // Las suscripciones crío son de pacientes: se incluyen en «Todos» y en «Pacientes».
+  var incluirSus = !seg || _segN(seg)===_segN('Pacientes');
+  var sus=(incluirSus ? ((_ccSus&&_ccSus.pacientes)||[]) : []).filter(function(p){ return (parseFloat(p.montoDebe)||0)>0.01; })
     .slice().sort(function(a,b){ return (parseFloat(b.montoDebe)||0)-(parseFloat(a.montoDebe)||0); });
   if(!ops.length && !sus.length){ if(typeof setStatus==='function') setStatus('No hay adeudos que reportar.','ok'); else alert('No hay adeudos que reportar.'); return; }
   var rows=[], conceptos=[];
@@ -36985,13 +36992,15 @@ function ccImprimirGeneral(){
     rows.push([ p.nombre||'—', 'Suscripción', 'Crío ('+ccEsc(p.plan||'')+')'+(p.estatus?' · '+ccEsc(p.estatus):''), p.proximoCobro?ccFch(p.proximoCobro):'—', '', '', ccFmt(p.montoDebe||0) ]);
     conceptos.push(null);
   });
-  var totalSaldo=parseFloat(_ccData.totalSaldo)||0;
-  var totalDebe=parseFloat((_ccSus&&_ccSus.totalDebe))||0;
+  // Con filtro por segmento, el total se recalcula de las filas mostradas (para el
+  // reporte general la suma de saldos SÍ cuadra: un solo motor, Cuentas_Cobrar).
+  var totalSaldo = seg ? ops.reduce(function(a,o){ return a+(parseFloat(o.saldo)||0); },0) : (parseFloat(_ccData.totalSaldo)||0);
+  var totalDebe  = seg ? sus.reduce(function(a,p){ return a+(parseFloat(p.montoDebe)||0); },0) : (parseFloat((_ccSus&&_ccSus.totalDebe))||0);
   var kpis=[
     {value:ccFmt(totalSaldo+totalDebe), label:'Total por cobrar'},
     {value:ccFmt(totalSaldo), label:'Saldos · '+ops.length+' adeudo'+(ops.length===1?'':'s')},
     {value:ccFmt(totalDebe), label:'Suscripciones crío · '+sus.length},
-    {value:String(_ccData.numDeudores!=null?_ccData.numDeudores:ops.length), label:'Deudores'}
+    {value:String(seg?ops.length:(_ccData.numDeudores!=null?_ccData.numDeudores:ops.length)), label:'Deudores'}
   ];
   // Antigüedad de saldos (aging) al pie, si el backend la manda.
   var notaHtml='', ag=_ccData.aging;
@@ -37001,7 +37010,7 @@ function ccImprimirGeneral(){
   }
   var hoy=ccFch(new Date().toISOString().substring(0,10));
   hfReportPrint('cobranza-general', {
-    title:'Reporte general de cobranza', subject:'', period:'Al '+hoy, generado:hfSello(),
+    title:'Reporte general de cobranza'+(seg?' · '+seg:''), subject:'', period:'Al '+hoy, generado:hfSello(),
     kpis:kpis,
     cols:['Paciente','Segmento','Concepto',{label:'Vence / Antig.'},{label:'Facturado',r:true},{label:'Abonado',r:true},{label:'Saldo',r:true}],
     rows:rows, conceptCol:2, rowConcepts:conceptos,
@@ -38403,6 +38412,32 @@ function cobImprimir(){
    sombreados por las versiones con idioma, y las globales serían inalcanzables. */
 function _cobMoney(n,lang){ return lang==='es' ? ccFmt(n) : hfFmtMoney(n,lang); }
 function _cobDate(s,lang){  return lang==='es' ? ccFch(s) : hfFmtDate(s,lang); }
+/* Estado de cobro de cada renglón para el documento: si tiene plan de pagos y
+   alguna cuota está vencida → «Vencido»; con plan al día → «En plan»; sin plan
+   (saldo abierto) → «Inmediato». Localizado. Vacío si la línea no tiene saldo. */
+var _COB_EST_L = {
+  es:{col:'Estado', venc:'⚠ Vencido', inm:'Inmediato', plan:'En plan'},
+  en:{col:'Status', venc:'⚠ Overdue', inm:'Immediate', plan:'On plan'},
+  fr:{col:'Statut', venc:'⚠ En retard', inm:'Immédiat', plan:'Échelonné'},
+  pt:{col:'Situação', venc:'⚠ Vencido', inm:'Imediato', plan:'Parcelado'}
+};
+function _cobEstL(lang){ return _COB_EST_L[String(lang||'es').toLowerCase().substring(0,2)] || _COB_EST_L.es; }
+function _cobEstadoLinea(op, saldo, lang){
+  if(!(parseFloat(saldo) > 0.01)) return '';
+  var t = _cobEstL(lang);
+  var pl = _cobPlanData && _cobPlanData.filter(function(p){ return String(p.op) === String(op); })[0];
+  if(pl && pl.calendario){
+    var abonado = _cobAbonadoDeOp(op), hoy = _planFmtJS(new Date()), acum = 0, venc = false;
+    pl.calendario.forEach(function(c){ acum = Math.round((acum + c.monto)*100)/100; if((abonado + 0.01) < acum && c.fecha < hoy) venc = true; });
+    return venc ? t.venc : t.plan;
+  }
+  return t.inm;   // saldo abierto sin plan → se cobra de inmediato
+}
+function _cobEstadoSusc(sus, lang){
+  if(!sus || !(parseFloat(sus.montoDebe) > 0.01)) return '';
+  var t = _cobEstL(lang);
+  return (sus.proximoCobro && String(sus.proximoCobro).substring(0,10) < _planFmtJS(new Date())) ? t.venc : t.inm;
+}
 function _cobBuildPrintData(lang){
   var d=_cobData, sus=d.suscripcion;
   var T=hfDict('cobranza',lang);
@@ -38421,7 +38456,7 @@ function _cobBuildPrintData(lang){
   var hoy=ccFch(new Date().toISOString().substring(0,10));
   // El PDF lleva el detalle de lo vendido según la vista elegida (histórico o periodo)
   var _vv=_cobVentasVista(d), _vvTot=0; _vv.forEach(function(v){ _vvTot+=v.total; });
-  var rows=_vv.map(function(v){ return [ccFch(v.fecha), (v.producto||'—')+(v.op?' · OP '+v.op:''), _cq(v.cantidad), ccFmt(v.total), ccFmt(v.pagado), v.saldo>0.01?ccFmt(v.saldo):'—']; });
+  var rows=_vv.map(function(v){ return [ccFch(v.fecha), (v.producto||'—')+(v.op?' · OP '+v.op:''), _cq(v.cantidad), ccFmt(v.total), ccFmt(v.pagado), v.saldo>0.01?ccFmt(v.saldo):'—', _cobEstadoLinea(v.op, v.saldo, lang)]; });
   // `conceptos` va en paralelo a `rows`: el nombre EXACTO del producto de cada
   // fila, o null si la fila no lleva producto (saldos, suscripción, descuentos:
   // esas son etiquetas del sistema y se traducen con el diccionario).
@@ -38453,15 +38488,18 @@ function _cobBuildPrintData(lang){
   (d.saldos||[]).forEach(function(o){
     if(o.auto && o.op && _opsImpresos[String(o.op)]) return;
     var partes=(o.items||[]).filter(function(x){return x.pac;});
-    if(partes.length){ partes.forEach(function(x){ rows.push([ccFch(x.fecha||o.fecha), x.pac+' · '+(x.producto||'—'), _cq(x.cantidad), ccFmt(x.total), '', ccFmt(x.total)]); conceptos.push(x.producto||''); }); }
-    else { rows.push([ccFch(o.fecha), o.concepto||T.saldo, '—', ccFmt(o.total), ccFmt((o.total||0)-(o.saldo||0)), ccFmt(o.saldo)]); conceptos.push(null); }
+    if(partes.length){ partes.forEach(function(x){ rows.push([ccFch(x.fecha||o.fecha), x.pac+' · '+(x.producto||'—'), _cq(x.cantidad), ccFmt(x.total), '', ccFmt(x.total), _cobEstadoLinea(o.op, x.total, lang)]); conceptos.push(x.producto||''); }); }
+    // El concepto del saldo se manda para que también se TRADUZCA en documentos en
+    // otro idioma (antes iba null → salía en español); si no está en catálogo, el
+    // diálogo de idioma lo pide una vez.
+    else { rows.push([ccFch(o.fecha), o.concepto||T.saldo, '—', ccFmt(o.total), ccFmt((o.total||0)-(o.saldo||0)), ccFmt(o.saldo), _cobEstadoLinea(o.op, o.saldo, lang)]); conceptos.push(o.concepto||null); }
   });
-  if(sus&&sus.montoDebe>0){ rows.push([ccFch(sus.proximoCobro),T.suscripcionCrio+' ('+sus.plan+')', '—', ccFmt(sus.montoDebe), ccFmt(0), ccFmt(sus.montoDebe)]); conceptos.push(null); }
+  if(sus&&sus.montoDebe>0){ rows.push([ccFch(sus.proximoCobro),T.suscripcionCrio+' ('+sus.plan+')', '—', ccFmt(sus.montoDebe), ccFmt(0), ccFmt(sus.montoDebe), _cobEstadoSusc(sus, lang)]); conceptos.push(null); }
   var susDebe=(sus&&sus.montoDebe)||0, totalDebe=(d.totalSaldo||0)+susDebe;
   var _desc=(d.descuentos&&d.descuentos.aplica)?d.descuentos:null;
   var _descTot=_desc?(_desc.total||0):0;
   var _neto=totalDebe-_descTot; if(_neto<0) _neto=0;
-  if(_desc){ _desc.lineas.forEach(function(l){ rows.push([ccEsc(l.mes), T.descuento+' '+l.pct+'% · '+(l.paciente?ccEsc(l.paciente)+' · ':'')+ccEsc(l.producto), _cq(l.cantidad), '', '', '−'+ccFmt(l.descuento)]); conceptos.push(l.producto||''); }); }
+  if(_desc){ _desc.lineas.forEach(function(l){ rows.push([ccEsc(l.mes), T.descuento+' '+l.pct+'% · '+(l.paciente?ccEsc(l.paciente)+' · ':'')+ccEsc(l.producto), _cq(l.cantidad), '', '', '−'+ccFmt(l.descuento), '']); conceptos.push(l.producto||''); }); }
   var kpis = _desc
     ? [{value:ccFmt(_neto),label:T.netoACobrar},{value:ccFmt(totalDebe),label:T.bruto},{value:'−'+ccFmt(_descTot),label:T.descuentoVol},{value:susDebe>0?ccFmt(susDebe):T.alDia,label:T.suscripcion}]
     : [{value:ccFmt(totalDebe),label:T.totalPorCobrar},{value:ccFmt(d.totalSaldo||0),label:T.saldos},{value:susDebe>0?ccFmt(susDebe):T.alDia,label:T.suscripcion},{value:ccFmt(_vvTot),label:(_cobVista==='pendiente'?T.porCobrarDetalle:T.totalVendido)}];
@@ -38478,7 +38516,7 @@ function _cobBuildPrintData(lang){
   // se adivine por posición: con 6 columnas la heurística vieja alineaba solo
   // "Pagado" y "Saldo", y dejaba la columna de dinero (Total) pegada a la izquierda.
   var cols=[T.fecha, T.concepto, {label:T.cantidad,r:true}, {label:T.subtotal,r:true},
-            {label:T.pagado,r:true}, {label:T.saldo,r:true}];
+            {label:T.pagado,r:true}, {label:T.saldo,r:true}, _cobEstL(lang).col];
   return { title:T.estadoCobranza, subject:d.paciente, period:periodTxt, generado:hfSello(),
     kpis:kpis, cols:cols, rows:rows,
     conceptCol:1, rowConcepts:conceptos,
