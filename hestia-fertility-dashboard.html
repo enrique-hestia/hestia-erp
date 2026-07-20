@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.20.261 -->
+﻿<!-- app-build:2026.07.20.262 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1286,6 +1286,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
       <input id="idp-m-max" type="number" step="0.01" placeholder="0.00" oninput="idpRender()" style="width:110px;padding:7px 9px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;font-size:0.82rem;background:var(--card-bg,#fff);color:var(--text-primary,#28251d)">
     </div>
     <button onclick="idpLimpiarFiltros()" style="padding:7px 12px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;background:transparent;color:var(--text-secondary,#7a7670);font-size:0.78rem;font-weight:600;cursor:pointer">Limpiar</button>
+    <button onclick="idpReporte()" title="Reporte imprimible de los cobros por identificar (para enviar por WhatsApp o correo)" style="padding:7px 12px;border:1px solid var(--color-divider,#e5e2dc);border-radius:8px;background:transparent;color:var(--text-primary,#28251d);font-size:0.78rem;font-weight:600;cursor:pointer">🖨️ Reporte</button>
     <button onclick="idpCargar()" style="padding:7px 12px;border:none;border-radius:8px;background:var(--color-primary,#c46a7a);color:#fff;font-size:0.78rem;font-weight:700;cursor:pointer">Actualizar</button>
   </div>
 
@@ -11351,18 +11352,24 @@ async function loadMenu() {
       var _cRef = menuItems.filter(function(i){ return i.id==='cfo'; })[0]
                || menuItems.filter(function(i){ return i.id==='fin-ingresos'; })[0]
                || menuItems.filter(function(i){ return i.seccion; })[0];
-      var _cSec = _cRef ? _cRef.seccion : '';
-      if (!menuItems.some(function(i){ return i.id==='contabilidad'; })) {
-        menuItems.push({ id:'contabilidad', label:'Contabilidad', padre:'', icono:'calculator',
-          tipo:'grupo', orden:(_cRef?(Number(_cRef.orden)||140)+0.5:200), seccion:_cSec, fuente:'' });
-      }
+      // Sección con fallback FIRME: un grupo sin sección no se dibuja bien.
+      var _cSec = (_cRef && _cRef.seccion) || (menuItems.filter(function(i){ return i.seccion; })[0]||{}).seccion || 'Finanzas';
+      var _cGrp = menuItems.filter(function(i){ return i.id==='contabilidad'; })[0];
+      if (!_cGrp) {
+        _cGrp = { id:'contabilidad', label:'Contabilidad', padre:'', icono:'calculator',
+          tipo:'grupo', orden:(_cRef?(Number(_cRef.orden)||140)+0.5:200), seccion:_cSec, fuente:'' };
+        menuItems.push(_cGrp);
+      } else if (!_cGrp.seccion) { _cGrp.seccion = _cSec; }
+      // Enganchar los hijos SIEMPRE bajo Contabilidad (antes solo si estaban
+      // "sueltos" → si la hoja Menu los tenía bajo otro padre, el grupo quedaba
+      // VACÍO y no se dibujaba: ese era el bug de "no aparece Contabilidad").
       [ {id:'comprobantes',  label:'Comprobantes (CFDI)', icono:'file-text', fuente:'comprobantes',  orden:1},
         {id:'poliza-concil', label:'Conciliar pólizas',   icono:'book-open', fuente:'poliza-concil', orden:2}
       ].forEach(function(h){
         var ex = menuItems.filter(function(i){ return i.id===h.id; })[0];
-        if (ex) { if (!ex.padre) ex.padre = 'contabilidad'; }   // suelto → agrupar; ya anidado → respetar
+        if (ex) { ex.padre = 'contabilidad'; ex.seccion = _cGrp.seccion; }   // forzar bajo Contabilidad + misma sección
         else menuItems.push({ id:h.id, label:h.label, padre:'contabilidad', icono:h.icono,
-          tipo:'vista', orden:h.orden, seccion:_cSec, fuente:h.fuente });
+          tipo:'vista', orden:h.orden, seccion:_cGrp.seccion, fuente:h.fuente });
       });
     })();
     // Inyectar "Novedades" (qué hay de nuevo + tutorial) al inicio del primer grupo
@@ -27747,6 +27754,53 @@ function idpRender() {
   }
   h += '</tbody></table>';
   cont.innerHTML = h;
+}
+
+/* Concepto en TEXTO plano (para el reporte imprimible). */
+function _idpConceptoTexto(p){
+  var ps=p.productos||[]; if(!ps.length) return '—';
+  return ps.map(function(x){ var t=x.producto||x.categoria||''; return (x.cantidad>1?(x.cantidad+'× '):'')+t; }).filter(Boolean).join(' · ');
+}
+/* Reporte imprimible de los cobros por identificar (respeta los filtros de
+   pantalla, ordenado por fecha). Se abre en ventana propia → imprimir / Guardar
+   como PDF para enviar por WhatsApp o correo. Autocontenido (no usa el motor de
+   plantillas). Solo el nombre falta: eso es justo lo que ayuda a identificar. */
+function idpReporte(){
+  var f=_idpFiltros();
+  var mMin=f.mMin===''?null:parseFloat(f.mMin), mMax=f.mMax===''?null:parseFloat(f.mMax);
+  var rows=_idpData.filter(function(p){
+    if(f.fIni&&p.fecha&&p.fecha<f.fIni) return false;
+    if(f.fFin&&p.fecha&&p.fecha>f.fFin) return false;
+    if(mMin!==null&&!isNaN(mMin)&&p.monto<mMin) return false;
+    if(mMax!==null&&!isNaN(mMax)&&p.monto>mMax) return false;
+    return true;
+  }).slice().sort(function(a,b){ return String(a.fecha||'').localeCompare(String(b.fecha||'')); });
+  if(!rows.length){ alert('No hay cobros por identificar con esos filtros.'); return; }
+  var total=rows.reduce(function(s,p){ return s+(parseFloat(p.monto)||0); },0);
+  var esc=function(s){ return String(s==null?'':s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c]; }); };
+  var hoy=new Date().toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'});
+  var per=(f.fIni||f.fFin)?('Del '+(f.fIni||'inicio')+' al '+(f.fFin||'hoy')):'Todos los pendientes';
+  var filas=rows.map(function(p,i){
+    return '<tr><td class="n">'+(i+1)+'</td><td>'+esc(p.fecha||'—')+'</td><td>'+esc(_idpConceptoTexto(p))+'</td><td class="r">'+fmtMXN(p.monto)+'</td><td>'+esc(p.metodoPago||'—')+'</td></tr>';
+  }).join('');
+  var sello=(typeof hfSello==='function')?hfSello():'VestaOS · Hestia Fertility';
+  var html='<!doctype html><html><head><meta charset="utf-8"><title>Cobros por identificar - '+hoy+'</title>'
+    +'<style>body{font-family:Arial,Helvetica,sans-serif;color:#28251d;margin:28px;font-size:13px}h1{font-size:19px;margin:0 0 2px}.sub{color:#7a7670;font-size:12px;margin-bottom:14px}'
+    +'.kpis{display:flex;gap:14px;margin:12px 0 16px}.kpi{border:1px solid #e5e2dc;border-radius:8px;padding:8px 14px}.kpi b{display:block;font-size:17px;color:#c46a7a}.kpi span{font-size:10px;color:#7a7670;text-transform:uppercase;letter-spacing:.05em}'
+    +'table{width:100%;border-collapse:collapse}th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#7a7670;border-bottom:2px solid #e5e2dc;padding:7px 8px}td{padding:7px 8px;border-bottom:1px solid #f0eeea}td.r,th.r{text-align:right}td.n{color:#b8b4ae;width:24px}'
+    +'tfoot td{font-weight:800;border-top:2px solid #e5e2dc;border-bottom:none}.foot{margin-top:18px;color:#b8b4ae;font-size:10px;text-align:right}@media print{body{margin:12px}}</style></head><body>'
+    +'<div style="font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#c46a7a">Hestia Fertility</div>'
+    +'<h1>Cobros por identificar</h1><div class="sub">'+esc(per)+' · emitido el '+hoy+'</div>'
+    +'<div class="kpis"><div class="kpi"><b>'+rows.length+'</b><span>Cobros</span></div><div class="kpi"><b>'+fmtMXN(total)+'</b><span>Monto total</span></div></div>'
+    +'<table><thead><tr><th class="n">#</th><th>Fecha</th><th>Concepto (qué se vendió)</th><th class="r">Monto</th><th>Método</th></tr></thead>'
+    +'<tbody>'+filas+'</tbody>'
+    +'<tfoot><tr><td colspan="3">Total ('+rows.length+' cobros)</td><td class="r">'+fmtMXN(total)+'</td><td></td></tr></tfoot></table>'
+    +'<div class="foot">'+esc(sello)+'</div>'
+    +'<script>window.onload=function(){setTimeout(function(){try{window.print();}catch(e){}},250);};<\/script>'
+    +'</body></html>';
+  var w=window.open('','_blank');
+  if(!w){ alert('El navegador bloqueó la ventana emergente. Permite ventanas emergentes para este sitio y vuelve a intentar.'); return; }
+  w.document.write(html); w.document.close();
 }
 
 /* Resumen del renglón: QUÉ se vendió. Es lo que de verdad permite reconocer a la
