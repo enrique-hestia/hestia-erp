@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.20.266 -->
+﻿<!-- app-build:2026.07.20.267 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -36576,6 +36576,47 @@ function _ecPlanCard(pl, abonado){
     + '<div style="font-size:10.5px;color:var(--color-text-muted);margin-bottom:6px">Total ' + ecFmt(pl.montoTotal) + ' · calendario informativo. El cobro se hace con «Cobrar / Abonar».</div>'
     + filas + '</div>';
 }
+/* Tabla imprimible del PLAN DE PAGOS con sus VENCIMIENTOS — bloque HTML autónomo
+   que se inyecta vía data.notaHtml (antes de </body>), así aparece en CUALQUIERA
+   de las 11 plantillas sin tocarlas. La usan AMBOS imprimibles (Estado de Cuenta y
+   Cobranza) con las mismas filas [{n,fecha,monto,estado:'Cubierto'/'VENCIDO'/'Pendiente',frecuencia}].
+   Para que el paciente sepa qué debe y HASTA CUÁNDO puede pagar. Localizado. */
+function _planPrintTableHTML(rows, lang){
+  if (!rows || !rows.length) return '';
+  lang = String(lang || 'es').toLowerCase().substring(0, 2);
+  var L = {
+    es:{t:'Plan de pagos · vencimientos', p:'Pago', f:'Fecha de pago', m:'Monto', e:'Estado', cub:'Cubierto', ven:'VENCIDO', pen:'Pendiente', hasta:'Puede pagar hasta', al:'Todos los pagos están cubiertos.', freq:{quincenal:'quincenal', mensual:'mensual'}},
+    en:{t:'Payment plan · due dates', p:'Payment', f:'Due date', m:'Amount', e:'Status', cub:'Paid', ven:'OVERDUE', pen:'Pending', hasta:'You can pay until', al:'All installments are covered.', freq:{quincenal:'biweekly', mensual:'monthly'}},
+    fr:{t:'Plan de paiement · échéances', p:'Paiement', f:'Échéance', m:'Montant', e:'Statut', cub:'Payé', ven:'EN RETARD', pen:'À venir', hasta:'Vous pouvez payer jusqu’au', al:'Tous les paiements sont couverts.', freq:{quincenal:'bimensuel', mensual:'mensuel'}},
+    pt:{t:'Plano de pagamento · vencimentos', p:'Parcela', f:'Vencimento', m:'Valor', e:'Situação', cub:'Pago', ven:'VENCIDO', pen:'Pendente', hasta:'Pode pagar até', al:'Todas as parcelas estão cobertas.', freq:{quincenal:'quinzenal', mensual:'mensal'}}
+  };
+  var t = L[lang] || L.es;
+  var fMoney = (lang==='es' && typeof ecFmt==='function') ? ecFmt : function(n){ return (typeof hfFmtMoney==='function') ? hfFmtMoney(n, lang) : ('$' + Number(n||0).toLocaleString()); };
+  var fDate  = (lang==='es' && typeof ecFmtFecha==='function') ? ecFmtFecha : function(s){ return (typeof hfFmtDate==='function') ? hfFmtDate(s, lang) : s; };
+  var freqRaw = String(rows[0].frecuencia || '').toLowerCase();
+  var freqTxt = t.freq[freqRaw] || rows[0].frecuencia || '';
+  var body = rows.map(function(r){
+    var color = r.estado==='VENCIDO' ? '#c83c3c' : (r.estado==='Cubierto' ? '#16a34a' : '#8a8a8a');
+    var lbl   = r.estado==='VENCIDO' ? t.ven : (r.estado==='Cubierto' ? t.cub : t.pen);
+    var wt    = r.estado==='VENCIDO' ? '700' : '600';
+    return '<tr><td style="padding:4px 10px;color:#444;border-top:1px solid #eee">' + t.p + ' ' + r.n + '</td>'
+      + '<td style="padding:4px 10px;color:#444;border-top:1px solid #eee">' + fDate(r.fecha) + '</td>'
+      + '<td style="padding:4px 10px;text-align:right;color:#222;border-top:1px solid #eee">' + fMoney(r.monto) + '</td>'
+      + '<td style="padding:4px 10px;color:' + color + ';font-weight:' + wt + ';border-top:1px solid #eee">' + lbl + '</td></tr>';
+  }).join('');
+  var pend = rows.filter(function(r){ return r.estado !== 'Cubierto'; });
+  var deadline = pend.length ? pend[pend.length-1].fecha : rows[rows.length-1].fecha;
+  var footer = pend.length ? (t.hasta + ' <b>' + fDate(deadline) + '</b>.') : t.al;
+  return '<div style="margin:16px 22px;padding:10px 14px;border:1px dashed #bbb;border-radius:8px;page-break-inside:avoid">'
+    + '<div style="text-transform:uppercase;letter-spacing:.05em;font-weight:700;color:#777;font-size:9px;margin-bottom:6px">' + t.t + (freqTxt ? ' (' + freqTxt + ')' : '') + '</div>'
+    + '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr>'
+    + '<th style="text-align:left;padding:3px 10px;font-size:9px;color:#999;text-transform:uppercase">' + t.p + '</th>'
+    + '<th style="text-align:left;padding:3px 10px;font-size:9px;color:#999;text-transform:uppercase">' + t.f + '</th>'
+    + '<th style="text-align:right;padding:3px 10px;font-size:9px;color:#999;text-transform:uppercase">' + t.m + '</th>'
+    + '<th style="text-align:left;padding:3px 10px;font-size:9px;color:#999;text-transform:uppercase">' + t.e + '</th></tr></thead>'
+    + '<tbody>' + body + '</tbody></table>'
+    + '<div style="font-size:10px;color:#555;margin-top:6px">' + footer + '</div></div>';
+}
 async function ecPlanQuitar(id){
   if (!confirm('¿Quitar este plan de pagos? No afecta saldos ni cobros.')) return;
   try {
@@ -36800,7 +36841,10 @@ function _ecBuildPrintData(lang) {
     // (analisis.gs: totalFacturado = Σ TotalPagar de estas mismas filas). Antes se
     // colocaba contando dos desde el final y caía bajo "Forma de pago".
     totalCol: cols.length - 1,
-    nota: (cfg.frase || '') + _ecPlanNota()
+    // El plan ahora va como TABLA completa (notaHtml, en todas las plantillas), así
+    // que `nota` deja de duplicar su resumen de 1 línea (que además solo salía en 4).
+    nota: (cfg.frase || ''),
+    notaHtml: _planPrintTableHTML(_ecPlanPrintRows(), lang)
   };
 }
 // Resumen del plan de pagos para el reporte impreso: próximo pago + vencidos.
@@ -36856,6 +36900,7 @@ function ccShell(){
       + '<div style="display:flex;gap:8px">'
         + '<button onclick="ccAbrirSaldoInicial()" title="Vender a crédito: registra la venta en Ingresos (fecha del cargo, pagado $0) y de ahí nace la cuenta por cobrar. No la captures también en Ingresos: se duplicaría." style="padding:8px 14px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">+ Cuenta por cobrar</button>'
         + (hasPermission('editar_egresos') ? '<button onclick="cobDescOpen()" title="Configura los descuentos por volumen de cada agencia: qué productos cuentan, escalones, y si aplica el mes actual o el anterior" style="padding:8px 14px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;margin-left:6px">🏷️ Descuentos agencia</button>' : '')
+        + '<button onclick="ccImprimirGeneral()" title="Imprimir el reporte de TODOS los deudores con montos, vencimientos y documentos vencidos" style="padding:8px 14px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;margin-left:6px">🖨️ Reporte general</button>'
         + '<button onclick="ccLoad(true)" id="cc-refresh" style="padding:8px 16px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">↻ Actualizar</button>'
       + '</div>'
     + '</div>'
@@ -36904,6 +36949,65 @@ function _ccPlanBadge(o){
   else if(prox) txt+=' · próx. '+prox.fecha;
   else txt+=' · <span style="color:#16a34a">al día</span>';
   return '<span style="display:inline-block;margin-top:3px;font-size:10px;background:var(--color-primary-hl);color:var(--color-primary);padding:2px 8px;border-radius:20px;font-weight:600">'+txt+'</span>';
+}
+
+/* ── REPORTE GENERAL DE COBRANZA (imprimible) ────────────────────────────────
+   Todos los que deben, con montos + vencimientos + documentos vencidos, en un
+   solo documento — como el de Flujo de Efectivo pero de cobranza. Usa los datos
+   YA cargados (_ccData = todos los saldos, _ccSus = suscripciones, _ccPlanMap =
+   planes), sin backend nuevo. Respeta el enmascarado por privacidad del backend. */
+function _ccGenVenc(o){
+  var pl = _ccPlanMap && (_ccPlanMap[String(o.paciente||'').toLowerCase()+'|'+String(o.op||'')] || _ccPlanMap[String(o.paciente||'').toLowerCase()+'|']);
+  if(pl && pl.calendario){
+    var abonado=parseFloat(o.abonado)||0, hoy=_planFmtJS(new Date()), acum=0, prox=null, venc=0;
+    pl.calendario.forEach(function(c){ acum=Math.round((acum+c.monto)*100)/100; if((abonado+0.01)<acum){ if(!prox)prox=c; if(c.fecha<hoy)venc++; } });
+    if(venc>0) return '⚠ '+venc+' venc.'+(prox?' · '+ccFch(prox.fecha):'');
+    if(prox) return 'Próx. '+ccFch(prox.fecha);
+    return 'Al día';
+  }
+  var dias=parseInt(o.dias,10)||0;
+  if(dias>0) return dias+' días'+(o.bucket?' ('+ccEsc(o.bucket)+')':'');
+  return o.fecha?ccFch(o.fecha):'—';
+}
+function ccImprimirGeneral(){
+  if(!_ccData || !_ccData.ops){ if(typeof setStatus==='function') setStatus('Aún cargando cobranza…','err'); else alert('Aún cargando cobranza…'); return; }
+  var ops=(_ccData.ops||[]).filter(function(o){ return (parseFloat(o.saldo)||0)>0.01; })
+    .slice().sort(function(a,b){ return (parseFloat(b.saldo)||0)-(parseFloat(a.saldo)||0); });
+  var sus=((_ccSus&&_ccSus.pacientes)||[]).filter(function(p){ return (parseFloat(p.montoDebe)||0)>0.01; })
+    .slice().sort(function(a,b){ return (parseFloat(b.montoDebe)||0)-(parseFloat(a.montoDebe)||0); });
+  if(!ops.length && !sus.length){ if(typeof setStatus==='function') setStatus('No hay adeudos que reportar.','ok'); else alert('No hay adeudos que reportar.'); return; }
+  var rows=[], conceptos=[];
+  ops.forEach(function(o){
+    rows.push([ o.paciente||'—', o.segmento||'—', (o.concepto||'—')+(o.op?' · '+o.op:''), _ccGenVenc(o), ccFmt(o.total||0), ccFmt(o.abonado||0), ccFmt(o.saldo||0) ]);
+    conceptos.push(null);
+  });
+  sus.forEach(function(p){
+    rows.push([ p.nombre||'—', 'Suscripción', 'Crío ('+ccEsc(p.plan||'')+')'+(p.estatus?' · '+ccEsc(p.estatus):''), p.proximoCobro?ccFch(p.proximoCobro):'—', '', '', ccFmt(p.montoDebe||0) ]);
+    conceptos.push(null);
+  });
+  var totalSaldo=parseFloat(_ccData.totalSaldo)||0;
+  var totalDebe=parseFloat((_ccSus&&_ccSus.totalDebe))||0;
+  var kpis=[
+    {value:ccFmt(totalSaldo+totalDebe), label:'Total por cobrar'},
+    {value:ccFmt(totalSaldo), label:'Saldos · '+ops.length+' adeudo'+(ops.length===1?'':'s')},
+    {value:ccFmt(totalDebe), label:'Suscripciones crío · '+sus.length},
+    {value:String(_ccData.numDeudores!=null?_ccData.numDeudores:ops.length), label:'Deudores'}
+  ];
+  // Antigüedad de saldos (aging) al pie, si el backend la manda.
+  var notaHtml='', ag=_ccData.aging;
+  if(ag && typeof ag==='object'){
+    var parts=[]; Object.keys(ag).forEach(function(k){ var v=parseFloat(ag[k])||0; if(v) parts.push('<b>'+ccEsc(k)+':</b> '+ccFmt(v)); });
+    if(parts.length) notaHtml='<div style="margin:16px 22px;padding:10px 14px;border:1px dashed #bbb;border-radius:8px;font-size:11px;color:#333;page-break-inside:avoid"><span style="text-transform:uppercase;letter-spacing:.05em;font-weight:700;color:#777;font-size:9px">Antigüedad de saldos</span><br>'+parts.join(' &nbsp;·&nbsp; ')+'</div>';
+  }
+  var hoy=ccFch(new Date().toISOString().substring(0,10));
+  hfReportPrint('cobranza-general', {
+    title:'Reporte general de cobranza', subject:'', period:'Al '+hoy, generado:hfSello(),
+    kpis:kpis,
+    cols:['Paciente','Segmento','Concepto',{label:'Vence / Antig.'},{label:'Facturado',r:true},{label:'Abonado',r:true},{label:'Saldo',r:true}],
+    rows:rows, conceptCol:2, rowConcepts:conceptos,
+    totalLabel:'Total por cobrar', totalValue:ccFmt(totalSaldo+totalDebe), totalCol:6, lineCol:6,
+    notaHtml:notaHtml, lang:'es'
+  });
 }
 
 function ccRenderKpis(){
@@ -38083,7 +38187,42 @@ function cobBuscar(){
     .then(function(r){return r.json();}).then(function(d){
       if(!d||!d.ok){ res.innerHTML='<div style="padding:30px;text-align:center;color:#c83c3c;font-size:13px">'+ccEsc((d&&d.error)||'No disponible. ¿Agregaste cobranza.gs y redeployaste?')+'</div>'; return; }
       _cobData=d; cobRender(d);
+      // El plan de pagos (calendario con vencimientos) para el imprimible de cobranza.
+      // Se baja aparte porque estadoCobranza no lo trae; el print es un gesto posterior.
+      _cobPlanData=null;
+      fetch(APPS_SCRIPT_URL+'?action=planesPago&paciente='+encodeURIComponent(nombre)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
+        .then(function(r){return r.json();}).then(function(pd){ if(pd&&pd.ok&&pd.planes&&pd.planes.length) _cobPlanData=pd.planes; }).catch(function(){});
     }).catch(function(e){ res.innerHTML='<div style="padding:30px;text-align:center;color:#c83c3c">Error de red: '+e.message+'</div>'; });
+}
+var _cobPlanData=null;
+// Abonado a la OP de un plan (para saber qué cuotas están cubiertas). Cae al total
+// pagado del paciente si el plan no trae OP (plan a nivel paciente).
+function _cobAbonadoDeOp(op){
+  if(!_cobData) return 0;
+  var o=String(op||'');
+  if(o){
+    var v=(_cobData.ventas||[]).filter(function(x){ return String(x.op)===o; })[0];
+    if(v) return parseFloat(v.pagado)||0;
+    var s=(_cobData.saldos||[]).filter(function(x){ return String(x.op)===o; })[0];
+    if(s) return (parseFloat(s.total)||0)-(parseFloat(s.saldo)||0);
+  }
+  // Sin OP: usa lo pagado total del paciente (suma de ventas.pagado).
+  return (_cobData.ventas||[]).reduce(function(a,x){ return a+(parseFloat(x.pagado)||0); },0);
+}
+// Gemelo de _ecPlanPrintRows para el imprimible de cobranza (abonado POR OP del plan).
+function _cobPlanPrintRows(){
+  if(!_cobPlanData||!_cobPlanData.length) return [];
+  var hoy=_planFmtJS(new Date()), rows=[];
+  _cobPlanData.forEach(function(pl){
+    var abonado=_cobAbonadoDeOp(pl.op), acum=0;
+    (pl.calendario||[]).forEach(function(c){
+      acum=Math.round((acum+c.monto)*100)/100;
+      var cubierto=(abonado+0.01)>=acum;
+      var estado=cubierto?'Cubierto':(c.fecha<hoy?'VENCIDO':'Pendiente');
+      rows.push({n:c.n, fecha:c.fecha, monto:c.monto, estado:estado, frecuencia:pl.frecuencia});
+    });
+  });
+  return rows;
 }
 var _cobVista='historico'; // 'historico' (todo lo vendido) | 'pendiente' (solo lo que se debe)
 function cobSetVista(v){ _cobVista=v; if(_cobData) cobRender(_cobData); }
@@ -38353,7 +38492,9 @@ function _cobBuildPrintData(lang){
     // cada renglón es el Subtotal (3), pero el gran total se ancla bajo Saldo (5).
     // Sin lineCol, `minimalista` tomaba el ancla del total como cifra de la fila e
     // imprimía "—" en cada renglón: una lista de conceptos sin un solo monto.
-    lineCol:3, totalCol:5, qtyCol:2, notaHtml:notaHtml };
+    // Al pie: datos de depósito + la tabla del plan de pagos con sus vencimientos
+    // (para que el paciente sepa qué debe y hasta cuándo puede pagar).
+    lineCol:3, totalCol:5, qtyCol:2, notaHtml: notaHtml + _planPrintTableHTML(_cobPlanPrintRows(), lang) };
 }
 /* ── Por qué el "Total por cobrar" de cobranza NO es la suma de la columna Saldo ──
  * Documentado aquí porque es una diferencia REAL que este build no resuelve (toca
