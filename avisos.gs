@@ -44,7 +44,49 @@ function _avisosFmtFecha(v) {
   return String(v).substring(0,10);
 }
 
+/* ── Cumpleaños AUTOMÁTICOS desde Nómina ─────────────────────────────────
+   Empleados ACTIVOS con FechaNacimiento (hoja Empleados del libro de Nómina,
+   vía readEmpleados de nomina.gs — mismo scope global). Son avisos SINTÉTICOS
+   del día: no se escriben en la hoja, se calculan al vuelo con id estable por
+   persona+año (así el descarte por-usuario del banner funciona igual).
+   Privacidad: solo el DÍA — jamás el año de nacimiento ni la edad.
+   Cache 6h por fecha: el sondeo del chat pega cada 7s y no vamos a leer el
+   libro de Nómina cada vez. */
+function _avisosCumplesHoy(hoy) {
+  var cacheKey = 'avisos_cumples_' + hoy;
+  try { var hit = CacheService.getScriptCache().get(cacheKey); if (hit !== null) return JSON.parse(hit); } catch(e){}
+  var out = [];
+  try {
+    if (typeof readEmpleados === 'function') {
+      var r = readEmpleados();
+      var mmdd = hoy.substring(5);   // 'MM-DD'
+      ((r && r.empleados) || []).forEach(function(emp){
+        if (!emp.Activo) return;
+        var fn = String(emp.FechaNacimiento || '');
+        if (fn.length < 10 || fn.substring(5) !== mmdd) return;
+        var nombre = String(emp.Nombre || '').trim();
+        if (!nombre) return;
+        var primer = nombre.split(/\s+/)[0];
+        primer = primer.charAt(0).toUpperCase() + primer.slice(1).toLowerCase();
+        out.push({
+          id: 'CUMPLE-' + String(emp.NumEmpleado || primer).replace(/\s+/g,'') + '-' + hoy.substring(0,4),
+          ts: Date.parse(hoy + 'T09:00:00') || Date.now(),
+          autorEmail: '', autorNombre: 'VestaOS',
+          titulo: '🎂 ¡Hoy cumple años ' + primer + '!',
+          mensaje: 'Felicita a ' + nombre + ' de parte de todo el equipo.',
+          nivel: 'exito', fechaEvento: hoy, expira: hoy,
+          anim: { tpl: 'cumple', nombre: primer, seed: 7 },
+          segmento: 'todos', auto: true
+        });
+      });
+    }
+  } catch(e){ /* sin nómina configurada → sin cumpleaños automáticos, sin romper avisos */ }
+  try { CacheService.getScriptCache().put(cacheKey, JSON.stringify(out), 21600); } catch(e){}
+  return out;
+}
+
 // Lista los avisos VIGENTES (activos y no expirados), más recientes primero.
+// Incluye los cumpleaños automáticos del día (sintéticos, van al frente).
 function avisosListActivos() {
   try {
     var sh = _avisosSheet();
@@ -70,7 +112,8 @@ function avisosListActivos() {
       });
     }
     out.sort(function(a,b){ return b.ts - a.ts; });
-    return { ok:true, hoy:hoy, avisos: out.slice(0, 50) };
+    var cumples = _avisosCumplesHoy(hoy);
+    return { ok:true, hoy:hoy, avisos: cumples.concat(out).slice(0, 50) };
   } catch(ex){ return { ok:false, error:ex.message, avisos:[] }; }
 }
 
