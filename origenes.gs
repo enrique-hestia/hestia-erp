@@ -149,7 +149,10 @@ function _origIdx(hdrRow){
   function f(key, fb){ var i = _origColFind(hdrRow, key); return i > -1 ? i : fb; }
   return { id:f('id',0), nombre:f('nombre',1), tipo:f('tipo',2), alias:f('alias',3),
            activo:f('activo',4), notas:f('notas',5), creado:f('creadoen',6),
-           padre:_origColFind(hdrRow, 'padre') };
+           padre:_origColFind(hdrRow, 'padre'),
+           // Contacto (para enviar su estado de cuenta por correo/WhatsApp). -1 si la
+           // hoja aún no trae la columna (se crea sola al primer guardado).
+           email:_origColFind(hdrRow, 'email'), telefono:_origColFind(hdrRow, 'telefono') };
 }
 
 /* ── Construye los registros del catálogo desde la matriz cruda, resolviendo
@@ -169,7 +172,9 @@ function _origBuild(data){
       alias:  String(r[ix.alias] || ''),
       activo: _origTruthy(r[ix.activo]),
       notas:  String(r[ix.notas] || ''),
-      padre:  (ix.padre > -1) ? String(r[ix.padre] || '').trim() : ''
+      padre:  (ix.padre > -1) ? String(r[ix.padre] || '').trim() : '',
+      email:    (ix.email    > -1) ? String(r[ix.email]    || '').trim() : '',
+      telefono: (ix.telefono > -1) ? String(r[ix.telefono] || '').trim() : ''
     });
   }
   return _origResolveGrupos(out);
@@ -398,6 +403,13 @@ function saveOrigen(b){
 
     // La columna Padre se garantiza ANTES de leer, para que _origBuild la vea.
     var cPadre = _origColEnsure(sh, 'padre', 'Padre');
+    // Contacto del origen (médicos): para enviarle su estado de cuenta por
+    // correo/WhatsApp cuando se habilite. Se crean solas al primer guardado.
+    var cEmail = _origColEnsure(sh, 'email', 'Email');
+    var cTel   = _origColEnsure(sh, 'telefono', 'Teléfono');
+    var _tieneEmail = (b && b.email !== undefined), _tieneTel = (b && b.telefono !== undefined);
+    var email = String((b && b.email) || '').trim();
+    var telefono = String((b && b.telefono) || '').trim();
 
     var data = sh.getDataRange().getValues();
     var id   = String((b && b.id) || '').trim();
@@ -419,6 +431,10 @@ function saveOrigen(b){
           sh.getRange(i + 1, ix.activo + 1).setValue(activo);
           sh.getRange(i + 1, ix.notas  + 1).setValue(notas);
           sh.getRange(i + 1, cPadre).setValue(padre);
+          // Email/teléfono SOLO si vinieron en el payload (anti-blanqueo: una baja
+          // que no los manda no los borra).
+          if (_tieneEmail) sh.getRange(i + 1, cEmail).setValue(email);
+          if (_tieneTel)   sh.getRange(i + 1, cTel).setValue(telefono);
           return { ok:true, id:id, updated:true };
         }
       }
@@ -431,7 +447,8 @@ function saveOrigen(b){
     fila[ix.id] = id; fila[ix.nombre] = nombre; fila[ix.tipo] = tipo;
     fila[ix.alias] = alias; fila[ix.activo] = activo; fila[ix.notas] = notas;
     fila[ix.creado] = new Date(); fila[cPadre - 1] = padre;
-    var ancho = Math.max(sh.getLastColumn(), cPadre);
+    fila[cEmail - 1] = email; fila[cTel - 1] = telefono;
+    var ancho = Math.max(sh.getLastColumn(), cPadre, cEmail, cTel);
     for (var f = 0; f < ancho; f++){ if (fila[f] === undefined) fila[f] = ''; }
     sh.getRange(sh.getLastRow() + 1, 1, 1, ancho).setValues([fila.slice(0, ancho)]);
     return { ok:true, id:id, created:true };

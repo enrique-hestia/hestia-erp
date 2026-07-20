@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.20.268 -->
+﻿<!-- app-build:2026.07.20.269 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -33059,7 +33059,7 @@ function _medRow(m, puede){
       + '<button onclick="medBaja(\'' + _escJs(m.id) + '\')" title="Dar de baja (deja registro)" style="background:none;border:1px solid var(--color-divider);border-radius:7px;color:#b91c1c;font-size:11px;padding:5px 10px;cursor:pointer;margin-left:6px">Baja</button>';
   }
   return '<tr style="border-top:1px solid var(--color-divider)">'
-    + '<td style="padding:10px 14px;color:var(--color-text);font-weight:600">' + _cxpEsc(m.nombre || '') + (m.alias ? '<div style="font-size:10.5px;font-weight:400;color:var(--color-text-muted);margin-top:2px">Alias: ' + _cxpEsc(m.alias) + '</div>' : '') + (m.notas ? '<div style="font-size:10.5px;font-weight:400;color:var(--color-text-muted);margin-top:2px">' + _cxpEsc(m.notas) + '</div>' : '') + '</td>'
+    + '<td style="padding:10px 14px;color:var(--color-text);font-weight:600">' + _cxpEsc(m.nombre || '') + (m.alias ? '<div style="font-size:10.5px;font-weight:400;color:var(--color-text-muted);margin-top:2px">Alias: ' + _cxpEsc(m.alias) + '</div>' : '') + ((m.email||m.telefono) ? '<div style="font-size:10.5px;font-weight:400;color:var(--color-text-muted);margin-top:2px">' + [m.email?'✉ '+_cxpEsc(m.email):'', m.telefono?'📞 '+_cxpEsc(m.telefono):''].filter(Boolean).join(' · ') + '</div>' : '') + (m.notas ? '<div style="font-size:10.5px;font-weight:400;color:var(--color-text-muted);margin-top:2px">' + _cxpEsc(m.notas) + '</div>' : '') + '</td>'
     + '<td style="padding:10px 14px"><span style="display:inline-block;background:var(--color-surface-offset);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;color:var(--color-text)">' + _cxpEsc(_medGrupoDe(m)) + '</span></td>'
     + (puede ? '<td style="padding:10px 14px;text-align:right;white-space:nowrap">' + acc + '</td>' : '')
     + '</tr>';
@@ -33085,6 +33085,9 @@ function _medFormHTML(){
     + '<div style="margin-bottom:12px"><label ' + L + '>Nombre *</label><input id="med-f-nombre" ' + S + ' placeholder="Ej. Dra. Laura Méndez"></div>'
     + '<div style="margin-bottom:12px"><label ' + L + '>Pertenece a (grupo / agencia)</label><select id="med-f-grupo" ' + S + '></select>'
     + '<div style="font-size:10.5px;color:var(--color-text-muted);margin-top:5px;line-height:1.4">Su grupo determina el <b>Canal</b> en la ficha y hace que sus procedimientos cuenten para las <b>comisiones</b> de ese grupo. Si no pertenece a ninguno, déjalo en <b>Externos (independiente)</b>.</div></div>'
+    + '<div style="display:flex;gap:10px;margin-bottom:12px"><div style="flex:1"><label ' + L + '>Correo</label><input id="med-f-email" type="email" ' + S + ' placeholder="medico@correo.com"></div>'
+    + '<div style="flex:1"><label ' + L + '>Teléfono / WhatsApp</label><input id="med-f-tel" type="tel" ' + S + ' placeholder="55 1234 5678"></div></div>'
+    + '<div style="font-size:10.5px;color:var(--color-text-muted);margin:-6px 0 12px;line-height:1.4">Para enviarle su estado de cuenta por correo o WhatsApp cuando se habilite. Opcional.</div>'
     + '<div style="margin-bottom:12px"><label ' + L + '>Alias (separados por coma)</label><input id="med-f-alias" ' + S + ' placeholder="Ej. Dr. Lozano, Lozano"><div style="font-size:10.5px;color:var(--color-text-muted);margin-top:5px;line-height:1.4">Ayudan a auto-detectar al médico en el histórico y la captura. Opcional.</div></div>'
     + '<div style="margin-bottom:14px"><label ' + L + '>Notas</label><textarea id="med-f-notas" ' + S + ' rows="2" style="resize:vertical"></textarea></div>'
     + '<div id="med-f-msg" style="display:none;font-size:11.5px;margin-bottom:12px;padding:7px 10px;border-radius:8px"></div>'
@@ -33122,6 +33125,8 @@ function medOpenForm(id){
   var fId = document.getElementById('med-f-id');       if (fId) fId.value   = m ? (m.id || '') : '';
   var fNom = document.getElementById('med-f-nombre');  if (fNom) fNom.value = m ? (m.nombre || '') : '';
   var fAl = document.getElementById('med-f-alias');    if (fAl) fAl.value   = m ? (m.alias || '') : '';
+  var fEm = document.getElementById('med-f-email');    if (fEm) fEm.value   = m ? (m.email || '') : '';
+  var fTe = document.getElementById('med-f-tel');      if (fTe) fTe.value   = m ? (m.telefono || '') : '';
   var fNot = document.getElementById('med-f-notas');   if (fNot) fNot.value = m ? (m.notas || '') : '';
   _medFillGrupoSelect(m ? (m.padre || '') : '');
   var msg = document.getElementById('med-f-msg'); if (msg){ msg.style.display = 'none'; msg.textContent = ''; }
@@ -33145,6 +33150,8 @@ async function medGuardar(){
     nombre:nombre,
     padre:((document.getElementById('med-f-grupo')||{}).value||'').trim(),
     alias:((document.getElementById('med-f-alias')||{}).value||'').trim(),
+    email:((document.getElementById('med-f-email')||{}).value||'').trim(),
+    telefono:((document.getElementById('med-f-tel')||{}).value||'').trim(),
     notas:((document.getElementById('med-f-notas')||{}).value||'').trim(),
     activo:true, token:getToken(), usuario:s.email||s.nombre||'' };
   var res; try { var r = await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(body)}); res = await r.json(); } catch(e){ res = {ok:false, error:e.message}; }
@@ -38488,7 +38495,16 @@ function _cobBuildPrintData(lang){
   (d.saldos||[]).forEach(function(o){
     if(o.auto && o.op && _opsImpresos[String(o.op)]) return;
     var partes=(o.items||[]).filter(function(x){return x.pac;});
+    // ── SEPARAR CONCEPTOS ──────────────────────────────────────────────────
+    // Si el saldo NO tiene partidas por paciente pero SÍ tiene desglose (items) y
+    // está totalmente SIN pagar y ese desglose suma el total, se abre una fila por
+    // concepto (en vez del texto concatenado "Honorarios A, Honorarios B, …"). Así
+    // siempre se ve qué se cobró Y cada producto se traduce por separado. Solo si
+    // está sin pagar y cuadra, para no repartir mal un pago parcial.
+    var _its=(o.items||[]), _sumIts=_its.reduce(function(a,x){ return a+(parseFloat(x.total)||0); },0);
+    var _separable = !partes.length && _its.length && (parseFloat(o.abonado)||0)<=0.01 && Math.abs(_sumIts-(parseFloat(o.total)||0))<=1;
     if(partes.length){ partes.forEach(function(x){ rows.push([ccFch(x.fecha||o.fecha), x.pac+' · '+(x.producto||'—'), _cq(x.cantidad), ccFmt(x.total), '', ccFmt(x.total), _cobEstadoLinea(o.op, x.total, lang)]); conceptos.push(x.producto||''); }); }
+    else if(_separable){ _its.forEach(function(x){ rows.push([ccFch(x.fecha||o.fecha), (x.producto||'—')+(o.op&&o.op!=='—'?' · OP '+o.op:''), _cq(x.cantidad), ccFmt(x.total), '', ccFmt(x.total), _cobEstadoLinea(o.op, x.total, lang)]); conceptos.push(x.producto||''); }); }
     // El concepto del saldo se manda para que también se TRADUZCA en documentos en
     // otro idioma (antes iba null → salía en español); si no está en catálogo, el
     // diálogo de idioma lo pide una vez.
