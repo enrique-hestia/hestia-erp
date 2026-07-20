@@ -1075,6 +1075,9 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 <!-- ══ VISTA: AVISOS DEL EQUIPO (broadcast) ══ -->
 <div id="view-avisos" class="view" style="display:none"><div id="avisos-root"></div></div>
 
+<!-- ══ VISTA: MÉDICOS TRATANTES (catálogo nuevo e independiente) ══ -->
+<div id="view-medicos" class="view" style="display:none"><div id="medicos-root"></div></div>
+
 <!-- ══ VISTA: INGRESOS ══ -->
 <div id="view-ingresos" class="view" style="display:none"></div>
 
@@ -11108,6 +11111,18 @@ async function loadMenu() {
         seccion:'Operación', fuente:'avisos'
       });
     }
+    /* ── Inyectar "Médicos Tratantes" (catálogo NUEVO e independiente): lo ve quien
+       administra pacientes (editar_pacientes). Ítem raíz, inyectado solo si la hoja
+       Menu no lo trae ya. Match EXACTO del id para no duplicar. ── */
+    if (typeof hasPermission === 'function' && hasPermission('editar_pacientes')) {
+      if (!menuItems.some(function(i){ return String(i.id||'').trim() === 'medicos'; })) {
+        menuItems.push({
+          id:'medicos', label:'Médicos Tratantes', padre:'',
+          icono:'stethoscope', tipo:'vista', orden:520,
+          seccion:'Operación', fuente:'medicos'
+        });
+      }
+    }
     // Inyectar "Catálogo General" como primer hijo del grupo Productos
     var prodGroup = menuItems.filter(function(i){
       return (i.tipo==='grupo'||i.id==='productos') && /producto/i.test(i.label||i.id);
@@ -16752,6 +16767,15 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     var _avEl = document.getElementById('view-avisos');
     if (_avEl) _avEl.style.display = '';
     loadAvisosView();
+    return;
+  }
+  // Médicos Tratantes (catálogo nuevo e independiente). Va ANTES de los ruteos
+  // genéricos de Productos: 'medicos' es un id único, match EXACTO de id/fuente.
+  if (viewId === 'medicos' || (_foundViewItem && /^m[eé]dicos$/i.test(String(_foundViewItem.fuente||'')))) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _medEl = document.getElementById('view-medicos');
+    if (_medEl) _medEl.style.display = '';
+    loadMedicosView();
     return;
   }
   // Orígenes externos (catálogo de agencias / médicos externos) — va ANTES del
@@ -26232,6 +26256,13 @@ var _DD_FRONT_DEFAULTS = {
   Empleados: {
     puesto: { etiqueta:'Puesto',        valores:_DD_EMPLEADOS_SEED.slice() },
     area:   { etiqueta:'Área / Depto',  valores:_DD_EMPLEADOS_SEED.slice() }
+  },
+  // Ficha del paciente. Canal = grupo (Agencia / Hestia / Externos); Origen = de
+  // dónde llegó (solo estadística). El Médico Tratante NO vive aquí: tiene su
+  // propio catálogo (Médicos Tratantes) porque cada médico lleva su canal.
+  Pacientes: {
+    canal:  { etiqueta:'Canal',  valores:['Agencia','Hestia','Externos'] },
+    origen: { etiqueta:'Origen', valores:['Página Web','Recomendación','Redes Sociales','Google','Médico externo','Regreso'] }
   }
 };
 function _ddMergeDefaults(d){
@@ -26532,6 +26563,15 @@ async function ddCrearSeccion() {
 }
 
 function _ddApply(sec, campo, valores) {
+  // Ficha del paciente: Canal / Origen. Refleja de inmediato si la ficha está
+  // abierta (con _pacFillSelect para NO perder el valor ya elegido) y fuerza a
+  // que la próxima apertura relea las listas.
+  if (sec === 'Pacientes' && (campo === 'canal' || campo === 'origen')) {
+    _pacOptLoaded = false;
+    var _psId = (campo === 'canal') ? 'pac-f-canal' : 'pac-f-origen';
+    if (document.getElementById(_psId)) _pacFillSelect(_psId, valores);
+    return;
+  }
   // Actualiza en tiempo real los selects del formulario que usen ese dropdown
   var selId = null;
   if (sec==='Egresos'  && campo==='subtipo')   selId = 'eg-subtipo';
@@ -27945,7 +27985,7 @@ function idpForzarAlta() {
       <div class="form-group">
         <label class="form-label">Canal</label>
         <select class="form-input" id="pac-f-canal" onchange="_pacCanalChanged()"><option value="">— Selecciona —</option></select>
-        <div style="font-size:10.5px;color:var(--color-text-muted,#9ca3af);margin-top:4px">Grupos y agencias del catálogo de <b>Orígenes externos</b>.</div>
+        <div style="font-size:10.5px;color:var(--color-text-muted,#9ca3af);margin-top:4px">Agencia · Hestia · Externos. Editable en <b>Panel de Control › Formularios</b>; filtra los médicos.</div>
       </div>
       <div class="form-group">
         <label class="form-label">Médico Tratante</label>
@@ -28661,6 +28701,46 @@ var _pacOptLoaded = false;
    sembrar o módulo sin desplegar) → la ficha sigue con la pestaña Opciones. */
 var _pacOrigMeta = [];
 
+/* Catálogo NUEVO e independiente de Médicos Tratantes [{id,nombre,canal,...}].
+   Llena el select #pac-f-medico; cada médico lleva su canal, así el select se
+   filtra al elegir Canal. Nada que ver con Orígenes externos. */
+var _pacMedicos = [];
+var _pacMedicosLoaded = false;
+/* Semillas usadas si las listas configurables (Panel de Control › Formularios)
+   aún no cargaron; _ddVals ya devuelve la lista guardada cuando existe. */
+var _PAC_CANAL_SEED  = ['Agencia','Hestia','Externos'];
+var _PAC_ORIGEN_SEED = ['Página Web','Recomendación','Redes Sociales','Google','Médico externo','Regreso'];
+
+/* Llena un select preservando SIEMPRE lo ya elegido (_pacEnsureOption): si el
+   valor guardado no está en la lista se conserva marcado «(fuera de catálogo)»
+   en vez de blanquearse al guardar. */
+function _pacFillSelect(selId, list){
+  var sel = document.getElementById(selId);
+  if (!sel) return;
+  var current = sel.value;
+  sel.innerHTML = '<option value="">— Selecciona —</option>';
+  (list || []).forEach(function(opt){
+    var o = document.createElement('option');
+    o.value = opt; o.textContent = opt;
+    sel.appendChild(o);
+  });
+  _pacEnsureOption(sel, current);
+  sel.value = current;
+}
+
+/* Trae el catálogo de Médicos Tratantes (una vez; cachea). Falla en silencio:
+   la ficha sigue funcionando con lo que ya tenga el select. */
+async function _pacMedicosFetch(force){
+  if (_pacMedicosLoaded && !force) return _pacMedicos;
+  try {
+    var tok = encodeURIComponent(getToken());
+    var r = await fetch(APPS_SCRIPT_URL + '?action=medicos&token=' + tok + '&_t=' + Date.now(), {redirect:'follow'});
+    var d = await r.json();
+    if (d && d.ok) { _pacMedicos = d.medicos || []; _pacMedicosLoaded = true; }
+  } catch(e){}
+  return _pacMedicos;
+}
+
 /* Garantiza que `val` exista como opción del select ANTES de asignarlo.
    Sin esto, `sel.value = val` con un valor que no está en la lista lo deja en
    '' EN SILENCIO: al guardar la ficha se escribiría vacío y se perdería el
@@ -28685,23 +28765,24 @@ function _pacOrigFind(nombre){
   }
   return null;
 }
-/* Al elegir un Canal que es un Grupo (o una Agencia CON integrantes), el
-   selector de Médico se filtra a sus miembros. Canal libre / agencia sin
-   miembros → se listan todos los médicos. El valor actual se conserva siempre
-   (nunca se borra por el filtro). */
+/* Al elegir un Canal, el selector de Médico se filtra a los médicos de ESE canal
+   (cada médico del catálogo lleva su canal). Canal vacío o sin médicos en ese
+   canal → se listan todos. El valor actual se conserva SIEMPRE (nunca se borra
+   por el filtro: anti-blanqueo). */
 function _pacFiltraMedicos(){
   var selC = document.getElementById('pac-f-canal');
   var selM = document.getElementById('pac-f-medico');
   var hint = document.getElementById('pac-medico-hint');
-  if (!selC || !selM || !_pacOrigMeta.length) return;
+  if (!selM) return;
   var cur = String(selM.value || '').trim();
-  var canal = String(selC.value || '').trim();
-  var reg = _pacOrigFind(canal);
-  var todos = _pacOrigMeta.filter(function(o){ return o.tipo === 'Médico externo'; });
+  // Catálogo aún sin cargar: NO tocar el select (conservar lo ya elegido).
+  if (!_pacMedicos || !_pacMedicos.length){ _pacEnsureOption(selM, cur); selM.value = cur; return; }
+  var canal = selC ? String(selC.value || '').trim() : '';
+  var todos = _pacMedicos.slice();
   var lista = todos, filtrado = false;
-  if (reg){
-    var miembros = todos.filter(function(o){ return String(o.grupoId||'') === String(reg.id||''); });
-    if (miembros.length){ lista = miembros; filtrado = true; }
+  if (canal){
+    var m = todos.filter(function(o){ return _origNormJS(o.canal) === _origNormJS(canal); });
+    if (m.length){ lista = m; filtrado = true; }
   }
   selM.innerHTML = '<option value="">— Selecciona —</option>';
   lista.forEach(function(o){
@@ -28713,8 +28794,8 @@ function _pacFiltraMedicos(){
   selM.value = cur;
   if (hint){
     hint.textContent = filtrado
-      ? 'Mostrando solo los de «' + canal + '» (' + lista.length + '). Cambia el Canal para ver otros.'
-      : (_pacOrigMeta.length ? 'Del catálogo de Orígenes externos. Elige un Canal de tipo Grupo para filtrar por sus integrantes.' : '');
+      ? 'Mostrando solo los del canal «' + canal + '» (' + lista.length + '). Cambia el Canal para ver otros.'
+      : (todos.length ? 'Del catálogo de Médicos Tratantes. Elige un Canal para filtrar por él.' : '');
     hint.style.display = hint.textContent ? 'block' : 'none';
   }
 }
@@ -28722,33 +28803,22 @@ function _pacCanalChanged(){ _pacFiltraMedicos(); }
 function loadPacientesOptions() {
   _pacLlenaIdiomaSelect();
   if (_pacOptLoaded) return;
+  // Canal y Origen: listas configurables (Panel de Control › Formularios). Si aún
+  // no cargaron, _ddVals devuelve las semillas del frontend.
+  _ddEnsure().then(function(){
+    _pacFillSelect('pac-f-canal',  _ddVals('Pacientes', 'canal',  _PAC_CANAL_SEED));
+    _pacFillSelect('pac-f-origen', _ddVals('Pacientes', 'origen', _PAC_ORIGEN_SEED));
+    _pacFiltraMedicos();   // por si el Canal ya está fijado (edición)
+  }).catch(function(){});
+  // Médico Tratante: catálogo NUEVO e independiente. Al resolver, _pacFiltraMedicos
+  // llena el select respetando el Canal elegido y conservando el médico ya capturado.
+  _pacMedicosFetch().then(function(){ _pacFiltraMedicos(); }).catch(function(){});
+  // País (y respaldo de la ficha) siguen viniendo de la hoja Opciones.
   var url = APPS_SCRIPT_URL + '?action=options&sheet=Pacientes&token=' + encodeURIComponent(getToken());
   fetch(url).then(function(r){ return r.json(); }).then(function(d) {
     if (!d.options) return;
-    // Canal y Médico Tratante vienen del catálogo Origenes_Externos cuando el
-    // backend lo tiene sembrado (d.origenesFicha); si no, de la hoja Opciones.
-    _pacOrigMeta = (d.origenes && d.origenes.length) ? d.origenes : [];
-    var map = {
-      'Origen':          'pac-f-origen',
-      'Canal':           'pac-f-canal',
-      'Médico Tratante': 'pac-f-medico',
-      'País':            'pac-f-pais'
-    };
-    Object.keys(map).forEach(function(col) {
-      var sel = document.getElementById(map[col]);
-      if (!sel || !d.options[col]) return;
-      var current = sel.value;
-      sel.innerHTML = '<option value="">— Selecciona —</option>';
-      d.options[col].forEach(function(opt) {
-        var o = document.createElement('option');
-        o.value = opt; o.textContent = opt;
-        sel.appendChild(o);
-      });
-      _pacEnsureOption(sel, current);   // no perder lo que ya estaba elegido
-      sel.value = current;
-    });
+    _pacFillSelect('pac-f-pais', d.options['País'] || []);
     _pacOptLoaded = true;
-    _pacFiltraMedicos();
   }).catch(function(){});
 }
 
@@ -32765,6 +32835,149 @@ async function avisoBaja(id){
   if (!confirm('¿Retirar este aviso? Queda registrado, solo deja de mostrarse.')) return;
   var res; try { var r = await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'avisosActualizar', id:id, activo:false})}); res = await r.json(); } catch(e){ res = {ok:false, error:e.message}; }
   if (res && res.ok) loadAvisosView(); else alert('Error: '+((res&&res.error)||''));
+}
+
+/* ══════════════ MÉDICOS TRATANTES (catálogo nuevo e independiente) ══════════════
+   Médicos POR NOMBRE, cada uno con un CANAL (Agencia / Hestia / Externos — lista
+   configurable en Panel de Control › Formularios). Alimenta el select
+   #pac-f-medico de la ficha del paciente. Alta/edición gateadas por
+   editar_pacientes. Backend: medicos.gs (GET action=medicos; POST saveMedico /
+   deleteMedico; @398). El modal es SINGLETON en <body> — ningún re-render lo cierra. */
+var _medData = [];
+
+async function medFetch(){
+  var tok = encodeURIComponent(getToken());
+  var d = await fetch(APPS_SCRIPT_URL + '?action=medicos&token=' + tok + '&_t=' + Date.now(), {redirect:'follow'}).then(function(r){ return r.json(); });
+  if (d && d.ok){ _medData = d.medicos || []; return _medData; }
+  throw new Error((d && d.error) || 'No se pudieron cargar los médicos.');
+}
+
+async function loadMedicosView(){
+  var root = document.getElementById('medicos-root'); if (!root) return;
+  root.innerHTML = (typeof hestiaLoader === 'function') ? hestiaLoader('Cargando médicos…') : 'Cargando…';
+  try {
+    await Promise.all([ medFetch(), _ddEnsure() ]);
+    // Espeja el catálogo que usa la ficha del paciente: un alta se ve al instante.
+    _pacMedicos = _medData.slice(); _pacMedicosLoaded = true;
+    _medRenderView();
+  } catch(e){
+    root.innerHTML = '<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px;line-height:1.6">⚠ ' + _cxpEsc(e.message) + '<br><span style="color:#6b7280">Primera vez: agrega <b>medicos.gs</b> en Apps Script y redespliega.</span></div>';
+  }
+}
+
+function _medRenderView(){
+  var root = document.getElementById('medicos-root'); if (!root) return;
+  var puede = typeof hasPermission === 'function' && hasPermission('editar_pacientes');
+  var list = _medData || [];
+  var TH = 'style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted)"';
+  var h = '<div style="max-width:820px;margin:0 auto;padding:4px 2px 44px">';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px">'
+    + '<div><div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--color-text-muted)">Hestia Fertility</div>'
+    + '<h1 style="font-size:20px;font-weight:800;color:var(--color-text);margin:0">Médicos Tratantes</h1>'
+    + '<div style="font-size:11.5px;color:var(--color-text-muted);margin-top:3px">Médicos por nombre, cada uno con su canal · alimentan la ficha del paciente</div></div>'
+    + (puede ? '<button onclick="medOpenForm()" class="dash-btn">+ Nuevo médico</button>' : '') + '</div>';
+  if (!list.length){
+    h += '<div style="background:var(--color-surface-2);border:1px dashed var(--color-divider);border-radius:14px;padding:40px;text-align:center;color:var(--color-text-muted);font-size:13px">🩺 Aún no hay médicos.' + (puede ? ' Agrega el primero con <b>+ Nuevo médico</b>.' : '') + '</div>';
+  } else {
+    h += '<div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:14px;overflow:hidden">'
+      + '<table style="width:100%;border-collapse:collapse;font-size:13px">'
+      + '<thead><tr style="background:var(--color-surface-offset)">'
+      + '<th ' + TH + '>Nombre</th><th ' + TH + '>Canal</th>'
+      + (puede ? '<th ' + TH + ' style="text-align:right;padding:10px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted)">Acciones</th>' : '')
+      + '</tr></thead><tbody>';
+    list.forEach(function(m){ h += _medRow(m, puede); });
+    h += '</tbody></table></div>';
+    h += '<div style="font-size:11px;color:var(--color-text-muted);margin-top:10px">' + list.length + ' médico' + (list.length===1?'':'s') + ' activo' + (list.length===1?'':'s') + '.</div>';
+  }
+  h += '</div>';
+  root.innerHTML = h;
+}
+
+function _medRow(m, puede){
+  var acc = '';
+  if (puede){
+    acc = '<button onclick="medOpenForm(\'' + _escJs(m.id) + '\')" title="Editar" style="background:none;border:1px solid var(--color-divider);border-radius:7px;color:var(--color-text-muted);font-size:11px;padding:5px 10px;cursor:pointer;margin-left:6px">Editar</button>'
+      + '<button onclick="medBaja(\'' + _escJs(m.id) + '\')" title="Dar de baja (deja registro)" style="background:none;border:1px solid var(--color-divider);border-radius:7px;color:#b91c1c;font-size:11px;padding:5px 10px;cursor:pointer;margin-left:6px">Baja</button>';
+  }
+  return '<tr style="border-top:1px solid var(--color-divider)">'
+    + '<td style="padding:10px 14px;color:var(--color-text);font-weight:600">' + _cxpEsc(m.nombre || '') + (m.notas ? '<div style="font-size:10.5px;font-weight:400;color:var(--color-text-muted);margin-top:2px">' + _cxpEsc(m.notas) + '</div>' : '') + '</td>'
+    + '<td style="padding:10px 14px"><span style="display:inline-block;background:var(--color-surface-offset);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;color:var(--color-text)">' + _cxpEsc(m.canal || '—') + '</span></td>'
+    + (puede ? '<td style="padding:10px 14px;text-align:right;white-space:nowrap">' + acc + '</td>' : '')
+    + '</tr>';
+}
+
+/* Modal SINGLETON en <body> (como el de Avisos): así ningún re-render de la
+   lista lo cierra a media captura ni pierde lo escrito. */
+function _medEnsureModal(){
+  if (document.getElementById('med-modal')) return;
+  var host = document.createElement('div'); host.innerHTML = _medFormHTML();
+  while (host.firstChild) document.body.appendChild(host.firstChild);
+}
+function _medFormHTML(){
+  var S = 'style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:12.5px;background:var(--color-surface-2);color:var(--color-text)"';
+  var L = 'style="display:block;font-size:10px;font-weight:600;color:var(--color-text-muted);margin-bottom:4px"';
+  return '<div id="med-ovl" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;backdrop-filter:blur(3px)" onclick="medCloseForm()"></div>'
+    + '<div id="med-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;background:var(--color-surface-2);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(440px,94vw);padding:20px">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div id="med-modal-title" style="font-size:15px;font-weight:800;color:var(--color-text)">Nuevo médico</div><button onclick="medCloseForm()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--color-text-muted)">×</button></div>'
+    + '<input type="hidden" id="med-f-id">'
+    + '<div style="margin-bottom:12px"><label ' + L + '>Nombre *</label><input id="med-f-nombre" ' + S + ' placeholder="Ej. Dra. Laura Méndez"></div>'
+    + '<div style="margin-bottom:12px"><label ' + L + '>Canal</label><select id="med-f-canal" ' + S + '></select></div>'
+    + '<div style="margin-bottom:14px"><label ' + L + '>Notas</label><textarea id="med-f-notas" ' + S + ' rows="2" style="resize:vertical"></textarea></div>'
+    + '<div id="med-f-msg" style="display:none;font-size:11.5px;margin-bottom:12px;padding:7px 10px;border-radius:8px"></div>'
+    + '<div style="display:flex;gap:10px"><button id="med-save-btn" onclick="medGuardar()" class="dash-btn" style="flex:1;padding:12px">Guardar</button>'
+    + '<button onclick="medCloseForm()" class="dash-btn ghost" style="padding:12px 20px">Cancelar</button></div></div>';
+}
+function _medFillCanalSelect(cur){
+  var sel = document.getElementById('med-f-canal'); if (!sel) return;
+  var list = _ddVals('Pacientes', 'canal', _PAC_CANAL_SEED);
+  sel.innerHTML = '<option value="">— Selecciona —</option>' + list.map(function(v){ return '<option value="' + _escH(v) + '">' + _escH(v) + '</option>'; }).join('');
+  cur = String(cur == null ? '' : cur).trim();
+  if (cur){
+    var found = false; for (var i=0;i<sel.options.length;i++){ if (sel.options[i].value === cur){ found = true; break; } }
+    if (!found){ var o = document.createElement('option'); o.value = cur; o.textContent = cur + ' (fuera de catálogo)'; sel.appendChild(o); }
+    sel.value = cur;
+  }
+}
+function medOpenForm(id){
+  _medEnsureModal();
+  _ddEnsure().then(function(){
+    var m = id ? (_medData || []).filter(function(x){ return String(x.id) === String(id); })[0] : null;
+    var t = document.getElementById('med-modal-title'); if (t) t.textContent = m ? 'Editar médico' : 'Nuevo médico';
+    var fId = document.getElementById('med-f-id');         if (fId) fId.value     = m ? (m.id || '') : '';
+    var fNom = document.getElementById('med-f-nombre');    if (fNom) fNom.value   = m ? (m.nombre || '') : '';
+    var fNot = document.getElementById('med-f-notas');     if (fNot) fNot.value   = m ? (m.notas || '') : '';
+    _medFillCanalSelect(m ? (m.canal || '') : '');
+    var msg = document.getElementById('med-f-msg'); if (msg){ msg.style.display = 'none'; msg.textContent = ''; }
+    var o = document.getElementById('med-ovl'), md = document.getElementById('med-modal');
+    if (o) o.style.display = 'block'; if (md) md.style.display = 'block';
+    if (fNom) setTimeout(function(){ fNom.focus(); }, 50);
+  });
+}
+function medCloseForm(){ var o=document.getElementById('med-ovl'), m=document.getElementById('med-modal'); if(o)o.style.display='none'; if(m)m.style.display='none'; }
+
+async function medGuardar(){
+  var nombre = ((document.getElementById('med-f-nombre')||{}).value||'').trim();
+  var msg = document.getElementById('med-f-msg');
+  function showMsg(txt, ok){ if(!msg) return; msg.style.display='block'; msg.textContent=txt; msg.style.background = ok?'#ecfdf5':'#fef2f2'; msg.style.color = ok?'#065f46':'#991b1b'; }
+  if (!nombre){ showMsg('El médico necesita un nombre.', false); return; }
+  var btn = document.getElementById('med-save-btn'); if (btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  // El token lo inyecta el wrapper de fetch en POST — no se manda aquí.
+  var body = { action:'saveMedico',
+    id:((document.getElementById('med-f-id')||{}).value||'').trim(),
+    nombre:nombre,
+    canal:((document.getElementById('med-f-canal')||{}).value||'').trim(),
+    notas:((document.getElementById('med-f-notas')||{}).value||'').trim() };
+  var res; try { var r = await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(body)}); res = await r.json(); } catch(e){ res = {ok:false, error:e.message}; }
+  if (btn){ btn.disabled=false; btn.textContent='Guardar'; }
+  if (res && res.ok){ medCloseForm(); _pacMedicosLoaded=false; loadMedicosView(); }
+  else showMsg('Error: ' + ((res&&res.error)||'No se pudo guardar'), false);
+}
+async function medBaja(id){
+  var m = (_medData || []).filter(function(x){ return String(x.id) === String(id); })[0];
+  if (!confirm('¿Dar de baja a «' + ((m&&m.nombre)||'este médico') + '»? Queda registrado, solo deja de aparecer.')) return;
+  var res; try { var r = await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'deleteMedico', id:id})}); res = await r.json(); } catch(e){ res = {ok:false, error:e.message}; }
+  if (res && res.ok){ _pacMedicosLoaded=false; loadMedicosView(); }
+  else alert('Error: ' + ((res&&res.error)||'No se pudo dar de baja'));
 }
 
 /* ══════════════ ANIMACIONES DE AVISOS (E4 · motion-graphics en canvas) ══════════════
