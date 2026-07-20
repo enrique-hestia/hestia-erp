@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.20.264 -->
+﻿<!-- app-build:2026.07.20.265 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -32944,63 +32944,72 @@ async function avisoBaja(id){
   if (res && res.ok) loadAvisosView(); else alert('Error: '+((res&&res.error)||''));
 }
 
-/* ══════════════ MÉDICOS TRATANTES (catálogo nuevo e independiente) ══════════════
-   Médicos POR NOMBRE, cada uno con un CANAL (Agencia / Hestia / Externos — lista
-   configurable en Panel de Control › Formularios). Alimenta el select
-   #pac-f-medico de la ficha del paciente. Alta/edición gateadas por
-   editar_pacientes. Backend: medicos.gs (GET action=medicos; POST saveMedico /
-   deleteMedico; @398). El modal es SINGLETON en <body> — ningún re-render lo cierra. */
-var _medData = [];
+/* ══════════════ MÉDICOS TRATANTES (vista amable de ORÍGENES EXTERNOS) ══════════════
+   Pantalla para dar de alta médicos rápido: lista + formulario, como el alta de
+   pacientes. PERO los médicos VIVEN en Orígenes Externos (tipo "Médico externo"),
+   que es la MISMA fuente que lee la atribución y —clave— el motor de comisiones
+   (comisiones.gs resuelve la venta con _origResolver). Por eso NO hay hoja aparte:
+   un médico dado de alta aquí aparece bajo su grupo en Orígenes y cuenta para las
+   comisiones sin tocar el motor. Cada médico elige a qué GRUPO/AGENCIA pertenece
+   (Reprovida, Grupo Médico, Daniel Madero…) o queda como Externos independiente;
+   de ahí se deriva su Canal en la ficha del paciente.
+   Backend: action=origenes (lectura) + saveOrigen/deleteOrigen (gate editar_ingresos).
+   El modal es SINGLETON en <body> — ningún re-render lo cierra. */
+var _medData = [];        // solo los tipo "Médico externo" (para la tabla)
+var _medOrigAll = [];     // catálogo completo de orígenes (para el selector de grupo)
 
 async function medFetch(){
-  var tok = encodeURIComponent(getToken());
-  var d = await fetch(APPS_SCRIPT_URL + '?action=medicos&token=' + tok + '&_t=' + Date.now(), {redirect:'follow'}).then(function(r){ return r.json(); });
-  if (d && d.ok){ _medData = d.medicos || []; return _medData; }
-  throw new Error((d && d.error) || 'No se pudieron cargar los médicos.');
+  var list = (typeof _origFetchList === 'function') ? await _origFetchList(true) : (_origListCache || []);
+  _medOrigAll = list || [];
+  _medData = _medOrigAll.filter(function(o){ return o && o.activo !== false && _origTipoDe(o) === 'Médico externo'; });
+  return _medData;
 }
 
 async function loadMedicosView(){
-  // UNIFICADO: los médicos tratantes viven en ORÍGENES EXTERNOS (misma fuente que
-  // atribución y comisiones). Este menú redirige ahí para no tener dos lugares de
-  // alta ni un catálogo paralelo que la ficha ya no lee.
-  if (typeof navigateTo === 'function') { setTimeout(function(){ try { navigateTo('origenes'); } catch(e){} }, 0); return; }
   var root = document.getElementById('medicos-root'); if (!root) return;
   root.innerHTML = (typeof hestiaLoader === 'function') ? hestiaLoader('Cargando médicos…') : 'Cargando…';
   try {
-    await Promise.all([ medFetch(), _ddEnsure() ]);
-    // Espeja el catálogo que usa la ficha del paciente: un alta se ve al instante.
-    _pacMedicos = _medData.slice(); _pacMedicosLoaded = true;
+    await medFetch();
     _medRenderView();
   } catch(e){
-    root.innerHTML = '<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px;line-height:1.6">⚠ ' + _cxpEsc(e.message) + '<br><span style="color:#6b7280">Primera vez: agrega <b>medicos.gs</b> en Apps Script y redespliega.</span></div>';
+    root.innerHTML = '<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px;line-height:1.6">⚠ ' + _cxpEsc(e.message) + '<br><span style="color:#6b7280">Primera vez: agrega el backend de <b>Orígenes externos</b> (action=origenes) en Apps Script y vuelve a desplegar.</span></div>';
   }
+}
+
+/* Nombre del grupo/agencia al que pertenece un médico (o 'Externos (independiente)'). */
+function _medGrupoDe(m){
+  var g = (typeof _origGrupoNombre === 'function') ? _origGrupoNombre(m, _medOrigAll) : '';
+  return g || 'Externos (independiente)';
 }
 
 function _medRenderView(){
   var root = document.getElementById('medicos-root'); if (!root) return;
-  var puede = typeof hasPermission === 'function' && hasPermission('editar_pacientes');
+  // saveOrigen/deleteOrigen exigen editar_ingresos (misma puerta que Orígenes).
+  var puede = typeof hasPermission === 'function' && hasPermission('editar_ingresos');
   var list = _medData || [];
   var TH = 'style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted)"';
-  var h = '<div style="max-width:820px;margin:0 auto;padding:4px 2px 44px">';
-  h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px">'
+  var h = '<div style="max-width:860px;margin:0 auto;padding:4px 2px 44px">';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px">'
     + '<div><div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--color-text-muted)">Hestia Fertility</div>'
     + '<h1 style="font-size:20px;font-weight:800;color:var(--color-text);margin:0">Médicos Tratantes</h1>'
-    + '<div style="font-size:11.5px;color:var(--color-text-muted);margin-top:3px">Médicos por nombre, cada uno con su canal · alimentan la ficha del paciente</div></div>'
+    + '<div style="font-size:11.5px;color:var(--color-text-muted);margin-top:3px">Cada médico pertenece a un grupo/agencia · alimenta la ficha del paciente y las comisiones</div></div>'
     + (puede ? '<button onclick="medOpenForm()" class="dash-btn">+ Nuevo médico</button>' : '') + '</div>';
+  h += '<div style="font-size:11px;color:var(--color-text-muted);margin:0 0 14px;line-height:1.5">Los médicos viven en <b>Orígenes externos</b> (aquí es solo una forma rápida de darlos de alta). Aparecen bajo su grupo y cuentan para las <b>comisiones</b> de ese grupo. '
+    + '<a href="#" onclick="if(typeof navigateTo===\'function\')navigateTo(\'origenes\');return false;" style="color:var(--color-primary);font-weight:600">Ver Orígenes externos →</a></div>';
   if (!list.length){
     h += '<div style="background:var(--color-surface-2);border:1px dashed var(--color-divider);border-radius:14px;padding:40px;text-align:center;color:var(--color-text-muted);font-size:13px">🩺 Aún no hay médicos.' + (puede ? ' Agrega el primero con <b>+ Nuevo médico</b>.' : '') + '</div>';
   } else {
     h += '<div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:14px;overflow:hidden">'
       + '<table style="width:100%;border-collapse:collapse;font-size:13px">'
       + '<thead><tr style="background:var(--color-surface-offset)">'
-      + '<th ' + TH + '>Nombre</th><th ' + TH + '>Canal</th>'
+      + '<th ' + TH + '>Nombre</th><th ' + TH + '>Pertenece a</th>'
       + (puede ? '<th ' + TH + ' style="text-align:right;padding:10px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted)">Acciones</th>' : '')
       + '</tr></thead><tbody>';
     list.forEach(function(m){ h += _medRow(m, puede); });
     h += '</tbody></table></div>';
     h += '<div style="font-size:11px;color:var(--color-text-muted);margin-top:10px">' + list.length + ' médico' + (list.length===1?'':'s') + ' activo' + (list.length===1?'':'s') + '.</div>';
   }
-  h += '</div>';
+  h += '</div>' + _medFormHTML2Marker();
   root.innerHTML = h;
 }
 
@@ -33011,11 +33020,14 @@ function _medRow(m, puede){
       + '<button onclick="medBaja(\'' + _escJs(m.id) + '\')" title="Dar de baja (deja registro)" style="background:none;border:1px solid var(--color-divider);border-radius:7px;color:#b91c1c;font-size:11px;padding:5px 10px;cursor:pointer;margin-left:6px">Baja</button>';
   }
   return '<tr style="border-top:1px solid var(--color-divider)">'
-    + '<td style="padding:10px 14px;color:var(--color-text);font-weight:600">' + _cxpEsc(m.nombre || '') + (m.notas ? '<div style="font-size:10.5px;font-weight:400;color:var(--color-text-muted);margin-top:2px">' + _cxpEsc(m.notas) + '</div>' : '') + '</td>'
-    + '<td style="padding:10px 14px"><span style="display:inline-block;background:var(--color-surface-offset);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;color:var(--color-text)">' + _cxpEsc(m.canal || '—') + '</span></td>'
+    + '<td style="padding:10px 14px;color:var(--color-text);font-weight:600">' + _cxpEsc(m.nombre || '') + (m.alias ? '<div style="font-size:10.5px;font-weight:400;color:var(--color-text-muted);margin-top:2px">Alias: ' + _cxpEsc(m.alias) + '</div>' : '') + (m.notas ? '<div style="font-size:10.5px;font-weight:400;color:var(--color-text-muted);margin-top:2px">' + _cxpEsc(m.notas) + '</div>' : '') + '</td>'
+    + '<td style="padding:10px 14px"><span style="display:inline-block;background:var(--color-surface-offset);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;color:var(--color-text)">' + _cxpEsc(_medGrupoDe(m)) + '</span></td>'
     + (puede ? '<td style="padding:10px 14px;text-align:right;white-space:nowrap">' + acc + '</td>' : '')
     + '</tr>';
 }
+
+/* Marcador: garantiza el modal singleton en <body> tras cada render de la lista. */
+function _medFormHTML2Marker(){ setTimeout(_medEnsureModal, 0); return ''; }
 
 /* Modal SINGLETON en <body> (como el de Avisos): así ningún re-render de la
    lista lo cierra a media captura ni pierde lo escrito. */
@@ -33028,41 +33040,55 @@ function _medFormHTML(){
   var S = 'style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:12.5px;background:var(--color-surface-2);color:var(--color-text)"';
   var L = 'style="display:block;font-size:10px;font-weight:600;color:var(--color-text-muted);margin-bottom:4px"';
   return '<div id="med-ovl" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;backdrop-filter:blur(3px)" onclick="medCloseForm()"></div>'
-    + '<div id="med-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;background:var(--color-surface-2);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(440px,94vw);padding:20px">'
+    + '<div id="med-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;background:var(--color-surface-2);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(440px,94vw);max-height:90vh;overflow:auto;padding:20px">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div id="med-modal-title" style="font-size:15px;font-weight:800;color:var(--color-text)">Nuevo médico</div><button onclick="medCloseForm()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--color-text-muted)">×</button></div>'
     + '<input type="hidden" id="med-f-id">'
     + '<div style="margin-bottom:12px"><label ' + L + '>Nombre *</label><input id="med-f-nombre" ' + S + ' placeholder="Ej. Dra. Laura Méndez"></div>'
-    + '<div style="margin-bottom:12px"><label ' + L + '>Canal</label><select id="med-f-canal" ' + S + '></select></div>'
+    + '<div style="margin-bottom:12px"><label ' + L + '>Pertenece a (grupo / agencia)</label><select id="med-f-grupo" ' + S + '></select>'
+    + '<div style="font-size:10.5px;color:var(--color-text-muted);margin-top:5px;line-height:1.4">Su grupo determina el <b>Canal</b> en la ficha y hace que sus procedimientos cuenten para las <b>comisiones</b> de ese grupo. Si no pertenece a ninguno, déjalo en <b>Externos (independiente)</b>.</div></div>'
+    + '<div style="margin-bottom:12px"><label ' + L + '>Alias (separados por coma)</label><input id="med-f-alias" ' + S + ' placeholder="Ej. Dr. Lozano, Lozano"><div style="font-size:10.5px;color:var(--color-text-muted);margin-top:5px;line-height:1.4">Ayudan a auto-detectar al médico en el histórico y la captura. Opcional.</div></div>'
     + '<div style="margin-bottom:14px"><label ' + L + '>Notas</label><textarea id="med-f-notas" ' + S + ' rows="2" style="resize:vertical"></textarea></div>'
     + '<div id="med-f-msg" style="display:none;font-size:11.5px;margin-bottom:12px;padding:7px 10px;border-radius:8px"></div>'
     + '<div style="display:flex;gap:10px"><button id="med-save-btn" onclick="medGuardar()" class="dash-btn" style="flex:1;padding:12px">Guardar</button>'
     + '<button onclick="medCloseForm()" class="dash-btn ghost" style="padding:12px 20px">Cancelar</button></div></div>';
 }
-function _medFillCanalSelect(cur){
-  var sel = document.getElementById('med-f-canal'); if (!sel) return;
-  var list = _ddVals('Pacientes', 'canal', _PAC_CANAL_SEED);
-  sel.innerHTML = '<option value="">— Selecciona —</option>' + list.map(function(v){ return '<option value="' + _escH(v) + '">' + _escH(v) + '</option>'; }).join('');
-  cur = String(cur == null ? '' : cur).trim();
-  if (cur){
-    var found = false; for (var i=0;i<sel.options.length;i++){ if (sel.options[i].value === cur){ found = true; break; } }
-    if (!found){ var o = document.createElement('option'); o.value = cur; o.textContent = cur + ' (fuera de catálogo)'; sel.appendChild(o); }
-    sel.value = cur;
+/* Llena el selector "Pertenece a": Grupos y Agencias del catálogo de Orígenes
+   externos (value = su id, para casar EXACTO con lo que lee comisiones), más
+   "Externos (independiente)" (value ''). Anti-blanqueo: si el grupo guardado ya
+   no está en el catálogo, se conserva como opción "(fuera de catálogo)". */
+function _medFillGrupoSelect(curId){
+  var sel = document.getElementById('med-f-grupo'); if (!sel) return;
+  var list = _medOrigAll || [];
+  var grupos = list.filter(function(o){ return _origTipoDe(o) === 'Grupo'; });
+  var agencias = list.filter(function(o){ return _origTipoDe(o) === 'Agencia'; });
+  function opt(o){ return '<option value="' + _escH(o.id) + '">' + _escH(o.nombre) + '</option>'; }
+  var h = '<option value="">— Externos (independiente) —</option>';
+  if (agencias.length) h += '<optgroup label="Agencias">' + agencias.map(opt).join('') + '</optgroup>';
+  if (grupos.length)   h += '<optgroup label="Grupos">' + grupos.map(opt).join('') + '</optgroup>';
+  sel.innerHTML = h;
+  curId = String(curId == null ? '' : curId).trim();
+  if (curId){
+    var found = false; for (var i=0;i<sel.options.length;i++){ if (sel.options[i].value === curId){ found = true; break; } }
+    if (!found){
+      var nom = ''; for (var k=0;k<list.length;k++){ if (String(list[k].id) === curId){ nom = list[k].nombre; break; } }
+      var o = document.createElement('option'); o.value = curId; o.textContent = (nom || curId) + ' (fuera de catálogo)'; sel.appendChild(o);
+    }
+    sel.value = curId;
   }
 }
 function medOpenForm(id){
   _medEnsureModal();
-  _ddEnsure().then(function(){
-    var m = id ? (_medData || []).filter(function(x){ return String(x.id) === String(id); })[0] : null;
-    var t = document.getElementById('med-modal-title'); if (t) t.textContent = m ? 'Editar médico' : 'Nuevo médico';
-    var fId = document.getElementById('med-f-id');         if (fId) fId.value     = m ? (m.id || '') : '';
-    var fNom = document.getElementById('med-f-nombre');    if (fNom) fNom.value   = m ? (m.nombre || '') : '';
-    var fNot = document.getElementById('med-f-notas');     if (fNot) fNot.value   = m ? (m.notas || '') : '';
-    _medFillCanalSelect(m ? (m.canal || '') : '');
-    var msg = document.getElementById('med-f-msg'); if (msg){ msg.style.display = 'none'; msg.textContent = ''; }
-    var o = document.getElementById('med-ovl'), md = document.getElementById('med-modal');
-    if (o) o.style.display = 'block'; if (md) md.style.display = 'block';
-    if (fNom) setTimeout(function(){ fNom.focus(); }, 50);
-  });
+  var m = id ? (_medData || []).filter(function(x){ return String(x.id) === String(id); })[0] : null;
+  var t = document.getElementById('med-modal-title'); if (t) t.textContent = m ? 'Editar médico' : 'Nuevo médico';
+  var fId = document.getElementById('med-f-id');       if (fId) fId.value   = m ? (m.id || '') : '';
+  var fNom = document.getElementById('med-f-nombre');  if (fNom) fNom.value = m ? (m.nombre || '') : '';
+  var fAl = document.getElementById('med-f-alias');    if (fAl) fAl.value   = m ? (m.alias || '') : '';
+  var fNot = document.getElementById('med-f-notas');   if (fNot) fNot.value = m ? (m.notas || '') : '';
+  _medFillGrupoSelect(m ? (m.padre || '') : '');
+  var msg = document.getElementById('med-f-msg'); if (msg){ msg.style.display = 'none'; msg.textContent = ''; }
+  var o = document.getElementById('med-ovl'), md = document.getElementById('med-modal');
+  if (o) o.style.display = 'block'; if (md) md.style.display = 'block';
+  if (fNom) setTimeout(function(){ fNom.focus(); }, 50);
 }
 function medCloseForm(){ var o=document.getElementById('med-ovl'), m=document.getElementById('med-modal'); if(o)o.style.display='none'; if(m)m.style.display='none'; }
 
@@ -33072,22 +33098,33 @@ async function medGuardar(){
   function showMsg(txt, ok){ if(!msg) return; msg.style.display='block'; msg.textContent=txt; msg.style.background = ok?'#ecfdf5':'#fef2f2'; msg.style.color = ok?'#065f46':'#991b1b'; }
   if (!nombre){ showMsg('El médico necesita un nombre.', false); return; }
   var btn = document.getElementById('med-save-btn'); if (btn){ btn.disabled=true; btn.textContent='Guardando…'; }
-  // El token lo inyecta el wrapper de fetch en POST — no se manda aquí.
-  var body = { action:'saveMedico',
+  var s = (typeof getSession === 'function' && getSession()) || {};
+  // Se guarda como un ORIGEN EXTERNO tipo "Médico externo" bajo el grupo elegido:
+  // así lo ve la ficha (canal derivado) y lo cuenta el motor de comisiones.
+  var body = { action:'saveOrigen', tipo:'Médico externo',
     id:((document.getElementById('med-f-id')||{}).value||'').trim(),
     nombre:nombre,
-    canal:((document.getElementById('med-f-canal')||{}).value||'').trim(),
-    notas:((document.getElementById('med-f-notas')||{}).value||'').trim() };
+    padre:((document.getElementById('med-f-grupo')||{}).value||'').trim(),
+    alias:((document.getElementById('med-f-alias')||{}).value||'').trim(),
+    notas:((document.getElementById('med-f-notas')||{}).value||'').trim(),
+    activo:true, token:getToken(), usuario:s.email||s.nombre||'' };
   var res; try { var r = await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(body)}); res = await r.json(); } catch(e){ res = {ok:false, error:e.message}; }
   if (btn){ btn.disabled=false; btn.textContent='Guardar'; }
-  if (res && res.ok){ medCloseForm(); _pacMedicosLoaded=false; loadMedicosView(); }
+  if (res && res.ok){ medCloseForm(); _origListCache=null; _pacMedicosLoaded=false; loadMedicosView(); }
   else showMsg('Error: ' + ((res&&res.error)||'No se pudo guardar'), false);
 }
 async function medBaja(id){
   var m = (_medData || []).filter(function(x){ return String(x.id) === String(id); })[0];
-  if (!confirm('¿Dar de baja a «' + ((m&&m.nombre)||'este médico') + '»? Queda registrado, solo deja de aparecer.')) return;
-  var res; try { var r = await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'deleteMedico', id:id})}); res = await r.json(); } catch(e){ res = {ok:false, error:e.message}; }
-  if (res && res.ok){ _pacMedicosLoaded=false; loadMedicosView(); }
+  if (!m){ alert('No se encontró el médico.'); return; }
+  if (!confirm('¿Dar de baja a «' + (m.nombre||'este médico') + '»? Queda registrado, solo deja de aparecer.')) return;
+  var s = (typeof getSession === 'function' && getSession()) || {};
+  // Baja SUAVE: se conserva la fila con activo=false (nunca se borra el histórico).
+  // Se re-envían todos los campos para no blanquear (saveOrigen escribe por columna).
+  var body = { action:'saveOrigen', id:m.id, tipo:'Médico externo', nombre:m.nombre||'',
+    padre:m.padre||'', alias:m.alias||'', notas:m.notas||'', activo:false,
+    token:getToken(), usuario:s.email||s.nombre||'' };
+  var res; try { var r = await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(body)}); res = await r.json(); } catch(e){ res = {ok:false, error:e.message}; }
+  if (res && res.ok){ _origListCache=null; _pacMedicosLoaded=false; loadMedicosView(); }
   else alert('Error: ' + ((res&&res.error)||'No se pudo dar de baja'));
 }
 
@@ -33449,22 +33486,25 @@ function _renderOrigenes(){
   // Manda el backend.
   var canEdit = hasPermission('editar_ingresos');
   var grupos = list.filter(function(o){ return _origTipoDe(o) === 'Grupo'; });
-  var sueltos = list.filter(function(o){ return _origTipoDe(o) !== 'Grupo' && !String(o.padre||'').trim(); });
+  var agencias = list.filter(function(o){ return _origTipoDe(o) === 'Agencia'; });
+  // Independientes = médicos/coordinadores SIN grupo ni agencia (los que sí cuelgan
+  // de un Grupo o Agencia se dibujan debajo de su padre, no aquí).
+  var sueltos = list.filter(function(o){ var t=_origTipoDe(o); return t !== 'Grupo' && t !== 'Agencia' && !String(o.padre||'').trim(); });
   function miembros(g){
     return list.filter(function(o){ return String(o.padre||'').trim() === String(g.id||'').trim(); });
   }
   function tit(txt, n, emoji){
     return '<div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--text-secondary,#9ca3af);margin:18px 0 8px">'+emoji+' '+txt+' ('+n+')</div>';
   }
-  // ── Grupos con sus miembros debajo, y luego los independientes por tipo.
-  function secGrupos(){
-    if (!grupos.length) return '';
-    var h = tit('Grupos', grupos.length, '🏛️');
-    grupos.forEach(function(g){
+  // ── Padres (Grupo o Agencia) con sus miembros debajo; luego los independientes.
+  function secConMiembros(parents, etiq, emoji){
+    if (!parents.length) return '';
+    var h = tit(etiq, parents.length, emoji);
+    parents.forEach(function(g){
       var ms = miembros(g);
       h += _origCard(g, canEdit, false);
       if (ms.length) h += ms.map(function(o){ return _origCard(o, canEdit, true); }).join('');
-      else h += '<div style="margin-left:22px;font-size:11px;color:var(--text-secondary,#9ca3af);padding:0 0 10px 8px">Sin integrantes todavía · edita un médico o coordinador y elige este grupo como <b>Pertenece a</b>.</div>';
+      else h += '<div style="margin-left:22px;font-size:11px;color:var(--text-secondary,#9ca3af);padding:0 0 10px 8px">Sin integrantes todavía · da de alta un médico en <b>Médicos Tratantes</b> y elige este como <b>Pertenece a</b>.</div>';
     });
     return h;
   }
@@ -33488,8 +33528,8 @@ function _renderOrigenes(){
       + (canEdit ? ' Crea el primero con <b>+ Nuevo origen</b>.' : '')
       + '<br><span style="font-size:11px">Los alias ayudan a auto-detectar el origen en el histórico y en la captura.</span></div>';
   } else {
-    h += secGrupos()
-       + secSueltos('Agencia', '🏢', 'Agencias')
+    h += secConMiembros(grupos, 'Grupos', '🏛️')
+       + secConMiembros(agencias, 'Agencias', '🏢')
        + secSueltos('Médico externo', '🩺', 'Médicos externos independientes')
        + secSueltos('Coordinador', '🧑‍💼', 'Coordinadores independientes');
   }
@@ -33519,29 +33559,30 @@ function _origModalHTML(){
     + '<button onclick="origCloseForm()" style="padding:12px 20px;background:var(--color-surface,#f3f4f6);border:1px solid var(--color-divider);border-radius:10px;font-size:13px;cursor:pointer">Cancelar</button></div></div>';
 }
 
-/* Llena el selector de Grupo padre. SOLO orígenes tipo Grupo (un nivel), y
-   nunca uno mismo (un origen no puede ser su propio grupo). */
+/* Llena el selector de Grupo padre: orígenes tipo Grupo O Agencia (ambos agrupan
+   médicos/coordinadores; la jerarquía sigue siendo de un nivel), nunca uno mismo. */
 function _origLlenaPadreSelect(selectedId, selfId){
   var sel = document.getElementById('orig-f-padre'); if (!sel) return;
   var list = window._origData || [];
+  var candidatos = list.filter(function(o){ var t=_origTipoDe(o); return (t === 'Grupo' || t === 'Agencia') && String(o.id||'') !== String(selfId||''); });
+  var grupos = candidatos.filter(function(o){ return _origTipoDe(o) === 'Grupo'; });
+  var agencias = candidatos.filter(function(o){ return _origTipoDe(o) === 'Agencia'; });
+  function opt(o){ var v = _cxpEsc(o.id).replace(/"/g,'&quot;'); return '<option value="'+v+'"'+(String(o.id)===String(selectedId||'')?' selected':'')+'>'+_cxpEsc(o.nombre)+'</option>'; }
   var h = '<option value="">— Independiente —</option>';
-  list.filter(function(o){ return _origTipoDe(o) === 'Grupo' && String(o.id||'') !== String(selfId||''); })
-      .forEach(function(o){
-        var v = _cxpEsc(o.id).replace(/"/g,'&quot;');
-        h += '<option value="'+v+'"'+(String(o.id)===String(selectedId||'')?' selected':'')+'>'+_cxpEsc(o.nombre)+'</option>';
-      });
+  if (agencias.length) h += '<optgroup label="Agencias">' + agencias.map(opt).join('') + '</optgroup>';
+  if (grupos.length)   h += '<optgroup label="Grupos">' + grupos.map(opt).join('') + '</optgroup>';
   sel.innerHTML = h;
   sel.value = String(selectedId || '');
 }
-/* Un Grupo no tiene padre → se oculta el selector y se limpia, para que la UI
-   no ofrezca lo que el backend va a rechazar. */
+/* Un Grupo o una Agencia no tienen padre → se oculta el selector y se limpia,
+   para que la UI no ofrezca lo que el backend va a rechazar. */
 function origTipoChanged(){
   var t = (document.getElementById('orig-f-tipo')||{}).value || '';
   var wrap = document.getElementById('orig-f-padre-wrap');
   var sel  = document.getElementById('orig-f-padre');
-  var esGrupo = (_origTipoCanon(t) === 'Grupo');
-  if (wrap) wrap.style.display = esGrupo ? 'none' : 'block';
-  if (esGrupo && sel) sel.value = '';
+  var esPadre = (_origTipoCanon(t) === 'Grupo' || _origTipoCanon(t) === 'Agencia');
+  if (wrap) wrap.style.display = esPadre ? 'none' : 'block';
+  if (esPadre && sel) sel.value = '';
 }
 function origOpenForm(o){
   _origEditRow = (o && o.id) ? o : null;

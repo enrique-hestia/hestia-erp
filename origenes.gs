@@ -70,6 +70,12 @@ function _origTipoCanon(tipo){
 }
 /* ¿Este tipo puede ser PADRE de otro? Solo los Grupos. Un solo nivel. */
 function _origTipoEsGrupo(tipo){ return _origTipoCanon(tipo) === 'Grupo'; }
+/* Un PADRE válido AGRUPA médicos/coordinadores para efectos de reporte y de
+   comisiones: puede ser un Grupo O una Agencia. Comisiones ya trata a ambos por
+   igual como "el grupo cuyo volumen cuenta", así que un médico puede colgar de
+   cualquiera de los dos. La jerarquía SIGUE siendo de UN nivel: ni un Grupo ni
+   una Agencia pueden tener padre. */
+function _origTipoEsPadreValido(tipo){ var t = _origTipoCanon(tipo); return t === 'Grupo' || t === 'Agencia'; }
 
 /* ── Normalización: minúsculas, sin acentos, puntuación→espacio, colapsada.
    Escrita SIN String.prototype.normalize a propósito: usa escapes \u para
@@ -172,9 +178,9 @@ function _origBuild(data){
 /* Rellena `padre` (limpiando referencias colgantes) y `grupoId` en cada
    registro. grupoId = el padre si existe, o el propio id si no → "el grupo de
    un médico independiente es él mismo". Defensivo contra datos sucios: un
-   padre que no existe, que se apunta a sí mismo, o que NO es Grupo (jerarquía
-   de 2 niveles metida a mano en la hoja) se ignora → el registro queda suelto
-   en vez de mentir sobre su grupo. */
+   padre que no existe, que se apunta a sí mismo, o que NO es Grupo ni Agencia
+   (jerarquía de 2 niveles metida a mano en la hoja) se ignora → el registro
+   queda suelto en vez de mentir sobre su grupo. */
 function _origResolveGrupos(arr){
   var byId = {};
   for (var i = 0; i < arr.length; i++){
@@ -188,9 +194,9 @@ function _origResolveGrupos(arr){
     if (p === id) p = '';                                  // ciclo directo
     var pr = p ? byId[p] : null;
     if (!pr) p = '';                                       // padre colgante
-    else if (!_origTipoEsGrupo(pr.tipo)) p = '';           // el padre no es Grupo
+    else if (!_origTipoEsPadreValido(pr.tipo)) p = '';     // el padre no es Grupo ni Agencia
     else if (String(pr.padre || '').trim()) p = '';        // el padre tiene padre → 2 niveles
-    if (_origTipoEsGrupo(o.tipo)) p = '';                  // un Grupo no tiene padre
+    if (_origTipoEsPadreValido(o.tipo)) p = '';            // un Grupo/Agencia no tiene padre
     o.padre   = p;
     o.grupoId = p || id;
   }
@@ -344,30 +350,30 @@ function _origValidaJerarquia(arr, id, tipoCanon, padreId){
   id = String(id || '').trim();
   padreId = String(padreId || '').trim();
 
-  if (tipoCanon === 'Grupo' && padreId)
-    return 'Un Grupo no puede pertenecer a otro origen: la jerarquia es de un solo nivel.';
+  if (_origTipoEsPadreValido(tipoCanon) && padreId)
+    return 'Un ' + tipoCanon + ' no puede pertenecer a otro origen: la jerarquia es de un solo nivel.';
 
-  if (id && tipoCanon !== 'Grupo'){
+  if (id && !_origTipoEsPadreValido(tipoCanon)){
     var hijos = 0;
     for (var h = 0; h < arr.length; h++){
       if (String(arr[h].padre || '').trim() === id) hijos++;
     }
     if (hijos)
-      return 'No puedes cambiar el tipo: ' + hijos + ' origen(es) tienen a este como Grupo. Muevelos primero.';
+      return 'No puedes cambiar el tipo: ' + hijos + ' origen(es) pertenecen a este. Muevelos primero.';
   }
 
   if (!padreId) return '';
-  if (padreId === id) return 'Un origen no puede ser su propio Grupo.';
+  if (padreId === id) return 'Un origen no puede ser su propio grupo.';
 
   var pr = null;
   for (var i = 0; i < arr.length; i++){
     if (String(arr[i].id || '').trim() === padreId){ pr = arr[i]; break; }
   }
-  if (!pr) return 'El Grupo padre indicado (' + padreId + ') no existe en el catalogo.';
-  if (!_origTipoEsGrupo(pr.tipo))
-    return 'El padre debe ser de tipo Grupo. "' + String(pr.nombre || '') + '" es ' + _origTipoCanon(pr.tipo) + '.';
+  if (!pr) return 'El grupo/agencia padre indicado (' + padreId + ') no existe en el catalogo.';
+  if (!_origTipoEsPadreValido(pr.tipo))
+    return 'El padre debe ser un Grupo o una Agencia. "' + String(pr.nombre || '') + '" es ' + _origTipoCanon(pr.tipo) + '.';
   if (String(pr.padre || '').trim())
-    return 'El Grupo "' + String(pr.nombre || '') + '" ya pertenece a otro: no se permiten jerarquias de mas de un nivel.';
+    return 'El grupo/agencia "' + String(pr.nombre || '') + '" ya pertenece a otro: no se permiten jerarquias de mas de un nivel.';
   return '';
 }
 
@@ -399,7 +405,7 @@ function saveOrigen(b){
     // Validación contra el catálogo REAL (con la jerarquía ya resuelta).
     var err = _origValidaJerarquia(_origBuild(data), id, tipo, padre);
     if (err) return { ok:false, error:err };
-    if (tipo === 'Grupo') padre = '';
+    if (_origTipoEsPadreValido(tipo)) padre = '';   // un Grupo/Agencia nunca cuelga de otro
 
     var ix = _origIdx(data[0] || []);
     if (id){
