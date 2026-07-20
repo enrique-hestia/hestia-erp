@@ -498,6 +498,15 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega dashboard.gs en Apps Script y redespliega.'});
       return jsonResponse(deleteDashboardLayout(_postEmail, body.layoutId));
     }
+    // Planes de pago (calendario) de Cuentas por Cobrar. Activar/desactivar con
+    // permiso editar_ingresos (es un adeudo del lado de ingresos). No mueve dinero.
+    if (body.action === 'activarPlanPagos' || body.action === 'desactivarPlanPago') {
+      if (typeof activarPlanPagos !== 'function')
+        return jsonResponse({ok:false, error:'Agrega planes.gs en Apps Script y redespliega.'});
+      if (!_tokenHasPermission(body.token || '', 'editar_ingresos'))
+        return jsonResponse({ok:false, error:'Sin autorización para gestionar planes de pago (editar_ingresos).'});
+      return jsonResponse(body.action === 'activarPlanPagos' ? activarPlanPagos(body) : desactivarPlanPago(body));
+    }
     // Médicos tratantes: alta/edición/baja del catálogo (gate editar_pacientes).
     if (body.action === 'saveMedico' || body.action === 'deleteMedico') {
       if (typeof saveMedico !== 'function')

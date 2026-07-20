@@ -27,7 +27,7 @@ $FILES = @(
   'comisiones','comprobantes','config','core','dashboard','cxp_creditos','declaraciones',
   'devengado','egresos_auditoria','facturacion','finance','gastosfijos','identificar','inventario','inventario_migracion',
   'lab','medical','medicos','nomina','novedades','origenes','poliza_concil','presupuesto','privacidad',
-  'productos_ss_id','prov_defaults','providers','recordatorios','scheduler','semanal','summary',
+  'planes','productos_ss_id','prov_defaults','providers','recordatorios','scheduler','semanal','summary',
   'traducciones'
 )
 

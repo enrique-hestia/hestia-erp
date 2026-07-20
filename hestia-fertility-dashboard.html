@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.20.258 -->
+﻿<!-- app-build:2026.07.20.259 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -36112,6 +36112,56 @@ function ecRenderResult(d) {
   ecRenderTabla(_ecMovAll);
   document.getElementById("ec-result").style.display = "";
   document.getElementById("ec-btn-print").style.display = "flex";
+  if (typeof ecCargarPlan === 'function') ecCargarPlan(d.paciente, _pagado);
+}
+
+/* ── Plan de pagos en el Estado de Cuenta (calendario con estado por pago) ── */
+function ecCargarPlan(paciente, abonado){
+  var host = document.getElementById('ec-plan-wrap');
+  if (!host) {
+    var dw = document.getElementById('ec-deuda-wrap');
+    host = document.createElement('div'); host.id = 'ec-plan-wrap';
+    if (dw && dw.parentNode) dw.parentNode.insertBefore(host, dw.nextSibling);
+    else { var er = document.getElementById('ec-result'); if (er) er.appendChild(host); }
+  }
+  host.innerHTML = ''; host.style.display = 'none';
+  fetch(APPS_SCRIPT_URL + '?action=planesPago&paciente=' + encodeURIComponent(paciente) + '&token=' + encodeURIComponent(getToken()) + '&_t=' + Date.now(), {redirect:'follow'})
+    .then(function(r){ return r.json(); }).then(function(d){
+      if (!d || !d.ok || !d.planes || !d.planes.length) return;
+      host.innerHTML = d.planes.map(function(pl){ return _ecPlanCard(pl, abonado); }).join('');
+      host.style.display = '';
+    }).catch(function(){});
+}
+function _ecPlanCard(pl, abonado){
+  var hoy = _planFmtJS(new Date()), acum = 0;
+  var filas = (pl.calendario||[]).map(function(c){
+    acum = Math.round((acum + c.monto)*100)/100;
+    var cubierto = (abonado + 0.01) >= acum;
+    var venc = !cubierto && c.fecha < hoy;
+    var estado = cubierto ? '<span style="color:#1a7f37;font-weight:700">✓ Cubierto</span>'
+      : venc ? '<span style="color:#b3261e;font-weight:700">Vencido</span>'
+      : '<span style="color:var(--color-text-muted)">Pendiente</span>';
+    return '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--color-divider);font-size:12px">'
+      + '<span style="color:var(--color-text)">Pago ' + c.n + ' · ' + ecFmtFecha(c.fecha) + '</span>'
+      + '<span style="display:flex;gap:14px;align-items:center"><span style="font-weight:700;font-variant-numeric:tabular-nums">' + ecFmt(c.monto) + '</span>' + estado + '</span></div>';
+  }).join('');
+  var canDel = (typeof hasPermission==='function') && hasPermission('editar_ingresos');
+  return '<div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:10px;padding:14px 16px;margin-top:14px">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+    + '<div style="font-size:13px;font-weight:700;color:var(--color-primary)">📅 Plan de pagos (' + pl.numPagos + ' ' + ecEsc(pl.frecuencia) + ')</div>'
+    + (canDel ? '<button onclick="ecPlanQuitar(' + ccQ(pl.id) + ')" title="Quitar el plan (no afecta saldos ni cobros)" style="padding:3px 9px;background:none;border:1px solid var(--color-divider);border-radius:6px;font-size:10.5px;cursor:pointer;color:var(--color-text-muted)">Quitar</button>' : '')
+    + '</div>'
+    + '<div style="font-size:10.5px;color:var(--color-text-muted);margin-bottom:6px">Total ' + ecFmt(pl.montoTotal) + ' · calendario informativo. El cobro se hace con «Cobrar / Abonar».</div>'
+    + filas + '</div>';
+}
+async function ecPlanQuitar(id){
+  if (!confirm('¿Quitar este plan de pagos? No afecta saldos ni cobros.')) return;
+  try {
+    var r = await fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify({action:'desactivarPlanPago', id:id})});
+    var d = await r.json();
+    if (d && d.ok) { if (_ecData) ecCargarPlan(_ecData.paciente, parseFloat(_ecData.totalPagado)||0); }
+    else alert('Error: ' + ((d && d.error) || ''));
+  } catch(e){ alert('Error: ' + e.message); }
 }
 
 /* ── Cobrar / Abonar INTEGRAL: cobra el saldo de una OP y cuadra los 3 libros ──
@@ -36789,7 +36839,72 @@ function ccSaldoAcciones(o){
     if(canEdit) h+=' <button onclick="ccAjustarIngreso('+ccQ(o.op)+','+ccQ(o.paciente)+','+(o.total||0)+','+(o.abonado||0)+')" title="Ajustar lo pagado" style="'+abtn+'">✎</button>';
     if(canEdit) h+=' <button onclick="ccSaldarIngreso('+ccQ(o.op)+','+ccQ(o.paciente)+','+(o.saldo||0)+')" title="Marcar como pagado (saldar)" style="'+abtn+';color:#16a34a;border-color:#a7d7b5">✓</button>';
   }
+  // Plan de pagos: calendario informativo del adeudo (no mueve dinero). Para
+  // saldos con paciente y monto > 0, con permiso editar_ingresos.
+  if((o.saldo||0) > 0 && o.paciente && typeof hasPermission==='function' && hasPermission('editar_ingresos')){
+    h+=' <button onclick="ccPlanAbrir('+ccQ(o.paciente)+','+ccQ(o.op||'')+','+(o.saldo||0)+')" title="Activar un plan de pagos (fechas automáticas) para este adeudo" style="'+abtn+';border-color:var(--color-primary);color:var(--color-primary)">📅 Plan</button>';
+  }
   return h;
+}
+/* ── PLAN DE PAGOS: calendario informativo de un adeudo (no toca bancos ni el
+   saldo; el cobro se sigue haciendo con "Cobrar / Abonar"). Espejo JS del
+   cálculo del backend para la vista previa en vivo. ── */
+function _planFmtJS(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function _planCalJS(montoTotal, frec, numPagos, iniStr){
+  var out=[], p=String(iniStr||'').split('-'); var base=(p.length===3)?new Date(+p[0],+p[1]-1,+p[2]):new Date();
+  numPagos=Math.max(1, parseInt(numPagos,10)||1); montoTotal=Math.round((parseFloat(montoTotal)||0)*100)/100;
+  var cuota=Math.round((montoTotal/numPagos)*100)/100, acum=0, quinc=String(frec).toLowerCase().indexOf('quinc')>-1;
+  for(var k=0;k<numPagos;k++){
+    var f; if(quinc){ f=new Date(base.getTime()); f.setDate(f.getDate()+15*k); } else { f=new Date(base.getFullYear(), base.getMonth()+k, base.getDate()); }
+    var monto=(k===numPagos-1)?Math.round((montoTotal-acum)*100)/100:cuota; acum=Math.round((acum+monto)*100)/100;
+    out.push({n:k+1, fecha:_planFmtJS(f), monto:monto});
+  }
+  return out;
+}
+var _ccPlanCtx=null;
+function ccPlanAbrir(paciente, op, saldo){
+  _ccPlanCtx={paciente:paciente, op:op||'', saldo:saldo};
+  var hoyStr=_planFmtJS(new Date());
+  var body=_ccField('Monto total del plan (MXN)', '<input id="cc-plan-monto" type="number" step="0.01" min="0.01" value="'+(saldo||0)+'" style="'+_ccInputStyle()+'" oninput="ccPlanPreview()">')
+    +'<div style="display:flex;gap:10px">'
+    +'<div style="flex:1">'+_ccField('Frecuencia', '<select id="cc-plan-frec" style="'+_ccInputStyle()+'" onchange="ccPlanPreview()"><option value="mensual">Mensual</option><option value="quincenal">Quincenal</option></select>')+'</div>'
+    +'<div style="flex:1">'+_ccField('Plazo (# de pagos)', '<input id="cc-plan-num" type="number" min="1" max="120" value="3" style="'+_ccInputStyle()+'" oninput="ccPlanPreview()">')+'</div>'
+    +'</div>'
+    +_ccField('Fecha del primer pago', '<input id="cc-plan-ini" type="date" value="'+hoyStr+'" style="'+_ccInputStyle()+'" onchange="ccPlanPreview()">')
+    +'<div style="font-size:11px;color:var(--color-text-muted);margin:-4px 0 8px">Es un calendario informativo. El cobro se sigue haciendo con "Cobrar / Abonar".</div>'
+    +'<div id="cc-plan-prev"></div>';
+  ccModal('📅 Plan de pagos — '+ccEsc(paciente), body, function(){ ccPlanGuardar(); }, 'Activar plan');
+  ccPlanPreview();
+}
+function ccPlanPreview(){
+  var box=document.getElementById('cc-plan-prev'); if(!box) return;
+  var monto=parseFloat((document.getElementById('cc-plan-monto')||{}).value)||0;
+  var frec=(document.getElementById('cc-plan-frec')||{}).value||'mensual';
+  var num=parseInt((document.getElementById('cc-plan-num')||{}).value,10)||0;
+  var ini=(document.getElementById('cc-plan-ini')||{}).value||_planFmtJS(new Date());
+  if(monto<=0||num<1){ box.innerHTML=''; return; }
+  var cal=_planCalJS(monto, frec, num, ini);
+  var h='<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);margin-bottom:6px">Calendario ('+num+' pago'+(num>1?'s':'')+')</div>'
+    +'<div style="max-height:190px;overflow-y:auto;border:1px solid var(--color-divider);border-radius:8px">';
+  cal.forEach(function(c){ h+='<div style="display:flex;justify-content:space-between;padding:6px 11px;border-bottom:1px solid var(--color-divider);font-size:12px"><span style="color:var(--color-text-muted)">Pago '+c.n+' · '+c.fecha+'</span><span style="font-weight:700;color:var(--color-text);font-variant-numeric:tabular-nums">$'+c.monto.toLocaleString('es-MX',{minimumFractionDigits:2})+'</span></div>'; });
+  box.innerHTML=h+'</div>';
+}
+async function ccPlanGuardar(){
+  if(!_ccPlanCtx) return;
+  var monto=parseFloat((document.getElementById('cc-plan-monto')||{}).value)||0;
+  var frec=(document.getElementById('cc-plan-frec')||{}).value||'mensual';
+  var num=parseInt((document.getElementById('cc-plan-num')||{}).value,10)||0;
+  var ini=(document.getElementById('cc-plan-ini')||{}).value||'';
+  if(monto<=0){ alert('El monto debe ser mayor a cero.'); return; }
+  if(num<1||num>120){ alert('El plazo debe estar entre 1 y 120 pagos.'); return; }
+  if(!ini){ alert('Elige la fecha del primer pago.'); return; }
+  var btn=document.getElementById('cc-modal-save'); if(btn){btn.disabled=true;btn.textContent='Activando…';}
+  var res; try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'activarPlanPagos', paciente:_ccPlanCtx.paciente, op:_ccPlanCtx.op, montoTotal:monto, frecuencia:frec, numPagos:num, fechaInicio:ini})});
+    res=await r.json();
+  }catch(e){ res={ok:false,error:e.message}; }
+  if(res&&res.ok){ var m=document.getElementById('cc-modal'); if(m)m.remove(); alert('✓ Plan activado: '+num+' pago(s) '+frec+'.\nAparece en el Estado de Cuenta de '+_ccPlanCtx.paciente+'.'); }
+  else{ alert('⚠ '+((res&&res.error)||'No se pudo activar el plan.')); if(btn){btn.disabled=false;btn.textContent='Activar plan';} }
 }
 /* ── Puente Cuentas por Cobrar → editar LA VENTA ─────────────────────────────
  * El saldo de un renglón "auto" es un DERIVADO de la venta (Facturado − Pagado):

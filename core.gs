@@ -433,6 +433,14 @@ function doGet(e) {
       return jsonResponse(readRecordatoriosPendientes(e.parameter.usuario || ''));
     }
 
+    // Planes de pago (calendario) de Cuentas por Cobrar. Lectura abierta a
+    // cualquier sesión válida; activar/desactivar por POST con editar_ingresos.
+    if (action === 'planesPago') {
+      if (typeof readPlanesPago !== 'function')
+        return jsonResponse({ok:false, error:'Agrega planes.gs en Apps Script y redespliega.', planes:[]});
+      return jsonResponse(readPlanesPago((e && e.parameter.paciente) || ''));
+    }
+
     // Catálogo de Médicos Tratantes (por nombre + canal). Lectura abierta a
     // cualquier sesión válida (llena el dropdown de la ficha). Alta/edición por
     // POST con permiso editar_pacientes.
