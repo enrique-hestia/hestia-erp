@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.19.248 -->
+﻿<!-- app-build:2026.07.19.249 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -32145,24 +32145,42 @@ function _dSeg(D){ return (D && (D[currentSegment]||D.todos)) || {meses:[],ingre
 function _serie(labels,data){ return {labels:labels||[], data:data||[]}; }
 
 // ── Catálogo de datos: cada uno sabe sacar su forma de `data`. Agregar dato = 1 objeto. ──
+// `menu` = menús que dan acceso a este dato. Si el usuario no tiene ninguno en
+// su menú (ya filtrado por permisos), NO puede verlo ni agregarlo. Sin `menu` =
+// dato general (visible para cualquiera que abra el Resumen). admin/'*' ve todo.
 var DASH_REGISTRY = [
-  {id:'ing_total',   label:'Ingresos del periodo',    cat:'Ingresos',  forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:fmtMXN(sumArr(d.ingresos)), sub:'Suma del periodo'};}},
-  {id:'gas_total',   label:'Gastos del periodo',      cat:'Egresos',   forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:fmtMXN(sumArr(d.gastos)), sub:'Suma del periodo'};}},
-  {id:'util_total',  label:'Utilidad del periodo',    cat:'Ingresos',  forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:fmtMXN(sumArr(d.ingresos)-sumArr(d.gastos)), sub:'Ingresos − gastos'};}},
-  {id:'margen_prom', label:'Margen bruto promedio',   cat:'Ingresos',  forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:Math.round(avgArr(d.margen))+'%', sub:'Promedio del periodo'};}},
+  {id:'ing_total',   label:'Ingresos del periodo',    cat:'Ingresos',  menu:['ingresos'], forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:fmtMXN(sumArr(d.ingresos)), sub:'Suma del periodo'};}},
+  {id:'gas_total',   label:'Gastos del periodo',      cat:'Egresos',   menu:['egresos','gastos','cxp'], forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:fmtMXN(sumArr(d.gastos)), sub:'Suma del periodo'};}},
+  {id:'util_total',  label:'Utilidad del periodo',    cat:'Ingresos',  menu:['ingresos'], forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:fmtMXN(sumArr(d.ingresos)-sumArr(d.gastos)), sub:'Ingresos − gastos'};}},
+  {id:'margen_prom', label:'Margen bruto promedio',   cat:'Ingresos',  menu:['ingresos'], forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:Math.round(avgArr(d.margen))+'%', sub:'Promedio del periodo'};}},
   {id:'ciclos_total',label:'Ciclos del periodo',      cat:'Operación', forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:sumArr(d.ciclos), sub:'Total del periodo'};}},
   {id:'cac_prom',    label:'CAC promedio',            cat:'Operación', forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);var c=Math.round(avgArr(d.cac));return {valor:c>0?fmtMXN(c):'—', sub:'Costo de adquisición'};}},
-  {id:'ing_mes',     label:'Ingresos por mes',        cat:'Ingresos',  forma:'serie', viz:['bar','line','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses,d.ingresos);}},
-  {id:'gas_mes',     label:'Gastos por mes',          cat:'Egresos',   forma:'serie', viz:['bar','line','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses,d.gastos);}},
-  {id:'util_mes',    label:'Utilidad por mes',        cat:'Ingresos',  forma:'serie', viz:['bar','line','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses, d.ingresos.map(function(v,i){return v-(d.gastos[i]||0);}));}},
+  {id:'ing_mes',     label:'Ingresos por mes',        cat:'Ingresos',  menu:['ingresos'], forma:'serie', viz:['bar','line','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses,d.ingresos);}},
+  {id:'gas_mes',     label:'Gastos por mes',          cat:'Egresos',   menu:['egresos','gastos','cxp'], forma:'serie', viz:['bar','line','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses,d.gastos);}},
+  {id:'util_mes',    label:'Utilidad por mes',        cat:'Ingresos',  menu:['ingresos'], forma:'serie', viz:['bar','line','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses, d.ingresos.map(function(v,i){return v-(d.gastos[i]||0);}));}},
   {id:'ciclos_mes',  label:'Ciclos por mes',          cat:'Operación', forma:'serie', viz:['bar','line','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses,d.ciclos);}},
-  {id:'margen_mes',  label:'Margen por mes (%)',      cat:'Ingresos',  forma:'serie', viz:['line','bar','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses,d.margen);}},
-  {id:'flujo_mes',   label:'Flujo de caja por mes',   cat:'Caja',      forma:'serie', viz:['bar','line','table'], get:function(D){var c=(D&&D.cashflow)||{};return _serie(c.meses,c.flujo);}},
-  {id:'mix_serv',    label:'Mix de servicios',        cat:'Servicios', forma:'distribucion', viz:['pie','bar','table'], get:function(D){var o=(D&&D.donut)||{};return {labels:o.labels||[], data:o.data||[], colors:o.colors||[]};}},
-  {id:'distrib_cos', label:'Distribución de costos',  cat:'Egresos',   forma:'distribucion', viz:['pie','bar','table'], get:function(D){var o=(D&&D.costos)||{};return {labels:o.labels||[], data:o.data||[], colors:o.colors||[]};}},
-  {id:'rent_serv',   label:'Rentabilidad por servicio',cat:'Servicios',forma:'tabla', viz:['table'], get:function(D){return {cols:['Servicio','Ingresos','Margen'], rows:((D&&D.servicios)||[]).map(function(s){return [s.name, s.ingresos, s.margen+'%'];})};}}
+  {id:'margen_mes',  label:'Margen por mes (%)',      cat:'Ingresos',  menu:['ingresos'], forma:'serie', viz:['line','bar','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses,d.margen);}},
+  {id:'flujo_mes',   label:'Flujo de caja por mes',   cat:'Caja',      menu:['cashflow','flujo'], forma:'serie', viz:['bar','line','table'], get:function(D){var c=(D&&D.cashflow)||{};return _serie(c.meses,c.flujo);}},
+  {id:'mix_serv',    label:'Mix de servicios',        cat:'Servicios', menu:['ingresos'], forma:'distribucion', viz:['pie','bar','table'], get:function(D){var o=(D&&D.donut)||{};return {labels:o.labels||[], data:o.data||[], colors:o.colors||[]};}},
+  {id:'distrib_cos', label:'Distribución de costos',  cat:'Egresos',   menu:['egresos','gastos','cxp'], forma:'distribucion', viz:['pie','bar','table'], get:function(D){var o=(D&&D.costos)||{};return {labels:o.labels||[], data:o.data||[], colors:o.colors||[]};}},
+  {id:'rent_serv',   label:'Rentabilidad por servicio',cat:'Servicios',menu:['ingresos'], forma:'tabla', viz:['table'], get:function(D){return {cols:['Servicio','Ingresos','Margen'], rows:((D&&D.servicios)||[]).map(function(s){return [s.name, s.ingresos, s.margen+'%'];})};}}
 ];
 function _dashDef(id){ for(var i=0;i<DASH_REGISTRY.length;i++) if(DASH_REGISTRY[i].id===id) return DASH_REGISTRY[i]; return null; }
+// ¿El usuario puede ver este dato? admin/'*' todo; si trae `perm` exige el permiso;
+// si trae `menu` exige tener alguno de esos menús (menuItems ya viene filtrado por
+// permisos). Sin gate = general. Espejo del modelo de permisos del resto del ERP.
+function _dashMenuHas(ids){
+  var items=(typeof menuItems!=='undefined' && menuItems) ? menuItems : [];
+  for(var i=0;i<items.length;i++){ var id=String(items[i].id||''); for(var c=0;c<ids.length;c++) if(id===ids[c]) return true; }
+  return false;
+}
+function _dashCanSee(def){
+  if(!def) return false;
+  if(typeof hasPermission==='function' && hasPermission('*')) return true;
+  if(def.perm && (typeof hasPermission!=='function' || !hasPermission(def.perm))) return false;
+  if(def.menu && def.menu.length) return _dashMenuHas(def.menu);
+  return true;
+}
 function _dashVizLabel(v){ return {kpi:'KPI',bar:'Barras',line:'Línea',pie:'Pastel',table:'Tabla'}[v]||v; }
 function _dashPalette(n){ var base=['#c46a7a','#3d8f8f','#c47a1e','#7a52b0','#3a72a8','#4d8c5a','#b8577a','#8a6d3b'],o=[],i; for(i=0;i<n;i++) o.push(base[i%base.length]); return o; }
 
@@ -32197,7 +32215,7 @@ function dashRender(){
   var grid=document.getElementById('dash-grid'); if(!grid) return;
   _dashKillCharts();
   grid.classList.toggle('is-edit', _dashEdit);
-  var lay=_dashGet(); var ws=(lay.widgets||[]).slice().sort(function(a,b){return (a.orden||0)-(b.orden||0);});
+  var lay=_dashGet(); var ws=(lay.widgets||[]).slice().filter(function(w){return _dashCanSee(_dashDef(w.dato));}).sort(function(a,b){return (a.orden||0)-(b.orden||0);});
   if(!ws.length){ grid.innerHTML=_dashEmptyHTML(); return; }
   grid.innerHTML = ws.map(_dashWidgetShell).join('');
   ws.forEach(function(w){ _dashPaint(w); });
@@ -32282,7 +32300,8 @@ function dashAddOpen(){ _dashPick={}; _dashRenderAddPanel(); document.getElement
 function dashAddClose(){ document.getElementById('dash-add-ovl').classList.remove('open'); document.getElementById('dash-add-modal').classList.remove('open'); }
 function _dashRenderAddPanel(){
   var body=document.getElementById('dash-add-body'); if(!body) return;
-  var cats={}, order=[]; DASH_REGISTRY.forEach(function(d){ if(!cats[d.cat]){ cats[d.cat]=[]; order.push(d.cat); } cats[d.cat].push(d); });
+  var cats={}, order=[]; DASH_REGISTRY.forEach(function(d){ if(!_dashCanSee(d)) return; if(!cats[d.cat]){ cats[d.cat]=[]; order.push(d.cat); } cats[d.cat].push(d); });
+  if(!order.length){ body.innerHTML='<div class="dash-empty-sm">No hay datos disponibles para tus permisos. Pide acceso a un área para poder agregarla.</div>'; return; }
   var h='';
   order.forEach(function(cat){
     h+='<div class="dash-add-cat">'+cat+'</div>';
@@ -32304,7 +32323,8 @@ function dashAddConfirm(){
   var ids=Object.keys(_dashPick);
   if(!ids.length){ dashAddClose(); return; }
   ids.forEach(function(id){
-    var d=_dashDef(id), viz=_dashPick[id];
+    var d=_dashDef(id); if(!d || !_dashCanSee(d)) return;   // no agregar algo sin permiso
+    var viz=_dashPick[id];
     var span = viz==='kpi' ? 3 : (d.forma==='distribucion' ? 4 : 6);
     lay.seq=(lay.seq||0)+1;
     lay.widgets.push({id:'w'+lay.seq, dato:id, viz:viz, span:span, orden:++maxOrden});
