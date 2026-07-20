@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.19.250 -->
+﻿<!-- app-build:2026.07.19.251 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -32144,6 +32144,28 @@ var _dashModeInit = false;
 function _dSeg(D){ return (D && (D[currentSegment]||D.todos)) || {meses:[],ingresos:[],gastos:[],ciclos:[],cac:[],margen:[]}; }
 function _serie(labels,data){ return {labels:labels||[], data:data||[]}; }
 
+// ── Fuentes asíncronas: datos de OTRAS áreas (CxP, P&L). Cache con TTL + dedup
+// de fetches en vuelo. La llave incluye el periodo cuando aplica. El backend
+// igual exige token y permisos (esto es solo la capa de presentación). ──
+var DASH_SOURCES = {
+  cxp:     { ttl:300000, key:function(){ return 'cxp'; },
+             url:function(){ return APPS_SCRIPT_URL+'?action=cxp&token='+encodeURIComponent(getToken())+'&_t='+Date.now(); } },
+  summary: { ttl:300000, key:function(){ return 'summary|'+currentFechaInicio+'|'+currentFechaFin; },
+             url:function(){ return APPS_SCRIPT_URL+'?action=summary&fechaInicio='+encodeURIComponent(currentFechaInicio)+'&fechaFin='+encodeURIComponent(currentFechaFin)+'&token='+encodeURIComponent(getToken())+'&_t='+Date.now(); } }
+};
+var _dashSrcCache={}, _dashSrcPend={};
+function _dashSrcState(srcId){
+  var s=DASH_SOURCES[srcId]; if(!s) return {loading:false, data:null};
+  var k=s.key(), c=_dashSrcCache[k];
+  if(c && (Date.now()-c.t) < s.ttl) return {loading:false, data:c.data};
+  if(_dashSrcPend[k]) return {loading:true, promise:_dashSrcPend[k]};
+  var p=fetch(s.url(),{redirect:'follow'}).then(function(r){return r.json();})
+    .then(function(d){ _dashSrcCache[k]={t:Date.now(), data:d}; delete _dashSrcPend[k]; return d; })
+    .catch(function(){ _dashSrcCache[k]={t:Date.now(), data:null}; delete _dashSrcPend[k]; return null; });
+  _dashSrcPend[k]=p;
+  return {loading:true, promise:p};
+}
+
 // ── Catálogo de datos: cada uno sabe sacar su forma de `data`. Agregar dato = 1 objeto. ──
 // `menu` = menús que dan acceso a este dato. Si el usuario no tiene ninguno en
 // su menú (ya filtrado por permisos), NO puede verlo ni agregarlo. Sin `menu` =
@@ -32163,7 +32185,20 @@ var DASH_REGISTRY = [
   {id:'flujo_mes',   label:'Flujo de caja por mes',   cat:'Caja',      menu:['cashflow','flujo'], forma:'serie', viz:['bar','line','table'], get:function(D){var c=(D&&D.cashflow)||{};return _serie(c.meses,c.flujo);}},
   {id:'mix_serv',    label:'Mix de servicios',        cat:'Servicios', menu:['ingresos'], forma:'distribucion', viz:['pie','bar','table'], get:function(D){var o=(D&&D.donut)||{};return {labels:o.labels||[], data:o.data||[], colors:o.colors||[]};}},
   {id:'distrib_cos', label:'Distribución de costos',  cat:'Egresos',   menu:['egresos','gastos','cxp'], forma:'distribucion', viz:['pie','bar','table'], get:function(D){var o=(D&&D.costos)||{};return {labels:o.labels||[], data:o.data||[], colors:o.colors||[]};}},
-  {id:'rent_serv',   label:'Rentabilidad por servicio',cat:'Servicios',menu:['ingresos'], forma:'tabla', viz:['table'], get:function(D){return {cols:['Servicio','Ingresos','Margen'], rows:((D&&D.servicios)||[]).map(function(s){return [s.name, s.ingresos, s.margen+'%'];})};}}
+  {id:'rent_serv',   label:'Rentabilidad por servicio',cat:'Servicios',menu:['ingresos'], forma:'tabla', viz:['table'], get:function(D){return {cols:['Servicio','Ingresos','Margen'], rows:((D&&D.servicios)||[]).map(function(s){return [s.name, s.ingresos, s.margen+'%'];})};}},
+  // ── Cuentas por Pagar (fuente asíncrona action=cxp) ──
+  {id:'cxp_vencido', label:'CxP: monto vencido',       cat:'Cuentas por Pagar', menu:['cxp','egresos','gastos'], src:'cxp', forma:'escalar', viz:['kpi'], get:function(B){var r=(B&&B.resumen)||{};return {valor:fmtMXN(r.totalVencido||0), sub:(r.vencido||0)+' cuenta(s) vencida(s)'};}},
+  {id:'cxp_d7',      label:'CxP: por pagar ≤7 días',   cat:'Cuentas por Pagar', menu:['cxp','egresos','gastos'], src:'cxp', forma:'escalar', viz:['kpi'], get:function(B){var r=(B&&B.resumen)||{};return {valor:fmtMXN((r.totalD3||0)+(r.totalD7||0)), sub:((r.d3||0)+(r.d7||0))+' cuenta(s) próximas'};}},
+  {id:'cxp_d30',     label:'CxP: por pagar ≤30 días',  cat:'Cuentas por Pagar', menu:['cxp','egresos','gastos'], src:'cxp', forma:'escalar', viz:['kpi'], get:function(B){var r=(B&&B.resumen)||{};return {valor:fmtMXN(r.totalD30||0), sub:(r.d30||0)+' cuenta(s) en el mes'};}},
+  {id:'cxp_urgencia',label:'CxP por urgencia',         cat:'Cuentas por Pagar', menu:['cxp','egresos','gastos'], src:'cxp', forma:'distribucion', viz:['pie','bar','table'], get:function(B){var r=(B&&B.resumen)||{};return {labels:['Vencido','≤3 días','≤7 días','≤30 días'], data:[r.totalVencido||0,r.totalD3||0,r.totalD7||0,r.totalD30||0], colors:['#dc2626','#c47a1e','#eab308','#3a72a8']};}},
+  // ── Estado de Resultados (fuente asíncrona action=summary, motor CFO) ──
+  {id:'pl_revenue',  label:'P&L: Ingresos (Revenue)',  cat:'Estado de Resultados', menu:['summary'], src:'summary', forma:'escalar', viz:['kpi'], get:function(B){var m=(B&&B.metricas)||{};return {valor:fmtMXN(m.revenue||0), sub:'Periodo del filtro'};}},
+  {id:'pl_ebitda',   label:'P&L: EBITDA',              cat:'Estado de Resultados', menu:['summary'], src:'summary', forma:'escalar', viz:['kpi'], get:function(B){var m=(B&&B.metricas)||{};var pct=m.revenue?Math.round(m.ebitda/m.revenue*100):0;return {valor:fmtMXN(m.ebitda||0), sub:pct+'% del ingreso'};}},
+  {id:'pl_utilidad', label:'P&L: Utilidad neta',       cat:'Estado de Resultados', menu:['summary'], src:'summary', forma:'escalar', viz:['kpi'], get:function(B){var m=(B&&B.metricas)||{};var pct=m.revenue?Math.round(m.netProfit/m.revenue*100):0;return {valor:fmtMXN(m.netProfit||0), sub:pct+'% margen neto'};}},
+  {id:'pl_estructura',label:'P&L: estructura de costos',cat:'Estado de Resultados', menu:['summary'], src:'summary', forma:'distribucion', viz:['pie','bar','table'], get:function(B){
+    var m=(B&&B.metricas)||{}; var labels=['COGS','OpEx','G&A','Impuestos'], data=[m.cogs||0,m.opex||0,m.ga||0,m.taxes||0], colors=['#c46a7a','#3d8f8f','#c47a1e','#7a52b0'];
+    if((m.netProfit||0)>0){ labels.push('Utilidad neta'); data.push(m.netProfit); colors.push('#4d8c5a'); }
+    return {labels:labels, data:data, colors:colors}; }}
 ];
 function _dashDef(id){ for(var i=0;i<DASH_REGISTRY.length;i++) if(DASH_REGISTRY[i].id===id) return DASH_REGISTRY[i]; return null; }
 // ¿El usuario puede ver este dato? admin/'*' todo; si trae `perm` exige el permiso;
@@ -32261,7 +32296,14 @@ function _dashWidgetShell(w){
 function _dashPaint(w){
   var body=document.getElementById('dashb-'+w.id); if(!body) return;
   var def=_dashDef(w.dato); if(!def){ body.innerHTML='<div class="dash-empty-sm">Dato no disponible</div>'; return; }
-  var val; try{ val=def.get(_dashData); }catch(e){ body.innerHTML='<div class="dash-empty-sm">—</div>'; return; }
+  var bundle=_dashData;
+  if(def.src){
+    var st=_dashSrcState(def.src);
+    if(st.loading){ body.innerHTML='<div class="dash-empty-sm">Cargando…</div>'; st.promise.then(function(){ _dashPaint(w); }); return; }
+    if(!st.data || st.data.ok===false){ body.innerHTML='<div class="dash-empty-sm">'+((st.data&&st.data.error)?_cxpEsc(st.data.error):'Sin conexión con el servidor')+'</div>'; return; }
+    bundle=st.data;
+  }
+  var val; try{ val=def.get(bundle); }catch(e){ body.innerHTML='<div class="dash-empty-sm">—</div>'; return; }
   var viz=w.viz||def.viz[0];
   if(viz==='kpi'){ body.innerHTML='<div class="dash-kpi-val">'+val.valor+'</div>'+(val.sub?'<div class="dash-kpi-sub">'+val.sub+'</div>':''); return; }
   if(viz==='table'){ body.innerHTML=_dashTableHTML(def,val); return; }
@@ -32270,6 +32312,7 @@ function _dashPaint(w){
 }
 function _dashChart(w,def,val,viz){
   var cv=document.getElementById('dashc-'+w.id); if(!cv) return;
+  if(_dashCharts[w.id]){ try{ _dashCharts[w.id].destroy(); }catch(e){} delete _dashCharts[w.id]; }   // repintado asíncrono: nunca 2 charts en el mismo canvas
   var p=cssVar('--color-primary')||'#c46a7a', grid=cssVar('--color-divider'), tick=cssVar('--color-text-muted'), cfg;
   if(def.forma==='distribucion'){
     var colors=(val.colors&&val.colors.length)?val.colors:_dashPalette((val.labels||[]).length);
