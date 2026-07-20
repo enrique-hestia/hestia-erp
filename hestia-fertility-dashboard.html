@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.19.255 -->
+﻿<!-- app-build:2026.07.19.256 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -13456,6 +13456,100 @@ window.cbSaveRow = async function() {
   } catch(e) { alert('Error de conexión'); if(btn){btn.disabled=false;btn.textContent='Guardar movimiento';} }
 };
 
+/* ── TRASPASO ENTRE CUENTAS BANCARIAS ─────────────────────
+   Un solo movimiento para el usuario; el backend registra los DOS asientos
+   (retiro origen + depósito destino) ligados por folio TRASP-… y con reversa
+   segura si el segundo falla. Solo cuentas tipo 'bancaria' (MP/tarjetas
+   tienen su propia captura). Modal singleton en <body>. */
+var _cbTraspCuentas = null;
+
+async function cbTraspasoOpen() {
+  if (!hasPermission('bank_capture')) { alert('No tienes permisos para capturar movimientos.'); return; }
+  // Cuentas config-driven (readCuentas): solo bancarias activas.
+  if (!_cbTraspCuentas) {
+    try {
+      var r0 = await fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify({action:'readCuentas'})});
+      var d0 = await r0.json();
+      if (d0 && d0.ok && d0.cuentas) _cbTraspCuentas = d0.cuentas;
+    } catch(e){}
+    if (!_cbTraspCuentas) { alert('No se pudieron cargar las cuentas. Revisa tu conexión.'); return; }
+  }
+  var bancarias = _cbTraspCuentas.filter(function(c){ return c.tipo==='bancaria' && c.activo!==false; });
+  _cbTraspEnsureModal();
+  var selO=document.getElementById('cbt-origen'), selD=document.getElementById('cbt-destino');
+  var opts = bancarias.map(function(c){ return '<option value="'+c.key+'">'+String(c.nombre).replace(/</g,'&lt;')+'</option>'; }).join('');
+  selO.innerHTML = opts; selD.innerHTML = opts;
+  if (bancarias.length > 1) selD.selectedIndex = 1;
+  var msg=document.getElementById('cbt-msg');
+  if (bancarias.length < 2) {
+    msg.style.display='block';
+    msg.innerHTML = '⚠ Necesitas al menos <b>2 cuentas bancarias</b> para un traspaso. Hoy solo hay '+bancarias.length+'. Crea la otra con "Nueva cuenta" (Mercado Pago y las tarjetas no entran aquí: tienen su propia captura).';
+  } else { msg.style.display='none'; msg.innerHTML=''; }
+  var f=document.getElementById('cbt-fecha'); if(f && !f.value){ var d=new Date(); f.value=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+  document.getElementById('cbt-ovl').style.display='block';
+  document.getElementById('cbt-modal').style.display='block';
+}
+
+function _cbTraspEnsureModal(){
+  if (document.getElementById('cbt-modal')) return;
+  var S='style="width:100%;box-sizing:border-box;padding:9px 11px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:13px;background:var(--color-surface-2);color:var(--color-text);font-family:inherit"';
+  var L='style="display:block;font-size:10px;font-weight:600;color:var(--color-text-muted);margin-bottom:4px"';
+  var host=document.createElement('div');
+  host.innerHTML =
+    '<div id="cbt-ovl" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;backdrop-filter:blur(3px)" onclick="cbTraspasoClose()"></div>'
+    +'<div id="cbt-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(440px,94vw);padding:20px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><div style="font-size:15px;font-weight:800;color:var(--color-text)">⇄ Traspaso entre cuentas</div><button onclick="cbTraspasoClose()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--color-text-muted)">×</button></div>'
+    +'<div style="font-size:11px;color:var(--color-text-muted);margin-bottom:14px">Registra el retiro y el depósito de un solo golpe, ligados y rastreables.</div>'
+    +'<div id="cbt-msg" style="display:none;background:#fef3c7;color:#92400e;border-radius:9px;padding:9px 12px;font-size:11.5px;line-height:1.5;margin-bottom:12px"></div>'
+    +'<div style="display:flex;gap:10px;margin-bottom:12px">'
+      +'<div style="flex:1"><label '+L+'>Desde (sale el dinero) *</label><select id="cbt-origen" '+S+'></select></div>'
+      +'<div style="flex:1"><label '+L+'>Hacia (entra el dinero) *</label><select id="cbt-destino" '+S+'></select></div>'
+    +'</div>'
+    +'<div style="display:flex;gap:10px;margin-bottom:12px">'
+      +'<div style="flex:1"><label '+L+'>Monto (MXN) *</label><input id="cbt-monto" type="number" min="0.01" step="0.01" placeholder="0.00" '+S+'></div>'
+      +'<div style="flex:1"><label '+L+'>Fecha *</label><input id="cbt-fecha" type="date" '+S+'></div>'
+    +'</div>'
+    +'<div style="margin-bottom:16px"><label '+L+'>Concepto (opcional)</label><input id="cbt-concepto" type="text" maxlength="120" placeholder="Ej. fondeo de nómina" '+S+'></div>'
+    +'<div style="display:flex;gap:10px">'
+      +'<button id="cbt-save-btn" onclick="cbTraspasoSave()" style="flex:1;padding:12px;background:var(--color-primary);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Registrar traspaso</button>'
+      +'<button onclick="cbTraspasoClose()" style="padding:12px 20px;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:10px;font-size:13px;cursor:pointer;color:var(--color-text);font-family:inherit">Cancelar</button>'
+    +'</div></div>';
+  while (host.firstChild) document.body.appendChild(host.firstChild);
+}
+function cbTraspasoClose(){ var o=document.getElementById('cbt-ovl'), m=document.getElementById('cbt-modal'); if(o)o.style.display='none'; if(m)m.style.display='none'; }
+
+async function cbTraspasoSave(){
+  if (!hasPermission('bank_capture')) { alert('No tienes permisos para capturar movimientos.'); return; }
+  var origen=(document.getElementById('cbt-origen')||{}).value||'';
+  var destino=(document.getElementById('cbt-destino')||{}).value||'';
+  var monto=parseFloat((document.getElementById('cbt-monto')||{}).value);
+  var fecha=(document.getElementById('cbt-fecha')||{}).value||'';
+  var concepto=(document.getElementById('cbt-concepto')||{}).value||'';
+  if (!origen || !destino) { alert('Elige las dos cuentas.'); return; }
+  if (origen===destino) { alert('La cuenta origen y la destino no pueden ser la misma.'); return; }
+  if (!(monto>0)) { alert('El monto debe ser mayor a cero.'); return; }
+  if (!fecha) { alert('La fecha es obligatoria.'); return; }
+  var nom=function(k){ var c=(_cbTraspCuentas||[]).filter(function(x){return x.key===k;})[0]; return c?c.nombre:k; };
+  if (!confirm('Registrar traspaso de $'+monto.toLocaleString('es-MX',{minimumFractionDigits:2})+'\n\n'+nom(origen)+'  →  '+nom(destino)+'\n\n¿Confirmas? (se crean los dos movimientos ligados)')) return;
+  var btn=document.getElementById('cbt-save-btn'); if(btn){btn.disabled=true;btn.textContent='Registrando…';}
+  var res; try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'traspasoBancos', origen:origen, destino:destino, monto:monto, fecha:fecha, concepto:concepto})});
+    res=await r.json();
+  }catch(e){ res={ok:false,error:'Error de conexión: '+e.message}; }
+  if(btn){btn.disabled=false;btn.textContent='Registrar traspaso';}
+  if(res&&res.ok){
+    cbTraspasoClose();
+    var mEl=document.getElementById('cbt-monto'); if(mEl)mEl.value='';
+    var cEl=document.getElementById('cbt-concepto'); if(cEl)cEl.value='';
+    alert('✓ Traspaso registrado — folio '+res.folio+'\n\n'+res.origen.cuenta+': nuevo saldo $'+Number(res.origen.nuevoSaldo).toLocaleString('es-MX',{minimumFractionDigits:2})+'\n'+res.destino.cuenta+': nuevo saldo $'+Number(res.destino.nuevoSaldo).toLocaleString('es-MX',{minimumFractionDigits:2}));
+    try{ loadConciliacionData(); }catch(e){}
+    try{ loadCashFlowData(); }catch(e){}
+  } else {
+    alert('⚠ '+((res&&res.error)||'No se pudo registrar el traspaso.'));
+    if (res && res.folio && res.revertido===false) { try{ loadConciliacionData(); }catch(e){} }
+  }
+}
+
 /* ── Editar fila existente ─────────────────────────────── */
 var _cbEditRowNum = null;
 
@@ -13579,6 +13673,7 @@ window.cbCrearBanco = async function() {
     if (res.ok) {
       alert('✅ Cuenta "'+res.nombre+'" creada y activa (tipo '+etq+').');
       if(elN) elN.value='';
+      _cbTraspCuentas = null;   // el modal de traspaso debe ver la cuenta nueva
       if(typeof loadConciliacionData==='function') loadConciliacionData();
       if(typeof loadCashFlowData==='function') loadCashFlowData();
     } else {
@@ -13865,6 +13960,7 @@ function renderConciliacion(data) {
     hh.push('<a class="cb-hbtn cb-hbtn-sh" href="https://docs.google.com/spreadsheets/d/1O1tmtuVMlDl6rsN0IVFH14KmYjQZhY6GOs68PU_u0cg/edit" target="_blank"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Editar en Sheets</a>');
   }
   if (hasPermission('bank_capture')) {
+    hh.push('<button class="cb-hbtn" style="background:var(--color-surface-2);border:1px solid var(--color-divider);color:var(--color-text)" onclick="cbTraspasoOpen()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>Traspaso</button>');
     hh.push('<button class="cb-hbtn cb-hbtn-add" onclick="cbOpenDrawer()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Agregar movimiento</button>');
   }
   hh.push('</div></div></div>');
@@ -13972,7 +14068,7 @@ function renderConciliacion(data) {
         hh.push('<td style="text-align:right;font-weight:600;color:#166534">'+(dep>0?'$'+dep.toLocaleString('en-US',{minimumFractionDigits:2}):'—')+'</td>');
         hh.push('<td style="text-align:right;font-weight:600;color:#991b1b">'+(ret>0?'$'+ret.toLocaleString('en-US',{minimumFractionDigits:2}):'—')+'</td>');
         hh.push('<td style="text-align:right;font-weight:700">'+(m.saldo!=null?'$'+parseFloat(m.saldo||0).toLocaleString('en-US',{minimumFractionDigits:2}):'—')+'</td>');
-        hh.push('<td style="color:var(--text-secondary,#374151);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(m.referencia||'—')+'</td>');
+        hh.push('<td style="color:var(--text-secondary,#374151);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+_cxpEsc(m.referencia||'—')+'</td>');
       } else if (aB.id==='amex') {
         var imp=parseFloat(m.importe||m.monto||0);
         var tipoBadge2 = imp>0 ? '<span class="cb-badge cb-ret">Cargo</span>' : imp<0 ? '<span class="cb-badge cb-dep">Pago</span>' : '<span class="cb-badge cb-neu">—</span>';
@@ -13982,7 +14078,7 @@ function renderConciliacion(data) {
         var usd=parseFloat(m.usd||0), tc=parseFloat(m.tipoCambio||0);
         hh.push('<td style="text-align:right;font-size:11px;color:'+(usd>0?'#0369a1':'var(--text-secondary,#9ca3af)')+'">'+(usd>0?'$'+usd.toLocaleString('en-US',{minimumFractionDigits:2}):'—')+'</td>');
         hh.push('<td style="text-align:right;font-size:11px;color:'+(tc>0?'#0369a1':'var(--text-secondary,#9ca3af)')+'">'+(tc>0?tc.toFixed(4):'—')+'</td>');
-        hh.push('<td style="color:var(--text-secondary,#374151);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(m.referencia||m.establecimiento||'—')+'</td>');
+        hh.push('<td style="color:var(--text-secondary,#374151);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+_cxpEsc(m.referencia||m.establecimiento||'—')+'</td>');
       } else {
         var cobro=parseFloat(m.cobro||m.totalBruto||0), com=parseFloat(m.comisiones||0), neto=parseFloat(m.totalVenta||0);
         var tipoBadge3 = cobro>0?'<span class="cb-badge cb-dep">DEPÓSITO</span>':cobro<0?'<span class="cb-badge cb-ret">RETIRO</span>':'<span class="cb-badge cb-neu">—</span>';

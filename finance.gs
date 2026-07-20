@@ -514,6 +514,14 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Sin autorización para editar avisos (publicar_avisos). Pídeselo al administrador.'});
       return jsonResponse(avisosActualizar(body));
     }
+    if (body.action === 'traspasoBancos') {
+      if (!_tokenHasPermission(body.token || '', 'bank_capture')) {
+        return jsonResponse({ok:false, error:'Sin autorización para capturar movimientos bancarios (bank_capture). Pídeselo al administrador.'});
+      }
+      var resTraspaso = traspasoBancos(body, _postEmail);
+      try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
+      return jsonResponse(resTraspaso);
+    }
     if (body.action === 'saveBankRow') {
       if (!_tokenHasPermission(body.token || '', 'bank_capture')) {
         return jsonResponse({ok:false, error:'Sin autorización para capturar movimientos bancarios (bank_capture). Pídeselo al administrador.'});
@@ -1866,6 +1874,91 @@ function saveBankRow(banco, row) {
     if (key === 'mercadopago') { try { _egRecalcComisionesMPFecha((row && row[1]) || '', ''); } catch(e) {} }
     return {ok:true, banco:banco, newSaldo:row[sc-1], totalRows:sheet.getLastRow()-1};
   } catch(ex) { return {ok:false, error:ex.message}; }
+}
+
+/* ── TRASPASO ENTRE CUENTAS BANCARIAS ─────────────────────────────────────
+   Registra un traspaso como DOS movimientos ligados por un folio TRASP-…:
+   RETIRO en la cuenta origen y DEPÓSITO en la destino. REUSA saveBankRow
+   (mismo saldo corrido que la captura manual — cero matemática nueva).
+   v1: SOLO cuentas tipo 'bancaria' — Mercado Pago (TPV) y las tarjetas de
+   crédito tienen su propia captura y semántica (comisiones/pagos).
+   Si el segundo asiento falla, se REVIERTE el primero únicamente si la última
+   fila de la hoja sigue siendo EXACTAMENTE la nuestra (el folio en la
+   Referencia lo prueba); si alguien capturó en medio, NO se borra nada y se
+   reporta el folio para corrección manual — nunca borrar lo que no es nuestro. */
+function traspasoBancos(b, autorEmail) {
+  try {
+    b = b || {};
+    var keyO = String(b.origen||'').toLowerCase().replace(/[\s-]/g,'');
+    var keyD = String(b.destino||'').toLowerCase().replace(/[\s-]/g,'');
+    if (!keyO || !keyD) return {ok:false, error:'Falta la cuenta origen o la destino.'};
+    if (keyO === keyD) return {ok:false, error:'La cuenta origen y la destino no pueden ser la misma.'};
+    var ctaO = _cuentaByKey(keyO), ctaD = _cuentaByKey(keyD);
+    if (!ctaO) return {ok:false, error:'Cuenta origen desconocida: '+b.origen};
+    if (!ctaD) return {ok:false, error:'Cuenta destino desconocida: '+b.destino};
+    if (String(ctaO.tipo)!=='bancaria' || String(ctaD.tipo)!=='bancaria')
+      return {ok:false, error:'Por ahora los traspasos son solo entre cuentas BANCARIAS. Mercado Pago (TPV) y las tarjetas de crédito tienen su propia captura.'};
+    if (ctaO.activo === false || ctaD.activo === false)
+      return {ok:false, error:'Una de las cuentas está desactivada. Reactívala antes de traspasar.'};
+    if (ctaO.gid === ctaD.gid)
+      return {ok:false, error:'Las dos cuentas apuntan a la misma hoja (config duplicada). Revisa Config_Cuentas.'};
+    // Monto: Number estricto (parseFloat dejaba pasar "1,000"→1 y "1e309"→Infinity)
+    // y se REDONDEA ANTES de validar (0.004 redondea a 0 y debe rechazarse).
+    var monto = Number(b.monto);
+    if (!isFinite(monto)) return {ok:false, error:'Monto inválido.'};
+    monto = Math.round(monto*100)/100;
+    if (!(monto > 0)) return {ok:false, error:'El monto debe ser mayor a cero.'};
+    var fecha = String(b.fecha||'').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return {ok:false, error:'Fecha inválida (usa AAAA-MM-DD).'};
+    // Concepto: tope de servidor + neutralizar fórmulas ('=...' vivas en la hoja).
+    var concepto = String(b.concepto||'').trim().substring(0,120);
+    if (concepto.charAt(0)==='=' || concepto.charAt(0)==='+') concepto = "'" + concepto;
+    var quien = String(autorEmail||'').trim();
+    var obs = concepto + (quien ? (concepto?' · ':'')+'por '+quien : '');
+    // Folio único (UUID: dos traspasos en el MISMO segundo no colisionan; la
+    // reversa compara la Referencia COMPLETA, no solo el folio).
+    var folio = 'TRASP-' + Utilities.formatDate(new Date(), Session.getScriptTimeZone()||'America/Mexico_City', 'yyyyMMdd-HHmmss')
+              + '-' + String(Utilities.getUuid()).replace(/-/g,'').substring(0,8);
+    var refO = 'Traspaso a '+ctaD.nombre+' · '+folio;
+    var refD = 'Traspaso desde '+ctaO.nombre+' · '+folio;
+    // bancaria: [Fecha, Depósito, Retiro, Saldo(auto), Referencia, USD, T.Cambio, Póliza, Observaciones]
+    var rowO = [fecha, 0, monto, 0, refO, '', '', '', obs];
+    var rowD = [fecha, monto, 0, 0, refD, '', '', '', obs];
+    // LOCK de script: los 2 asientos y la eventual reversa son una sola
+    // operación — sin esto, una captura concurrente entre el check y el
+    // deleteRow de la reversa corrompería el saldo corrido (TOCTOU).
+    var lock = LockService.getScriptLock();
+    try { lock.waitLock(10000); }
+    catch(eLk){ return {ok:false, error:'El sistema está ocupado con otra operación bancaria. Intenta de nuevo en unos segundos.'}; }
+    try {
+      var r1 = saveBankRow(keyO, rowO);
+      if (!r1 || !r1.ok) return {ok:false, error:'No se pudo registrar el retiro en '+ctaO.nombre+': '+((r1&&r1.error)||'error desconocido')+'. No se movió nada.'};
+      var r2 = saveBankRow(keyD, rowD);
+      if (!r2 || !r2.ok) {
+        var revertido = false;
+        try {
+          var ssR = SpreadsheetApp.openById(BANKS_SS_ID);
+          var shsR = ssR.getSheets(), sheetO = null;
+          for (var iR=0;iR<shsR.length;iR++) if (shsR[iR].getSheetId()===ctaO.gid){ sheetO=shsR[iR]; break; }
+          if (sheetO) {
+            var lrR = sheetO.getLastRow();
+            var lastR = sheetO.getRange(lrR, 1, 1, 9).getValues()[0];
+            // Match EXACTO de la Referencia completa: solo borramos NUESTRA fila.
+            if (String(lastR[4]||'') === refO) { sheetO.deleteRow(lrR); revertido = true; }
+          }
+        } catch(eRev) {}
+        return {ok:false, folio:folio, revertido:revertido,
+          error:'El depósito en '+ctaD.nombre+' falló: '+((r2&&r2.error)||'error desconocido')
+            + (revertido ? ' El retiro en '+ctaO.nombre+' se revirtió — no quedó nada a medias.'
+                         : ' ATENCIÓN: el retiro en '+ctaO.nombre+' quedó registrado con folio '+folio+' y NO se pudo revertir en automático. Bórralo desde el ERP (✕ del movimiento) — NO directamente en la hoja, o los saldos quedan mal.')};
+      }
+      return {ok:true, folio:folio,
+        origen:{cuenta:ctaO.nombre, nuevoSaldo:r1.newSaldo},
+        destino:{cuenta:ctaD.nombre, nuevoSaldo:r2.newSaldo}};
+    } finally {
+      try { lock.releaseLock(); } catch(eRl){}
+    }
+  } catch(ex){ return {ok:false, error:ex.message}; }
 }
 
 function saveLiberado(rowNum, liberado) {
