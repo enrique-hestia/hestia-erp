@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.20.262 -->
+﻿<!-- app-build:2026.07.20.263 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -28052,7 +28052,7 @@ function idpForzarAlta() {
       </div>
       <div class="form-group">
         <label class="form-label">Médico Tratante</label>
-        <select class="form-input" id="pac-f-medico"><option value="">— Selecciona —</option></select>
+        <select class="form-input" id="pac-f-medico" onchange="_pacMedicoChanged()"><option value="">— Selecciona —</option></select>
         <div id="pac-medico-hint" style="display:none;font-size:10.5px;color:var(--color-text-muted,#9ca3af);margin-top:4px"></div>
       </div>
       <div class="form-group">
@@ -28791,17 +28791,41 @@ function _pacFillSelect(selId, list){
   sel.value = current;
 }
 
-/* Trae el catálogo de Médicos Tratantes (una vez; cachea). Falla en silencio:
-   la ficha sigue funcionando con lo que ya tenga el select. */
+/* Médicos tratantes = los MÉDICOS de ORÍGENES EXTERNOS (fuente única de verdad,
+   la misma que alimenta la atribución y las comisiones). Cada médico lleva su
+   CANAL DERIVADO de su grupo, no tecleado a mano. Falla en silencio. */
 async function _pacMedicosFetch(force){
   if (_pacMedicosLoaded && !force) return _pacMedicos;
   try {
-    var tok = encodeURIComponent(getToken());
-    var r = await fetch(APPS_SCRIPT_URL + '?action=medicos&token=' + tok + '&_t=' + Date.now(), {redirect:'follow'});
-    var d = await r.json();
-    if (d && d.ok) { _pacMedicos = d.medicos || []; _pacMedicosLoaded = true; }
+    var list = (typeof _origFetchList === 'function') ? await _origFetchList(force) : (_origListCache || []);
+    if (list && list.length) _pacOrigMeta = list;   // meta para derivar el canal
+    _pacMedicos = (list || []).filter(function(o){
+      return o && o.activo !== false && _origTipoCanon(o.tipo) === 'Médico externo';
+    }).map(function(o){ return { nombre: o.nombre, canal: _pacCanalDeMedico(o, list) }; });
+    _pacMedicosLoaded = true;
   } catch(e){}
   return _pacMedicos;
+}
+/* Canal DERIVADO del grupo del médico en Orígenes Externos (el grupo MANDA):
+   · su grupo se llama ~Hestia            → Hestia   (médicos de la clínica)
+   · pertenece a un grupo o agencia       → Agencia
+   · independiente (sin grupo)            → Externos
+   Así, si en la ficha eligen mal el Canal, el médico lo corrige a donde de
+   verdad pertenece — no hay que asignarlo dos veces. */
+function _pacCanalDeMedico(o, list){
+  if (!o) return '';
+  var grupo = (typeof _origGrupoNombre === 'function') ? _origGrupoNombre(o, list || _pacOrigMeta) : '';
+  if (grupo && _origNormJS(grupo).indexOf('hestia') > -1) return 'Hestia';
+  if (o.padre && String(o.padre).trim()) return 'Agencia';
+  return 'Externos';
+}
+/* Al elegir un médico, el Canal se fija SOLO según su grupo (Orígenes Externos
+   manda). El valor previo del médico se conserva vía _pacEnsureOption. */
+function _pacMedicoChanged(){
+  var selM = document.getElementById('pac-f-medico'), selC = document.getElementById('pac-f-canal');
+  if (!selM || !selC || !selM.value) return;
+  var med = (_pacMedicos || []).filter(function(m){ return m.nombre === selM.value; })[0];
+  if (med && med.canal){ _pacEnsureOption(selC, med.canal); selC.value = med.canal; }
 }
 
 /* Garantiza que `val` exista como opción del select ANTES de asignarlo.
@@ -32916,6 +32940,10 @@ async function medFetch(){
 }
 
 async function loadMedicosView(){
+  // UNIFICADO: los médicos tratantes viven en ORÍGENES EXTERNOS (misma fuente que
+  // atribución y comisiones). Este menú redirige ahí para no tener dos lugares de
+  // alta ni un catálogo paralelo que la ficha ya no lee.
+  if (typeof navigateTo === 'function') { setTimeout(function(){ try { navigateTo('origenes'); } catch(e){} }, 0); return; }
   var root = document.getElementById('medicos-root'); if (!root) return;
   root.innerHTML = (typeof hestiaLoader === 'function') ? hestiaLoader('Cargando médicos…') : 'Cargando…';
   try {
