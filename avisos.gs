@@ -53,7 +53,8 @@ function _avisosFmtFecha(v) {
    Cache 6h por fecha: el sondeo del chat pega cada 7s y no vamos a leer el
    libro de Nómina cada vez. */
 function _avisosCumplesHoy(hoy) {
-  var cacheKey = 'avisos_cumples_' + hoy;
+  // v2: cambió el texto del título — la llave nueva invalida el caché viejo (6h)
+  var cacheKey = 'avisos_cumples_v2_' + hoy;
   try { var hit = CacheService.getScriptCache().get(cacheKey); if (hit !== null) return JSON.parse(hit); } catch(e){}
   var out = [];
   try {
@@ -72,7 +73,7 @@ function _avisosCumplesHoy(hoy) {
           id: 'CUMPLE-' + String(emp.NumEmpleado || primer).replace(/\s+/g,'') + '-' + hoy.substring(0,4),
           ts: Date.parse(hoy + 'T09:00:00') || Date.now(),
           autorEmail: '', autorNombre: 'VestaOS',
-          titulo: '🎂 ¡Hoy cumple años ' + primer + '!',
+          titulo: 'Feliz Cumpleaños ' + primer + ' 🎂',
           mensaje: 'Felicita a ' + nombre + ' de parte de todo el equipo.',
           nivel: 'exito', fechaEvento: hoy, expira: hoy,
           anim: { tpl: 'cumple', nombre: primer, seed: 7 },

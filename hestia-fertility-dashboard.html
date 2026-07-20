@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.19.253 -->
+﻿<!-- app-build:2026.07.19.254 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -32465,6 +32465,9 @@ function hfAvisosRecibidos(avisos){
   if (!avisos) return;
   _avisosData = avisos;
   _avisosBanner();
+  // No re-render con el modal de publicar abierto: el usuario está escribiendo.
+  var modal = document.getElementById('aviso-modal');
+  if (modal && modal.style.display === 'block') return;
   var v = document.getElementById('view-avisos');
   if (v && v.style.display !== 'none' && document.getElementById('avisos-root')) _avisosRenderView();
 }
@@ -32534,8 +32537,18 @@ function _avisosRenderView(){
   } else {
     list.forEach(function(a){ h += _avisoCard(a, puede); });
   }
-  h += '</div>' + (puede ? _avisoFormHTML() : '');
+  h += '</div>';
   root.innerHTML = h;
+}
+
+/* Modal de publicar como SINGLETON en <body>. Antes vivía dentro de
+   avisos-root, y el re-render que dispara el sondeo del chat (cada 7s) lo
+   reconstruía CERRADO — la ventana "se cerraba sola" a media captura y se
+   perdía lo escrito. En body, los re-renders de la lista ya no lo tocan. */
+function _avisoEnsureModal(){
+  if (document.getElementById('aviso-modal')) return;
+  var host = document.createElement('div'); host.innerHTML = _avisoFormHTML();
+  while (host.firstChild) document.body.appendChild(host.firstChild);
 }
 
 function _avisoCard(a, puede){
@@ -32582,7 +32595,7 @@ function _avisoFormHTML(){
     +'<div style="display:flex;gap:10px"><button id="aviso-save-btn" onclick="avisoPublicar()" class="dash-btn" style="flex:1;padding:12px">Publicar a todo el equipo</button>'
     +'<button onclick="avisoCloseForm()" class="dash-btn ghost" style="padding:12px 20px">Cancelar</button></div></div>';
 }
-function avisoOpenForm(){ var o=document.getElementById('aviso-ovl'), m=document.getElementById('aviso-modal'); if(o)o.style.display='block'; if(m)m.style.display='block'; var t=document.getElementById('aviso-f-titulo'); if(t) setTimeout(function(){t.focus();},50); }
+function avisoOpenForm(){ _avisoEnsureModal(); var o=document.getElementById('aviso-ovl'), m=document.getElementById('aviso-modal'); if(o)o.style.display='block'; if(m)m.style.display='block'; var t=document.getElementById('aviso-f-titulo'); if(t) setTimeout(function(){t.focus();},50); }
 function avisoCloseForm(){ var o=document.getElementById('aviso-ovl'), m=document.getElementById('aviso-modal'); if(o)o.style.display='none'; if(m)m.style.display='none'; }
 function avisoAnimToggle(){ var on=(document.getElementById('aviso-f-anim')||{}).checked; var r=document.getElementById('aviso-f-animrow'); if(r) r.style.display=on?'flex':'none'; }
 // Receta de animación según el form (tpl 'auto' → clasificador local).
@@ -32693,7 +32706,7 @@ var _AVISO_TPLS = {
           ctx.fillStyle=fg; ctx.beginPath(); ctx.arc(0,0,H*.02,0,6.28); ctx.fill(); ctx.restore(); } }
       ctx.restore();
       _animConfetiDraw(ctx,S.conf,_animFase(t,.12,1),W,H,.95);
-      _animTitulo(ctx,W,H, a.nombre?('¡Feliz cumpleaños, '+a.nombre+'!'):(a.headline||'¡Feliz cumpleaños!'), t,.3,.3,Math.round(H*.085));
+      _animTitulo(ctx,W,H, a.nombre?('Feliz Cumpleaños '+a.nombre):(a.headline||'Feliz Cumpleaños'), t,.3,.3,Math.round(H*.085));
       _animSello(ctx,W,H);
     } },
   meta: { dur:6000, init:function(a,W,H){ var rng=_animRng(a.seed||3), bs=[],i;
