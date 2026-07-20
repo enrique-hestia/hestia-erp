@@ -122,6 +122,9 @@ function chatPoll(body) {
     }
     var res = { ok: true, mensajes: mensajes, online: online, serverTs: Date.now() };
     if (!since || body.wantDir) res.dir = _chatDirectorio(); // directorio solo en el primer sondeo
+    // Avisos generales a caballo del mismo sondeo (cero timers nuevos en el
+    // cliente). Si avisos.gs no está desplegado, el chat sigue como si nada.
+    try { if (typeof avisosListActivos === 'function') { var _av = avisosListActivos(); if (_av && _av.ok) res.avisos = _av.avisos; } } catch(e){}
     return res;
   } catch (ex) { return { ok: false, error: ex.message }; }
 }

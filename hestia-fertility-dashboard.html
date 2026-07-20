@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.19.251 -->
+﻿<!-- app-build:2026.07.19.252 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -890,7 +890,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
   <!-- KPIs -->
   <section class="kpi-grid" aria-label="Indicadores clave">
 
-    <div class="kpi-card">
+    <div class="kpi-card" id="rc-kpi0">
       <div class="kpi-header">
         <div class="kpi-icon" style="background:#fce8f0"><svg viewBox="0 0 24 24" fill="none" stroke="#c46a7a" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
         <span class="kpi-badge" id="kpi0-badge"></span>
@@ -900,7 +900,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
       <div class="kpi-spark-wrap"><canvas class="kpi-spark" id="spark0"></canvas></div>
     </div>
 
-    <div class="kpi-card">
+    <div class="kpi-card" id="rc-kpi1">
       <div class="kpi-header">
         <div class="kpi-icon" style="background:#e6f4ea"><svg viewBox="0 0 24 24" fill="none" stroke="#4d8c5a" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div>
         <span class="kpi-badge" id="kpi1-badge"></span>
@@ -949,7 +949,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 
   <!-- FILA: Ingresos por mes + Donut servicios -->
   <div class="row-2">
-    <div class="card">
+    <div class="card" id="rc-ingvsgas">
       <div class="card-header">
         <div>
           <div class="card-title">Ingresos vs Gastos</div>
@@ -964,7 +964,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
       <div class="chart-wrap-tall"><canvas id="ingresoChart"></canvas></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="rc-mix">
       <div class="card-header">
         <div>
           <div class="card-title">Mix de Servicios</div>
@@ -978,7 +978,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 
   <!-- FILA: Tabla servicios + Funnel + Alertas -->
   <div class="row-2">
-    <div class="card">
+    <div class="card" id="rc-rent">
       <div class="card-header">
         <div>
           <div class="card-title">Rentabilidad por Servicio</div>
@@ -1019,7 +1019,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 
   <!-- FILA: Comparativa Segmentos -->
   <div class="row-3">
-    <div class="card">
+    <div class="card" id="rc-ticket">
       <div class="card-header" style="margin-bottom:var(--space-3)">
         <div>
           <div class="card-title">Ticket Promedio (LTV)</div>
@@ -1036,7 +1036,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" id="rc-cash">
       <div class="card-header" style="margin-bottom:var(--space-3)">
         <div>
           <div class="card-title">Flujo de Caja</div>
@@ -1046,7 +1046,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
       <div class="chart-wrap"><canvas id="cashChart"></canvas></div>
     </div>
 
-    <div class="card">
+    <div class="card" id="rc-costos">
       <div class="card-header" style="margin-bottom:var(--space-3)">
         <div>
           <div class="card-title">Distribución Costos</div>
@@ -1067,6 +1067,9 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 
 <!-- ══ VISTA: FLUJO DE EFECTIVO ══ -->
 <div id="view-cashflow" class="view" style="display:none"></div>
+
+<!-- ══ VISTA: AVISOS DEL EQUIPO (broadcast) ══ -->
+<div id="view-avisos" class="view" style="display:none"><div id="avisos-root"></div></div>
 
 <!-- ══ VISTA: INGRESOS ══ -->
 <div id="view-ingresos" class="view" style="display:none"></div>
@@ -11091,6 +11094,16 @@ async function loadMenu() {
         });
       }
     }
+    /* ── Inyectar "Avisos" (broadcast del equipo): lo ve TODO usuario logueado
+       (leer es abierto; publicar exige el permiso publicar_avisos). Ítem raíz,
+       inyectado solo si la hoja Menu no lo trae ya. Match EXACTO del id. ── */
+    if (!menuItems.some(function(i){ return String(i.id||'').trim() === 'avisos'; })) {
+      menuItems.push({
+        id:'avisos', label:'Avisos', padre:'',
+        icono:'megaphone', tipo:'vista', orden:510,
+        seccion:'Operación', fuente:'avisos'
+      });
+    }
     // Inyectar "Catálogo General" como primer hijo del grupo Productos
     var prodGroup = menuItems.filter(function(i){
       return (i.tipo==='grupo'||i.id==='productos') && /producto/i.test(i.label||i.id);
@@ -16609,6 +16622,14 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     novInit();
     return;
   }
+  // Avisos del equipo (broadcast)
+  if (viewId === 'avisos' || (_foundViewItem && /^avisos$/i.test(String(_foundViewItem.fuente||'')))) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _avEl = document.getElementById('view-avisos');
+    if (_avEl) _avEl.style.display = '';
+    loadAvisosView();
+    return;
+  }
   // Orígenes externos (catálogo de agencias / médicos externos) — va ANTES del
   // bloque de Productos porque 'atribuir-externos' contiene "externo" y sería
   // absorbido por el ruteo genérico de catálogo.
@@ -19615,6 +19636,8 @@ function chatPollOnce(first){
     .then(function(r){return r.json();}).then(function(res){
       if(!res||!res.ok) return;
       _chat.online=res.online||[]; if(res.dir) _chat.dir=res.dir; if(res.serverTs) _chat.sinceTs=res.serverTs;
+      // Avisos generales a caballo del mismo sondeo (banner + vista)
+      if(res.avisos && typeof hfAvisosRecibidos==='function'){ try{ hfAvisosRecibidos(res.avisos); }catch(e){} }
       // Mapa email → alias (del directorio): con esto se pinta el autor de cada
       // mensaje, incluso los históricos que se guardaron con el nombre completo.
       if(res.dir) res.dir.forEach(function(u){ var e=String(u.email||'').toLowerCase(); if(e) _chat.aliasByEmail[e]=aliasFrom(u.alias,u.nombre,e); });
@@ -24149,6 +24172,7 @@ async function loadResumenGeneral(){
 function renderResumen(data) {
   if (typeof hfPendCalLoad === 'function') hfPendCalLoad();   // calendario de pendientes (independiente de la data del ERP)
   if (typeof _dashOnData === 'function') _dashOnData(data);   // dashboard configurable (E2): guarda la data + arranca el modo
+  if (typeof _resumenGatearClasico === 'function') _resumenGatearClasico();   // clásico: ocultar tarjetas sin permiso
   if (!data || !data.todos) return;
   var d = data[currentSegment] || data.todos;
   updateKPIs(d);
@@ -26963,7 +26987,8 @@ var OP_PERMS_CATALOG = [
   {key:'docs_enviar',      label:'Enviar documentos por correo',     cat:'Documentos y Correo'},
   {key:'pagos_autorizar',  label:'Autorizar pagos (flujo próximo)',  cat:'Documentos y Correo'},
   {key:'ver_datos_sensibles', label:'Ver nombres y datos sensibles (pacientes, empleados, proveedores)', cat:'Privacidad'},
-  {key:'cambiar_auto_refresh', label:'Cambiar el auto-refresh (frecuencia de actualización)', cat:'Sistema'}
+  {key:'cambiar_auto_refresh', label:'Cambiar el auto-refresh (frecuencia de actualización)', cat:'Sistema'},
+  {key:'publicar_avisos',  label:'Publicar avisos generales para todo el equipo', cat:'Comunicación'}
 ];
 
 // Fallback hardcoded (se usa solo si la sesión no trae permisosOperativos)
@@ -26972,7 +26997,7 @@ var ROLE_PERMS_DEFAULT = {
   director: ['*'],
   gerente:  ['bank_create','bank_edit','bank_delete','bank_capture','bank_liberado',
              'sheets_access','cf_capture','export_data','editar_ingresos','editar_egresos','ver_datos_sensibles',
-             'identificar_pacientes'],
+             'identificar_pacientes','publicar_avisos'],
   operador: ['bank_capture','bank_edit','bank_liberado','cf_capture','ver_datos_sensibles','identificar_pacientes'],
   // 'captura' = vendedoras/enfermeras: son las ÚNICAS que saben de quién es cada
   // cobro de la página de citas, así que identificar es justo su trabajo. Sigue
@@ -32151,7 +32176,9 @@ var DASH_SOURCES = {
   cxp:     { ttl:300000, key:function(){ return 'cxp'; },
              url:function(){ return APPS_SCRIPT_URL+'?action=cxp&token='+encodeURIComponent(getToken())+'&_t='+Date.now(); } },
   summary: { ttl:300000, key:function(){ return 'summary|'+currentFechaInicio+'|'+currentFechaFin; },
-             url:function(){ return APPS_SCRIPT_URL+'?action=summary&fechaInicio='+encodeURIComponent(currentFechaInicio)+'&fechaFin='+encodeURIComponent(currentFechaFin)+'&token='+encodeURIComponent(getToken())+'&_t='+Date.now(); } }
+             url:function(){ return APPS_SCRIPT_URL+'?action=summary&fechaInicio='+encodeURIComponent(currentFechaInicio)+'&fechaFin='+encodeURIComponent(currentFechaFin)+'&token='+encodeURIComponent(getToken())+'&_t='+Date.now(); } },
+  avisos:  { ttl:120000, key:function(){ return 'avisos'; },
+             url:function(){ return APPS_SCRIPT_URL+'?action=avisosActivos&token='+encodeURIComponent(getToken())+'&_t='+Date.now(); } }
 };
 var _dashSrcCache={}, _dashSrcPend={};
 function _dashSrcState(srcId){
@@ -32198,7 +32225,11 @@ var DASH_REGISTRY = [
   {id:'pl_estructura',label:'P&L: estructura de costos',cat:'Estado de Resultados', menu:['summary'], src:'summary', forma:'distribucion', viz:['pie','bar','table'], get:function(B){
     var m=(B&&B.metricas)||{}; var labels=['COGS','OpEx','G&A','Impuestos'], data=[m.cogs||0,m.opex||0,m.ga||0,m.taxes||0], colors=['#c46a7a','#3d8f8f','#c47a1e','#7a52b0'];
     if((m.netProfit||0)>0){ labels.push('Utilidad neta'); data.push(m.netProfit); colors.push('#4d8c5a'); }
-    return {labels:labels, data:data, colors:colors}; }}
+    return {labels:labels, data:data, colors:colors}; }},
+  // ── Avisos del equipo (broadcast — todos los ven) ──
+  {id:'avisos_lista', label:'Avisos del equipo',        cat:'Comunicación', src:'avisos', forma:'tabla', viz:['table'], get:function(B){
+    var l=(B&&B.avisos)||[]; return {cols:['Aviso','Fecha'], rows:l.slice(0,8).map(function(a){
+      return [a.titulo, a.fechaEvento || (a.ts?new Date(a.ts).toLocaleDateString('es-MX',{day:'numeric',month:'short'}):'')]; })}; }}
 ];
 function _dashDef(id){ for(var i=0;i<DASH_REGISTRY.length;i++) if(DASH_REGISTRY[i].id===id) return DASH_REGISTRY[i]; return null; }
 // ¿El usuario puede ver este dato? admin/'*' todo; si trae `perm` exige el permiso;
@@ -32215,6 +32246,25 @@ function _dashCanSee(def){
   if(def.perm && (typeof hasPermission!=='function' || !hasPermission(def.perm))) return false;
   if(def.menu && def.menu.length) return _dashMenuHas(def.menu);
   return true;
+}
+
+/* ── Gateo del Resumen CLÁSICO: las tarjetas con dinero solo las ve quien tiene
+   el área habilitada (mismo criterio que "Mi tablero"). Ciclos, CAC, embudo y
+   alertas son operación general y quedan para todos. ── */
+function _resumenGatearClasico(){
+  var todo = typeof hasPermission==='function' && hasPermission('*');
+  function gate(id, menus){
+    var el=document.getElementById(id); if(!el) return;
+    el.style.display = (todo || _dashMenuHas(menus)) ? '' : 'none';
+  }
+  gate('rc-kpi0',    ['ingresos']);            // Ingresos brutos
+  gate('rc-kpi1',    ['ingresos']);            // Margen bruto
+  gate('rc-ingvsgas',['ingresos']);            // Ingresos vs Gastos
+  gate('rc-mix',     ['ingresos']);            // Mix de servicios
+  gate('rc-rent',    ['ingresos']);            // Rentabilidad por servicio
+  gate('rc-ticket',  ['ingresos']);            // Ticket promedio (LTV)
+  gate('rc-cash',    ['cashflow','flujo']);    // Flujo de caja
+  gate('rc-costos',  ['egresos','gastos','cxp']); // Distribución de costos
 }
 function _dashVizLabel(v){ return {kpi:'KPI',bar:'Barras',line:'Línea',pie:'Pastel',table:'Tabla'}[v]||v; }
 function _dashPalette(n){ var base=['#c46a7a','#3d8f8f','#c47a1e','#7a52b0','#3a72a8','#4d8c5a','#b8577a','#8a6d3b'],o=[],i; for(i=0;i<n;i++) o.push(base[i%base.length]); return o; }
@@ -32400,6 +32450,144 @@ function dashAddConfirm(){
     lay.widgets.push({id:'w'+lay.seq, dato:id, viz:viz, span:span, orden:++maxOrden});
   });
   _dashSave(); dashAddClose(); dashRender();
+}
+
+/* ══════════════ AVISOS DEL EQUIPO (E3 · broadcast) ══════════════
+   Mensajes para todos ("cumpleaños de X", "junta a las 10"). Llegan a caballo
+   del sondeo del chat (chatPollOnce → hfAvisosRecibidos) — cero timers nuevos.
+   Leer: todos. Publicar/retirar: permiso publicar_avisos (el backend lo
+   re-verifica; el botón solo es cosmético). El descarte del banner es por
+   usuario y por aviso (localStorage). */
+var _avisosData = null;
+var _avisosBannerId = null;
+
+function hfAvisosRecibidos(avisos){
+  if (!avisos) return;
+  _avisosData = avisos;
+  _avisosBanner();
+  var v = document.getElementById('view-avisos');
+  if (v && v.style.display !== 'none' && document.getElementById('avisos-root')) _avisosRenderView();
+}
+
+// Banner flotante con el aviso más reciente que este usuario no haya descartado.
+function _avisosBanner(){
+  var list = _avisosData || [], top = null;
+  for (var i = 0; i < list.length; i++){
+    var seen = false; try { seen = !!localStorage.getItem('hf_aviso_x_' + list[i].id); } catch(e){}
+    if (!seen){ top = list[i]; break; }
+  }
+  var old = document.getElementById('aviso-banner');
+  if (!top){ if (old) old.remove(); _avisosBannerId = null; return; }
+  if (_avisosBannerId === top.id && old) return;
+  if (old) old.remove();
+  _avisosBannerId = top.id;
+  var b = document.createElement('div'); b.id = 'aviso-banner';
+  b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:-160px;z-index:2147482000;background:#1f2937;color:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.3);padding:13px 18px;display:flex;align-items:center;gap:14px;max-width:560px;width:calc(100% - 24px);transition:bottom .4s cubic-bezier(.4,0,.2,1);font-family:var(--font-primary,sans-serif)';
+  b.innerHTML = '<div style="font-size:22px">📣</div>'
+    +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">'+_cxpEsc(top.titulo)+'</div>'
+    +(top.mensaje?'<div style="font-size:11px;color:#cbd5e1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+_cxpEsc(top.mensaje)+'</div>':'')
+    +'<div style="font-size:10px;color:#94a3b8;margin-top:2px">'+_cxpEsc(top.autorNombre||top.autorEmail||'')+(top.fechaEvento?' · '+top.fechaEvento:'')+'</div></div>'
+    +'<button onclick="navigateTo(\'avisos\');hfAvisoCerrarBanner(\''+top.id+'\')" style="background:#c46a7a;color:#fff;border:none;border-radius:8px;padding:9px 14px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">Ver</button>'
+    +'<button onclick="hfAvisoCerrarBanner(\''+top.id+'\')" style="background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer;padding:2px 6px" title="Descartar">×</button>';
+  document.body.appendChild(b);
+  setTimeout(function(){ b.style.bottom = '20px'; }, 60);
+}
+function hfAvisoCerrarBanner(id){
+  try { localStorage.setItem('hf_aviso_x_' + id, '1'); } catch(e){}
+  var b = document.getElementById('aviso-banner');
+  if (b){ b.style.bottom = '-160px'; setTimeout(function(){ if (b.parentNode) b.parentNode.removeChild(b); }, 420); }
+  _avisosBannerId = null;
+  setTimeout(_avisosBanner, 450);   // si hay otro sin descartar, entra en su lugar
+}
+
+async function hfAvisosFetch(){
+  var tok = encodeURIComponent(getToken());
+  var d = await fetch(APPS_SCRIPT_URL+'?action=avisosActivos&token='+tok+'&_t='+Date.now(), {redirect:'follow'}).then(function(r){ return r.json(); });
+  if (d && d.ok){ _avisosData = d.avisos || []; return _avisosData; }
+  throw new Error((d && d.error) || 'No se pudieron cargar los avisos.');
+}
+
+async function loadAvisosView(){
+  var root = document.getElementById('avisos-root'); if (!root) return;
+  root.innerHTML = (typeof hestiaLoader === 'function') ? hestiaLoader('Cargando avisos…') : 'Cargando…';
+  try {
+    await hfAvisosFetch();
+    if (typeof hfFinish === 'function') { try { await hfFinish(); } catch(e){} }
+    _avisosRenderView();
+  } catch(e){
+    root.innerHTML = '<div style="padding:24px;color:#991b1b;background:#fef2f2;border-radius:10px;font-size:13px;line-height:1.6">⚠ '+_cxpEsc(e.message)+'<br><span style="color:#6b7280">Primera vez: agrega <b>avisos.gs</b> en Apps Script y redespliega.</span></div>';
+  }
+}
+
+function _avisosRenderView(){
+  var root = document.getElementById('avisos-root'); if (!root) return;
+  var list = _avisosData || [];
+  var puede = typeof hasPermission === 'function' && hasPermission('publicar_avisos');
+  var h = '<div style="max-width:760px;margin:0 auto;padding:4px 2px 44px">';
+  h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px">'
+    +'<div><div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--color-text-muted)">Hestia Fertility</div>'
+    +'<h1 style="font-size:20px;font-weight:800;color:var(--color-text);margin:0">Avisos del equipo</h1>'
+    +'<div style="font-size:11.5px;color:var(--color-text-muted);margin-top:3px">Mensajes para todos · cumpleaños, juntas, logros</div></div>'
+    +(puede ? '<button onclick="avisoOpenForm()" class="dash-btn">+ Publicar aviso</button>' : '')+'</div>';
+  if (!list.length){
+    h += '<div style="background:var(--color-surface-2);border:1px dashed var(--color-divider);border-radius:14px;padding:40px;text-align:center;color:var(--color-text-muted);font-size:13px;margin-top:16px">📣 No hay avisos vigentes.'+(puede?' Publica el primero con <b>+ Publicar aviso</b>.':'')+'</div>';
+  } else {
+    list.forEach(function(a){ h += _avisoCard(a, puede); });
+  }
+  h += '</div>' + (puede ? _avisoFormHTML() : '');
+  root.innerHTML = h;
+}
+
+function _avisoCard(a, puede){
+  var colores = { info:'var(--color-primary)', exito:'#4d8c5a', alerta:'#c47a1e' };
+  var c = colores[a.nivel] || colores.info;
+  var fstr = a.ts ? new Date(a.ts).toLocaleDateString('es-MX', {day:'numeric', month:'short'}) : '';
+  return '<div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-left:3px solid '+c+';border-radius:12px;padding:14px 16px;margin-bottom:10px">'
+    +'<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap">'
+    +'<div style="flex:1;min-width:200px"><div style="font-size:13.5px;font-weight:700;color:var(--color-text)">'+_cxpEsc(a.titulo)+'</div>'
+    +(a.mensaje?'<div style="font-size:12px;color:var(--color-text-muted);margin-top:3px;line-height:1.5">'+_cxpEsc(a.mensaje)+'</div>':'')
+    +'<div style="font-size:10.5px;color:var(--color-text-faint);margin-top:6px">'+_cxpEsc(a.autorNombre||a.autorEmail||'')+(fstr?' · '+fstr:'')+(a.fechaEvento?' · 📅 '+a.fechaEvento:'')+(a.expira?' · expira '+a.expira:'')+'</div></div>'
+    +(puede?'<button onclick="avisoBaja(\''+a.id+'\')" title="Retirar (deja registro, deja de mostrarse)" style="background:none;border:1px solid var(--color-divider);border-radius:7px;color:var(--color-text-muted);font-size:11px;padding:5px 10px;cursor:pointer">Retirar</button>':'')
+    +'</div></div>';
+}
+
+function _avisoFormHTML(){
+  var S = 'style="width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:12.5px;background:var(--color-surface-2);color:var(--color-text)"';
+  var L = 'style="display:block;font-size:10px;font-weight:600;color:var(--color-text-muted);margin-bottom:4px"';
+  return '<div id="aviso-ovl" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:999;backdrop-filter:blur(3px)" onclick="avisoCloseForm()"></div>'
+    +'<div id="aviso-modal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1000;background:var(--color-surface-2);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.25);width:min(480px,94vw);padding:20px">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div style="font-size:15px;font-weight:800;color:var(--color-text)">Publicar aviso</div><button onclick="avisoCloseForm()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--color-text-muted)">×</button></div>'
+    +'<div style="margin-bottom:12px"><label '+L+'>Título *</label><input id="aviso-f-titulo" '+S+' placeholder="Ej. 🎂 Cumpleaños de Laura"></div>'
+    +'<div style="margin-bottom:12px"><label '+L+'>Mensaje</label><textarea id="aviso-f-mensaje" '+S+' rows="2" style="resize:vertical"></textarea></div>'
+    +'<div style="display:flex;gap:10px;margin-bottom:12px"><div style="flex:1"><label '+L+'>Tono</label><select id="aviso-f-nivel" '+S+'><option value="info">Informativo</option><option value="exito">Celebración</option><option value="alerta">Importante</option></select></div>'
+    +'<div style="flex:1"><label '+L+'>Fecha del evento</label><input id="aviso-f-fecha" type="date" '+S+'></div></div>'
+    +'<div style="margin-bottom:14px"><label '+L+'>Se oculta solo después de (opcional)</label><input id="aviso-f-expira" type="date" '+S+'></div>'
+    +'<div style="display:flex;gap:10px"><button id="aviso-save-btn" onclick="avisoPublicar()" class="dash-btn" style="flex:1;padding:12px">Publicar a todo el equipo</button>'
+    +'<button onclick="avisoCloseForm()" class="dash-btn ghost" style="padding:12px 20px">Cancelar</button></div></div>';
+}
+function avisoOpenForm(){ var o=document.getElementById('aviso-ovl'), m=document.getElementById('aviso-modal'); if(o)o.style.display='block'; if(m)m.style.display='block'; var t=document.getElementById('aviso-f-titulo'); if(t) setTimeout(function(){t.focus();},50); }
+function avisoCloseForm(){ var o=document.getElementById('aviso-ovl'), m=document.getElementById('aviso-modal'); if(o)o.style.display='none'; if(m)m.style.display='none'; }
+
+async function avisoPublicar(){
+  var titulo = ((document.getElementById('aviso-f-titulo')||{}).value||'').trim();
+  if (!titulo){ alert('El aviso necesita un título.'); return; }
+  var s = getSession()||{};
+  var btn = document.getElementById('aviso-save-btn'); if (btn){ btn.disabled=true; btn.textContent='Publicando…'; }
+  var body = { action:'avisosPublicar', titulo:titulo,
+    mensaje:(document.getElementById('aviso-f-mensaje')||{}).value||'',
+    nivel:(document.getElementById('aviso-f-nivel')||{}).value||'info',
+    fechaEvento:(document.getElementById('aviso-f-fecha')||{}).value||'',
+    expira:(document.getElementById('aviso-f-expira')||{}).value||'',
+    autorNombre:((typeof sessionAlias==='function')?sessionAlias(s):'')||s.nombre||s.email||'' };
+  var res; try { var r = await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(body)}); res = await r.json(); } catch(e){ res = {ok:false, error:e.message}; }
+  if (btn){ btn.disabled=false; btn.textContent='Publicar a todo el equipo'; }
+  if (res && res.ok){ avisoCloseForm(); loadAvisosView(); }
+  else alert('Error: '+((res&&res.error)||'No se pudo publicar'));
+}
+async function avisoBaja(id){
+  if (!confirm('¿Retirar este aviso? Queda registrado, solo deja de mostrarse.')) return;
+  var res; try { var r = await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'avisosActualizar', id:id, activo:false})}); res = await r.json(); } catch(e){ res = {ok:false, error:e.message}; }
+  if (res && res.ok) loadAvisosView(); else alert('Error: '+((res&&res.error)||''));
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -35227,19 +35415,32 @@ function submitEntmed() {
 (function(){
   if (location.protocol === 'file:') return;
   var CHECK_INTERVAL = 60000;
-  var _knownBuild = null;
   var _pageUrl = location.href.split('?')[0].split('#')[0];
 
   function parseBuild(text) {
-    var m = text.match(/<!--\s*app-build:([^\s>]+)/);
+    var m = String(text).match(/app-build:([^\s>]+)/);
     return m ? m[1] : null;
   }
 
-  // Captura el build actual de la página ya cargada
-  _knownBuild = parseBuild(document.documentElement.outerHTML.substring(0, 200));
+  /* Build LOCAL de la página cargada. El comentario <!-- app-build --> vive
+     ANTES de <html>, así que NO aparece en documentElement.outerHTML — ese era
+     el bug: _knownBuild quedaba null, el primer chequeo ADOPTABA el build
+     remoto como "conocido", y una página vieja servida por caché jamás se
+     detectaba a sí misma como vieja. Los comentarios pre-<html> sí existen en
+     el DOM: son childNodes del document. */
+  var _localBuild = (function(){
+    try {
+      for (var i = 0; i < document.childNodes.length; i++) {
+        var n = document.childNodes[i];
+        if (n.nodeType === 8) { var b = parseBuild(n.nodeValue); if (b) return b; }
+      }
+    } catch(e){}
+    return null;
+  })();
 
-  function checkForUpdate() {
-    // Range request: solo los primeros 200 bytes (donde está el comentario app-build)
+  function checkForUpdate(alCargar) {
+    // Range: solo los primeros bytes (ahí está el marcador). Si el host ignora
+    // Range devuelve todo y el regex funciona igual.
     fetch(_pageUrl + '?_v=' + Date.now(), {
       method: 'GET',
       cache: 'no-store',
@@ -35247,17 +35448,33 @@ function submitEntmed() {
     }).then(function(r){ return r.text(); })
       .then(function(text){
         var remoteBuild = parseBuild(text);
-        if (!remoteBuild) return;
-        if (_knownBuild === null) {
-          _knownBuild = remoteBuild;
-        } else if (remoteBuild !== _knownBuild) {
-          document.getElementById('upd-toast').classList.add('show');
+        if (!remoteBuild || !_localBuild || remoteBuild === _localBuild) return;
+        // La página cargada es VIEJA.
+        if (alCargar) {
+          /* Recién cargada: actualizar SOLO, sin pedir clic (aún no hay trabajo
+             que perder). _v = build remoto → idempotente. Guard anti-bucle: si
+             un caché necio sigue sirviendo la vieja con la URL nueva, no ciclar
+             — se muestra el aviso en su lugar. */
+          var k = 'hf_upd_' + remoteBuild;
+          try {
+            if (!sessionStorage.getItem(k)) {
+              sessionStorage.setItem(k, '1');
+              location.replace(_pageUrl + '?_v=' + encodeURIComponent(remoteBuild));
+              return;
+            }
+          } catch(e){}
         }
+        // Con la app abierta (o si el auto falló): aviso no intrusivo.
+        var t = document.getElementById('upd-toast'); if (t) t.classList.add('show');
       }).catch(function(){});
   }
 
-  setTimeout(checkForUpdate, 15000);
-  setInterval(checkForUpdate, CHECK_INTERVAL);
+  // 1) Al cargar: si hay versión nueva, se aplica sola (también en móvil).
+  checkForUpdate(true);
+  // 2) Mientras está abierta: aviso cada minuto…
+  setInterval(function(){ checkForUpdate(false); }, CHECK_INTERVAL);
+  // 3) …y al VOLVER a la pestaña/app — clave en móvil, donde no existe el hard refresh.
+  document.addEventListener('visibilitychange', function(){ if (!document.hidden) checkForUpdate(false); });
 })();
 
 

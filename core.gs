@@ -433,6 +433,15 @@ function doGet(e) {
       return jsonResponse(readRecordatoriosPendientes(e.parameter.usuario || ''));
     }
 
+    // Avisos generales del equipo (broadcast): lectura abierta a cualquier
+    // sesión válida (el gate global de GET ya exigió token). Publicar/editar
+    // van por POST con permiso publicar_avisos.
+    if (action === 'avisosActivos') {
+      if (typeof avisosListActivos !== 'function')
+        return jsonResponse({ok:false, error:'Agrega avisos.gs en Apps Script y redespliega.', avisos:[]});
+      return jsonResponse(avisosListActivos());
+    }
+
     // Tableros configurables ("Mi tablero"). El dueño se deriva del TOKEN, no de
     // un parámetro del cliente: nadie puede leer el tablero de otro. Fail-closed.
     if (action === 'dashboardLayouts') {

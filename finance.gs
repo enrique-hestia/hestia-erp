@@ -498,6 +498,22 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega dashboard.gs en Apps Script y redespliega.'});
       return jsonResponse(deleteDashboardLayout(_postEmail, body.layoutId));
     }
+    // Avisos generales (broadcast): publicar/editar exige permiso explícito.
+    // El autor sale de _postEmail (token verificado), no del cliente.
+    if (body.action === 'avisosPublicar') {
+      if (typeof avisosPublicar !== 'function')
+        return jsonResponse({ok:false, error:'Agrega avisos.gs en Apps Script y redespliega.'});
+      if (!_tokenHasPermission(body.token || '', 'publicar_avisos'))
+        return jsonResponse({ok:false, error:'Sin autorización para publicar avisos (publicar_avisos). Pídeselo al administrador.'});
+      return jsonResponse(avisosPublicar(body, _postEmail));
+    }
+    if (body.action === 'avisosActualizar') {
+      if (typeof avisosActualizar !== 'function')
+        return jsonResponse({ok:false, error:'Agrega avisos.gs en Apps Script y redespliega.'});
+      if (!_tokenHasPermission(body.token || '', 'publicar_avisos'))
+        return jsonResponse({ok:false, error:'Sin autorización para editar avisos (publicar_avisos). Pídeselo al administrador.'});
+      return jsonResponse(avisosActualizar(body));
+    }
     if (body.action === 'saveBankRow') {
       if (!_tokenHasPermission(body.token || '', 'bank_capture')) {
         return jsonResponse({ok:false, error:'Sin autorización para capturar movimientos bancarios (bank_capture). Pídeselo al administrador.'});
