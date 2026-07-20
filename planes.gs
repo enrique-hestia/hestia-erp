@@ -22,7 +22,7 @@ function setupPlanesPago() {
   sh.getRange(1,1,1,PLAN_HEADERS.length).setValues([PLAN_HEADERS])
     .setFontWeight('bold').setFontColor('#ffffff').setBackground('#c46a7a');
   sh.setFrozenRows(1);
-  sh.setColumnWidths(1, PLAN_HEADERS.length, [110,240,110,110,100,80,110,70,150,150]);
+  [110,240,110,110,100,80,110,70,150,150].forEach(function(w,i){ sh.setColumnWidth(i+1, w); });
   return {ok:true, tab:PLAN_TAB};
 }
 function _planSheet() {

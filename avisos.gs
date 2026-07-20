@@ -25,7 +25,7 @@ function setupAvisos() {
   sh.getRange(1,1,1,AVISOS_HEADERS.length).setValues([AVISOS_HEADERS])
     .setFontWeight('bold').setFontColor('#ffffff').setBackground('#c46a7a');
   sh.setFrozenRows(1);
-  sh.setColumnWidths(1, AVISOS_HEADERS.length, [110,160,210,150,240,340,80,110,70,110,260,120]);
+  [110,160,210,150,240,340,80,110,70,110,260,120].forEach(function(w,i){ sh.setColumnWidth(i+1, w); });
   return {ok:true, tab:AVISOS_TAB};
 }
 function _avisosSheet() {

@@ -24,7 +24,7 @@ function setupRecordatorios() {
   sh.getRange(1,1,1,REC_HEADERS.length).setValues([REC_HEADERS])
     .setFontWeight('bold').setFontColor('#ffffff').setBackground('#c46a7a');
   sh.setFrozenRows(1);
-  sh.setColumnWidths(1, REC_HEADERS.length, [110,210,260,300,120,110,150,100,160,160,110,80,80]);
+  [110,210,260,300,120,110,150,100,160,160,110,80,80].forEach(function(w,i){ sh.setColumnWidth(i+1, w); });
   return {ok:true, tab:REC_TAB};
 }
 // Asegura que la hoja tenga todas las columnas (migración de hojas viejas de 10 columnas).

@@ -27,7 +27,7 @@ function setupMedicos() {
   sh.getRange(1,1,1,MED_HEADERS.length).setValues([MED_HEADERS])
     .setFontWeight('bold').setFontColor('#ffffff').setBackground('#c46a7a');
   sh.setFrozenRows(1);
-  sh.setColumnWidths(1, MED_HEADERS.length, [90,260,140,70,300,160]);
+  [90,260,140,70,300,160].forEach(function(w,i){ sh.setColumnWidth(i+1, w); });
   return {ok:true, tab:MED_TAB};
 }
 function _medSheet() {

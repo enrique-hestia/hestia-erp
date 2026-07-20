@@ -24,7 +24,7 @@ function setupDashboard() {
   sh.getRange(1,1,1,DASH_HEADERS.length).setValues([DASH_HEADERS])
     .setFontWeight('bold').setFontColor('#ffffff').setBackground('#c46a7a');
   sh.setFrozenRows(1);
-  sh.setColumnWidths(1, DASH_HEADERS.length, [230,140,180,90,70,70,520,160]);
+  [230,140,180,90,70,70,520,160].forEach(function(w,i){ sh.setColumnWidth(i+1, w); });
   return {ok:true, tab:DASH_TAB};
 }
 
