@@ -5475,6 +5475,14 @@ function listaPacientesAll() {
     var idxRS = _pacColIdx(hdrs,'Razon Social'), idxRFC = _pacColIdx(hdrs,'RFC'),
         idxCP = _pacColIdx(hdrs,'Codigo Postal'), idxUso = _pacColIdx(hdrs,'Uso CFDI'),
         idxReg = _pacColIdx(hdrs,'Regimen Fiscal'), idxFP = _pacColIdx(hdrs,'Forma de Pago Habitual');
+    // E-mail POR ENCABEZADO, no por posición: la columna 4 (índice 3) dejó de
+    // ser el correo cuando la hoja cambió de layout, y el buscador de pacientes
+    // recibía otro dato como "email" — por eso no encontraba por correo.
+    var idxEmail = _pacColIdx(hdrs,'E-mail');
+    if (idxEmail < 0) idxEmail = _pacColIdx(hdrs,'Email');
+    if (idxEmail < 0) idxEmail = _pacColIdx(hdrs,'Correo');
+    if (idxEmail < 0) { for (var hE = 0; hE < hdrs.length; hE++){ if (hdrs[hE].toLowerCase().indexOf('mail') > -1){ idxEmail = hE; break; } } }
+    if (idxEmail < 0) idxEmail = 3;   // último recurso: la posición histórica
     // Enmascarado en el BACKEND: los roles sin 'ver_datos_sensibles' (socio, viewer…)
     // reciben nombre+lista (recepción los necesita) pero NO el correo ni los datos
     // fiscales de TODO el padrón. admin/director ven todo. Antes esto volcaba correos
@@ -5485,7 +5493,8 @@ function listaPacientesAll() {
       var nombre = String(data[i][1] || '').trim();
       if (!nombre) continue;
       var lista  = String(data[i][PAC_COL_LISTA - 1] || '').trim() || 'General';
-      var email  = String(data[i][3] || '').trim();
+      var email  = String(data[i][idxEmail] || '').trim();
+      if (email && email.indexOf('@') === -1) email = '';   // lo que no parece correo no se presume correo
       result.push({
         id: String(data[i][0]||'').trim(), nombre: nombre, lista: lista,
         email: _ver ? email : '',
