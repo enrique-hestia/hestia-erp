@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.19.256 -->
+﻿<!-- app-build:2026.07.20.257 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -13474,20 +13474,32 @@ async function cbTraspasoOpen() {
     } catch(e){}
     if (!_cbTraspCuentas) { alert('No se pudieron cargar las cuentas. Revisa tu conexión.'); return; }
   }
-  var bancarias = _cbTraspCuentas.filter(function(c){ return c.tipo==='bancaria' && c.activo!==false; });
+  var cuentas = _cbTraspCuentas.filter(function(c){ return c.activo!==false; });
   _cbTraspEnsureModal();
   var selO=document.getElementById('cbt-origen'), selD=document.getElementById('cbt-destino');
-  var opts = bancarias.map(function(c){ return '<option value="'+c.key+'">'+String(c.nombre).replace(/</g,'&lt;')+'</option>'; }).join('');
+  var tag=function(t){ return t==='credito' ? ' (tarjeta)' : t==='tpv' ? ' (TPV)' : ''; };
+  var opts = cuentas.map(function(c){ return '<option value="'+c.key+'">'+String(c.nombre).replace(/</g,'&lt;')+tag(c.tipo)+'</option>'; }).join('');
   selO.innerHTML = opts; selD.innerHTML = opts;
-  if (bancarias.length > 1) selD.selectedIndex = 1;
+  if (cuentas.length > 1) selD.selectedIndex = 1;
   var msg=document.getElementById('cbt-msg');
-  if (bancarias.length < 2) {
+  if (cuentas.length < 2) {
     msg.style.display='block';
-    msg.innerHTML = '⚠ Necesitas al menos <b>2 cuentas bancarias</b> para un traspaso. Hoy solo hay '+bancarias.length+'. Crea la otra con "Nueva cuenta" (Mercado Pago y las tarjetas no entran aquí: tienen su propia captura).';
+    msg.innerHTML = '⚠ Necesitas al menos <b>2 cuentas</b> para un traspaso. Crea otra con "Nueva cuenta".';
   } else { msg.style.display='none'; msg.innerHTML=''; }
   var f=document.getElementById('cbt-fecha'); if(f && !f.value){ var d=new Date(); f.value=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+  cbTraspasoHint();
   document.getElementById('cbt-ovl').style.display='block';
   document.getElementById('cbt-modal').style.display='block';
+}
+
+// Pista según el TIPO del origen: disposición (tarjeta), retiro (MP) o transferencia.
+function cbTraspasoHint(){
+  var key=(document.getElementById('cbt-origen')||{}).value||'';
+  var c=(_cbTraspCuentas||[]).filter(function(x){return x.key===key;})[0]||{};
+  var h=document.getElementById('cbt-hint'); if(!h) return;
+  if (c.tipo==='credito') h.innerHTML='💳 <b>Disposición de efectivo</b>: esto AUMENTA la deuda de la tarjeta por el monto + la comisión que cobra por disponer. Anota la comisión abajo.';
+  else if (c.tipo==='tpv') h.innerHTML='🏧 <b>Retiro de la cuenta TPV</b> al destino. Si te cobran comisión por el retiro, anótala abajo (queda como comisión de la cuenta).';
+  else h.innerHTML='🏦 Transferencia bancaria. Si tu banco cobra comisión (SPEI, etc.), anótala abajo — se carga a la cuenta origen.';
 }
 
 function _cbTraspEnsureModal(){
@@ -13501,15 +13513,20 @@ function _cbTraspEnsureModal(){
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><div style="font-size:15px;font-weight:800;color:var(--color-text)">⇄ Traspaso entre cuentas</div><button onclick="cbTraspasoClose()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--color-text-muted)">×</button></div>'
     +'<div style="font-size:11px;color:var(--color-text-muted);margin-bottom:14px">Registra el retiro y el depósito de un solo golpe, ligados y rastreables.</div>'
     +'<div id="cbt-msg" style="display:none;background:#fef3c7;color:#92400e;border-radius:9px;padding:9px 12px;font-size:11.5px;line-height:1.5;margin-bottom:12px"></div>'
-    +'<div style="display:flex;gap:10px;margin-bottom:12px">'
-      +'<div style="flex:1"><label '+L+'>Desde (sale el dinero) *</label><select id="cbt-origen" '+S+'></select></div>'
+    +'<div style="display:flex;gap:10px;margin-bottom:10px">'
+      +'<div style="flex:1"><label '+L+'>Desde (sale el dinero) *</label><select id="cbt-origen" '+S+' onchange="cbTraspasoHint()"></select></div>'
       +'<div style="flex:1"><label '+L+'>Hacia (entra el dinero) *</label><select id="cbt-destino" '+S+'></select></div>'
     +'</div>'
+    +'<div id="cbt-hint" style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:9px;padding:8px 11px;font-size:11px;line-height:1.5;color:var(--color-text-muted);margin-bottom:12px"></div>'
     +'<div style="display:flex;gap:10px;margin-bottom:12px">'
       +'<div style="flex:1"><label '+L+'>Monto (MXN) *</label><input id="cbt-monto" type="number" min="0.01" step="0.01" placeholder="0.00" '+S+'></div>'
-      +'<div style="flex:1"><label '+L+'>Fecha *</label><input id="cbt-fecha" type="date" '+S+'></div>'
+      +'<div style="flex:1"><label '+L+'>Comisión del origen</label><input id="cbt-comision" type="number" min="0" step="0.01" placeholder="0.00" '+S+'></div>'
     +'</div>'
-    +'<div style="margin-bottom:16px"><label '+L+'>Concepto (opcional)</label><input id="cbt-concepto" type="text" maxlength="120" placeholder="Ej. fondeo de nómina" '+S+'></div>'
+    +'<div style="display:flex;gap:10px;margin-bottom:12px">'
+      +'<div style="flex:1"><label '+L+'>Fecha *</label><input id="cbt-fecha" type="date" '+S+'></div>'
+      +'<div style="flex:1.4"><label '+L+'>Concepto (opcional)</label><input id="cbt-concepto" type="text" maxlength="120" placeholder="Ej. fondeo de nómina" '+S+'></div>'
+    +'</div>'
+    +'<div style="font-size:10.5px;color:var(--color-text-faint);margin-bottom:14px">El destino recibe el monto completo; la comisión se carga a la cuenta origen.</div>'
     +'<div style="display:flex;gap:10px">'
       +'<button id="cbt-save-btn" onclick="cbTraspasoSave()" style="flex:1;padding:12px;background:var(--color-primary);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Registrar traspaso</button>'
       +'<button onclick="cbTraspasoClose()" style="padding:12px 20px;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:10px;font-size:13px;cursor:pointer;color:var(--color-text);font-family:inherit">Cancelar</button>'
@@ -13523,17 +13540,24 @@ async function cbTraspasoSave(){
   var origen=(document.getElementById('cbt-origen')||{}).value||'';
   var destino=(document.getElementById('cbt-destino')||{}).value||'';
   var monto=parseFloat((document.getElementById('cbt-monto')||{}).value);
+  var comision=parseFloat((document.getElementById('cbt-comision')||{}).value)||0;
   var fecha=(document.getElementById('cbt-fecha')||{}).value||'';
   var concepto=(document.getElementById('cbt-concepto')||{}).value||'';
   if (!origen || !destino) { alert('Elige las dos cuentas.'); return; }
   if (origen===destino) { alert('La cuenta origen y la destino no pueden ser la misma.'); return; }
   if (!(monto>0)) { alert('El monto debe ser mayor a cero.'); return; }
+  if (comision<0) { alert('La comisión no puede ser negativa.'); return; }
   if (!fecha) { alert('La fecha es obligatoria.'); return; }
   var nom=function(k){ var c=(_cbTraspCuentas||[]).filter(function(x){return x.key===k;})[0]; return c?c.nombre:k; };
-  if (!confirm('Registrar traspaso de $'+monto.toLocaleString('es-MX',{minimumFractionDigits:2})+'\n\n'+nom(origen)+'  →  '+nom(destino)+'\n\n¿Confirmas? (se crean los dos movimientos ligados)')) return;
+  var saleTotal = monto + comision;
+  var msgConf = 'Registrar traspaso:\n\n'+nom(origen)+'  →  '+nom(destino)
+    +'\nEntra al destino: $'+monto.toLocaleString('es-MX',{minimumFractionDigits:2})
+    +(comision>0 ? '\nComisión (a '+nom(origen)+'): $'+comision.toLocaleString('es-MX',{minimumFractionDigits:2})+'\nSale del origen: $'+saleTotal.toLocaleString('es-MX',{minimumFractionDigits:2}) : '')
+    +'\n\n¿Confirmas?';
+  if (!confirm(msgConf)) return;
   var btn=document.getElementById('cbt-save-btn'); if(btn){btn.disabled=true;btn.textContent='Registrando…';}
   var res; try{
-    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'traspasoBancos', origen:origen, destino:destino, monto:monto, fecha:fecha, concepto:concepto})});
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'traspasoBancos', origen:origen, destino:destino, monto:monto, comision:comision, fecha:fecha, concepto:concepto})});
     res=await r.json();
   }catch(e){ res={ok:false,error:'Error de conexión: '+e.message}; }
   if(btn){btn.disabled=false;btn.textContent='Registrar traspaso';}
