@@ -433,6 +433,14 @@ function doGet(e) {
       return jsonResponse(readRecordatoriosPendientes(e.parameter.usuario || ''));
     }
 
+    // Tableros configurables ("Mi tablero"). El dueño se deriva del TOKEN, no de
+    // un parámetro del cliente: nadie puede leer el tablero de otro. Fail-closed.
+    if (action === 'dashboardLayouts') {
+      if (typeof readDashboardLayouts !== 'function')
+        return jsonResponse({ok:false, error:'Agrega dashboard.gs en Apps Script y redespliega.', layouts:[]});
+      return jsonResponse(readDashboardLayouts(verifyToken((e && e.parameter.token) || '')));
+    }
+
     // Catálogo de proveedores (fuente única para dropdowns)
     if (action === 'proveedores') {
       return jsonResponse(readProveedores());

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.19.249 -->
+﻿<!-- app-build:2026.07.19.250 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -32188,7 +32188,34 @@ function _dashPalette(n){ var base=['#c46a7a','#3d8f8f','#c47a1e','#7a52b0','#3a
 function _dashUser(){ var s=getSession()||{}; return String(s.email||'anon').toLowerCase(); }
 function _dashLSKey(){ return 'hestia_erp_dash_'+_dashUser(); }
 function _dashGet(){ if(_dashLayout) return _dashLayout; try{ var raw=localStorage.getItem(_dashLSKey()); if(raw){ var o=JSON.parse(raw); if(o&&o.widgets){ _dashLayout=o; return o; } } }catch(e){} _dashLayout={widgets:[], seq:0}; return _dashLayout; }
-function _dashSave(){ try{ localStorage.setItem(_dashLSKey(), JSON.stringify(_dashGet())); }catch(e){} }
+// Guarda: localStorage (instantáneo) + servidor (best-effort, sincroniza dispositivos).
+function _dashSave(){ try{ localStorage.setItem(_dashLSKey(), JSON.stringify(_dashGet())); }catch(e){} _dashSaveServer(); }
+var _dashServerLoaded=false;
+// Trae el tablero guardado en servidor (una vez) y lo hace autoritativo sobre el
+// caché local. Si el servidor no tiene nada (o falla), se queda lo local.
+function _dashLoadServer(){
+  if(_dashServerLoaded) return; _dashServerLoaded=true;
+  try{
+    var tok=encodeURIComponent(getToken());
+    fetch(APPS_SCRIPT_URL+'?action=dashboardLayouts&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d&&d.ok&&d.layouts&&d.layouts.length){
+          var def=null; d.layouts.forEach(function(l){ if(l.layoutId==='default') def=l; }); if(!def) def=d.layouts[0];
+          if(def&&def.config&&def.config.widgets){
+            _dashLayout=def.config;
+            try{ localStorage.setItem(_dashLSKey(), JSON.stringify(_dashLayout)); }catch(e){}
+            if(_dashInTablero()) dashRender();
+          }
+        }
+      }).catch(function(){});
+  }catch(e){}
+}
+function _dashSaveServer(){
+  try{
+    fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'saveDashboardLayout', token:getToken(), layout:{layoutId:'default', nombre:'Mi tablero', config:_dashGet()}})}).catch(function(){});
+  }catch(e){}
+}
 
 // ── Modo Clásico / Mi tablero ──
 function _dashInTablero(){ var v=document.getElementById('view-resumen'); return !!(v && v.classList.contains('mode-tablero')); }
@@ -32200,7 +32227,7 @@ function _dashSetMode(mode){
   try{ localStorage.setItem('hestia_erp_resumen_mode', mode); }catch(e){}
   if(tablero) dashRender(); else _dashKillCharts();
 }
-function _dashInitMode(){ var mode='clasico'; try{ mode=localStorage.getItem('hestia_erp_resumen_mode')||'clasico'; }catch(e){} _dashSetMode(mode); }
+function _dashInitMode(){ var mode='clasico'; try{ mode=localStorage.getItem('hestia_erp_resumen_mode')||'clasico'; }catch(e){} _dashSetMode(mode); _dashLoadServer(); }
 // Llamado desde renderResumen: guarda la data y refresca el tablero si está activo.
 function _dashOnData(data){ _dashData=data||_dashData; if(!_dashModeInit){ _dashModeInit=true; _dashInitMode(); } else if(_dashInTablero()){ dashRender(); } }
 

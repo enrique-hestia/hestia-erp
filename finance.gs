@@ -486,6 +486,18 @@ function doPost(e) {
     if (body.action === 'login') {
       return jsonResponse(handleLogin(body.email || '', body.password || ''));
     }
+    // Tablero configurable: el dueño es _postEmail (verificado por el gate global),
+    // NUNCA un usuario que mande el cliente → nadie escribe el tablero de otro.
+    if (body.action === 'saveDashboardLayout') {
+      if (typeof saveDashboardLayout !== 'function')
+        return jsonResponse({ok:false, error:'Agrega dashboard.gs en Apps Script y redespliega.'});
+      return jsonResponse(saveDashboardLayout(_postEmail, body.layout));
+    }
+    if (body.action === 'deleteDashboardLayout') {
+      if (typeof deleteDashboardLayout !== 'function')
+        return jsonResponse({ok:false, error:'Agrega dashboard.gs en Apps Script y redespliega.'});
+      return jsonResponse(deleteDashboardLayout(_postEmail, body.layoutId));
+    }
     if (body.action === 'saveBankRow') {
       if (!_tokenHasPermission(body.token || '', 'bank_capture')) {
         return jsonResponse({ok:false, error:'Sin autorización para capturar movimientos bancarios (bank_capture). Pídeselo al administrador.'});
