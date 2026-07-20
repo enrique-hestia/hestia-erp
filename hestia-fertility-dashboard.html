@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.20.263 -->
+﻿<!-- app-build:2026.07.20.264 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12172,6 +12172,17 @@ function _comOrigNombre(id) {
   for (var i = 0; i < l.length; i++) if (String(l[i].id || '').trim() === String(id || '').trim()) return l[i].nombre || id;
   return id ? String(id) : '';
 }
+/* Médicos que integran un grupo (los que suman volumen y reciben su %). Incluye
+   el caso "médico independiente = su propio grupo". Misma verdad que la ficha:
+   los médicos y sus grupos viven en Orígenes externos. */
+function _comMedicosDeGrupo(grupoId) {
+  var l = _comOrig || []; grupoId = String(grupoId || '').trim();
+  if (!grupoId) return [];
+  var esMed = function(o){ return (typeof _origTipoCanon==='function') ? _origTipoCanon(o.tipo)==='Médico externo' : true; };
+  var hijos = l.filter(function(o){ return String(o.padre||'').trim()===grupoId && esMed(o); });
+  var propio = l.filter(function(o){ return String(o.id||'').trim()===grupoId && esMed(o); }); // independiente
+  return propio.concat(hijos);
+}
 
 function comRender() {
   var root = document.getElementById('comisiones-root');
@@ -12482,6 +12493,15 @@ function comCfgInnerHtml() {
       + '<select onchange="comCfgSet(\'grupoId\',this.value)" style="' + selS + ';min-width:280px"' + (puede ? '' : ' disabled') + '>'
       + (_comOrig ? _comCfgOrigOpts(r.grupoId, true) : '<option value="' + _comEsc(r.grupoId || '') + '">Cargando catálogo…</option>')
       + '</select>';
+    // Médicos que integran el grupo elegido — para ver EXACTAMENTE a quién aplica.
+    (function(){
+      var _gm = _comMedicosDeGrupo(r.grupoId);
+      h += '<div style="margin:-4px 0 10px;font-size:11.5px;line-height:1.5;color:var(--color-text-muted)">';
+      if (!r.grupoId) h += 'Elige el grupo; aquí aparecerán los médicos que lo integran.';
+      else if (_gm.length) h += '👥 <b style="color:var(--color-text)">Médicos del grupo:</b> ' + _gm.map(function(o){ return _comEsc(o.nombre); }).join(' · ') + '. <span style="color:var(--color-text-faint)">Cada uno suma sus procedimientos al volumen del grupo y recibe su % por los suyos.</span>';
+      else h += '<span style="color:#b45309">⚠ Este grupo no tiene médicos asignados.</span> En <b>Orígenes externos</b>, edita cada médico y ponle este grupo en «Pertenece a».';
+      h += '</div>';
+    })();
 
     // Productos
     h += '<span style="' + lab + '">Procedimientos que aplican <span style="font-weight:400;text-transform:none;color:var(--color-text-muted)">· solo estos cuentan para el escalón Y generan comisión</span></span>';
@@ -12530,14 +12550,14 @@ function comCfgInnerHtml() {
       h += '<tr><td style="padding:4px 8px">';
       if (puede) {
         h += '<select onchange="comCfgBenSet(' + j + ',\'tipo\',this.value)" style="' + selS + ';min-width:180px">'
-          + '<option value="medico_del_procedimiento"' + (esMed ? ' selected' : '') + '>🩺 El médico del procedimiento</option>'
-          + '<option value="fijo"' + (!esMed ? ' selected' : '') + '>👤 Alguien fijo (del catálogo)</option></select>';
+          + '<option value="medico_del_procedimiento"' + (esMed ? ' selected' : '') + '>🩺 Cada médico del grupo (por sus procedimientos)</option>'
+          + '<option value="fijo"' + (!esMed ? ' selected' : '') + '>👤 Alguien fijo — coordinador/agencia (del catálogo)</option></select>';
         if (!esMed) {
           h += '<div style="margin-top:4px"><select onchange="comCfgBenSet(' + j + ',\'origenId\',this.value)" style="' + selS + ';min-width:220px">'
             + (_comOrig ? _comCfgOrigOpts(b.origenId, false) : '<option value="' + _comEsc(b.origenId || '') + '">Cargando catálogo…</option>')
             + '</select></div>';
         }
-      } else h += esMed ? '🩺 El médico del procedimiento' : ('👤 ' + _comEsc(_comOrigNombre(b.origenId)));
+      } else h += esMed ? '🩺 Cada médico del grupo (por sus procedimientos)' : ('👤 ' + _comEsc(_comOrigNombre(b.origenId)));
       h += '</td><td style="padding:4px 8px">' + (puede ? '<input type="number" min="0" step="1" value="' + (b.parte || 0) + '" onchange="comCfgBenSet(' + j + ',\'parte\',this.value)" style="' + inS + '">' : ((b.parte || 0) + '%')) + '</td>'
         + '<td style="padding:4px 8px">';
       if (puede) {
