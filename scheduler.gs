@@ -523,7 +523,11 @@ function _schedTasks() {
     { id:'recordatorios_del_dia', handler:'recordatoriosDelDia',
       nombre:'Recordatorios del día',
       desc:'Cada mañana envía a cada usuario un correo con sus recordatorios (agenda) del día.',
-      tipo:'diaria', horaDefault:7, minuto:30 }
+      tipo:'diaria', horaDefault:7, minuto:30 },
+    { id:'expediente_vigencias', handler:'expedienteChequeoNocturno',
+      nombre:'Expediente médicos — avisos de vigencia',
+      desc:'Cada mañana notifica a los médicos con documentos vencidos o por vencer (correo + recordatorio interno).',
+      tipo:'diaria', horaDefault:8, minuto:15 }
   ];
 }
 function _schedGetCfg(id, key, def){

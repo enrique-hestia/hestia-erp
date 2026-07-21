@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.287 -->
+﻿<!-- app-build:2026.07.21.288 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -33564,7 +33564,8 @@ function _medRenderTabla(){
 function _medRow(m, puede){
   var acc = '';
   if (puede){
-    acc = '<button onclick="medOpenForm(\'' + _escJs(m.id) + '\')" title="Editar" style="background:none;border:1px solid var(--color-divider);border-radius:7px;color:var(--color-text-muted);font-size:11px;padding:5px 10px;cursor:pointer;margin-left:6px">Editar</button>'
+    acc = '<button onclick="expOpen(\'' + _escJs(m.nombre) + '\')" title="Expediente: documentos y vigencias" style="background:none;border:1px solid var(--color-primary,#c46a7a);border-radius:7px;color:var(--color-primary,#c46a7a);font-size:11px;padding:5px 10px;cursor:pointer;margin-left:6px;font-weight:700">📁 Expediente</button>'
+      + '<button onclick="medOpenForm(\'' + _escJs(m.id) + '\')" title="Editar" style="background:none;border:1px solid var(--color-divider);border-radius:7px;color:var(--color-text-muted);font-size:11px;padding:5px 10px;cursor:pointer;margin-left:6px">Editar</button>'
       + '<button onclick="medBaja(\'' + _escJs(m.id) + '\')" title="Dar de baja (deja registro)" style="background:none;border:1px solid var(--color-divider);border-radius:7px;color:#b91c1c;font-size:11px;padding:5px 10px;cursor:pointer;margin-left:6px">Baja</button>';
   }
   return '<tr style="border-top:1px solid var(--color-divider)">'
@@ -33572,6 +33573,107 @@ function _medRow(m, puede){
     + '<td style="padding:10px 14px"><span style="display:inline-block;background:var(--color-surface-offset);border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;color:var(--color-text)">' + _cxpEsc(_medGrupoDe(m)) + '</span></td>'
     + (puede ? '<td style="padding:10px 14px;text-align:right;white-space:nowrap">' + acc + '</td>' : '')
     + '</tr>';
+}
+
+/* ── EXPEDIENTE DE MÉDICOS: modal de checklist (documentos + vigencias) ───── */
+var _expData=null, _expMedico='', _expUploadDoc='';
+function _expEnsureModal(){
+  if(document.getElementById('exp-modal')) return;
+  var d=document.createElement('div'); d.id='exp-modal';
+  d.style.cssText='display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;align-items:flex-start;justify-content:center;overflow:auto;padding:40px 16px';
+  d.innerHTML='<div style="background:var(--color-surface,#fff);border-radius:14px;max-width:660px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)"><div id="exp-modal-body" style="padding:22px 24px"></div></div>';
+  d.addEventListener('click',function(e){ if(e.target===d) expClose(); });
+  document.body.appendChild(d);
+  var fi=document.createElement('input'); fi.type='file'; fi.id='exp-file'; fi.style.display='none';
+  fi.accept='.pdf,.jpg,.jpeg,.png'; fi.addEventListener('change',_expFileChosen); document.body.appendChild(fi);
+}
+function expClose(){ var m=document.getElementById('exp-modal'); if(m) m.style.display='none'; }
+async function expOpen(nombre){
+  _expEnsureModal(); _expMedico=nombre;
+  document.getElementById('exp-modal').style.display='flex';
+  document.getElementById('exp-modal-body').innerHTML='<div style="text-align:center;padding:30px;color:var(--color-text-muted)">Cargando expediente…</div>';
+  try{
+    var r=await fetch(APPS_SCRIPT_URL+'?action=expedienteMedico&medico='+encodeURIComponent(nombre)+'&token='+encodeURIComponent(getToken())+'&_t='+Date.now(),{redirect:'follow'});
+    _expData=await r.json(); expRender();
+  }catch(e){ document.getElementById('exp-modal-body').innerHTML='<div style="color:#b91c1c;padding:20px">Error: '+e.message+'</div>'; }
+}
+function _expBadge(estado){
+  var map={completo:['#16a34a','Completo'],incompleto:['#b45309','Incompleto'],por_vencer:['#a16207','Por vencer'],vencido:['#b91c1c','Vencido']};
+  var c=map[estado]||['#6b7280',estado]; return '<span style="background:'+c[0]+'22;color:'+c[0]+';border-radius:20px;padding:3px 12px;font-size:12px;font-weight:800">'+c[1]+'</span>';
+}
+function expRender(){
+  var d=_expData; if(!d||!d.ok){ document.getElementById('exp-modal-body').innerHTML='<div style="color:#b91c1c;padding:20px">'+((d&&d.error)||'Error')+'</div>'; return; }
+  var puede=hasPermission('editar_ingresos');
+  var h='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px">'
+    +'<div><div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Expediente médico</div>'
+    +'<div style="font-size:18px;font-weight:800;color:var(--color-text)">'+_comEsc(d.medico)+'</div>'
+    +'<div style="font-size:12px;color:var(--color-text-muted);margin-top:4px">'+d.subidos+'/'+d.total+' documentos &nbsp;'+_expBadge(d.estado)+'</div></div>'
+    +'<button onclick="expClose()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--color-text-muted)">×</button></div>'
+    +'<div style="display:flex;flex-direction:column;gap:8px">';
+  (d.items||[]).forEach(function(x){
+    var vig=x.vigencia||{estado:'no_aplica'};
+    var vigTxt = x.requiereVigencia ? (x.fechaVigencia ? ('Vence '+x.fechaVigencia+(vig.estado==='vencido'?' · VENCIDO':vig.estado==='por_vencer'?' · por vencer':'')) : (x.subido?'⚠ falta capturar la vigencia':'')) : '';
+    var vigCol = vig.estado==='vencido'?'#b91c1c':vig.estado==='por_vencer'?'#a16207':'var(--color-text-muted)';
+    h+='<div style="display:flex;align-items:center;gap:10px;border:1px solid var(--color-divider);border-radius:10px;padding:9px 12px">'
+      +'<span style="font-size:18px">'+(x.subido?'✅':'⬜')+'</span>'
+      +'<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--color-text)">'+_comEsc(x.nombre)+'</div>'
+      +(vigTxt?'<div style="font-size:11px;color:'+vigCol+'">'+_comEsc(vigTxt)+'</div>':'')+'</div>';
+    if(x.subido && x.driveUrl) h+='<a href="'+x.driveUrl+'" target="_blank" rel="noopener" style="font-size:11px;color:var(--color-primary,#c46a7a);text-decoration:none;font-weight:700">Ver</a>';
+    if(puede){
+      h+='<button onclick="expUpload(\''+_escJs(x.docId)+'\')" style="font-size:11px;padding:4px 10px;border:1px solid var(--color-primary,#c46a7a);background:none;color:var(--color-primary,#c46a7a);border-radius:7px;cursor:pointer;font-weight:700">'+(x.subido?'Reemplazar':'Subir')+'</button>';
+      if(x.requiereVigencia && x.subido) h+='<button onclick="expSetVig(\''+_escJs(x.docId)+'\')" title="Fecha de vigencia" style="font-size:12px;padding:4px 8px;border:1px solid var(--color-divider);background:none;border-radius:7px;cursor:pointer">📅</button>';
+      if(x.subido) h+='<button onclick="expDel(\''+_escJs(x.docId)+'\')" title="Quitar" style="font-size:12px;padding:4px 8px;border:1px solid #fecaca;background:none;color:#b91c1c;border-radius:7px;cursor:pointer">🗑</button>';
+    }
+    h+='</div>';
+  });
+  h+='</div>';
+  if(puede) h+='<div style="margin-top:16px;display:flex;justify-content:space-between;align-items:center;gap:8px"><span style="font-size:10.5px;color:var(--color-text-muted)">Los documentos son requisito para tratamientos. Archivos en Drive con acceso restringido.</span><button onclick="expNotificar()" style="font-size:12px;padding:8px 16px;border:1px solid var(--color-primary,#c46a7a);background:var(--color-primary,#c46a7a);color:#fff;border-radius:9px;cursor:pointer;font-weight:700;white-space:nowrap">✉ Notificar al médico</button></div>';
+  document.getElementById('exp-modal-body').innerHTML=h;
+}
+function expUpload(docId){ _expUploadDoc=docId; var fi=document.getElementById('exp-file'); if(fi){ fi.value=''; fi.click(); } }
+function _expFileChosen(e){
+  var f=e.target.files&&e.target.files[0]; if(!f) return;
+  if(f.size>10*1024*1024){ alert('El archivo pesa más de 10 MB.'); return; }
+  var rd=new FileReader();
+  rd.onload=async function(){
+    var b64=String(rd.result||'').split(',')[1]||''; var s=getSession()||{};
+    document.getElementById('exp-modal-body').innerHTML='<div style="text-align:center;padding:30px;color:var(--color-text-muted)">Subiendo…</div>';
+    try{
+      var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'expedienteSubir',medico:_expMedico,docId:_expUploadDoc,base64:b64,fileName:f.name,contentType:f.type||'application/octet-stream',token:s.token||getToken(),usuario:s.email||''})});
+      var d=await r.json();
+      if(!d.ok){ alert('No se subió: '+(d.error||'')); expOpen(_expMedico); return; }
+      _expData=d.expediente; expRender();
+    }catch(err){ alert('Error: '+err.message); expOpen(_expMedico); }
+  };
+  rd.readAsDataURL(f);
+}
+async function expSetVig(docId){
+  var cur=((_expData.items||[]).filter(function(x){return x.docId===docId;})[0]||{}).fechaVigencia||'';
+  var v=prompt('Fecha de vigencia (AAAA-MM-DD) — cuándo vence este documento:', cur||'');
+  if(v===null) return; v=(v||'').trim();
+  if(v && !/^\d{4}-\d{2}-\d{2}$/.test(v)){ alert('Formato: AAAA-MM-DD'); return; }
+  var s=getSession()||{};
+  try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'expedienteVigencia',medico:_expMedico,docId:docId,fechaVigencia:v,token:s.token||getToken(),usuario:s.email||''})}); var d=await r.json();
+    if(!d.ok){ alert(d.error||'Error'); return; } _expData=d.expediente; expRender();
+  }catch(e){ alert('Error: '+e.message); }
+}
+async function expDel(docId){
+  if(!confirm('¿Quitar este documento del expediente? El archivo se manda a la papelera de Drive.')) return;
+  var s=getSession()||{};
+  try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'expedienteEliminar',medico:_expMedico,docId:docId,token:s.token||getToken(),usuario:s.email||''})}); var d=await r.json();
+    if(!d.ok){ alert(d.error||'Error'); return; } _expData=d.expediente; expRender();
+  }catch(e){ alert('Error: '+e.message); }
+}
+async function expNotificar(){
+  if(!confirm('Enviar al médico '+_expMedico+' un correo con el estatus de su expediente (pendientes / por vencer / vencidos)?\n\nSe usa el correo registrado en su ficha.')) return;
+  var s=getSession()||{};
+  try{
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'expedienteNotificar',medico:_expMedico,token:s.token||getToken(),usuario:s.email||''})});
+    var res=await r.json();
+    if(!res.ok){ alert('No se pudo notificar: '+(res.error||'')); return; }
+    var msg=(res.enviado&&res.enviado.correo)?('Correo enviado a '+(res.correo||'')+'.'):((res.correo?'':'El médico no tiene correo en su ficha. ')+'Se dejó un recordatorio interno.');
+    alert('Notificación registrada. '+msg);
+  }catch(e){ alert('Error: '+e.message); }
 }
 
 /* Marcador: garantiza el modal singleton en <body> tras cada render de la lista. */

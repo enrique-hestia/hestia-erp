@@ -24,7 +24,7 @@ $DEPLOYMENT_ID = 'AKfycbw3pPDLfDFVmb2VF1FCGCTZGK8Ie1du7zUFyJPQT7Fwxi_ngsEmEL-o-u
 # de tiempo. finance.gs es superconjunto estricto; config_dropdowns no aportaba NADA propio.
 $FILES = @(
   '_diagnostico','analisis','avisos','board','cancelacion','capture','catalogo','chat','cobranza',
-  'comisiones','comprobantes','config','core','dashboard','cxp_creditos','declaraciones',
+  'comisiones','comprobantes','config','core','dashboard','cxp_creditos','declaraciones','expediente',
   'devengado','egresos_auditoria','facturacion','finance','gastosfijos','identificar','inventario','inventario_migracion',
   'lab','medical','medicos','nomina','novedades','origenes','poliza_concil','presupuesto','privacidad',
   'planes','productos_ss_id','prov_defaults','providers','recordatorios','scheduler','semanal','summary',

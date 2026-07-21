@@ -684,6 +684,19 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Actualiza comisiones.gs en Apps Script y redespliega.'});
       return jsonResponse(saldarComision(body, _postEmail));
     }
+    // Expediente de médicos (escrituras; cada función gatea 'editar_ingresos'). El
+    // actor es la identidad VERIFICADA del token, no la del cliente.
+    if (body.action === 'expedienteSubir' || body.action === 'expedienteVigencia' ||
+        body.action === 'expedienteEliminar' || body.action === 'expedienteConfigSave' ||
+        body.action === 'expedienteNotificar' || body.action === 'expedienteSetup') {
+      body.usuario = _postEmail || body.usuario || '';
+      if (body.action === 'expedienteSubir')     return jsonResponse((typeof subirDocExpediente==='function') ? subirDocExpediente(body) : {ok:false, error:'Agrega expediente.gs y redespliega.'});
+      if (body.action === 'expedienteVigencia')  return jsonResponse((typeof actualizarVigenciaExpediente==='function') ? actualizarVigenciaExpediente(body) : {ok:false, error:'Agrega expediente.gs y redespliega.'});
+      if (body.action === 'expedienteEliminar')  return jsonResponse((typeof eliminarDocExpediente==='function') ? eliminarDocExpediente(body) : {ok:false, error:'Agrega expediente.gs y redespliega.'});
+      if (body.action === 'expedienteConfigSave')return jsonResponse((typeof saveExpedienteConfig==='function') ? saveExpedienteConfig(body) : {ok:false, error:'Agrega expediente.gs y redespliega.'});
+      if (body.action === 'expedienteNotificar') return jsonResponse((typeof notificarExpedienteMedico==='function') ? notificarExpedienteMedico(body) : {ok:false, error:'Agrega expediente.gs y redespliega.'});
+      if (body.action === 'expedienteSetup')     return jsonResponse((typeof setupExpediente==='function') ? setupExpediente() : {ok:false, error:'Agrega expediente.gs y redespliega.'});
+    }
     if (body.action === 'saveComisionesCfg') {
       if (typeof saveComisionesCfg !== 'function')
         return jsonResponse({ok:false, error:'Agrega comisiones.gs al proyecto de Apps Script y redespliega.'});

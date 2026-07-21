@@ -538,6 +538,19 @@ function doGet(e) {
         reglaId: (e && e.parameter.reglaId) || ''
       }));
     }
+    // Expediente de médicos (solo lectura)
+    if (action === 'expedienteConfig') {
+      if (typeof readExpedienteConfig !== 'function') return jsonResponse({ok:false, error:'Agrega expediente.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readExpedienteConfig());
+    }
+    if (action === 'expedienteMedico') {
+      if (typeof readExpedienteMedico !== 'function') return jsonResponse({ok:false, error:'Agrega expediente.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readExpedienteMedico((e && e.parameter.medico) || ''));
+    }
+    if (action === 'expedientesResumen') {
+      if (typeof readExpedientesResumen !== 'function') return jsonResponse({ok:false, error:'Agrega expediente.gs al proyecto de Apps Script y redespliega.'});
+      return jsonResponse(readExpedientesResumen());
+    }
     // Presupuesto: histórico de metas por trimestre (racha meta vs real)
     if (action === 'historicoMetas') {
       if (typeof readHistoricoMetas !== 'function')
