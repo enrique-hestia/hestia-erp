@@ -675,6 +675,15 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega comisiones.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(generarComisiones(body));
     }
+    // saldarComision NO mueve dinero: solo marca un mes como "pagado fuera"/descartado
+    // (o lo desmarca) para apagar el aviso. Gate propio: 'saldar_comisiones'.
+    // El actor sale de _postEmail (token verificado), NO del cliente: es una marca
+    // de accountability sobre una hoja de dinero, no debe ser falsificable.
+    if (body.action === 'saldarComision') {
+      if (typeof saldarComision !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza comisiones.gs en Apps Script y redespliega.'});
+      return jsonResponse(saldarComision(body, _postEmail));
+    }
     if (body.action === 'saveComisionesCfg') {
       if (typeof saveComisionesCfg !== 'function')
         return jsonResponse({ok:false, error:'Agrega comisiones.gs al proyecto de Apps Script y redespliega.'});

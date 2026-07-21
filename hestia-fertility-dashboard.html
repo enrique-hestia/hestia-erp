@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.277 -->
+﻿<!-- app-build:2026.07.21.278 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12313,6 +12313,17 @@ function comRender() {
       +  '<button onclick="comCalcular()" style="padding:8px 16px;background:var(--color-brand,#c46a7a);color:#fff;border:none;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">Calcular</button>'
       +  '<span id="com-status" style="font-size:12px;color:var(--color-text-muted,#9ca3af)"></span>'
       +  '</div>';
+    // Reporte general por RANGO de meses (todas las reglas activas o la elegida arriba).
+    h += '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:12px;padding-top:12px;border-top:1px dashed var(--color-border,#e5e7eb)">'
+      +  '<div style="font-size:12px;font-weight:700;color:var(--color-text,#374151);align-self:center">📊 Reporte general</div>'
+      +  '<div><div style="font-size:var(--text-xs);font-weight:600;color:var(--color-text-muted,#9ca3af);margin-bottom:4px">Desde</div>'
+      +  '<input type="month" id="com-rango-desde" style="padding:6px 10px;border:1px solid var(--color-border);border-radius:var(--radius-md,8px);background:var(--color-surface);color:var(--color-text)"></div>'
+      +  '<div><div style="font-size:var(--text-xs);font-weight:600;color:var(--color-text-muted,#9ca3af);margin-bottom:4px">Hasta</div>'
+      +  '<input type="month" id="com-rango-hasta" style="padding:6px 10px;border:1px solid var(--color-border);border-radius:var(--radius-md,8px);background:var(--color-surface);color:var(--color-text)"></div>'
+      +  '<label style="font-size:11.5px;color:var(--color-text-muted,#6b7280);display:flex;align-items:center;gap:5px;align-self:center"><input type="checkbox" id="com-rango-todas" checked> todas las reglas</label>'
+      +  '<button onclick="comReporteRango()" style="padding:8px 16px;background:var(--color-surface-2,#f3f4f6);border:1px solid var(--color-border,#e5e7eb);border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">📊 Ver / imprimir</button>'
+      +  '<span id="com-rango-status" style="font-size:12px;color:var(--color-text-muted,#9ca3af)"></span>'
+      +  '</div>';
   }
   h += '</div>';                       // /card controles
   h += '<div id="com-result"></div>';
@@ -12324,8 +12335,71 @@ function comRender() {
     var elM = document.getElementById('com-mes'), elY = document.getElementById('com-anio');
     if (elM) elM.value = String(hoy2.getMonth() === 0 ? 12 : hoy2.getMonth());
     if (elY) elY.value = String(hoy2.getMonth() === 0 ? hoy2.getFullYear() - 1 : hoy2.getFullYear());
+    // Rango por defecto: del mes pasado hacia atrás 6 meses.
+    var elHasta = document.getElementById('com-rango-hasta'), elDesde = document.getElementById('com-rango-desde');
+    var _mk = function(d){ return d.getFullYear() + '-' + ('0'+(d.getMonth()+1)).slice(-2); };
+    var _fin = new Date(hoy2.getFullYear(), hoy2.getMonth() - 1, 1);
+    var _ini = new Date(hoy2.getFullYear(), hoy2.getMonth() - 6, 1);
+    if (elHasta) elHasta.value = _mk(_fin);
+    if (elDesde) elDesde.value = _mk(_ini);
   }
   if (_comCalc) comRenderResult();
+}
+/* Reporte general de comisiones por RANGO de meses. Read-only: una fila por mes+regla
+   con conteo, escalón, total y ESTADO (pendiente/generado/pagado fuera/descartado). */
+async function comReporteRango(){
+  var d = (document.getElementById('com-rango-desde')||{}).value || '';
+  var h = (document.getElementById('com-rango-hasta')||{}).value || '';
+  if (!/^\d{4}-\d{2}$/.test(d) || !/^\d{4}-\d{2}$/.test(h)){ alert('Elige el rango: Desde y Hasta (mes y año).'); return; }
+  var todas = (document.getElementById('com-rango-todas')||{}).checked;
+  var reglaId = todas ? '' : ((document.getElementById('com-regla')||{}).value || '');
+  var st = document.getElementById('com-rango-status'); if (st) st.textContent = 'Generando…';
+  var q = 'action=reporteComisionesRango&desde=' + encodeURIComponent(d) + '&hasta=' + encodeURIComponent(h)
+        + (reglaId ? '&reglaId=' + encodeURIComponent(reglaId) : '') + '&token=' + encodeURIComponent(getToken()) + '&_t=' + Date.now();
+  var res;
+  try { var r = await fetch(APPS_SCRIPT_URL + '?' + q, {redirect:'follow'}); res = await r.json(); }
+  catch(e){ res = { ok:false, error:e.message }; }
+  if (st) st.textContent = '';
+  if (!res || !res.ok){ alert('No se pudo generar el reporte.\n\n' + ((res&&res.error) || 'Error desconocido')); return; }
+  if (!(res.filas||[]).length){ alert('No hay comisiones en ese rango.'); return; }
+  _comImprimirRango(res);
+}
+/* Estado legible + estilo para el reporte de rango. */
+function _comEstadoTxt(e){
+  return e==='generado' ? 'Generado' : e==='saldada' ? 'Pagado fuera' : e==='descartada' ? 'Descartado' : e==='sin_comision' ? 'Sin comisión' : (e==='pendiente'?'PENDIENTE':e);
+}
+function _comImprimirRango(res){
+  var rows = [], kinds = [], cons = [];
+  (res.filas||[]).forEach(function(f){
+    rows.push([ _comMesNombre(f.mesKey), f.regla, String(f.conteo||0), (f.pct||0)+'%', _comEstadoTxt(f.estado), _comMoney(f.total) ]);
+    kinds.push('header'); cons.push(null);
+    (f.beneficiarios||[]).forEach(function(b){
+      rows.push([ '↳ ' + b.beneficiario, (b.via==='efectivo'?'Efectivo · CxP':'Nota de crédito'), '', '', (b.aplica?('aplica '+_comMesNombre(String(b.aplica))):''), _comMoney(b.monto) ]);
+      kinds.push('item'); cons.push(null);
+    });
+  });
+  var t = res.totales||{};
+  var kpis = [
+    { value:_comMoney(t.general||0),   label:'Total del rango' },
+    { value:_comMoney(t.pendiente||0), label:'PENDIENTE de generar' },
+    { value:_comMoney(t.generado||0),  label:'Ya generado' },
+    { value:_comMoney((t.saldada||0)+(t.descartada||0)), label:'Pagado fuera / descartado' }
+  ];
+  var notaHtml = '<div style="margin:16px 22px;padding:10px 14px;border:1px dashed #bbb;border-radius:8px;font-size:11px;color:#333;page-break-inside:avoid">'
+    + '<b>Estados:</b> <b>PENDIENTE</b> = alcanzó el escalón y aún no se genera ni se ha marcado; <b>Generado</b> = créditos/CxP creados en el sistema; <b>Pagado fuera</b> = liquidado por fuera antes de este módulo (marcado a mano); <b>Descartado</b> = no aplica. Solo «PENDIENTE» requiere acción.</div>';
+  var reglasUnicas = {}; (res.filas||[]).forEach(function(f){ reglasUnicas[f.reglaId] = f.regla; });
+  var nombresR = Object.keys(reglasUnicas);
+  var subject = (nombresR.length === 1) ? reglasUnicas[nombresR[0]] : 'Todas las reglas (' + nombresR.length + ')';
+  var _per = _comMesNombre(res.desde) + ' → ' + _comMesNombre(res.hasta);
+  hfReportPrint('comisiones-general', {
+    title:'Comisiones — reporte general por rango', subject:subject,
+    period: _per, generado:hfSello(),
+    kpis:kpis,
+    cols:['Mes / beneficiario','Regla / cómo se paga',{label:'Proc.',r:true},{label:'Escalón',r:true},{label:'Estado / aplica'},{label:'Monto',r:true}],
+    rows:rows, rowKinds:kinds, conceptCol:0, rowConcepts:cons,
+    totalLabel:'Total del rango', totalValue:_comMoney(t.general||0), totalCol:5, lineCol:5,
+    notaHtml:notaHtml, lang:'es'
+  });
 }
 
 async function comCalcular() {
@@ -12469,17 +12543,77 @@ function comImprimirDetalle(){
    no generada (backend comisionesPendientes) y pinta un banner con la lista. */
 function comChequeaPendientes(){
   var box = document.getElementById('com-pendientes'); if (!box) return;
-  fetch(APPS_SCRIPT_URL + '?action=comisionesPendientes&meses=3&token=' + encodeURIComponent(getToken()) + '&_t=' + Date.now(), {redirect:'follow'})
+  var meses = (window._comPendMeses||6);
+  fetch(APPS_SCRIPT_URL + '?action=comisionesPendientes&meses=' + meses + '&token=' + encodeURIComponent(getToken()) + '&_t=' + Date.now(), {redirect:'follow'})
     .then(function(r){ return r.json(); }).then(function(d){
       if (!d || !d.ok || !d.pendientes || !d.pendientes.length){ box.innerHTML = ''; return; }
+      var puedeSaldar = (typeof hasPermission==='function') && hasPermission('saldar_comisiones');
       var items = d.pendientes.map(function(p){
-        return '<li style="margin:2px 0">' + _comEsc(p.regla) + ' · ' + _comEsc(_comMesNombre(p.mesKey)) + ' · ' + p.conteo + ' proc. → ' + p.pct + '% · <b>' + _comMoney(p.total) + '</b></li>';
+        var acc = '', etq;
+        if (p.crecioTrasMarcar){
+          // El mes ya estaba marcado (pagado fuera) pero le entraron más ventas: se
+          // re-avisa SOLO el excedente. No van los botones (ya hay marca): hay que abrir
+          // ese mes y decidir (desmarcar/re-marcar o generar el excedente).
+          etq = ' · <b>+' + _comMoney(p.total) + '</b> nuevo';
+          acc = '<span style="margin-left:8px;font-size:11px;color:#b45309">⚠ creció tras marcarse (marcado ' + _comMoney(p.marcadoPrevio||0) + ', ahora ' + _comMoney(p.totalVivo||0) + ') — ábrelo para revisar</span>';
+        } else {
+          etq = ' · <b>' + _comMoney(p.total) + '</b>';
+          if (puedeSaldar){
+            var args = "'" + _comEsc(p.reglaId) + "'," + p.anio + "," + p.mes;
+            acc = '<span style="white-space:nowrap;margin-left:8px">'
+                + '<button onclick="comSaldar(' + args + ",'saldar')\" title=\"Marcar este mes como ya pagado fuera del sistema (apaga el aviso, no mueve dinero)\" style=\"padding:2px 8px;font-size:11px;font-weight:600;border:1px solid #a7f3d0;background:#ecfdf5;color:#047857;border-radius:7px;cursor:pointer\">✓ Ya se pagó</button> "
+                + '<button onclick="comSaldar(' + args + ",'descartar')\" title=\"Descartar este mes (no aplica). También apaga el aviso.\" style=\"padding:2px 8px;font-size:11px;font-weight:600;border:1px solid #e5e7eb;background:#f9fafb;color:#6b7280;border-radius:7px;cursor:pointer\">🚫 Descartar</button>"
+                + '</span>';
+          }
+        }
+        return '<li style="margin:4px 0">' + _comEsc(p.regla) + ' · ' + _comEsc(_comMesNombre(p.mesKey)) + ' · ' + p.conteo + ' proc. → ' + p.pct + '%' + etq + acc + '</li>';
       }).join('');
+      var nota = puedeSaldar
+        ? 'Estos meses ya cerraron con comisión y aún no se han generado. Elige la regla y el mes abajo, pulsa «Calcular» y luego «Generar». <b>Si ya se pagaron fuera del sistema</b> (antes de este módulo), márcalos con <b>✓ Ya se pagó</b> para quitarlos del aviso.'
+        : 'Estos meses ya cerraron con comisión y aún no se han generado. Elige la regla y el mes abajo, pulsa «Calcular» y luego «Generar».';
       box.innerHTML = '<div style="margin-bottom:16px;padding:14px 16px;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;color:#92400e;font-size:13px">'
         + '<div style="font-weight:800;margin-bottom:4px">🔔 Hay comisiones por pagar (' + _comMoney(d.total) + ')</div>'
-        + '<div style="font-size:12px;margin-bottom:6px">Estos meses ya cerraron con comisión y aún no se han generado. Elige la regla y el mes abajo, pulsa «Calcular» y luego «Generar».</div>'
-        + '<ul style="margin:0;padding-left:18px;font-size:12px">' + items + '</ul></div>';
+        + '<div style="font-size:12px;margin-bottom:6px">' + nota + '</div>'
+        + '<ul style="margin:0;padding-left:18px;font-size:12px;list-style:disc">' + items + '</ul></div>';
     }).catch(function(){ box.innerHTML = ''; });
+}
+/* Marca un mes como ya pagado fuera del sistema ('saldar') o lo descarta ('descartar').
+   NO mueve dinero: solo lo quita del aviso "hay comisiones por pagar". Requiere el
+   permiso saldar_comisiones (el backend vuelve a validarlo). */
+async function comSaldar(reglaId, anio, mes, accion){
+  var esDesc = (accion==='descartar');
+  var verbo = esDesc ? 'DESCARTAR' : 'marcar como YA PAGADA (fuera del sistema)';
+  if (!confirm(verbo + ' la comisión de ' + _comMesNombre(anio + '-' + ('0'+mes).slice(-2)) + ' ' + anio + '.\n\n'
+    + (esDesc ? 'Se quitará del aviso «hay comisiones por pagar» porque no aplica.' : 'Úsalo solo si ese mes ya se liquidó FUERA del sistema (antes de este módulo).')
+    + '\nNo se mueve dinero: no crea créditos ni cuentas por pagar. Queda registrado quién lo marcó y se puede revertir.\n\n¿Confirmas?')) return;
+  var s = getSession() || {};
+  var res;
+  try {
+    var r = await fetch(APPS_SCRIPT_URL, { method:'POST', redirect:'follow', body: JSON.stringify({
+      action:'saldarComision', accion:accion, anio:anio, mes:mes, reglaId:reglaId,
+      token: s.token || getToken(), usuario: s.email || '' }) });
+    res = await r.json();
+  } catch(e){ res = { ok:false, error:e.message }; }
+  if (!res.ok){ alert('No se pudo marcar.\n\n' + (res.error || 'Error desconocido')); return; }
+  if (res.yaMarcada) alert(res.msg || 'Ese mes ya estaba marcado.');
+  comChequeaPendientes();                 // refresca el aviso
+  if (_comCalc && _comCalc.ok) comCalcular();   // y el cálculo si estaba abierto ese mes
+}
+/* Quita la marca del mes que está en pantalla (vuelve a contar como pendiente). */
+async function comDesmarcar(){
+  var c = _comCalc; if (!c || !c.ok || !c.marca) return;
+  if (!confirm('Quitar la marca de ' + _comMesNombre(c.mes) + '.\n\nEse mes volverá a aparecer como comisión pendiente y podrás Generarlo.\n\n¿Confirmas?')) return;
+  var s = getSession() || {};
+  var res;
+  try {
+    var r = await fetch(APPS_SCRIPT_URL, { method:'POST', redirect:'follow', body: JSON.stringify({
+      action:'saldarComision', accion:'desmarcar', anio:c.anio, mes:parseInt(String(c.mes).substring(5,7),10),
+      reglaId:c.regla.id, token: s.token || getToken(), usuario: s.email || '' }) });
+    res = await r.json();
+  } catch(e){ res = { ok:false, error:e.message }; }
+  if (!res.ok){ alert('No se pudo quitar la marca.\n\n' + (res.error || 'Error desconocido')); return; }
+  comChequeaPendientes();
+  await comCalcular();
 }
 function comRenderResult() {
   var box = document.getElementById('com-result');
@@ -12624,6 +12758,17 @@ function comRenderResult() {
       +  '<button onclick="comGenerar(true)" style="padding:8px 16px;background:none;color:#92400e;border:1px solid #fde68a;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">↻ Regenerar</button>'
       +  '<button onclick="comRevertir()" title="Deshacer esta generación (borra los créditos y la CxP creados). Solo si nadie los ha usado." style="padding:8px 16px;background:none;color:#b91c1c;border:1px solid #fecaca;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">↩ Revertir (deshacer)</button></div>'
       +  '<div style="margin-top:6px;color:var(--color-text-muted,#6b7280)"><b>Regenerar</b> deshace y vuelve a crear; <b>Revertir</b> solo deshace (lo deja como si nunca se hubiera generado). Ambos solo funcionan si <b>nadie lo ha cobrado todavía</b>: si el médico ya usó su crédito o a Madero ya se le pagó, el ERP se niega (no borra dinero real).</div>';
+    h += '</div>';
+  } else if (c.marca) {
+    var esDesc = (c.marca.tipo === 'descartada');
+    var puedeSaldar = hasPermission('saldar_comisiones');
+    h += '<div style="margin-top:16px;padding:14px;background:' + (esDesc ? 'var(--color-surface,#f9fafb)' : 'rgba(16,185,129,.08)') + ';border:1px solid ' + (esDesc ? 'var(--color-border,#e5e7eb)' : 'rgba(16,185,129,.35)') + ';border-radius:9px;font-size:12.5px">'
+      +  '<b>' + (esDesc ? '🚫 Este mes se descartó (no aplica).' : '✓ Este mes se marcó como YA PAGADO fuera del sistema.') + '</b>'
+      +  '<div style="margin-top:5px;color:var(--color-text-muted,#6b7280)">' + (esDesc ? 'No cuenta como pendiente.' : 'Se liquidó por fuera antes de este módulo; no se generaron créditos ni cuentas por pagar aquí.')
+      +  (c.marca.usuario ? ' Marcado por <b>' + _comEsc(c.marca.usuario) + '</b>.' : '')
+      +  (c.marca.nota ? ' <i>' + _comEsc(c.marca.nota) + '</i>' : '') + '</div>';
+    if (puedeSaldar) h += '<div style="margin-top:10px"><button onclick="comDesmarcar()" title="Quitar la marca: el mes vuelve a contar como pendiente y podrás Generar." style="padding:8px 16px;background:none;color:#92400e;border:1px solid #fde68a;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">↩ Quitar la marca (volver a pendiente)</button></div>';
+    else h += '<div style="margin-top:8px;color:var(--color-text-muted,#9ca3af)">Para quitar la marca necesitas el permiso <b>saldar_comisiones</b>.</div>';
     h += '</div>';
   } else if (c.bloqueo) {
     h += '<div style="margin-top:16px;padding:14px;background:#fef2f2;border:1px solid #fecaca;border-radius:9px;color:#991b1b;font-size:12.5px">'
@@ -25216,7 +25361,8 @@ var _REPORT_TYPES=[
   {id:'cobranza-general',    label:'Reporte general de cobranza', defaultTpl:'ejecutivo'},
   {id:'comisiones-actividad',label:'Comisiones — actividad de m\xe9dicos', defaultTpl:'ejecutivo'},
   {id:'comisiones-pagar',    label:'Comisiones — reporte a pagar', defaultTpl:'contable'},
-  {id:'comisiones-detalle',  label:'Comisiones — detalle del c\xe1lculo', defaultTpl:'minimalista'}
+  {id:'comisiones-detalle',  label:'Comisiones — detalle del c\xe1lculo', defaultTpl:'minimalista'},
+  {id:'comisiones-general',  label:'Comisiones — reporte general por rango', defaultTpl:'ejecutivo'}
 ];
 /* ── Shared helpers ────────────────────────────────────────── */
 function _tplFmt(v,decimals){var n=Number(v)||0;var d=decimals||0;return '$'+n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});}
@@ -27493,7 +27639,11 @@ var OP_PERMS_CATALOG = [
   {key:'pagos_autorizar',  label:'Autorizar pagos (flujo próximo)',  cat:'Documentos y Correo'},
   {key:'ver_datos_sensibles', label:'Ver nombres y datos sensibles (pacientes, empleados, proveedores)', cat:'Privacidad'},
   {key:'cambiar_auto_refresh', label:'Cambiar el auto-refresh (frecuencia de actualización)', cat:'Sistema'},
-  {key:'publicar_avisos',  label:'Publicar avisos generales para todo el equipo', cat:'Comunicación'}
+  {key:'publicar_avisos',  label:'Publicar avisos generales para todo el equipo', cat:'Comunicación'},
+  /* NO mueve dinero: solo apaga el aviso "hay comisiones por pagar" para meses ya
+     liquidados fuera del sistema (o que no aplican). Aparte de generar a propósito;
+     nuevo → de entrada solo admin/director hasta que se otorgue aquí. */
+  {key:'saldar_comisiones', label:'Marcar comisiones pasadas como ya pagadas / descartar', cat:'Comisiones'}
 ];
 
 // Fallback hardcoded (se usa solo si la sesión no trae permisosOperativos)
@@ -40305,7 +40455,7 @@ async function _novCfgGuardar(){
 
   /* ============ COMISIONES POR VOLUMEN DE GRUPO ============ */
   { id:'comisiones', group:'operacion', icon:'🤝', title:'Comisiones a médicos externos (volumen de grupo)',
-    keywords:'comision comisiones rebate escalon escalones volumen grupo medico medicos externos coordinador madero daniel madero paladino nivel niveles porcentaje descuento grupo medico procedimientos elegibles beneficiario reparto credito efectivo cxp diferido mes siguiente generar regenerar revertir deshacer undo configurar regla reglas editor crear regla nueva regla capturar regla escalones desde hasta beneficiarios parte 100 empezar con un ejemplo aviso descuento al capturar reporte actividad reporte a pagar reporte detallado por que no cuenta producto no elegible inseminacion sasha hay comisiones por pagar cuando se aplica mes ganado hestia medicos tratantes prueba',
+    keywords:'comision comisiones rebate escalon escalones volumen grupo medico medicos externos coordinador madero daniel madero paladino nivel niveles porcentaje descuento grupo medico procedimientos elegibles beneficiario reparto credito efectivo cxp diferido mes siguiente generar regenerar revertir deshacer undo configurar regla reglas editor crear regla nueva regla capturar regla escalones desde hasta beneficiarios parte 100 empezar con un ejemplo aviso descuento al capturar reporte actividad reporte a pagar reporte detallado por que no cuenta producto no elegible inseminacion sasha hay comisiones por pagar cuando se aplica mes ganado hestia medicos tratantes prueba reporte general rango de meses varios meses saldar marcar como pagada ya se pago pagada fuera del sistema descartar desmarcar quitar marca saldar_comisiones meses anteriores ya pagados antes del sistema permiso',
     intro:'Cuando un **grupo de médicos externos** junta suficientes procedimientos en el mes, se les paga un **rebate**. Funciona en 4 pasos: el **grupo desbloquea** el nivel entre todos, pero **cada médico cobra sobre lo suyo**, y ese monto se **reparte** entre el médico y el coordinador, pagándose **el mes siguiente**.',
     pasos:[
       '**1. Se cuenta.** Se suman los procedimientos **elegibles** (una lista configurable de productos — no todos cuentan) de **todos** los médicos del grupo en el mes. Las **ventas canceladas no cuentan**.',
@@ -40324,14 +40474,16 @@ async function _novCfgGuardar(){
       { h:'Aviso de descuento al CAPTURAR un ingreso', p:'Cuando capturas un ingreso y eliges el **Origen** (médico o agencia), sale un aviso automático debajo del selector: *«🎯 Dr. Paladino tiene 10% de comisión este mes»* o *«sin comisión todavía, faltan 1 para el 10%»*, o para agencias *«🏷️ Reprovida acumuló X%»*. Si no hay descuento, no muestra nada. ⚠ Es un **rebate al médico** (su crédito), **NO** una rebaja al precio que paga la paciente. Es informativo y de solo lectura: no cambia lo que capturas.' },
       { h:'Los tres reportes imprimibles', p:'Después de **Calcular**, arriba de «Se va a generar» hay dos botones y en «Actividad de los médicos» un tercero:\n\n· **🖨️ Imprimir reporte** (actividad) — qué hizo cada médico: sus procedimientos, base y la comisión que le toca (o la que le tocaría si el grupo llegara al escalón). **Sale siempre**, aunque el grupo no llegue al nivel.\n· **🖨️ Reporte a pagar** — lo que se le paga a cada beneficiario, marcando la línea de **Daniel Madero** como *«Efectivo · Cuenta por pagar»* (la que se vuelve CxP).\n· **🖨️ Reporte detallado** — el porqué del cálculo: por médico, sus procedimientos → escalón → reparto (crédito/efectivo).\n\nTodos usan el motor de plantillas: su diseño se cambia en **Panel de Control → Formato de reportes**.' },
       { h:'¿Por qué NO cuenta un procedimiento? (te lo dice la pantalla)', p:'Un procedimiento **solo cuenta si su producto está en la lista de la regla** (coincidencia exacta con el nombre del catálogo). Si un paciente de un médico del grupo no aparece, casi siempre es eso: su producto no está en la lista. La pantalla ahora te lo dice directo con un aviso amarillo: *«⚠ Estos procedimientos del grupo NO cuentan (su producto no está en la lista de la regla): Dr. Paladino · Sasha · **Inseminación Intrauterina**»*. Para que cuente, agrega ese producto en **⚙️ Configurar reglas → Procedimientos que aplican**. (La forma de pago —Nota de Crédito, efectivo— **no** afecta: el motor cuenta por producto + origen + mes.)' },
+      { h:'Reporte general por RANGO de meses', p:'Además de los tres reportes de un mes, en los controles hay un bloque **📊 Reporte general**: eliges **Desde** y **Hasta** (mes/año) y **todas las reglas** (o solo la seleccionada) y pulsas **📊 Ver / imprimir**. Sale una tabla tipo flujo de efectivo con **una fila por mes+regla**: procedimientos, escalón, total y su **ESTADO** — **PENDIENTE** (alcanzó escalón y aún no se genera ni se marcó), **Generado** (créditos/CxP creados), **Pagado fuera** (marcado a mano) o **Descartado**. Arriba, cuatro KPIs (total del rango, pendiente, ya generado, pagado fuera/descartado). Solo lo **PENDIENTE** requiere acción. El rango se topa a **24 meses**. Su diseño se cambia en **Panel de Control → Formato de reportes** (`comisiones-general`).' },
+      { h:'Marcar meses YA pagados fuera del sistema (o descartarlos)', p:'Como este módulo es nuevo, hay meses viejos cuya comisión **ya se pagó a mano** antes de que existiera — pero el aviso «hay comisiones por pagar» los seguiría marcando. Para eso, en el **aviso** cada mes trae dos botones: **✓ Ya se pagó** (se liquidó fuera del sistema) y **🚫 Descartar** (no aplica). Cualquiera de los dos **quita ese mes del aviso** y de lo pendiente. ⚠ **NO mueve dinero**: no crea créditos ni cuentas por pagar; solo deja una marca con **quién y cuándo** la puso. Si te equivocas, abre ese mes (Calcular) y pulsa **↩ Quitar la marca**: vuelve a contar como pendiente. **Requiere el permiso `saldar_comisiones`** (aparte de generar): sin él ves el aviso pero no los botones. No se puede marcar como pagado un mes que el sistema **ya generó** de verdad (para eso está **Revertir**).' },
       { h:'«¿Cuándo se aplica?» (diferido): acumula en un mes, aplica en otro', p:'El **diferido** es cuántos meses después de los procedimientos se aplica/paga la comisión: **0** = el mismo mes; **1** = el mes siguiente (acumula en junio, aplica en julio). El % se **gana** por el volumen acumulado de un mes y se **aplica** `diferido` meses después. Por eso el aviso al capturar, con diferido=1, te dice el % ganado el **mes anterior** («por su volumen de junio»), no el del mes de la venta. Si tu modelo es «lo de junio se aplica en julio», pon el diferido en **1**.' },
       { h:'Cómo se paga cada quien', p:'El **crédito** del médico se guarda a su nombre y se descuenta de lo que él debe la próxima vez que se le facture. ⚠ Para que se pueda aplicar, la cuenta tiene que estar a **exactamente ese mismo nombre**; si el médico nunca ha sido titular de una cuenta, la pantalla te lo **avisa** antes de generar. El **efectivo** del coordinador se crea como una **cuenta por pagar** que vence a fin del mes siguiente, y se paga desde CxP como cualquier otra.' }
     ],
     datos:{
-      hojas:['`BD_Ingresos` (columna `OrigenExterno` = quién trajo la venta, y `Cancelada`)','`Origenes_Externos` (columna `Padre` = a qué grupo pertenece cada médico)','`Creditos_Favor` (el crédito del médico)','`Egresos<año>` (la CxP del coordinador)','`Comisiones_Generadas` (memoria de lo ya generado: impide duplicar)'],
-      funciones:['calcularComisiones (solo lectura; devuelve descartadasDetalle = por qué no cuenta cada procedimiento)','generarComisiones (escribe; con {regenerar} rehace, con {soloRevertir} solo deshace)','descuentoOrigen (GET, aviso al capturar; respeta el diferido → mes ganado)','comisionesPendientes (GET, aviso «hay comisiones por pagar»)','readComisionesCfg','saveComisionesCfg','setupComisionesConfig'],
-      permisos:['generar_comisiones'],
-      nota:'`comisiones.gs` (backend) requiere deploy + `setupComisionesConfig()`. Las reglas se capturan desde **⚙️ Configurar reglas** (`readComisionesCfg`/`saveComisionesCfg`, permiso `generar_comisiones`); se guardan en la Script Property `COMISIONES_CFG` — el JSON queda visible en un `<details>` solo para soporte, ya no es la forma de capturar. Depende de `origenes.gs` (`_origResolver`, la jerarquía de grupos): si no está desplegado, el módulo **falla ruidoso** en vez de calcular cero en silencio. La validación (`_comValidarRegla`) corre en el front **y** en el backend: el reparto debe sumar 100% en los dos.'
+      hojas:['`BD_Ingresos` (columna `OrigenExterno` = quién trajo la venta, y `Cancelada`)','`Origenes_Externos` (columna `Padre` = a qué grupo pertenece cada médico)','`Creditos_Favor` (el crédito del médico)','`Egresos<año>` (la CxP del coordinador)','`Comisiones_Generadas` (memoria: Estado `activa` = dinero real generado; `revertida` = deshecho; `saldada`/`descartada` = marca manual sin dinero; `desmarcada` = marca quitada)'],
+      funciones:['calcularComisiones (solo lectura; devuelve descartadasDetalle y `marca` = marca manual viva)','generarComisiones (escribe; con {regenerar} rehace, con {soloRevertir} solo deshace)','descuentoOrigen (GET, aviso al capturar; respeta el diferido → mes ganado)','comisionesPendientes (GET, aviso «hay comisiones por pagar»; ya salta los meses marcados)','reporteComisionesRango (GET, reporte general por rango de meses; solo lectura)','saldarComision (POST; accion saldar/descartar/desmarcar; NO mueve dinero; permiso `saldar_comisiones`)','_comMarca / _comYaGenerado (solo cuenta Estado=activa)','readComisionesCfg','saveComisionesCfg','setupComisionesConfig'],
+      permisos:['generar_comisiones (calcular/generar/revertir)','saldar_comisiones (marcar como pagada fuera / descartar / desmarcar — NO mueve dinero)'],
+      nota:'`comisiones.gs` (backend) requiere deploy + `setupComisionesConfig()`. **Marcar como pagada** escribe una fila-marca en `Comisiones_Generadas` (Via=`marca`, RefId vacío, Estado `saldada`/`descartada`): apaga el aviso sin tocar dinero, y `_comYaGenerado` la ignora (solo cuenta `activa`), así que jamás la confunde el Revertir. `saldar_comisiones` es un permiso nuevo → de entrada solo admin/director hasta otorgarlo en Gestión de Roles. El **reporte general por rango** itera `calcularComisiones` mes a mes (tope 24 meses) — es solo lectura. Depende de `origenes.gs` (`_origResolver`): si no está desplegado, el módulo **falla ruidoso** en vez de calcular cero en silencio. La validación (`_comValidarRegla`) corre en el front **y** en el backend.'
     } },
 
   { id:'poliza-concil', group:'operacion', icon:'🧾', title:'Conciliar pólizas (ContaDigital)',
@@ -44533,7 +44685,7 @@ async function _novCfgGuardar(){
 
   /* ============ COMISIONES POR VOLUMEN DE GRUPO ============ */
   { id:'comisiones', group:'operacion', icon:'🤝', title:'Comisiones a médicos externos (volumen de grupo)',
-    keywords:'comision comisiones rebate escalon escalones volumen grupo medico medicos externos coordinador madero paladino nivel porcentaje reparto credito efectivo generar regenerar diferido mes siguiente cuando se aplica acumulado mes ganado mes aplica configurar regla reglas editor de reglas crear regla nueva regla capturar regla beneficiarios parte suma 100 empezar con un ejemplo desde hasta sin limite reporte reportes imprimir actividad a pagar detalle plantilla panel de control revertir reversa deshacer undo aviso descuento al capturar por que no cuenta no aparece procedimiento descartado no elegible producto no incluido hay comisiones por pagar banner recordatorio',
+    keywords:'comision comisiones rebate escalon escalones volumen grupo medico medicos externos coordinador madero paladino nivel porcentaje reparto credito efectivo generar regenerar diferido mes siguiente cuando se aplica acumulado mes ganado mes aplica configurar regla reglas editor de reglas crear regla nueva regla capturar regla beneficiarios parte suma 100 empezar con un ejemplo desde hasta sin limite reporte reportes imprimir actividad a pagar detalle plantilla panel de control revertir reversa deshacer undo aviso descuento al capturar por que no cuenta no aparece procedimiento descartado no elegible producto no incluido hay comisiones por pagar banner recordatorio reporte general rango de meses varios meses saldar marcar como pagada ya se pago pagada fuera del sistema descartar desmarcar quitar marca saldar_comisiones meses anteriores ya pagados antes del sistema permiso',
     para:'El **grupo** de médicos junta procedimientos en el mes y eso **desbloquea** un escalón (ej. 3 o más → 10%). El % se aplica **solo a los procedimientos de cada médico**, y ese monto se **reparte**: mitad de **crédito al médico** y mitad en **efectivo al coordinador**, el **mes siguiente**. Nada se escribe hasta que lo apruebas.',
     where:'Menú **Comisiones** (o Ctrl+K → «comisiones»).',
     mock:{ title:'Comisiones por volumen de grupo', crumb:'Finanzas › Comisiones',
@@ -44557,7 +44709,9 @@ async function _novCfgGuardar(){
       'Pulsa **Generar**: se crean los créditos y las cuentas por pagar. Si el mes **ya se generó**, el ERP se niega y te dice qué existe; **↻ Regenerar** solo funciona si nadie lo ha cobrado.',
       '**Reportes (3):** con el cálculo en pantalla, **🖨️ Actividad** imprime lo que hizo cada médico/grupo; **💵 A pagar** el resumen de a quién y cuánto se le paga este mes; **🔎 Detalle** el porqué de cada cifra (venta por venta, escalón, reparto y **qué se descartó y por qué**). Los tres son personalizables desde **Panel de Control → plantillas**.',
       '**Si te equivocaste al Generar:** usa **↩ Revertir** para deshacer ese mes — borra los créditos y las cuentas por pagar que creó. Igual que Regenerar, **solo funciona si nadie lo ha cobrado**; si ya se cobró, se niega y te explica qué existe (ver el bloque de reversa más abajo).',
-      '**No tienes que entrar a Comisiones para enterarte:** al **capturar un ingreso** con un médico que ya trae descuento, el ERP te lo **avisa en el acto** («El Dr. Paladino acumula X procedimientos este mes → 10%»); y un **banner «hay comisiones por pagar»** aparece cuando existe un mes ganado que todavía no se ha generado.'
+      '**No tienes que entrar a Comisiones para enterarte:** al **capturar un ingreso** con un médico que ya trae descuento, el ERP te lo **avisa en el acto** («El Dr. Paladino acumula X procedimientos este mes → 10%»); y un **banner «hay comisiones por pagar»** aparece cuando existe un mes ganado que todavía no se ha generado.',
+      '**Reporte general (varios meses):** en los controles, el bloque **📊 Reporte general** te deja elegir **Desde/Hasta** (mes/año) y **todas las reglas** (o la elegida) y sacar una tabla con una fila por mes con su **estado** (Pendiente / Generado / Pagado fuera / Descartado) y KPIs. Es como el flujo de efectivo pero de comisiones. Tope: 24 meses.',
+      '**Meses ya pagados fuera del sistema:** como el módulo es nuevo, hay meses viejos cuya comisión **ya se pagó a mano**. En el banner «hay comisiones por pagar», cada mes trae **✓ Ya se pagó** y **🚫 Descartar**: cualquiera lo **quita del aviso sin mover dinero** (deja registro de quién lo marcó). Si te equivocas, abre ese mes (Calcular) y pulsa **↩ Quitar la marca**. Requiere el permiso **saldar_comisiones**.'
     ],
     buttons:[
      {
@@ -44635,6 +44789,22 @@ async function _novCfgGuardar(){
      {
       "k": "Banner «hay comisiones por pagar»",
       "d": "No es un botón: es un aviso que aparece solo cuando existe un mes ganado (el grupo llegó al escalón) que todavía no se ha generado. Te lleva directo a Comisiones para revisarlo."
+     },
+     {
+      "k": "📊 Reporte general (Desde/Hasta)",
+      "d": "Saca un reporte de VARIOS meses de una vez: una fila por mes con procedimientos, escalón, total y estado (Pendiente/Generado/Pagado fuera/Descartado), más KPIs. Elige el rango y si quieres todas las reglas o solo una. Tope 24 meses."
+     },
+     {
+      "k": "✓ Ya se pagó",
+      "d": "En el banner de pendientes: marca ese mes como YA pagado fuera del sistema (para los que se liquidaron antes de este módulo). Lo quita del aviso SIN mover dinero. Necesita el permiso saldar_comisiones."
+     },
+     {
+      "k": "🚫 Descartar",
+      "d": "En el banner: marca un mes como que NO aplica y lo quita del aviso. Tampoco mueve dinero. Necesita saldar_comisiones."
+     },
+     {
+      "k": "↩ Quitar la marca",
+      "d": "Deshace un «Ya se pagó»/«Descartar»: el mes vuelve a contar como pendiente y podrás Generarlo. Aparece al Calcular un mes marcado, con el permiso saldar_comisiones."
      }
     ],
     tips:[
@@ -44643,11 +44813,12 @@ async function _novCfgGuardar(){
       'El **grupo** y los beneficiarios fijos se eligen del catálogo de **Orígenes externos** (solo activos) y se guardan por **ID**: así el crédito siempre empata con la cuenta del médico.',
       '**«¿Cuándo se aplica?» (diferido) es acumulado, no adelantado.** Si pones **1 mes**, el descuento se **gana** con los procedimientos del mes en curso y se **aplica** (crédito + nota) el mes siguiente. Ejemplo: los procedimientos de **junio** desbloquean el escalón; el crédito se genera y se paga en **julio**. El aviso al capturar cuenta el **mes en que se gana** (junio), no el mes en que se cobra.',
       '**¿Un procedimiento no aparece en el cálculo?** Casi siempre es una de tres: (1) el **producto no está en la lista** de la regla —solo cuentan los que agregaste—, (2) el **médico no pertenece al grupo** de la regla, o (3) es de **otro mes**. El reporte **🔎 Detalle** lista exactamente qué se descartó y por cuál motivo. Un crédito aplicado de un mes anterior (ej. Sasha con Dr. Paladino) **sí** cuenta para el tier del mes en que se registró la venta.',
-      '**Revertir vs Regenerar:** *Regenerar* borra y **vuelve a crear** (para corregir cifras); *Revertir* borra y **deja el mes en cero** (para deshacer un Generar equivocado). Ambos exigen que **nadie haya cobrado**: si un médico ya usó su crédito o al coordinador ya se le pagó, el ERP se niega para no descuadrar el dinero.'
+      '**Revertir vs Regenerar:** *Regenerar* borra y **vuelve a crear** (para corregir cifras); *Revertir* borra y **deja el mes en cero** (para deshacer un Generar equivocado). Ambos exigen que **nadie haya cobrado**: si un médico ya usó su crédito o al coordinador ya se le pagó, el ERP se niega para no descuadrar el dinero.',
+      '**«Ya se pagó» ≠ Generar ≠ Revertir.** *Generar* crea el dinero (créditos/CxP) en el sistema; *Revertir* lo deshace; **«Ya se pagó»/«Descartar»** NO tocan dinero: solo marcan un mes viejo (liquidado por fuera o que no aplica) para que deje de salir en el aviso. Por eso llevan **su propio permiso (`saldar_comisiones`)** y no se puede marcar como pagado un mes que el sistema **ya generó** (para ese usa Revertir).'
     ],
-    tech:{ funciones:['calcularComisiones','generarComisiones (soloRevertir)','descuentoOrigen','comisionesPendientes','comImprimirActividad','comImprimirPagar','comImprimirDetalle','comChequeaPendientes','comRevertir','_ingAvisoDescuento'],
-      permisos:['generar_comisiones'],
-      deploy:'`comisiones.gs` desplegado (@406) + rutas GET `descuentoOrigen` y `comisionesPendientes` en `core.gs`. `Calcular` y los reportes son solo lectura; solo **Generar/Regenerar/Revertir** escriben, y se niegan si algo ya se cobró.' } },
+    tech:{ funciones:['calcularComisiones (devuelve `marca`)','generarComisiones (soloRevertir)','saldarComision (saldar/descartar/desmarcar; NO mueve dinero)','reporteComisionesRango (reporte general por rango)','descuentoOrigen','comisionesPendientes (salta meses marcados)','comImprimirActividad/Pagar/Detalle','comReporteRango','comSaldar/comDesmarcar','comChequeaPendientes','comRevertir','_ingAvisoDescuento'],
+      permisos:['generar_comisiones (calcular/generar/revertir)','saldar_comisiones (marcar como pagada/descartar/desmarcar)'],
+      deploy:'`comisiones.gs` desplegado + rutas GET `descuentoOrigen`/`comisionesPendientes`/`reporteComisionesRango` en `core.gs` y POST `saldarComision` en `finance.gs`. `Calcular`/reportes/reporte general son solo lectura; **Generar/Regenerar/Revertir** escriben dinero; **saldarComision** solo escribe una marca en `Comisiones_Generadas` (Estado `saldada`/`descartada`, sin dinero) — `_comYaGenerado` cuenta solo `activa`, así que nunca la confunde el Revertir.' } },
 
   { id:'poliza-concil', group:'operacion', icon:'🧾', title:'Conciliar pólizas (ContaDigital)',
     keywords:'poliza polizas contadigital conciliar folio contabilidad crvisor export xlsx egresos ingresos factura monto fecha cuadrar registrado sin poliza ambiguo',

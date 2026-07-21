@@ -43,10 +43,14 @@
              finance.gs (saveCxP, libros por año, permisos, logAudit).
    ═══════════════════════════════════════════════════════════════════════════ */
 
-var COMISIONES_VER     = 'comisiones-2026.07.16a';
-var COMISIONES_CFG_KEY = 'COMISIONES_CFG';
-var COMISIONES_TAB     = 'Comisiones_Generadas';
-var COMISIONES_PERM    = 'generar_comisiones';
+var COMISIONES_VER        = 'comisiones-2026.07.21a';
+var COMISIONES_CFG_KEY    = 'COMISIONES_CFG';
+var COMISIONES_TAB        = 'Comisiones_Generadas';
+var COMISIONES_PERM       = 'generar_comisiones';
+// Permiso APARTE de generar: marcar un mes como "ya pagado fuera del sistema" (o
+// descartarlo) NO mueve dinero, solo apaga el aviso "hay comisiones por pagar".
+// Es sensible (silencia una deuda), así que se delega explícitamente por rol.
+var COMISIONES_PERM_SALDAR = 'saldar_comisiones';
 
 /* ───────────────────────── Helpers propios ─────────────────────────
    Se apoyan en cobranza.gs/finance.gs donde ya existe la pieza (_cobNum, _cobTierPct,
@@ -88,6 +92,11 @@ function _comFinDeMes(mes) {
   return String(mes) + '-' + _comPad2(new Date(y, m, 0).getDate());
 }
 function _comRedondea(n) { return Math.round((_comNum(n) + Number.EPSILON) * 100) / 100; }
+// Neutraliza inyección de fórmulas/CSV: un valor de usuario que empiece con = + - @
+// (o tab/CR) se guardaría como FÓRMULA VIVA en la hoja (IMPORTXML, etc., ejecutándose
+// bajo el dueño). Anteponer comilla lo fuerza a texto literal. Usar en TODO texto de
+// usuario que se escriba a Comisiones_Generadas (hoja de dinero).
+function _comCell(v) { v = String(v == null ? '' : v); return /^[=+\-@\t\r]/.test(v) ? "'" + v : v; }
 
 /* ── Guard de deploy parcial. Apps Script comparte scope global: si origenes.gs no
    está desplegado (o está en una versión vieja), _origResolver no existe y las ventas
@@ -256,7 +265,10 @@ function _comEnsureControl() {
   }
   return sh;
 }
-/* Lo ya generado (y NO revertido) para un mes+regla. Vacío = nunca se ha generado. */
+/* Lo ya generado (dinero REAL: crédito o CxP) para un mes+regla. Vacío = nunca se
+   ha generado en el sistema. SOLO cuenta estado 'activa': ni 'revertida' ni las
+   marcas manuales ('saldada'/'descartada', que NO son movimientos de dinero) deben
+   contar como generado, o el reversa intentaría "deshacer" una marca sin refId. */
 function _comYaGenerado(mes, reglaId) {
   var out = [];
   try {
@@ -265,7 +277,7 @@ function _comYaGenerado(mes, reglaId) {
     for (var i = 1; i < raw.length; i++) {
       if (String(raw[i][0] || '').trim() !== String(mes)) continue;
       if (String(raw[i][1] || '').trim() !== String(reglaId)) continue;
-      if (String(raw[i][6] || '').trim().toLowerCase() === 'revertida') continue;
+      if (String(raw[i][6] || '').trim().toLowerCase() !== 'activa') continue;
       out.push({ rowNum: i + 1, mes: String(raw[i][0]), reglaId: String(raw[i][1]),
                  beneficiario: String(raw[i][2]), via: String(raw[i][3]),
                  monto: _comNum(raw[i][4]), refId: String(raw[i][5] || '').trim(),
@@ -274,6 +286,27 @@ function _comYaGenerado(mes, reglaId) {
     }
   } catch (e) {}
   return out;
+}
+
+/* Marca MANUAL viva de un mes+regla: "ya pagada fuera del sistema" ('saldada') o
+   "no aplica" ('descartada'). NO es dinero: es un apagador del aviso de pendientes
+   para los meses que se liquidaron antes de existir este módulo. Devuelve la última
+   marca viva, o null. Via='marca', RefId vacío → nunca se confunde con dinero real. */
+function _comMarca(mes, reglaId) {
+  try {
+    var sh = _comEnsureControl();
+    var raw = sh.getDataRange().getValues();
+    var found = null;
+    for (var i = 1; i < raw.length; i++) {
+      if (String(raw[i][0] || '').trim() !== String(mes)) continue;
+      if (String(raw[i][1] || '').trim() !== String(reglaId)) continue;
+      var est = String(raw[i][6] || '').trim().toLowerCase();
+      if (est === 'saldada' || est === 'descartada')
+        found = { rowNum: i + 1, tipo: est, nota: String(raw[i][2] || ''),
+                  monto: _comNum(raw[i][4]), usuario: String(raw[i][7] || ''), timestamp: raw[i][8] };
+    }
+    return found;
+  } catch (e) { return null; }
 }
 
 /* OP sintética del crédito: estable y única por (regla, mes, médico). _cobRegistrarCreditoFavor
@@ -469,7 +502,7 @@ function calcularComisiones(body) {
              totalGeneral: _comRedondea(totLista.reduce(function (s, t) { return s + t.monto; }, 0)),
              elegibles: elegibles, descartadas: descartadas, descartadasDetalle: descNoElegible,
              avisos: avisos, bloqueo: bloqueoLibro,
-             yaGenerado: ya, generado: ya.length > 0 };
+             yaGenerado: ya, generado: ya.length > 0, marca: _comMarca(mesKey, regla.id) };
   } catch (ex) { return { ok: false, error: ex.message, version: COMISIONES_VER }; }
 }
 
@@ -552,16 +585,154 @@ function comisionesPendientes(meses) {
         var calc = null;
         try { calc = calcularComisiones({ anio: anio, mes: mes, reglaId: reglas[i].id }); } catch (e) { calc = null; }
         if (!calc || !calc.ok) continue;
-        if ((calc.pct || 0) > 0 && !calc.generado && calc.totalGeneral > 0.01) {
+        // Pendiente = alcanzó escalón, NO generado en el sistema y NO marcado a mano.
+        // Pero la marca guarda el MONTO al momento de marcar: si al mes le entraron
+        // MÁS ventas después (captura tardía / back-fill de OrigenExterno), la parte
+        // NUEVA vuelve a ser pendiente. Comparamos el total vivo con lo marcado y, si
+        // creció, se re-avisa SOLO el excedente (no todo el mes ya liquidado).
+        var marcaMonto = calc.marca ? _comNum(calc.marca.monto) : 0;
+        var neto = _comRedondea((calc.totalGeneral || 0) - marcaMonto);
+        if ((calc.pct || 0) > 0 && !calc.generado && (calc.totalGeneral || 0) > 0.01 && (!calc.marca || neto > 0.01)) {
           pend.push({ reglaId: reglas[i].id, regla: reglas[i].nombre || reglas[i].id,
                       anio: anio, mes: mes, mesKey: calc.mes, pct: calc.pct,
-                      conteo: calc.conteo, total: calc.totalGeneral });
-          totalMonto += calc.totalGeneral;
+                      conteo: calc.conteo,
+                      total: (calc.marca ? neto : (calc.totalGeneral || 0)),
+                      crecioTrasMarcar: !!calc.marca,
+                      marcadoPrevio: (calc.marca ? _comRedondea(marcaMonto) : 0),
+                      totalVivo: _comRedondea(calc.totalGeneral || 0) });
+          totalMonto += (calc.marca ? neto : (calc.totalGeneral || 0));
         }
       }
     }
     return { ok: true, pendientes: pend, total: _comRedondea(totalMonto) };
   } catch (ex) { return { ok: false, error: ex.message, pendientes: [] }; }
+}
+
+/* ═══════════ MARCAR COMO PAGADA / DESCARTAR (apaga el aviso, NO mueve dinero) ═══════════
+ * Para los meses que se PAGARON fuera del sistema (antes de existir este módulo) o
+ * que NO aplican: se escribe una MARCA en el control (Via='marca', RefId vacío,
+ * Estado 'saldada'|'descartada') que solo quita ese mes del aviso "hay comisiones por
+ * pagar". No crea créditos ni CxP. Gated por 'saldar_comisiones' (distinto de generar).
+ *   accion: 'saldar' (pagada fuera) | 'descartar' (no aplica) | 'desmarcar' (revivir)
+ */
+function saldarComision(body, actorEmail) {
+  try {
+    body = body || {};
+    if (typeof _tokenHasPermission !== 'function')
+      return { ok: false, error: 'Actualiza finance.gs en Apps Script y redespliega (falta el verificador de permisos).', version: COMISIONES_VER };
+    if (!_tokenHasPermission(body.token, COMISIONES_PERM_SALDAR))
+      return { ok: false, error: 'No tienes permiso para marcar comisiones como pagadas (' + COMISIONES_PERM_SALDAR + '). Pídeselo al administrador o al director.', version: COMISIONES_VER };
+    // El actor es la identidad VERIFICADA del token (la pasa doPost), no el cliente:
+    // esta marca silencia una deuda, su autoría no puede ser falsificable.
+    var actor = String(actorEmail || '').trim() || 'sistema';
+
+    var accion = String(body.accion || 'saldar').toLowerCase();
+    if (['saldar', 'descartar', 'desmarcar'].indexOf(accion) < 0)
+      return { ok: false, error: 'Acción no válida: ' + accion + ' (usa saldar, descartar o desmarcar).', version: COMISIONES_VER };
+
+    // Recalcular SIEMPRE contra la hoja: mesKey/reglaId/monto salen del cálculo real,
+    // nunca de lo que mande el cliente.
+    var calc = calcularComisiones({ anio: body.anio, mes: body.mes, reglaId: body.reglaId });
+    if (!calc.ok) return calc;
+    var mesKey = calc.mes, reglaId = calc.regla.id;
+
+    var lock = LockService.getScriptLock();
+    if (!lock.tryLock(20000)) return { ok: false, error: 'Sistema ocupado, reintenta en un momento.', version: COMISIONES_VER };
+    try {
+      var sh = _comEnsureControl();
+      var marca = _comMarca(mesKey, reglaId);
+
+      if (accion === 'desmarcar') {
+        if (!marca) return { ok: false, error: 'No hay ninguna marca de ' + mesKey + ' (regla ' + reglaId + ') que quitar.', version: COMISIONES_VER };
+        sh.getRange(marca.rowNum, 7).setValue('desmarcada');
+        try { logAudit(actor, 'Comisiones', 'Desmarcar (reactivar pendiente)', mesKey + '/' + reglaId, marca.tipo, '', ''); } catch (e) {}
+        return { ok: true, desmarcado: true, version: COMISIONES_VER, mes: mesKey, reglaId: reglaId };
+      }
+
+      // saldar / descartar: NO se puede marcar como pagado algo que el sistema YA
+      // generó (créditos/CxP vivos). Para eso está Revertir, no la marca.
+      var ya = _comYaGenerado(mesKey, reglaId);
+      if (ya.length)
+        return { ok: false, version: COMISIONES_VER,
+                 error: 'Las comisiones de ' + mesKey + ' (regla ' + reglaId + ') YA están GENERADAS en el sistema (créditos/CxP). Marcarlas como pagadas las duplicaría en los registros. Si de verdad quieres deshacerlas, usa «Revertir».' };
+      if (marca)
+        return { ok: true, version: COMISIONES_VER, yaMarcada: true, mes: mesKey, reglaId: reglaId, tipo: marca.tipo,
+                 msg: 'Ese mes ya estaba marcado como ' + (marca.tipo === 'descartada' ? 'descartado' : 'pagado fuera') + ' por ' + (marca.usuario || '—') + '.' };
+
+      var estado = (accion === 'descartar') ? 'descartada' : 'saldada';
+      var nota = String(body.nota || '').slice(0, 300) ||
+                 (estado === 'saldada' ? 'Pagada fuera del sistema (antes del módulo de comisiones)' : 'Descartada / no aplica');
+      // _comCell neutraliza fórmulas en la nota (texto de usuario); el actor ya es
+      // el email verificado, pero se sanea igual por si acaso.
+      sh.appendRow([mesKey, reglaId, _comCell(nota), 'marca', calc.totalGeneral || 0, '', estado, _comCell(actor), new Date()]);
+      try {
+        logAudit(actor, 'Comisiones',
+                 estado === 'saldada' ? 'Marcar como pagada (externa)' : 'Descartar',
+                 mesKey + '/' + reglaId, '', '$' + (calc.totalGeneral || 0), nota);
+      } catch (e) {}
+      return { ok: true, version: COMISIONES_VER, mes: mesKey, reglaId: reglaId, tipo: estado, monto: _comRedondea(calc.totalGeneral || 0) };
+    } finally { try { lock.releaseLock(); } catch (e) {} }
+  } catch (ex) { return { ok: false, error: ex.message, version: COMISIONES_VER }; }
+}
+
+/* ═══════════════ REPORTE GENERAL POR RANGO DE MESES (SOLO LECTURA) ═══════════════
+ * Recorre [desde..hasta] (YYYY-MM) × reglas (o una) y devuelve una fila por mes+regla
+ * con conteo, escalón, total y ESTADO (pendiente/generado/saldada/descartada) + los
+ * beneficiarios. Alimenta el "reporte general" imprimible. No escribe nada.
+ * Ojo escalabilidad: calcularComisiones lee BD_Ingresos del año en cada llamada; el
+ * rango se topa a 24 meses para no exceder el tiempo de Apps Script.
+ */
+function reporteComisionesRango(body) {
+  try {
+    body = body || {};
+    var desde = String(body.desde || '').trim(), hasta = String(body.hasta || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(desde) || !/^\d{4}-\d{2}$/.test(hasta))
+      return { ok: false, error: 'Rango inválido: usa AAAA-MM en «desde» y «hasta».', version: COMISIONES_VER };
+    if (desde > hasta) { var _t = desde; desde = hasta; hasta = _t; }
+    var soloRegla = String(body.reglaId || '').trim();
+    var reglas = (_comCfg().reglas || []);
+    if (soloRegla) reglas = reglas.filter(function (r) { return r.id === soloRegla; });
+    else reglas = reglas.filter(function (r) { return r.activo !== false; });
+    if (!reglas.length) return { ok: true, version: COMISIONES_VER, desde: desde, hasta: hasta, filas: [], totales: {} };
+
+    var y0 = parseInt(desde.substring(0, 4), 10), m0 = parseInt(desde.substring(5, 7), 10);
+    var y1 = parseInt(hasta.substring(0, 4), 10), m1 = parseInt(hasta.substring(5, 7), 10);
+    // Rechazar rangos largos ANTES de trabajar: truncar en silencio un reporte de
+    // dinero (dejando fuera justo los meses recientes) sería peor que negarse.
+    var totalMeses = (y1 - y0) * 12 + (m1 - m0) + 1;
+    if (totalMeses > 24)
+      return { ok: false, version: COMISIONES_VER,
+               error: 'El rango pedido es de ' + totalMeses + ' meses; el máximo es 24 por reporte. Acórtalo (por ejemplo, un año a la vez).' };
+    var filas = [], tot = { pendiente: 0, generado: 0, saldada: 0, descartada: 0, general: 0 };
+    var guard = 0;
+    for (var y = y0, m = m0; (y < y1) || (y === y1 && m <= m1); ) {
+      for (var i = 0; i < reglas.length; i++) {
+        var calc = null;
+        try { calc = calcularComisiones({ anio: y, mes: m, reglaId: reglas[i].id }); } catch (e) { calc = null; }
+        if (calc && calc.ok) {
+          var totGen = _comRedondea(calc.totalGeneral || 0);
+          // 'sin_comision' cuando el grupo NO llegó al escalón (pct=0, $0): no es
+          // pendiente ni requiere acción; 'pendiente' solo si de verdad alcanzó y debe.
+          var estado = 'sin_comision';
+          if (calc.generado) estado = 'generado';
+          else if (calc.marca) estado = (calc.marca.tipo === 'descartada' ? 'descartada' : 'saldada');
+          else if ((calc.pct || 0) > 0 && totGen > 0.01) estado = 'pendiente';
+          filas.push({ mesKey: calc.mes, reglaId: reglas[i].id, regla: reglas[i].nombre || reglas[i].id,
+                       conteo: calc.conteo, pct: calc.pct, total: totGen, estado: estado,
+                       mesAplica: calc.mesAplica,
+                       beneficiarios: (calc.totales || []).map(function (t) { return { beneficiario: t.beneficiario, via: t.via, monto: _comRedondea(t.monto), aplica: t.mesAplica }; }),
+                       marca: calc.marca ? { tipo: calc.marca.tipo, usuario: calc.marca.usuario, nota: calc.marca.nota } : null });
+          if (totGen > 0.01) { tot.general += totGen; if (tot[estado] != null) tot[estado] += totGen; }
+        }
+      }
+      m++; if (m > 12) { m = 1; y++; }
+      if (++guard > 24) break;   // tope de seguridad: 24 meses
+    }
+    return { ok: true, version: COMISIONES_VER, desde: desde, hasta: hasta, filas: filas,
+             totales: { general: _comRedondea(tot.general), pendiente: _comRedondea(tot.pendiente),
+                        generado: _comRedondea(tot.generado), saldada: _comRedondea(tot.saldada),
+                        descartada: _comRedondea(tot.descartada) } };
+  } catch (ex) { return { ok: false, error: ex.message, version: COMISIONES_VER }; }
 }
 
 /* ═════════════════════════ REVERSA (para regenerar) ═════════════════════════
@@ -672,6 +843,18 @@ function generarComisiones(body) {
           .forEach(function (rn) { shCr.getRange(rn, 7).setValue('revertida'); });
         try { logAudit(body.usuario || 'sistema', 'Comisiones', 'Revertir (deshacer)', mesKey + '/' + reglaId, '', '', revR.length + ' movimiento(s)'); } catch (e) {}
         return { ok: true, revertido: true, version: COMISIONES_VER, mes: mesKey, reglaId: reglaId, revertidos: revR };
+      }
+
+      // ── MES MARCADO A MANO (pagado fuera / descartado) ──────────────────
+      // La autoridad del DINERO (no solo la UI) bloquea generar un mes que ya se
+      // marcó como pagado fuera del sistema: generarlo crearía créditos/CxP que
+      // duplicarían un pago ya hecho. Va DESPUÉS de soloRevertir (revertir dinero
+      // real sigue permitido) y ANTES de escribir. Para generarlo: desmarcar primero.
+      if (calc.marca) {
+        return { ok: false, version: COMISIONES_VER, hayMarca: true,
+                 error: 'Este mes está marcado como ' + (calc.marca.tipo === 'descartada' ? 'DESCARTADO (no aplica)' : 'YA PAGADO fuera del sistema') +
+                        (calc.marca.usuario ? ' por ' + calc.marca.usuario : '') +
+                        '. Generar crearía créditos/CxP y duplicaría un pago ya hecho. Si de verdad quieres generarlo, primero quita la marca (Calcular ese mes → ↩ Quitar la marca).' };
       }
 
       // ── IDEMPOTENCIA ────────────────────────────────────────────────────

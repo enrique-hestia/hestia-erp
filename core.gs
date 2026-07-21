@@ -528,6 +528,16 @@ function doGet(e) {
         return jsonResponse({ok:false, error:'Actualiza comisiones.gs en Apps Script y redespliega.'});
       return jsonResponse(comisionesPendientes((e&&e.parameter.meses)||3));
     }
+    // Reporte general de comisiones por RANGO de meses (solo lectura).
+    if (action === 'reporteComisionesRango') {
+      if (typeof reporteComisionesRango !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza comisiones.gs en Apps Script y redespliega.'});
+      return jsonResponse(reporteComisionesRango({
+        desde:   (e && e.parameter.desde)   || '',
+        hasta:   (e && e.parameter.hasta)   || '',
+        reglaId: (e && e.parameter.reglaId) || ''
+      }));
+    }
     // Presupuesto: histórico de metas por trimestre (racha meta vs real)
     if (action === 'historicoMetas') {
       if (typeof readHistoricoMetas !== 'function')
