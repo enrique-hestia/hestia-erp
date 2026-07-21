@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.274 -->
+﻿<!-- app-build:2026.07.21.275 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6368,13 +6368,16 @@ function _ingAvisoDescuento(){
     if (seq !== _ingDescSeq) return;   // llegó una respuesta vieja: la ignora
     if (!d || !d.ok){ box.style.display = 'none'; box.innerHTML = ''; return; }
     var nom = _escH(d.nombre || origen), html = '', bg = 'rgba(16,185,129,.10)', col = '#047857';
+    // Con diferido>0 el % que aplica AHORA se ganó el mes anterior: se nombra ese mes.
+    var _mesG = (d.diferido > 0 && d.mesGanado) ? (typeof _comMesNombre==='function' ? _comMesNombre(d.mesGanado) : d.mesGanado) : '';
+    var difFrase = _mesG ? ('por su volumen de ' + _mesG) : 'este mes';
     if (d.tipo === 'medico' && (d.pct||0) > 0){
-      html = '🎯 <b>' + nom + '</b> tiene <b>' + d.pct + '%</b> de comisión este mes '
-        + '<span style="color:var(--color-text-muted,#6b7280)">(volumen del grupo: ' + (d.conteo||0) + ' procedimiento' + ((d.conteo===1)?'':'s') + '). Es rebate al médico, no rebaja el precio de la paciente.</span>';
+      html = '🎯 <b>' + nom + '</b> tiene <b>' + d.pct + '%</b> de comisión '
+        + '<span style="color:var(--color-text-muted,#6b7280)">(' + difFrase + ': ' + (d.conteo||0) + ' procedimiento' + ((d.conteo===1)?'':'s') + ' del grupo). Es rebate al médico, no rebaja el precio de la paciente.</span>';
     } else if (d.tipo === 'medico'){
       // médico con regla pero aún sin escalón: dice cuánto falta
       var sig = _ingSigTier(d);
-      html = '<b>' + nom + '</b>: sin comisión todavía este mes (' + (d.conteo||0) + ' procedimiento' + ((d.conteo===1)?'':'s') + ' del grupo)'
+      html = '<b>' + nom + '</b>: sin comisión todavía (' + (d.conteo||0) + ' procedimiento' + ((d.conteo===1)?'':'s') + ' del grupo ' + (_mesG ? 'en ' + _mesG : 'este mes') + ')'
         + (sig ? '. Faltan <b>' + Math.max(0, sig.desde-(d.conteo||0)) + '</b> para el ' + sig.pct + '%.' : '.');
       bg = 'var(--color-surface-2,#f3f4f6)'; col = 'var(--color-text-muted,#6b7280)';
     } else if (d.tipo === 'agencia' && (d.pct||0) > 0){
@@ -12617,8 +12620,10 @@ function comRenderResult() {
       +  '<b>✓ Este mes ya se generó.</b><ul style="margin:6px 0 0 18px;padding:0">'
       +  c.yaGenerado.map(function (i) { return '<li style="margin:3px 0">' + _comEsc(i.beneficiario) + ' · ' + _comVia(i.via) + ' · <b>' + _comMoney(i.monto) + '</b> <span style="color:var(--color-text-muted,#9ca3af)">(' + _comEsc(i.refId) + ')</span></li>'; }).join('')
       +  '</ul>';
-    if (puede) h += '<button onclick="comGenerar(true)" style="margin-top:10px;padding:8px 16px;background:none;color:#92400e;border:1px solid #fde68a;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">↻ Regenerar</button>'
-      +  '<div style="margin-top:6px;color:var(--color-text-muted,#6b7280)">Regenerar deshace lo anterior y lo vuelve a crear. Solo funciona si <b>nadie lo ha cobrado todavía</b>: si el médico ya usó su crédito o a Madero ya se le pagó, el ERP se niega (devolvería dinero que ya se aplicó).</div>';
+    if (puede) h += '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">'
+      +  '<button onclick="comGenerar(true)" style="padding:8px 16px;background:none;color:#92400e;border:1px solid #fde68a;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">↻ Regenerar</button>'
+      +  '<button onclick="comRevertir()" title="Deshacer esta generación (borra los créditos y la CxP creados). Solo si nadie los ha usado." style="padding:8px 16px;background:none;color:#b91c1c;border:1px solid #fecaca;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">↩ Revertir (deshacer)</button></div>'
+      +  '<div style="margin-top:6px;color:var(--color-text-muted,#6b7280)"><b>Regenerar</b> deshace y vuelve a crear; <b>Revertir</b> solo deshace (lo deja como si nunca se hubiera generado). Ambos solo funcionan si <b>nadie lo ha cobrado todavía</b>: si el médico ya usó su crédito o a Madero ya se le pagó, el ERP se niega (no borra dinero real).</div>';
     h += '</div>';
   } else if (c.bloqueo) {
     h += '<div style="margin-top:16px;padding:14px;background:#fef2f2;border:1px solid #fecaca;border-radius:9px;color:#991b1b;font-size:12.5px">'
@@ -12662,6 +12667,29 @@ async function comGenerar(regenerar) {
       + (res.revertidos && res.revertidos.length ? '\nSe deshicieron ' + res.revertidos.length + ' movimiento(s) anteriores.' : ''));
   }
   await comCalcular();   // re-lee: refleja el estado real, no lo que creemos que pasó
+}
+/* Revertir (deshacer) una generación hecha por error. Borra los créditos y la CxP
+   creados y lo deja como si nunca se hubiera generado. El backend se niega si algo
+   ya se cobró (mismo blindaje que Regenerar). No vuelve a crear nada. */
+async function comRevertir() {
+  var c = _comCalc;
+  if (!c || !c.ok) return;
+  if (!confirm('REVERTIR (deshacer) las comisiones de ' + _comMesNombre(c.mes) + '.\n\n'
+    + 'Se borrarán los créditos y la cuenta por pagar que se crearon. Queda como si nunca se hubiera generado.\n'
+    + 'Si el médico ya usó su crédito o a Madero ya se le pagó, el ERP se negará (no borra dinero real).\n\n¿Confirmas?')) return;
+  var st = document.getElementById('com-status'); if (st) st.textContent = 'Revirtiendo…';
+  var s = getSession() || {};
+  var res;
+  try {
+    var r = await fetch(APPS_SCRIPT_URL, { method: 'POST', redirect: 'follow', body: JSON.stringify({
+      action: 'generarComisiones', anio: c.anio, mes: parseInt(String(c.mes).substring(5, 7), 10),
+      reglaId: c.regla.id, soloRevertir: true, token: s.token || getToken(), usuario: s.email || '' }) });
+    res = await r.json();
+  } catch (e) { res = { ok: false, error: e.message }; }
+  if (st) st.textContent = '';
+  if (!res.ok) alert('No se pudo revertir.\n\n' + (res.error || 'Error desconocido'));
+  else alert('Revertido: se deshicieron ' + ((res.revertidos && res.revertidos.length) || 0) + ' movimiento(s). Ya no hay nada generado de ese mes.');
+  await comCalcular();
 }
 
 /* ── Panel de configuración de reglas (sin tocar código) ───────────────────── */

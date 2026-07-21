@@ -499,13 +499,20 @@ function descuentoOrigen(origen, anio, mes) {
         return r.activo !== false && String(r.grupoId) === grupoId;
       });
       if (reglas.length) {
-        var calc = calcularComisiones({ anio: anio, mes: mes, reglaId: reglas[0].id });
+        // El descuento que APLICA a una venta de (mes) se GANÓ 'diferido' meses antes:
+        // con diferido=1, una venta de julio usa el volumen acumulado de JUNIO (el mes
+        // que ya cerró). Con diferido=0 usa el mes en curso. Por eso se calcula sobre el
+        // mes GANADO = mes − diferido, no sobre el mes de la venta.
+        var difer = (reglas[0].diferido == null) ? 1 : (parseInt(reglas[0].diferido, 10) || 0);
+        var earnKey = _comMesSuma(_comMesKey(anio, mes), -difer);
+        var eAnio = parseInt(String(earnKey).substring(0, 4), 10), eMes = parseInt(String(earnKey).substring(5, 7), 10);
+        var calc = calcularComisiones({ anio: eAnio, mes: eMes, reglaId: reglas[0].id });
         if (calc && calc.ok) {
           return { ok: true, tipo: 'medico', nombre: res.nombre || origen,
                    regla: reglas[0].nombre || reglas[0].id,
                    pct: calc.pct || 0, conteo: calc.conteo || 0,
                    escalon: calc.escalon || null, escalones: calc.escalones || [],
-                   mes: calc.mes };
+                   diferido: difer, mesGanado: calc.mes, mesAplica: _comMesKey(anio, mes) };
         }
       }
     }
@@ -635,6 +642,37 @@ function generarComisiones(body) {
 
       var mesKey = calc.mes, reglaId = calc.regla.id;
       var ya = _comYaGenerado(mesKey, reglaId);
+
+      // ── SOLO REVERTIR (deshacer una generación hecha por error) ──────────
+      // Misma seguridad que regenerar: se revisa TODO antes de tocar NADA; si una
+      // pieza ya se cobró/usó, NO se revierte nada (para no borrar dinero real).
+      if (body.soloRevertir) {
+        if (!ya.length) return { ok: false, error: 'No hay comisiones generadas de ' + mesKey + ' (regla ' + reglaId + ') para revertir.', version: COMISIONES_VER };
+        var estR = ya.map(function (i) { return { item: i, est: _comEstadoRef(i) }; });
+        var tocR = estR.filter(function (e) { return e.est.tocado; });
+        if (tocR.length)
+          return { ok: false, version: COMISIONES_VER, noSePuedeRevertir: true,
+                   error: 'No se puede revertir ' + mesKey + ': parte de lo generado ya se cobró/usó.\n· ' +
+                          tocR.map(function (t) { return t.est.motivo; }).join('\n· ') + '\nNo se modificó nada.',
+                   motivos: tocR.map(function (t) { return t.est.motivo; }) };
+        var revR = [];
+        estR.forEach(function (e) {
+          var i = e.item;
+          if (i.via === 'nota_credito') { _cobRegistrarCreditoFavor(i.refId, i.beneficiario, 0, null); }
+          else if (i.via === 'efectivo' && e.est.rowNum > 1) {
+            var ssDr = SpreadsheetApp.openById(EGRESOS_SS_2026);
+            var shDr = ssDr.getSheetByName(EGRESOS_TABS[2026] || 'Egresos2026');
+            shDr.deleteRow(e.est.rowNum);
+            try { CacheService.getScriptCache().remove('gas_egresos_v1_2026'); } catch (_c) {}
+          }
+          revR.push({ beneficiario: i.beneficiario, via: i.via, monto: i.monto, refId: i.refId });
+        });
+        var shCr = _comEnsureControl();
+        ya.map(function (i) { return i.rowNum; }).sort(function (a, b) { return b - a; })
+          .forEach(function (rn) { shCr.getRange(rn, 7).setValue('revertida'); });
+        try { logAudit(body.usuario || 'sistema', 'Comisiones', 'Revertir (deshacer)', mesKey + '/' + reglaId, '', '', revR.length + ' movimiento(s)'); } catch (e) {}
+        return { ok: true, revertido: true, version: COMISIONES_VER, mes: mesKey, reglaId: reglaId, revertidos: revR };
+      }
 
       // ── IDEMPOTENCIA ────────────────────────────────────────────────────
       if (ya.length && !body.regenerar) {
