@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.280 -->
+﻿<!-- app-build:2026.07.21.281 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -20698,8 +20698,10 @@ function _renderProveedores(){
       +'</div>':'')
     +'</div>');
   // Acceso discreto al spreadsheet (hoja "Proveedores" en el libro de Cuentas por Pagar).
-  // Solo visible para usuarios con permiso 'sheets_access'; el resto ni lo ve.
-  if (hasPermission('sheets_access')) {
+  // Visible para quien pueda ADMINISTRAR proveedores (canEdit = bank_capture) o tenga
+  // 'sheets_access'. El acceso real lo controla el compartir de Google Sheets; esto es
+  // solo el enlace. (Antes solo sheets_access; se amplió porque el dueño lo necesita.)
+  if (canEdit || hasPermission('sheets_access')) {
     h.push('<div style="display:flex;justify-content:flex-end;margin:-6px 2px 4px">'
       +'<a href="https://docs.google.com/spreadsheets/d/'+CXP_SS_ID+'/edit" target="_blank" rel="noopener" '
       +'title="Abrir la hoja Proveedores en Google Sheets (acceso restringido)" '
