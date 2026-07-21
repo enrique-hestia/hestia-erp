@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.286 -->
+﻿<!-- app-build:2026.07.21.287 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -5073,9 +5073,20 @@ function ingEditOp(opId) {
     opRows.forEach(function(r) {
       ingAddLine();
       var n = _ingLineCount;
+      // Categoría: la guardada; si viene vacía (p. ej. una cuenta por cobrar que no la
+      // capturó) se DERIVA del producto contra el catálogo, para no dejar el ingreso sin
+      // categoría (sin tocar el PVP guardado). Así al guardar queda completo.
+      var _cat = r.categoria || '';
+      if (!_cat && r.producto) {
+        var _pool = (_ingProductos && _ingProductos.length) ? _ingProductos : (_ingTodosProductos || []);
+        var _p = _pool.filter(function(p){ return p.descripcion === r.producto; })[0];
+        if (_p && _p.categoria) _cat = _p.categoria;
+      }
       var catEl = document.getElementById('ing-cat-' + n);
       if (catEl) {
-        catEl.value = r.categoria || '';
+        if (_cat && !catEl.querySelector('option[value="'+String(_cat).replace(/"/g,'&quot;')+'"]'))
+          catEl.innerHTML += '<option value="'+_cat+'">'+_cat+'</option>';
+        catEl.value = _cat;
         ingOnCatChange(n); // refresca el datalist de productos filtrado por categoría
       }
       var prodEl = document.getElementById('ing-prod-' + n);
@@ -8193,6 +8204,14 @@ function _ingCollectPayload() {
     if (pvp === 0) continue;
     var prodSel = document.getElementById('ing-prod-'+i);
     var lineCat = (document.getElementById('ing-cat-'+i)||{}).value || '';
+    // Red de seguridad: si la categoría quedó vacía pero el producto está en el
+    // catálogo, se deriva de ahí → el ingreso SIEMPRE se guarda con categoría
+    // (evita cuentas por cobrar sin categoría que descuadran los reportes).
+    if (!lineCat && prodSel && prodSel.value) {
+      var _pool = (_ingProductos && _ingProductos.length) ? _ingProductos : (_ingTodosProductos || []);
+      var _pp = _pool.filter(function(p){ return p.descripcion === prodSel.value; })[0];
+      if (_pp && _pp.categoria) lineCat = _pp.categoria;
+    }
     var lineCiclo = _ING_CAT_TO_CICLO[lineCat.toLowerCase()] || '';
     if (!lineCiclo) { for (var ci=0;ci<ING_CICLOS.length;ci++){if(ING_CICLOS[ci].toLowerCase()===lineCat.toLowerCase()){lineCiclo=ING_CICLOS[ci];break;}} }
     lineas.push({
@@ -8227,11 +8246,16 @@ function _ingCollectPayload() {
   });
 
   var payments = _ingCollectPayments();
-  if (!payments.length) { alert('Agrega al menos una forma de pago con monto'); return null; }
-
-  // Forma de pago principal = la de mayor monto (para BD_Ingresos)
-  var mainFP = payments.reduce(function(a,b){ return b.monto > a.monto ? b : a; });
   var totalPagado = payments.reduce(function(s,p){ return s + p.monto; }, 0);
+  // VENTA A CRÉDITO (cuenta por cobrar): $0 pagado es VÁLIDO — la paciente queda
+  // debiendo. Antes se bloqueaba con "Agrega al menos una forma de pago con monto", lo
+  // que impedía editar/guardar una cuenta por cobrar (había que corregir la BD a mano).
+  // Se confirma para no dejar sin pago una venta normal por olvido.
+  if (!payments.length || totalPagado < 0.01) {
+    if (!confirm('No capturaste ninguna forma de pago con monto.\n\nSe guardará como VENTA A CRÉDITO (cuenta por cobrar): la paciente queda debiendo ' + _ingMoney(totalOp) + '.\n\n¿Continuar?')) return null;
+  }
+  // Forma de pago principal = la de mayor monto (para BD_Ingresos); en venta a crédito, "Crédito".
+  var mainFP = payments.length ? payments.reduce(function(a,b){ return b.monto > a.monto ? b : a; }) : { formaPago:'Crédito', monto:0 };
 
   // En modo edición: si cambia monto, forma de pago o fecha → desmarcar conciliación
   if (_ingEditMode) {
