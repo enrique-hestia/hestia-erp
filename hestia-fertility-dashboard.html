@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.284 -->
+﻿<!-- app-build:2026.07.21.285 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -26089,7 +26089,7 @@ var HF_L_COMMON={
        saldoAFavor:'Saldo a favor', alCorriente:'Al corriente', movimientos:'Movimientos',
        estadoCuenta:'Estado de cuenta', estadoCobranza:'Estado de cobranza',
        totalPorCobrar:'Total por cobrar', saldos:'Saldos', suscripcion:'Suscripción',
-       alDia:'Al día', totalVendido:'Total vendido', porCobrarDetalle:'Por cobrar (detalle)',
+       alDia:'Al día', sinAlmacen:'Sin almacenamiento en criobanco', totalVendido:'Total vendido', porCobrarDetalle:'Por cobrar (detalle)',
        netoACobrar:'Neto a cobrar', bruto:'Bruto', descuentoVol:'Descuento vol.',
        soloPendiente:'Solo lo pendiente por cobrar', historicoCompleto:'Histórico completo',
        datosDeposito:'Datos para depósito', banco:'Banco', beneficiario:'Beneficiario',
@@ -26107,7 +26107,7 @@ var HF_L_COMMON={
        saldoAFavor:'Credit balance', alCorriente:'Paid in full', movimientos:'Transactions',
        estadoCuenta:'Account statement', estadoCobranza:'Collection statement',
        totalPorCobrar:'Total receivable', saldos:'Balances', suscripcion:'Subscription',
-       alDia:'Up to date', totalVendido:'Total billed', porCobrarDetalle:'Receivable (detail)',
+       alDia:'Up to date', sinAlmacen:'No cryostorage on file', totalVendido:'Total billed', porCobrarDetalle:'Receivable (detail)',
        netoACobrar:'Net receivable', bruto:'Gross', descuentoVol:'Volume discount',
        soloPendiente:'Outstanding balance only', historicoCompleto:'Full history',
        datosDeposito:'Bank transfer details', banco:'Bank', beneficiario:'Beneficiary',
@@ -26125,7 +26125,7 @@ var HF_L_COMMON={
        saldoAFavor:'Solde créditeur', alCorriente:'Soldé', movimientos:'Opérations',
        estadoCuenta:'Relevé de compte', estadoCobranza:'État des créances',
        totalPorCobrar:'Total à recevoir', saldos:'Soldes', suscripcion:'Abonnement',
-       alDia:'À jour', totalVendido:'Total facturé', porCobrarDetalle:'À recevoir (détail)',
+       alDia:'À jour', sinAlmacen:'Aucune cryoconservation', totalVendido:'Total facturé', porCobrarDetalle:'À recevoir (détail)',
        netoACobrar:'Net à recevoir', bruto:'Brut', descuentoVol:'Remise de volume',
        soloPendiente:'Solde restant dû uniquement', historicoCompleto:'Historique complet',
        datosDeposito:'Coordonnées bancaires', banco:'Banque', beneficiario:'Bénéficiaire',
@@ -26143,7 +26143,7 @@ var HF_L_COMMON={
        saldoAFavor:'Saldo credor', alCorriente:'Quitado', movimientos:'Movimentações',
        estadoCuenta:'Extrato de conta', estadoCobranza:'Extrato de cobrança',
        totalPorCobrar:'Total a receber', saldos:'Saldos', suscripcion:'Assinatura',
-       alDia:'Em dia', totalVendido:'Total faturado', porCobrarDetalle:'A receber (detalhe)',
+       alDia:'Em dia', sinAlmacen:'Sem criopreservação', totalVendido:'Total faturado', porCobrarDetalle:'A receber (detalhe)',
        netoACobrar:'Líquido a receber', bruto:'Bruto', descuentoVol:'Desconto por volume',
        soloPendiente:'Somente o saldo em aberto', historicoCompleto:'Histórico completo',
        datosDeposito:'Dados para depósito', banco:'Banco', beneficiario:'Beneficiário',
@@ -39084,9 +39084,12 @@ function _cobBuildPrintData(lang){
   var _descTot=_desc?(_desc.total||0):0;
   var _neto=totalDebe-_descTot; if(_neto<0) _neto=0;
   if(_desc){ _desc.lineas.forEach(function(l){ rows.push([ccEsc(l.mes), T.descuento+' '+l.pct+'% · '+(l.paciente?ccEsc(l.paciente)+' · ':'')+ccEsc(l.producto), _cq(l.cantidad), '', '', '−'+ccFmt(l.descuento), '']); rowKinds.push('normal'); conceptos.push(l.producto||''); }); }
+  // Suscripción crío en el KPI del PDF: sin material en criobanco (sus null) → mensaje
+  // congruente, NO "Al día". Con material → monto si debe, o "Al día" si está vigente.
+  var _susKpiVal = !sus ? (T.sinAlmacen||'Sin almacenamiento en criobanco') : (susDebe>0 ? ccFmt(susDebe) : T.alDia);
   var kpis = _desc
-    ? [{value:ccFmt(_neto),label:T.netoACobrar},{value:ccFmt(totalDebe),label:T.bruto},{value:'−'+ccFmt(_descTot),label:T.descuentoVol},{value:susDebe>0?ccFmt(susDebe):T.alDia,label:T.suscripcion}]
-    : [{value:ccFmt(totalDebe),label:T.totalPorCobrar},{value:ccFmt(d.totalSaldo||0),label:T.saldos},{value:susDebe>0?ccFmt(susDebe):T.alDia,label:T.suscripcion},{value:ccFmt(_vvTot),label:(_cobVista==='pendiente'?T.porCobrarDetalle:T.totalVendido)}];
+    ? [{value:ccFmt(_neto),label:T.netoACobrar},{value:ccFmt(totalDebe),label:T.bruto},{value:'−'+ccFmt(_descTot),label:T.descuentoVol},{value:_susKpiVal,label:T.suscripcion}]
+    : [{value:ccFmt(totalDebe),label:T.totalPorCobrar},{value:ccFmt(d.totalSaldo||0),label:T.saldos},{value:_susKpiVal,label:T.suscripcion},{value:ccFmt(_vvTot),label:(_cobVista==='pendiente'?T.porCobrarDetalle:T.totalVendido)}];
   var periodTxt = (_cobVista==='pendiente') ? (T.soloPendiente+' · '+T.emitidoEl+' '+hoy) : (T.historicoCompleto+' · '+T.emitidoEl+' '+hoy);
   // Nota al pie: datos para depósito
   var _dep=d.deposito, notaHtml='';
