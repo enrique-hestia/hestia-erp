@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.282 -->
+﻿<!-- app-build:2026.07.21.283 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -38776,7 +38776,24 @@ function cobRender(d){
   h+='<div style="background:var(--color-primary);border-radius:10px;padding:14px 18px;color:#fff"><div style="font-size:10px;font-weight:700;opacity:.85;text-transform:uppercase;margin-bottom:4px">'+(_desc?'Neto a cobrar':'Total por cobrar')+'</div><div style="font-size:22px;font-weight:800">'+ccFmt(_desc?_neto:totalDebe)+'</div>'+(_desc?'<div style="font-size:10px;opacity:.85;margin-top:2px">Bruto '+ccFmt(totalDebe)+' − desc. '+ccFmt(_descTot)+'</div>':'')+'</div>';
   h+='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:10px;padding:14px 18px"><div style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;margin-bottom:4px">Saldos (adeudos)</div><div style="font-size:18px;font-weight:800;color:#c83c3c">'+ccFmt(d.totalSaldo||0)+'</div></div>';
   if(_desc){ h+='<div style="background:var(--color-surface);border:1px solid #cde0cf;border-radius:10px;padding:14px 18px"><div style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;margin-bottom:4px">Descuento volumen</div><div style="font-size:18px;font-weight:800;color:#16a34a">−'+ccFmt(_descTot)+'</div></div>'; }
-  h+='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:10px;padding:14px 18px"><div style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;margin-bottom:4px">Suscripción crío</div><div style="font-size:18px;font-weight:800;color:'+(susDebe>0?'#b45309':'#16a34a')+'">'+(susDebe>0?ccFmt(susDebe):'Al día')+'</div></div>';
+  // Suscripción crío — 3 casos:
+  //  · Sin material en criobanco (el backend excluye a quien no tiene óvulos/embriones,
+  //    así que sus = null): NO decir "Al día" (no hay nada que cobrar) → mensaje neutro.
+  //  · Con material: mostrar el ESTATUS REAL (Vigente / Por vencer / Vencida / Cortesía /
+  //    Falta suscripción / Pago automático) y el monto si debe.
+  var _susTxt, _susColor, _susSz;
+  if (!sus) {
+    _susTxt = 'Sin almacenamiento en criobanco';
+    _susColor = 'var(--color-text-muted,#9ca3af)'; _susSz = '13px';
+  } else {
+    var _susEst = String(sus.estatus||'').trim() || '—';
+    var _susOk = (_susEst==='Vigente' || _susEst==='Cortesía' || _susEst==='Pago automático');
+    var _susPv = (_susEst==='Por vencer');
+    _susColor = _susOk ? '#16a34a' : (_susPv ? '#a16207' : '#b45309');
+    _susTxt = _comEsc(_susEst) + (susDebe>0 ? ' · '+ccFmt(susDebe) : '');
+    _susSz = '15px';
+  }
+  h+='<div style="background:var(--color-surface);border:1px solid var(--color-divider);border-radius:10px;padding:14px 18px"><div style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;margin-bottom:4px">Suscripción crío</div><div style="font-size:'+_susSz+';font-weight:800;color:'+_susColor+'">'+_susTxt+'</div></div>';
   h+='</div>';
   // Detalle del descuento por volumen (escala por agencia, acumulado del mes)
   if(_desc){
