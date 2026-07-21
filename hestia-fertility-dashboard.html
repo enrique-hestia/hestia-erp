@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.20.270 -->
+﻿<!-- app-build:2026.07.20.271 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12291,6 +12291,62 @@ async function comCalcular() {
   comRenderResult();
 }
 
+/* Reagrupa los procedimientos ELEGIBLES por médico (c.elegibles SIEMPRE llega,
+   aunque el grupo no alcance el escalón) → { medicoNombre, cantidad, base, ventas }.
+   Réplica del porMedico del backend, para poder mostrar "qué hizo cada médico". */
+function _comPorMedico(c){
+  var by = {};
+  ((c && c.elegibles) || []).forEach(function(e){
+    var k = String(e.medicoId || e.medicoNombre || '');
+    if (!by[k]) by[k] = { medicoId:e.medicoId, medicoNombre:e.medicoNombre || '(sin nombre)', cantidad:0, base:0, ventas:[] };
+    by[k].cantidad += (parseFloat(e.cantidad)||1);
+    by[k].base += (parseFloat(e.total)||0);
+    by[k].ventas.push(e);
+  });
+  return Object.keys(by).map(function(k){ return by[k]; }).sort(function(a,b){ return b.base - a.base; });
+}
+/* El primer escalón con % que el grupo AÚN no alcanza (para la comisión hipotética
+   "si llegaran a N procedimientos"). null si ya lo alcanzó o no hay escalones con %. */
+function _comSiguienteEscalon(c){
+  var tiers = ((c && c.escalones) || []).filter(function(t){ return (parseFloat(t.pct)||0) > 0; })
+    .sort(function(a,b){ return a.desde - b.desde; });
+  for (var i=0;i<tiers.length;i++){ if ((c.conteo||0) < tiers[i].desde) return tiers[i]; }
+  return null;
+}
+function comImprimirActividad(){
+  var c = _comCalc; if (!c || !c.ok){ if(typeof setStatus==='function') setStatus('Primero pulsa «Calcular».','err'); return; }
+  var act = _comPorMedico(c), sig = _comSiguienteEscalon(c);
+  var reglaNom = (c.regla && c.regla.nombre) || '';
+  var rows = [], kinds = [], cons = [];
+  act.forEach(function(m){
+    var comAct = (c.pct>0) ? _comfRedondea(m.base * c.pct / 100) : 0;
+    var comHip = sig ? _comfRedondea(m.base * sig.pct / 100) : 0;
+    rows.push([ m.medicoNombre, String(m.cantidad), _comMoney(m.base), (c.pct>0?_comMoney(comAct):'—'), (sig?_comMoney(comHip):'—') ]);
+    kinds.push('header'); cons.push(null);
+    (m.ventas||[]).forEach(function(v){
+      rows.push([ (v.op?v.op+' · ':'') + (v.paciente||'') + ' · ' + (v.producto||''), String(v.cantidad||1), _comMoney(v.total), '', '' ]);
+      kinds.push('item'); cons.push(v.producto||'');
+    });
+  });
+  var baseTotal = act.reduce(function(a,m){ return a+(m.base||0); }, 0);
+  var kpis = [
+    { value:String(c.conteo||0), label:'Procedimientos del grupo' },
+    { value:(c.pct||0)+'%', label:'Escalón actual' },
+    { value:String(act.length), label:'Médicos con actividad' },
+    { value:_comMoney(baseTotal), label:'Base total' }
+  ];
+  var notaHtml = sig
+    ? '<div style="margin:16px 22px;padding:10px 14px;border:1px dashed #bbb;border-radius:8px;font-size:11px;color:#333;page-break-inside:avoid">💡 El grupo lleva <b>'+(c.conteo||0)+'</b> procedimiento(s); faltan <b>'+Math.max(0,(sig.desde-(c.conteo||0)))+'</b> para el escalón de <b>'+sig.pct+'%</b>. La columna «Si llegan al escalón» estima la comisión de cada médico en ese caso.</div>'
+    : '';
+  hfReportPrint('comisiones-actividad', {
+    title:'Reporte de actividad de médicos', subject:reglaNom, period:_comMesNombre(c.mes)+' '+String(c.mes).substring(0,4), generado:hfSello(),
+    kpis:kpis,
+    cols:['Médico / procedimiento', {label:'Cant.',r:true}, {label:'Base / monto',r:true}, {label:'Comisión '+(c.pct||0)+'%',r:true}, {label:(sig?'Si llegan a '+sig.desde+' ('+sig.pct+'%)':'Comisión'),r:true}],
+    rows:rows, rowKinds:kinds, conceptCol:0, rowConcepts:cons,
+    totalLabel:'Base total del grupo', totalValue:_comMoney(baseTotal), totalCol:2, lineCol:2,
+    notaHtml:notaHtml, lang:'es'
+  });
+}
 function comRenderResult() {
   var box = document.getElementById('com-result');
   if (!box) return;
@@ -12331,9 +12387,39 @@ function comRenderResult() {
       +  '</ul></div>';
   }
 
+  // ── ACTIVIDAD DE LOS MÉDICOS — se muestra SIEMPRE, aunque el grupo no llegue al
+  // escalón (así ves "qué hizo cada médico" y la comisión que le tocaría). Sale de
+  // c.elegibles, que llega aunque pct=0. Es solo informativo (no se genera nada).
+  var _act = _comPorMedico(c);
+  if (_act.length) {
+    var _sig = _comSiguienteEscalon(c);
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin:6px 0 8px">'
+      +  '<div style="font-size:13px;font-weight:700">Actividad de los médicos en ' + _comEsc(_comMesNombre(c.mes)) + '</div>'
+      +  '<button onclick="comImprimirActividad()" style="padding:6px 12px;background:var(--color-surface-2,#f3f4f6);border:1px solid var(--color-border,#e5e7eb);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">🖨️ Imprimir reporte</button></div>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:10px"><thead><tr>'
+      +  ['MÉDICO','PROC.','SU BASE','COMISIÓN ' + (c.pct||0) + '%'].concat(_sig ? ['SI LLEGAN A ' + _sig.desde + ' (' + _sig.pct + '%)'] : []).map(function(x,i){
+           return '<th style="text-align:' + (i===0?'left':'right') + ';padding:6px 8px;border-bottom:2px solid var(--color-border,#e5e7eb);font-size:10px;color:var(--color-text-muted,#9ca3af)">' + x + '</th>'; }).join('')
+      +  '</tr></thead><tbody>';
+    _act.forEach(function(m){
+      var comAct = (c.pct>0) ? _comfRedondea(m.base * c.pct / 100) : 0;
+      var comHip = _sig ? _comfRedondea(m.base * _sig.pct / 100) : 0;
+      h += '<tr><td style="padding:6px 8px;border-bottom:1px solid var(--color-border,#f3f4f6);font-weight:600">' + _comEsc(m.medicoNombre) + '</td>'
+        +  '<td style="padding:6px 8px;border-bottom:1px solid var(--color-border,#f3f4f6);text-align:right">' + m.cantidad + '</td>'
+        +  '<td style="padding:6px 8px;border-bottom:1px solid var(--color-border,#f3f4f6);text-align:right">' + _comMoney(m.base) + '</td>'
+        +  '<td style="padding:6px 8px;border-bottom:1px solid var(--color-border,#f3f4f6);text-align:right;font-weight:600">' + (c.pct>0 ? _comMoney(comAct) : '—') + '</td>'
+        +  (_sig ? '<td style="padding:6px 8px;border-bottom:1px solid var(--color-border,#f3f4f6);text-align:right;color:var(--color-text-muted,#6b7280)">' + _comMoney(comHip) + '</td>' : '')
+        +  '</tr>';
+      h += '<tr><td colspan="' + (_sig?5:4) + '" style="padding:0 8px 7px 18px;border-bottom:1px solid var(--color-border,#f3f4f6);font-size:11px;color:var(--color-text-muted,#6b7280)">'
+        +  (m.ventas||[]).map(function(v){ return _comEsc(v.op) + ' · ' + _comEsc(v.paciente) + ' · ' + _comEsc(v.producto) + ' ×' + v.cantidad + ' · ' + _comMoney(v.total); }).join(' &nbsp;|&nbsp; ')
+        +  '</td></tr>';
+    });
+    h += '</tbody></table>';
+    if (_sig) h += '<div style="font-size:11.5px;color:var(--color-text-muted,#6b7280);margin-bottom:12px">💡 El grupo lleva <b>' + (c.conteo||0) + '</b> procedimiento(s); faltan <b>' + Math.max(0,(_sig.desde-(c.conteo||0))) + '</b> para el escalón de <b>' + _sig.pct + '%</b>. La comisión aún no es real (nada se genera hasta llegar al escalón).</div>';
+  }
+
   if (!c.detalle.length) {
-    h += '<div style="padding:20px;text-align:center;color:var(--color-text-muted,#6b7280);font-size:13px">'
-      +  'No hay comisión que generar este mes' + (c.conteo ? ' (el grupo no llegó al escalón).' : ' (el grupo no hizo procedimientos de los que cuentan).')
+    h += '<div style="padding:16px;text-align:center;color:var(--color-text-muted,#6b7280);font-size:13px;border-top:1px solid var(--color-border,#f3f4f6)">'
+      +  'No hay comisión que <b>generar</b> este mes' + (c.conteo ? ' (el grupo no llegó al escalón).' : ' (el grupo no hizo procedimientos de los que cuentan).')
       +  '</div></div>';
     box.innerHTML = h; return;
   }
@@ -12453,11 +12539,12 @@ function _comCfgProdDl() {
 function _comCfgOrigOpts(sel, soloGrupos) {
   var l = (_comOrig || []).slice();
   if (soloGrupos) {
-    // Un médico SIN padre es su propio grupo (independiente): también puede ser
-    // el sujeto del volumen. Excluirlo dejaría fuera al médico que trabaja solo.
+    // Solo los GRUPOS/AGENCIAS que de verdad generan comisión por volumen (Grupo
+    // Médico, Reprovida). Se excluyen los médicos individuales (esos van dentro de
+    // su grupo) y "Hestia" (médicos de casa, no generan comisión de agencia).
     l = l.filter(function (o) {
       var t = _origTipoDe(o);
-      return t === 'Grupo' || t === 'Agencia' || (t === 'Médico externo' && !String(o.padre || '').trim());
+      return (t === 'Grupo' || t === 'Agencia') && _origNormJS(o.nombre).indexOf('hestia') < 0;
     });
   }
   var h = '<option value="">— Elige del catálogo —</option>';
@@ -28916,33 +29003,32 @@ function _pacOrigFind(nombre){
    canal → se listan todos. El valor actual se conserva SIEMPRE (nunca se borra
    por el filtro: anti-blanqueo). */
 function _pacFiltraMedicos(){
-  var selC = document.getElementById('pac-f-canal');
   var selM = document.getElementById('pac-f-medico');
   var hint = document.getElementById('pac-medico-hint');
   if (!selM) return;
   var cur = String(selM.value || '').trim();
   // Catálogo aún sin cargar: NO tocar el select (conservar lo ya elegido).
   if (!_pacMedicos || !_pacMedicos.length){ _pacEnsureOption(selM, cur); selM.value = cur; return; }
-  var canal = selC ? String(selC.value || '').trim() : '';
-  var todos = _pacMedicos.slice();
-  var lista = todos, filtrado = false;
-  if (canal){
-    var m = todos.filter(function(o){ return _origNormJS(o.canal) === _origNormJS(canal); });
-    if (m.length){ lista = m; filtrado = true; }
-  }
-  selM.innerHTML = '<option value="">— Selecciona —</option>';
-  lista.forEach(function(o){
-    var op = document.createElement('option');
-    op.value = o.nombre; op.textContent = o.nombre;
-    selM.appendChild(op);
+  // TODOS los médicos, agrupados por canal (Hestia / Agencia / Externos) para que
+  // se vean COMPLETOS y organizados. Antes se filtraban por el Canal elegido y se
+  // ocultaban médicos válidos (los de agencia/grupo no aparecían). Elegir un médico
+  // ya fija su Canal solo (_pacMedicoChanged), así que no hace falta filtrar.
+  var todos = _pacMedicos.slice().sort(function(a,b){ return String(a.nombre||'').localeCompare(String(b.nombre||'')); });
+  var byCanal = {}; todos.forEach(function(o){ var k = String(o.canal||'Externos'); (byCanal[k]=byCanal[k]||[]).push(o); });
+  var orden = ['Hestia','Agencia','Externos'];
+  var canales = Object.keys(byCanal).sort(function(a,b){ var ia=orden.indexOf(a), ib=orden.indexOf(b); ia=ia<0?99:ia; ib=ib<0?99:ib; return (ia-ib) || a.localeCompare(b); });
+  var h = '<option value="">— Selecciona —</option>';
+  canales.forEach(function(c){
+    h += '<optgroup label="'+_escH(c)+'">';
+    byCanal[c].forEach(function(o){ h += '<option value="'+_escH(o.nombre)+'">'+_escH(o.nombre)+'</option>'; });
+    h += '</optgroup>';
   });
+  selM.innerHTML = h;
   _pacEnsureOption(selM, cur);   // el médico ya capturado nunca se pierde
   selM.value = cur;
   if (hint){
-    hint.textContent = filtrado
-      ? 'Mostrando solo los del canal «' + canal + '» (' + lista.length + '). Cambia el Canal para ver otros.'
-      : (todos.length ? 'Del catálogo de Médicos Tratantes. Elige un Canal para filtrar por él.' : '');
-    hint.style.display = hint.textContent ? 'block' : 'none';
+    hint.textContent = 'Todos los médicos tratantes ('+todos.length+'), agrupados por canal. Al elegir uno se asigna su Canal solo.';
+    hint.style.display = 'block';
   }
 }
 function _pacCanalChanged(){ _pacFiltraMedicos(); }
@@ -33021,12 +33107,25 @@ function _medGrupoDe(m){
   return g || 'Externos (independiente)';
 }
 
+var _medSort = 'nombre', _medFilter = '';
+function _medSetSort(v){ _medSort = v; _medRenderTabla(); }
+function _medOnFiltro(v){ _medFilter = v; _medRenderTabla(); }
+// Lista filtrada (por nombre/grupo/alias) y ordenada (nombre A-Z o por grupo).
+function _medListaVista(){
+  var q = (typeof _origNormJS === 'function') ? _origNormJS(_medFilter||'') : String(_medFilter||'').toLowerCase();
+  var list = (_medData||[]).filter(function(m){
+    if (!q) return true;
+    return _origNormJS(m.nombre||'').indexOf(q) > -1 || _origNormJS(_medGrupoDe(m)).indexOf(q) > -1 || _origNormJS(m.alias||'').indexOf(q) > -1;
+  }).slice();
+  if (_medSort === 'grupo') list.sort(function(a,b){ return _medGrupoDe(a).localeCompare(_medGrupoDe(b)) || String(a.nombre||'').localeCompare(String(b.nombre||'')); });
+  else list.sort(function(a,b){ return String(a.nombre||'').localeCompare(String(b.nombre||'')); });
+  return list;
+}
 function _medRenderView(){
   var root = document.getElementById('medicos-root'); if (!root) return;
   // saveOrigen/deleteOrigen exigen editar_ingresos (misma puerta que Orígenes).
   var puede = typeof hasPermission === 'function' && hasPermission('editar_ingresos');
-  var list = _medData || [];
-  var TH = 'style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted)"';
+  var total = (_medData||[]).length;
   var h = '<div style="max-width:860px;margin:0 auto;padding:4px 2px 44px">';
   h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px">'
     + '<div><div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--color-text-muted)">Hestia Fertility</div>'
@@ -33035,21 +33134,39 @@ function _medRenderView(){
     + (puede ? '<button onclick="medOpenForm()" class="dash-btn">+ Nuevo médico</button>' : '') + '</div>';
   h += '<div style="font-size:11px;color:var(--color-text-muted);margin:0 0 14px;line-height:1.5">Los médicos viven en <b>Orígenes externos</b> (aquí es solo una forma rápida de darlos de alta). Aparecen bajo su grupo y cuentan para las <b>comisiones</b> de ese grupo. '
     + '<a href="#" onclick="if(typeof navigateTo===\'function\')navigateTo(\'origenes\');return false;" style="color:var(--color-primary);font-weight:600">Ver Orígenes externos →</a></div>';
-  if (!list.length){
+  if (!total){
     h += '<div style="background:var(--color-surface-2);border:1px dashed var(--color-divider);border-radius:14px;padding:40px;text-align:center;color:var(--color-text-muted);font-size:13px">🩺 Aún no hay médicos.' + (puede ? ' Agrega el primero con <b>+ Nuevo médico</b>.' : '') + '</div>';
   } else {
-    h += '<div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:14px;overflow:hidden">'
-      + '<table style="width:100%;border-collapse:collapse;font-size:13px">'
-      + '<thead><tr style="background:var(--color-surface-offset)">'
-      + '<th ' + TH + '>Nombre</th><th ' + TH + '>Pertenece a</th>'
-      + (puede ? '<th ' + TH + ' style="text-align:right;padding:10px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted)">Acciones</th>' : '')
-      + '</tr></thead><tbody>';
-    list.forEach(function(m){ h += _medRow(m, puede); });
-    h += '</tbody></table></div>';
-    h += '<div style="font-size:11px;color:var(--color-text-muted);margin-top:10px">' + list.length + ' médico' + (list.length===1?'':'s') + ' activo' + (list.length===1?'':'s') + '.</div>';
+    // Controles: buscar + ordenar (por Nombre A-Z o por Grupo). El buscador vive
+    // FUERA de la tabla que se re-renderiza, así no pierde el foco al escribir.
+    h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'
+      + '<input id="med-buscar" type="text" value="' + _escH(_medFilter) + '" placeholder="🔍 Buscar médico, grupo o alias…" oninput="_medOnFiltro(this.value)" style="flex:1;min-width:180px;padding:8px 12px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:12.5px;background:var(--color-surface-2);color:var(--color-text)">'
+      + '<label style="font-size:11px;color:var(--color-text-muted);font-weight:600">Ordenar:</label>'
+      + '<select onchange="_medSetSort(this.value)" style="padding:8px 10px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:12.5px;background:var(--color-surface-2);color:var(--color-text)">'
+      + '<option value="nombre"' + (_medSort==='nombre'?' selected':'') + '>Nombre (A-Z)</option>'
+      + '<option value="grupo"' + (_medSort==='grupo'?' selected':'') + '>Grupo / Agencia</option></select></div>';
+    h += '<div id="med-tbody-wrap"></div>';
   }
   h += '</div>' + _medFormHTML2Marker();
   root.innerHTML = h;
+  if (total) _medRenderTabla();
+}
+function _medRenderTabla(){
+  var wrap = document.getElementById('med-tbody-wrap'); if (!wrap) return;
+  var puede = typeof hasPermission === 'function' && hasPermission('editar_ingresos');
+  var TH = 'style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted)"';
+  var list = _medListaVista(), total = (_medData||[]).length;
+  var h = '<div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:14px;overflow:hidden">'
+    + '<table style="width:100%;border-collapse:collapse;font-size:13px">'
+    + '<thead><tr style="background:var(--color-surface-offset)">'
+    + '<th ' + TH + '>Nombre</th><th ' + TH + '>Pertenece a</th>'
+    + (puede ? '<th ' + TH + ' style="text-align:right">Acciones</th>' : '')
+    + '</tr></thead><tbody>';
+  if (!list.length) h += '<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--color-text-muted);font-size:12.5px">Sin resultados para «' + _cxpEsc(_medFilter) + '».</td></tr>';
+  else list.forEach(function(m){ h += _medRow(m, puede); });
+  h += '</tbody></table></div>';
+  h += '<div style="font-size:11px;color:var(--color-text-muted);margin-top:10px">' + list.length + (list.length!==total ? ' de ' + total : '') + ' médico' + (total===1?'':'s') + (list.length!==total?'':' activo'+(total===1?'':'s')) + '.</div>';
+  wrap.innerHTML = h;
 }
 
 function _medRow(m, puede){
@@ -33101,10 +33218,15 @@ function _medFormHTML(){
 function _medFillGrupoSelect(curId){
   var sel = document.getElementById('med-f-grupo'); if (!sel) return;
   var list = _medOrigAll || [];
-  var grupos = list.filter(function(o){ return _origTipoDe(o) === 'Grupo'; });
+  // Hestia = médicos de CASA. Viven bajo un grupo "Hestia" (se crea solo la 1a vez
+  // al guardar). Su valor es el id del grupo si ya existe, o el sentinel __HESTIA__.
+  var hestiaGrp = list.filter(function(o){ return _origTipoDe(o) === 'Grupo' && _origNormJS(o.nombre).indexOf('hestia') > -1; })[0];
+  var hestiaVal = hestiaGrp ? hestiaGrp.id : '__HESTIA__';
+  var grupos = list.filter(function(o){ return _origTipoDe(o) === 'Grupo' && _origNormJS(o.nombre).indexOf('hestia') < 0; });
   var agencias = list.filter(function(o){ return _origTipoDe(o) === 'Agencia'; });
   function opt(o){ return '<option value="' + _escH(o.id) + '">' + _escH(o.nombre) + '</option>'; }
-  var h = '<option value="">— Externos (independiente) —</option>';
+  var h = '<optgroup label="Interno"><option value="' + _escH(hestiaVal) + '">🏥 Hestia (médico de casa)</option></optgroup>';
+  h += '<option value="">— Externos (independiente) —</option>';
   if (agencias.length) h += '<optgroup label="Agencias">' + agencias.map(opt).join('') + '</optgroup>';
   if (grupos.length)   h += '<optgroup label="Grupos">' + grupos.map(opt).join('') + '</optgroup>';
   sel.innerHTML = h;
@@ -33136,6 +33258,18 @@ function medOpenForm(id){
 }
 function medCloseForm(){ var o=document.getElementById('med-ovl'), m=document.getElementById('med-modal'); if(o)o.style.display='none'; if(m)m.style.display='none'; }
 
+/* Devuelve el id del grupo "Hestia" (médicos de casa), creándolo la primera vez.
+   Es un Grupo del catálogo de Orígenes; se excluye del selector de Comisiones para
+   no confundirlo con los grupos que sí generan comisión (Grupo Médico / Reprovida). */
+async function _medEnsureHestiaGrupo(){
+  var hg = (_medOrigAll||[]).filter(function(o){ return _origTipoDe(o)==='Grupo' && _origNormJS(o.nombre).indexOf('hestia')>-1; })[0];
+  if (hg) return hg.id;
+  var s = (typeof getSession === 'function' && getSession()) || {};
+  var r = await fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify({ action:'saveOrigen', tipo:'Grupo', nombre:'Hestia', notas:'Médicos de casa', activo:true, token:getToken(), usuario:s.email||s.nombre||'' })});
+  var d = await r.json();
+  if (d && d.ok && d.id){ _origListCache = null; return d.id; }
+  throw new Error((d && d.error) || 'No se pudo crear el grupo Hestia.');
+}
 async function medGuardar(){
   var nombre = ((document.getElementById('med-f-nombre')||{}).value||'').trim();
   var msg = document.getElementById('med-f-msg');
@@ -33143,12 +33277,19 @@ async function medGuardar(){
   if (!nombre){ showMsg('El médico necesita un nombre.', false); return; }
   var btn = document.getElementById('med-save-btn'); if (btn){ btn.disabled=true; btn.textContent='Guardando…'; }
   var s = (typeof getSession === 'function' && getSession()) || {};
+  var padre = ((document.getElementById('med-f-grupo')||{}).value||'').trim();
+  // "Hestia (médico de casa)": si aún no existe el grupo Hestia, se crea aquí una
+  // sola vez y el médico cuelga de él (así su Canal se deriva a "Hestia").
+  if (padre === '__HESTIA__'){
+    try { padre = await _medEnsureHestiaGrupo(); }
+    catch(e){ showMsg('Error: ' + e.message, false); if (btn){ btn.disabled=false; btn.textContent='Guardar'; } return; }
+  }
   // Se guarda como un ORIGEN EXTERNO tipo "Médico externo" bajo el grupo elegido:
   // así lo ve la ficha (canal derivado) y lo cuenta el motor de comisiones.
   var body = { action:'saveOrigen', tipo:'Médico externo',
     id:((document.getElementById('med-f-id')||{}).value||'').trim(),
     nombre:nombre,
-    padre:((document.getElementById('med-f-grupo')||{}).value||'').trim(),
+    padre:padre,
     alias:((document.getElementById('med-f-alias')||{}).value||'').trim(),
     email:((document.getElementById('med-f-email')||{}).value||'').trim(),
     telefono:((document.getElementById('med-f-tel')||{}).value||'').trim(),
@@ -38423,15 +38564,17 @@ function _cobDate(s,lang){  return lang==='es' ? ccFch(s) : hfFmtDate(s,lang); }
    alguna cuota está vencida → «Vencido»; con plan al día → «En plan»; sin plan
    (saldo abierto) → «Inmediato». Localizado. Vacío si la línea no tiene saldo. */
 var _COB_EST_L = {
-  es:{col:'Estado', venc:'⚠ Vencido', inm:'Inmediato', plan:'En plan'},
-  en:{col:'Status', venc:'⚠ Overdue', inm:'Immediate', plan:'On plan'},
-  fr:{col:'Statut', venc:'⚠ En retard', inm:'Immédiat', plan:'Échelonné'},
-  pt:{col:'Situação', venc:'⚠ Vencido', inm:'Imediato', plan:'Parcelado'}
+  es:{col:'Estado', venc:'⚠ Vencido', inm:'Inmediato', plan:'En plan', pag:'✓ Pagado'},
+  en:{col:'Status', venc:'⚠ Overdue', inm:'Immediate', plan:'On plan', pag:'✓ Paid'},
+  fr:{col:'Statut', venc:'⚠ En retard', inm:'Immédiat', plan:'Échelonné', pag:'✓ Payé'},
+  pt:{col:'Situação', venc:'⚠ Vencido', inm:'Imediato', plan:'Parcelado', pag:'✓ Pago'}
 };
 function _cobEstL(lang){ return _COB_EST_L[String(lang||'es').toLowerCase().substring(0,2)] || _COB_EST_L.es; }
 function _cobEstadoLinea(op, saldo, lang){
-  if(!(parseFloat(saldo) > 0.01)) return '';
   var t = _cobEstL(lang);
+  // Sin saldo = ya PAGADO. Marcarlo claro (antes salía en blanco y, con "Pagado
+  // $0.00", parecía un cargo sin pagar → el usuario lo veía como cobro doble).
+  if(!(parseFloat(saldo) > 0.01)) return t.pag;
   var pl = _cobPlanData && _cobPlanData.filter(function(p){ return String(p.op) === String(op); })[0];
   if(pl && pl.calendario){
     var abonado = _cobAbonadoDeOp(op), hoy = _planFmtJS(new Date()), acum = 0, venc = false;
@@ -38490,15 +38633,21 @@ function _cobBuildPrintData(lang){
     else { movs.push({ op:o.op||'', fecha:o.fecha, producto:o.concepto||T.saldo, cantidad:null, total:o.total, pagado:(o.total||0)-(o.saldo||0), saldo:o.saldo }); }
   });
   var _mkRowCob=function(m, isItem){
+    var settled = (parseFloat(m.saldo)||0) <= 0.01;
+    // Si está saldado y es un cargo real, "Pagado" = el total (no $0.00): así se ve
+    // que YA se pagó y no se confunde con un cargo pendiente.
+    var pagCell = (m.pagado==null) ? '' : ((settled && (parseFloat(m.total)||0)>0) ? ccFmt(m.total) : ccFmt(m.pagado));
     return [ ccFch(m.fecha), m.producto, _cq(m.cantidad), ccFmt(m.total),
-             (m.pagado==null?'':ccFmt(m.pagado)), ((parseFloat(m.saldo)||0)>0.01?ccFmt(m.saldo):'—'),
+             pagCell, (settled?'—':ccFmt(m.saldo)),
              isItem ? '' : _cobEstadoLinea(m.op, m.saldo, lang) ];
   };
   var _mkHeaderCob=function(g, tot){
     var op=String((g[0].op)||'').trim(), sumPag=0, sumSal=0, hayPag=false;
     g.forEach(function(m){ if(m.pagado!=null){ sumPag+=(parseFloat(m.pagado)||0); hayPag=true; } sumSal+=(parseFloat(m.saldo)||0); });
+    var settled = sumSal <= 0.01;
+    var pagCell = settled && tot>0 ? ccFmt(tot) : (hayPag?ccFmt(sumPag):'');
     var titulo=_lblCobro+' · '+g.length+' '+_lblConc+((op&&op!=='—')?' · OP '+op:'');
-    return [ ccFch(g[0].fecha), titulo, '', ccFmt(tot), (hayPag?ccFmt(sumPag):''), (sumSal>0.01?ccFmt(sumSal):'—'), _cobEstadoLinea(op, sumSal, lang) ];
+    return [ ccFch(g[0].fecha), titulo, '', ccFmt(tot), pagCell, (settled?'—':ccFmt(sumSal)), _cobEstadoLinea(op, sumSal, lang) ];
   };
   var _agCob=_agruparPorOp(movs, _mkRowCob, _mkHeaderCob);
   var rows=_agCob.rows, rowKinds=_agCob.rowKinds, conceptos=_agCob.rowConcepts;
