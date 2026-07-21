@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.273 -->
+﻿<!-- app-build:2026.07.21.274 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12546,6 +12546,17 @@ function comRenderResult() {
     });
     h += '</tbody></table>';
     if (_sig) h += '<div style="font-size:11.5px;color:var(--color-text-muted,#6b7280);margin-bottom:12px">💡 El grupo lleva <b>' + (c.conteo||0) + '</b> procedimiento(s); faltan <b>' + Math.max(0,(_sig.desde-(c.conteo||0))) + '</b> para el escalón de <b>' + _sig.pct + '%</b>. La comisión aún no es real (nada se genera hasta llegar al escalón).</div>';
+  }
+
+  // Procedimientos del grupo que NO cuentan porque su producto no está en la lista
+  // de la regla (la causa más común de "no aparece tal paciente"). Accionable.
+  if ((c.descartadasDetalle||[]).length){
+    h += '<div style="margin:8px 0 12px;padding:12px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:9px;font-size:12.5px;color:#92400e">'
+      +  '<div style="font-weight:700;margin-bottom:5px">⚠ Estos procedimientos del grupo NO cuentan (su producto no está en la lista de la regla):</div>'
+      +  '<ul style="margin:0;padding-left:18px">'
+      +  c.descartadasDetalle.map(function(x){ return '<li style="margin:2px 0">' + _comEsc(x.medicoNombre) + ' · ' + _comEsc(x.paciente) + ' · <b>' + _comEsc(x.producto) + '</b> (' + _comMoney(x.total) + ')</li>'; }).join('')
+      +  '</ul>'
+      +  '<div style="margin-top:6px;font-size:11.5px">Para que cuenten, agrega esos productos abajo en <b>Configurar reglas → Procedimientos que aplican</b>. El nombre debe coincidir con el del catálogo.</div></div>';
   }
 
   if (!c.detalle.length) {
@@ -38757,17 +38768,40 @@ function _cobBuildPrintData(lang){
   // saldo propio) cuyo total coincide con un cargo ABIERTO es esa misma deuda → se
   // OMITE la venta y la deuda se muestra UNA sola vez, como saldo por cobrar. Las
   // ventas realmente pagadas (pagado>0) NO se omiten.
-  var _saldosAbiertos = (d.saldos||[]).filter(function(o){ return (parseFloat(o.saldo)||0) > 0.01; });
-  function _ventaEspejoDeSaldo(v){
-    var vp=parseFloat(v.pagado)||0, vs=parseFloat(v.saldo)||0, vt=parseFloat(v.total)||0;
-    if(vp>0.01 || vs>0.01 || vt<=0.01) return false;
-    return _saldosAbiertos.some(function(o){ return Math.abs((parseFloat(o.total)||0) - vt) <= 1; });
+  // La MISMA deuda puede vivir DOS veces con OTRA OP: como venta(s) en BD_Ingresos
+  // (a veces marcadas "pagadas") y como CARGO abierto en Cuentas_Cobrar. No hay campo
+  // que las ligue (cargarSaldoInicial acuña OP nueva); solo coinciden por paciente
+  // (mismo estado de cuenta) + monto + desglose. Una venta-OP TOTALMENTE saldada cuyo
+  // (total + conjunto de importes de sus líneas) coincide EXACTO con un cargo ABIERTO
+  // es esa misma deuda → se OMITE la venta y el adeudo se ve UNA vez, abajo, como
+  // saldo por cobrar. Match estricto (total al centavo + mismo set de importes) para
+  // no ocultar una venta legítimamente pagada de monto coincidente.
+  function _cobSig(total, importes){
+    return Math.round((parseFloat(total)||0)*100) + '|' +
+      (importes||[]).map(function(t){ return Math.round((parseFloat(t)||0)*100); }).sort(function(a,b){ return a-b; }).join(',');
   }
+  var _cargoSigs = {};
+  (d.saldos||[]).forEach(function(o){
+    if((parseFloat(o.saldo)||0) <= 0.01) return;
+    var its = (o.items||[]).map(function(x){ return x.total; });
+    _cargoSigs[_cobSig(o.total, its.length ? its : [o.total])] = true;
+  });
+  var _vByOp = {};
+  _vv.forEach(function(v){ var k = String(v.op||''); (_vByOp[k]=_vByOp[k]||[]).push(v); });
+  var _opOmit = {};
+  Object.keys(_vByOp).forEach(function(k){
+    if (!k) return;   // ventas sin OP no se pueden ligar con seguridad
+    var grp = _vByOp[k];
+    var totalGrp = grp.reduce(function(a,v){ return a+(parseFloat(v.total)||0); },0);
+    var saldoGrp = grp.reduce(function(a,v){ return a+(parseFloat(v.saldo)||0); },0);
+    if (saldoGrp > 0.01) return;   // la venta tiene saldo propio → NO es espejo de un adeudo
+    if (_cargoSigs[_cobSig(totalGrp, grp.map(function(v){ return v.total; }))]) _opOmit[k] = true;
+  });
   _vvTot = 0;   // se recalcula solo con lo realmente impreso (sin los espejos omitidos)
   var _opsImpresos={};
   _vv.forEach(function(v){
-    if(_ventaEspejoDeSaldo(v)) return;                 // espejo "pagado-por-blanco" de un adeudo abierto → fuera
-    if(v.op) _opsImpresos[String(v.op)]=true;
+    if (v.op && _opOmit[String(v.op)]) return;         // venta espejo de un adeudo abierto → fuera
+    if (v.op) _opsImpresos[String(v.op)]=true;
     _vvTot += (parseFloat(v.total)||0);
     movs.push({ op:v.op||'', fecha:v.fecha, producto:v.producto||'—', cantidad:v.cantidad, total:v.total, pagado:v.pagado, saldo:v.saldo });
   });

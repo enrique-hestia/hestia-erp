@@ -359,13 +359,22 @@ function calcularComisiones(body) {
 
     // ── 1) Ventas del GRUPO con producto elegible ──────────────────────────
     var elegibles = [], descartadas = { sinOrigen: 0, otroGrupo: 0, productoNoElegible: 0 };
+    // Detalle SOLO de las que SÍ son del grupo pero su PRODUCTO no está en la lista
+    // elegible: es lo accionable ("Sasha con Paladino no cuenta porque Inseminación
+    // no está en los productos de la regla"). sinOrigen/otroGrupo solo se cuentan.
+    var descNoElegible = [];
     lect.rows.forEach(function (v) {
       if (!v.origen) { descartadas.sinOrigen++; return; }
       var res = null;
       try { res = _origResolver(v.origen); } catch (e) { res = null; }
       if (!res || !res.id) { descartadas.sinOrigen++; return; }
       if (String(res.grupoId) !== String(regla.grupoId)) { descartadas.otroGrupo++; return; }
-      if (!prodSet[_comKeyProd(v.producto)]) { descartadas.productoNoElegible++; return; }
+      if (!prodSet[_comKeyProd(v.producto)]) {
+        descartadas.productoNoElegible++;
+        descNoElegible.push({ op: v.op, paciente: v.paciente, producto: v.producto,
+                              cantidad: v.cantidad, total: v.total, medicoNombre: res.nombre });
+        return;
+      }
       elegibles.push({ op: v.op, paciente: v.paciente, producto: v.producto, cantidad: v.cantidad,
                        total: v.total, medicoId: res.id, medicoNombre: res.nombre, medicoTipo: res.tipo });
     });
@@ -458,7 +467,7 @@ function calcularComisiones(body) {
              pct: pct, escalones: tiers.map(function (t) { return { desde: t.desde, hasta: t.hasta === 1e9 ? '' : t.hasta, pct: t.pct }; }),
              detalle: detalle, totales: totLista,
              totalGeneral: _comRedondea(totLista.reduce(function (s, t) { return s + t.monto; }, 0)),
-             elegibles: elegibles, descartadas: descartadas,
+             elegibles: elegibles, descartadas: descartadas, descartadasDetalle: descNoElegible,
              avisos: avisos, bloqueo: bloqueoLibro,
              yaGenerado: ya, generado: ya.length > 0 };
   } catch (ex) { return { ok: false, error: ex.message, version: COMISIONES_VER }; }
