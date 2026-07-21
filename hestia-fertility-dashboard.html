@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.279 -->
+﻿<!-- app-build:2026.07.21.280 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -3902,6 +3902,11 @@ function _renderProductosView() {
 }
 
 var PRODUCTOS_SS_ID = '1eXskEMPdwuwEuV7GmVDNfyO1ulxhsZ9F_2hDVRDdIAY';
+// Libro de Cuentas por Pagar — aquí vive la hoja "Proveedores".
+// Solo se usa para el acceso directo (discreto) al spreadsheet, gateado por 'sheets_access'.
+// (No se fuerza pestaña con #gid= porque el gid de la hoja Proveedores no está en el código;
+//  la hoja se resuelve por nombre en el backend. El link abre el libro en su pestaña activa.)
+var CXP_SS_ID = '1iRjpYtkcqx-3NRwlVK-UYx09I0gVyiTDRtIA9X9RAQw';
 
 /* ── Administración de AGENCIAS (cada agencia = una lista de precios) ── */
 async function agenciasAdminOpen(){
@@ -20692,6 +20697,16 @@ function _renderProveedores(){
       +'<button class="pv-btn" onclick="provOpenForm()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Nuevo proveedor</button>'
       +'</div>':'')
     +'</div>');
+  // Acceso discreto al spreadsheet (hoja "Proveedores" en el libro de Cuentas por Pagar).
+  // Solo visible para usuarios con permiso 'sheets_access'; el resto ni lo ve.
+  if (hasPermission('sheets_access')) {
+    h.push('<div style="display:flex;justify-content:flex-end;margin:-6px 2px 4px">'
+      +'<a href="https://docs.google.com/spreadsheets/d/'+CXP_SS_ID+'/edit" target="_blank" rel="noopener" '
+      +'title="Abrir la hoja Proveedores en Google Sheets (acceso restringido)" '
+      +'style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--text-secondary,#9ca3af);text-decoration:none;opacity:.75">'
+      +'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>'
+      +'Abrir en Sheets</a></div>');
+  }
   // KPIs
   h.push('<div class="pv-kstrip">'
     +'<div class="pv-ks"><div class="pv-ks-lbl">Proveedores</div><div class="pv-ks-val" style="color:var(--text-primary,#111)">'+k.total+'</div></div>'
