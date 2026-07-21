@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.289 -->
+﻿<!-- app-build:2026.07.21.290 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -33702,8 +33702,43 @@ async function expReporte(){
     });
     h+='</tbody></table>';
   }
-  h+='<div style="margin-top:16px;display:flex;justify-content:flex-end"><button onclick="expReporteImprimir()" style="font-size:12px;padding:8px 16px;border:1px solid var(--color-divider);background:var(--color-surface-2,#f3f4f6);border-radius:9px;cursor:pointer;font-weight:600">🖨️ Imprimir</button></div>';
+  h+='<div style="margin-top:16px;display:flex;justify-content:space-between;gap:8px">'
+    +(hasPermission('editar_ingresos')?'<button onclick="expConfig()" style="font-size:12px;padding:8px 14px;border:1px solid var(--color-divider);background:none;border-radius:9px;cursor:pointer;font-weight:600">⚙ Configurar documentos</button>':'<span></span>')
+    +'<button onclick="expReporteImprimir()" style="font-size:12px;padding:8px 16px;border:1px solid var(--color-divider);background:var(--color-surface-2,#f3f4f6);border-radius:9px;cursor:pointer;font-weight:600">🖨️ Imprimir</button></div>';
   document.getElementById('exp-modal-body').innerHTML=h;
+}
+/* Configuración de documentos requeridos (cuáles se piden, cuáles caducan). */
+var _expCfg=[];
+async function expConfig(){
+  _expEnsureModal(); document.getElementById('exp-modal').style.display='flex';
+  document.getElementById('exp-modal-body').innerHTML='<div style="text-align:center;padding:30px;color:var(--color-text-muted)">Cargando…</div>';
+  var d; try{ var r=await fetch(APPS_SCRIPT_URL+'?action=expedienteConfig&token='+encodeURIComponent(getToken())+'&_t='+Date.now(),{redirect:'follow'}); d=await r.json(); }catch(e){ document.getElementById('exp-modal-body').innerHTML='<div style="color:#b91c1c;padding:20px">Error: '+e.message+'</div>'; return; }
+  _expCfg=(d&&d.docs)?d.docs.slice():[]; expConfigRender();
+}
+function _expCfgRow(x,i){
+  return '<div style="display:flex;align-items:center;gap:8px;border:1px solid var(--color-divider);border-radius:9px;padding:8px 10px">'
+    +'<input value="'+_comEsc(x.nombre||'')+'" oninput="_expCfg['+i+'].nombre=this.value" placeholder="Nombre del documento" style="flex:1;padding:6px 8px;border:1px solid var(--color-divider);border-radius:6px;font-size:12px;background:var(--card-bg,#fff);color:var(--color-text)">'
+    +'<label style="font-size:11px;display:flex;align-items:center;gap:4px;white-space:nowrap"><input type="checkbox" '+(x.requiereVigencia?'checked':'')+' onchange="_expCfg['+i+'].requiereVigencia=this.checked;expConfigRender()">caduca</label>'
+    +(x.requiereVigencia?'<input type="number" value="'+(x.diasAviso||30)+'" oninput="_expCfg['+i+'].diasAviso=parseInt(this.value)||0" title="días de aviso antes de vencer" style="width:56px;padding:6px;border:1px solid var(--color-divider);border-radius:6px;font-size:12px;background:var(--card-bg,#fff);color:var(--color-text)"><span style="font-size:10px;color:var(--color-text-muted)">días</span>':'')
+    +'<button onclick="_expCfg.splice('+i+',1);expConfigRender()" title="Quitar" style="border:1px solid #fecaca;background:none;color:#b91c1c;border-radius:6px;font-size:12px;padding:4px 8px;cursor:pointer">🗑</button></div>';
+}
+function expConfigRender(){
+  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="font-size:18px;font-weight:800;color:var(--color-text)">Documentos requeridos</div><button onclick="expClose()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--color-text-muted)">×</button></div>'
+    +'<div style="font-size:11px;color:var(--color-text-muted);margin-bottom:12px">Marca «caduca» los que tienen vigencia (Póliza RC, Certificado del Consejo…) y en cuántos días avisar antes de vencer.</div>'
+    +'<div style="display:flex;flex-direction:column;gap:6px">';
+  (_expCfg||[]).forEach(function(x,i){ h+=_expCfgRow(x,i); });
+  h+='</div><div style="margin-top:10px"><button onclick="expCfgAdd()" style="font-size:12px;padding:6px 12px;border:1px dashed var(--color-divider);background:none;border-radius:8px;cursor:pointer">+ Agregar documento</button></div>'
+    +'<div style="margin-top:16px;display:flex;justify-content:flex-end"><button onclick="expConfigSave()" style="font-size:12px;padding:8px 18px;border:none;background:var(--color-primary,#c46a7a);color:#fff;border-radius:9px;cursor:pointer;font-weight:700">Guardar</button></div>';
+  document.getElementById('exp-modal-body').innerHTML=h;
+}
+function expCfgAdd(){ _expCfg.push({docId:'doc'+Date.now(), nombre:'', requiereVigencia:false, diasAviso:0, orden:(_expCfg.length+1)*10, activo:true}); expConfigRender(); }
+async function expConfigSave(){
+  var docs=(_expCfg||[]).filter(function(x){return (x.nombre||'').trim();}).map(function(x,i){ return {docId:x.docId||('doc'+i), nombre:x.nombre, requiereVigencia:!!x.requiereVigencia, diasAviso:x.diasAviso||0, orden:(i+1)*10, activo:x.activo!==false}; });
+  if(!docs.length){ alert('Deja al menos un documento.'); return; }
+  var s=getSession()||{};
+  try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'expedienteConfigSave',docs:docs,token:s.token||getToken(),usuario:s.email||''})}); var d=await r.json();
+    if(!d.ok){ alert(d.error||'Error'); return; } alert('Configuración de documentos guardada.'); expClose();
+  }catch(e){ alert('Error: '+e.message); }
 }
 function expReporteImprimir(){
   var d=_expResumen; if(!d) return; var rs=d.resumen||{};
