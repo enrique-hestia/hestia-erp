@@ -146,6 +146,16 @@ function _summaryRevOrden(label){
   return 90; // no clasificado → al final, antes de "(Sin grupo)"
 }
 
+/* Canoniquiza el nombre del grupo de Revenue (columna U) a Title Case para que las
+   variantes que SOLO difieren en mayúsculas ("EXTERNOS"/"Externos", "SURROGACY"/
+   "Surrogacy") NO creen grupos DUPLICADOS. Solo mergea diferencias de caso: grupos
+   realmente distintos siguen separados. No cambia el total, solo agrupa mejor. */
+function _sumGrupoCanon(raw){
+  var s = String(raw||'').trim().replace(/\s+/g,' ');
+  if (!s || s === '(Sin grupo)') return '(Sin grupo)';
+  return s.replace(/\S+/g, function(w){ return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase(); });
+}
+
 /* Clave normalizada (sin acentos/puntuación) para empatar contra el template. */
 function _sumKey(s){
   return String(s||'').toLowerCase()
@@ -652,7 +662,9 @@ function readSummary(fechaInicio, fechaFin) {
         }
         var prod = String(r.producto||'').trim() || l2 || '(sin producto)';
         var cant = Number(r.cantidad)||0; if(!cant) cant=1;
-        var line = getRev(l1, _summaryRevOrden(l1));
+        // Canoniquiza el caso del grupo para no duplicar "Surrogacy"/"SURROGACY" ni
+        // "Externos"/"EXTERNOS" (el orden se calcula con el valor crudo, es case-insensitive).
+        var line = getRev(_sumGrupoCanon(l1), _summaryRevOrden(l1));
         if (enActual){ line.actual+=r.total; recon.ingresosTotal+=r.total;
           addRev(line, l2, prod, r.total, cant, true, {fecha:f, nombre:r.paciente, concepto:r.producto+' · '+r.categoria, monto:r.total, cantidad:cant});
         }
