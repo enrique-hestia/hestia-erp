@@ -938,6 +938,86 @@ function readEstadoResultadosMensual(fechaInicio, fechaFin){
   }catch(ex){ return {ok:false, error:ex.message+' (L:'+(ex.lineNumber||'?')+')'}; }
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   OPERATING P&L — EN VIVO desde la BD REAL (motor readSummary), SIN el
+   libro viejo ER_SS_ID (17jlXza…). Devuelve EXACTAMENTE la misma forma que
+   _buildPLReport de finance.gs (view:'p-l', fuente:'OperatingPL', colHeaders,
+   rows con 8 valores) para que renderOperatingPL y _presInyectaBudgetEnPL
+   sigan funcionando byte-idéntico. El Budget lo pone _presInyectaBudgetEnPL
+   ENCIMA (módulo Presupuesto). Taxonomía UNIFICADA con Summary/Board → los
+   tres reportes cuadran fila por fila (misma fuente de verdad).
+   · Actual  = readSummary(ventana año actual)      → .actual de cada línea
+   · Año ant.= readSummary(misma ventana año previo) → .actual (YoY correcto)
+   ══════════════════════════════════════════════════════════════════════ */
+function _plReportLive(viewType, plMonth, yr, prv, VIEW_OPTIONS, MONTH_OPTIONS, yearRange){
+  var QTR = { Q1:[1,2,3], Q2:[4,5,6], Q3:[7,8,9], Q4:[10,11,12] };
+  var MES_NUM = { Enero:1,Febrero:2,Marzo:3,Abril:4,Mayo:5,Junio:6,
+                  Julio:7,Agosto:8,Septiembre:9,Octubre:10,Noviembre:11,Diciembre:12 };
+  var targetMonths = (plMonth && MES_NUM[plMonth]) ? [MES_NUM[plMonth]] : (QTR[viewType] || QTR.Q1);
+  var mMin = Math.min.apply(null, targetMonths), mMax = Math.max.apply(null, targetMonths);
+  function pad(n){ return (String(n).length < 2) ? ('0'+n) : (''+n); }
+  function lastDay(y,m){ return new Date(y, m, 0).getDate(); }
+  var curFi  = yr  +'-'+ pad(mMin) +'-01', curFf  = yr  +'-'+ pad(mMax) +'-'+ pad(lastDay(yr, mMax));
+  var prevFi = prv +'-'+ pad(mMin) +'-01', prevFf = prv +'-'+ pad(mMax) +'-'+ pad(lastDay(prv, mMax));
+
+  var sA = readSummary(curFi, curFf);
+  if (!sA || !sA.ok) return { ok:false, error:(sA && sA.error) || 'motor Summary no disponible' };
+  var sP = readSummary(prevFi, prevFf); if (!sP) sP = { ok:false };
+
+  // Año anterior: valor .actual de cada línea del periodo previo, indexado por etiqueta.
+  var prevByLabel = {};
+  if (sP.ok) (sP.lineas||[]).forEach(function(l){ prevByLabel[_sumNorm(l.label||l.linea)] = _erN(l.actual); });
+
+  var totActual = _erN(sA.metricas && sA.metricas.revenue);          // Total Income actual (denominador %)
+  var totPrev   = sP.ok ? _erN(sP.metricas && sP.metricas.revenue) : 0;
+
+  // readSummary.lineas YA viene en el orden canónico del P&L:
+  //   Revenue › grupos, COGS › líneas, Gross Profit, OpEx › líneas, Clinic
+  //   Contribution, G&A › líneas, EBITDA, D&A, EBIT, EBT, Taxes › líneas, Net Profit.
+  var rows = (sA.lineas||[]).map(function(l){
+    var actual = _erN(l.actual);
+    var prev   = prevByLabel[_sumNorm(l.label||l.linea)] || 0;
+    var tipo   = (l.tipo==='seccion') ? 'seccion' : (l.tipo==='metric' ? 'metric' : 'dato');
+    var indent = (tipo==='dato') ? 1 : 0;
+    return {
+      label: l.label || l.linea, tipo: tipo, indent: indent,
+      values: [
+        actual,
+        totActual ? actual/totActual : null,
+        0,                                             // Budget → lo llena _presInyectaBudgetEnPL
+        null,                                          // % Budget → idem
+        null,                                          // vs Budget → idem
+        prev,
+        totPrev ? prev/totPrev : null,
+        prev ? (actual-prev)/Math.abs(prev) : null     // YoY %
+      ]
+    };
+  });
+
+  var pLabel = plMonth || viewType;
+  return {
+    view:'p-l', fuente:'OperatingPL', ok:true,
+    viewType:viewType, activeMonth:plMonth,
+    currentYear:String(yr), currentPrev:String(prv),
+    viewOptions:VIEW_OPTIONS, monthOptions:MONTH_OPTIONS,
+    hasMonthFilter:true, yearRange:yearRange,
+    fuenteDatos:'BD real · motor Summary (consolidado ingresos + egresos)',
+    colHeaders:[
+      {label:'Actual '+pLabel+' '+yr, isPct:false,isVs:false},
+      {label:'%',                      isPct:true, isVs:false},
+      {label:'Budget '+pLabel+' '+yr, isPct:false,isVs:false},
+      {label:'%',                      isPct:true, isVs:false},
+      {label:'vs. Budget',             isPct:true, isVs:true },
+      {label:prv+' '+pLabel,          isPct:false,isVs:false},
+      {label:'%',                      isPct:true, isVs:false},
+      {label:'YOY %',                  isPct:true, isVs:true }
+    ],
+    rows: rows,
+    _debug:{ source:'live-summary', curWindow:curFi+'…'+curFf, prevWindow:prevFi+'…'+prevFf,
+             totActual:totActual, totPrev:totPrev, nLineas:(sA.lineas||[]).length }
+  };
+}
+
 /* ══ RESUMEN GENERAL — alimenta el dashboard principal con datos EN VIVO
    donde los hay (KPIs ingresos/margen/ciclos, serie mensual ing vs gastos,
    mix de servicios por línea). El resto (CAC, embudo, rentabilidad por

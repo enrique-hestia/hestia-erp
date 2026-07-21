@@ -194,6 +194,17 @@ function readOperatingPL(viewType, plMonth, plYear, plPrevYear) {
   var yearRange = [];
   for (var yy = yr-3; yy <= yr+3; yy++) yearRange.push(String(yy));
 
+  // ── PRIMERO: construir el P&L desde la BD REAL (motor Summary, consolidado
+  //    de ingresos+egresos) SIN el libro viejo ER_SS_ID. Taxonomía unificada
+  //    con Summary/Board → los tres cuadran. Si el motor fallara, cae al libro
+  //    viejo (fallback de abajo) para no romper la vista.
+  try {
+    if (typeof _plReportLive === 'function') {
+      var _live = _plReportLive(viewType, plMonth, yr, prv, VIEW_OPTIONS, MONTH_OPTIONS, yearRange);
+      if (_live && _live.ok !== false && _live.rows && _live.rows.length) return _live;
+    }
+  } catch (eLive) { /* cae al fallback del libro viejo */ }
+
   try {
     var erSS = SpreadsheetApp.openById(ER_SS_ID);
     var sheets = erSS.getSheets();

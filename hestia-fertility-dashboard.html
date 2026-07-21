@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.290 -->
+﻿<!-- app-build:2026.07.21.291 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -15742,9 +15742,16 @@ function renderOperatingPL(data) {
   html.push('<div style="text-align:right">');
   html.push('<div style="font-size:12px;font-weight:700;color:var(--text-primary,#111)">' + currentYear + ' vs ' + currentPrev + '</div>');
   html.push('<div style="font-size:10px;color:var(--text-secondary,#6b7280);text-transform:uppercase;letter-spacing:.5px">Moneda: MXN</div>');
-  html.push('<a href="' + ssUrl + '" target="_blank" class="pl-sheets-btn">'
-    +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>'
-    +' Ver en Sheets</a>');
+  if (data && data.fuenteDatos) {
+    // P&L en vivo desde la BD real (motor Summary) — ya NO lee el libro viejo.
+    html.push('<div class="pl-sheets-btn" style="color:#0f766e;cursor:default" title="' + _esc(data.fuenteDatos) + '">'
+      +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>'
+      +' Fuente: BD real</div>');
+  } else {
+    html.push('<a href="' + ssUrl + '" target="_blank" class="pl-sheets-btn">'
+      +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>'
+      +' Ver en Sheets</a>');
+  }
   html.push('</div></div>');
 
   // Filtros
