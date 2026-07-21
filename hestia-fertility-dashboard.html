@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.276 -->
+﻿<!-- app-build:2026.07.21.277 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -40445,6 +40445,85 @@ async function _novCfgGuardar(){
     }
   },
 
+  { id:'traspaso-cuentas', group:'operacion', icon:'⇄', title:'Traspaso entre cuentas bancarias',
+    keywords:'traspaso traspasos transferencia entre cuentas mover dinero pasar dinero fondear fondeo de nomina fondeo de caja retiro deposito retiro y deposito disposicion de efectivo disposicion de credito amex tarjeta de credito pago de tarjeta pagar la tarjeta tpv terminal punto de venta mercado pago mp comision comision del origen spei santander cuenta origen cuenta destino desde hacia folio trasp reversa revertir cancelar traspaso equivocado deshacer borrar movimiento saldo corrido nuevo saldo bank_capture conciliacion bancos cuentas activas readCuentas Config_Cuentas doble asiento retiro origen deposito destino ⇄',
+    intro:'Mueve dinero **entre dos cuentas del ERP** (banco, tarjeta de crédito tipo **AMEX** o terminal **TPV/Mercado Pago**) con un solo movimiento: el sistema registra por ti el **retiro en el origen** y el **depósito en el destino**, ligados por un **folio `TRASP-…`** y con reversa automática si algo falla a medias. El **destino recibe el monto completo**; cualquier **comisión** la absorbe siempre la cuenta de origen.',
+    pasos:[
+      'Entra a **Finanzas → Conciliación / Bancos**. En la barra de acciones de arriba pulsa el botón **⇄ Traspaso**.',
+      'En **Desde (sale el dinero)** elige la cuenta origen y en **Hacia (entra el dinero)** la destino. Junto al nombre verás una etiqueta: **`(tarjeta)`** para las de crédito y **`(TPV)`** para Mercado Pago. No pueden ser la misma cuenta.',
+      'Lee el **recuadro de pista** que aparece bajo los selectores: cambia según el tipo del origen (transferencia bancaria, **disposición de efectivo** de la tarjeta, o **retiro del TPV**).',
+      'Escribe el **Monto (MXN)** que debe llegar al destino. Si hubo un cobro por mover el dinero (SPEI, comisión de disposición, comisión por retiro), anótalo en **Comisión del origen**; si no hubo, déjalo vacío o en 0.',
+      'Revisa la **Fecha** (viene ya con la de hoy) y, opcional, un **Concepto** corto (máx. 120 caracteres, ej. *fondeo de nómina*).',
+      'Pulsa **Registrar traspaso**. Aparece una **confirmación con el desglose**: cuánto entra al destino, la comisión y cuánto sale en total del origen. Confirma solo si cuadra.',
+      'Al terminar verás **✓ Traspaso registrado** con el **folio `TRASP-…`** y el **nuevo saldo** de ambas cuentas. La conciliación y el flujo de caja se refrescan solos.'
+    ],
+    bloques:[
+      { h:'Qué es y cuándo se usa', p:'El traspaso resuelve un movimiento que en realidad son **dos asientos** — sacar de una cuenta y meter en otra — sin que tengas que capturarlos por separado ni que se te olvide uno. Sirve para **fondear** (pasar de Mercado Pago o AMEX a Santander para pagar nómina o proveedores), **pagar la tarjeta** (mandar dinero de un banco a AMEX para bajar su deuda) o **disponer efectivo** de la tarjeta. Lo abre el botón **⇄ Traspaso** en la vista de **Bancos/Conciliación**. Requiere el permiso **`bank_capture`** (el mismo de capturar movimientos); si no lo tienes, el botón te avisa y no abre.' },
+      { h:'Un solo movimiento, dos asientos ligados', p:'Aunque tú llenas **un** formulario, el backend escribe **dos (o tres) filas** amarradas por el mismo **folio `TRASP-fecha-hora-id`**: el **retiro/salida en el origen** y el **depósito/entrada en el destino** (y una fila extra si hay comisión). Reutiliza exactamente el mismo motor de saldo corrido que la captura manual (`saveBankRow`), así que los saldos quedan idénticos a como si lo hubieras capturado a mano. Todo corre bajo un **candado (`LockService`)**: si el sistema está ocupado con otra operación bancaria te pide reintentar en unos segundos, para que dos capturas simultáneas no descuadren el saldo.' },
+      { h:'Las tres clases de cuenta y qué pasa contablemente', p:'El **Tipo** de cada cuenta decide el comportamiento:\n• **Bancaria (Santander)** — origen: se registra un **Retiro** por el monto; destino: un **Depósito** por el monto.\n• **Crédito / tarjeta (AMEX)** — es 100% deuda, nadie deposita. Como **origen** es una **`Disposición de efectivo`**: la deuda **sube** por el monto (Movimiento en positivo). Como **destino** es un **`Pago de tarjeta`**: la deuda **baja** por el monto (Movimiento en negativo).\n• **TPV / Mercado Pago** — usa el layout de la hoja MP. Como **origen** hace un **Retiro** (`Cobro` negativo, con el neto dentro del Total de Venta); como **destino** un **Depósito** (`Cobro` positivo). En un traspaso la columna **Comisiones de MP se deja en 0 a propósito** para no contaminar la partida automática de comisiones de ventas — una comisión por retiro no es una comisión por cobro.' },
+      { h:'La comisión: siempre la paga el origen', p:'El campo **Comisión del origen** es **opcional** y **nunca negativo**. El **destino recibe el monto completo**; la comisión se **carga a la cuenta de origen** como una fila/cargo aparte, con su propia referencia (`Comisión por disposición de efectivo · folio` en tarjetas, `Comisión por traspaso · folio` en el resto). Por eso en el desglose de confirmación **lo que sale del origen = monto + comisión**, mientras que **lo que entra al destino = solo el monto**. Ejemplos de comisión: el **SPEI** de un banco, lo que la tarjeta cobra por **disponer efectivo**, o lo que el TPV cobra por **retirar**.' },
+      { h:'La confirmación con desglose y el folio', p:'Antes de escribir nada, el ERP te muestra un cuadro de **confirmación** con: `Origen → Destino`, **entra al destino**, **comisión (a origen)** y **sale del origen** (monto + comisión). Es tu última oportunidad de revisar montos y dirección. Al aceptar y registrar con éxito, el mensaje final trae el **folio `TRASP-…` único** (no colisiona ni con dos traspasos en el mismo segundo) y el **nuevo saldo** de ambas cuentas. Guarda mentalmente ese folio: es lo que te permitirá **identificar y revertir** el traspaso más tarde si te equivocaste.' },
+      { h:'Cómo revertir un traspaso equivocado', p:'**No hay un botón de "deshacer traspaso".** Para revertir uno ya registrado, ve al despliegue de movimientos de cada cuenta y **borra a mano las filas del traspaso con la ✕ del movimiento**, identificándolas por el **folio `TRASP-…`** que aparece en su referencia/observaciones. Debes borrar **ambas patas**: la del origen (retiro/disposición **y** su fila de comisión, si hubo) **y** la del destino (depósito/pago). Regla de oro: **bórralas desde el ERP con la ✕, nunca directamente en la hoja de cálculo** — si editas la hoja a mano, el saldo corrido de esa cuenta queda mal para siempre. Como el traspaso no destruye nada al registrarse, revertirlo es simplemente eliminar sus asientos por folio.' },
+      { h:'Reversa automática y el caso "quedó a medias"', p:'Si el sistema alcanza a escribir el retiro del origen pero **el depósito del destino falla**, intenta una **reversa automática segura**: borra las filas que sí metió en el origen, de la última hacia atrás, **verificando el texto EXACTO** de cada referencia. Si todo coincide, te dice *"Lo escrito en (origen) se revirtió — no quedó nada a medias"*. Pero si entre medias **alguien más capturó un movimiento** en esa cuenta, el sistema **se detiene y NO borra nada** (jamás borra lo que no reconoce como suyo) y te muestra el **folio** con una **ATENCIÓN**: en ese caso tú debes borrar esas filas manualmente con la **✕ del movimiento en el ERP** (no en la hoja). Si nada llegó a escribirse, simplemente dice *"No se movió nada"* y puedes reintentar.' },
+      { h:'Validaciones y errores que te puede marcar', p:'El traspaso rechaza con mensaje claro: cuentas **origen y destino iguales**, cuenta **desconocida**, cuenta **desactivada** (reactívala antes), o dos cuentas que apuntan a la **misma hoja** (config duplicada en `Config_Cuentas`). El **monto** se valida en estricto: no acepta texto como `1,000`, ni `Infinity`, se **redondea a 2 decimales** y debe ser **> 0** (un `0.004` que redondea a 0 se rechaza). La **fecha** debe ser `AAAA-MM-DD`. El **concepto** se recorta a 120 caracteres y se **neutralizan fórmulas** (si empieza con `=` o `+` se le antepone una comilla para que no se ejecute en la hoja). Necesitas **al menos 2 cuentas activas** para que el modal deje traspasar; si solo hay una, te sugiere crear otra con "Nueva cuenta".' }
+    ],
+    ejemplo:'Disposición de efectivo de **AMEX** para fondear **Santander**, moviendo **$50,000** con **$1,500** de comisión por disponer. En el modal: Desde = *AMEX (tarjeta)*, Hacia = *Santander*, Monto = `50000`, Comisión = `1500`. La confirmación dirá: entra a Santander **$50,000.00**, comisión (a AMEX) **$1,500.00**, sale del origen **$51,500.00**. Contablemente: la **deuda de AMEX sube $51,500** (dos filas: $50,000 de disposición + $1,500 de comisión) y **Santander deposita $50,000**. Folio único, p. ej. `TRASP-20260720-141530-a1b2c3d4`.',
+    datos:{ hojas:['Config_Cuentas (en el libro de bancos BANKS_SS_ID): key, nombre, gid, tipo (bancaria/credito/tpv), color, activo — define cuentas y comportamiento; fallback a los 3 core si está vacía','Pestaña por cuenta en el libro de bancos: Santander (bancaria: Depósito/Retiro/Saldo), AMEX (credito: Movimiento/Saldo de deuda), Mercado Pago (tpv: Cobro/Comisiones/Total Venta/Tipo/Observaciones)'], scriptProps:['BANKS_SS_ID (libro de bancos)','BANKS_GID (config.gs: gids semilla de santander/amex/mercadopago)'], funciones:['traspasoBancos(b, autorEmail) — finance.gs: orquesta validaciones, folio, LockService, escribe origen+destino y reversa','_traspFilasOrigen(cta, monto, com, fecha, mesStr, refO, refCom, obs) — filas de salida por tipo (retiro / disposición+cargo / retiro MP)','_traspFilaDestino(cta, monto, fecha, mesStr, refD, obs) — fila de entrada por tipo (depósito / pago de tarjeta / cobro MP)','saveBankRow(banco, row) — motor de saldo corrido reutilizado (cero matemática nueva)','_cuentaByKey / _cuentas / readCuentas — catálogo data-driven de cuentas','Frontend (hestia-fertility-dashboard.html): cbTraspasoOpen, cbTraspasoSave, cbTraspasoHint, _cbTraspEnsureModal, cbTraspasoClose, cache _cbTraspCuentas'], permisos:['bank_capture — exigido en el frontend (hasPermission) y en el backend (doPost → _tokenHasPermission); es el mismo permiso que capturar movimientos bancarios'], motorVer:'Modelo de cuentas data-driven Etapa 1 (2026-07-17); traspaso con reversa por referencia exacta', nota:'El folio es TRASP-yyyyMMdd-HHmmss-<uuid8>, único aunque haya dos traspasos en el mismo segundo. La reversa compara el TEXTO COMPLETO de la referencia, no solo el folio, y nunca borra filas ajenas. Tras cada traspaso se invalida la caché erp_banks_v1. En cuentas TPV/MP la columna Comisiones se deja en 0 a propósito para no contaminar la partida automática de comisiones de ventas.' }
+  },
+
+  { id:'plan-pagos', group:'operacion', icon:'📅', title:'Plan de pagos (parcialidades de Cuentas por Cobrar)',
+    keywords:'plan de pagos parcialidades mensualidades cuotas quincenal mensual vencimiento vencimientos calendario abonos abonado estado de cuenta cobranza cuentas por cobrar CxC saldo adeudo deuda vencido cubierto pendiente al dia proximo pago hasta cuando pagar fecha de pago diferir financiar dividir partir plazo numero de pagos fecha del primer pago badge tarjeta PDF imprimible reporte paciente OP Planes_Pago activar quitar desactivar reemplazar cascada redondeo ultima cuota due date installments payment plan biweekly monthly overdue paid',
+    intro:'El **plan de pagos** parte un adeudo de un paciente en varias **cuotas** con fechas automáticas (**quincenal** cada 15 días o **mensual** cada mes). Es un **calendario informativo**: sirve para que el paciente sepa cuánto y **hasta cuándo** pagar, y para vigilar vencidos. **NO mueve dinero, NO toca bancos y NO cambia el saldo** — el cobro se sigue haciendo con el botón «Cobrar / Abonar» de siempre.',
+    pasos:[
+      'Entra a **Finanzas › Cuentas por Cobrar** y localiza la fila del adeudo del paciente (necesitas permiso **editar_ingresos**).',
+      'Pulsa el botón **📅 Plan** de esa fila. Se abre la ventana **Plan de pagos** con el saldo ya puesto como monto.',
+      'Ajusta **Monto total del plan** (por defecto = saldo pendiente), la **Frecuencia** (Mensual o Quincenal), el **Plazo (# de pagos)** entre 1 y 120, y la **Fecha del primer pago**.',
+      'Revisa la **vista previa** que se dibuja sola debajo: muestra cada pago con su fecha y monto conforme escribes.',
+      'Pulsa **Activar plan**. Verás el mensaje «✓ Plan activado» y el calendario aparecerá en el **Estado de Cuenta** del paciente y como **badge** en la lista de Cuentas por Cobrar.',
+      'Para cobrar cada cuota usa **Cobrar / Abonar** como siempre; el plan marcará solo las cuotas que ya quedaron cubiertas.',
+      'Para retirar el plan: abre el **Estado de Cuenta** del paciente y en la tarjeta del plan pulsa **Quitar** (no afecta saldos ni cobros).'
+    ],
+    bloques:[
+      { h:'Qué es y qué NO hace', p:'Un plan es un **calendario de referencia** amarrado a un adeudo concreto: la combinación **paciente + OP** (la venta). Solo puede existir **un plan por adeudo**. Divide el `MontoTotal` en `NumPagos` cuotas con fechas, y en pantalla/PDF marca cada cuota como cubierta o vencida.\n\nLo que **NO** hace, y es clave repetirlo al equipo: no genera cobros, no crea movimientos de banco, no modifica el saldo de la cuenta por cobrar ni el Pagado del ingreso. El saldo real sigue siendo **Facturado − Pagado**. Activar o quitar un plan **no cambia ningún número de deuda**; es puramente informativo.' },
+      { h:'Cómo activar un plan a un paciente', p:'Desde **Finanzas › Cuentas por Cobrar**, cada fila con saldo tiene el botón **📅 Plan**. Se abre una ventana con 4 campos: **Monto total del plan** (llega precargado con el saldo, pero puedes cambiarlo), **Frecuencia** (Mensual / Quincenal), **Plazo (# de pagos)** de 1 a 120, y **Fecha del primer pago** (hoy por defecto).\n\nMientras escribes, una **vista previa** muestra el calendario que se generará (`Pago 1 · fecha · monto`, etc.). Al pulsar **Activar plan** el sistema valida y guarda. Si ya existía un plan para ese mismo paciente+OP, el nuevo lo **reemplaza** (no se duplican). Requiere permiso **editar_ingresos**.' },
+      { h:'Cómo se calcula el calendario', p:'Las fechas salen solas a partir de la **Fecha del primer pago**:\n- **Quincenal**: cada pago se corre **+15 días** respecto al primero (día base + 15, +30, +45…).\n- **Mensual**: cada pago cae el **mismo día del mes siguiente** (+1 mes por cuota).\n\nEl monto de cada cuota es `MontoTotal ÷ NumPagos` redondeado a 2 decimales. Para que **la suma cuadre exacto con el total**, la **última cuota absorbe el redondeo** (puede quedar unos centavos distinta de las demás). Ejemplo: **$10,000 en 3 mensualidades** → 3,333.33 + 3,333.33 + **3,333.34** = 10,000.00 exacto.' },
+      { h:'El badge en la lista de Cuentas por Cobrar', p:'En cada fila de Cuentas por Cobrar que tenga plan aparece una etiqueta **📅 Plan** con el estado de un vistazo:\n- **📅 Plan · N vencido(s)** en **rojo** si hay cuotas cuya fecha ya pasó y aún no están cubiertas por lo abonado.\n- **📅 Plan · próx. AAAA-MM-DD** si no hay vencidos pero queda una cuota pendiente (te dice la fecha de la siguiente).\n- **📅 Plan · al día** en **verde** si lo abonado ya cubre todo el calendario.\n\nEse mismo estado se resume en el **Reporte general de cobranza** (columna de vencimiento: «⚠ N venc.», «Próx. fecha» o «Al día»).' },
+      { h:'La tarjeta en el Estado de Cuenta', p:'Al buscar un paciente en **Estado de Cuenta**, debajo de sus movimientos aparece la tarjeta **📅 Plan de pagos (N frecuencia)** con el total y la nota «calendario informativo. El cobro se hace con «Cobrar / Abonar»».\n\nLista cada cuota como **Pago n · fecha · monto · estado**, donde el estado es **✓ Cubierto** (verde), **Vencido** (rojo) o **Pendiente** (gris). Si tienes permiso **editar_ingresos** verás también el botón **Quitar** en la esquina de la tarjeta.' },
+      { h:'Cómo se marca cada cuota cubierta (la cascada)', p:'El plan **no lleva registro pago por pago**; deduce el estado de cada cuota a partir de **lo que el paciente ya abonó en total** (lo que el ERP ya conoce por el saldo). Funciona en **cascada**: lo abonado va tapando las cuotas en orden.\n\nSe acumulan los montos: una cuota está **Cubierto** cuando lo abonado alcanza (o supera, con tolerancia de 1 centavo) el **acumulado hasta esa cuota**. Si no la alcanza y su **fecha ya pasó** → **Vencido**; si no la alcanza pero su fecha aún no llega → **Pendiente**.\n\nEjemplo: adeudo de **$30,000 en 3 mensualidades de $10,000**. Si el paciente ha abonado **$15,000**, la cuota 1 (acumulado 10,000) queda **Cubierta**; la cuota 2 (acumulado 20,000) queda descubierta → **Vencida** si su fecha ya pasó, **Pendiente** si no. Al registrar más abonos con «Cobrar / Abonar», las siguientes cuotas se marcan solas.' },
+      { h:'Cómo se ven los vencimientos en los PDFs', p:'El plan se imprime tanto en el **Estado de Cuenta** como en el **reporte de Cobranza** del paciente, como un recuadro **Plan de pagos · vencimientos (frecuencia)** con una tabla de **Pago | Fecha de pago | Monto | Estado** (Cubierto / **VENCIDO** / Pendiente, con color).\n\nAl pie aparece la línea clave para el paciente: **«Puede pagar hasta [fecha]»**, que apunta a la fecha de la **última cuota pendiente** (el plazo final para ponerse al corriente); si ya está todo pagado dice «Todos los pagos están cubiertos». El recuadro sale en **cualquiera** de las plantillas de impresión y está **traducido** a español, inglés, francés y portugués (incluida la frecuencia: quincenal→biweekly / mensual→monthly, etc.), útil para pacientes internacionales.' },
+      { h:'El dinero se cobra aparte (no confundir)', p:'Insistir con el equipo: el plan **no cobra nada**. Para registrar un pago real hay que usar **Cobrar / Abonar** (en Estado de Cuenta o en Cuentas por Cobrar), que es lo único que sube el **Pagado**, mueve el **banco** y cierra la cuenta por cobrar. El plan solo **lee** ese abonado para pintar el estado de cada cuota.\n\nComo el estado se deriva del abonado en cascada, no importa **con qué forma de pago** ni en cuántos golpes pague el paciente: el sistema reparte lo abonado sobre las cuotas en orden.' },
+      { h:'Quitar o reemplazar el plan', p:'Para **quitar** un plan, abre el **Estado de Cuenta** del paciente y pulsa **Quitar** en la tarjeta del plan (pide confirmación; requiere **editar_ingresos**). Quitar el plan **no afecta saldos ni cobros**: solo deja de mostrar el calendario. Internamente la fila **no se borra**, se marca como inactiva (queda la traza), y deja de aparecer en pantalla y en los PDFs.\n\nPara **cambiar** un plan (otro monto, plazo o fecha), no hace falta quitarlo antes: vuelve a pulsar **📅 Plan** en la fila de Cuentas por Cobrar y actívalo de nuevo — al ser el mismo paciente+OP, el sistema **reemplaza** el anterior.' }
+    ],
+    ejemplo:'Adeudo de **$30,000** de la paciente «Ana P.» (OP-1050). Pulsas **📅 Plan**, eliges **Mensual**, **3 pagos**, primer pago **2026-07-20**. Se genera: Pago 1 — 2026-07-20 — $10,000; Pago 2 — 2026-08-20 — $10,000; Pago 3 — 2026-09-20 — $10,000 (suma exacta $30,000). Si Ana ha abonado **$15,000**, el Estado de Cuenta muestra: Pago 1 **✓ Cubierto**, Pago 2 **Vencido** (si el 2026-08-20 ya pasó) y Pago 3 **Pendiente**; el PDF dirá **«Puede pagar hasta 2026-09-20»**. El saldo real sigue siendo $15,000 y solo baja cuando registres el cobro con **Cobrar / Abonar**.',
+    datos:{ hojas:['Planes_Pago (en SHEET_ID) — columnas: Id, Paciente, OP, MontoTotal, Frecuencia, NumPagos, FechaInicio, Activo, CreadoEn, ActualizadoEn. Un renglón por (paciente, OP); Activo=false = quitado (no se borra la fila).'], scriptProps:['Ninguna propia. La hoja Planes_Pago vive en el libro SHEET_ID (config.gs).'], funciones:['Backend (planes.gs): readPlanesPago (solo activos, ya con calendario calculado), activarPlanPagos (upsert por paciente+OP; valida monto>0, numPagos 1-120, fecha AAAA-MM-DD, frecuencia→quincenal/mensual), desactivarPlanPago (pone Activo=false), _planCalendario (quincenal +15 días / mensual +1 mes; última cuota absorbe el redondeo para cuadrar el total), setupPlanesPago (crea la hoja), _planSheet (auto-crea si falta).','Frontend (hestia-fertility-dashboard.html): ccPlanAbrir / ccPlanPreview / ccPlanGuardar (activar desde Cuentas por Cobrar), _ccPlanBadge (badge próximo/vencido/al día en la lista), ecCargarPlan / _ecPlanCard (tarjeta en Estado de Cuenta), _ecPlanPrintRows + _planPrintTableHTML (tabla imprimible localizada es/en/fr/pt, se inyecta vía data.notaHtml en cualquier plantilla), ecPlanQuitar (Quitar), _planCalJS / _planFmtJS (espejo del cálculo en el navegador).'], permisos:['editar_ingresos — necesario para activar y para quitar un plan (gate en el POST de finance.gs). La LECTURA (badge/tarjeta/PDF) está abierta a cualquier sesión válida.'], motorVer:'Rutas: GET action=planesPago en core.gs (doGet) devuelve los planes activos con su calendario; POST action=activarPlanPagos / desactivarPlanPago vía finance.gs (doPost, con gate editar_ingresos). Requiere que planes.gs esté agregado al proyecto Apps Script y desplegado; la hoja se auto-crea al primer uso o con setupPlanesPago().', nota:'El estado de cada cuota (Cubierto/Vencido/Pendiente) se DERIVA por cascada del total abonado del paciente; no se guarda pago-por-pago. El plan es informativo: no altera saldos, bancos ni el Pagado del ingreso.' }
+  },
+
+  { id:'medicos-tratantes', group:'operacion', icon:'🩺', title:'Médicos Tratantes',
+    keywords:'medico tratante medicos tratantes alta medico nuevo medico dar de alta doctor doctora dra dr registrar medico pertenece a grupo agencia hestia medico de casa externos externo independiente canal correo email telefono whatsapp contacto estado de cuenta comision comisiones volumen grupo medico reprovida ordenar buscar buscador alias notas baja dar de baja soft delete origenes externos origen externo ficha paciente Origenes_Externos padre grupoId editar_ingresos catalogo medicos',
+    intro:'Pantalla amable para **dar de alta médicos tratantes** sin pelearte con hojas de cálculo. Por debajo cada médico se guarda en **Orígenes externos** como un `Médico externo`, colgando del grupo o agencia que elijas en **Pertenece a**. Ese vínculo es lo que hace que el médico aparezca con su **Canal** correcto en la ficha del paciente y que sus procedimientos **cuenten para las comisiones** de su grupo.',
+    pasos:[
+      'Entra por el menú a **Médicos Tratantes** (bajo el bloque de catálogos/productos). Verás el listado con **buscador** y selector de **orden**.',
+      'Pulsa **+ Nuevo médico** (arriba a la derecha). Se abre una ventana; si no tienes el permiso `editar_ingresos` el botón no aparece.',
+      'Escribe el **Nombre *** (único obligatorio). Ej. `Dra. Laura Méndez`.',
+      'Abre **Pertenece a (grupo / agencia)** y elige: **🏥 Hestia (médico de casa)** si es de la clínica, una **Agencia** o **Grupo** de la lista, o **— Externos (independiente) —** si no pertenece a nadie.',
+      'Opcional: llena **Correo** y **Teléfono / WhatsApp** para poder enviarle su estado de cuenta más adelante.',
+      'Opcional: agrega **Alias** separados por coma (`Dr. Lozano, Lozano`) para que el sistema lo reconozca solo en el histórico y la captura, y **Notas**.',
+      'Pulsa **Guardar**. El médico aparece en la tabla bajo su grupo. Para cambiarlo usa **Editar**; para retirarlo usa **Baja** (deja registro, no borra).'
+    ],
+    bloques:[
+      { h:'Qué significa "Pertenece a" (lo más importante)', p:'El campo **Pertenece a** no es cosmético: define dos cosas a la vez.\n\n**1) El Canal en la ficha del paciente.** Al elegir a este médico en un ingreso, el Canal se fija solo según su grupo: si su grupo se llama ~Hestia → **Hestia**; si cuelga de un grupo/agencia → **Agencia**; si es independiente → **Externos**. Así, aunque en la ficha marquen mal el Canal, el médico lo corrige a donde de verdad pertenece — no hay que asignarlo dos veces.\n\n**2) Las comisiones.** Sus procedimientos suman al **volumen del grupo/agencia** al que pertenece. El motor de comisiones lista los médicos de un grupo por su `padre`, así que si eliges mal el grupo, sus ventas cuentan para el grupo equivocado. Si de verdad no pertenece a ninguno, déjalo en **Externos (independiente)** — ahí su `grupo` es él mismo y no infla el volumen de nadie.' },
+      { h:'Hestia: el médico de casa', p:'La opción **🏥 Hestia (médico de casa)** es para los doctores propios de la clínica. Detrás, todos cuelgan de un **Grupo llamado "Hestia"** en Orígenes externos que **se crea solo la primera vez** que guardas un médico de casa (no tienes que crearlo tú). Ese grupo Hestia queda **excluido del selector de Comisiones** a propósito: los médicos de casa no generan comisión externa, así que no se confunde con los grupos que sí la generan (Grupo Médico, Reprovida, etc.). En la ficha, un médico Hestia hace que el Canal salga como **Hestia**.' },
+      { h:'Correo y teléfono / WhatsApp', p:'Los campos **Correo** y **Teléfono / WhatsApp** son **opcionales** y sirven para un solo fin: poder enviarle al médico **su estado de cuenta** por correo o WhatsApp cuando esa función se habilite. Se guardan en las columnas **Email** y **Teléfono** de la hoja de Orígenes externos. En la tabla aparecen bajo el nombre (`✉ correo · 📞 teléfono`). Tienen protección **anti-blanqueo**: solo se escriben si vienen en el guardado, de modo que una baja u otra edición que no los traiga **no los borra**.' },
+      { h:'Buscar y ordenar', p:'El **buscador** (`🔍 Buscar médico, grupo o alias…`) filtra en vivo por **nombre, grupo/agencia o alias**, ignorando acentos y mayúsculas. Vive fuera de la tabla, así que al escribir no pierdes el foco. El selector **Ordenar** tiene dos modos: **Nombre (A-Z)** (por defecto) y **Grupo / Agencia** (agrupa a los médicos por su grupo y dentro de cada grupo los ordena por nombre). Abajo del listado se indica cuántos médicos ves de cuántos totales.' },
+      { h:'Editar y dar de baja (baja suave)', p:'**Editar** reabre la ventana con todos los campos precargados — incluido el grupo, que si por alguna razón ya no existe en el catálogo se conserva como `(fuera de catálogo)` para no perderlo. **Baja** es un **soft-delete**: pide confirmación y marca al médico como inactivo (`Activo = NO`); **nunca borra la fila**, así que el histórico y las comisiones pasadas quedan intactos, solo deja de aparecer en el listado y en los desplegables. Al dar de baja se **reenvían todos sus datos** para no blanquear nada. Un médico dado de baja sigue resolviendo por nombre en registros viejos.' },
+      { h:'Cómo se relaciona con Orígenes externos', p:'Esta pantalla es solo **una forma rápida y amable** de dar de alta médicos: los médicos **viven realmente en Orígenes externos**. Cada médico que creas aquí es un registro de tipo **`Médico externo`** cuyo `Padre` es el id del grupo/agencia que elegiste. Por eso hay un enlace **"Ver Orígenes externos →"**: ahí ves el catálogo completo (Grupos, Agencias, Médicos, Coordinadores) y la misma jerarquía de **un solo nivel** (un médico pertenece a un grupo; un grupo no tiene padre). Si editas al médico desde Orígenes externos o desde aquí, es el mismo registro.' },
+      { h:'Alias: para que el sistema lo reconozca solo', p:'Los **Alias** (separados por coma) ayudan a **auto-detectar** al médico cuando su nombre aparece escrito distinto en el histórico o en la captura de ingresos (`Dr. Lozano`, `Lozano`…). El motor de coincidencias trata el **nombre** como coincidencia de confianza **alta** y cada **alias** como confianza **baja** (el nombre siempre gana). Son opcionales pero muy útiles para no crear médicos duplicados por variantes de escritura.' },
+      { h:'Permisos y quién puede qué', p:'**Leer** el listado: cualquier sesión válida. **Alta, edición y baja**: requieren el permiso **`editar_ingresos`** (la misma puerta que Orígenes externos). Si no lo tienes, ves la tabla pero no los botones **+ Nuevo médico**, **Editar** ni **Baja**. El candado es fail-closed en el backend (`saveOrigen`), así que aunque alguien fuerce la llamada sin permiso, se rechaza.' }
+    ],
+    ejemplo:'Das de alta a **Dra. Laura Méndez** y en **Pertenece a** eliges la agencia **REPROVIDA**. A partir de ahí: (1) cuando una vendedora la seleccione en un ingreso, el **Canal** de la ficha se fija solo en **Agencia**; (2) cada procedimiento que traiga Laura **suma al volumen de REPROVIDA** para el cálculo de su comisión. Si en cambio la hubieras dejado en **Externos (independiente)**, sus ventas no contarían para ninguna agencia. Y si es doctora de la clínica y eliges **🏥 Hestia**, la primera vez se crea el grupo "Hestia", su Canal sale **Hestia** y no aparece en el selector de comisiones.',
+    datos:{ hojas:['Origenes_Externos (en SHEET_ID) — AQUÍ viven los médicos. Columnas por encabezado: Id, Nombre, Tipo, Alias, Activo, Notas, CreadoEn, Padre, Email, Teléfono. Un médico = fila con Tipo=\'Médico externo\' y Padre=id del grupo/agencia.','Medicos_Tratantes (en SHEET_ID) — HUÉRFANA / NO USADA por esta pantalla (ver nota).'], scriptProps:['SHEET_ID (config.gs) — libro que hospeda Origenes_Externos y (la huérfana) Medicos_Tratantes'], funciones:['Frontend: loadMedicosView, medFetch, _medRenderView, _medRenderTabla, _medRow, _medFormHTML, _medFillGrupoSelect, _medEnsureHestiaGrupo, medGuardar, medBaja, _medListaVista/_medSort, _medGrupoDe (~ línea 33262-33495 del HTML)','Backend origenes.gs: saveOrigen (alta/edición, escribe por columna, anti-blanqueo de Email/Teléfono), _origBuild/_origResolveGrupos (resuelven jerarquía de 1 nivel), _origResolver/_origResolverEn (contrato compartido), _origOpcionesFicha (alimenta Canal+Médico de la ficha)','Comisiones: _comMedicosDeGrupo(grupoId) lista los Médicos externos cuyo padre = ese grupo/agencia'], permisos:['editar_ingresos — requerido para +Nuevo médico, Editar y Baja (gate fail-closed en saveOrigen)','Lectura del listado: cualquier sesión válida'], motorVer:'Frontend build .269 · backend origenes.gs @403 (correo+teléfono en el alta)', nota:'IMPORTANTE: la pantalla de Médicos Tratantes NO usa medicos.gs ni la hoja Medicos_Tratantes. Ese catálogo (funciones readMedicos/setupMedicos, hoja con Id/Nombre/Canal/Activo/Notas) quedó HUÉRFANO: sigue en el deploy ($FILES incluye \'medicos\') pero el frontend guarda TODO vía saveOrigen sobre Origenes_Externos. La verdad de los médicos es Orígenes externos; Medicos_Tratantes es un vestigio que no se lee ni se escribe desde esta vista. La jerarquía padre (Grupo O Agencia) es lo que amarra al médico a su grupo para el Canal en la ficha y para las comisiones (_origResolver/grupoId).' }
+  },
+
   { id:'conciliar-mp', group:'operacion', icon:'🔄', title:'Conciliar suscripciones Crío (Mercado Pago)',
     keywords:'conciliar mp mercado pago suscripcion crio payer id payerid recordar cobro export csv xlsx suscrito año gratis pago sin suscripcion cobranza almacenamiento vincular payer',
     intro:'La pestaña **Conciliar MP** (en Cuentas por Cobrar) cruza el **export de suscripciones de Mercado Pago** contra los pacientes con inventario Crío, para ver **quién está suscrito, quién está en año gratis y quién pagó sin suscripción**. Cada paciente queda ligado a su `payer_id` de MP.',
@@ -41555,10 +41634,13 @@ async function _novCfgGuardar(){
     'xml-cfdi':              { view:'gastos',      menu:['egresos','gastos','cxp'] },
     'poliza-concil':         { view:'poliza-concil', menu:['poliza-concil'] },
     'conciliacion':          { view:'conciliacion', menu:['conciliacion'] },
+    'traspaso-cuentas':      { view:'conciliacion', menu:['conciliacion'], perm:'bank_capture' },
     'comisiones':            { view:'comisiones',  menu:['comisiones'], tour:'comisiones' },
     'cobranza':              { view:'cuentas-cobrar', menu:['cuentas-cobrar','cobranza'] },
     'conciliar-mp':          { view:'cuentas-cobrar', menu:['cuentas-cobrar'] },
+    'plan-pagos':            { view:'cuentas-cobrar', menu:['cuentas-cobrar','cobranza'] },
     'origenes-externos':     { view:'origenes',    menu:['origenes'], directo:true, perm:'editar_ingresos', tour:'origenes' },
+    'medicos-tratantes':     { view:'medicos',     menu:['medicos'], directo:true },
     'gastos-fijos':          { view:'gastos-fijos', menu:['gastos-fijos'] },
     'nomina':                { view:'nomina',      menu:['nomina'] },
     'proveedores':           { view:'proveedores', menu:['proveedores'] },
@@ -44451,7 +44533,7 @@ async function _novCfgGuardar(){
 
   /* ============ COMISIONES POR VOLUMEN DE GRUPO ============ */
   { id:'comisiones', group:'operacion', icon:'🤝', title:'Comisiones a médicos externos (volumen de grupo)',
-    keywords:'comision comisiones rebate escalon escalones volumen grupo medico medicos externos coordinador madero paladino nivel porcentaje reparto credito efectivo generar regenerar diferido mes siguiente configurar regla reglas editor de reglas crear regla nueva regla capturar regla beneficiarios parte suma 100 empezar con un ejemplo desde hasta sin limite',
+    keywords:'comision comisiones rebate escalon escalones volumen grupo medico medicos externos coordinador madero paladino nivel porcentaje reparto credito efectivo generar regenerar diferido mes siguiente cuando se aplica acumulado mes ganado mes aplica configurar regla reglas editor de reglas crear regla nueva regla capturar regla beneficiarios parte suma 100 empezar con un ejemplo desde hasta sin limite reporte reportes imprimir actividad a pagar detalle plantilla panel de control revertir reversa deshacer undo aviso descuento al capturar por que no cuenta no aparece procedimiento descartado no elegible producto no incluido hay comisiones por pagar banner recordatorio',
     para:'El **grupo** de médicos junta procedimientos en el mes y eso **desbloquea** un escalón (ej. 3 o más → 10%). El % se aplica **solo a los procedimientos de cada médico**, y ese monto se **reparte**: mitad de **crédito al médico** y mitad en **efectivo al coordinador**, el **mes siguiente**. Nada se escribe hasta que lo apruebas.',
     where:'Menú **Comisiones** (o Ctrl+K → «comisiones»).',
     mock:{ title:'Comisiones por volumen de grupo', crumb:'Finanzas › Comisiones',
@@ -44472,7 +44554,10 @@ async function _novCfgGuardar(){
       'Entra a **Comisiones** y elige la **regla**, el **mes** de los procedimientos y el **año**.',
       'Pulsa **Calcular**: verás **cuántos procedimientos hizo el grupo** y **qué escalón alcanzó**, el detalle por médico y los totales por beneficiario.',
       'Revisa los **avisos** (ej. un crédito que quedaría a nombre de un médico sin cuenta) y el detalle de las ventas que forman cada base.',
-      'Pulsa **Generar**: se crean los créditos y las cuentas por pagar. Si el mes **ya se generó**, el ERP se niega y te dice qué existe; **↻ Regenerar** solo funciona si nadie lo ha cobrado.'
+      'Pulsa **Generar**: se crean los créditos y las cuentas por pagar. Si el mes **ya se generó**, el ERP se niega y te dice qué existe; **↻ Regenerar** solo funciona si nadie lo ha cobrado.',
+      '**Reportes (3):** con el cálculo en pantalla, **🖨️ Actividad** imprime lo que hizo cada médico/grupo; **💵 A pagar** el resumen de a quién y cuánto se le paga este mes; **🔎 Detalle** el porqué de cada cifra (venta por venta, escalón, reparto y **qué se descartó y por qué**). Los tres son personalizables desde **Panel de Control → plantillas**.',
+      '**Si te equivocaste al Generar:** usa **↩ Revertir** para deshacer ese mes — borra los créditos y las cuentas por pagar que creó. Igual que Regenerar, **solo funciona si nadie lo ha cobrado**; si ya se cobró, se niega y te explica qué existe (ver el bloque de reversa más abajo).',
+      '**No tienes que entrar a Comisiones para enterarte:** al **capturar un ingreso** con un médico que ya trae descuento, el ERP te lo **avisa en el acto** («El Dr. Paladino acumula X procedimientos este mes → 10%»); y un **banner «hay comisiones por pagar»** aparece cuando existe un mes ganado que todavía no se ha generado.'
     ],
     buttons:[
      {
@@ -44530,13 +44615,39 @@ async function _novCfgGuardar(){
      {
       "k": "Guardar reglas",
       "d": "Guarda toda la configuración. Se queda bloqueado mientras alguna regla tenga errores (por ejemplo, un reparto que no suma 100%) y te dice cuántas hay que corregir."
+     },
+     {
+      "k": "🖨️ Actividad",
+      "d": "Imprime lo que hizo el grupo/cada médico en el mes: procedimientos, base y escalón alcanzado. Sirve para mostrarle al médico su producción aunque no haya llegado al escalón."
+     },
+     {
+      "k": "💵 A pagar",
+      "d": "Reporte de a quién y cuánto se le paga este mes: crédito por médico y efectivo por coordinador, con el total. Es el que le das a quien paga."
+     },
+     {
+      "k": "🔎 Detalle",
+      "d": "El porqué de cada cifra: venta por venta, el escalón, el reparto y —clave— la lista de lo que NO contó y por qué (producto no incluido en la regla, médico fuera del grupo, mes equivocado). Úsalo cuando alguien pregunte «¿por qué no aparece mi paciente?»."
+     },
+     {
+      "k": "↩ Revertir",
+      "d": "Deshace un mes YA generado: borra los créditos y las cuentas por pagar que creó, sin volver a calcular. Solo funciona si nadie ha cobrado; si ya se cobró, se niega y te dice qué existe. Es tu red de seguridad si Generaste por error."
+     },
+     {
+      "k": "Banner «hay comisiones por pagar»",
+      "d": "No es un botón: es un aviso que aparece solo cuando existe un mes ganado (el grupo llegó al escalón) que todavía no se ha generado. Te lleva directo a Comisiones para revisarlo."
      }
     ],
     tips:[
       'Si un mes sale en **0%**, no es un error: el grupo no llegó al escalón. La pantalla te dice cuántos procedimientos hizo y cuántos le faltaban.',
       'Las **partes del reparto deben sumar 100%**. Es el reparto **del escalón**, no de la venta: del 10%, 50/50 = **5% de la venta** para cada quien. El panel te muestra ese número en vivo mientras editas.',
-      'El **grupo** y los beneficiarios fijos se eligen del catálogo de **Orígenes externos** (solo activos) y se guardan por **ID**: así el crédito siempre empata con la cuenta del médico.'
-    ] },
+      'El **grupo** y los beneficiarios fijos se eligen del catálogo de **Orígenes externos** (solo activos) y se guardan por **ID**: así el crédito siempre empata con la cuenta del médico.',
+      '**«¿Cuándo se aplica?» (diferido) es acumulado, no adelantado.** Si pones **1 mes**, el descuento se **gana** con los procedimientos del mes en curso y se **aplica** (crédito + nota) el mes siguiente. Ejemplo: los procedimientos de **junio** desbloquean el escalón; el crédito se genera y se paga en **julio**. El aviso al capturar cuenta el **mes en que se gana** (junio), no el mes en que se cobra.',
+      '**¿Un procedimiento no aparece en el cálculo?** Casi siempre es una de tres: (1) el **producto no está en la lista** de la regla —solo cuentan los que agregaste—, (2) el **médico no pertenece al grupo** de la regla, o (3) es de **otro mes**. El reporte **🔎 Detalle** lista exactamente qué se descartó y por cuál motivo. Un crédito aplicado de un mes anterior (ej. Sasha con Dr. Paladino) **sí** cuenta para el tier del mes en que se registró la venta.',
+      '**Revertir vs Regenerar:** *Regenerar* borra y **vuelve a crear** (para corregir cifras); *Revertir* borra y **deja el mes en cero** (para deshacer un Generar equivocado). Ambos exigen que **nadie haya cobrado**: si un médico ya usó su crédito o al coordinador ya se le pagó, el ERP se niega para no descuadrar el dinero.'
+    ],
+    tech:{ funciones:['calcularComisiones','generarComisiones (soloRevertir)','descuentoOrigen','comisionesPendientes','comImprimirActividad','comImprimirPagar','comImprimirDetalle','comChequeaPendientes','comRevertir','_ingAvisoDescuento'],
+      permisos:['generar_comisiones'],
+      deploy:'`comisiones.gs` desplegado (@406) + rutas GET `descuentoOrigen` y `comisionesPendientes` en `core.gs`. `Calcular` y los reportes son solo lectura; solo **Generar/Regenerar/Revertir** escriben, y se niegan si algo ya se cobró.' } },
 
   { id:'poliza-concil', group:'operacion', icon:'🧾', title:'Conciliar pólizas (ContaDigital)',
     keywords:'poliza polizas contadigital conciliar folio contabilidad crvisor export xlsx egresos ingresos factura monto fecha cuadrar registrado sin poliza ambiguo',
@@ -44572,7 +44683,7 @@ async function _novCfgGuardar(){
       deploy:'`poliza_concil.gs` devuelve los movimientos del ERP del periodo y escribe el Folio en la columna Póliza.' } },
 
   { id:'cobranza', group:'operacion', icon:'📥', title:'Cobranza / Cuentas por Cobrar',
-    keywords:'cobranza cuentas por cobrar cxc adeudo saldo abono abonar cobrar cobro credito a favor comision mp banco conciliacion pagado abonos huerfanos descuadre suscripcion crio criopreservacion almacenamiento agencia reprovida descuento volumen deposito partida bloque paciente aging motor a motor b anual mensual saldo inicial conciliar mp mercado pago payer id recordar cobro corregir la venta corregir venta editar cuenta por cobrar editar adeudo me equivoque error de captura nombre equivocado cambiar nombre paciente corregir monto deuda huerfana mover todo',
+    keywords:'cobranza cuentas por cobrar cxc adeudo saldo abono abonar cobrar cobro credito a favor comision mp banco conciliacion pagado abonos huerfanos descuadre suscripcion crio criopreservacion almacenamiento agencia reprovida descuento volumen deposito partida bloque paciente aging motor a motor b anual mensual saldo inicial conciliar mp mercado pago payer id recordar cobro corregir la venta corregir venta editar cuenta por cobrar editar adeudo me equivoque error de captura nombre equivocado cambiar nombre paciente corregir monto deuda huerfana mover todo plan de pagos plan pagos parcialidades mensualidades vencimientos calendario fechas de pago activar plan reporte general de cobranza reporte general deudores todos los que deben lista de deudores vencido inmediato en plan estado por linea agrupar por op conceptos desglose separar conceptos partida duplicada duplicado pagada y plan estado de cuenta historico',
     para:'**Cobranza** controla lo que te deben. Tiene **dos motores** que no mezclan datos: **Motor A — Saldos** (adeudos de ventas) y **Motor B — Suscripciones de criopreservación**. Se ve en *Cuentas por Cobrar* (2 pestañas) y en el reporte *Cobranza*.',
     where:'Menú → **Cuentas por Cobrar** (operación) · Menú → Reportes → **Cobranza** (estado de cuenta imprimible).',
     mock:{ title:'Cuentas por Cobrar', crumb:'Cobranza', period:'Julio 2026',
@@ -44596,7 +44707,9 @@ async function _novCfgGuardar(){
       'Si te dice que **el saldo cambió**, alguien más lo movió: recarga la lista y reintenta (evita cobrarle al renglón equivocado o cobrar dos veces).',
       '**¿Capturaste algo mal (nombre, cantidad, producto)?** Pulsa **«Corregir la venta →»** en ese renglón: abre la venta en Ingresos lista para editar. Al guardar se ajustan **la venta, el banco y la cuenta por cobrar** de una sola vez, y si cambiaste el paciente la deuda queda **solo** a nombre del nuevo. Aplica también a los cargos **REPROVIDA** dados de alta con «+ Cuenta por cobrar» (nacieron con una venta detrás). Necesitas **editar_ingresos**.',
       'Para **cobrar** una suscripción: pestaña **Suscripciones Crío → Abonar** (marca periodos FIFO y crea el ingreso real).',
-      'Para el estado de cuenta imprimible: **Reportes → Cobranza**, busca la agencia/paciente e imprime (muestra Bruto − Descuento = Neto y datos de depósito).'
+      'Para el estado de cuenta imprimible: **Reportes → Cobranza**, busca la agencia/paciente e imprime (muestra Bruto − Descuento = Neto y datos de depósito).',
+      '**Plan de pagos (parcialidades):** en un saldo, **Editar → Plan de pagos** parte la deuda en vencimientos (fechas + montos). El estado de cuenta y el Estado de Cuenta del paciente **imprimen el calendario** con cada parcialidad y su fecha, y marcan cada renglón como **Vencido / Inmediato / En plan**. **Desactivar plan** regresa el saldo a cobro normal.',
+      '**Reporte general de cobranza (todos los que deben):** Reportes → Cobranza → **📋 Reporte general**. Igual que el flujo de efectivo pero de lo que te deben: lista a **todos** los deudores (pacientes, médicos, agencias) con su saldo, antigüedad y estado, para revisar la cartera completa de una vez.'
     ],
     buttons:[
       { k:'Pestaña «Saldos por cobrar»', d:'Adeudos de ventas (Motor A), por pacientes/médicos/agencias.' },
@@ -44612,7 +44725,10 @@ async function _novCfgGuardar(){
       { k:'Autopay', d:'Marca cobro automático informativo (muestra el próximo cobro; no cobra solo).' },
       { k:'Generar (suscripciones)', d:'Crea los cargos del periodo: primero muestra un preview, luego confirmas.' },
       { k:'🏷️ Descuentos agencia', d:'Abre el panel para configurar el descuento por volumen de CADA agencia: qué productos cuentan (solo los de la lista), los escalones (desde–hasta–%), si se cuenta todo junto o por producto, por agencia o por miembro, y si aplica con lo del mes o con lo vendido el mes anterior. Guarda y el estado de cuenta lo aplica solo.' },
-      { k:'Pestaña «Conciliar MP»', d:'Cruza el export de Mercado Pago vs los pacientes con inventario Crío (suscrito / año gratis / pagó sin suscripción) y ofrece 🔔 Recordar cobro (tiene su propia sección).' }
+      { k:'Pestaña «Conciliar MP»', d:'Cruza el export de Mercado Pago vs los pacientes con inventario Crío (suscrito / año gratis / pagó sin suscripción) y ofrece 🔔 Recordar cobro (tiene su propia sección).' },
+      { k:'Plan de pagos (en Editar)', d:'Parte un saldo en parcialidades con fecha y monto cada una. Al imprimir, el estado de cuenta muestra el calendario completo y marca cada vencimiento como Vencido / Inmediato / En plan.' },
+      { k:'Desactivar plan', d:'Quita el plan de parcialidades y regresa el saldo a cobro normal (una sola exhibición). No borra lo ya cobrado.' },
+      { k:'📋 Reporte general (en Reportes → Cobranza)', d:'Imprime la cartera completa: todos los deudores (pacientes, médicos y agencias) con saldo, antigüedad y estado, en un solo documento tipo flujo de efectivo. Antes de imprimir conviene definir a quién va dirigido para ocultar datos sensibles.' }
     ],
     bloques:[
       { h:'⚠ Motor A: solo registro explícito', p:'El sistema **NO deduce** adeudos automáticamente (los precios viejos darían saldos falsos). Un adeudo **solo nace** al: (1) capturar un ingreso con **pago parcial**, (2) **cargar un saldo inicial**, o (3) hacer un **cargo a crédito**.' },
@@ -44621,7 +44737,11 @@ async function _novCfgGuardar(){
       { h:'Partidas por bloque (agencias/externos)', p:'En agencias NUESTRO cliente es la agencia (ej. REPROVIDA), pero el reporte lista a los **pacientes reales**. El editor trabaja por **bloques**: cada bloque = **un paciente + la fecha de su tratamiento + sus productos**. El botón **«+ Otro paciente / fecha»** deja seguir capturando en la misma nota.' },
       { h:'Motor B: reglas de suscripción', p:'Solo se cobra a quien **tenga inventario** (óvulos u embriones > 0). **Año 1 gratis solo para Hestia** (externos pagan desde el inicio); plan **anual $5,700** o **mensual $475**, default anual por inscripción. Estatus: Cortesía / Vigente / Por vencer / Vencida / Falta suscripción.' },
       { h:'Descuento por volumen por agencia', p:'Se configura en el panel **«🏷️ Descuentos agencia»** (Cuentas por Cobrar): productos que aplican, escalones desde–hasta–%, conteo combinado/por producto, directo/por miembro, base mes actual/mes anterior. Config en Script Property `COBRANZA_DESC_CFG` (`cobDescCfgRead`/`cobDescCfgSave`, permiso `editar_egresos`); migra sola desde la hoja legacy `Descuentos_Agencia`. Requiere redeploy de cobranza.gs + core.gs + finance.gs.' },
-      { h:'Conciliar MP (suscripciones Crío)', p:'La pestaña **«Conciliar MP»** cruza el export de Mercado Pago contra los pacientes con inventario Crío para ver quién está **suscrito / en año gratis / pagó sin suscripción**, liga a cada paciente con su `payer_id` y ofrece **🔔 Recordar cobro**. Tiene su propia sección: «Conciliar suscripciones Crío (Mercado Pago)».' }
+      { h:'Conciliar MP (suscripciones Crío)', p:'La pestaña **«Conciliar MP»** cruza el export de Mercado Pago contra los pacientes con inventario Crío para ver quién está **suscrito / en año gratis / pagó sin suscripción**, liga a cada paciente con su `payer_id` y ofrece **🔔 Recordar cobro**. Tiene su propia sección: «Conciliar suscripciones Crío (Mercado Pago)».' },
+      { h:'Plan de pagos con vencimientos', p:'Un saldo se puede pagar **en parcialidades**. En **Editar → Plan de pagos** capturas cada vencimiento (fecha + monto); las parcialidades deben sumar el saldo. Al imprimir, tanto el **Estado de Cuenta del paciente** como el **estado de cuenta de Cobranza** agregan una **tabla de calendario** con cada parcialidad, su fecha y si ya se pagó. **Desactivar plan** lo regresa a una sola exhibición.' },
+      { h:'Estado por línea: Vencido / Inmediato / En plan', p:'En el estado de cuenta cada renglón trae su **estado**: **Pagado** (ya liquidado), **En plan** (tiene parcialidades vigentes, aún no vence), **Inmediato** (se debe y no tiene plan → cobrar ya) y **Vencido** (pasó su fecha de vencimiento). Sirve para saber de un vistazo qué cobrar primero. Se puede **filtrar por segmento** (pacientes / médicos / agencias).' },
+      { h:'⚠ «La partida sale duplicada: una dice Pagada y otra dice Plan»', p:'Pasaba cuando **la misma deuda existía dos veces**: como **venta pagada** (con su OP) y como **cargo abierto** cargado a mano (otra OP, sin campo que las ligara). En el **histórico** aparecían las dos. El estado de cuenta ahora las **detecta por firma** (total + el conjunto de conceptos): si un grupo de venta **ya pagado** coincide con un cargo abierto, **omite el duplicado** y deja solo el saldo real. Si vuelve a aparecer, casi siempre es que los conceptos/monto no son idénticos: revisa que el cargo a mano tenga las mismas partidas que la venta.' },
+      { h:'Conceptos agrupados por operación', p:'El estado de cuenta **separa los conceptos** de cada venta (lo que realmente se cobró, no un renglón compuesto) y los **agrupa por operación (OP)** con su encabezado, para que se lea qué incluye cada cargo. Es visual: no cambia los montos.' }
     ],
     ejemplo:'REPROVIDA acumula **5** «Preparación endometrial» en el mes → cae en el escalón **4-8 = 7%**. Bruto 5×$5,000 = $25,000, descuento $1,750, **Neto a cobrar = $23,250**.',
     tips:[
@@ -44630,13 +44750,13 @@ async function _novCfgGuardar(){
     ],
     tech:{ hojas:['`Cuentas_Cobrar` y `Abonos_Cobrar` (INGRESOS_SS_ID) — Motor A; columna `Items` = JSON de partidas (pac, fecha, producto, cant, importe)','`Suscripciones_Crio` (INGRESOS_SS_ID) — Motor B','`Inventario Crío` (LAB_SS_ID): NOMBRE / FECHA CRÍO / OOV / EMB / EXTERNO','`Descuentos_Agencia` (INGRESOS_SS_ID): Agencia | Producto | Desde | Hasta | Descuento(%)'],
       props:['`COBRANZA_CONFIG` (tarifas/reglas)','`COBRANZA_PAC_CFG` (por paciente: {externo, mensual, autopay})','`COBRANZA_DESCUENTOS` · `COBRANZA_DEPOSITO` · `AGENCIAS` (default [reprovida])'],
-      funciones:['readEstadoCobranza','cuentasCobrar','suscripcionesCrio','registrarAbono','cargarSaldoInicial (crea la venta con saveIngreso pagado:0)','abonarIngreso','abonarCargo','editarCuentaCobrar','auditarCargosSinVenta (SOLO LECTURA)','generarSuscripciones','_cobDescuentosAgencia','_cobDeposito','_cobParseItems'],
+      funciones:['readEstadoCobranza','readEstadoCobranzaGeneral (reporte general)','cuentasCobrar','suscripcionesCrio','registrarAbono','cargarSaldoInicial (crea la venta con saveIngreso pagado:0)','abonarIngreso','abonarCargo','editarCuentaCobrar','auditarCargosSinVenta (SOLO LECTURA)','generarSuscripciones','_cobDescuentosAgencia','_cobDeposito','_cobParseItems','readPlanesPago','activarPlanPagos','desactivarPlanPago','_planCalendario','_cobBuildPrintData / _cobSig (dedup por firma) / _cobEstadoLinea / _agruparPorOp (frontend)'],
       permisos:['editar_egresos (alta/edición y toggles)','borrar_egresos'],
       motor:'cobranza-2026.07.10o',
-      deploy:'`cobranza.gs` requiere **agregarse al Apps Script + redeploy + `setupCobranzaConfig()`** una vez.' } },
+      deploy:'`cobranza.gs` requiere **agregarse al Apps Script + redeploy + `setupCobranzaConfig()`** una vez. El plan de pagos vive en `planes.gs` (mismo proyecto). El reporte general y la dedup por firma / estado por línea / agrupación por OP son **frontend** (`_cobBuildPrintData`).' } },
 
   { id:'origenes-externos', group:'operacion', icon:'🏷️', title:'Orígenes externos (grupos, agencias, médicos)',
-    keywords:'origen origenes externos agencia medico referido atribucion atribuir historico catalogo quien refiere venta reprovida back-fill origen desconocido grupo grupos jerarquia padre pertenece coordinador canal medico tratante ficha paciente reporte por medico reporte por grupo',
+    keywords:'origen origenes externos agencia medico medicos referido atribucion atribuir historico catalogo quien refiere venta reprovida back-fill origen desconocido grupo grupos jerarquia padre pertenece coordinador canal medico tratante medicos tratantes ficha paciente reporte por medico reporte por grupo correo email telefono whatsapp hestia medico de casa ordenar filtrar buscar todos los medicos alta de medico',
     para:'Los **Orígenes externos** son el catálogo ÚNICO de quién refiere pacientes: **grupos, agencias, médicos externos y coordinadores**. Sirven para saber **de quién es cada venta** y para contar los procedimientos de **un grupo entero de médicos**. El mismo catálogo alimenta **Canal** y **Médico Tratante** de la ficha del paciente y el desglose por origen en Presupuesto y Board Deck.',
     where:'**Panel de Control → 🏷️ Orígenes externos** (o el botón 🏷️ del encabezado).',
     mock:{ title:'Orígenes externos', crumb:'Panel de Control › Orígenes externos',
@@ -44667,11 +44787,135 @@ async function _novCfgGuardar(){
     tips:[ 'La jerarquía es de **UN nivel**: un médico pertenece a un grupo; un grupo no pertenece a nada. Un médico independiente es su propio grupo.',
            '**Atribuir ≠ rubro contable.** Una paciente que paga directo puede venir referida por un médico: se atribuye SIN que la venta se vaya al bucket de «Externos». El rubro lo decide el ciclo/categoría, nunca el origen.',
            'Si un valor viejo de la ficha no está en el catálogo, **no se borra**: sale marcado como *(fuera de catálogo)*.',
+           '**Médicos = este mismo catálogo.** Dar de alta un médico en **Médicos Tratantes** crea un origen tipo *Médico externo* con su **grupo** (Externos, una agencia, o **🏥 Hestia — médico de casa**). Por eso el médico cuenta para comisiones y aparece como Canal/Médico Tratante. El alta guarda **correo y teléfono** (para futuros avisos por WhatsApp/correo). Tiene su sección propia: «Médicos Tratantes».',
+           'La **ficha del paciente** ya muestra **TODOS** los médicos, agrupados por canal (Hestia / Agencia / Externos): antes ocultaba los del Grupo Médico.',
            'Para revisar las fichas ya capturadas, corre `migrarCanalesAOrigenes()` en Apps Script: es **solo lectura** y te enseña el mapeo antes de escribir nada.' ],
-    tech:{ hojas:['`Origenes_Externos`: catálogo (columna **Padre** = grupo al que pertenece)','`BD_Ingresos`: columna `OrigenExterno`','Hoja de Pacientes: `Canal` y `Médico Tratante`'],
-      funciones:['loadOrigenes','saveOrigen','deleteOrigen','_origResolver','migrarCanalesAOrigenes','loadAtribuirExternos','sugerirOrigenes','aplicarOrigenesHistorico','_ingLoadOrigenesIntoSelect','_ingAutofillOrigen'],
+    tech:{ hojas:['`Origenes_Externos`: catálogo (columna **Padre** = grupo al que pertenece; columnas **Correo** y **Teléfono** al final)','`BD_Ingresos`: columna `OrigenExterno`','Hoja de Pacientes: `Canal` y `Médico Tratante`'],
+      funciones:['loadOrigenes','saveOrigen','deleteOrigen','_origResolver','migrarCanalesAOrigenes','loadAtribuirExternos','sugerirOrigenes','aplicarOrigenesHistorico','_ingLoadOrigenesIntoSelect','_ingAutofillOrigen','medGuardar','_medFillGrupoSelect','_medEnsureHestiaGrupo','_pacFiltraMedicos'],
       permisos:['editar_ingresos'],
-      deploy:'Requiere `origenes.gs`, `core.gs` y `finance.gs` desplegados. Editar/borrar pide **editar_ingresos**.' } },
+      deploy:'Requiere `origenes.gs` (@403, con correo/teléfono), `core.gs` y `finance.gs` desplegados. Editar/borrar pide **editar_ingresos**.' } },
+
+  { id:'traspaso-cuentas', group:'operacion', icon:'⇄', title:'Traspaso entre cuentas bancarias',
+    keywords:'traspaso traspasos transferencia entre cuentas mover dinero pasar dinero fondear fondeo de nomina fondeo de caja retiro deposito disposicion de efectivo disposicion de credito amex tarjeta de credito pago de tarjeta pagar la tarjeta tpv terminal mercado pago mp comision spei santander cuenta origen cuenta destino desde hacia folio trasp reversa revertir cancelar traspaso equivocado deshacer bank_capture conciliacion bancos doble asiento',
+    para:'Mueve dinero **entre dos cuentas del ERP** (banco, tarjeta **AMEX** o terminal **TPV/Mercado Pago**) con un solo formulario: el sistema registra por ti el **retiro en el origen** y el **depósito en el destino**, ligados por un **folio `TRASP-…`** y con reversa automática si algo falla a medias. El **destino recibe el monto completo**; cualquier **comisión** la absorbe siempre la cuenta de **origen**.',
+    where:'Menú → **Conciliación / Bancos** → botón **⇄ Traspaso** (barra de acciones). Requiere permiso **bank_capture**.',
+    mock:{ title:'Traspaso entre cuentas', crumb:'Bancos › Traspaso',
+      toolbar:[ {t:'select', label:'Desde: AMEX (tarjeta)', n:1}, {t:'select', label:'Hacia: Santander', n:2}, {t:'btn', label:'Registrar traspaso', pri:true, n:5} ],
+      note:'Disposición de efectivo de la tarjeta para fondear el banco:',
+      table:{ cols:['Desglose de la confirmación','Monto'],
+        rows:[ [{label:'Entra al destino (Santander)',n:3},'$50,000.00'],
+               [{label:'Comisión (a AMEX)',n:4},'$1,500.00'],
+               [{raw:'<b>Sale del origen (AMEX)</b>'},{raw:'<b>$51,500.00</b>'}] ] },
+      callouts:[ {n:1,text:'**Desde**: la cuenta de donde sale el dinero. La etiqueta `(tarjeta)` / `(TPV)` te dice de qué tipo es.'},
+                 {n:2,text:'**Hacia**: la cuenta que recibe. No puede ser la misma que el origen.'},
+                 {n:3,text:'El **destino recibe el monto completo** que escribiste.'},
+                 {n:4,text:'La **comisión** (SPEI, disposición, retiro) la paga **el origen**, como fila aparte.'},
+                 {n:5,text:'**Registrar** muestra este desglose para confirmar; al aceptar escribe ambas patas y te da el **folio** y los nuevos saldos.'} ] },
+    steps:[
+      'Abre **Bancos / Conciliación** y pulsa **⇄ Traspaso**.',
+      'Elige **Desde (sale el dinero)** y **Hacia (entra el dinero)**. Lee el recuadro de pista: cambia según el tipo del origen (transferencia, disposición de tarjeta o retiro de TPV).',
+      'Escribe el **Monto (MXN)** que debe llegar al destino y, si hubo cobro por moverlo, la **Comisión del origen** (si no hubo, déjala en 0).',
+      'Revisa la **Fecha** (hoy por defecto) y un **Concepto** corto opcional.',
+      'Pulsa **Registrar traspaso**, revisa el **desglose** (entra / comisión / sale) y confirma.',
+      'Verás **✓ Traspaso registrado** con el **folio `TRASP-…`** y el nuevo saldo de ambas cuentas.'
+    ],
+    buttons:[
+      { k:'⇄ Traspaso', d:'Abre el formulario. Solo aparece con permiso bank_capture y si hay al menos 2 cuentas activas.' },
+      { k:'Desde (origen)', d:'Cuenta de donde sale el dinero. En tarjeta es una «disposición de efectivo»; en TPV, un «retiro».' },
+      { k:'Hacia (destino)', d:'Cuenta que recibe el monto completo. En tarjeta es un «pago de tarjeta» (baja la deuda).' },
+      { k:'Comisión del origen', d:'Opcional. Lo que cobró mover el dinero; se carga a la cuenta de origen, nunca al destino.' },
+      { k:'Registrar traspaso', d:'Muestra el desglose de confirmación y, al aceptar, escribe el retiro y el depósito ligados por un folio único.' }
+    ],
+    tips:[
+      '**No hay botón «deshacer traspaso».** Para revertir uno, borra a mano **ambas patas** (origen + su comisión, y destino) con la **✕ del movimiento en el ERP** —nunca en la hoja de cálculo—, identificándolas por el **folio `TRASP-…`**.',
+      'Si el depósito falla a medias, el sistema intenta una **reversa automática segura**: solo borra lo que reconoce por su referencia exacta; si alguien más capturó en esa cuenta mientras tanto, **se detiene y no borra nada** y te avisa con el folio para que lo corrijas tú.',
+      'En cuentas **TPV/Mercado Pago** la columna de comisiones del traspaso se deja en **0 a propósito**: una comisión por retiro no es una comisión por cobro, y así no contamina la partida automática de comisiones de ventas.'
+    ],
+    tech:{ hojas:['`Config_Cuentas` (BANKS_SS_ID): key, nombre, gid, tipo (bancaria/credito/tpv), color, activo','Pestaña por cuenta: Santander (Depósito/Retiro/Saldo), AMEX (Movimiento/Saldo de deuda), Mercado Pago (Cobro/Comisiones/Total Venta)'],
+      funciones:['traspasoBancos','_traspFilasOrigen','_traspFilaDestino','saveBankRow (motor de saldo reutilizado)','readCuentas','cbTraspasoOpen/Save/Hint (frontend)'],
+      permisos:['bank_capture'],
+      deploy:'`finance.gs` desplegado (modelo de cuentas data-driven, Etapa 1). El folio es `TRASP-yyyyMMdd-HHmmss-<uuid8>`; la reversa compara el texto COMPLETO de la referencia y nunca borra filas ajenas.' } },
+
+  { id:'plan-pagos', group:'operacion', icon:'📅', title:'Plan de pagos (parcialidades de Cuentas por Cobrar)',
+    keywords:'plan de pagos parcialidades mensualidades cuotas quincenal mensual vencimiento vencimientos calendario abonos estado de cuenta cobranza cuentas por cobrar cxc saldo adeudo vencido cubierto pendiente proximo pago hasta cuando pagar fecha de pago financiar dividir plazo badge PDF imprimible activar quitar desactivar reemplazar cascada',
+    para:'El **plan de pagos** parte un adeudo en varias **cuotas** con fechas automáticas (**quincenal** cada 15 días o **mensual**). Es un **calendario informativo**: dice cuánto y **hasta cuándo** pagar, y vigila vencidos. **NO mueve dinero, NO toca bancos y NO cambia el saldo** — el cobro se sigue haciendo con **Cobrar / Abonar**.',
+    where:'Menú → **Cuentas por Cobrar** → en la fila del adeudo, botón **📅 Plan**. La tarjeta se ve en **Estado de Cuenta** del paciente.',
+    mock:{ title:'Plan de pagos', crumb:'Cuentas por Cobrar › 📅 Plan',
+      toolbar:[ {t:'select', label:'Frecuencia: Mensual', n:1}, {t:'select', label:'Plazo: 3 pagos', n:2}, {t:'btn', label:'Activar plan', pri:true, n:3} ],
+      note:'Adeudo $30,000 · abonado $15,000 — el estado sale de lo abonado (cascada):',
+      table:{ cols:['Pago','Fecha','Monto','Estado'],
+        rows:[ ['Pago 1','2026-07-20','$10,000',{raw:'<b class="hfm-badge ok">✓ Cubierto</b>',n:4}],
+               ['Pago 2','2026-08-20','$10,000',{raw:'<b class="hfm-badge dng">Vencido</b>',n:5}],
+               ['Pago 3','2026-09-20','$10,000',{raw:'<b class="hfm-badge">Pendiente</b>',n:6}] ] },
+      callouts:[ {n:1,text:'**Frecuencia**: Mensual (+1 mes por cuota) o Quincenal (+15 días).'},
+                 {n:2,text:'**Plazo**: número de pagos (1 a 120). El monto se reparte parejo; la última cuota absorbe el redondeo para cuadrar exacto.'},
+                 {n:3,text:'**Activar** guarda el calendario. Si ya había plan para ese paciente+OP, lo **reemplaza**.'},
+                 {n:4,text:'**Cubierto**: lo abonado ya alcanzó el acumulado hasta esa cuota.'},
+                 {n:5,text:'**Vencido**: descubierta y su fecha ya pasó → cobrar ya.'},
+                 {n:6,text:'**Pendiente**: descubierta pero su fecha aún no llega.'} ] },
+    steps:[
+      'En **Cuentas por Cobrar**, en la fila del adeudo pulsa **📅 Plan** (necesitas **editar_ingresos**).',
+      'Ajusta **Monto total** (por defecto = saldo), **Frecuencia**, **Plazo (# de pagos)** y **Fecha del primer pago**.',
+      'Revisa la **vista previa** que se dibuja sola y pulsa **Activar plan**.',
+      'El calendario aparece en el **Estado de Cuenta** del paciente y como **badge** en la lista (al día / próx. fecha / N vencido).',
+      'Cobra cada cuota con **Cobrar / Abonar** como siempre; el plan marca solas las cuotas cubiertas.',
+      'Para retirarlo: en la tarjeta del Estado de Cuenta pulsa **Quitar** (no afecta saldos).'
+    ],
+    buttons:[
+      { k:'📅 Plan', d:'Abre el formulario del plan en una fila de Cuentas por Cobrar. Requiere editar_ingresos.' },
+      { k:'Frecuencia', d:'Mensual (mismo día del mes siguiente) o Quincenal (+15 días por cuota).' },
+      { k:'Plazo (# de pagos)', d:'Entre 1 y 120. El total se divide parejo y la última cuota absorbe el redondeo para cuadrar exacto.' },
+      { k:'Activar plan', d:'Guarda el calendario. Reemplaza cualquier plan previo del mismo paciente+OP.' },
+      { k:'Quitar (en Estado de Cuenta)', d:'Retira el plan. No afecta saldos ni cobros; la fila no se borra, se marca inactiva (queda traza).' }
+    ],
+    tips:[
+      'El estado de cada cuota (**Cubierto / Vencido / Pendiente**) se **deriva por cascada** del total abonado del paciente; no se guarda pago por pago. No importa la forma de pago ni en cuántos golpes pague.',
+      'En los **PDFs** (Estado de Cuenta y Cobranza) el plan sale como recuadro **Plan de pagos · vencimientos** con la línea **«Puede pagar hasta [fecha]»** (la última cuota pendiente). Está **traducido** a es/en/fr/pt para pacientes internacionales.',
+      'Insistir con el equipo: el plan **no cobra**. Solo **Cobrar / Abonar** sube el Pagado, mueve el banco y cierra la cuenta por cobrar.'
+    ],
+    tech:{ hojas:['`Planes_Pago` (SHEET_ID): Id, Paciente, OP, MontoTotal, Frecuencia, NumPagos, FechaInicio, Activo, CreadoEn, ActualizadoEn — un renglón por (paciente, OP); Activo=false = quitado (no se borra la fila)'],
+      funciones:['readPlanesPago','activarPlanPagos','desactivarPlanPago','_planCalendario','setupPlanesPago','ccPlanAbrir/Preview/Guardar','_ccPlanBadge','ecCargarPlan/_ecPlanCard','_ecPlanPrintRows/_planPrintTableHTML','ecPlanQuitar'],
+      permisos:['editar_ingresos (activar/quitar); la lectura del badge/tarjeta/PDF está abierta a cualquier sesión válida'],
+      deploy:'`planes.gs` requiere agregarse al Apps Script + redeploy; la hoja se auto-crea al primer uso o con `setupPlanesPago()`. GET `action=planesPago` (core.gs) devuelve planes activos con calendario; POST `activarPlanPagos`/`desactivarPlanPago` (finance.gs, gate editar_ingresos). Es informativo: no altera saldos, bancos ni el Pagado del ingreso.' } },
+
+  { id:'medicos-tratantes', group:'operacion', icon:'🩺', title:'Médicos Tratantes',
+    keywords:'medico tratante medicos tratantes alta medico nuevo medico dar de alta doctor doctora dra dr registrar medico pertenece a grupo agencia hestia medico de casa externos independiente canal correo email telefono whatsapp contacto comision comisiones volumen grupo reprovida ordenar buscar buscador alias notas baja soft delete origenes externos ficha paciente editar_ingresos catalogo medicos',
+    para:'Pantalla amable para **dar de alta médicos tratantes** sin pelear con hojas. Por debajo, cada médico se guarda en **Orígenes externos** como un `Médico externo` colgando del **grupo o agencia** que elijas en **Pertenece a**. Ese vínculo es lo que fija su **Canal** en la ficha del paciente y hace que sus procedimientos **cuenten para las comisiones** de su grupo.',
+    where:'Menú → **Médicos Tratantes** (bloque de catálogos). Alta/edición/baja piden **editar_ingresos**.',
+    mock:{ title:'Médicos Tratantes', crumb:'Catálogos › Médicos Tratantes',
+      toolbar:[ {t:'search', label:'Buscar médico, grupo o alias…', n:3}, {t:'select', label:'Ordenar: Grupo / Agencia', n:4}, {t:'btn', label:'+ Nuevo médico', pri:true, n:1} ],
+      table:{ cols:['Médico','Pertenece a',''],
+        rows:[ [{raw:'🏥 Dra. Laura Méndez<br><span class="hfm-mini">✉ laura@clinica · 📞 55 1234 5678</span>'},{label:'Hestia (médico de casa)',n:2},'✎ Editar · Baja'],
+               ['🩺 Dra. Maritza Rojas',{raw:'REPROVIDA <span class="hfm-mini">(agencia)</span>'},'✎ Editar · Baja'],
+               ['🩺 Dr. Lozano','— Externos (independiente)','✎ Editar · Baja'] ] },
+      callouts:[ {n:1,text:'**+ Nuevo médico**: abre la ficha. Solo aparece con permiso editar_ingresos.'},
+                 {n:2,text:'**Pertenece a**: Hestia (médico de casa), una agencia/grupo, o Externos (independiente). Fija el Canal y a quién le suman las comisiones.'},
+                 {n:3,text:'**Buscar**: filtra en vivo por nombre, grupo o alias (ignora acentos), sin perder el foco.'},
+                 {n:4,text:'**Ordenar**: por Nombre (A-Z) o por Grupo / Agencia (agrupa a los médicos por su grupo).'} ] },
+    steps:[
+      'Entra a **Médicos Tratantes** y pulsa **+ Nuevo médico**.',
+      'Escribe el **Nombre** (único obligatorio).',
+      'Elige **Pertenece a**: **🏥 Hestia (médico de casa)**, una **Agencia/Grupo**, o **— Externos (independiente) —**.',
+      'Opcional: **Correo** y **Teléfono / WhatsApp** (para enviarle su estado de cuenta más adelante), **Alias** (separados por coma) y **Notas**.',
+      'Pulsa **Guardar**. El médico queda bajo su grupo; usa **Editar** para cambiarlo o **Baja** para retirarlo (deja registro, no borra).'
+    ],
+    buttons:[
+      { k:'+ Nuevo médico', d:'Alta de un médico. Detrás crea un origen tipo «Médico externo» con el grupo elegido.' },
+      { k:'Pertenece a (grupo / agencia)', d:'Define el Canal en la ficha y a qué grupo/agencia le suman sus procedimientos para comisiones. «Externos (independiente)» = es su propio grupo.' },
+      { k:'🏥 Hestia (médico de casa)', d:'Para doctores de la clínica. Crea solo la primera vez el grupo «Hestia», que queda excluido del selector de Comisiones (no generan comisión externa).' },
+      { k:'Correo / Teléfono', d:'Opcionales, para enviarle su estado de cuenta. Anti-blanqueo: una baja u otra edición que no los traiga no los borra.' },
+      { k:'✎ Editar', d:'Reabre la ficha con todo precargado (incluido el grupo).' },
+      { k:'Baja', d:'Soft-delete: marca al médico inactivo y lo saca de listas y desplegables, pero nunca borra la fila (histórico y comisiones pasadas intactos).' }
+    ],
+    tips:[
+      '**«Pertenece a» no es cosmético.** Fija dos cosas: (1) el **Canal** de la ficha (Hestia / Agencia / Externos) aunque lo marquen mal a mano, y (2) a qué grupo **suman sus procedimientos** para comisiones. Elegir mal el grupo manda sus ventas al grupo equivocado.',
+      'La **ficha del paciente** ya muestra **TODOS** los médicos, agrupados por canal; antes ocultaba los del Grupo Médico.',
+      'Los médicos **viven en Orígenes externos** (esta pantalla es solo una forma rápida de darlos de alta). El enlace **«Ver Orígenes externos →»** abre el catálogo completo. La pantalla **NO** usa `medicos.gs` ni la hoja `Medicos_Tratantes` (huérfana): todo se guarda vía `saveOrigen` sobre `Origenes_Externos`.'
+    ],
+    tech:{ hojas:['`Origenes_Externos` (SHEET_ID) — AQUÍ viven los médicos: Id, Nombre, Tipo, Alias, Activo, Notas, CreadoEn, Padre, Email, Teléfono. Un médico = fila con Tipo=«Médico externo» y Padre=id del grupo/agencia','`Medicos_Tratantes` (SHEET_ID) — HUÉRFANA / no usada por esta vista'],
+      funciones:['loadMedicosView','_medRenderView/_medRenderTabla','_medFillGrupoSelect','_medEnsureHestiaGrupo','medGuardar','medBaja','_medListaVista/_medSort','saveOrigen (anti-blanqueo Email/Teléfono)','_comMedicosDeGrupo'],
+      permisos:['editar_ingresos (alta/edición/baja, gate fail-closed en saveOrigen); lectura del listado: cualquier sesión válida'],
+      deploy:'Frontend build .269 · `origenes.gs` @403 (correo+teléfono). La jerarquía **Padre** (Grupo o Agencia) amarra al médico a su grupo para el Canal y para las comisiones.' } },
 
   { id:'conciliar-mp', group:'operacion', icon:'🔄', title:'Conciliar suscripciones Crío (Mercado Pago)',
     keywords:'conciliar mp mercado pago suscripcion crio payer id payerid recordar cobro export csv xlsx suscrito año gratis pago sin suscripcion vincular',
