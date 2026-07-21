@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.288 -->
+﻿<!-- app-build:2026.07.21.289 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -25412,7 +25412,8 @@ var _REPORT_TYPES=[
   {id:'comisiones-actividad',label:'Comisiones — actividad de m\xe9dicos', defaultTpl:'ejecutivo'},
   {id:'comisiones-pagar',    label:'Comisiones — reporte a pagar', defaultTpl:'contable'},
   {id:'comisiones-detalle',  label:'Comisiones — detalle del c\xe1lculo', defaultTpl:'minimalista'},
-  {id:'comisiones-general',  label:'Comisiones — reporte general por rango', defaultTpl:'ejecutivo'}
+  {id:'comisiones-general',  label:'Comisiones — reporte general por rango', defaultTpl:'ejecutivo'},
+  {id:'expedientes-resumen',  label:'Expedientes de m\xe9dicos — pendientes y vigencias', defaultTpl:'ejecutivo'}
 ];
 /* ── Shared helpers ────────────────────────────────────────── */
 function _tplFmt(v,decimals){var n=Number(v)||0;var d=decimals||0;return '$'+n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});}
@@ -33523,7 +33524,10 @@ function _medRenderView(){
     + '<div><div style="font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--color-text-muted)">Hestia Fertility</div>'
     + '<h1 style="font-size:20px;font-weight:800;color:var(--color-text);margin:0">Médicos Tratantes</h1>'
     + '<div style="font-size:11.5px;color:var(--color-text-muted);margin-top:3px">Cada médico pertenece a un grupo/agencia · alimenta la ficha del paciente y las comisiones</div></div>'
-    + (puede ? '<button onclick="medOpenForm()" class="dash-btn">+ Nuevo médico</button>' : '') + '</div>';
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    + '<button onclick="expReporte()" title="Expedientes: pendientes y vigencias" style="padding:8px 14px;background:var(--color-surface-2,#f3f4f6);border:1px solid var(--color-divider);border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">📋 Reporte de expedientes</button>'
+    + (puede ? '<button onclick="medOpenForm()" class="dash-btn">+ Nuevo médico</button>' : '')
+    + '</div></div>';
   h += '<div style="font-size:11px;color:var(--color-text-muted);margin:0 0 14px;line-height:1.5">Los médicos viven en <b>Orígenes externos</b> (aquí es solo una forma rápida de darlos de alta). Aparecen bajo su grupo y cuentan para las <b>comisiones</b> de ese grupo. '
     + '<a href="#" onclick="if(typeof navigateTo===\'function\')navigateTo(\'origenes\');return false;" style="color:var(--color-primary);font-weight:600">Ver Orígenes externos →</a></div>';
   if (!total){
@@ -33674,6 +33678,44 @@ async function expNotificar(){
     var msg=(res.enviado&&res.enviado.correo)?('Correo enviado a '+(res.correo||'')+'.'):((res.correo?'':'El médico no tiene correo en su ficha. ')+'Se dejó un recordatorio interno.');
     alert('Notificación registrada. '+msg);
   }catch(e){ alert('Error: '+e.message); }
+}
+/* Reporte de expedientes: pendientes y vigencias (readExpedientesResumen). */
+var _expResumen=null;
+function _expKpi(v,l,c){ return '<div style="flex:1;min-width:90px;background:'+c+'18;border-radius:10px;padding:10px 12px;text-align:center"><div style="font-size:20px;font-weight:800;color:'+c+'">'+v+'</div><div style="font-size:10px;color:var(--color-text-muted);text-transform:uppercase;font-weight:600;margin-top:2px">'+l+'</div></div>'; }
+async function expReporte(){
+  _expEnsureModal(); document.getElementById('exp-modal').style.display='flex';
+  document.getElementById('exp-modal-body').innerHTML='<div style="text-align:center;padding:30px;color:var(--color-text-muted)">Cargando reporte…</div>';
+  var d;
+  try{ var r=await fetch(APPS_SCRIPT_URL+'?action=expedientesResumen&token='+encodeURIComponent(getToken())+'&_t='+Date.now(),{redirect:'follow'}); d=await r.json(); }
+  catch(e){ document.getElementById('exp-modal-body').innerHTML='<div style="color:#b91c1c;padding:20px">Error: '+e.message+'</div>'; return; }
+  if(!d||!d.ok){ document.getElementById('exp-modal-body').innerHTML='<div style="color:#b91c1c;padding:20px">'+((d&&d.error)||'Error')+'</div>'; return; }
+  _expResumen=d; var rs=d.resumen||{};
+  var h='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px"><div><div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted)">Reporte</div><div style="font-size:18px;font-weight:800;color:var(--color-text)">Expedientes — pendientes y vigencias</div></div><button onclick="expClose()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--color-text-muted)">×</button></div>';
+  h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">'+_expKpi(rs.total||0,'Médicos','#6b7280')+_expKpi(rs.completos||0,'Completos','#16a34a')+_expKpi(rs.incompletos||0,'Incompletos','#b45309')+_expKpi(rs.vencidos||0,'Con vencidos','#b91c1c')+_expKpi(rs.porVencer||0,'Por vencer','#a16207')+'</div>';
+  var alerta=(d.medicos||[]).filter(function(m){return m.estado!=='completo';});
+  if(!alerta.length){ h+='<div style="padding:24px;text-align:center;color:#16a34a;font-weight:700">✅ Todos los expedientes están completos y al día.</div>'; }
+  else{
+    h+='<table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr style="text-align:left;color:var(--color-text-muted);font-size:10px;text-transform:uppercase"><th style="padding:6px 8px">Médico</th><th style="padding:6px 8px">Estado</th><th style="padding:6px 8px">Pendiente / por vencer</th></tr></thead><tbody>';
+    alerta.forEach(function(m){
+      var col=(m.vencidos>0)?'#b91c1c':(m.estado==='incompleto'?'#b45309':'#a16207');
+      h+='<tr style="border-top:1px solid var(--color-divider)"><td style="padding:7px 8px;font-weight:600">'+_comEsc(m.medico)+(m.correo?'<div style="font-size:10px;color:var(--color-text-muted)">✉ '+_comEsc(m.correo)+'</div>':'')+'</td><td style="padding:7px 8px;color:'+col+';font-weight:700">'+_comEsc(m.estado)+' ('+m.subidos+'/'+m.total+')</td><td style="padding:7px 8px;color:var(--color-text-muted)">'+(m.docsAlerta||[]).map(function(x){return _comEsc(x.nombre)+' ('+_comEsc(x.motivo)+')';}).join(', ')+'</td></tr>';
+    });
+    h+='</tbody></table>';
+  }
+  h+='<div style="margin-top:16px;display:flex;justify-content:flex-end"><button onclick="expReporteImprimir()" style="font-size:12px;padding:8px 16px;border:1px solid var(--color-divider);background:var(--color-surface-2,#f3f4f6);border-radius:9px;cursor:pointer;font-weight:600">🖨️ Imprimir</button></div>';
+  document.getElementById('exp-modal-body').innerHTML=h;
+}
+function expReporteImprimir(){
+  var d=_expResumen; if(!d) return; var rs=d.resumen||{};
+  var rows=[], kinds=[], cons=[];
+  (d.medicos||[]).filter(function(m){return m.estado!=='completo';}).forEach(function(m){
+    rows.push([m.medico, m.estado+' ('+m.subidos+'/'+m.total+')', (m.docsAlerta||[]).map(function(x){return x.nombre+' ('+x.motivo+')';}).join('; ')]);
+    kinds.push('normal'); cons.push(null);
+  });
+  var hoy=new Date(); var per='Al '+hoy.getFullYear()+'-'+('0'+(hoy.getMonth()+1)).slice(-2)+'-'+('0'+hoy.getDate()).slice(-2);
+  hfReportPrint('expedientes-resumen',{ title:'Expedientes de médicos — pendientes y vigencias', subject:'Requisito de salud para tratamientos', period:per, generado:hfSello(),
+    kpis:[{value:String(rs.total||0),label:'Médicos'},{value:String(rs.completos||0),label:'Completos'},{value:String(rs.incompletos||0),label:'Incompletos'},{value:String((rs.vencidos||0)+(rs.porVencer||0)),label:'Vigencia'}],
+    cols:['Médico','Estado','Documentos pendientes / por vencer'], rows:rows, rowKinds:kinds, conceptCol:0, rowConcepts:cons, lang:'es' });
 }
 
 /* Marcador: garantiza el modal singleton en <body> tras cada render de la lista. */

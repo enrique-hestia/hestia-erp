@@ -485,9 +485,11 @@ function diagSummaryIngresos(){
    Editor de Apps Script → Run → diagLibrosIngresos → Ver registro. */
 function diagLibrosIngresos(){
   function num(v){ if(typeof v==='number')return v; var n=parseFloat(String(v||'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
-  function sig(f,t,pac,prod){ return (f||'')+'|'+Math.round(num(t)*100)+'|'+String(pac||'').trim().toLowerCase()+'|'+String(prod||'').trim().toLowerCase(); }
+  function ft(f,t){ return (f||'')+'|'+Math.round(num(t)*100); }   // fecha+monto: NO depende del formato del nombre
   var master = _summaryReadIngresosMaster();
-  var idx = {}; master.forEach(function(r){ idx[sig(r.fecha, r.total, r.paciente, r.producto)] = true; });
+  // Multiconjunto de (fecha,monto) del consolidado + total por año.
+  var idxFT = {}, consTotAnio = {};
+  master.forEach(function(r){ var k=ft(r.fecha,r.total); idxFT[k]=(idxFT[k]||0)+1; var y=(r.fecha&&r.fecha.length>=4)?r.fecha.substring(0,4):'?'; consTotAnio[y]=(consTotAnio[y]||0)+num(r.total); });
   var out = {}, CUR = new Date().getFullYear();
   [CUR-1, CUR-2].forEach(function(anio){
     var bid = _sumIngresosIds()[anio];
@@ -499,17 +501,21 @@ function diagLibrosIngresos(){
       var hdr = data[0].map(function(c){ return String(c).trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''); });
       function col(keys,fb){ for(var n=0;n<keys.length;n++)for(var c=0;c<hdr.length;c++){ if(hdr[c]===keys[n]) return c; } return fb; }
       var iO=col(['op'],0), iF=col(['fecha'],2), iP=col(['paciente'],3), iPr=col(['producto'],5), iT=col(['totalpagar','total a pagar','total'],9);
-      var filas=0, huerfanos=[];
+      var filas=0, totalParcial=0, huerfFT=0, muestra=[], usados={};
       for (var i=1;i<data.length;i++){ var r=data[i]; if(!String(r[iO]||'').trim()) continue; filas++;
-        var f=_sumParseDate(r[iF]);
-        if (!idx[sig(f, r[iT], r[iP], r[iPr])] && num(r[iT])!==0){
-          if(huerfanos.length<25) huerfanos.push({op:String(r[iO]||''), fecha:f, total:num(r[iT]), paciente:String(r[iP]||''), producto:String(r[iPr]||'')});
-        }
+        var t=num(r[iT]); totalParcial+=t; var f=_sumParseDate(r[iF]); var k=ft(f,t);
+        var disp=(idxFT[k]||0)-(usados[k]||0);
+        if (disp>0){ usados[k]=(usados[k]||0)+1; }   // esa (fecha,monto) SÍ existe en el consolidado
+        else if (t!==0){ huerfFT++; if(muestra.length<25) muestra.push({op:String(r[iO]||''), fecha:f, total:t, paciente:String(r[iP]||''), producto:String(r[iPr]||'')}); }
       }
-      out[anio] = { filasParcial:filas, huerfanos:huerfanos.length, muestra:huerfanos };
+      var ct = consTotAnio[String(anio)]||0;
+      out[anio] = { filasParcial:filas, totalParcial:Math.round(totalParcial), totalConsolidadoEseAnio:Math.round(ct),
+        huerfanosPorFechaMonto:huerfFT, diferenciaMonto:Math.round(totalParcial - ct),
+        veredicto: (huerfFT===0 ? 'OK — el consolidado contiene todo (por fecha+monto)' : ('⚠ '+huerfFT+' fila(s) del parcial SIN (fecha,monto) en el consolidado = posible dinero no migrado')),
+        muestraHuerfanos:muestra };
     } catch(e){ out[anio] = { error:e.message }; }
   });
-  out._nota = '0 huerfanos = el consolidado contiene todo; los reportes no pierden nada. huerfanos>0 = filas del libro parcial a migrar al principal.';
+  out._nota = 'huerfanosPorFechaMonto=0 → el consolidado tiene TODO el dinero del parcial (los "huérfanos" anteriores eran solo diferencia de formato de nombre) → leer solo el consolidado es correcto. huerfanosPorFechaMonto>0 → esas ventas hay que migrarlas al libro principal.';
   try{ Logger.log(JSON.stringify(out,null,2)); }catch(e){}
   return out;
 }
