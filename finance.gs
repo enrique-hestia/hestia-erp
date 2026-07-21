@@ -7619,6 +7619,9 @@ var CFG_DD_DEFAULTS = [
   // escribía el puesto/área a su manera y no cuadraban los reportes por área.
   ['Empleados', 'puesto',    'Puesto',                 'Enfermera|Marketing|Embrióloga|Médico|Finanzas|Limpieza|Ventas|Administración|Recepción'],
   ['Empleados', 'area',      'Área / Depto',           'Enfermera|Marketing|Embrióloga|Médico|Finanzas|Limpieza|Ventas|Administración|Recepción'],
+  // Alta de proveedor (Catálogo de Proveedores). Antes hardcodeada en el HTML
+  // (PROV_CATS); ahora administrable desde Panel de Control > Formularios.
+  ['Proveedores', 'categoria', 'Categoría de proveedor', 'Medicamentos|Laboratorio|Insumos|Servicios|Renta|Honorarios|Nómina|Otros'],
 ];
 
 // Inserta en la hoja las filas por defecto (CFG_DD_DEFAULTS) que aún no existan.

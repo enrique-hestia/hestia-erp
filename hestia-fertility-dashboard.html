@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.278 -->
+﻿<!-- app-build:2026.07.21.279 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -20597,6 +20597,7 @@ async function loadProveedores(){
     _provData = await resp.json();
     if (_provData.error) throw new Error(_provData.error);
     _provCache(_provData.rows||[]);
+    try { await _ddEnsure(); } catch(e){}   // categorías administrables listas antes de render/alta
     await hfFinish();
     _renderProveedores();
   } catch(e){
@@ -20629,7 +20630,10 @@ function _renderProveedores(){
   var rows=data.rows||[];
   var filtered=_provFilterRows();
   var k=data.kpis||{total:rows.length,activos:0,inactivos:0};
-  var cats=(data.categorias&&data.categorias.length)?data.categorias:PROV_CATS;
+  // Filtro: categorías administradas (Panel de Control > Formularios) + las que ya
+  // existen en los datos (para poder filtrar por una categoría legacy fuera del catálogo).
+  var cats=_ddVals('Proveedores','categoria',PROV_CATS);
+  (data.categorias||[]).forEach(function(c){ if(c && cats.indexOf(c)<0) cats.push(c); });
   var canEdit=hasPermission('bank_capture');
 
   if (!document.getElementById('prov-styles')){
@@ -20777,7 +20781,12 @@ function provOpenForm(row, onSaved){
   var isEdit = !!row;
   function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
   function inp(id,lbl,val,full,type){return '<div class="pv-field'+(full?' full':'')+'"><label class="pv-flbl">'+lbl+'</label><input class="pv-inp" id="pf-'+id+'" type="'+(type||'text')+'" value="'+esc(val||'')+'"></div>';}
-  var catSel='<div class="pv-field"><label class="pv-flbl">Categoría</label><select class="pv-inp" id="pf-categoria">'+['',].concat(PROV_CATS).map(function(c){return '<option value="'+esc(c)+'"'+((row&&row.categoria===c)?' selected':'')+'>'+(c||'— elegir —')+'</option>';}).join('')+'</select></div>';
+  // Categoría administrable desde Panel de Control > Formularios > Proveedores
+  // (fallback a PROV_CATS). Si el proveedor ya trae un valor fuera del catálogo,
+  // se conserva para no perderlo al editar.
+  var _catList=_ddVals('Proveedores','categoria',PROV_CATS);
+  if (row && row.categoria && _catList.indexOf(row.categoria)<0) _catList=_catList.concat([row.categoria]);
+  var catSel='<div class="pv-field"><label class="pv-flbl">Categoría</label><select class="pv-inp" id="pf-categoria">'+['',].concat(_catList).map(function(c){return '<option value="'+esc(c)+'"'+((row&&row.categoria===c)?' selected':'')+'>'+(c||'— elegir —')+'</option>';}).join('')+'</select></div>';
   var estSel='<div class="pv-field"><label class="pv-flbl">Estatus</label><select class="pv-inp" id="pf-estatus">'+['Activo','Inactivo'].map(function(c){return '<option value="'+c+'"'+((row&&row.estatus===c)?' selected':(!row&&c==='Activo'?' selected':''))+'>'+c+'</option>';}).join('')+'</select></div>';
 
   var ovl=document.createElement('div'); ovl.className='pv-moverlay'; ovl.id='pv-modal-ovl';
@@ -26742,6 +26751,11 @@ var _DD_FRONT_DEFAULTS = {
   Pacientes: {
     canal:  { etiqueta:'Canal',  valores:['Agencia','Hestia','Externos'] },
     origen: { etiqueta:'Origen', valores:['Página Web','Recomendación','Redes Sociales','Google','Médico externo','Regreso'] }
+  },
+  // Alta de proveedor. La CATEGORÍA ya no está hardcodeada: se administra aquí
+  // (Panel de Control > Formularios > Proveedores). PROV_CATS queda como fallback.
+  Proveedores: {
+    categoria: { etiqueta:'Categoría de proveedor', valores:(typeof PROV_CATS!=='undefined')?PROV_CATS.slice():['Medicamentos','Laboratorio','Insumos','Servicios','Renta','Honorarios','Nómina','Otros'] }
   }
 };
 function _ddMergeDefaults(d){
@@ -41109,7 +41123,7 @@ async function _novCfgGuardar(){
   },
 
   { id:'formularios', group:'admin', icon:'🧾', title:'Formularios (dropdowns universales)',
-    keywords:'formularios dropdowns opciones desplegables tipo categoria producto puesto area departamento empleado nomina config_dropdowns panel de control sembrar nueva seccion listas selects administrar reflejo inmediato',
+    keywords:'formularios dropdowns opciones desplegables tipo categoria producto puesto area departamento empleado nomina config_dropdowns panel de control sembrar nueva seccion listas selects administrar reflejo inmediato categoria de proveedor proveedores PROV_CATS medicamentos laboratorio insumos honorarios',
     intro:'**Panel de Control → Formularios** administra **todos los dropdowns** de la aplicación desde un solo lugar (incluidos Tipo/Categoría de producto). Editas los valores y se **reflejan de inmediato** en los formularios, porque se guardan directo en Google Sheets.',
     pasos:[
       'Abre **Panel de Control → Formularios**. Verás cada sección (Productos, Egresos, General…) con sus campos y valores.',
@@ -41118,13 +41132,14 @@ async function _novCfgGuardar(){
     ],
     bloques:[
       { h:'Tipo/Categoría de producto', p:'Los selectores **Tipo** y **Categoría** del alta de producto salen de aquí (`Config_Dropdowns > Productos`). Editarlos en Formularios cambia lo que ve Ingresos/Catálogo al instante (con fallback a los valores que ya existen en los datos).' },
-      { h:'Puesto y Área / Depto del empleado', p:'La ficha del empleado (**Nómina → Empleados**) ya **no** usa texto libre: **Puesto** y **Área / Depto** son dropdowns administrados aquí (`Config_Dropdowns > Empleados > puesto` y `> area`). Antes cada quien escribía el área a su manera y no cuadraban los reportes por área. Si un empleado ya traía un valor viejo que no está en la lista, **no se pierde**: se muestra igual y puedes dejarlo o cambiarlo.' }
+      { h:'Puesto y Área / Depto del empleado', p:'La ficha del empleado (**Nómina → Empleados**) ya **no** usa texto libre: **Puesto** y **Área / Depto** son dropdowns administrados aquí (`Config_Dropdowns > Empleados > puesto` y `> area`). Antes cada quien escribía el área a su manera y no cuadraban los reportes por área. Si un empleado ya traía un valor viejo que no está en la lista, **no se pierde**: se muestra igual y puedes dejarlo o cambiarlo.' },
+      { h:'Categoría de proveedor', p:'La **Categoría** del alta de proveedor (Medicamentos, Laboratorio, Insumos, Servicios, Renta, Honorarios, Nómina, Otros) ya **no** está hardcodeada: se administra en la sección **`Proveedores`** de este panel (`Config_Dropdowns > Proveedores > categoria`). Agrega o quita categorías y aparecen de inmediato en **Nuevo proveedor** y en el filtro de la lista. Si un proveedor ya traía una categoría fuera del catálogo, **no se pierde**: se conserva al editarlo.' }
     ],
     datos:{
       hojas:['`Config_Dropdowns` (Sección | Campo | Etiqueta | Valores)'],
       funciones:['getDropdowns','ddNuevaSeccion','ddCrearSeccion','_ddSeedPick','saveDropdowns','_ddVals','_ddEnsure','_nomEmpDdRefresh'],
       permisos:['administrar (Panel de Control)'],
-      nota:'La fuente real de Tipo/Categoría de producto es `Config_Dropdowns > Productos`, y la de Puesto/Área es `Config_Dropdowns > Empleados`; el sembrado inicial lo hace finance.gs (`CFG_DD_DEFAULTS`, se auto-cura al leer). El frontend trae los mismos valores en `_DD_FRONT_DEFAULTS`, así que funcionan aun sin redesplegar.'
+      nota:'La fuente real de Tipo/Categoría de producto es `Config_Dropdowns > Productos`, la de Puesto/Área es `Config_Dropdowns > Empleados`, y la de Categoría de proveedor es `Config_Dropdowns > Proveedores`; el sembrado inicial lo hace finance.gs (`CFG_DD_DEFAULTS`, se auto-cura al leer). El frontend trae los mismos valores en `_DD_FRONT_DEFAULTS` (Proveedores.categoria = fallback `PROV_CATS`), así que funcionan aun sin redesplegar.'
     }
   },
 
@@ -45737,7 +45752,7 @@ async function _novCfgGuardar(){
       nota:'`saveMenu` actualiza in-place por id (nunca toca id/tipo/fuente/seccion). El menú se cachea en `erp_menu_v3_*` (1800s).' } },
 
   { id:'formularios', group:'admin', icon:'🧾', title:'Formularios (dropdowns universales)',
-    keywords:'formularios dropdowns opciones desplegables tipo categoria producto puesto area departamento empleado nomina config_dropdowns panel de control sembrar nueva seccion listas selects administrar reflejo inmediato',
+    keywords:'formularios dropdowns opciones desplegables tipo categoria producto puesto area departamento empleado nomina config_dropdowns panel de control sembrar nueva seccion listas selects administrar reflejo inmediato categoria de proveedor proveedores PROV_CATS medicamentos laboratorio insumos honorarios',
     para:'**Panel de Control → Formularios** administra **todos los dropdowns** de la app desde un solo lugar (incluidos **Tipo/Categoría** de producto). Editas los valores y se **reflejan de inmediato** en los formularios.',
     where:'Menú → **Panel de Control → Formularios**.',
     mock:{ title:'Panel de Control · Formularios', crumb:'Panel de Control › Formularios',
