@@ -346,15 +346,30 @@ function saveSummaryConfig(body) {
    así que compartir dentro de la petición es seguro y sin staleness (no hay escrituras
    a ingresos dentro de un reporte). Colapsa el fan-out N+1 a un parseo por año. */
 var _RPT_ING_MEMO = {};
+var _RPT_ING_MASTER = null;   // libro consolidado, parseado UNA vez por petición
 function _summaryReadIngresos(anio) {
   if (_RPT_ING_MEMO.hasOwnProperty(anio)) return _RPT_ING_MEMO[anio];
-  var out = _summaryReadIngresosImpl(anio);
+  // Lee el ÚNICO libro consolidado (INGRESOS_SS_ID) una vez por petición y filtra por el
+  // AÑO REAL de cada fila (su fecha). Antes cada año abría un libro distinto y el
+  // consolidado (mapeado al key 2026) se SOLAPABA con los libros parciales legacy
+  // 2024/2025 → doble-conteo de los meses compartidos (p.ej. 2025-01 salía en el read de
+  // 2026 y otra vez en el de 2025). Ahora hay UNA sola verdad por fila = su fecha.
+  if (_RPT_ING_MASTER === null) _RPT_ING_MASTER = _summaryReadIngresosMaster();
+  var _cur = new Date().getFullYear(), _a = parseInt(anio, 10);
+  var out = _RPT_ING_MASTER.filter(function(r){
+    var y = (r.fecha && r.fecha.length >= 4) ? parseInt(r.fecha.substring(0, 4), 10) : _cur;
+    return y === _a;
+  });
   _RPT_ING_MEMO[anio] = out;
   return out;
 }
-function _summaryReadIngresosImpl(anio) {
+// Lee el libro CONSOLIDADO de ingresos (INGRESOS_SS_ID) — nunca los libros parciales por
+// año (INGRESOS_SS_2025/2024, legacy, ya no se leen en reportes). El año de cada fila lo
+// decide su propia fecha (_anio), no de qué libro salió.
+function _summaryReadIngresosMaster() {
   var out = [];
-  var yid = _sumIngresosIds()[anio];
+  var _MASTER_CUR = new Date().getFullYear();
+  var yid = (typeof INGRESOS_SS_ID !== 'undefined' && INGRESOS_SS_ID) ? INGRESOS_SS_ID : (_sumIngresosIds()[_MASTER_CUR]);
   if (!yid) return out;
   var ss = SpreadsheetApp.openById(yid);
   var sh = ss.getSheetByName('BD_Ingresos') || ss.getSheets()[0];
@@ -402,13 +417,14 @@ function _summaryReadIngresosImpl(anio) {
     // (los 4 leen de aquí). La fila sigue en la hoja: solo deja de sumar.
     if (iCancel>-1 && typeof _ingEsCancelada==='function' && _ingEsCancelada(r[iCancel])) continue;
     var _pac = (typeof _privVer==='function' && !_privVer()) ? _privPaciente(r[iOp]) : String(r[iPac]||'');
-    out.push({ op:String(r[iOp]||''), fecha:_sumParseDate(r[iFecha]),
+    var _f = _sumParseDate(r[iFecha]);
+    out.push({ op:String(r[iOp]||''), fecha:_f,
       fechaRaw:(r[iFecha] instanceof Date ? r[iFecha].toISOString().substring(0,10) : String(r[iFecha]||'')), paciente:_pac,
       categoria:String(r[iCat]||''), producto:String(r[iProd]||''), cantidad:num(r[iCant]),
       total:num(r[iTot]), formaPago:(iFP>-1?String(r[iFP]||''):''),
       grupoU:(iCiclo>-1?String(r[iCiclo]||'').trim():''),
       origen:(iOrigen>-1?String(r[iOrigen]||'').trim():''),
-      _anio:anio, _fila:(i+1), _fechaAlt:_sumBuscaFechaEnFila(r, iFecha) });
+      _anio:(_f && _f.length>=4 ? _f.substring(0,4) : String(_MASTER_CUR)), _fila:(i+1), _fechaAlt:_sumBuscaFechaEnFila(r, iFecha) });
   }
   return out;
 }
@@ -444,7 +460,7 @@ function perfSelfTest(){
 function diagSummaryIngresos(){
   var out = {};
   [2026, 2025].forEach(function(anio){
-    var rows = _summaryReadIngresosImpl(anio);   // sin memo, lectura directa
+    var rows = _summaryReadIngresos(anio);   // lector corregido: filtra el consolidado por año real de cada fila
     var conFecha=0, sinFecha=0, porMes={}, sumRevenueAnio=0, muestraSinFecha=[], muestraConFecha=[];
     rows.forEach(function(r){
       var f=(r.fecha||'').substring(0,10);
@@ -457,6 +473,43 @@ function diagSummaryIngresos(){
       revenuePorMes:porMes, sumRevenueTodoElAnio:sumRevenueAnio,
       muestraConFecha:muestraConFecha, muestraSinFecha:muestraSinFecha };
   });
+  try{ Logger.log(JSON.stringify(out,null,2)); }catch(e){}
+  return out;
+}
+
+/* Verifica que los libros PARCIALES legacy de ingresos (2024/2025) estén CONTENIDOS en
+   el consolidado (INGRESOS_SS_ID). Tras el fix del doble-conteo, los reportes leen SOLO
+   el consolidado; si un libro parcial tuviera filas que NO estén en el consolidado
+   (huérfanas, no migradas), dejarían de contar en los reportes. Ideal: **0 huérfanos**;
+   si aparecen, hay que migrarlas al libro principal. Solo lectura, seguro de correr.
+   Editor de Apps Script → Run → diagLibrosIngresos → Ver registro. */
+function diagLibrosIngresos(){
+  function num(v){ if(typeof v==='number')return v; var n=parseFloat(String(v||'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
+  function sig(f,t,pac,prod){ return (f||'')+'|'+Math.round(num(t)*100)+'|'+String(pac||'').trim().toLowerCase()+'|'+String(prod||'').trim().toLowerCase(); }
+  var master = _summaryReadIngresosMaster();
+  var idx = {}; master.forEach(function(r){ idx[sig(r.fecha, r.total, r.paciente, r.producto)] = true; });
+  var out = {}, CUR = new Date().getFullYear();
+  [CUR-1, CUR-2].forEach(function(anio){
+    var bid = _sumIngresosIds()[anio];
+    if (!bid || bid === INGRESOS_SS_ID){ out[anio] = { nota:'sin libro parcial propio (o apunta al consolidado)' }; return; }
+    try {
+      var ss = SpreadsheetApp.openById(bid);
+      var sh = ss.getSheetByName('BD_Ingresos') || ss.getSheets()[0];
+      var data = sh.getDataRange().getValues();
+      var hdr = data[0].map(function(c){ return String(c).trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''); });
+      function col(keys,fb){ for(var n=0;n<keys.length;n++)for(var c=0;c<hdr.length;c++){ if(hdr[c]===keys[n]) return c; } return fb; }
+      var iO=col(['op'],0), iF=col(['fecha'],2), iP=col(['paciente'],3), iPr=col(['producto'],5), iT=col(['totalpagar','total a pagar','total'],9);
+      var filas=0, huerfanos=[];
+      for (var i=1;i<data.length;i++){ var r=data[i]; if(!String(r[iO]||'').trim()) continue; filas++;
+        var f=_sumParseDate(r[iF]);
+        if (!idx[sig(f, r[iT], r[iP], r[iPr])] && num(r[iT])!==0){
+          if(huerfanos.length<25) huerfanos.push({op:String(r[iO]||''), fecha:f, total:num(r[iT]), paciente:String(r[iP]||''), producto:String(r[iPr]||'')});
+        }
+      }
+      out[anio] = { filasParcial:filas, huerfanos:huerfanos.length, muestra:huerfanos };
+    } catch(e){ out[anio] = { error:e.message }; }
+  });
+  out._nota = '0 huerfanos = el consolidado contiene todo; los reportes no pierden nada. huerfanos>0 = filas del libro parcial a migrar al principal.';
   try{ Logger.log(JSON.stringify(out,null,2)); }catch(e){}
   return out;
 }
