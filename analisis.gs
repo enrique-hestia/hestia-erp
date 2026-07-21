@@ -787,7 +787,7 @@ function _ecMismoPaciente(filaNom, buscadoNom){
   return true;
 }
 
-function readEstadoCuentaPaciente(pacienteNombre) {
+function readEstadoCuentaPaciente(pacienteNombre, origen) {
   try {
     // Estado de cuenta financiero de un paciente: los roles sin
     // 'ver_datos_sensibles' (socio, viewer…) no ven saldos de pacientes.
@@ -795,8 +795,13 @@ function readEstadoCuentaPaciente(pacienteNombre) {
     if (typeof _privVer === 'function' && !_privVer()) {
       return { ok:false, error:'Sin autorización para ver el estado de cuenta de pacientes (ver_datos_sensibles).', code:403 };
     }
-    if (!pacienteNombre) return { ok: false, error: 'Nombre de paciente requerido' };
-    var nombreBuscar = String(pacienteNombre).trim().toLowerCase();
+    // Modo ORIGEN: si viene `origen` (agencia / médico externo), en vez de buscar un
+    // paciente se listan TODOS los movimientos atribuidos a ese origen (columna
+    // OrigenExterno) a través de todas sus pacientes. Mismo gate de privacidad.
+    var _origBuscar = String(origen || '').trim();
+    var _origKey = _origBuscar.toLowerCase();
+    if (!pacienteNombre && !_origBuscar) return { ok: false, error: 'Nombre de paciente u origen requerido' };
+    var nombreBuscar = String(pacienteNombre || '').trim().toLowerCase();
 
     // BD_Ingresos es la hoja CONSOLIDADA de todos los años; vive solo en
     // INGRESOS_SS_ID. No leer de los spreadsheets por año (2024/2025)
@@ -827,8 +832,11 @@ function readEstadoCuentaPaciente(pacienteNombre) {
     // localiza por ENCABEZADO, nunca por posición fija. Mismo patrón que
     // _anReadBDIngresos (arriba en este archivo), summary.gs y presupuesto.gs.
     var iCancel = hc('cancelada');
+    var iOrigen = hc('origenexterno','origen externo','origen');   // atribución agencia/médico
     if (iPac < 0 || iTotal < 0)
       return { ok: false, error: 'Columnas Paciente o Total no encontradas en ' + BD_INGRESOS_TAB };
+    if (_origBuscar && iOrigen < 0)
+      return { ok: false, error: 'La hoja no tiene la columna OrigenExterno para filtrar por agencia/médico.' };
 
     var movimientos = [];
     var totalGeneral = 0;
@@ -847,9 +855,15 @@ function readEstadoCuentaPaciente(pacienteNombre) {
     for (var r = 1; r < data.length; r++) {
       var row = data[r];
       var pac = String(row[iPac] || '').trim().toLowerCase();
-      // Exacto O tolerante (abreviado 2024/2025). El tolerante solo se consulta si
-      // el exacto falla, así no cambia nada del comportamiento de 2026.
-      if (pac !== nombreBuscar && !_ecMismoPaciente(pac, nombreBuscar)) continue;
+      if (_origBuscar) {
+        // Modo ORIGEN: filtra por OrigenExterno (agencia/médico), no por paciente.
+        var _ov = iOrigen > -1 ? String(row[iOrigen] || '').trim().toLowerCase() : '';
+        if (_ov !== _origKey) continue;
+      } else {
+        // Exacto O tolerante (abreviado 2024/2025). El tolerante solo se consulta si
+        // el exacto falla, así no cambia nada del comportamiento de 2026.
+        if (pac !== nombreBuscar && !_ecMismoPaciente(pac, nombreBuscar)) continue;
+      }
       // ── VENTA CANCELADA → no existe para el estado de cuenta ───────────────────
       // cancelacion.gs marca Cancelada=true pero DEJA TotalPagar y Pagado intactos
       // (es el registro histórico de lo que pasó, y el reverso del dinero ya se
@@ -896,6 +910,7 @@ function readEstadoCuentaPaciente(pacienteNombre) {
       totalGeneral += total;
       movimientos.push({
         op:       opRow,
+        paciente: String(row[iPac] || '').trim(),   // para el modo ORIGEN (qué paciente); inocuo en modo paciente
         fecha:    fechaStr,
         anio:     fechaStr ? fechaStr.substring(0, 4) : 'Sin año',
         cat:      String(row[iCat]  || '').trim(),
@@ -931,7 +946,7 @@ function readEstadoCuentaPaciente(pacienteNombre) {
     var saldoPendiente = 0;
     var _opsCubiertos = {};
     try {
-      if (typeof _cobReadCargos === 'function' && typeof _cobReadAbonos === 'function' && typeof _cobKeyNom === 'function') {
+      if (!_origBuscar && typeof _cobReadCargos === 'function' && typeof _cobReadAbonos === 'function' && typeof _cobKeyNom === 'function') {
         var _keyPac = _cobKeyNom(pacienteNombre);
         var _cargos = _cobReadCargos();
         var _abonos = _cobReadAbonos();
@@ -987,7 +1002,10 @@ function readEstadoCuentaPaciente(pacienteNombre) {
 
     return {
       ok: true,
-      paciente: String(pacienteNombre).trim(),
+      esOrigen: !!_origBuscar,
+      origen: _origBuscar || '',
+      titulo: _origBuscar || String(pacienteNombre).trim(),
+      paciente: _origBuscar ? '' : String(pacienteNombre).trim(),
       totalGeneral: totalGeneral,
       totalFacturado: totalFacturado,
       totalPagado: totalPagado,

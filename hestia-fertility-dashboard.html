@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.285 -->
+﻿<!-- app-build:2026.07.21.286 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -36833,6 +36833,8 @@ function ecInit() {
 }
 
 function ecOnInput(val) {
+  // Escribir un nombre = buscar PACIENTE → sale del modo origen (agencia/médico).
+  if (_ecOrigenSel) { _ecOrigenSel = ''; var _so = document.getElementById('ec-orig'); if (_so) _so.value = ''; }
   var box = document.getElementById("ec-suggestions");
   if (!box) return;
   if (!val || val.length < 2) { box.style.display = "none"; return; }
@@ -36881,9 +36883,12 @@ function ecOrigLlenar() {
     }).join('');
   }).catch(function () {});
 }
+var _ecOrigenSel = '';   // agencia/médico elegido del dropdown (modo ORIGEN)
 function ecOrigPick() {
-  var sel = document.getElementById('ec-orig'); if (!sel || !sel.value) return;
-  var inp = document.getElementById('ec-search'); if (inp) inp.value = sel.value;
+  var sel = document.getElementById('ec-orig');
+  if (!sel || !sel.value) { _ecOrigenSel = ''; return; }
+  _ecOrigenSel = sel.value;                              // filtra por ORIGEN, no por paciente
+  var inp = document.getElementById('ec-search'); if (inp) inp.value = '';   // no es un paciente
   var box = document.getElementById('ec-suggestions'); if (box) box.style.display = 'none';
   ecBuscar();
 }
@@ -36891,9 +36896,9 @@ function ecOrigPick() {
 /* Devuelve la promesa de la consulta (la usa el botón "Actualizar" para esperar
    a los datos antes de anunciar que actualizó). Los demás llamadores la ignoran. */
 function ecBuscar() {
-  var nombre = (document.getElementById("ec-search") || {}).value || "";
-  nombre = nombre.trim();
-  if (!nombre) return;
+  var origen = _ecOrigenSel || '';
+  var nombre = origen ? '' : (((document.getElementById("ec-search") || {}).value || "").trim());
+  if (!nombre && !origen) return;
   var box = document.getElementById("ec-suggestions");
   if (box) box.style.display = "none";
   document.getElementById("ec-loading").style.display = "";
@@ -36902,7 +36907,7 @@ function ecBuscar() {
   document.getElementById("ec-btn-print").style.display = "none";
   var s = getSession() || {};
   return fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow',
-    body: JSON.stringify({action:'estadoCuenta', paciente: nombre, token: s.token||getToken(), usuario: s.email||''})})
+    body: JSON.stringify({action:'estadoCuenta', paciente: nombre, origen: origen, token: s.token||getToken(), usuario: s.email||''})})
     .then(function(r){ return r.json(); })
     .then(function(d){
       document.getElementById("ec-loading").style.display = "none";
@@ -36939,6 +36944,10 @@ function ecFmtFecha(str) {
 
 function ecRenderResult(d) {
   var cards = document.getElementById("ec-cards");
+  // Título de la tabla: en modo ORIGEN (agencia/médico) deja claro de quién es y que
+  // son varias pacientes; en modo paciente se queda "Movimientos".
+  var _tt = document.getElementById('ec-tabla-titulo');
+  if (_tt) _tt.textContent = d.esOrigen ? ('Tratamientos de ' + (d.titulo||'') + ' · ' + (d.totalMovimientos||0) + ' movimiento(s)') : 'Movimientos';
   var porAnioHtml = "";
   var anios = Object.keys(d.porAnio||{}).sort();
   for (var i = 0; i < anios.length; i++) {
@@ -37224,6 +37233,7 @@ function ecRenderTabla(movs) {
   // columnas, mismo "—" cuando no consta. Si esto y el PDF divergen, el que cobra
   // y la paciente están leyendo dos documentos distintos del mismo saldo.
   var _cant = !!(typeof _ecData !== "undefined" && _ecData && _ecData.cantFiable);
+  var _esOrig = !!(typeof _ecData !== "undefined" && _ecData && _ecData.esOrigen);   // modo agencia/médico
   var _thc = document.getElementById("ec-th-cant");
   if (_thc) _thc.style.display = _cant ? "" : "none";
   var _ncols = _cant ? 6 : 5;
@@ -37235,7 +37245,7 @@ function ecRenderTabla(movs) {
     var bg = i%2===1 ? "background:var(--color-surface-2)" : "";
     html += "<tr style=\"border-bottom:1px solid var(--color-divider);" + bg + "\">"
       + "<td style=\"padding:10px 14px;white-space:nowrap;color:var(--color-text-muted);font-size:12px\">" + ecFmtFecha(m.fecha) + "</td>"
-      + "<td style=\"padding:10px 14px;color:var(--color-text);font-weight:500\">" + (m.producto||m.desc||"--") + "</td>"
+      + "<td style=\"padding:10px 14px;color:var(--color-text);font-weight:500\">" + (_esOrig && m.paciente ? "<b>"+_comEsc(m.paciente)+"</b> · " : "") + (m.producto||m.desc||"--") + "</td>"
       + (_cant ? "<td style=\"padding:10px 14px;text-align:right;color:var(--color-text);font-size:12px\">" + _fq(m.cant) + "</td>" : "")
       + "<td style=\"padding:10px 14px;color:var(--color-text-muted);font-size:12px\">" + (m.cat||"--") + "</td>"
       + "<td style=\"padding:10px 14px;color:var(--color-text-muted);font-size:12px\">" + (m.pago||"--") + "</td>"
@@ -37249,7 +37259,7 @@ function ecFiltrarTabla(q) {
   if (!q) { ecRenderTabla(_ecMovAll); return; }
   q = q.toLowerCase();
   var filtered = _ecMovAll.filter(function(m){
-    return (m.producto+m.cat+m.desc+m.pago+m.fecha).toLowerCase().indexOf(q) >= 0;
+    return (m.producto+m.cat+m.desc+m.pago+m.fecha+(m.paciente||'')).toLowerCase().indexOf(q) >= 0;
   });
   ecRenderTabla(filtered);
 }
@@ -37260,7 +37270,7 @@ function ecImprimir() {
   // para este documento. Todo el `data` se arma YA en ese idioma (fechas y
   // montos con su `loc`), y los nombres de producto los resuelve el embudo
   // contra el catálogo — si falta alguno, no imprime.
-  hfReportPrintAsk('estado-cuenta', _ecData.paciente, _ecBuildPrintData);
+  hfReportPrintAsk('estado-cuenta', _ecData.titulo || _ecData.paciente, _ecBuildPrintData);
 }
 function _ecBuildPrintData(lang) {
   // Pasa por el sistema de plantillas (Panel de Control > Reportes) — la

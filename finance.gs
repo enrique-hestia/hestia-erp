@@ -744,7 +744,7 @@ function doPost(e) {
     if (body.action === 'estadoCuenta') {
       if (typeof readEstadoCuentaPaciente !== 'function')
         return jsonResponse({ok:false, error:'Agrega analisis.gs al proyecto de Apps Script y redespliega.'});
-      return jsonResponse(readEstadoCuentaPaciente(body.paciente||''));
+      return jsonResponse(readEstadoCuentaPaciente(body.paciente||'', body.origen||''));
     }
     // ── COBRAR / ABONAR INTEGRAL: sube Pagado + banco + cierra CxCobrar (+ crédito) ──
     if (body.action === 'abonarIngreso') {
