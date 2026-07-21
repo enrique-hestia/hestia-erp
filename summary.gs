@@ -269,7 +269,7 @@ function setupSummaryConfig() {
   var claves = {}; // 'fuente::clave' -> {fuente, clave}
   var anio = new Date().getFullYear();
   try {
-    var eg = readEgresosData(anio);
+    var eg = readEgresosData(anio, {rowsOnly:true, skipUrls:true});
     (eg.rows||[]).forEach(function(r){
       var clave = String(r.contable||'')+'|'+String(r.subtipo||'');
       claves['egreso::'+clave] = { fuente:'egreso', clave:clave };
@@ -329,8 +329,20 @@ function saveSummaryConfig(body) {
   } catch(ex){ return { ok:false, error:ex.message }; }
 }
 
-/* ── Lectura completa de Ingresos de un año (BD_Ingresos, sin recorte) ── */
+/* ── Lectura completa de Ingresos de un año (BD_Ingresos, sin recorte) ──
+   Memo POR-PETICIÓN por año: TODOS sus callers son constructores de reporte de solo
+   lectura (Summary, Board, Semanal, Presupuesto), que llaman este lector varias veces
+   por el mismo año en una sola carga. Apps Script reinicia los globals cada ejecución,
+   así que compartir dentro de la petición es seguro y sin staleness (no hay escrituras
+   a ingresos dentro de un reporte). Colapsa el fan-out N+1 a un parseo por año. */
+var _RPT_ING_MEMO = {};
 function _summaryReadIngresos(anio) {
+  if (_RPT_ING_MEMO.hasOwnProperty(anio)) return _RPT_ING_MEMO[anio];
+  var out = _summaryReadIngresosImpl(anio);
+  _RPT_ING_MEMO[anio] = out;
+  return out;
+}
+function _summaryReadIngresosImpl(anio) {
   var out = [];
   var yid = _sumIngresosIds()[anio];
   if (!yid) return out;
@@ -388,6 +400,26 @@ function _summaryReadIngresos(anio) {
       origen:(iOrigen>-1?String(r[iOrigen]||'').trim():''),
       _anio:anio, _fila:(i+1), _fechaAlt:_sumBuscaFechaEnFila(r, iFecha) });
   }
+  return out;
+}
+
+/* Prueba de equivalencia de la optimización de reportes (build .282): confirma que
+   la variante PODADA de egresos (rowsOnly+skipUrls, la que ahora usan los reportes CFO)
+   produce EXACTAMENTE las mismas filas y el mismo total que el camino completo. Correr
+   en el editor de Apps Script: Run → perfSelfTest → Ver registros. Es SOLO LECTURA,
+   seguro de correr las veces que quieras. Debe decir IGUAL:true en todo. */
+function perfSelfTest(){
+  var y = new Date().getFullYear();
+  function sum(rows){ var t=0, bySub={}; (rows||[]).forEach(function(r){ var m=Number(r.monto)||0; t+=m; var s=r.subtipo||''; bySub[s]=(bySub[s]||0)+m; }); return {t:t, n:(rows||[]).length, bySub:bySub}; }
+  var full = _readEgresosDataImpl(y, {});
+  var lite = _readEgresosDataImpl(y, {rowsOnly:true, skipUrls:true});
+  var a=sum(full.rows), b=sum(lite.rows);
+  var subsIguales=true, keys={}; Object.keys(a.bySub).forEach(function(k){keys[k]=1;}); Object.keys(b.bySub).forEach(function(k){keys[k]=1;});
+  Object.keys(keys).forEach(function(k){ if(Math.abs((a.bySub[k]||0)-(b.bySub[k]||0))>0.001) subsIguales=false; });
+  var out = { anio:y,
+    egresos:{ filasFull:a.n, filasLite:b.n, totalFull:a.t, totalLite:b.t,
+      IGUAL_total:Math.abs(a.t-b.t)<0.001, IGUAL_filas:a.n===b.n, IGUAL_porSubtipo:subsIguales } };
+  try { Logger.log(JSON.stringify(out)); } catch(e){}
   return out;
 }
 
@@ -513,7 +545,7 @@ function readSummary(fechaInicio, fechaFin) {
 
     // ── Egresos ──
     for (var y=yFrom; y<=yTo; y++){
-      var eg; try { eg = readEgresosData(y); } catch(e){ continue; }
+      var eg; try { eg = readEgresosData(y, {rowsOnly:true, skipUrls:true}); } catch(e){ continue; }
       (eg.rows||[]).forEach(function(r){
         var f = (r.fecha||r.vencimiento||'').substring(0,10);
         var enActual = _sumInRange(f, fi, ff), enPrev = _sumInRange(f, pi, pf);

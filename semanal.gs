@@ -81,7 +81,7 @@ function readResumenSemanal(fechaRef){
     // ── Egresos por área (subtipo) ──
     var gastoArea={}, totEg=0, totEgPrev=0;
     years.forEach(function(anio){
-      var eg = (typeof readEgresosData==='function') ? readEgresosData(anio) : {rows:[]};
+      var eg = (typeof readEgresosData==='function') ? readEgresosData(anio, {rowsOnly:true, skipUrls:true}) : {rows:[]};
       (eg.rows||[]).forEach(function(r){
         var f=(r.fecha||'').substring(0,10); if(!f) return;
         if(r.estatus==='Cancelada') return;

@@ -42,7 +42,7 @@ function _boardSeries(endIso){
   for (var y=endY-2; y<=endY; y++){
     try { _summaryReadIngresos(y).forEach(function(r){ var f=(r.fecha||'').substring(0,7); if(f.length===7) add(f,'ing',_boardNum(r.total)); }); } catch(e){}
     try {
-      var eg=readEgresosData(y);
+      var eg=readEgresosData(y, {rowsOnly:true, skipUrls:true});
       (eg.rows||[]).forEach(function(r){
         if(r.estatus==='Cancelada') return;
         if(_sumNorm(r.contable)==='credito'||_sumNorm(r.contable)==='crédito') return;

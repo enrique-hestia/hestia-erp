@@ -3218,7 +3218,25 @@ function uploadEgresoPDF(payload) {
   }
 }
 
-function readEgresosData(anio) {
+// Memo POR-PETICIÓN solo para la variante rowsOnly (reportes CFO). Apps Script
+// reinicia los globals en cada ejecución, así que compartir dentro de una petición
+// es seguro y sin staleness. La variante COMPLETA (tabla de Egresos / escrituras)
+// NO se memoiza, para que nunca sirva datos previos a una escritura del mismo request.
+var _RPT_EG_MEMO = {};
+function readEgresosData(anio, opts) {
+  opts = opts || {};
+  anio = anio || new Date().getFullYear();
+  if (opts.rowsOnly) {
+    var _mk = anio + '|r' + (opts.skipUrls ? 'u' : '');
+    if (_RPT_EG_MEMO.hasOwnProperty(_mk)) return _RPT_EG_MEMO[_mk];
+    var _r = _readEgresosDataImpl(anio, opts);
+    _RPT_EG_MEMO[_mk] = _r;
+    return _r;
+  }
+  return _readEgresosDataImpl(anio, opts);
+}
+function _readEgresosDataImpl(anio, opts) {
+  opts = opts || {};
   try {
     anio = anio || new Date().getFullYear();
     var ssId = _egIdDeAnio(anio);
@@ -3343,7 +3361,9 @@ function readEgresosData(anio) {
     // por posición de array. Mapeamos por fila REAL de la hoja usando _rowNum.
     try {
       var lastDataRow = raw.length - 1;
-      if (lastDataRow > 0 && (iLinkFact > -1 || iLinkPago > -1 || iLinkCotiz > -1)) {
+      // skipUrls (reportes CFO): los reportes no leen los campos *Url, así que nos
+      // saltamos por completo las lecturas getRichTextValues (lo más lento de Sheets).
+      if (!opts.skipUrls && lastDataRow > 0 && (iLinkFact > -1 || iLinkPago > -1 || iLinkCotiz > -1)) {
         var byRow = {};
         for (var ar = 0; ar < allRows.length; ar++) byRow[allRows[ar]._rowNum] = allRows[ar];
         if (iLinkCotiz > -1) {
@@ -3369,6 +3389,12 @@ function readEgresosData(anio) {
         }
       }
     } catch(rtErr) { /* getRichTextValues puede fallar en sheets muy grandes — continuamos sin URLs */ }
+
+    // rowsOnly (reportes CFO): solo iteran eg.rows; nos saltamos los KPIs, los sorts,
+    // el reverse y los catálogos que esos reportes NO leen. Los números salen idénticos.
+    if (opts.rowsOnly) {
+      return { ok:true, view:'egresos', anio:anio, rows: allRows, totalRows: allRows.length };
+    }
 
     // KPIs
     var totalEgresos=0, totalPagado=0, totalPendiente=0, countPagado=0;
