@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.20.271 -->
+﻿<!-- app-build:2026.07.21.272 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -38614,12 +38614,29 @@ function _cobBuildPrintData(lang){
   var _lblCobro=(lang==='en')?'Charge':(lang==='fr')?'Prestation':(lang==='pt')?'Cobrança':'Cobro';
   var _lblConc =(lang==='en')?'items':(lang==='fr')?'éléments':(lang==='pt')?'itens':'conceptos';
   var movs=[];
-  _vv.forEach(function(v){ movs.push({ op:v.op||'', fecha:v.fecha, producto:v.producto||'—', cantidad:v.cantidad, total:v.total, pagado:v.pagado, saldo:v.saldo }); });
-  // La misma deuda vive en dos motores (venta en BD_Ingresos + espejo en
-  // Cuentas_Cobrar): se salta el espejo SOLO si su venta ya está impresa arriba (si
-  // no —enmascarada o de otro año— el espejo es la única evidencia; esconder deuda
-  // es peor que duplicarla). El discriminador real es `auto`, no `origen`.
-  var _opsImpresos={}; _vv.forEach(function(v){ if(v.op) _opsImpresos[String(v.op)]=true; });
+  // La misma deuda puede vivir DOS veces: como VENTA en BD_Ingresos (a veces con
+  // Pagado en blanco → parece "pagada") y como CARGO abierto en Cuentas_Cobrar (el
+  // adeudo real, muchas veces con OTRA OP). Antes salía duplicada ("pagado" arriba +
+  // "debe" abajo, el mismo monto). Una venta SIN pago registrado (pagado≈0 y sin
+  // saldo propio) cuyo total coincide con un cargo ABIERTO es esa misma deuda → se
+  // OMITE la venta y la deuda se muestra UNA sola vez, como saldo por cobrar. Las
+  // ventas realmente pagadas (pagado>0) NO se omiten.
+  var _saldosAbiertos = (d.saldos||[]).filter(function(o){ return (parseFloat(o.saldo)||0) > 0.01; });
+  function _ventaEspejoDeSaldo(v){
+    var vp=parseFloat(v.pagado)||0, vs=parseFloat(v.saldo)||0, vt=parseFloat(v.total)||0;
+    if(vp>0.01 || vs>0.01 || vt<=0.01) return false;
+    return _saldosAbiertos.some(function(o){ return Math.abs((parseFloat(o.total)||0) - vt) <= 1; });
+  }
+  _vvTot = 0;   // se recalcula solo con lo realmente impreso (sin los espejos omitidos)
+  var _opsImpresos={};
+  _vv.forEach(function(v){
+    if(_ventaEspejoDeSaldo(v)) return;                 // espejo "pagado-por-blanco" de un adeudo abierto → fuera
+    if(v.op) _opsImpresos[String(v.op)]=true;
+    _vvTot += (parseFloat(v.total)||0);
+    movs.push({ op:v.op||'', fecha:v.fecha, producto:v.producto||'—', cantidad:v.cantidad, total:v.total, pagado:v.pagado, saldo:v.saldo });
+  });
+  // El espejo AUTO en Cuentas_Cobrar se salta solo si su venta ya está impresa arriba
+  // (si no —enmascarada o de otro año— es la única evidencia). Discriminador real: `auto`.
   (d.saldos||[]).forEach(function(o){
     if(o.auto && o.op && _opsImpresos[String(o.op)]) return;
     var partes=(o.items||[]).filter(function(x){return x.pac;});
