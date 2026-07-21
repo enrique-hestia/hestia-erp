@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.283 -->
+﻿<!-- app-build:2026.07.21.284 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4012,7 +4012,7 @@ function _listaFormHTML(x){
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
       +'<div style="grid-column:1/3"><label style="font-size:10px;color:var(--color-text-muted,#6b7280)">Nombre *</label><input id="lst-f-nombre" '+S+' style="width:100%;box-sizing:border-box;'+(edit?'background:var(--color-surface-2,#f5f5f5)':'')+'" value="'+_esc(x.lista||'')+'" '+(edit?'readonly title="El nombre no se cambia (es la clave de la columna de precios)"':'placeholder="Ej. Grupo Médico"')+'></div>'
       +'<div style="grid-column:1/3"><label style="font-size:10px;color:var(--color-text-muted,#6b7280)">Descripción</label><input id="lst-f-desc" '+S+' style="width:100%;box-sizing:border-box" value="'+_esc(x.descripcion||'')+'" placeholder="Para qué es esta lista"></div>'
-      +'<div><label style="font-size:10px;color:var(--color-text-muted,#6b7280)">Moneda</label><select id="lst-f-moneda" '+S+' style="width:100%"><option'+((x.moneda||'MXN')==='MXN'?' selected':'')+'>MXN</option><option'+(x.moneda==='USD'?' selected':'')+'>USD</option><option'+(x.moneda==='EUR'?' selected':'')+'>EUR</option></select></div>'
+      +'<div><label style="font-size:10px;color:var(--color-text-muted,#6b7280)">Moneda</label><select id="lst-f-moneda" '+S+' style="width:100%">'+_ddVals('General','moneda',['MXN','USD','EUR']).map(function(mm){return '<option'+((x.moneda||'MXN')===mm?' selected':'')+'>'+mm+'</option>';}).join('')+'</select></div>'
       +'<div><label style="font-size:10px;color:var(--color-text-muted,#6b7280)">Multiplicador</label><input id="lst-f-mult" type="number" step="0.01" min="0" '+S+' style="width:100%;box-sizing:border-box" value="'+(x.multiplicador||1)+'"></div>'
       +'<label style="grid-column:1/3;display:flex;align-items:center;gap:6px;font-size:12px"><input id="lst-f-activo" type="checkbox" '+(x.activo!==false?'checked':'')+'> Activa (aparece como opción de lista)</label>'
     +'</div>'
@@ -4119,7 +4119,7 @@ function prodOpenForm(defaultCat) {
   if (!el) return;
   var cats = _prodCatList(defaultCat);
   var tipos = _ddVals('Productos','tipo', _PROD_TIPOS_FALLBACK);
-  var monedas = ['MXN','USD'];
+  var monedas = _ddVals('General','moneda',['MXN','USD','EUR']);   // administrable en Panel de Control > Formularios > General
   // Listas de precios = base + cada AGENCIA (REPROVIDA + las que se vayan creando).
   // FUENTE ÚNICA: las listas de precios salen SOLO de BD_Listas (lo que el usuario
   // administra en "💲 Listas de precios"). Antes esto era una unión de 3 fuentes
@@ -7127,7 +7127,7 @@ function _ingDeclModal(it, esEdicion){
   function rowI(lbl,field,op){ return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:3px 0"><span style="font-size:11px;color:var(--text-secondary,#374151)">'+(op?'<b>'+op+'</b> ':'')+lbl+'</span>'+field+'</div>'; }
   function rowC(lbl,spanId,op){ return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0;border-top:1px solid var(--color-divider,#f0f0f0)"><span style="font-size:11px;font-weight:800;color:var(--text-primary,#111)">'+(op?op+' ':'')+lbl+'</span><span id="'+spanId+'" style="font-size:12.5px;font-weight:800;color:var(--text-primary,#111)">$0.00</span></div>'; }
   var tipo=it.Tipo||'ISR provisional';
-  var tipoOpts=ING_DECL_TIPOS.map(function(t){ return '<option value="'+t+'"'+(t===tipo?' selected':'')+'>'+t+'</option>'; }).join('');
+  var tipoOpts=_ddVals('Declaraciones','tipo',ING_DECL_TIPOS).map(function(t){ return '<option value="'+t+'"'+(t===tipo?' selected':'')+'>'+t+'</option>'; }).join('');
   var f='<input type="hidden" id="ingd-id" value="'+_cxpEsc(String(it.ID||''))+'">';
   f+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:10px">'
     +'<label style="font-size:10px;color:var(--text-secondary,#6b7280)">Tipo de declaración<br><select id="ingd-tipo" onchange="_ingDeclOnTipo()" style="width:100%;padding:6px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff)">'+tipoOpts+'</select></label>'
@@ -26773,6 +26773,14 @@ var _DD_FRONT_DEFAULTS = {
   // (Panel de Control > Formularios > Proveedores). PROV_CATS queda como fallback.
   Proveedores: {
     categoria: { etiqueta:'Categoría de proveedor', valores:(typeof PROV_CATS!=='undefined')?PROV_CATS.slice():['Medicamentos','Laboratorio','Insumos','Servicios','Renta','Honorarios','Nómina','Otros'] }
+  },
+  // Forma de pago impresa en la Nota/Recibo (solo etiqueta, no rutea a banco).
+  Recibos: {
+    formaPago: { etiqueta:'Forma de pago (Nota/Recibo)', valores:['Efectivo','Transferencia','Tarjeta de crédito','Tarjeta de débito','Depósito','Cheque'] }
+  },
+  // Tipo de declaración fiscal (módulo Declaraciones).
+  Declaraciones: {
+    tipo: { etiqueta:'Tipo de declaración', valores:(typeof ING_DECL_TIPOS!=='undefined')?ING_DECL_TIPOS.slice():['ISR provisional','IVA','ISR anual','DIOT','Otro'] }
   }
 };
 function _ddMergeDefaults(d){
@@ -39630,7 +39638,7 @@ function notaRenderResult(d){
     +'<div style="flex:2;min-width:200px"><label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);display:block;margin-bottom:3px">Recibí de (paciente)</label><input id="nota-receptor" type="text" value="'+_esc(d.paciente||'').replace(/"/g,'&quot;')+'" style="width:100%;padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:13px;background:var(--color-surface-2);color:var(--color-text)"></div>'
     +'<div><label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);display:block;margin-bottom:3px">Folio</label><input id="nota-folio" type="text" value="'+folioAuto+'" style="width:150px;padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)"></div>'
     +'<div><label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);display:block;margin-bottom:3px">Fecha</label><input id="nota-fecha" type="date" value="'+fechaISO+'" style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)"></div>'
-    +'<div><label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);display:block;margin-bottom:3px">Forma de pago</label><select id="nota-formapago" style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)"><option>Efectivo</option><option>Transferencia</option><option>Tarjeta de crédito</option><option>Tarjeta de débito</option><option>Depósito</option><option>Cheque</option></select></div>'
+    +'<div><label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);display:block;margin-bottom:3px">Forma de pago</label><select id="nota-formapago" style="padding:8px 10px;border:1px solid var(--color-divider);border-radius:7px;font-size:12px;background:var(--color-surface-2);color:var(--color-text)">'+_ddVals('Recibos','formaPago',['Efectivo','Transferencia','Tarjeta de crédito','Tarjeta de débito','Depósito','Cheque']).map(function(fp){return '<option>'+fp+'</option>';}).join('')+'</select></div>'
     // Idioma del recibo (nivel 3): llega con el de la ficha del paciente y el
     // usuario lo puede cambiar solo para este documento — ver _notaSetIdiomaFicha.
     +'<div><label style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--color-text-muted);display:block;margin-bottom:3px">Idioma</label>'

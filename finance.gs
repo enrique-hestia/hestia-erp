@@ -7648,6 +7648,12 @@ var CFG_DD_DEFAULTS = [
   // Alta de proveedor (Catálogo de Proveedores). Antes hardcodeada en el HTML
   // (PROV_CATS); ahora administrable desde Panel de Control > Formularios.
   ['Proveedores', 'categoria', 'Categoría de proveedor', 'Medicamentos|Laboratorio|Insumos|Servicios|Renta|Honorarios|Nómina|Otros'],
+  // Forma de pago que se IMPRIME en la Nota/Recibo de pago (solo etiqueta, no rutea a
+  // banco): lista propia porque es más rica que la de Ingresos (incluye Cheque, TC/TD).
+  ['Recibos', 'formaPago', 'Forma de pago (Nota/Recibo)', 'Efectivo|Transferencia|Tarjeta de crédito|Tarjeta de débito|Depósito|Cheque'],
+  // Tipo de declaración fiscal (registro de Declaraciones): etiqueta plana, el admin
+  // puede agregar ISN/Retenciones/IEPS sin tocar código.
+  ['Declaraciones', 'tipo', 'Tipo de declaración', 'ISR provisional|IVA|ISR anual|DIOT|Otro'],
 ];
 
 // Inserta en la hoja las filas por defecto (CFG_DD_DEFAULTS) que aún no existan.
