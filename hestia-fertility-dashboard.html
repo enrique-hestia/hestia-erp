@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.272 -->
+﻿<!-- app-build:2026.07.21.273 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -5625,6 +5625,7 @@ async function ingOpenDrawer() {
     +'<label '+LBL+'>Origen (grupo / agencia / médico) <span id="ing-f-origen-req" style="color:#dc2626">*</span> <span id="ing-f-origen-lbl" style="font-size:9px;font-weight:500;color:var(--color-text-muted,#9ca3af);letter-spacing:.3px">— quién refirió a la paciente</span></label>'
     +'<select id="ing-f-origen" '+S+' onchange="_ingOrigenChanged()"><option value="">— Sin origen —</option></select>'
     +'<div id="ing-f-origen-src" style="display:none;font-size:10.5px;color:var(--color-primary,#c46a7a);margin-top:5px;line-height:1.4"></div>'
+    +'<div id="ing-f-origen-desc" style="display:none;margin-top:6px;font-size:11px;line-height:1.4;padding:7px 10px;border-radius:8px"></div>'
     +'</div>';
   h += '<div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-top:14px">'
     +'<div><label '+LBL+'>Razón Social (facturación) <span style="font-size:9px;font-weight:500;color:var(--color-text-muted,#9ca3af);letter-spacing:.3px">— se autocompleta al elegir paciente</span></label>'
@@ -6341,12 +6342,56 @@ function _ingCollectOrigen() {
    puede cambiarlo y, una vez que lo toca, la precarga ya no se lo pisa
    (mismo criterio que _pacIdiomaTocado en la ficha). */
 var _ingOrigenTocado = false;
-function _ingOrigenChanged(){ _ingOrigenTocado = true; _ingOrigenFuente(''); }
+function _ingOrigenChanged(){ _ingOrigenTocado = true; _ingOrigenFuente(''); _ingAvisoDescuento(); }
 function _ingOrigenFuente(txt){
   var el = document.getElementById('ing-f-origen-src');
   if (!el) return;
   el.textContent = txt || '';
   el.style.display = txt ? 'block' : 'none';
+}
+/* AVISO de descuento/rebate al capturar: dice si el médico/agencia elegido tiene %
+   este mes (según el volumen del grupo/agencia). Solo lectura, fire-and-forget: si
+   el backend no responde o no hay regla, no muestra nada y la captura sigue igual.
+   Es un REBATE al médico (crédito), no una rebaja al precio del paciente. */
+var _ingDescSeq = 0;
+function _ingAvisoDescuento(){
+  var box = document.getElementById('ing-f-origen-desc'); if (!box) return;
+  var origen = (typeof _ingCollectOrigen === 'function') ? _ingCollectOrigen() : '';
+  if (!origen){ box.style.display = 'none'; box.innerHTML = ''; return; }
+  var seq = ++_ingDescSeq;
+  box.style.display = 'block'; box.style.background = 'var(--color-surface-2,#f3f4f6)'; box.style.color = 'var(--color-text-muted,#6b7280)';
+  box.innerHTML = 'Revisando descuento del mes…';
+  var now = new Date();
+  var url = APPS_SCRIPT_URL + '?action=descuentoOrigen&origen=' + encodeURIComponent(origen)
+    + '&anio=' + now.getFullYear() + '&mes=' + (now.getMonth()+1) + '&token=' + encodeURIComponent(getToken()) + '&_t=' + Date.now();
+  fetch(url, {redirect:'follow'}).then(function(r){ return r.json(); }).then(function(d){
+    if (seq !== _ingDescSeq) return;   // llegó una respuesta vieja: la ignora
+    if (!d || !d.ok){ box.style.display = 'none'; box.innerHTML = ''; return; }
+    var nom = _escH(d.nombre || origen), html = '', bg = 'rgba(16,185,129,.10)', col = '#047857';
+    if (d.tipo === 'medico' && (d.pct||0) > 0){
+      html = '🎯 <b>' + nom + '</b> tiene <b>' + d.pct + '%</b> de comisión este mes '
+        + '<span style="color:var(--color-text-muted,#6b7280)">(volumen del grupo: ' + (d.conteo||0) + ' procedimiento' + ((d.conteo===1)?'':'s') + '). Es rebate al médico, no rebaja el precio de la paciente.</span>';
+    } else if (d.tipo === 'medico'){
+      // médico con regla pero aún sin escalón: dice cuánto falta
+      var sig = _ingSigTier(d);
+      html = '<b>' + nom + '</b>: sin comisión todavía este mes (' + (d.conteo||0) + ' procedimiento' + ((d.conteo===1)?'':'s') + ' del grupo)'
+        + (sig ? '. Faltan <b>' + Math.max(0, sig.desde-(d.conteo||0)) + '</b> para el ' + sig.pct + '%.' : '.');
+      bg = 'var(--color-surface-2,#f3f4f6)'; col = 'var(--color-text-muted,#6b7280)';
+    } else if (d.tipo === 'agencia' && (d.pct||0) > 0){
+      html = '🏷️ <b>' + nom + '</b> acumuló <b>' + d.pct + '%</b> de descuento de volumen este mes.';
+      bg = 'rgba(196,106,122,.10)'; col = 'var(--color-primary,#c46a7a)';
+    } else {
+      box.style.display = 'none'; box.innerHTML = ''; return;   // sin descuento → silencio
+    }
+    box.style.background = bg; box.style.color = col; box.innerHTML = html;
+  }).catch(function(){ if (seq === _ingDescSeq){ box.style.display = 'none'; box.innerHTML = ''; } });
+}
+// Primer escalón con % que el grupo aún no alcanza (para "faltan N para X%").
+function _ingSigTier(d){
+  var tiers = ((d && d.escalones) || []).filter(function(t){ return (parseFloat(t.pct)||0) > 0; })
+    .sort(function(a,b){ return a.desde - b.desde; });
+  for (var i=0;i<tiers.length;i++){ if ((d.conteo||0) < tiers[i].desde) return tiers[i]; }
+  return null;
 }
 /* d = respuesta de action=pacienteLista {medico, canal}. Se prefiere el Médico
    Tratante; si no hay, el Canal (grupo/agencia de donde viene). */
@@ -6363,6 +6408,7 @@ async function _ingAutofillOrigen(d){
   }
   var deMedico = !!String((d && d.medico) || '').trim();
   _ingOrigenFuente('Se tomó de la ficha de la paciente (' + (deMedico ? 'Médico Tratante' : 'Canal') + '). Puedes cambiarlo.');
+  _ingAvisoDescuento();   // muestra el % del médico/agencia si aplica este mes
 }
 
 /* ── Líneas de pago múltiple ───────────────────────────── */
@@ -12063,6 +12109,7 @@ async function comInit() {
     _comCfgSel = 0;
   }
   comRender();
+  comChequeaPendientes();   // aviso "hay comisiones por pagar" (async, no frena la vista)
   // El catálogo de orígenes alimenta los dropdowns (grupo y beneficiarios). Se
   // carga aparte y re-pinta solo el panel: que tarde no debe frenar la vista.
   if (!_comOrig && typeof _origFetchList === 'function') {
@@ -12222,6 +12269,9 @@ function comRender() {
   var puedeGenerar = hasPermission('generar_comisiones');
   var h = '';
 
+  // Aviso "hay comisiones por pagar" (se llena async con comChequeaPendientes).
+  h += '<div id="com-pendientes"></div>';
+
   h += '<div class="card" style="margin-bottom:16px">'
     +  '<div class="card-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">'
     +    '<div><div class="card-title">Comisiones por volumen de grupo</div>'
@@ -12347,6 +12397,87 @@ function comImprimirActividad(){
     notaHtml:notaHtml, lang:'es'
   });
 }
+/* Reporte A PAGAR: lo que se le paga a cada beneficiario (Daniel Madero en efectivo
+   → cuenta por pagar; el médico como crédito a su cuenta). Solo lectura; imprime lo
+   que se GENERARÍA (c.totales). */
+function comImprimirPagar(){
+  var c = _comCalc; if (!c || !c.ok){ if(typeof setStatus==='function') setStatus('Primero pulsa «Calcular».','err'); return; }
+  if (!(c.totales||[]).length){ if(typeof setStatus==='function') setStatus('No hay nada por pagar (el grupo no llegó al escalón).','err'); return; }
+  var rows = [], cons = [];
+  (c.totales||[]).forEach(function(t){
+    var via = (t.via==='efectivo') ? 'Efectivo · Cuenta por pagar' : 'Nota de crédito (a su cuenta)';
+    rows.push([ t.beneficiario, via, _comMesNombre(String(t.mesAplica||c.mesAplica)), _comMoney(t.monto) ]);
+    cons.push(null);
+  });
+  var totEf = (c.totales||[]).filter(function(t){ return t.via==='efectivo'; }).reduce(function(a,t){ return a+(t.monto||0); },0);
+  var kpis = [
+    { value:_comMoney(c.totalGeneral||0), label:'Total a pagar' },
+    { value:_comMoney(totEf), label:'En efectivo (CxP)' },
+    { value:(c.pct||0)+'%', label:'Escalón' },
+    { value:_comMesNombre(c.mes), label:'Mes de los proc.' }
+  ];
+  hfReportPrint('comisiones-pagar', {
+    title:'Comisiones a pagar', subject:(c.regla&&c.regla.nombre)||'', period:_comMesNombre(c.mes)+' → aplica '+_comMesNombre(String(c.mesAplica)), generado:hfSello(),
+    kpis:kpis, cols:['Beneficiario','Cómo se le paga','Aplica', {label:'Monto',r:true}],
+    rows:rows, conceptCol:0, rowConcepts:cons,
+    totalLabel:'Total a pagar', totalValue:_comMoney(c.totalGeneral||0), totalCol:3, lineCol:3,
+    notaHtml:'<div style="margin:16px 22px;padding:10px 14px;border:1px dashed #bbb;border-radius:8px;font-size:11px;color:#333;page-break-inside:avoid">Las líneas «Efectivo · Cuenta por pagar» generan una <b>CxP</b> (p.ej. Daniel Madero). Las de «Nota de crédito» quedan como saldo a favor del médico, que se aplica cuando facture con ese mismo nombre.</div>',
+    lang:'es'
+  });
+}
+/* Reporte DETALLADO del por qué: por médico, sus procedimientos → escalón del grupo
+   → el % y el reparto que le tocó. Solo lectura (c.detalle). */
+function comImprimirDetalle(){
+  var c = _comCalc; if (!c || !c.ok){ if(typeof setStatus==='function') setStatus('Primero pulsa «Calcular».','err'); return; }
+  var det = c.detalle||[];
+  if (!det.length){ if(typeof setStatus==='function') setStatus('No hay detalle que imprimir (el grupo no llegó al escalón). Usa «Imprimir reporte» de actividad.','err'); return; }
+  // Agrupar por médico (cada médico puede tener 2 renglones: su crédito + Madero).
+  var by = {}, orden = [];
+  det.forEach(function(d){ var k=d.medicoNombre||''; if(!by[k]){ by[k]={ medico:k, base:d.base, cant:d.cantidadMedico, ventas:d.ventas||[], repartos:[] }; orden.push(k); } by[k].repartos.push(d); });
+  var rows = [], kinds = [], cons = [];
+  orden.forEach(function(k){
+    var m = by[k];
+    rows.push([ m.medico, String(m.cant), _comMoney(m.base), c.pct+'%', _comMoney((m.repartos[0]&&m.repartos[0].accrual)|| _comfRedondea(m.base*c.pct/100)) ]);
+    kinds.push('header'); cons.push(null);
+    m.repartos.forEach(function(d){
+      rows.push([ '↳ '+d.beneficiario+' ('+(_comVia?_comVia(d.via):d.via)+')', d.parte+'%', d.efectivoPct+'%', '', _comMoney(d.monto) ]);
+      kinds.push('item'); cons.push(null);
+    });
+    (m.ventas||[]).forEach(function(v){
+      rows.push([ '   '+(v.op||'')+' · '+(v.paciente||'')+' · '+(v.producto||''), String(v.cantidad||1), _comMoney(v.total), '', '' ]);
+      kinds.push('item'); cons.push(v.producto||'');
+    });
+  });
+  var kpis = [
+    { value:String(c.conteo||0), label:'Procedimientos del grupo' },
+    { value:(c.pct||0)+'%', label:'Escalón alcanzado' },
+    { value:_comMoney(c.totalGeneral||0), label:'Total repartido' },
+    { value:_comMesNombre(c.mes), label:'Mes' }
+  ];
+  hfReportPrint('comisiones-detalle', {
+    title:'Comisiones — detalle del cálculo', subject:(c.regla&&c.regla.nombre)||'', period:_comMesNombre(c.mes)+' '+String(c.mes).substring(0,4), generado:hfSello(),
+    kpis:kpis, cols:['Médico / reparto', {label:'Cant. / parte',r:true}, {label:'Base / %',r:true}, {label:'% efectivo',r:true}, {label:'Monto',r:true}],
+    rows:rows, rowKinds:kinds, conceptCol:0, rowConcepts:cons,
+    totalLabel:'Total repartido', totalValue:_comMoney(c.totalGeneral||0), totalCol:4, lineCol:4,
+    lang:'es'
+  });
+}
+/* Aviso "hay comisiones por pagar": consulta los meses cerrados con comisión aún
+   no generada (backend comisionesPendientes) y pinta un banner con la lista. */
+function comChequeaPendientes(){
+  var box = document.getElementById('com-pendientes'); if (!box) return;
+  fetch(APPS_SCRIPT_URL + '?action=comisionesPendientes&meses=3&token=' + encodeURIComponent(getToken()) + '&_t=' + Date.now(), {redirect:'follow'})
+    .then(function(r){ return r.json(); }).then(function(d){
+      if (!d || !d.ok || !d.pendientes || !d.pendientes.length){ box.innerHTML = ''; return; }
+      var items = d.pendientes.map(function(p){
+        return '<li style="margin:2px 0">' + _comEsc(p.regla) + ' · ' + _comEsc(_comMesNombre(p.mesKey)) + ' · ' + p.conteo + ' proc. → ' + p.pct + '% · <b>' + _comMoney(p.total) + '</b></li>';
+      }).join('');
+      box.innerHTML = '<div style="margin-bottom:16px;padding:14px 16px;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;color:#92400e;font-size:13px">'
+        + '<div style="font-weight:800;margin-bottom:4px">🔔 Hay comisiones por pagar (' + _comMoney(d.total) + ')</div>'
+        + '<div style="font-size:12px;margin-bottom:6px">Estos meses ya cerraron con comisión y aún no se han generado. Elige la regla y el mes abajo, pulsa «Calcular» y luego «Generar».</div>'
+        + '<ul style="margin:0;padding-left:18px;font-size:12px">' + items + '</ul></div>';
+    }).catch(function(){ box.innerHTML = ''; });
+}
 function comRenderResult() {
   var box = document.getElementById('com-result');
   if (!box) return;
@@ -12425,7 +12556,12 @@ function comRenderResult() {
   }
 
   // ── Totales por beneficiario = lo que SE VA A ESCRIBIR.
-  h += '<div style="font-size:13px;font-weight:700;margin:4px 0 8px">Se va a generar</div>';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin:4px 0 8px">'
+    +  '<div style="font-size:13px;font-weight:700">Se va a generar</div>'
+    +  '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+    +  '<button onclick="comImprimirPagar()" title="Imprimir lo que se paga a cada beneficiario (efectivo = cuenta por pagar)" style="padding:6px 11px;background:var(--color-surface-2,#f3f4f6);border:1px solid var(--color-border,#e5e7eb);border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer">🖨️ Reporte a pagar</button>'
+    +  '<button onclick="comImprimirDetalle()" title="Imprimir el detalle del por qué: procedimientos → escalón → reparto por médico" style="padding:6px 11px;background:var(--color-surface-2,#f3f4f6);border:1px solid var(--color-border,#e5e7eb);border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer">🖨️ Reporte detallado</button>'
+    +  '</div></div>';
   h += '<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px"><thead><tr>'
     +  '<th style="text-align:left;padding:7px 8px;border-bottom:2px solid var(--color-border,#e5e7eb);font-size:11px;color:var(--color-text-muted,#9ca3af)">BENEFICIARIO</th>'
     +  '<th style="text-align:left;padding:7px 8px;border-bottom:2px solid var(--color-border,#e5e7eb);font-size:11px;color:var(--color-text-muted,#9ca3af)">CÓMO SE LE PAGA</th>'

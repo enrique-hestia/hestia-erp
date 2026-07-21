@@ -464,6 +464,90 @@ function calcularComisiones(body) {
   } catch (ex) { return { ok: false, error: ex.message, version: COMISIONES_VER }; }
 }
 
+/* ═══════════════ AVISO DE DESCUENTO/REBATE POR ORIGEN (SOLO LECTURA) ═══════════════
+ * Para el aviso al CAPTURAR un ingreso: dado el origen elegido (médico externo o
+ * agencia) y el mes, devuelve el % que aplica ESTE MES. NO escribe nada.
+ *  · Médico externo → busca su grupo (_origResolver) → la regla de comisión activa
+ *    de ese grupo → calcularComisiones → pct del escalón alcanzado por el volumen
+ *    del grupo. (Es un REBATE al médico, no una rebaja al precio del paciente.)
+ *  · Agencia (Reprovida) → _cobDescuentosAgencia → % de volumen del mes.
+ * Devuelve {ok, tipo:'medico'|'agencia'|'', nombre, pct, conteo, escalones, ...}.
+ */
+function descuentoOrigen(origen, anio, mes) {
+  try {
+    origen = String(origen || '').trim();
+    if (!origen) return { ok: true, tipo: '', pct: 0 };
+    var now = new Date();
+    anio = parseInt(anio, 10) || now.getFullYear();
+    mes  = parseInt(mes, 10)  || (now.getMonth() + 1);
+
+    // (A) MÉDICO EXTERNO → regla de su grupo → pct del mes.
+    var res = null;
+    try { if (typeof _origResolver === 'function') res = _origResolver(origen); } catch (e) {}
+    if (res && res.id) {
+      var grupoId = String(res.grupoId || res.id);
+      var reglas = (_comCfg().reglas || []).filter(function (r) {
+        return r.activo !== false && String(r.grupoId) === grupoId;
+      });
+      if (reglas.length) {
+        var calc = calcularComisiones({ anio: anio, mes: mes, reglaId: reglas[0].id });
+        if (calc && calc.ok) {
+          return { ok: true, tipo: 'medico', nombre: res.nombre || origen,
+                   regla: reglas[0].nombre || reglas[0].id,
+                   pct: calc.pct || 0, conteo: calc.conteo || 0,
+                   escalon: calc.escalon || null, escalones: calc.escalones || [],
+                   mes: calc.mes };
+        }
+      }
+    }
+    // (B) AGENCIA → descuento por volumen del mes.
+    try {
+      if (typeof _cobDescuentosAgencia === 'function') {
+        var desc = _cobDescuentosAgencia(origen);
+        if (desc && desc.aplica) {
+          var pctMax = 0;
+          (desc.lineas || []).forEach(function (l) { if ((_comNum(l.pct) || 0) > pctMax) pctMax = _comNum(l.pct); });
+          return { ok: true, tipo: 'agencia', nombre: origen, pct: pctMax, total: desc.total || 0 };
+        }
+      }
+    } catch (e2) {}
+    return { ok: true, tipo: '', pct: 0, nombre: origen };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+/* ═══════════════ COMISIONES PENDIENTES DE GENERAR (SOLO LECTURA) ═══════════════
+ * Recorre las reglas activas × los últimos meses cerrados y lista las que tienen
+ * pct>0 y AÚN no se han generado. Alimenta el aviso "hay comisiones por pagar".
+ * Solo lectura (calcularComisiones no escribe). `meses` = cuántos meses hacia atrás
+ * revisar (default 3, incluyendo el mes anterior; el mes en curso no se cierra aún).
+ */
+function comisionesPendientes(meses) {
+  try {
+    meses = parseInt(meses, 10) || 3;
+    var reglas = (_comCfg().reglas || []).filter(function (r) { return r.activo !== false; });
+    if (!reglas.length) return { ok: true, pendientes: [], total: 0 };
+    var now = new Date();
+    var pend = [], totalMonto = 0;
+    // Del mes anterior hacia atrás (el mes actual sigue acumulando, no se genera).
+    for (var k = 1; k <= meses; k++) {
+      var d = new Date(now.getFullYear(), now.getMonth() - k, 1);
+      var anio = d.getFullYear(), mes = d.getMonth() + 1;
+      for (var i = 0; i < reglas.length; i++) {
+        var calc = null;
+        try { calc = calcularComisiones({ anio: anio, mes: mes, reglaId: reglas[i].id }); } catch (e) { calc = null; }
+        if (!calc || !calc.ok) continue;
+        if ((calc.pct || 0) > 0 && !calc.generado && calc.totalGeneral > 0.01) {
+          pend.push({ reglaId: reglas[i].id, regla: reglas[i].nombre || reglas[i].id,
+                      anio: anio, mes: mes, mesKey: calc.mes, pct: calc.pct,
+                      conteo: calc.conteo, total: calc.totalGeneral });
+          totalMonto += calc.totalGeneral;
+        }
+      }
+    }
+    return { ok: true, pendientes: pend, total: _comRedondea(totalMonto) };
+  } catch (ex) { return { ok: false, error: ex.message, pendientes: [] }; }
+}
+
 /* ═════════════════════════ REVERSA (para regenerar) ═════════════════════════
  * Solo se puede revertir lo que NADIE ha tocado todavía. Se revisa TODO antes de
  * revertir NADA: una reversa a medias dejaría al médico sin crédito y a Madero con

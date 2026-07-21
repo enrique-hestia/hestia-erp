@@ -516,6 +516,18 @@ function doGet(e) {
         return jsonResponse({ok:false, error:'Agrega comisiones.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(readComisionesCfg());
     }
+    // Aviso de descuento/rebate del origen (médico o agencia) al capturar. Solo lectura.
+    if (action === 'descuentoOrigen') {
+      if (typeof descuentoOrigen !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza comisiones.gs en Apps Script y redespliega.'});
+      return jsonResponse(descuentoOrigen((e&&e.parameter.origen)||'', (e&&e.parameter.anio)||'', (e&&e.parameter.mes)||''));
+    }
+    // Comisiones pendientes de generar (aviso "hay comisiones por pagar"). Solo lectura.
+    if (action === 'comisionesPendientes') {
+      if (typeof comisionesPendientes !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza comisiones.gs en Apps Script y redespliega.'});
+      return jsonResponse(comisionesPendientes((e&&e.parameter.meses)||3));
+    }
     // Presupuesto: histórico de metas por trimestre (racha meta vs real)
     if (action === 'historicoMetas') {
       if (typeof readHistoricoMetas !== 'function')
