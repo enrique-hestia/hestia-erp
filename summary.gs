@@ -423,6 +423,34 @@ function perfSelfTest(){
   return out;
 }
 
+/* DIAGNÓSTICO (solo lectura): por qué el P&L/Summary de un año no cuadra con Ingresos.
+   Muestra, POR AÑO, cuántas filas ve el lector del summary, cuántas tienen fecha
+   parseable, cuántas caen en cada mes, el total de revenue, y una MUESTRA de filas
+   SIN fecha con su valor crudo (fechaRaw) y dónde SÍ hay una fecha en esa fila
+   (fechaAlt → si apunta a otra columna, es un corrimiento de columnas en esa hoja).
+   Correr en el editor de Apps Script: Run → diagSummaryIngresos → Ver registro.
+   Compara 2026 vs 2025: si 2026 tiene muchas 'sinFecha' y 2025 no, el problema es la
+   hoja BD_Ingresos 2026 (formato de fecha o columnas), NO el motor. */
+function diagSummaryIngresos(){
+  var out = {};
+  [2026, 2025].forEach(function(anio){
+    var rows = _summaryReadIngresosImpl(anio);   // sin memo, lectura directa
+    var conFecha=0, sinFecha=0, porMes={}, sumRevenueAnio=0, muestraSinFecha=[], muestraConFecha=[];
+    rows.forEach(function(r){
+      var f=(r.fecha||'').substring(0,10);
+      sumRevenueAnio += Number(r.total)||0;
+      if(f){ conFecha++; var mk=f.substring(0,7); porMes[mk]=(porMes[mk]||0)+(Number(r.total)||0);
+        if(muestraConFecha.length<3) muestraConFecha.push({op:r.op, fecha:f, total:r.total}); }
+      else { sinFecha++; if(muestraSinFecha.length<10) muestraSinFecha.push({op:r.op, fechaRaw:r.fechaRaw, total:r.total, fechaAlt:r._fechaAlt, fila:r._fila, producto:r.producto}); }
+    });
+    out[anio] = { totalFilas:rows.length, conFecha:conFecha, sinFecha:sinFecha,
+      revenuePorMes:porMes, sumRevenueTodoElAnio:sumRevenueAnio,
+      muestraConFecha:muestraConFecha, muestraSinFecha:muestraSinFecha };
+  });
+  try{ Logger.log(JSON.stringify(out,null,2)); }catch(e){}
+  return out;
+}
+
 // Índice de columna (0-based) a letra estilo Excel: 0->A, 26->AA
 function _colLetra(n){ var s=''; n=n+1; while(n>0){ var m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26); } return s; }
 
