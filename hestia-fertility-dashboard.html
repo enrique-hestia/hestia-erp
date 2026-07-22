@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.328 -->
+﻿<!-- app-build:2026.07.22.329 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -24795,7 +24795,7 @@ function renderOrdenesVenta(){
         + '<th style="padding:9px 12px">Fecha</th><th style="padding:9px 12px">Paciente</th><th style="padding:9px 12px;text-align:right">Total</th>'
         + '<th style="padding:9px 12px">Ingreso</th><th style="padding:9px 12px;text-align:right">Acciones</th></tr></thead><tbody>';
       _ovRows.forEach(function(o){
-        var acc = '';
+        var acc = '<button onclick="ovImprimir(\''+o.folio+'\')" title="Imprimir cotización" style="'+_ovBtnCss('#0d9488')+'">🖨</button>';
         var editable = !o.ingresoOP && o.estatus !== 'cancelada';
         if (editable && puede){
           acc += '<button onclick="ovEditar(\''+o.folio+'\')" title="Editar" style="'+_ovBtnCss('#0369a1')+'">✏</button>';
@@ -25003,6 +25003,61 @@ function ovGenerarIngreso(folio){
     alert('Ingreso '+d.op+' generado. Estatus: '+d.estatus + (d.saldoGenerado>0.01 ? '\n\nQuedó un saldo por cobrar de '+_ovMoney(d.saldoGenerado)+' (se generó su cuenta por cobrar).' : ''));
     renderOrdenesVenta();
   }).catch(function(e){ alert('Error de red: '+e); });
+}
+
+/* ── Cotización imprimible (E2) — documento branded con sello VestaOS ───────── */
+function ovImprimir(folio){
+  var o = _ovRows.filter(function(x){return x.folio===folio;})[0]; if (!o){ alert('Orden no encontrada.'); return; }
+  var esOrden = o.tipo === 'orden';
+  var tituloDoc = esOrden ? 'ORDEN DE VENTA' : 'COTIZACIÓN';
+  var filas = (o.lineas||[]).map(function(l){
+    var pvp = Number(l.pvp)||0, desc = Number(l.descuento)||0, cant = Number(l.cantidad)||1;
+    var sub = pvp*cant*(1-desc/100);
+    return '<tr>'
+      + '<td style="padding:9px 10px;border-bottom:1px solid #eee">'+_escH(l.producto||'')+(l.sku?' <span style="color:#999;font-size:10px">('+_escH(l.sku)+')</span>':'')+'</td>'
+      + '<td style="padding:9px 10px;border-bottom:1px solid #eee;text-align:center">'+cant+'</td>'
+      + '<td style="padding:9px 10px;border-bottom:1px solid #eee;text-align:right">'+_ovMoney(pvp)+'</td>'
+      + '<td style="padding:9px 10px;border-bottom:1px solid #eee;text-align:right">'+(desc?desc+'%':'—')+'</td>'
+      + '<td style="padding:9px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:700">'+_ovMoney(sub)+'</td>'
+      + '</tr>';
+  }).join('');
+  var sello = (typeof hfSello==='function') ? hfSello() : '';
+  var vig = o.vigencia ? ('<div><span style="color:#999">Vigencia:</span> <b>'+_escH(o.vigencia)+'</b></div>') : '';
+  var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+_escH(tituloDoc+' '+o.folio)+'</title>'
+    + '<style>'
+    + '*{box-sizing:border-box}body{font-family:"Segoe UI",Arial,sans-serif;color:#222;margin:0;padding:40px;font-size:13px}'
+    + '.hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #c46a7a;padding-bottom:16px;margin-bottom:20px}'
+    + '.brand{font-size:26px;font-weight:800;color:#c46a7a;letter-spacing:.5px}.brand small{display:block;font-size:11px;font-weight:400;color:#888;letter-spacing:2px;margin-top:2px}'
+    + '.doc{text-align:right}.doc h1{font-size:17px;margin:0;color:#333;letter-spacing:1px}.doc .folio{font-size:20px;font-weight:800;color:#c46a7a;margin-top:4px}'
+    + '.meta{display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;margin-bottom:22px;font-size:12.5px}'
+    + 'table{width:100%;border-collapse:collapse;margin-bottom:8px}th{background:#c46a7a;color:#fff;padding:9px 10px;font-size:11px;text-align:left;text-transform:uppercase;letter-spacing:.5px}'
+    + '.tot{text-align:right;font-size:18px;font-weight:800;margin:14px 0 26px;color:#333}'
+    + '.notas{font-size:12px;color:#555;border-left:3px solid #eadfe2;padding:6px 12px;margin-bottom:30px;white-space:pre-wrap}'
+    + '.firma{display:flex;justify-content:space-between;gap:40px;margin-top:50px}.firma div{flex:1;text-align:center;border-top:1px solid #999;padding-top:6px;font-size:11px;color:#666}'
+    + '.sello{margin-top:34px;font-size:9.5px;color:#aaa;text-align:center;letter-spacing:.5px}'
+    + '@media print{body{padding:20px}}'
+    + '</style></head><body>'
+    + '<div class="hdr"><div class="brand">Hestia Fertility<small>VESTAOS</small></div>'
+    +   '<div class="doc"><h1>'+tituloDoc+'</h1><div class="folio">'+_escH(o.folio)+'</div>'
+    +     '<div style="font-size:11px;color:#888;margin-top:4px;text-transform:capitalize">'+_escH(o.estatus||'')+'</div></div></div>'
+    + '<div class="meta">'
+    +   '<div><span style="color:#999">Paciente:</span> <b>'+_escH(o.paciente||'—')+'</b></div>'
+    +   '<div><span style="color:#999">Fecha:</span> <b>'+_escH(o.fecha||'')+'</b></div>'
+    +   '<div><span style="color:#999">Médico / Origen:</span> <b>'+_escH(o.origen||'—')+'</b></div>'
+    +   vig
+    + '</div>'
+    + '<table><thead><tr><th>Concepto</th><th style="text-align:center">Cant.</th><th style="text-align:right">P. Unitario</th><th style="text-align:right">Desc.</th><th style="text-align:right">Importe</th></tr></thead><tbody>'
+    +   filas + '</tbody></table>'
+    + '<div class="tot">Total: '+_ovMoney(o.total)+'</div>'
+    + (o.notas ? '<div class="notas">'+_escH(o.notas)+'</div>' : '')
+    + '<div class="firma"><div>Aceptación del paciente</div><div>Hestia Fertility</div></div>'
+    + '<div class="sello">'+_escH(sello)+'</div>'
+    + '</body></html>';
+  var w = window.open('', '_blank');
+  if (!w){ alert('Habilita las ventanas emergentes para imprimir.'); return; }
+  w.document.write(html); w.document.close();
+  try{ w.document.title = tituloDoc+' '+o.folio; }catch(e){}
+  setTimeout(function(){ try{ w.print(); }catch(e){} }, 350);
 }
 
 /* ── URLs de sheets externos para botón "Ver en Sheets" en vistas genéricas ─── */
