@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.311 -->
+﻿<!-- app-build:2026.07.22.312 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -20982,6 +20982,59 @@ function _provEnsureModalStyles(){
     +'@media(max-width:560px){.pv-mb{grid-template-columns:1fr}}';
   document.head.appendChild(s);
 }
+/* ── Sincronizar egresos de un proveedor (por RFC + nombre parecido) ── */
+var _provSyncCtx=null, _provSyncProps=null;
+function _provSyncModal(inner){
+  var old=document.getElementById('provsync-ovl'); if(old) old.remove();
+  var ovl=document.createElement('div'); ovl.id='provsync-ovl';
+  ovl.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:5000;display:flex;align-items:center;justify-content:center;padding:16px';
+  ovl.innerHTML='<div style="background:var(--color-surface,#fff);color:var(--color-text,#111);border-radius:14px;max-width:520px;width:100%;max-height:88vh;box-shadow:0 20px 60px rgba(0,0,0,.3);display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:15px 20px;border-bottom:1px solid var(--color-divider,#eee);font-weight:800;font-size:15px">🔗 Sincronizar egresos del proveedor</div>'
+    +'<div id="provsync-body" style="flex:1;overflow-y:auto;padding:16px 20px">'+inner+'</div>'
+    +'<div id="provsync-foot" style="padding:12px 20px;border-top:1px solid var(--color-divider,#eee);display:flex;gap:10px;justify-content:flex-end"><button onclick="var o=document.getElementById(\'provsync-ovl\');if(o)o.remove()" style="padding:8px 16px;border:1px solid var(--color-divider);border-radius:8px;background:none;cursor:pointer;color:var(--color-text)">Cerrar</button></div>'
+    +'</div>';
+  document.body.appendChild(ovl);
+}
+async function provSyncEgresos(){
+  var nombre=((document.getElementById('pf-nombre')||{}).value||'').trim();
+  var rfc=((document.getElementById('pf-rfc')||{}).value||'').trim();
+  var alias=((document.getElementById('pf-comercial')||{}).value||'').trim();
+  if(!nombre){ alert('Pon primero el nombre / razón social.'); return; }
+  _provSyncModal('<div style="text-align:center;padding:26px;color:#6b7280"><span class="ing-spinner ing-spinner-dark"></span> Buscando egresos…</div>');
+  var s=getSession()||{};
+  var d; try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'sincronizarEgresosProveedor', token:s.token||getToken(), rfc:rfc, nombre:nombre, alias:alias})}); d=await r.json(); }catch(e){ d={ok:false,error:e.message}; }
+  _provSyncRender(d, {rfc:rfc, nombre:nombre, alias:alias});
+}
+function _provSyncRender(d, ctx){
+  _provSyncCtx=ctx;
+  var body=document.getElementById('provsync-body'), foot=document.getElementById('provsync-foot'); if(!body) return;
+  if(!d||!d.ok){ body.innerHTML='<div style="color:#c83c3c;padding:12px">'+_esc((d&&d.error)||'No disponible')+'</div>'; return; }
+  _provSyncProps=d.props||[];
+  if(!_provSyncProps.length){ body.innerHTML='<div style="padding:16px;text-align:center;color:#16a34a">✓ Todos los egresos ya usan «'+_esc(d.target)+'». Nada que sincronizar.</div>'; return; }
+  var h='<div style="font-size:12.5px;color:#6b7280;margin-bottom:10px">Se actualizarán a <b>'+_esc(d.target)+'</b>. Empatados por <b>RFC: '+d.porRFC+'</b> · por nombre parecido: '+d.porNombre+'. Los de nombre parecido van <b>sin marcar</b> (revísalos).</div>';
+  h+='<div style="max-height:300px;overflow:auto">';
+  _provSyncProps.forEach(function(p,i){
+    h+='<label style="display:flex;gap:9px;align-items:center;padding:7px 3px;border-bottom:1px solid var(--color-divider);font-size:12px;cursor:pointer">'
+      +'<input type="checkbox" class="provsync-chk" data-i="'+i+'" '+(p.via==='rfc'?'checked':'')+'>'
+      +'<span style="flex:1"><b style="color:#c83c3c">'+_esc(p.old)+'</b> <span style="color:#6b7280">('+p.anio+')</span></span>'
+      +'<span style="font-size:10px;padding:2px 7px;border-radius:10px;'+(p.via==='rfc'?'background:#e6f2ea;color:#16a34a':'background:#fff7ed;color:#b45309')+'">'+(p.via==='rfc'?'RFC':'nombre')+'</span></label>';
+  });
+  h+='</div>';
+  body.innerHTML=h;
+  foot.innerHTML='<button onclick="var o=document.getElementById(\'provsync-ovl\');if(o)o.remove()" style="padding:8px 16px;border:1px solid var(--color-divider);border-radius:8px;background:none;cursor:pointer;color:var(--color-text)">Cancelar</button>'
+    +'<button id="provsync-apply" onclick="provSyncAplicar()" style="padding:8px 18px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Actualizar seleccionados</button>';
+}
+async function provSyncAplicar(){
+  var chks=Array.prototype.slice.call(document.querySelectorAll('.provsync-chk:checked'));
+  if(!chks.length){ alert('Marca al menos un egreso.'); return; }
+  var aplicar=chks.map(function(c){ var p=_provSyncProps[parseInt(c.getAttribute('data-i'),10)]; return {anio:p.anio, row:p.row}; });
+  var btn=document.getElementById('provsync-apply'); if(btn){ btn.disabled=true; btn.textContent='Actualizando…'; }
+  var s=getSession()||{};
+  var d; try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'sincronizarEgresosProveedor', apply:true, aplicar:aplicar, token:s.token||getToken(), rfc:_provSyncCtx.rfc, nombre:_provSyncCtx.nombre, alias:_provSyncCtx.alias})}); d=await r.json(); }catch(e){ d={ok:false,error:e.message}; }
+  if(d&&d.ok){ var o=document.getElementById('provsync-ovl'); if(o)o.remove(); alert('✓ '+d.actualizados+' egreso(s) actualizados a «'+_provSyncCtx.nombre+'».\nRefresca Egresos para verlo.'); }
+  else { alert('⚠ '+((d&&d.error)||'No se pudo sincronizar.')); if(btn){ btn.disabled=false; btn.textContent='Actualizar seleccionados'; } }
+}
+
 function provOpenForm(row, onSaved){
   _provEnsureModalStyles(); // garantiza el CSS del modal aunque no se haya abierto la vista de Proveedores
   _provEditRow = row || null;
@@ -21022,6 +21075,7 @@ function provOpenForm(row, onSaved){
       +inp('notas','Notas', row&&row.notas, true)
     +'</div>'
     +'<div class="pv-mf"><div id="pf-msg" style="margin-right:auto;font-size:12px;align-self:center;color:#991b1b"></div>'
+      +(isEdit?'<button class="pv-cancel" onclick="provSyncEgresos()" title="Actualiza el nombre de este proveedor en los egresos históricos, empatando por RFC (y por nombre parecido). Arregla typos como CRYOTECH↔CRYOTEC.">🔗 Sincronizar egresos</button>':'')
       +'<button class="pv-cancel" onclick="provCloseForm()">Cancelar</button>'
       +'<button class="pv-btn" id="pf-save" onclick="provSave()">'+(isEdit?'Guardar cambios':'Registrar')+'</button></div>'
     +'</div>';

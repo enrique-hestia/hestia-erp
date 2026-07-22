@@ -1188,6 +1188,12 @@ function doPost(e) {
     if (body.action === 'updateProveedor') {
       return jsonResponse(updateProveedor(body));
     }
+    if (body.action === 'sincronizarEgresosProveedor') {
+      if (typeof sincronizarEgresosProveedor !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza providers.gs en Apps Script y redespliega.'});
+      if (typeof _postEmail !== 'undefined' && _postEmail) body.usuario = _postEmail;
+      return jsonResponse(sincronizarEgresosProveedor(body));
+    }
     if (body.action === 'autocompletarProveedores') {
       if (typeof autocompletarProveedoresDesdeXML !== 'function')
         return jsonResponse({ok:false, error:'Actualiza providers.gs en Apps Script y redespliega.'});

@@ -479,6 +479,88 @@ function _provRenombrarEnEgresos(oldName, newName) {
   return { total: total, porAnio: porAnio };
 }
 
+/* ── SINCRONIZAR EGRESOS DE UN PROVEEDOR (por RFC + nombre parecido) ───────────
+ * El renombrado en cascada matchea el nombre EXACTO; los egresos con un typo (p.ej.
+ * "CRYOTECH" vs el catálogo "CRYOTEC") quedan huérfanos. Esta herramienta empata por
+ * la columna FacturaRFC (estable, del CFDI) y, como respaldo, por nombre PARECIDO
+ * (acento-fold + Levenshtein≤2), y actualiza el texto del proveedor al nombre actual.
+ * Preview (default) NO escribe; apply aplica solo las filas re-verificadas. Gated. */
+function _provNormNombre(s){
+  return String(s||'').toLowerCase()
+    .replace(/[áàäâ]/g,'a').replace(/[éèëê]/g,'e').replace(/[íìïî]/g,'i')
+    .replace(/[óòöô]/g,'o').replace(/[úùüû]/g,'u').replace(/ñ/g,'n')
+    .replace(/[^a-z0-9]/g,'');
+}
+function _provLev(a,b){
+  a=a||''; b=b||''; var m=a.length,n=b.length; if(!m)return n; if(!n)return m;
+  var d=[]; for(var i=0;i<=m;i++){d[i]=[]; d[i][0]=i;} for(var j=0;j<=n;j++)d[0][j]=j;
+  for(var i2=1;i2<=m;i2++)for(var j2=1;j2<=n;j2++){ var c=a.charAt(i2-1)===b.charAt(j2-1)?0:1; d[i2][j2]=Math.min(d[i2-1][j2]+1,d[i2][j2-1]+1,d[i2-1][j2-1]+c); }
+  return d[m][n];
+}
+function sincronizarEgresosProveedor(body){
+  try{
+    body = body || {};
+    if (typeof _tokenHasPermission==='function' && !_tokenHasPermission(body.token||'', 'editar_egresos'))
+      return { ok:false, error:'Sin autorización para editar egresos (permiso editar_egresos).' };
+    var apply = body.apply===true||body.apply==='true';
+    var rfc = String(body.rfc||'').trim().toUpperCase();
+    var target = String(body.nombre||'').trim();
+    if(!target) return { ok:false, error:'Falta el nombre destino del proveedor.' };
+    var names=[target]; if(body.alias) names.push(String(body.alias));
+    var nn = names.map(_provNormNombre).filter(Boolean);
+    var years=[2026,2025,2024];
+    var props=[];
+    for(var y=0;y<years.length;y++){
+      var yr=years[y];
+      try{
+        var ss=SpreadsheetApp.openById(EGRESOS_IDS[yr]);
+        var sh=ss.getSheetByName(EGRESOS_TABS[yr]);
+        if(!sh||sh.getLastRow()<2) continue;
+        var hdr=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(function(x){return String(x).trim().toLowerCase();});
+        var iProv=hdr.indexOf('proveedor'); if(iProv<0)iProv=4;
+        var iRfc=hdr.indexOf('facturarfc');
+        var data=sh.getRange(2,1,sh.getLastRow()-1,sh.getLastColumn()).getValues();
+        for(var r=0;r<data.length;r++){
+          var txt=String(data[r][iProv]||'').trim(); if(!txt) continue;
+          if(txt===target) continue;   // ya coincide con el nombre actual
+          var via=null;
+          if(rfc && iRfc>-1 && String(data[r][iRfc]||'').trim().toUpperCase()===rfc) via='rfc';
+          else {
+            var tn=_provNormNombre(txt);
+            if(tn && nn.some(function(x){ return x===tn || (x.length>3 && tn.length>3 && (x.indexOf(tn)>-1||tn.indexOf(x)>-1)) || _provLev(x,tn)<=2; })) via='nombre';
+          }
+          if(via) props.push({ anio:yr, row:r+2, old:txt, via:via });
+        }
+      }catch(e){}
+    }
+    if(!apply){
+      return { ok:true, preview:true, target:target,
+               porRFC:props.filter(function(p){return p.via==='rfc';}).length,
+               porNombre:props.filter(function(p){return p.via==='nombre';}).length,
+               total:props.length, props:props };
+    }
+    // APPLY — re-verifica contra props recién calculados (solo lo confirmado y válido)
+    var okSet={}; props.forEach(function(p){ okSet[p.anio+':'+p.row]=1; });
+    var confirmar = body.aplicar || props;
+    var byYear={};
+    confirmar.forEach(function(c){ if(okSet[c.anio+':'+c.row]) (byYear[c.anio]=byYear[c.anio]||[]).push(c); });
+    var updated=0, porAnio={};
+    Object.keys(byYear).forEach(function(yk){
+      var yr=parseInt(yk,10);
+      try{
+        var ss=SpreadsheetApp.openById(EGRESOS_IDS[yr]);
+        var sh=ss.getSheetByName(EGRESOS_TABS[yr]);
+        var hdr=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(function(x){return String(x).trim().toLowerCase();});
+        var iProv=hdr.indexOf('proveedor'); if(iProv<0)iProv=4;
+        byYear[yk].forEach(function(c){ sh.getRange(c.row, iProv+1).setValue(target); updated++; porAnio[yr]=(porAnio[yr]||0)+1; });
+        try{ CacheService.getScriptCache().remove('gas_egresos_v1_'+yr); }catch(e){}
+      }catch(e){}
+    });
+    try{ logAudit(body.usuario||'', 'Proveedores', 'Sincronizar egresos', rfc||target, 'proveedor', '', target+' ('+updated+' egresos)'); }catch(e){}
+    return { ok:true, actualizados:updated, porAnio:porAnio };
+  }catch(ex){ return { ok:false, error:ex.message }; }
+}
+
 // Cuenta cuántos registros de Egresos tiene un proveedor (para avisar antes de renombrar).
 function contarEgresosProveedor(nombre) {
   try {
