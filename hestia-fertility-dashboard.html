@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.316 -->
+﻿<!-- app-build:2026.07.22.317 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -48071,17 +48071,42 @@ try {
   function _asisResolverPaciente(query, cb){
     function run(){
       var lista = (typeof _ecPacientesList!=='undefined' && _ecPacientesList) ? _ecPacientesList : [];
-      var q = String(query||'').trim();
-      // exacto (normalizado) primero
-      var exact = lista.filter(function(n){ return _asisNorm(n) === _asisNorm(q); });
-      if (exact.length === 1) return cb(exact[0], []);
-      var cand = (typeof _pacFuzzy==='function') ? _pacFuzzy(lista, q, 6) : [];
-      if (cand.length === 1) return cb(cand[0], []);
-      if (cand.length > 1)  return cb(null, cand);
-      return cb(null, []);   // ninguno
+      cb.apply(null, _asisMatchNombre(lista, query));
     }
     if (typeof _ensurePacList==='function') { try { _ensurePacList(run); return; } catch(e){} }
     run();
+  }
+  /* Resolutor FUERTE de nombres (paso 2 del parser): reusa el motor _dup* — iniciales
+     ("Melina PA" ↔ "Melina Piña Amaros"), apellidos invertidos (Dice sobre tokens
+     ordenados) y erratas (Levenshtein). Devuelve [nombre|null, candidatos]. Sirve
+     tanto para pacientes como para proveedores (misma firma de lista de strings). */
+  function _asisMatchNombre(lista, query){
+    var q = String(query||'').trim(); if(!q || !lista || !lista.length) return [null, []];
+    var nq = (typeof _pdupNorm==='function') ? _pdupNorm(q) : q.toLowerCase();
+    // 1) exacto normalizado
+    var exact = lista.filter(function(n){ return ((typeof _pdupNorm==='function')?_pdupNorm(n):String(n).toLowerCase()) === nq; });
+    if (exact.length === 1) return [exact[0], []];
+    if (exact.length > 1)  return [null, exact.slice(0,8)];
+    // 2) motor fuerte: iniciales + similitud + substring
+    var scored = [];
+    for (var i=0;i<lista.length;i++){
+      var n = lista[i];
+      var ini = (typeof _dupEcMismo==='function') && (_dupEcMismo(n,q) || _dupEcMismo(q,n));
+      var sim = (typeof _dupSim==='function') ? _dupSim(n,q) : 0;
+      var sub = ((typeof _pdupNorm==='function')?_pdupNorm(n):String(n).toLowerCase()).indexOf(nq) > -1;
+      if (ini || sub || sim >= 62) scored.push({ name:n, s: ini?100:(sub?Math.max(sim,80):sim) });
+    }
+    scored.sort(function(a,b){ return b.s - a.s; });
+    var seen={}, uniq=[]; scored.forEach(function(x){ var k=(typeof _pdupNorm==='function')?_pdupNorm(x.name):x.name; if(!seen[k]){ seen[k]=1; uniq.push(x); } });
+    if(!uniq.length){
+      var old = (typeof _pacFuzzy==='function') ? _pacFuzzy(lista, q, 6) : [];
+      if(old.length===1) return [old[0], []];
+      return [null, old];
+    }
+    if(uniq.length===1) return [uniq[0].name, []];
+    // auto-elige si el 1º domina claramente
+    if(uniq[0].s>=95 && (uniq[0].s - uniq[1].s) >= 15) return [uniq[0].name, []];
+    return [null, uniq.slice(0,8).map(function(x){ return x.name; })];
   }
   function _asisNoPac(nombre, candidatos){
     if (candidatos && candidatos.length){
@@ -48188,8 +48213,11 @@ try {
     if (res.intencion === 'crear_cxp'){
       var f = res;
       var provs = ((window._proveedores||[]).map(function(p){ return p.nombre; })).filter(Boolean);
-      var cand = f.proveedor ? ((typeof _pacFuzzy==='function')?_pacFuzzy(provs, f.proveedor, 6):[]) : [];
-      // resuelto: exactamente 1 candidato. Si 0, se usa lo dictado (crearía proveedor nuevo, se avisa). Si >1, se pregunta.
+      // Motor fuerte (mismo que pacientes): [match único | null, candidatos].
+      var _mp = f.proveedor ? _asisMatchNombre(provs, f.proveedor) : [null, []];
+      var _provMatch = _mp[0], cand = _mp[1];
+      if (_provMatch){ f.proveedor = _provMatch; _asisPintarCxP(cuerpo, f, true); return; }
+      // resuelto: match único arriba. Si 0, se usa lo dictado (crearía proveedor nuevo, se avisa). Si >1, se pregunta.
       if (cand.length > 1){
         var hc = '<div class="asis-q">¿Cuál proveedor? Encontré varios parecidos a «'+_asisEsc(f.proveedor)+'»:</div><div class="asis-cands">';
         cand.forEach(function(c){ hc += '<button class="asis-cand" data-prov="'+_asisEsc(c)+'">'+_asisEsc(c)+'</button>'; });
