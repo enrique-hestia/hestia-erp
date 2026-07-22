@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.324 -->
+﻿<!-- app-build:2026.07.22.325 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1246,6 +1246,8 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 
 <!-- Cobranza: Cuentas por Cobrar (Motor A saldos + Motor B suscripciones crío) -->
 <div id="view-cuentas-cobrar" class="view" style="display:none"><div id="cc-root"></div></div>
+<!-- Ventas / Órdenes de Venta: pipeline cotización → orden → facturada → pagada -->
+<div id="view-ordenes-venta" class="view" style="display:none"><div id="ov-root"></div></div>
 <!-- Cobranza: estado de cuenta de cobranza por paciente (reporte) -->
 <div id="view-cobranza" class="view" style="display:none"><div id="cob-root"></div></div>
 <!-- Seguro: carta de reembolso para pacientes extranjeros (por operación, con tipo de cambio) -->
@@ -24649,6 +24651,7 @@ function navigateTo(viewId) {
     displayId = 'caja-chica';
   }
   if (viewId === 'egresos') { displayId = 'gastos'; }
+  if (viewId === 'ordenes-venta' || viewId === 'ventas' || (_foundItem && /orden.?venta|^ventas$|cotizaci/i.test(String(_foundItem.fuente||'')+' '+String(_foundItem.label||'')))) { displayId = 'ordenes-venta'; if (typeof renderOrdenesVenta === 'function') setTimeout(renderOrdenesVenta, 0); }
   if (viewId === 'estado-cuenta') { displayId = 'estado-cuenta'; ecInit(); }
   if (viewId === 'cobranza' || (_foundItem && /^cobranza$/i.test(String(_foundItem.fuente||'')))) { displayId = 'cobranza'; }
   else if (viewId === 'seguro' || (_foundItem && /^seguro$/i.test(String(_foundItem.fuente||'')))) { displayId = 'seguro'; }
@@ -24706,6 +24709,218 @@ function navigateTo(viewId) {
   // "Actualizar" para no anunciar "Actualizado" antes de tiempo). Los demás
   // llamadores la ignoran, como siempre.
   return loadView(viewId, currentFechaInicio, currentFechaFin);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   VENTAS / ÓRDENES DE VENTA (E1) — pipeline cotización → orden → facturada → pagada
+   Coexiste con la captura directa de ingresos. Folio OV-##### estable de por vida.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var _ovRows = [], _ovFiltroEst = '', _ovEditFolio = null, _ovLineSeq = 0;
+function _ovMoney(n){ n = Number(n)||0; return '$' + n.toLocaleString('es-MX', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+var _OV_EST_COLOR = { borrador:'#6b7280', enviada:'#0369a1', aprobada:'#7c3aed', orden:'#0d9488', facturada:'#b45309', pagada:'#047857', cancelada:'#b91c1c' };
+function _ovBadge(est){
+  var c = _OV_EST_COLOR[est] || '#6b7280';
+  return '<span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:10.5px;font-weight:700;color:#fff;background:'+c+';text-transform:capitalize">'+_escH(est||'')+'</span>';
+}
+function _ovTipoLabel(o){ return o.tipo === 'orden' ? 'Orden' : 'Cotización'; }
+
+function renderOrdenesVenta(){
+  var host = document.getElementById('ov-root'); if (!host) return;
+  host.innerHTML = '<div style="padding:24px;color:var(--color-text-muted,#6b7280);font-size:13px">Cargando órdenes de venta…</div>';
+  var url = APPS_SCRIPT_URL + '?action=ordenesVenta&token=' + encodeURIComponent(getToken())
+    + (_ovFiltroEst ? '&estatus='+encodeURIComponent(_ovFiltroEst) : '') + '&_t=' + Date.now();
+  fetch(url, {redirect:'follow'}).then(function(r){ return r.json(); }).then(function(d){
+    if (!d || !d.ok){ host.innerHTML = '<div style="padding:24px;color:#b91c1c">'+_escH((d&&d.error)||'No se pudieron cargar las órdenes.')+'</div>'; return; }
+    _ovRows = d.rows || [];
+    var estados = d.estados || ['borrador','enviada','aprobada','orden','facturada','pagada','cancelada'];
+    var filtroOpts = '<option value="">Todos los estatus</option>' + estados.map(function(e){ return '<option value="'+e+'"'+(_ovFiltroEst===e?' selected':'')+'>'+e.charAt(0).toUpperCase()+e.slice(1)+'</option>'; }).join('');
+    var puede = (typeof hasPermission !== 'function') || hasPermission('editar_ingresos');
+    var h = '<div class="card" style="padding:0;overflow:hidden">'
+      + '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--color-divider,#e5e7eb)">'
+      +   '<div><div style="font-size:16px;font-weight:800;color:var(--text-primary,#111)">🧾 Ventas / Órdenes</div>'
+      +   '<div style="font-size:12px;color:var(--color-text-muted,#6b7280);margin-top:2px">Cotización → orden → facturada → pagada. Una venta pactada, opcional; convive con la captura directa.</div></div>'
+      +   '<div style="display:flex;gap:8px;align-items:center">'
+      +     '<select onchange="_ovFiltroEst=this.value;renderOrdenesVenta()" style="padding:7px 10px;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'+filtroOpts+'</select>'
+      +     (puede ? '<button onclick="ovNueva()" style="padding:8px 14px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">＋ Nueva cotización</button>' : '')
+      +   '</div>'
+      + '</div>';
+    if (!_ovRows.length){
+      h += '<div style="padding:34px;text-align:center;color:var(--color-text-muted,#9ca3af);font-size:13px">Aún no hay órdenes de venta. Crea una cotización para empezar.</div>';
+    } else {
+      h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+        + '<thead><tr style="text-align:left;color:var(--color-text-muted,#6b7280);border-bottom:1px solid var(--color-divider,#e5e7eb)">'
+        + '<th style="padding:9px 12px">Folio</th><th style="padding:9px 12px">Tipo</th><th style="padding:9px 12px">Estatus</th>'
+        + '<th style="padding:9px 12px">Fecha</th><th style="padding:9px 12px">Paciente</th><th style="padding:9px 12px;text-align:right">Total</th>'
+        + '<th style="padding:9px 12px">Ingreso</th><th style="padding:9px 12px;text-align:right">Acciones</th></tr></thead><tbody>';
+      _ovRows.forEach(function(o){
+        var acc = '';
+        var editable = !o.ingresoOP && o.estatus !== 'cancelada';
+        if (editable && puede){
+          acc += '<button onclick="ovEditar(\''+o.folio+'\')" title="Editar" style="'+_ovBtnCss('#0369a1')+'">✏</button>';
+          if (o.estatus === 'borrador') acc += '<button onclick="ovCambiarEstatus(\''+o.folio+'\',\'enviada\')" title="Marcar enviada" style="'+_ovBtnCss('#0369a1')+'">Enviar</button>';
+          if (o.estatus === 'enviada') acc += '<button onclick="ovCambiarEstatus(\''+o.folio+'\',\'aprobada\')" title="Paciente aprobó" style="'+_ovBtnCss('#7c3aed')+'">Aprobar</button>';
+          acc += '<button onclick="ovGenerarIngreso(\''+o.folio+'\')" title="Generar el ingreso (cobrar)" style="'+_ovBtnCss('#047857')+'">Generar ingreso</button>';
+          acc += '<button onclick="ovCancelar(\''+o.folio+'\')" title="Cancelar" style="'+_ovBtnCss('#b91c1c')+'">✕</button>';
+        } else if (o.ingresoOP){
+          acc += '<button onclick="ovVer(\''+o.folio+'\')" style="'+_ovBtnCss('#6b7280')+'">Ver</button>';
+        }
+        h += '<tr style="border-bottom:1px solid var(--color-divider,#f0f0f0)">'
+          + '<td style="padding:9px 12px;font-weight:700">'+_escH(o.folio)+'</td>'
+          + '<td style="padding:9px 12px">'+_ovTipoLabel(o)+'</td>'
+          + '<td style="padding:9px 12px">'+_ovBadge(o.estatus)+'</td>'
+          + '<td style="padding:9px 12px">'+_escH(o.fecha||'')+'</td>'
+          + '<td style="padding:9px 12px">'+_escH(o.paciente||'—')+'</td>'
+          + '<td style="padding:9px 12px;text-align:right;font-weight:700">'+_ovMoney(o.total)+'</td>'
+          + '<td style="padding:9px 12px">'+(o.ingresoOP ? _escH(o.ingresoOP) : '—')+'</td>'
+          + '<td style="padding:9px 12px;text-align:right;white-space:nowrap">'+acc+'</td></tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+    h += '</div>';
+    host.innerHTML = h;
+  }).catch(function(e){ host.innerHTML = '<div style="padding:24px;color:#b91c1c">Error de red: '+_escH(String(e))+'</div>'; });
+}
+function _ovBtnCss(c){ return 'margin-left:5px;padding:4px 9px;border:1px solid '+c+';color:'+c+';background:transparent;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer'; }
+
+function ovVer(folio){ var o = _ovRows.filter(function(x){return x.folio===folio;})[0]; if(o) ovEditar(folio, true); }
+
+/* ── Editor (modal) ─────────────────────────────────────────── */
+function ovNueva(){ _ovOpenEditor(null, false); }
+function ovEditar(folio, soloLectura){ var o = _ovRows.filter(function(x){return x.folio===folio;})[0]; _ovOpenEditor(o||null, !!soloLectura); }
+function _ovOpenEditor(ov, ro){
+  _ovEditFolio = ov ? ov.folio : null; _ovLineSeq = 0;
+  ingLoadProductos && ingLoadProductos(false);
+  var m = document.getElementById('ov-modal');
+  if (!m){ m = document.createElement('div'); m.id = 'ov-modal'; document.body.appendChild(m); }
+  m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:30px 12px';
+  var titulo = ov ? (_ovTipoLabel(ov)+' '+ov.folio) : 'Nueva cotización';
+  var dis = ro ? 'disabled' : '';
+  var IS = 'width:100%;box-sizing:border-box;padding:7px 9px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:12.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)';
+  var h = '<div style="background:var(--card-bg,#fff);border-radius:14px;max-width:820px;width:100%;padding:22px;box-shadow:0 12px 48px rgba(0,0,0,.3)">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
+    +   '<div style="font-size:17px;font-weight:800;color:var(--text-primary,#111)">'+_escH(titulo)+'</div>'
+    +   '<button onclick="_ovCloseEditor()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#9ca3af;line-height:1">×</button></div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'
+    +   '<label style="font-size:11px;color:var(--color-text-muted,#6b7280)">Paciente<input id="ov-e-paciente" '+dis+' value="'+_escH(ov?ov.paciente:'')+'" style="'+IS+'"></label>'
+    +   '<label style="font-size:11px;color:var(--color-text-muted,#6b7280)">Origen / Médico<input id="ov-e-origen" '+dis+' value="'+_escH(ov?ov.origen:'')+'" style="'+IS+'"></label>'
+    +   '<label style="font-size:11px;color:var(--color-text-muted,#6b7280)">Fecha<input type="date" id="ov-e-fecha" '+dis+' value="'+_escH(ov?ov.fecha:'')+'" style="'+IS+'"></label>'
+    +   '<label style="font-size:11px;color:var(--color-text-muted,#6b7280)">Vigencia<input type="date" id="ov-e-vigencia" '+dis+' value="'+_escH(ov?ov.vigencia:'')+'" style="'+IS+'"></label>'
+    + '</div>'
+    + '<datalist id="ov-prodlist">'+((_ingTodosProductos||_ingProductos||[]).map(function(p){ var pr=(p.precios&&p.precios.General)||p.precio||0; return '<option value="'+String(p.descripcion||'').replace(/"/g,'&quot;')+'" data-precio="'+pr+'" data-sku="'+String(p.sku||'').replace(/"/g,'&quot;')+'">'; }).join(''))+'</datalist>'
+    + '<div style="font-size:11px;color:var(--color-text-muted,#6b7280);margin-bottom:4px;font-weight:700">Productos</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 90px 60px 55px 100px 26px;gap:6px;font-size:10px;color:var(--color-text-muted,#9ca3af);padding:0 2px 3px"><div>Producto</div><div style="text-align:right">PVP</div><div style="text-align:right">Desc%</div><div style="text-align:center">Cant</div><div style="text-align:right">Subtotal</div><div></div></div>'
+    + '<div id="ov-lineas"></div>'
+    + (ro ? '' : '<button onclick="ovAddLinea()" style="margin-top:6px;padding:5px 11px;background:var(--color-surface-2,#f3f4f6);border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:11.5px;font-weight:700;cursor:pointer">＋ Línea</button>')
+    + '<label style="display:block;font-size:11px;color:var(--color-text-muted,#6b7280);margin-top:12px">Notas<textarea id="ov-e-notas" '+dis+' rows="2" style="'+IS+';resize:vertical">'+_escH(ov?ov.notas:'')+'</textarea></label>'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--color-divider,#e5e7eb)">'
+    +   '<div style="font-size:18px;font-weight:800;color:var(--text-primary,#111)">Total: <span id="ov-e-total">$0.00</span></div>'
+    +   (ro ? '<button onclick="_ovCloseEditor()" style="padding:9px 18px;background:var(--color-surface-2,#f3f4f6);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-weight:700;cursor:pointer">Cerrar</button>'
+           : '<div><button onclick="_ovCloseEditor()" style="padding:9px 16px;background:transparent;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-weight:700;cursor:pointer;margin-right:8px">Cancelar</button>'
+             + '<button onclick="ovGuardar()" style="padding:9px 20px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Guardar</button></div>')
+    + '</div></div>';
+  m.innerHTML = h; m.style.display = 'flex';
+  var lc = ov && ov.lineas && ov.lineas.length ? ov.lineas : [null];
+  lc.forEach(function(l){ ovAddLinea(l, ro); });
+  ovRecalc();
+}
+function _ovCloseEditor(){ var m = document.getElementById('ov-modal'); if (m){ m.style.display='none'; m.innerHTML=''; } }
+function ovAddLinea(l, ro){
+  var host = document.getElementById('ov-lineas'); if (!host) return;
+  var n = ++_ovLineSeq; var dis = ro ? 'disabled' : '';
+  var IS = 'box-sizing:border-box;padding:6px 7px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:12px;background:var(--card-bg,#fff);color:var(--text-primary,#111)';
+  var row = document.createElement('div');
+  row.id = 'ov-linea-'+n;
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 90px 60px 55px 100px 26px;gap:6px;align-items:center;margin-bottom:5px';
+  row.innerHTML = '<input id="ov-l-prod-'+n+'" list="ov-prodlist" '+dis+' value="'+_escH(l?l.producto:'')+'" data-sku="'+_escH(l?l.sku:'')+'" placeholder="Producto…" oninput="ovOnProd('+n+')" style="width:100%;'+IS+'">'
+    + '<input id="ov-l-pvp-'+n+'" type="number" step="0.01" '+dis+' value="'+(l?l.pvp:'')+'" oninput="ovRecalc()" style="text-align:right;'+IS+'">'
+    + '<input id="ov-l-desc-'+n+'" type="number" step="1" min="0" max="100" '+dis+' value="'+(l?l.descuento:0)+'" oninput="ovRecalc()" style="text-align:right;'+IS+'">'
+    + '<input id="ov-l-cant-'+n+'" type="number" step="1" min="1" '+dis+' value="'+(l?l.cantidad:1)+'" oninput="ovRecalc()" style="text-align:center;'+IS+'">'
+    + '<div id="ov-l-sub-'+n+'" style="text-align:right;font-weight:700;font-size:12px">$0.00</div>'
+    + (ro ? '<div></div>' : '<button onclick="var e=document.getElementById(\'ov-linea-'+n+'\');if(e)e.remove();ovRecalc()" tabindex="-1" style="background:none;border:none;color:#dc2626;font-size:15px;cursor:pointer;line-height:1">×</button>');
+  host.appendChild(row);
+}
+function ovOnProd(n){
+  var inp = document.getElementById('ov-l-prod-'+n); if (!inp) return;
+  var dl = document.getElementById('ov-prodlist'); if (dl){
+    var opt = Array.prototype.filter.call(dl.options, function(o){ return o.value === inp.value; })[0];
+    if (opt){
+      var pvp = document.getElementById('ov-l-pvp-'+n);
+      if (pvp && !pvp.value) pvp.value = opt.getAttribute('data-precio') || '';
+      inp.setAttribute('data-sku', opt.getAttribute('data-sku') || '');
+    }
+  }
+  ovRecalc();
+}
+function ovRecalc(){
+  var host = document.getElementById('ov-lineas'); if (!host) return;
+  var total = 0;
+  Array.prototype.forEach.call(host.children, function(row){
+    var n = row.id.replace('ov-linea-','');
+    var pvp = parseFloat((document.getElementById('ov-l-pvp-'+n)||{}).value)||0;
+    var desc = parseFloat((document.getElementById('ov-l-desc-'+n)||{}).value)||0;
+    var cant = parseFloat((document.getElementById('ov-l-cant-'+n)||{}).value)||1;
+    var sub = pvp*cant*(1-desc/100); total += sub;
+    var se = document.getElementById('ov-l-sub-'+n); if (se) se.textContent = _ovMoney(sub);
+  });
+  var te = document.getElementById('ov-e-total'); if (te) te.textContent = _ovMoney(total);
+}
+function _ovCollectLineas(){
+  var host = document.getElementById('ov-lineas'); var out = [];
+  if (!host) return out;
+  Array.prototype.forEach.call(host.children, function(row){
+    var n = row.id.replace('ov-linea-','');
+    var prod = (document.getElementById('ov-l-prod-'+n)||{}).value || '';
+    if (!String(prod).trim()) return;
+    out.push({ producto: prod, sku: (document.getElementById('ov-l-prod-'+n)||{}).getAttribute ? (document.getElementById('ov-l-prod-'+n).getAttribute('data-sku')||'') : '',
+      pvp: parseFloat((document.getElementById('ov-l-pvp-'+n)||{}).value)||0,
+      descuento: parseFloat((document.getElementById('ov-l-desc-'+n)||{}).value)||0,
+      cantidad: parseFloat((document.getElementById('ov-l-cant-'+n)||{}).value)||1 });
+  });
+  return out;
+}
+function ovGuardar(){
+  var lineas = _ovCollectLineas();
+  if (!lineas.length){ alert('Agrega al menos un producto.'); return; }
+  var body = { action:'saveOrdenVenta', token:getToken(),
+    folio: _ovEditFolio || '',
+    paciente: (document.getElementById('ov-e-paciente')||{}).value || '',
+    origen: (document.getElementById('ov-e-origen')||{}).value || '',
+    fecha: (document.getElementById('ov-e-fecha')||{}).value || '',
+    vigencia: (document.getElementById('ov-e-vigencia')||{}).value || '',
+    notas: (document.getElementById('ov-e-notas')||{}).value || '',
+    lineas: lineas };
+  fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(d){
+    if (!d || !d.ok){ alert((d&&d.error)||'No se pudo guardar.'); return; }
+    _ovCloseEditor(); renderOrdenesVenta();
+  }).catch(function(e){ alert('Error de red: '+e); });
+}
+function ovCambiarEstatus(folio, estatus){
+  fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify({action:'cambiarEstatusOV', token:getToken(), folio:folio, estatus:estatus})}).then(function(r){return r.json();}).then(function(d){
+    if (!d || !d.ok){ alert((d&&d.error)||'No se pudo cambiar el estatus.'); return; }
+    renderOrdenesVenta();
+  }).catch(function(e){ alert('Error de red: '+e); });
+}
+function ovCancelar(folio){
+  var motivo = prompt('Cancelar '+folio+'. Motivo (opcional):', '');
+  if (motivo === null) return;
+  fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify({action:'cancelarOrdenVenta', token:getToken(), folio:folio, motivo:motivo})}).then(function(r){return r.json();}).then(function(d){
+    if (!d || !d.ok){ alert((d&&d.error)||'No se pudo cancelar.'); return; }
+    renderOrdenesVenta();
+  }).catch(function(e){ alert('Error de red: '+e); });
+}
+function ovGenerarIngreso(folio){
+  var o = _ovRows.filter(function(x){return x.folio===folio;})[0]; if (!o) return;
+  var forma = prompt('Generar el ingreso de '+folio+' (total '+_ovMoney(o.total)+').\n\nForma de pago (ej. Transferencia, Efectivo, Mercado Pago):', '');
+  if (forma === null) return;
+  var pagStr = prompt('Monto realmente cobrado ahora (vacío = cobrado completo). Si es menor al total, la diferencia queda como cuenta por cobrar:', '');
+  if (pagStr === null) return;
+  var body = { action:'generarIngresoDesdeOV', token:getToken(), folio:folio, formaPago:forma };
+  if (String(pagStr).trim() !== '') body.pagado = parseFloat(pagStr)||0;
+  fetch(APPS_SCRIPT_URL, {method:'POST', redirect:'follow', body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(d){
+    if (!d || !d.ok){ alert((d&&d.error)||'No se pudo generar el ingreso.'); return; }
+    alert('Ingreso '+d.op+' generado. Estatus: '+d.estatus + (d.saldoGenerado>0.01 ? '\n\nQuedó un saldo por cobrar de '+_ovMoney(d.saldoGenerado)+' (se generó su cuenta por cobrar).' : ''));
+    renderOrdenesVenta();
+  }).catch(function(e){ alert('Error de red: '+e); });
 }
 
 /* ── URLs de sheets externos para botón "Ver en Sheets" en vistas genéricas ─── */

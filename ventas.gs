@@ -219,6 +219,25 @@ function cancelarOrdenVenta(body){
   }catch(ex){ return { ok: false, error: ex.message }; }
 }
 
+/* ─────────────────────────── SETUP: ítem de menú ───────────────────────────
+ * Inserta "Ventas / Órdenes" (id=ordenes-venta) bajo Finanzas si no existe. Seguro
+ * de correr varias veces (idempotente: no duplica). Correr UNA vez tras desplegar. */
+function setupMenuVentas(){
+  try{
+    var ss = SpreadsheetApp.openById(SHEET_ID);
+    var sh = ss.getSheetByName('Menu');
+    if (!sh) return { ok:false, error:'No existe la hoja Menu.' };
+    var vals = sh.getDataRange().getValues();
+    for (var i = 1; i < vals.length; i++) if (String(vals[i][0] || '').trim() === 'ordenes-venta') return { ok:true, yaExiste:true };
+    var ncol = vals[0].length, row = new Array(ncol);
+    row[0] = 'ordenes-venta'; row[1] = 'finanzas'; row[2] = 'Ventas / Órdenes';
+    row[3] = 'finanzas'; row[4] = 'file-text'; row[5] = 115; row[6] = 'vista';
+    row[7] = 'OrdenVenta'; if (ncol > 8) row[8] = true;
+    sh.appendRow(row);
+    return { ok:true, creado:true };
+  }catch(ex){ return { ok:false, error:ex.message }; }
+}
+
 /* ─────────────────────────── GENERAR INGRESO DESDE OV (POST) — E3 ───────────────
  * Puente: construye el payload de saveIngreso a partir de las líneas de la OV y lo
  * llama (reutiliza TODA la lógica de dinero: folio OP, bancos, comisiones, CxC). NO
