@@ -1078,7 +1078,7 @@ function readResumenGeneral(fechaInicio, fechaFin){
       // Ciclos del periodo partidos en Hestia (ALTA / Estimulación Ovárica Controlada)
       // vs Externos (Capturas): # de ciclos + ingreso de cada bloque.
       ciclosBox:{
-        hestia:   _rgBoxLinea(full.lineas, function(nom){ return nom==='alta' || nom.indexOf('estimulaci')>-1 || nom.indexOf('ciclos iniciad')>-1; }),
+        hestia:   _rgBoxLinea(full.lineas, function(nom){ return (nom.indexOf('alta')>-1 && nom.indexOf('baja')<0) || nom.indexOf('estimulaci')>-1 || nom.indexOf('ciclos iniciad')>-1; }),
         externos: _rgBoxLinea(full.lineas, function(nom){ return nom.indexOf('extern')>-1; })
       },
       margenBruto: totRev? Math.round(_erN(full.metricas.grossProfit)/totRev*100):0 };
