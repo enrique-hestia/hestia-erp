@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.312 -->
+﻿<!-- app-build:2026.07.22.313 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -48305,7 +48305,8 @@ try {
     var pnl = document.createElement('div');
     pnl.id='asis-panel';
     pnl.innerHTML =
-      '<div class="asis-hd">💡 Asistente <small>escribe o dicta con '+(_asisIsMac?'el Dictado de macOS':'Win+H')+'</small></div>'+
+      '<div class="asis-hd" style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span>💡 Asistente <small>escribe o dicta con '+(_asisIsMac?'el Dictado de macOS':'Win+H')+'</small></span>'+
+        '<button id="asis-voz" onclick="hfVozToggle()" title="Voz del asistente (local, no sube nada a ningún lado)" style="flex:0 0 auto;border:1px solid var(--color-divider,#ddd);background:var(--color-surface-2,#f5f3f0);border-radius:8px;padding:3px 9px;font-size:14px;cursor:pointer;color:var(--color-text,#111);line-height:1">🔈</button></div>'+
       '<div class="asis-bd">'+
         '<input id="asis-input" type="text" autocomplete="off" placeholder="Escribe qué necesitas… ej. «ve a cobranza» o «¿cómo registro una nómina?»">'+
         '<div class="asis-hint">Enter para ejecutar. Para dictar, activa <b>'+_asisDictar+'</b> y habla — el audio lo procesa tu sistema, no sale de tu equipo por VestaOS.</div>'+
@@ -48321,6 +48322,7 @@ try {
     });
     document.getElementById('asis-resp').innerHTML = _asisEjemplosHTML();
     _asisBindEjemplos();
+    _asisVozBtnSync();
   }
 
   function _asisBindEjemplos(){
@@ -48352,6 +48354,70 @@ try {
       e.preventDefault(); _asisToggle();
     }
   }, true);
+
+  // ══ VOZ LOCAL (speechSynthesis) + SALUDO POR NOMBRE ══
+  // 100% en el navegador: el TTS (output) NO sube audio a ninguna plataforma. El
+  // dictado (input) lo hace el sistema operativo (Win+H / Dictado macOS), no VestaOS.
+  var _hfVoz=false; try{ _hfVoz=localStorage.getItem('hestia_asis_voz')==='1'; }catch(e){}
+  var _hfVoice=null;
+  function _hfPickVoice(){
+    try{
+      var vs=(window.speechSynthesis&&window.speechSynthesis.getVoices)?window.speechSynthesis.getVoices():[];
+      if(!vs||!vs.length) return null;
+      var es=vs.filter(function(v){ return /es(-|_)/i.test(v.lang||''); }); if(!es.length) es=vs;
+      var fem=es.filter(function(v){ return /(paulina|sabina|m[oó]nica|helena|laura|marisol|female|mujer)/i.test((v.name||'')); });
+      var mx=es.filter(function(v){ return /mx/i.test(v.lang||''); });
+      return fem[0]||mx[0]||es[0]||null;
+    }catch(e){ return null; }
+  }
+  function hfSpeak(text){
+    if(!_hfVoz||!text||!window.speechSynthesis||!window.SpeechSynthesisUtterance) return;
+    try{
+      if(!_hfVoice) _hfVoice=_hfPickVoice();
+      window.speechSynthesis.cancel();
+      var u=new SpeechSynthesisUtterance(String(text));
+      if(_hfVoice){ u.voice=_hfVoice; u.lang=_hfVoice.lang||'es-MX'; } else { u.lang='es-MX'; }
+      u.rate=1.0; u.pitch=1.05; u.volume=1;
+      window.speechSynthesis.speak(u);
+    }catch(e){}
+  }
+  try{ if(window.speechSynthesis) window.speechSynthesis.onvoiceschanged=function(){ _hfVoice=_hfPickVoice(); }; }catch(e){}
+  function _asisVozBtnSync(){ var b=document.getElementById('asis-voz'); if(b){ b.textContent=_hfVoz?'🔊':'🔈'; b.title=(_hfVoz?'Voz activada':'Voz apagada')+' — local, no sube nada'; b.style.borderColor=_hfVoz?'var(--color-primary,#c46a7a)':'var(--color-divider,#ddd)'; } }
+  window.hfVozToggle=function(){
+    _hfVoz=!_hfVoz; try{ localStorage.setItem('hestia_asis_voz', _hfVoz?'1':'0'); }catch(e){}
+    _asisVozBtnSync();
+    if(_hfVoz){ _hfVoice=_hfPickVoice(); hfSpeak(_hfSaludoTexto(true)); } else { try{ window.speechSynthesis.cancel(); }catch(e){} }
+  };
+  try{ window.hfSpeak=hfSpeak; }catch(e){}
+
+  function _hfNombreUsuario(){
+    try{ var s=(typeof getSession==='function')?getSession():null; if(!s) return '';
+      var n=s.nombre||s.name||'';
+      if(!n && s.email) n=String(s.email).split('@')[0].replace(/[._-]+/g,' ');
+      n=String(n||'').trim().split(/\s+/)[0]||'';
+      return n?n.charAt(0).toUpperCase()+n.slice(1):'';
+    }catch(e){ return ''; }
+  }
+  function _hfSaludoTexto(conNombre){
+    var h=new Date().getHours(); var parte=h<12?'Buenos días':(h<19?'Buenas tardes':'Buenas noches');
+    var n=conNombre?_hfNombreUsuario():''; return n?(parte+', '+n):parte;
+  }
+  function _hfSaludar(){
+    try{
+      if(sessionStorage.getItem('hestia_saludo')==='1') return;
+      var n=_hfNombreUsuario(); if(!n) return;
+      sessionStorage.setItem('hestia_saludo','1');
+      var t=_hfSaludoTexto(true);
+      var toast=document.createElement('div');
+      toast.style.cssText='position:fixed;right:20px;bottom:92px;z-index:9998;background:var(--color-surface,#fff);color:var(--color-text,#111);border:1px solid var(--color-divider,#e5e7eb);border-left:4px solid var(--color-primary,#c46a7a);border-radius:12px;padding:12px 16px;box-shadow:0 10px 30px rgba(0,0,0,.15);font-size:14px;max-width:290px;opacity:0;transform:translateY(8px);transition:opacity .3s,transform .3s';
+      toast.innerHTML='<b>'+t+'</b> 👋<div style="font-size:12px;color:var(--color-text-muted,#888);margin-top:3px">Soy tu asistente. Pulsa 💡 o '+_asisModTxt+' cuando me necesites. El 🔈 activa mi voz.</div>';
+      document.body.appendChild(toast);
+      requestAnimationFrame(function(){ toast.style.opacity='1'; toast.style.transform='translateY(0)'; });
+      setTimeout(function(){ toast.style.opacity='0'; toast.style.transform='translateY(8px)'; setTimeout(function(){ if(toast.parentNode) toast.parentNode.removeChild(toast); },400); }, 6500);
+      hfSpeak(t);
+    }catch(e){}
+  }
+  (function(){ var tries=0; var iv=setInterval(function(){ tries++; if(_hfNombreUsuario()){ clearInterval(iv); _hfSaludar(); } else if(tries>30){ clearInterval(iv); } }, 500); })();
 
   try { window.asisOpen = _asisOpen_; window.asisToggle = _asisToggle; } catch(e){}
   // El FAB se crea al primer uso o al cargar; se pinta en cuanto el DOM esté listo.
