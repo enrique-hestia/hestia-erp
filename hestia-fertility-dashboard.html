@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.297 -->
+﻿<!-- app-build:2026.07.21.298 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -47356,6 +47356,11 @@ try {
    ═══════════════════════════════════════════════════════════════════════════ */
 (function(){
   var _asisOpen = false, _asisBusy = false;
+  // Mac vs Windows: el atajo YA funciona en Mac (Cmd+I por e.metaKey) y el input
+  // acepta el Dictado de macOS. Solo cambian las etiquetas (no «Win+H» en Mac).
+  var _asisIsMac = /Mac|iPhone|iPad|iPod/.test((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || '');
+  var _asisDictar = _asisIsMac ? 'el Dictado de macOS (doble Control o 🌐/Fn)' : 'Win+H';
+  var _asisModTxt = _asisIsMac ? '⌘I' : 'Ctrl+I';
 
   function _asisNorm(s){
     return String(s||'').toLowerCase()
@@ -47381,6 +47386,7 @@ try {
     { grupo:'Navegar', icon:'🧭', ítems:['ve a cobranza','ábreme egresos','llévame a nómina','ir a cuentas por cobrar'] },
     { grupo:'Preguntar (solo lectura)', icon:'💬', ítems:['¿cuánto debe Diana García?','saldo de Melina Piña'] },
     { grupo:'Imprimir', icon:'🖨️', ítems:['imprime el estado de cuenta de Diana García'] },
+    { grupo:'Cómo se hace (ayuda)', icon:'📖', ítems:['¿cómo registro una nómina?','¿cómo hago una conciliación?','para qué sirve el board deck'] },
     { grupo:'Crear (pide confirmación)', icon:'✍️', ítems:['crea una cuenta por pagar de VIANTO por $32,615 folio A-123 vence 30 de agosto'] }
   ];
 
@@ -47457,6 +47463,13 @@ try {
     // CREAR CXP — verbo + "cuenta por pagar/cxp/orden de pago"
     if (/^(crea|crear|nueva|nuevo|registra|registrar|da\s+de\s+alta|agrega)\b.*(cuenta\s+por\s+pagar|cxp|orden\s+de\s+pago)/.test(n)){
       return _asisParsearCxP(frase);
+    }
+
+    // AYUDA — "¿cómo hago X?", "para qué sirve X", "explícame X" → busca en el manual.
+    if (/^(como|ayuda|no\s+se|ense[nñ]ame(\s+a)?|explica(me)?|para\s+que\s+sirve|que\s+es\b|donde\s+(se|puedo|esta))\b/.test(n)){
+      var _cons = n.replace(/^(como|ayuda|no\s+se|ense[nñ]ame(\s+a)?|explica(me)?|para\s+que\s+sirve|que\s+es|donde\s+(se|puedo|esta))\s*/,'')
+                   .replace(/^(hago|se|puedo|funciona|registro|creo|es|para|el|la|un|una|de)\s+/,'').trim();
+      return { intencion:'ayuda', consulta:(_cons || n) };
     }
 
     // FALLBACK — no es una orden ejecutable, pero ¿menciona un área? Ofrece llevar ahí.
@@ -47577,6 +47590,23 @@ try {
       cuerpo.innerHTML = h + '</div>';
       Array.prototype.forEach.call(cuerpo.querySelectorAll('.asis-cand'), function(b){
         b.onclick = function(){ try{ navigateTo(b.getAttribute('data-nav')); }catch(e){} _asisClose(); };
+      });
+      return;
+    }
+    // ── AYUDA (¿cómo…?) ── responde con las guías del manual (IA sin IA: recuperación
+    //    sobre HELP/HFMAN). Reusa el abridor canónico _cmdkAbrirManual (overlay «?» o
+    //    vista 📖 Manual según el tipo del resultado).
+    if (res.intencion === 'ayuda'){
+      var _hits = (typeof hfBuscarManual === 'function') ? hfBuscarManual(res.consulta, 4) : [];
+      if (!_hits || !_hits.length){
+        cuerpo.innerHTML = '<div class="asis-warn">No encontré una guía sobre «'+_asisEsc(res.consulta)+'». Prueba con otras palabras, o abre el manual con el botón «?».</div>';
+        return;
+      }
+      var _hh = '<div class="asis-q">Esto encontré en la ayuda sobre «'+_asisEsc(res.consulta)+'»:</div><div class="asis-cands">';
+      _hits.forEach(function(x,i){ _hh += '<button class="asis-cand" data-hi="'+i+'">'+_asisEsc((x.icon?x.icon+' ':'📖 ')+(x.title||x.titulo||x.id))+'</button>'; });
+      cuerpo.innerHTML = _hh + '</div>';
+      Array.prototype.forEach.call(cuerpo.querySelectorAll('[data-hi]'), function(b){
+        b.onclick = function(){ var x=_hits[+b.getAttribute('data-hi')]; try{ if(typeof _cmdkAbrirManual==='function'){ _cmdkAbrirManual(x, res.consulta)(); } }catch(e){} _asisClose(); };
       });
       return;
     }
@@ -47773,17 +47803,17 @@ try {
 
     var fab = document.createElement('button');
     fab.id='asis-fab'; fab.setAttribute('aria-label','Asistente de comandos'); fab.innerHTML='💡';
-    fab.title='Asistente de comandos (Ctrl+I)';
+    fab.title='Asistente de comandos ('+_asisModTxt+')';
     fab.onclick=_asisToggle;
     document.body.appendChild(fab);
 
     var pnl = document.createElement('div');
     pnl.id='asis-panel';
     pnl.innerHTML =
-      '<div class="asis-hd">💡 Asistente <small>escribe o dicta con Win+H</small></div>'+
+      '<div class="asis-hd">💡 Asistente <small>escribe o dicta con '+(_asisIsMac?'el Dictado de macOS':'Win+H')+'</small></div>'+
       '<div class="asis-bd">'+
-        '<input id="asis-input" type="text" autocomplete="off" placeholder="Escribe qué necesitas… ej. «ve a cobranza»">'+
-        '<div class="asis-hint">Enter para ejecutar. Para dictar, activa <b>Win+H</b> y habla — el audio no sale de tu equipo por VestaOS.</div>'+
+        '<input id="asis-input" type="text" autocomplete="off" placeholder="Escribe qué necesitas… ej. «ve a cobranza» o «¿cómo registro una nómina?»">'+
+        '<div class="asis-hint">Enter para ejecutar. Para dictar, activa <b>'+_asisDictar+'</b> y habla — el audio lo procesa tu sistema, no sale de tu equipo por VestaOS.</div>'+
         '<div id="asis-resp"></div>'+
       '</div>';
     document.body.appendChild(pnl);
