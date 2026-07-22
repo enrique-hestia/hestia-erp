@@ -6528,7 +6528,7 @@ function abonarIngreso(body) {
       function hc(){ for (var a=0;a<arguments.length;a++){ var k=H.indexOf(arguments[a]); if(k>-1) return k; } return -1; }
       var iOp = hc('op'); if (iOp < 0) iOp = 0;
       var iPac = hc('paciente'), iCat = hc('categoria','categoría');
-      var iTotal = hc('totalpagar','total a pagar','total'), iPag = hc('pagado');
+      var iTotal = hc('totalpagar','total a pagar','total'), iPag = hc('pagado'), iFP = hc('formapago','forma de pago','forma pago');
       if (iPag < 0) return { ok: false, error: 'No se encontró la columna Pagado en BD_Ingresos' };
 
       var rows = [], totalOP = 0, pagadoActual = 0, pacName = '', catName = '';
@@ -6601,6 +6601,9 @@ function abonarIngreso(body) {
       for (var k = 0; k < rows.length; k++) {
         var apply = Math.min(rem, rows[k].total); if (apply < 0) apply = 0;
         sheet.getRange(rows[k].rowNum, iPag + 1).setValue(apply); rem -= apply;
+        // Registra la FORMA DE PAGO del cobro en el renglón del ingreso (antes quedaba
+        // en '—' porque el abono solo subía Pagado). No la borra si no se mandó.
+        if (iFP > -1 && formaPago) sheet.getRange(rows[k].rowNum, iFP + 1).setValue(formaPago);
       }
       try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch (e) {}
 
@@ -6701,7 +6704,7 @@ function cobrarConsolidado(body) {
       function hc(){ for (var a=0;a<arguments.length;a++){ var k=H.indexOf(arguments[a]); if(k>-1) return k; } return -1; }
       var iOp = hc('op'); if (iOp < 0) iOp = 0;
       var iPac = hc('paciente'), iCat = hc('categoria','categoría');
-      var iTotal = hc('totalpagar','total a pagar','total'), iPag = hc('pagado');
+      var iTotal = hc('totalpagar','total a pagar','total'), iPag = hc('pagado'), iFP = hc('formapago','forma de pago','forma pago');
       if (iPag < 0) return { ok: false, error: 'No se encontró la columna Pagado en BD_Ingresos' };
 
       // Índice OP → líneas + totales
@@ -6748,7 +6751,8 @@ function cobrarConsolidado(body) {
         if (apply <= 0.001) { aplicados.push({ op:x.op, aplicado:0, saldo:x.saldo }); return; }
         var nuevoPagado = x.info.pagado + apply; if (nuevoPagado > x.info.total) nuevoPagado = x.info.total;
         var acc = nuevoPagado;
-        for (var k=0; k<x.info.rows.length; k++){ var ap = Math.min(acc, x.info.rows[k].total); if(ap<0)ap=0; sheet.getRange(x.info.rows[k].rowNum, iPag+1).setValue(ap); acc -= ap; }
+        for (var k=0; k<x.info.rows.length; k++){ var ap = Math.min(acc, x.info.rows[k].total); if(ap<0)ap=0; sheet.getRange(x.info.rows[k].rowNum, iPag+1).setValue(ap); acc -= ap;
+          if (iFP > -1 && formaPago) sheet.getRange(x.info.rows[k].rowNum, iFP+1).setValue(formaPago); }   // registra la forma de pago del depósito en cada línea
         var nuevoSaldo = Math.max(0, x.info.total - nuevoPagado);
         if (typeof _cobRegistrarSaldoIngreso === 'function') { try { _cobRegistrarSaldoIngreso(x.op, x.info.paciente, x.info.cat, nuevoSaldo, fecha); } catch (e) {} }
         if (typeof registrarAbono === 'function') { try { registrarAbono({ op:x.op, paciente:x.info.paciente, monto:apply, tipo:'abono-op', formaPago:formaPago, fecha:fecha, nota:'Cobro consolidado '+folio+(refDep?(' · ref '+refDep):''), usuario:usuario }); } catch (e) {} }
