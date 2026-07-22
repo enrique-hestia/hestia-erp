@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.304 -->
+﻿<!-- app-build:2026.07.22.305 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -495,7 +495,8 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 .dash-w{grid-column:span 6;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:var(--radius-lg);padding:var(--space-4);box-shadow:var(--shadow-sm);min-width:0}
 .dash-w.span-3{grid-column:span 3}.dash-w.span-4{grid-column:span 4}.dash-w.span-6{grid-column:span 6}.dash-w.span-12{grid-column:span 12}
 .dash-w-head{display:flex;align-items:center;gap:8px;margin-bottom:var(--space-3)}
-.dash-w-title{flex:1;font-size:var(--text-sm);font-weight:600;color:var(--color-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dash-w-ico{flex:none;width:28px;height:28px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font-size:15px;background:var(--color-primary-hl);line-height:1}
+.dash-w-title{flex:1;font-size:var(--text-sm);font-weight:700;color:var(--color-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-.01em}
 .dash-grip{cursor:grab;color:var(--color-text-faint);font-size:12px;letter-spacing:-2px;display:none;user-select:none}
 .dash-wtools{display:none;gap:3px}
 .dash-grid.is-edit .dash-wtools{display:inline-flex}
@@ -33168,39 +33169,49 @@ function _dashSrcState(srcId){
 // su menú (ya filtrado por permisos), NO puede verlo ni agregarlo. Sin `menu` =
 // dato general (visible para cualquiera que abra el Resumen). admin/'*' ve todo.
 var DASH_REGISTRY = [
-  {id:'ing_total',   label:'Ingresos del periodo',    cat:'Ingresos',  menu:['ingresos'], forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:fmtMXN(sumArr(d.ingresos)), sub:'Suma del periodo'};}},
-  {id:'gas_total',   label:'Gastos del periodo',      cat:'Egresos',   menu:['egresos','gastos','cxp'], forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:fmtMXN(sumArr(d.gastos)), sub:'Suma del periodo'};}},
-  {id:'util_total',  label:'Utilidad del periodo',    cat:'Ingresos',  menu:['ingresos'], forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:fmtMXN(sumArr(d.ingresos)-sumArr(d.gastos)), sub:'Ingresos − gastos'};}},
-  {id:'margen_prom', label:'Margen bruto promedio',   cat:'Ingresos',  menu:['ingresos'], forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:Math.round(avgArr(d.margen))+'%', sub:'Promedio del periodo'};}},
-  {id:'ciclos_total',label:'Ciclos del periodo',      cat:'Operación', forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:sumArr(d.ciclos), sub:'Total del periodo'};}},
-  {id:'cac_prom',    label:'CAC promedio',            cat:'Operación', forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);var c=Math.round(avgArr(d.cac));return {valor:c>0?fmtMXN(c):'—', sub:'Costo de adquisición'};}},
-  {id:'ing_mes',     label:'Ingresos por mes',        cat:'Ingresos',  menu:['ingresos'], forma:'serie', viz:['bar','line','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses,d.ingresos);}},
-  {id:'gas_mes',     label:'Gastos por mes',          cat:'Egresos',   menu:['egresos','gastos','cxp'], forma:'serie', viz:['bar','line','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses,d.gastos);}},
-  {id:'util_mes',    label:'Utilidad por mes',        cat:'Ingresos',  menu:['ingresos'], forma:'serie', viz:['bar','line','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses, d.ingresos.map(function(v,i){return v-(d.gastos[i]||0);}));}},
-  {id:'ciclos_mes',  label:'Ciclos por mes',          cat:'Operación', forma:'serie', viz:['bar','line','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses,d.ciclos);}},
-  {id:'margen_mes',  label:'Margen por mes (%)',      cat:'Ingresos',  menu:['ingresos'], forma:'serie', viz:['line','bar','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses,d.margen);}},
-  {id:'flujo_mes',   label:'Flujo de caja por mes',   cat:'Caja',      menu:['cashflow','flujo'], forma:'serie', viz:['bar','line','table'], get:function(D){var c=(D&&D.cashflow)||{};return _serie(c.meses,c.flujo);}},
-  {id:'mix_serv',    label:'Mix de servicios',        cat:'Servicios', menu:['ingresos'], forma:'distribucion', viz:['pie','bar','table'], get:function(D){var o=(D&&D.donut)||{};return {labels:o.labels||[], data:o.data||[], colors:o.colors||[]};}},
-  {id:'distrib_cos', label:'Distribución de costos',  cat:'Egresos',   menu:['egresos','gastos','cxp'], forma:'distribucion', viz:['pie','bar','table'], get:function(D){var o=(D&&D.costos)||{};return {labels:o.labels||[], data:o.data||[], colors:o.colors||[]};}},
-  {id:'rent_serv',   label:'Rentabilidad por servicio',cat:'Servicios',menu:['ingresos'], forma:'tabla', viz:['table'], get:function(D){return {cols:['Servicio','Ingresos','Margen'], rows:((D&&D.servicios)||[]).map(function(s){return [s.name, s.ingresos, s.margen+'%'];})};}},
+  {id:'ing_total',   label:'Ingresos del periodo',    icon:'💰', cat:'Ingresos',  menu:['ingresos'], forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:fmtMXN(sumArr(d.ingresos)), sub:'Suma del periodo'};}},
+  {id:'gas_total',   label:'Gastos del periodo',      icon:'💸', cat:'Egresos',   menu:['egresos','gastos','cxp'], forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:fmtMXN(sumArr(d.gastos)), sub:'Suma del periodo'};}},
+  {id:'util_total',  label:'Utilidad del periodo',    icon:'📈', cat:'Ingresos',  menu:['ingresos'], forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:fmtMXN(sumArr(d.ingresos)-sumArr(d.gastos)), sub:'Ingresos − gastos'};}},
+  {id:'margen_prom', label:'Margen bruto promedio',   icon:'📊', cat:'Ingresos',  menu:['ingresos'], forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);return {valor:Math.round(avgArr(d.margen))+'%', sub:'Promedio del periodo'};}},
+  {id:'margen_bruto',label:'Margen bruto del periodo',icon:'🧮', cat:'Ingresos',  menu:['ingresos'], forma:'escalar', viz:['kpi'], get:function(D){return {valor:((D&&D.margenBruto)||0)+'%', sub:'Utilidad bruta ÷ ingresos'};}},
+  {id:'ciclos_total',label:'Ciclos del periodo',      icon:'🔬', cat:'Operación', forma:'escalar', viz:['kpi'], get:function(D){var b=(D&&D.ciclosBox)||{};var h=(b.hestia&&b.hestia.n)||0,e=(b.externos&&b.externos.n)||0;return {valor:(h+e), sub:h+' Hestia · '+e+' Externos'};}},
+  {id:'ciclos_hestia',label:'Ciclos Hestia (Alta)',   icon:'🏥', cat:'Operación', forma:'escalar', viz:['kpi'], get:function(D){var b=(D&&D.ciclosBox)||{};var h=b.hestia||{};return {valor:(h.n||0), sub:fmtMXN(h.monto||0)+' en ingresos'};}},
+  {id:'ciclos_ext',  label:'Ciclos Externos (Capturas)',icon:'🤝', cat:'Operación', forma:'escalar', viz:['kpi'], get:function(D){var b=(D&&D.ciclosBox)||{};var e=b.externos||{};return {valor:(e.n||0), sub:fmtMXN(e.monto||0)+' en ingresos'};}},
+  {id:'cac_prom',    label:'CAC promedio',            icon:'🎯', cat:'Operación', forma:'escalar', viz:['kpi'], get:function(D){var d=_dSeg(D);var c=Math.round(avgArr(d.cac));return {valor:c>0?fmtMXN(c):'—', sub:'Costo de adquisición'};}},
+  {id:'ing_mes',     label:'Ingresos por mes',        icon:'💰', cat:'Ingresos',  menu:['ingresos'], forma:'serie', viz:['bar','line','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses,d.ingresos);}},
+  {id:'gas_mes',     label:'Gastos por mes',          icon:'💸', cat:'Egresos',   menu:['egresos','gastos','cxp'], forma:'serie', viz:['bar','line','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses,d.gastos);}},
+  {id:'util_mes',    label:'Utilidad por mes',        icon:'📈', cat:'Ingresos',  menu:['ingresos'], forma:'serie', viz:['bar','line','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses, d.ingresos.map(function(v,i){return v-(d.gastos[i]||0);}));}},
+  {id:'ciclos_mes',  label:'Ciclos por mes',          icon:'🔬', cat:'Operación', forma:'serie', viz:['bar','line','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses,d.ciclos);}},
+  {id:'ciclos_hestia_mes',label:'Ciclos Hestia por mes',icon:'🏥',cat:'Operación', forma:'serie', viz:['bar','line','table'], get:function(D){var b=(D&&D.ciclosBox)||{};return _serie(b.labels||[], (b.hestia&&b.hestia.serie)||[]);}},
+  {id:'ciclos_ext_mes',label:'Ciclos Externos por mes',icon:'🤝',cat:'Operación', forma:'serie', viz:['bar','line','table'], get:function(D){var b=(D&&D.ciclosBox)||{};return _serie(b.labels||[], (b.externos&&b.externos.serie)||[]);}},
+  {id:'margen_mes',  label:'Margen por mes (%)',      icon:'📊', cat:'Ingresos',  menu:['ingresos'], forma:'serie', viz:['line','bar','table'], get:function(D){var d=_dSeg(D);return _serie(d.meses,d.margen);}},
+  {id:'mix_serv',    label:'Mix de servicios',        icon:'🧬', cat:'Servicios', menu:['ingresos'], forma:'distribucion', viz:['pie','bar','table'], get:function(D){var o=(D&&D.donut)||{};return {labels:o.labels||[], data:o.data||[], colors:o.colors||[]};}},
+  {id:'ing_hestia_ext',label:'Ingreso Hestia vs Externos',icon:'🥧',cat:'Servicios', forma:'distribucion', viz:['pie','bar','table'], get:function(D){var b=(D&&D.ciclosBox)||{};return {labels:['Hestia','Externos'], data:[(b.hestia&&b.hestia.monto)||0,(b.externos&&b.externos.monto)||0], colors:['#c46a7a','#3d8f8f']};}},
   // ── Cuentas por Pagar (fuente asíncrona action=cxp) ──
-  {id:'cxp_vencido', label:'CxP: monto vencido',       cat:'Cuentas por Pagar', menu:['cxp','egresos','gastos'], src:'cxp', forma:'escalar', viz:['kpi'], get:function(B){var r=(B&&B.resumen)||{};return {valor:fmtMXN(r.totalVencido||0), sub:(r.vencido||0)+' cuenta(s) vencida(s)'};}},
-  {id:'cxp_d7',      label:'CxP: por pagar ≤7 días',   cat:'Cuentas por Pagar', menu:['cxp','egresos','gastos'], src:'cxp', forma:'escalar', viz:['kpi'], get:function(B){var r=(B&&B.resumen)||{};return {valor:fmtMXN((r.totalD3||0)+(r.totalD7||0)), sub:((r.d3||0)+(r.d7||0))+' cuenta(s) próximas'};}},
-  {id:'cxp_d30',     label:'CxP: por pagar ≤30 días',  cat:'Cuentas por Pagar', menu:['cxp','egresos','gastos'], src:'cxp', forma:'escalar', viz:['kpi'], get:function(B){var r=(B&&B.resumen)||{};return {valor:fmtMXN(r.totalD30||0), sub:(r.d30||0)+' cuenta(s) en el mes'};}},
-  {id:'cxp_urgencia',label:'CxP por urgencia',         cat:'Cuentas por Pagar', menu:['cxp','egresos','gastos'], src:'cxp', forma:'distribucion', viz:['pie','bar','table'], get:function(B){var r=(B&&B.resumen)||{};return {labels:['Vencido','≤3 días','≤7 días','≤30 días'], data:[r.totalVencido||0,r.totalD3||0,r.totalD7||0,r.totalD30||0], colors:['#dc2626','#c47a1e','#eab308','#3a72a8']};}},
+  {id:'cxp_vencido', label:'CxP: monto vencido',       icon:'⏰', cat:'Cuentas por Pagar', menu:['cxp','egresos','gastos'], src:'cxp', forma:'escalar', viz:['kpi'], get:function(B){var r=(B&&B.resumen)||{};return {valor:fmtMXN(r.totalVencido||0), sub:(r.vencido||0)+' cuenta(s) vencida(s)'};}},
+  {id:'cxp_d7',      label:'CxP: por pagar ≤7 días',   icon:'📌', cat:'Cuentas por Pagar', menu:['cxp','egresos','gastos'], src:'cxp', forma:'escalar', viz:['kpi'], get:function(B){var r=(B&&B.resumen)||{};return {valor:fmtMXN((r.totalD3||0)+(r.totalD7||0)), sub:((r.d3||0)+(r.d7||0))+' cuenta(s) próximas'};}},
+  {id:'cxp_d30',     label:'CxP: por pagar ≤30 días',  icon:'📅', cat:'Cuentas por Pagar', menu:['cxp','egresos','gastos'], src:'cxp', forma:'escalar', viz:['kpi'], get:function(B){var r=(B&&B.resumen)||{};return {valor:fmtMXN(r.totalD30||0), sub:(r.d30||0)+' cuenta(s) en el mes'};}},
+  {id:'cxp_total',   label:'CxP: total por pagar (30d)',icon:'🧾', cat:'Cuentas por Pagar', menu:['cxp','egresos','gastos'], src:'cxp', forma:'escalar', viz:['kpi'], get:function(B){var r=(B&&B.resumen)||{};return {valor:fmtMXN((r.totalVencido||0)+(r.totalD3||0)+(r.totalD7||0)+(r.totalD30||0)), sub:'Vencido + próximos 30 días'};}},
+  {id:'cxp_urgencia',label:'CxP por urgencia',         icon:'🚦', cat:'Cuentas por Pagar', menu:['cxp','egresos','gastos'], src:'cxp', forma:'distribucion', viz:['pie','bar','table'], get:function(B){var r=(B&&B.resumen)||{};return {labels:['Vencido','≤3 días','≤7 días','≤30 días'], data:[r.totalVencido||0,r.totalD3||0,r.totalD7||0,r.totalD30||0], colors:['#dc2626','#c47a1e','#eab308','#3a72a8']};}},
   // ── Estado de Resultados (fuente asíncrona action=summary, motor CFO) ──
-  {id:'pl_revenue',  label:'P&L: Ingresos (Revenue)',  cat:'Estado de Resultados', menu:['summary'], src:'summary', forma:'escalar', viz:['kpi'], get:function(B){var m=(B&&B.metricas)||{};return {valor:fmtMXN(m.revenue||0), sub:'Periodo del filtro'};}},
-  {id:'pl_ebitda',   label:'P&L: EBITDA',              cat:'Estado de Resultados', menu:['summary'], src:'summary', forma:'escalar', viz:['kpi'], get:function(B){var m=(B&&B.metricas)||{};var pct=m.revenue?Math.round(m.ebitda/m.revenue*100):0;return {valor:fmtMXN(m.ebitda||0), sub:pct+'% del ingreso'};}},
-  {id:'pl_utilidad', label:'P&L: Utilidad neta',       cat:'Estado de Resultados', menu:['summary'], src:'summary', forma:'escalar', viz:['kpi'], get:function(B){var m=(B&&B.metricas)||{};var pct=m.revenue?Math.round(m.netProfit/m.revenue*100):0;return {valor:fmtMXN(m.netProfit||0), sub:pct+'% margen neto'};}},
-  {id:'pl_estructura',label:'P&L: estructura de costos',cat:'Estado de Resultados', menu:['summary'], src:'summary', forma:'distribucion', viz:['pie','bar','table'], get:function(B){
+  {id:'pl_revenue',  label:'P&L: Ingresos (Revenue)',  icon:'🏦', cat:'Estado de Resultados', menu:['summary'], src:'summary', forma:'escalar', viz:['kpi'], get:function(B){var m=(B&&B.metricas)||{};return {valor:fmtMXN(m.revenue||0), sub:'Periodo del filtro'};}},
+  {id:'pl_gross',    label:'P&L: Utilidad bruta',      icon:'🏦', cat:'Estado de Resultados', menu:['summary'], src:'summary', forma:'escalar', viz:['kpi'], get:function(B){var m=(B&&B.metricas)||{};var pct=m.revenue?Math.round(m.grossProfit/m.revenue*100):0;return {valor:fmtMXN(m.grossProfit||0), sub:pct+'% del ingreso'};}},
+  {id:'pl_ebitda',   label:'P&L: EBITDA',              icon:'🏦', cat:'Estado de Resultados', menu:['summary'], src:'summary', forma:'escalar', viz:['kpi'], get:function(B){var m=(B&&B.metricas)||{};var pct=m.revenue?Math.round(m.ebitda/m.revenue*100):0;return {valor:fmtMXN(m.ebitda||0), sub:pct+'% del ingreso'};}},
+  {id:'pl_utilidad', label:'P&L: Utilidad neta',       icon:'🏦', cat:'Estado de Resultados', menu:['summary'], src:'summary', forma:'escalar', viz:['kpi'], get:function(B){var m=(B&&B.metricas)||{};var pct=m.revenue?Math.round(m.netProfit/m.revenue*100):0;return {valor:fmtMXN(m.netProfit||0), sub:pct+'% margen neto'};}},
+  {id:'pl_cogs',     label:'P&L: Costo de ventas',     icon:'🏭', cat:'Estado de Resultados', menu:['summary'], src:'summary', forma:'escalar', viz:['kpi'], get:function(B){var m=(B&&B.metricas)||{};return {valor:fmtMXN(m.cogs||0), sub:'Costos directos (COGS)'};}},
+  {id:'pl_opex',     label:'P&L: Gastos de operación', icon:'🏢', cat:'Estado de Resultados', menu:['summary'], src:'summary', forma:'escalar', viz:['kpi'], get:function(B){var m=(B&&B.metricas)||{};return {valor:fmtMXN((m.opex||0)+(m.ga||0)), sub:'OpEx + G&A'};}},
+  {id:'distrib_cos', label:'Distribución de costos',   icon:'🧾', cat:'Egresos', menu:['egresos','gastos','cxp'], src:'summary', forma:'distribucion', viz:['pie','bar','table'], get:function(B){var m=(B&&B.metricas)||{};return {labels:['COGS','OpEx','G&A','Impuestos'], data:[m.cogs||0,m.opex||0,m.ga||0,m.taxes||0], colors:['#c46a7a','#3d8f8f','#c47a1e','#7a52b0']};}},
+  {id:'pl_estructura',label:'P&L: estructura de costos',icon:'🏦', cat:'Estado de Resultados', menu:['summary'], src:'summary', forma:'distribucion', viz:['pie','bar','table'], get:function(B){
     var m=(B&&B.metricas)||{}; var labels=['COGS','OpEx','G&A','Impuestos'], data=[m.cogs||0,m.opex||0,m.ga||0,m.taxes||0], colors=['#c46a7a','#3d8f8f','#c47a1e','#7a52b0'];
     if((m.netProfit||0)>0){ labels.push('Utilidad neta'); data.push(m.netProfit); colors.push('#4d8c5a'); }
     return {labels:labels, data:data, colors:colors}; }},
   // ── Avisos del equipo (broadcast — todos los ven) ──
-  {id:'avisos_lista', label:'Avisos del equipo',        cat:'Comunicación', src:'avisos', forma:'tabla', viz:['table'], get:function(B){
+  {id:'avisos_lista', label:'Avisos del equipo',        icon:'📣', cat:'Comunicación', src:'avisos', forma:'tabla', viz:['table'], get:function(B){
     var l=(B&&B.avisos)||[]; return {cols:['Aviso','Fecha'], rows:l.slice(0,8).map(function(a){
       return [a.titulo, a.fechaEvento || (a.ts?new Date(a.ts).toLocaleDateString('es-MX',{day:'numeric',month:'short'}):'')]; })}; }}
 ];
+// Icono por categoría para el panel «Agregar widget» (estilo Power BI).
+var DASH_CAT_ICON={ 'Ingresos':'💰','Egresos':'💸','Operación':'🔬','Servicios':'🧬','Caja':'🏦','Cuentas por Pagar':'🧾','Estado de Resultados':'🏦','Comunicación':'📣' };
 function _dashDef(id){ for(var i=0;i<DASH_REGISTRY.length;i++) if(DASH_REGISTRY[i].id===id) return DASH_REGISTRY[i]; return null; }
 // ¿El usuario puede ver este dato? admin/'*' todo; si trae `perm` exige el permiso;
 // si trae `menu` exige tener alguno de esos menús (menuItems ya viene filtrado por
@@ -33237,6 +33248,17 @@ function _resumenGatearClasico(){
   gate('rc-costos',  ['egresos','gastos','cxp']); // Distribución de costos
 }
 function _dashVizLabel(v){ return {kpi:'KPI',bar:'Barras',line:'Línea',pie:'Pastel',table:'Tabla'}[v]||v; }
+// ¿El widget tiene datos que mostrar? Evita recuadros en blanco cuando el periodo
+// no trae nada (o la fuente no devolvió esa forma). KPI '—'/vacío = sin dato.
+function _dashHasData(def,val,viz){
+  if(!val) return false;
+  if(viz==='kpi'){ var v=val.valor; return v!==undefined && v!==null && v!=='' && v!=='—'; }
+  if(def.forma==='tabla'){ return !!(val.rows && val.rows.length); }
+  var data=val.data||[];
+  if(!data.length) return false;
+  var sum=0; for(var i=0;i<data.length;i++) sum+=Math.abs(+data[i]||0);
+  return sum>0;   // series/distribución todo-cero = sin dato real
+}
 function _dashPalette(n){ var base=['#c46a7a','#3d8f8f','#c47a1e','#7a52b0','#3a72a8','#4d8c5a','#b8577a','#8a6d3b'],o=[],i; for(i=0;i<n;i++) o.push(base[i%base.length]); return o; }
 
 // ── Layout (localStorage por usuario) ──
@@ -33304,7 +33326,9 @@ function dashRender(){
 }
 function _dashWidgetShell(w){
   var def=_dashDef(w.dato); var titulo=w.titulo || (def?def.label:'—');
+  var icon=(def&&def.icon)||'📊';
   var tools='<span class="dash-grip" draggable="true" ondragstart="_dashDragStart(event,\''+w.id+'\')" title="Arrastrar">⋮⋮</span>'
+    +'<span class="dash-w-ico">'+icon+'</span>'
     +'<div class="dash-w-title">'+_cxpEsc(titulo)+'</div>'
     +'<div class="dash-wtools">'
     +'<button class="dash-wt" title="Cambiar tamaño" onclick="dashCycleSpan(\''+w.id+'\')">⤢</button>'
@@ -33325,6 +33349,8 @@ function _dashPaint(w){
   }
   var val; try{ val=def.get(bundle); }catch(e){ body.innerHTML='<div class="dash-empty-sm">—</div>'; return; }
   var viz=w.viz||def.viz[0];
+  // Estado vacío elegante: sin dato para el periodo → mensaje, no recuadro en blanco.
+  if(!_dashHasData(def,val,viz)){ body.innerHTML='<div class="dash-empty-sm">Sin datos en este periodo</div>'; return; }
   if(viz==='kpi'){ body.innerHTML='<div class="dash-kpi-val">'+val.valor+'</div>'+(val.sub?'<div class="dash-kpi-sub">'+val.sub+'</div>':''); return; }
   if(viz==='table'){ body.innerHTML=_dashTableHTML(def,val); return; }
   body.innerHTML='<div class="dash-canvas-wrap"><canvas id="dashc-'+w.id+'"></canvas></div>';
@@ -33394,7 +33420,7 @@ function _dashRenderAddPanel(){
   if(!order.length){ body.innerHTML='<div class="dash-empty-sm">No hay datos disponibles para tus permisos. Pide acceso a un área para poder agregarla.</div>'; return; }
   var h='';
   order.forEach(function(cat){
-    h+='<div class="dash-add-cat">'+cat+'</div>';
+    h+='<div class="dash-add-cat">'+((DASH_CAT_ICON&&DASH_CAT_ICON[cat])?DASH_CAT_ICON[cat]+' ':'')+cat+'</div>';
     cats[cat].forEach(function(d){
       var on=_dashPick[d.id]!==undefined;
       var vopts=d.viz.map(function(v){return '<option value="'+v+'"'+((on&&_dashPick[d.id]===v)?' selected':'')+'>'+_dashVizLabel(v)+'</option>';}).join('');
@@ -45083,11 +45109,11 @@ async function _novCfgGuardar(){
       cards:[ {label:'Ingresos del periodo', val:'$1,240,000'}, {label:'CxP: monto vencido', val:'$85,300'}, {label:'P&L: EBITDA', val:'$310,000'} ],
       note:'En modo **Editar**, cada widget muestra sus controles: **⋮⋮** arrastrar · **⤢** tamaño · **✕** quitar.',
       callouts:[ {n:1,text:'El **interruptor** cambia entre Clásico y Mi tablero sin perder nada. El ERP recuerda el último modo que usaste.'},
-                 {n:2,text:'**+ Agregar widget** abre el panel de **checkboxes agrupados por categoría** (Ingresos, Egresos, Operación, Servicios, Caja, Cuentas por Pagar, Estado de Resultados, Comunicación): marcas el dato y eliges cómo verlo.'},
+                 {n:2,text:'**+ Agregar widget** abre el panel de **checkboxes agrupados por categoría** (Ingresos, Egresos, Operación, Servicios, Cuentas por Pagar, Estado de Resultados, Comunicación): marcas el dato y eliges cómo verlo.'},
                  {n:3,text:'**Editar** enciende el modo edición: arrastra con **⋮⋮** para reordenar, **⤢** cicla el tamaño (chico → mediano → grande → ancho) y **✕** quita el widget. Al terminar, el botón dice **Listo**.'} ] },
     steps:[
       'Entra al **Resumen** y pulsa **Mi tablero** en el interruptor de arriba. La primera vez está vacío: es normal, lo vas a armar tú.',
-      'Pulsa **+ Agregar widget**. Se abre el panel con los datos disponibles **agrupados por categoría** (Ingresos, Egresos, Operación, Servicios, Caja, Cuentas por Pagar, Estado de Resultados, Comunicación).',
+      'Pulsa **+ Agregar widget**. Se abre el panel con los datos disponibles **agrupados por categoría** (Ingresos, Egresos, Operación, Servicios, Cuentas por Pagar, Estado de Resultados, Comunicación).',
       '**Marca la casilla** de cada dato que quieras y, en su lista de la derecha, elige **cómo verlo**: KPI (número grande), Barras, Línea, Pastel o Tabla. No todo permite todas las formas — un total del periodo, por ejemplo, solo tiene sentido como KPI.',
       'Pulsa **Agregar seleccionados**: los widgets aparecen en el tablero ya pintados con los datos del periodo elegido arriba.',
       'Para acomodarlo, pulsa **Editar**: arrastra cada widget desde **⋮⋮** y suéltalo sobre otro para reordenar, pulsa **⤢** para cambiar su tamaño (chico → mediano → grande → ancho, en ciclo) y **✕** para quitar el que sobre.',
