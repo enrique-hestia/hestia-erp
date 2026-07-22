@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.325 -->
+﻿<!-- app-build:2026.07.22.326 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -24801,13 +24801,20 @@ function _ovOpenEditor(ov, ro){
     +   '<div style="font-size:17px;font-weight:800;color:var(--text-primary,#111)">'+_escH(titulo)+'</div>'
     +   '<button onclick="_ovCloseEditor()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#9ca3af;line-height:1">×</button></div>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">'
-    +   '<label style="font-size:11px;color:var(--color-text-muted,#6b7280)">Paciente<input id="ov-e-paciente" '+dis+' value="'+_escH(ov?ov.paciente:'')+'" style="'+IS+'"></label>'
-    +   '<label style="font-size:11px;color:var(--color-text-muted,#6b7280)">Origen / Médico<input id="ov-e-origen" '+dis+' value="'+_escH(ov?ov.origen:'')+'" style="'+IS+'"></label>'
+    +   '<label style="font-size:11px;color:var(--color-text-muted,#6b7280)">Paciente'
+    +     '<div style="display:flex;gap:6px"><input id="ov-e-paciente" list="ov-paclist" '+dis+' value="'+_escH(ov?ov.paciente:'')+'" placeholder="Buscar paciente…" style="'+IS+'">'
+    +     (ro?'':'<button type="button" onclick="ovNuevoPaciente()" title="Dar de alta un paciente nuevo" style="flex:0 0 auto;padding:0 12px;background:var(--color-surface-2,#f3f4f6);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:16px;font-weight:700;cursor:pointer;color:var(--color-primary,#c46a7a)">＋</button>')
+    +     '</div><datalist id="ov-paclist"></datalist></label>'
+    +   '<label style="font-size:11px;color:var(--color-text-muted,#6b7280)">Origen / Médico<select id="ov-e-origen" '+dis+' style="'+IS+'"><option value="'+_escH(ov?ov.origen:'')+'">'+_escH(ov?(ov.origen||'— Sin origen —'):'— Sin origen —')+'</option></select></label>'
     +   '<label style="font-size:11px;color:var(--color-text-muted,#6b7280)">Fecha<input type="date" id="ov-e-fecha" '+dis+' value="'+_escH(ov?ov.fecha:'')+'" style="'+IS+'"></label>'
     +   '<label style="font-size:11px;color:var(--color-text-muted,#6b7280)">Vigencia<input type="date" id="ov-e-vigencia" '+dis+' value="'+_escH(ov?ov.vigencia:'')+'" style="'+IS+'"></label>'
     + '</div>'
-    + '<datalist id="ov-prodlist">'+((_ingTodosProductos||_ingProductos||[]).map(function(p){ var pr=(p.precios&&p.precios.General)||p.precio||0; return '<option value="'+String(p.descripcion||'').replace(/"/g,'&quot;')+'" data-precio="'+pr+'" data-sku="'+String(p.sku||'').replace(/"/g,'&quot;')+'">'; }).join(''))+'</datalist>'
-    + '<div style="font-size:11px;color:var(--color-text-muted,#6b7280);margin-bottom:4px;font-weight:700">Productos</div>'
+    + '<datalist id="ov-prodlist"></datalist>'
+    + '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:6px">'
+    +   '<span style="font-size:11px;color:var(--color-text-muted,#6b7280);font-weight:700">Productos</span>'
+    +   (ro?'':'<span style="font-size:11px;color:var(--color-text-muted,#6b7280)">· Precio: <select id="ov-e-modo" onchange="ovModoChange()" style="padding:4px 8px;border:1px solid var(--color-divider,#e5e7eb);border-radius:6px;font-size:11.5px;background:var(--card-bg,#fff);color:var(--text-primary,#111)"><option value="catalogo">Catálogo (normal)</option><option value="gm-tier">Grupo Médico — Tier fijo</option><option value="gm-pct">Grupo Médico — Porcentaje</option></select></span>')
+    +   '<span id="ov-e-gminfo" style="font-size:11px;color:#0d9488;font-weight:600"></span>'
+    + '</div>'
     + '<div style="display:grid;grid-template-columns:1fr 90px 60px 55px 100px 26px;gap:6px;font-size:10px;color:var(--color-text-muted,#9ca3af);padding:0 2px 3px"><div>Producto</div><div style="text-align:right">PVP</div><div style="text-align:right">Desc%</div><div style="text-align:center">Cant</div><div style="text-align:right">Subtotal</div><div></div></div>'
     + '<div id="ov-lineas"></div>'
     + (ro ? '' : '<button onclick="ovAddLinea()" style="margin-top:6px;padding:5px 11px;background:var(--color-surface-2,#f3f4f6);border:1px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:11.5px;font-weight:700;cursor:pointer">＋ Línea</button>')
@@ -24819,9 +24826,71 @@ function _ovOpenEditor(ov, ro){
              + '<button onclick="ovGuardar()" style="padding:9px 20px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Guardar</button></div>')
     + '</div></div>';
   m.innerHTML = h; m.style.display = 'flex';
+  _ovSetupPacientes();
+  _ovSetupOrigenes(ov);
+  if (typeof _gmCtxLoad === 'function') _gmCtxLoad();
+  _ovBuildProdDatalist('catalogo');
   var lc = ov && ov.lineas && ov.lineas.length ? ov.lineas : [null];
   lc.forEach(function(l){ ovAddLinea(l, ro); });
   ovRecalc();
+}
+/* Dropdown de pacientes (mismo origen que la captura de ingresos) + alta rápida. */
+function _ovSetupPacientes(){
+  var dl = document.getElementById('ov-paclist'); if (!dl) return;
+  function fill(){ dl.innerHTML = (_ingPacientesDB||[]).map(function(p){ return '<option value="'+String(p.nombre||'').replace(/"/g,'&quot;')+'">'; }).join(''); }
+  if (_ingPacientesDB && _ingPacientesDB.length) fill();
+  if (typeof ingLoadPacientes === 'function') { try{ ingLoadPacientes(false).then(fill).catch(function(){}); }catch(e){} }
+}
+function ovNuevoPaciente(){
+  _ingPacienteCallback = function(nombre){
+    var el = document.getElementById('ov-e-paciente'); if (el && nombre) el.value = nombre;
+    if (_ingPacientesDB && !_ingPacientesDB.some(function(p){return p.nombre===nombre;})) _ingPacientesDB.push({nombre:nombre, lista:'General'});
+    _ovSetupPacientes();
+  };
+  if (typeof openModal === 'function') openModal('cap-pacientes');
+}
+/* Dropdown de orígenes/médicos (mismo catálogo que la captura). */
+async function _ovSetupOrigenes(ov){
+  var sel = document.getElementById('ov-e-origen'); if (!sel || typeof _origFetchList !== 'function') return;
+  try{
+    var list = await _origFetchList();
+    var actives = list.filter(function(o){ return o.activo !== false; });
+    sel.innerHTML = '<option value="">— Sin origen —</option>' + _origOptionsHTML(actives, ov?ov.origen:'');
+    if (ov && ov.origen) sel.value = ov.origen;
+  }catch(e){}
+}
+/* Datalist de productos según el modo:
+   · catalogo → productos de la BD (precio normal).
+   · gm-tier / gm-pct → PROCEDIMIENTOS de las reglas de comisión + tratamientos con
+     tarifa (NO viven en la BD de productos). El precio se llena al elegir. */
+function _ovBuildProdDatalist(modo){
+  var dl = document.getElementById('ov-prodlist'); if (!dl) return;
+  var opts = '';
+  if (modo === 'gm-tier' || modo === 'gm-pct'){
+    var trat = (window._gmCtx && _gmCtx.tratamientos) || [];
+    var byName = {}; trat.forEach(function(t){ byName[_gmKey(t.nombre)] = t; if(t.sku) byName[_gmKey(t.sku)] = t; });
+    var procs = ((window._gmCtx && _gmCtx.procedimientos) || []).slice();
+    trat.forEach(function(t){ if (procs.indexOf(t.nombre) < 0) procs.push(t.nombre); });
+    var seen = {};
+    procs.forEach(function(nm){
+      var k = _gmKey(nm); if (seen[k]) return; seen[k] = 1;
+      var t = byName[k];
+      opts += '<option value="'+String(nm).replace(/"/g,'&quot;')+'" data-gm="1" data-base="'+(t?t.base:0)+'" data-tierprice="'+(t?t.precioMedico:0)+'">';
+    });
+  } else {
+    opts = (_ingTodosProductos||_ingProductos||[]).map(function(p){ var pr=(p.precios&&p.precios.General)||p.precio||0; return '<option value="'+String(p.descripcion||'').replace(/"/g,'&quot;')+'" data-precio="'+pr+'" data-sku="'+String(p.sku||'').replace(/"/g,'&quot;')+'">'; }).join('');
+  }
+  dl.innerHTML = opts;
+}
+function ovModoChange(){
+  var modo = (document.getElementById('ov-e-modo')||{}).value || 'catalogo';
+  var info = document.getElementById('ov-e-gminfo');
+  if (modo === 'gm-tier' || modo === 'gm-pct'){
+    _gmCtxLoad().then(function(){
+      _ovBuildProdDatalist(modo);
+      if (info && window._gmCtx) info.textContent = '🏥 '+(_gmCtx.tierLabel||'')+' ('+(_gmCtx.conteo||0)+' proced. de '+(_gmCtx.mesAnterior||'')+') · '+(modo==='gm-pct' ? ((_gmCtx.pct||0)+'% de descuento sobre base') : 'precio de la tabla');
+    });
+  } else { _ovBuildProdDatalist('catalogo'); if (info) info.textContent = ''; }
 }
 function _ovCloseEditor(){ var m = document.getElementById('ov-modal'); if (m){ m.style.display='none'; m.innerHTML=''; } }
 function ovAddLinea(l, ro){
@@ -24841,10 +24910,23 @@ function ovAddLinea(l, ro){
 }
 function ovOnProd(n){
   var inp = document.getElementById('ov-l-prod-'+n); if (!inp) return;
-  var dl = document.getElementById('ov-prodlist'); if (dl){
-    var opt = Array.prototype.filter.call(dl.options, function(o){ return o.value === inp.value; })[0];
-    if (opt){
-      var pvp = document.getElementById('ov-l-pvp-'+n);
+  var dl = document.getElementById('ov-prodlist');
+  var modo = (document.getElementById('ov-e-modo')||{}).value || 'catalogo';
+  var opt = dl ? Array.prototype.filter.call(dl.options, function(o){ return o.value === inp.value; })[0] : null;
+  if (opt){
+    var pvp = document.getElementById('ov-l-pvp-'+n), desc = document.getElementById('ov-l-desc-'+n);
+    if (opt.getAttribute('data-gm') === '1'){
+      if (modo === 'gm-pct'){
+        // Porcentaje: PVP = base, Desc% = % del escalón del tier (mes anterior).
+        if (pvp) pvp.value = parseFloat(opt.getAttribute('data-base')) || 0;
+        if (desc && window._gmCtx) desc.value = _gmCtx.pct || 0;
+      } else {
+        // Tier fijo: PVP = precio de la tabla para el tier vigente, sin descuento extra.
+        if (pvp) pvp.value = parseFloat(opt.getAttribute('data-tierprice')) || 0;
+        if (desc) desc.value = 0;
+      }
+      inp.setAttribute('data-sku', '');
+    } else {
       if (pvp && !pvp.value) pvp.value = opt.getAttribute('data-precio') || '';
       inp.setAttribute('data-sku', opt.getAttribute('data-sku') || '');
     }

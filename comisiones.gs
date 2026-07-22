@@ -356,7 +356,19 @@ function tarifaGMContexto(anio, mes){
     var tier = _gmTierPorVolumen(conteo);
     var tl = (cfg.tiers && cfg.tiers[tier]) ? cfg.tiers[tier].label : ('Tier '+tier);
     var pct = (cfg.tiers && cfg.tiers[tier]) ? cfg.tiers[tier].pct : 0;
+    // Procedimientos que APLICAN según las reglas de comisión (imagen "PROCEDIMIENTOS
+    // QUE APLICAN"): estos productos NO viven en la BD de productos, hay que ofrecerlos
+    // en el dropdown de la cotización. Unión de todas las reglas activas de comisión.
+    var procs = {};
+    try{
+      (_comCfg().reglas || []).forEach(function(r){
+        if (r.activo === false) return;
+        (r.productos || []).forEach(function(p){ if(p) procs[String(p).trim()] = 1; });
+        (r.productosSoloDescuento || []).forEach(function(p){ if(p) procs[String(p).trim()] = 1; });
+      });
+    }catch(e){}
     return { ok:true, tier:tier, tierLabel:tl, pct:pct, conteo:conteo, mesAnterior:mesPrevKey,
+             procedimientos: Object.keys(procs),
              tratamientos:(cfg.tratamientos||[]).map(function(t){
                return { nombre:t.nombre, sku:t.sku, base:t.base,
                         precioMedico:(t.precio&&t.precio[tier]!=null)?t.precio[tier]:t.base,
