@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.319 -->
+﻿<!-- app-build:2026.07.22.320 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -30045,7 +30045,7 @@ function _cxpBuildNewRows(rows) {
       + '<td style="font-size:11px">'+(row.vencimiento||'—')+'</td>'
       + '<td style="text-align:center;font-size:12px">'+factIcon+'</td>'
       + '<td style="text-align:center;white-space:nowrap">'
-        + '<button onclick="cxpOpenPay('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),'+(row.saldoPendiente!=null?row.saldoPendiente:row.monto)+',\''+(row.divisa||'MXN')+'\',decodeURIComponent(\''+encodeURIComponent(row.linkCotizacionUrl||'')+'\'))" style="padding:4px 10px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;margin-right:4px">Pagar</button>'
+        + '<button onclick="cxpOpenPay('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),'+(row.saldoPendiente!=null?row.saldoPendiente:row.monto)+',\''+(row.divisa||'MXN')+'\',decodeURIComponent(\''+encodeURIComponent(row.linkCotizacionUrl||'')+'\'),'+(row.monto||0)+','+(row.montoAbonado||0)+')" style="padding:4px 10px;background:#166534;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;margin-right:4px">Pagar</button>'
         + (row.recurrenteId ? '<button onclick="cxpRegresarProgramacion('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor||'')+'\'))" style="padding:4px 9px;background:#f59e0b;color:#fff;border:none;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;margin-right:4px;white-space:nowrap" title="Regresar a Programación del mes (Gastos Fijos) para reprogramarla por el monto correcto — solo aparece en cuentas que vienen de un gasto fijo">↩ Reprogramar</button>' : '')
         + '<button onclick="cxpOpenEdit('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(JSON.stringify(row))+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.1);color:#2563eb;border:none;border-radius:6px;font-size:12px;cursor:pointer" title="Editar">✎</button>'
         + '<button onclick="cxpFactura('+row.rowNum+',decodeURIComponent(\''+encodeURIComponent(row.proveedor)+'\'),decodeURIComponent(\''+encodeURIComponent(row.linkFacturaUrl||'')+'\'))" style="padding:4px 8px;background:rgba(59,130,246,.08);border:none;border-radius:6px;font-size:12px;cursor:pointer;margin-left:4px;opacity:'+(row.linkFacturaUrl?'1':'.45')+'" title="'+(row.linkFacturaUrl?'Ver factura':'Subir factura')+'">📄</button>'
@@ -35036,14 +35036,16 @@ window.cxpCancelarConfirmar = async function(rowNum, proveedor) {
 // cotizUrl: la cotización adjunta de ESTA CxP (row.linkCotizacionUrl). Se muestra
 // dentro del modal porque a veces el documento trae la REFERENCIA de pago, y sin
 // verla hay que ir a buscar el archivo original — que ya está cargado aquí.
-window.cxpOpenPay = async function(rowNum, proveedor, monto, divisa, cotizUrl) {
+window.cxpOpenPay = async function(rowNum, proveedor, monto, divisa, cotizUrl, facturaTotal, abonado) {
   var m=document.getElementById('cxp-pay-modal'),o=document.getElementById('cxp-pay-ovl');
   if(m)m.style.display='block'; if(o)o.style.display='block';
   var title = document.getElementById('cxp-pay-title');
   if(title) title.textContent = 'Pagar a ' + proveedor;
   var body = document.getElementById('cxp-pay-body');
   if (!body) return;
-  window._cxpPayMonto = monto;
+  window._cxpPayMonto = monto;                 // = pendiente al abrir
+  window._cxpPayFactura = (facturaTotal!=null && facturaTotal>0) ? facturaTotal : monto;  // total de la factura
+  window._cxpPayAbonado = abonado || 0;        // ya pagado antes (Σ abonos)
   window._cxpPayRowNum = rowNum;
   window._cxpPaySaldoPendiente = monto; // se reduce si se aplica crédito antes de pagar
   window._cxpPayCreditos = [];
@@ -35119,9 +35121,18 @@ window.cxpOpenPay = async function(rowNum, proveedor, monto, divisa, cotizUrl) {
     + creditoHtml
     + '<div id="cxp-pay-monto-box" style="background:linear-gradient(135deg,#166534,#15803d);border-radius:12px;padding:16px;color:#fff;margin-bottom:16px">'
       + '<div style="font-size:13px;font-weight:700">'+proveedor+'</div>'
-      + '<div id="cxp-pay-monto-display" style="font-size:24px;font-weight:800;margin-top:4px">$'+monto.toLocaleString('en-US',{minimumFractionDigits:2})+(divisa==='USD'?' <span style="font-size:13px;font-weight:700;opacity:.9">USD</span>':'')+'</div>'
+      + (((window._cxpPayFactura > monto + 0.01) || (window._cxpPayAbonado > 0.01))
+          ? '<div style="font-size:11px;opacity:.92;margin-top:7px;display:flex;justify-content:space-between"><span>Factura</span><span>$'+window._cxpPayFactura.toLocaleString('en-US',{minimumFractionDigits:2})+'</span></div>'
+            + '<div style="font-size:11px;opacity:.92;display:flex;justify-content:space-between"><span>Pagado antes</span><span>$'+window._cxpPayAbonado.toLocaleString('en-US',{minimumFractionDigits:2})+'</span></div>'
+            + '<div style="font-size:10.5px;opacity:.9;margin-top:5px;border-top:1px solid rgba(255,255,255,.28);padding-top:5px">Pendiente:</div>'
+          : '')
+      + '<div id="cxp-pay-monto-display" style="font-size:24px;font-weight:800;margin-top:2px">$'+monto.toLocaleString('en-US',{minimumFractionDigits:2})+(divisa==='USD'?' <span style="font-size:13px;font-weight:700;opacity:.9">USD</span>':'')+'</div>'
       + (divisa==='USD'?'<div style="font-size:10.5px;margin-top:5px;opacity:.92;line-height:1.4">Partida en dólares — elige Santander o AMEX y captura el tipo de cambio; el sistema lo manda a su columna correcta.</div>':'')
     + '</div>'
+    + (divisa==='USD' ? '' :
+       '<div style="margin-bottom:12px"><label style="display:block;font-size:10px;font-weight:600;color:var(--text-secondary,#6b7280);margin-bottom:4px">Monto a pagar ahora</label>'
+       + '<input type="number" step="0.01" min="0.01" id="cxp-pay-abono" '+S+' value="'+monto.toFixed(2)+'">'
+       + '<div style="font-size:10px;color:var(--text-secondary,#9ca3af);margin-top:3px">Si pagas MENOS que el pendiente, la diferencia queda como cuenta por pagar (abono parcial). Deja el total para liquidarla.</div></div>')
     + cotizHtml
     + clabeHtml
     + '<div style="display:flex;flex-direction:column;gap:12px">'
@@ -35199,6 +35210,8 @@ window.cxpAplicarCredito = async function(){
     }
     var disp = document.getElementById('cxp-pay-monto-display');
     if (disp) disp.textContent = '$'+window._cxpPaySaldoPendiente.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+    var _ab = document.getElementById('cxp-pay-abono');   // el pendiente bajó por el crédito → refleja en «Monto a pagar»
+    if (_ab) _ab.value = Number(window._cxpPaySaldoPendiente||0).toFixed(2);
     var box = document.getElementById('cxp-pay-credito-box');
     if (box) box.remove();
     alert('Crédito aplicado. Saldo restante a pagar: $'+window._cxpPaySaldoPendiente.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}));
@@ -35272,18 +35285,30 @@ window.cxpSubmitPay = async function(rowNum) {
       if (!(montoUSD > 0)) { alert('Captura el importe en USD'); return; }
     }
   }
+  var _pendiente = (window._cxpPaySaldoPendiente!=null) ? window._cxpPaySaldoPendiente : (window._cxpPayMonto||0);
+  var _abonoEl = document.getElementById('cxp-pay-abono');
+  var _montoPago = _abonoEl ? (parseFloat(_abonoEl.value)||0) : _pendiente;
+  if (divisa !== 'USD') {
+    if (_montoPago <= 0.01) { alert('Captura el monto a pagar.'); return; }
+    if (_montoPago > _pendiente + 0.01) { alert('El monto a pagar ($'+_montoPago.toLocaleString('en-US',{minimumFractionDigits:2})+') supera el pendiente ($'+_pendiente.toLocaleString('en-US',{minimumFractionDigits:2})+').'); return; }
+  }
   var btn = document.getElementById('cxp-pay-btn');
   if(btn){btn.disabled=true;btn.textContent='Procesando…';}
   try {
     var s = getSession()||{};
-    var body = {
-      action:'pagarCxP', rowNum:rowNum, fechaPago:fecha, formaPago:fp, linkPago:link, linkFactura:factLink,
-      divisa:divisa, tipoCambio:tipoCambio, montoUSD:montoUSD, usuario:s.email||'sistema'
-    };
-    // Si ya se aplicó un crédito de proveedor en este mismo modal, el pago en
-    // efectivo/banco solo debe cubrir el saldo restante, no el importe original.
-    if (window._cxpPaySaldoPendiente != null && window._cxpPayMonto != null && window._cxpPaySaldoPendiente < window._cxpPayMonto) {
-      body.montoOverride = window._cxpPaySaldoPendiente;
+    var body;
+    if (divisa !== 'USD' && _montoPago < _pendiente - 0.01) {
+      // PAGO PARCIAL → aplicarAbonoCxP: rutea SOLO lo pagado al banco y deja la
+      // diferencia como cuenta por pagar. No toca el Monto (factura completa).
+      body = { action:'aplicarAbonoCxP', rowNum:rowNum, montoPagoCash:_montoPago,
+               formaPago:fp, fechaPago:fecha, usuario:s.email||'sistema' };
+    } else {
+      // PAGO COMPLETO (o USD) → pagarCxP. montoOverride = el pendiente real (no la
+      // factura), para no rutear de más si ya había abonos/crédito previos.
+      body = { action:'pagarCxP', rowNum:rowNum, fechaPago:fecha, formaPago:fp, linkPago:link, linkFactura:factLink,
+               divisa:divisa, tipoCambio:tipoCambio, montoUSD:montoUSD, usuario:s.email||'sistema' };
+      if (divisa !== 'USD') { body.montoOverride = _pendiente; }
+      else if (window._cxpPaySaldoPendiente != null && window._cxpPayMonto != null && window._cxpPaySaldoPendiente < window._cxpPayMonto) { body.montoOverride = window._cxpPaySaldoPendiente; }
     }
     var r = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify(body)});
     var res = await r.json();

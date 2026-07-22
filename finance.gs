@@ -1111,6 +1111,9 @@ function doPost(e) {
     if (body.action === 'aplicarAbonoCxP') {
       if (typeof aplicarAbonoCxP !== 'function')
         return jsonResponse({ok:false, error:'Agrega cxp_creditos.gs al proyecto de Apps Script y redespliega.'});
+      // Candado igual que pagarCxP: abonar/aplicar crédito liquida saldo y mueve banco.
+      if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'editar_egresos'))
+        return jsonResponse({ok:false, error:'Sin autorización para abonar/pagar cuentas por pagar (permiso editar_egresos).'});
       return jsonResponse(aplicarAbonoCxP(body));
     }
     if (body.action === 'consumirSaldoFavorProveedor') {
