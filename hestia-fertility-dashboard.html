@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.303 -->
+﻿<!-- app-build:2026.07.22.304 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1812,7 +1812,6 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
         <div style="font-size:var(--text-lg);font-weight:700">Panel de Control</div>
         <div style="font-size:var(--text-xs);color:var(--color-text-muted)">Administración del sistema · VestaOS</div>
       </div>
-      <button onclick="auditAbrir()" title="Auditoría: quién cambió qué y cuándo (requiere permiso)" style="margin-left:auto;padding:8px 14px;background:transparent;color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">🕵️ Auditoría</button>
     </div>
 
     <!-- Tabs -->
@@ -11304,6 +11303,17 @@ async function loadMenu() {
         id:'avisos', label:'Avisos', padre:'',
         icono:'megaphone', tipo:'vista', orden:510,
         seccion:'Operación', fuente:'avisos'
+      });
+    }
+    /* ── Inyectar "Auditoría" (bitácora: quién cambió qué y cuándo): es MÓDULO de
+       Operación por su importancia (no una config del Panel). Solo con permiso
+       ver_auditoria. Al abrirlo se lanza el overlay (ver navigateTo). ── */
+    if (typeof hasPermission === 'function' && hasPermission('ver_auditoria') &&
+        !menuItems.some(function(i){ return String(i.id||'').trim() === 'auditoria'; })) {
+      menuItems.push({
+        id:'auditoria', label:'Auditoría', padre:'',
+        icono:'shield', tipo:'vista', orden:520,
+        seccion:'Operación', fuente:'auditoria'
       });
     }
     /* ── Inyectar "Médicos Tratantes" (catálogo NUEVO e independiente): lo ve quien
@@ -24406,6 +24416,8 @@ function navigateTo(viewId) {
   try { if (window._navCur && window._navCur !== viewId) window._navPrev = window._navCur; window._navCur = viewId; } catch(e){}
   // Cerrar sidebar en móvil al navegar
   closeSidebar();
+  // Auditoría: es un overlay, no una vista con contenedor propio → lánzalo y sal.
+  if (viewId === 'auditoria') { if (typeof auditAbrir === 'function') auditAbrir(); return; }
   // Ocultar todas
   document.querySelectorAll('.view').forEach(function(v) { v.style.display = 'none'; });
 

@@ -1048,25 +1048,59 @@ function _rgBoxLinea(lineas, test){
   });
   return { n:Math.round(n), monto:Math.round(monto) };
 }
+/* CICLOS INICIADOS del periodo = # de OPERACIONES distintas por tipo de ciclo
+   (col CicloAltaBaja, que _summaryReadIngresos expone como r.grupoU): Hestia =
+   'ALTA' (Estimulación Ovárica Controlada); Externos = 'EXTERNOS' (Capturas).
+   NO se suman cantidades de productos (eso inflaba a 29). monto = ingreso total
+   de esas OPs; serie = # de OPs por mes. Cancelados no entran (los salta el
+   lector). Expone _tipos = los valores de CicloAltaBaja hallados (diagnóstico). */
+function _rgCiclosBox(fi, ff, months){
+  var yFrom=parseInt(fi.substring(0,4),10), yTo=parseInt(ff.substring(0,4),10);
+  var hSet={}, eSet={}, tipos={};
+  var mIdx={}; (months||[]).forEach(function(mo,i){ mIdx[String(mo.ini||'').substring(0,7)]=i; });
+  var hSerie=(months||[]).map(function(){return {};}), eSerie=(months||[]).map(function(){return {};});
+  var yearsRows={};
+  for (var y=yFrom;y<=yTo;y++){ try{ yearsRows[y]=_summaryReadIngresos(y)||[]; }catch(e){ yearsRows[y]=[]; } }
+  for (var y1=yFrom;y1<=yTo;y1++){
+    yearsRows[y1].forEach(function(r){
+      var f=(r.fecha||'').substring(0,10); if(!f||f<fi||f>ff) return;
+      var op=String(r.op||'').trim(); if(!op) return;
+      var ct=String(r.grupoU||'').trim().toUpperCase(); if(ct) tipos[ct]=(tipos[ct]||0)+1;
+      var mi=mIdx[f.substring(0,7)];
+      if(ct==='ALTA'){ hSet[op]=1; if(mi!=null) hSerie[mi][op]=1; }
+      else if(ct.indexOf('EXTERN')>-1){ eSet[op]=1; if(mi!=null) eSerie[mi][op]=1; }
+    });
+  }
+  var hMonto=0, eMonto=0;
+  for (var y2=yFrom;y2<=yTo;y2++){
+    yearsRows[y2].forEach(function(r){
+      var f=(r.fecha||'').substring(0,10); if(!f||f<fi||f>ff) return;
+      var op=String(r.op||'').trim(); if(!op) return; var t=Number(r.total)||0;
+      if(hSet[op]) hMonto+=t; if(eSet[op]) eMonto+=t;
+    });
+  }
+  function cnt(o){var n=0;for(var k in o)n++;return n;}
+  return {
+    hestia:{n:cnt(hSet), monto:Math.round(hMonto), serie:hSerie.map(cnt)},
+    externos:{n:cnt(eSet), monto:Math.round(eMonto), serie:eSerie.map(cnt)},
+    meses:(months||[]).length, _tipos:tipos
+  };
+}
 function readResumenGeneral(fechaInicio, fechaFin){
   try{
     var fi=String(fechaInicio||'').substring(0,10), ff=String(fechaFin||'').substring(0,10);
     if(!fi||!ff){ var hoy=new Date(); ff=_sumFmtDate(hoy); fi=ff.substring(0,8)+'01'; }
     var months=_erEnumMonths(fi, ff); if(months.length>18) months=months.slice(months.length-18);
     var full=readSummary(fi, ff); if(!full.ok) return full;
-    var _rgHTest=function(nom){ return (nom.indexOf('alta')>-1 && nom.indexOf('baja')<0) || nom.indexOf('estimulaci')>-1 || nom.indexOf('ciclos iniciad')>-1; };
-    var _rgETest=function(nom){ return nom.indexOf('extern')>-1; };
-    var meses=[], ingresos=[], gastos=[], margen=[], ciclos=[], cac=[], hSerie=[], eSerie=[];
+    var meses=[], ingresos=[], gastos=[], margen=[], ciclos=[], cac=[];
     months.forEach(function(mo){
       var s=readSummary(mo.ini, mo.fin), mm=(s&&s.ok)?s.metricas:{};
       var rev=_erN(mm.revenue);
       var eg=(s&&s.ok&&s.reconc)?_erN(s.reconc.egresosPL):(_erN(mm.cogs)+_erN(mm.opex)+_erN(mm.ga)+_erN(mm.taxes));
-      var lin=(s&&s.ok)?s.lineas:[];
       meses.push((mo.label||'').split(' ')[0]);
       ingresos.push(Math.round(rev)); gastos.push(Math.round(eg));
       margen.push(rev? Math.round(_erN(mm.grossProfit)/rev*100):0);
-      ciclos.push(_rgCiclos(lin)); cac.push(0);   // CAC sin fuente aún
-      hSerie.push(_rgBoxLinea(lin, _rgHTest).n); eSerie.push(_rgBoxLinea(lin, _rgETest).n);
+      ciclos.push(_rgCiclos((s&&s.ok)?s.lineas:[])); cac.push(0);   // CAC sin fuente aún
     });
     var totRev=_erN(full.metricas.revenue)||1;
     var lineasRev=(full.lineas||[]).filter(function(l){ return l.tipo==='dato'&&l.grupo==='REVENUE'&&Math.abs(_erN(l.actual))>0.5; })
@@ -1082,15 +1116,8 @@ function readResumenGeneral(fechaInicio, fechaFin){
       // Ciclos del periodo partidos en Hestia (ALTA / Estimulación Ovárica Controlada)
       // vs Externos (Capturas): # de ciclos + ingreso de cada bloque.
       ciclosBox:(function(){
-        try {
-          var H=_rgBoxLinea(full.lineas, _rgHTest), E=_rgBoxLinea(full.lineas, _rgETest);
-          H.serie=hSerie; E.serie=eSerie;
-          var box={ hestia:H, externos:E, meses:meses.length, labels:meses };
-          // Si NINGÚN bloque encontró ciclos, expone las líneas de revenue reales
-          // (etiqueta=monto) para diagnosticar el match sin adivinar.
-          if(!H.n && !E.n){ box._lineas=(full.lineas||[]).filter(function(l){ return l.tipo==='dato'&&l.grupo==='REVENUE'; }).map(function(l){ return (l.linea||l.label)+'='+Math.round(_erN(l.actual)); }); }
-          return box;
-        } catch(eCB){ return { error:String((eCB&&eCB.message)||eCB) }; }
+        try { var box=_rgCiclosBox(fi, ff, months); box.labels=meses; return box; }
+        catch(eCB){ return { error:String((eCB&&eCB.message)||eCB) }; }
       })(),
       margenBruto: totRev? Math.round(_erN(full.metricas.grossProfit)/totRev*100):0 };
   }catch(ex){ return {ok:false, error:ex.message+' (L:'+(ex.lineNumber||'?')+')'}; }
