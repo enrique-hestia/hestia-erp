@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.327 -->
+﻿<!-- app-build:2026.07.22.328 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12359,7 +12359,22 @@ async function gmTarifasAbrir(){
   var s=getSession()||{};
   try{ if(typeof ingLoadProductos==='function') await ingLoadProductos(false); }catch(e){}
   try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'tarifasGMLeer',token:s.token||getToken()})}); var d=await r.json(); _gmTarifas=(d&&d.ok)?d.cfg:null; }catch(e){ _gmTarifas=null; }
+  // Auto-reflejar los procedimientos ya dados de alta en las reglas de comisión
+  // (Procedimientos que aplican + Solo comisión) para no capturarlos doble aquí.
+  try{ var ctx=await _gmCtxLoad(true); if(ctx&&ctx.procedimientos) _gmMergeProcs(ctx.procedimientos); }catch(e){}
   _gmRender();
+}
+/* Añade a la tabla de tarifas los procedimientos de las reglas que aún no estén
+   (por nombre). Preserva las filas existentes y sus precios; solo agrega faltantes. */
+function _gmMergeProcs(procs){
+  if(!_gmTarifas) return;
+  _gmTarifas.tratamientos=_gmTarifas.tratamientos||[];
+  var have={}; _gmTarifas.tratamientos.forEach(function(t){ have[_gmKey(t.nombre)]=1; });
+  (procs||[]).forEach(function(nm){
+    var k=_gmKey(nm); if(!nm||have[k]) return; have[k]=1;
+    var p=(_ingTodosProductos||_ingProductos||[]).filter(function(x){return String(x.descripcion||'')===nm;})[0];
+    _gmTarifas.tratamientos.push({nombre:nm, sku:p?String(p.sku||''):'', base:0, precio:[0,0,0,0,0,0], daniel:[0,0,0,0,0,0]});
+  });
 }
 function _gmProdDatalist(){
   return '<datalist id="gm-prodlist">'+((_ingTodosProductos||_ingProductos||[]).map(function(p){ return '<option value="'+String(p.descripcion||'').replace(/"/g,'&quot;')+'" data-sku="'+String(p.sku||'').replace(/"/g,'&quot;')+'">'; }).join(''))+'</datalist>';
@@ -24882,10 +24897,14 @@ async function _ovSetupOrigenes(ov){
   }catch(e){}
 }
 /* Datalist de productos = catálogo de productos (los tiers son internos y no se
-   muestran en la cotización). */
+   muestran en la cotización). Carga el catálogo si aún no está en memoria. */
 function _ovBuildProdDatalist(){
-  var dl = document.getElementById('ov-prodlist'); if (!dl) return;
-  dl.innerHTML = (_ingTodosProductos||_ingProductos||[]).map(function(p){ var pr=(p.precios&&p.precios.General)||p.precio||0; return '<option value="'+String(p.descripcion||'').replace(/"/g,'&quot;')+'" data-precio="'+pr+'" data-sku="'+String(p.sku||'').replace(/"/g,'&quot;')+'">'; }).join('');
+  function fill(){
+    var dl = document.getElementById('ov-prodlist'); if (!dl) return;
+    dl.innerHTML = (_ingTodosProductos||_ingProductos||[]).map(function(p){ var pr=(p.precios&&p.precios.General)||p.precio||0; return '<option value="'+String(p.descripcion||'').replace(/"/g,'&quot;')+'" data-precio="'+pr+'" data-sku="'+String(p.sku||'').replace(/"/g,'&quot;')+'">'; }).join('');
+  }
+  if ((_ingTodosProductos&&_ingTodosProductos.length)||(_ingProductos&&_ingProductos.length)) fill();
+  if (typeof ingLoadProductos === 'function'){ try{ ingLoadProductos(false).then(fill).catch(function(){}); }catch(e){} }
 }
 function _ovCloseEditor(){ var m = document.getElementById('ov-modal'); if (m){ m.style.display='none'; m.innerHTML=''; } }
 function ovAddLinea(l, ro){
