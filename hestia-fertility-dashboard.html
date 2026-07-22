@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.300 -->
+﻿<!-- app-build:2026.07.22.301 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -5000,10 +5000,48 @@ function _ingAutofillRazonSocial() {
   }
 }
 
+/* ── Aviso: el paciente YA tiene una cuenta por cobrar abierta ────────────────
+   Evita que alguien re-capture un pago que ya está como saldo pendiente (lo que
+   duplica el ingreso Y el movimiento en bancos). Al elegir paciente se consulta
+   su saldo; si debe algo, banner + gate al guardar. ─────────────────────────── */
+var _ingPacCxC = null;   // {saldo, ops:[...]} del paciente actual, o null
+function _ingCxCWarnHide(){ _ingPacCxC=null; var b=document.getElementById('ing-cxc-warn'); if(b) b.remove(); }
+function _ingCheckCxC(nombre){
+  _ingCxCWarnHide();
+  if(!nombre) return;
+  var tok=encodeURIComponent(getToken());
+  fetch(APPS_SCRIPT_URL+'?action=estadoCobranza&paciente='+encodeURIComponent(nombre)+'&token='+tok+'&_t='+Date.now(),{redirect:'follow'})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d||!d.ok||d.masked) return;
+      var saldo=(d.totalSaldo||0)+((d.suscripcion&&d.suscripcion.montoDebe)||0);
+      if(saldo<=0.5) return;
+      var cur=(document.getElementById('ing-paciente')||{}).value||'';
+      if(_fzNorm(cur)!==_fzNorm(nombre)) return;   // el usuario ya cambió de paciente → no muestres banner viejo
+      var ops=(d.saldos||[]).filter(function(o){return (o.saldo||0)>0.5;}).map(function(o){return o.op;}).filter(Boolean);
+      _ingPacCxC={saldo:saldo, ops:ops};
+      _ingCxCWarnRender(nombre, saldo, ops);
+    }).catch(function(){});
+}
+function _ingCxCWarnRender(nombre, saldo, ops){
+  var host=document.getElementById('ing-form-view')||document.getElementById('view-ingresos');
+  if(!host) return;
+  var b=document.getElementById('ing-cxc-warn'); if(b) b.remove();
+  b=document.createElement('div'); b.id='ing-cxc-warn';
+  b.style.cssText='margin:0 0 14px;border:1.5px solid #f59e0b;background:#fffbeb;border-radius:11px;padding:12px 15px;display:flex;align-items:center;gap:12px;flex-wrap:wrap';
+  var opTxt=ops.length?(' · '+ops.slice(0,3).join(', ')+(ops.length>3?'…':'')):'';
+  b.innerHTML='<div style="flex:1;min-width:240px;font-size:12.5px;color:#92400e;line-height:1.5">'
+    +'⚠️ <b>'+_esc(nombre)+'</b> ya tiene <b>'+_ingMoney(saldo)+'</b> por cobrar'+_esc(opTxt)+'. '
+    +'Si vas a cobrar eso, hazlo en <b>Cuentas por Cobrar → «Cobrar / Abonar»</b> — <u>no lo captures de nuevo</u> (duplicarías el ingreso y el movimiento en bancos).</div>'
+    +'<button type="button" onclick="navigateTo(\'cuentas-cobrar\')" style="border:1px solid #b45309;background:#b45309;color:#fff;border-radius:8px;padding:7px 13px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">Ir a Cobrar</button>';
+  var first=host.firstElementChild;
+  if(first) host.insertBefore(b, first); else host.appendChild(b);
+}
+
 async function ingOnPacienteChange() {
   var pacEl = document.getElementById('ing-paciente');
   if (!pacEl || !pacEl.value.trim()) return;
   _ingAutofillRazonSocial();
+  if (!_ingEditMode) _ingCheckCxC(pacEl.value.trim()); else _ingCxCWarnHide();
   var listaLabel = document.getElementById('ing-lista-label');
   try {
     var tok = encodeURIComponent(getToken());
@@ -8373,6 +8411,15 @@ async function ingSubmit(saveNew) {
   _ingSaveNew = !!saveNew && !_ingEditMode;   // en edición no aplica
   var payload = _ingCollectPayload();
   if (!payload) return;
+
+  // Gate: si el paciente ya tiene una cuenta por cobrar abierta, confirmar que
+  // NO es un re-cobro de esa cuenta (capturarlo de nuevo duplica ingreso + banco).
+  if (!_ingEditMode && _ingPacCxC && _ingPacCxC.saldo > 0.5) {
+    var _opsTxt = (_ingPacCxC.ops && _ingPacCxC.ops.length) ? (' (' + _ingPacCxC.ops.slice(0,3).join(', ') + ')') : '';
+    if (!confirm('⚠️ ' + (payload.paciente || 'Este paciente') + ' ya tiene ' + _ingMoney(_ingPacCxC.saldo) + ' por cobrar' + _opsTxt + '.\n\n'
+      + 'Si este pago es para SALDAR esa cuenta, NO lo captures aquí (lo duplicarías): ve a Cuentas por Cobrar y usa «Cobrar / Abonar».\n\n'
+      + '¿Es un ingreso NUEVO, distinto de esa cuenta, y quieres capturarlo de todos modos?')) return;
+  }
 
   // Pago parcial: si lo cobrado es menor al total de la operación, avisar que se
   // generará una cuenta por cobrar antes de guardar (solo en alta, no en edición).
