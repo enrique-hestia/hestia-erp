@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.322 -->
+﻿<!-- app-build:2026.07.22.323 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -24564,6 +24564,16 @@ function navigateTo(viewId) {
   try { if (window._navCur && window._navCur !== viewId) window._navPrev = window._navCur; window._navCur = viewId; } catch(e){}
   // Cerrar sidebar en móvil al navegar
   closeSidebar();
+  // Tour guiado: se auto-lanza la PRIMERA vez que se visita una vista con tour.
+  try{
+    if (window.HF_TOURS && window.HF_TOURS[viewId]){
+      var _tk='hestia_tour_seen_'+viewId;
+      if(!localStorage.getItem(_tk)){
+        localStorage.setItem(_tk,'1');
+        setTimeout(function(){ try{ if(window._navCur===viewId && window.hfTour) window.hfTour(window.HF_TOURS[viewId]); }catch(e){} }, 1000);
+      }
+    }
+  }catch(e){}
   // Auditoría: es un overlay, no una vista con contenedor propio → lánzalo y sal.
   if (viewId === 'auditoria') { if (typeof auditAbrir === 'function') auditAbrir(); return; }
   // Ocultar todas
@@ -43061,6 +43071,15 @@ async function _novCfgGuardar(){
     }
   };
 
+  /* Re-lanza el tour de la vista ACTUAL (para volver a verlo desde el manual/«?»). */
+  window.hfTourView = function(v){
+    v = v || window._navCur;
+    if (window.HF_TOURS && window.HF_TOURS[v] && window.hfTour){ window.hfTour(window.HF_TOURS[v]); return true; }
+    if (typeof setStatus==='function') setStatus('Esta pantalla aún no tiene tour guiado.','info');
+    return false;
+  };
+  window.hfTourHay = function(v){ v = v || window._navCur; return !!(window.HF_TOURS && window.HF_TOURS[v]); };
+
   /* Motor de tour del manual: envuelve _tourStart y le agrega lo que le
      faltaba — saltar pasos cuyo selector no existe (vista cambiada, sin
      permiso, tabla vacía) y salir con Esc. Si no queda ningún paso, no abre
@@ -43125,6 +43144,28 @@ async function _novCfgGuardar(){
        alt:'El botón <b>Calcular</b> aparece cuando hay al menos una regla configurada.'},
       {el:null, title:'4. Generar',
        body:'Hasta que pulsas <b>Generar</b> se crean los créditos y las cuentas por pagar — eso <b>sí</b> mueve dinero, y pide confirmación. Necesita el permiso <b>generar_comisiones</b>. Si el mes ya se generó, verás <b>↻ Regenerar</b>, que solo funciona si nadie ha cobrado todavía.'}
+    ],
+    'cuentas-cobrar': [
+      {el:null, title:'Cuentas por Cobrar',
+       body:'Aquí ves TODO lo que te deben: <b>saldos de pacientes</b>, médicos y agencias, y las <b>suscripciones de crío</b>. Los saldos nacen SOLO de un registro real (pago parcial o saldo inicial), nunca se inventan.'},
+      {el:null, title:'Cobrar / Abonar',
+       body:'En cada renglón, <b>Cobrar / Abonar</b> registra el pago: sube lo pagado, lo <b>manda al banco</b> según la forma de pago, y cierra el saldo. Puedes <b>adjuntar el comprobante</b> (se guarda en Drive y queda ligado al cobro).'},
+      {el:null, title:'Cobro consolidado',
+       body:'¿Un paciente pagó varias partidas con UN solo depósito? Marca los checkboxes de sus renglones y pulsa <b>💰 Cobrar juntos</b>: cae <b>un solo movimiento</b> en el banco y cada partida queda abonada. Como un ERP de verdad.'},
+      {el:null, title:'Plan de pagos',
+       body:'A un adeudo le puedes activar un <b>📅 Plan de pagos</b> (parcialidades con fechas). Es informativo: no mueve dinero, el cobro se sigue haciendo con «Cobrar / Abonar».'},
+      {el:null, title:'🧭 Alinear folios (admin)',
+       body:'Si un cargo quedó apuntando a la venta equivocada (folio corrido), <b>🧭 Alinear folios</b> lo detecta y lo re-apunta a la venta correcta, con vista previa. Requiere el permiso <b>reorganizar_folios</b>.'}
+    ],
+    gastos: [
+      {el:null, title:'Egresos y Cuentas por Pagar',
+       body:'Aquí capturas y controlas todo lo que la clínica paga. Un egreso con <b>fecha de pago</b> ya está pagado; uno con solo <b>vencimiento</b> es una <b>Cuenta por Pagar</b> pendiente.'},
+      {el:null, title:'Factura, Pagado y Pendiente',
+       body:'El <b>Monto</b> es la factura completa. Al pagar puedes abonar <b>menos</b> que el pendiente: la diferencia queda como cuenta por pagar (abono parcial). El banco refleja SOLO lo que pagaste; la factura no se toca (tu P&L no se descuadra).'},
+      {el:null, title:'Saldo a favor del proveedor',
+       body:'Si cancelas una orden ya pagada, su dinero queda como <b>saldo a favor</b> del proveedor. Al pagar otra orden de ese mismo proveedor, aparece para <b>aplicarlo</b> antes de pagar el resto.'},
+      {el:null, title:'Conciliar pólizas + proveedor',
+       body:'<b>Conciliar pólizas</b> cruza el export de ContaDigital contra tus movimientos. Y si renombras un proveedor, usa <b>🔗 Sincronizar egresos</b> (por RFC) para actualizar su histórico sin errores de typo.'}
     ],
     identificar: [
       {el:null, title:'Identificar pacientes',
