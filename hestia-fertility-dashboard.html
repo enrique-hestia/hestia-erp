@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.315 -->
+﻿<!-- app-build:2026.07.22.316 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -27911,6 +27911,7 @@ var OP_PERMS_CATALOG = [
   {key:'editar_ingresos',  label:'Editar operaciones de ingreso',    cat:'Ingresos'},
   {key:'ver_auditoria',    label:'Ver la auditoría (quién cambió qué y cuándo)', cat:'Administración'},
   {key:'reorganizar_folios', label:'Alinear folios de cobranza (re-apuntar cargos con folio corrido)', cat:'Administración'},
+  {key:'autorizar_saldo_favor', label:'Autorizar consumir/descartar saldo a favor de proveedor (sin pago)', cat:'Administración'},
   /* Permiso APARTE de editar_ingresos a propósito: cancelar una venta mueve
      dinero hacia afuera (dispara el reembolso a la paciente y el reverso en el
      banco) y la retira de todos los reportes. Editar corrige un dato; cancelar
@@ -35066,7 +35067,7 @@ window.cxpOpenPay = async function(rowNum, proveedor, monto, divisa, cotizUrl) {
           + '<input type="number" id="cxp-pay-credito-monto" step="0.01" min="0" max="'+Math.min(totalCredito,monto)+'" value="'+Math.min(totalCredito,monto).toFixed(2)+'" style="flex:1;padding:6px 8px;border:1.5px solid #ca8a04;border-radius:6px;font-size:12px">'
           + '<button onclick="cxpAplicarCredito()" id="cxp-pay-credito-btn" style="padding:6px 12px;background:#854d0e;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Aplicar</button>'
         + '</div>'
-        + '<div style="margin-top:7px;border-top:1px dashed #ca8a04;padding-top:6px"><a href="javascript:void(0)" onclick="cxpConsumirPorFuera()" style="font-size:10.5px;color:#854d0e;text-decoration:underline;cursor:pointer">¿Ya descontaste el saldo directo al pagar (pusiste el monto neto)? Consúmelo aquí — sin pagar de nuevo.</a></div>'
+        + ((hasPermission('autorizar_saldo_favor')||hasPermission('*')) ? '<div style="margin-top:7px;border-top:1px dashed #ca8a04;padding-top:6px"><a href="javascript:void(0)" onclick="cxpConsumirPorFuera()" style="font-size:10.5px;color:#854d0e;text-decoration:underline;cursor:pointer">¿Ya descontaste el saldo directo al pagar (pusiste el monto neto)? Consúmelo aquí — sin pagar de nuevo (requiere autorización).</a></div>' : '')
         + '</div>';
     }
   } catch(eCred){}

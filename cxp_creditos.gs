@@ -123,8 +123,10 @@ function _consumirCredito(creditoId, monto) {
 function consumirSaldoFavorProveedor(body){
   try{
     body = body || {};
-    if (typeof _tokenHasPermission==='function' && !_tokenHasPermission(body.token||'', 'editar_egresos'))
-      return { ok:false, error:'Sin autorización para editar egresos (permiso editar_egresos).' };
+    // Candado FUERTE: consumir/descartar un saldo a favor sin pago es delicado (podría
+    // borrar un crédito real que el proveedor nos debe). Requiere permiso PROPIO.
+    if (typeof _tokenHasPermission==='function' && !_tokenHasPermission(body.token||'', 'autorizar_saldo_favor'))
+      return { ok:false, error:'Sin autorización para consumir un saldo a favor (permiso «autorizar_saldo_favor»). Pídeselo a un administrador.' };
     var creditoId = body.creditoId;
     var monto = Math.max(0, Number(String(body.monto||'').replace(/[$,\s]/g,'')) || 0);
     if(!creditoId) return { ok:false, error:'Falta indicar el crédito.' };
