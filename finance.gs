@@ -4248,11 +4248,12 @@ function repararEgresosSinFecha(body) {
       var f = row[iFecha];
       if (f instanceof Date) continue;
       if (String(f||'').trim() !== '') continue;              // ya tiene algo en Fecha
-      // Elegir fecha
+      // Elegir fecha de pago SIN usar el vencimiento: el vencimiento es una fecha de
+      // DEUDA (cuándo se debe), NO de PAGO (cuándo se pagó). Usarlo ponía la fecha de
+      // pago = vencimiento, que es incorrecto (bug reportado). Prioridad: el Mes
+      // registrado (mitad de mes → refleja el periodo real del gasto) → hoy.
       var nueva = null, fuente = '';
-      if (iVenc>-1 && row[iVenc] instanceof Date) { nueva = row[iVenc]; fuente='vencimiento'; }
-      else if (iVenc>-1 && String(row[iVenc]||'').trim() && !isNaN(new Date(row[iVenc]))) { nueva = new Date(row[iVenc]); fuente='vencimiento'; }
-      if (!nueva && iMes>-1) { var pm = parseMesTag(row[iMes]); if (pm) { nueva = pm; fuente='mes'; } }
+      if (iMes>-1) { var pm = parseMesTag(row[iMes]); if (pm) { nueva = pm; fuente='mes'; } }
       if (!nueva) { nueva = hoy; fuente='hoy'; }
       sheet.getRange(r+1, iFecha+1).setValue(nueva);
       if (iMes>-1) sheet.getRange(r+1, iMes+1).setValue(mesesOut[nueva.getMonth()] + '-' + String(nueva.getFullYear()).slice(-2));

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.318 -->
+﻿<!-- app-build:2026.07.22.319 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -9065,7 +9065,7 @@ function _renderEgresosERP() {
   }
   h.push('<div class="eg-panel">'
     +'<div class="eg-ph"><div class="eg-pt">Detalle de egresos</div><div style="display:flex;align-items:center;gap:10px"><div style="font-size:10.5px;color:var(--text-secondary,#9ca3af)">Clic en un encabezado para ordenar · Pág. '+_egPage+' de '+totalPages+'</div>'
-    +(hasPermission('editar_egresos')?'<button onclick="egRepararFechas()" title="Rellena la fecha de los egresos pagados que quedaron sin fecha (usa vencimiento o el mes registrado)" style="font-size:11px;padding:4px 10px;border:1px solid var(--color-border,#e5e7eb);background:none;border-radius:7px;cursor:pointer;color:var(--color-text,#1a252f)">🗓️ Reparar fechas</button>':'')
+    +(hasPermission('editar_egresos')?'<button onclick="egRepararFechas()" title="Rellena la fecha de PAGO de los egresos pagados que quedaron sin fecha, usando el mes registrado (mitad de mes) o hoy. NO usa el vencimiento (esa es fecha de deuda, no de pago)." style="font-size:11px;padding:4px 10px;border:1px solid var(--color-border,#e5e7eb);background:none;border-radius:7px;cursor:pointer;color:var(--color-text,#1a252f)">🗓️ Reparar fechas</button>':'')
     +'<button onclick="navigateTo(\'poliza-concil\')" title="Conciliar pólizas contra el export de ContaDigital y asignar el folio como póliza" style="font-size:11px;padding:4px 10px;border:1px solid var(--color-border,#e5e7eb);background:none;border-radius:7px;cursor:pointer;color:var(--color-text,#1a252f)">🧾 Conciliar pólizas</button>'+'</div></div>'
     +'<div style="overflow-x:auto;max-height:65vh;overflow-y:auto">'
     +'<table class="eg-tbl"><thead><tr>'
@@ -9855,7 +9855,7 @@ async function egEditField(rowNum, field, el){
 }
 
 async function egRepararFechas(){
-  if(!confirm('Rellenar la fecha de los egresos PAGADOS que quedaron sin fecha (año '+_egAnio+').\n\nUsa el vencimiento, o el mes registrado (día 15), o la fecha de hoy como último recurso. Podrás ajustar cualquiera después. ¿Continuar?')) return;
+  if(!confirm('Rellenar la fecha de PAGO de los egresos PAGADOS que quedaron sin fecha (año '+_egAnio+').\n\nUsa el mes registrado (día 15) o la fecha de hoy — NO el vencimiento (esa es fecha de deuda, no de pago). Podrás ajustar cualquiera después. ¿Continuar?')) return;
   try{
     var s=getSession()||{};
     var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'repararEgresosSinFecha',anio:_egAnio,usuario:s.email||''})});
