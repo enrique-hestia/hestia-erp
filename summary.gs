@@ -1035,6 +1035,19 @@ function _rgCiclos(lineas){
   });
   return Math.round(n);
 }
+/* Ciclos + ingreso de UNA línea de revenue (Hestia ALTA vs Externos Capturas).
+   n = suma de cantidades de sus productos; monto = ingreso real de la línea. */
+function _rgBoxLinea(lineas, test){
+  var n=0, monto=0;
+  (lineas||[]).forEach(function(l){
+    if(l.tipo!=='dato' || l.grupo!=='REVENUE') return;
+    var nom=String(l.linea||l.label||'').toLowerCase();
+    if(!test(nom)) return;
+    monto += _erN(l.actual);
+    (l.subitems||[]).forEach(function(s){ if(s.productos){ s.productos.forEach(function(p){ n+=_erN(p.cantidad); }); } else { n+=_erN(s.cantidad); } });
+  });
+  return { n:Math.round(n), monto:Math.round(monto) };
+}
 function readResumenGeneral(fechaInicio, fechaFin){
   try{
     var fi=String(fechaInicio||'').substring(0,10), ff=String(fechaFin||'').substring(0,10);
@@ -1062,6 +1075,12 @@ function readResumenGeneral(fechaInicio, fechaFin){
       todos:{ meses:meses, ingresos:ingresos, gastos:gastos, margen:margen, ciclos:ciclos, cac:cac },
       donut:{ labels:dLabels, data:dData, colors:dLabels.map(function(_,i){return pal[i%pal.length];}) },
       totalIngresos:_erN(full.metricas.revenue), totalCiclos:ciclos.reduce(function(a,b){return a+b;},0),
+      // Ciclos del periodo partidos en Hestia (ALTA / Estimulación Ovárica Controlada)
+      // vs Externos (Capturas): # de ciclos + ingreso de cada bloque.
+      ciclosBox:{
+        hestia:   _rgBoxLinea(full.lineas, function(nom){ return nom==='alta' || nom.indexOf('estimulaci')>-1 || nom.indexOf('ciclos iniciad')>-1; }),
+        externos: _rgBoxLinea(full.lineas, function(nom){ return nom.indexOf('extern')>-1; })
+      },
       margenBruto: totRev? Math.round(_erN(full.metricas.grossProfit)/totRev*100):0 };
   }catch(ex){ return {ok:false, error:ex.message+' (L:'+(ex.lineNumber||'?')+')'}; }
 }

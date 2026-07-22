@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.295 -->
+﻿<!-- app-build:2026.07.21.296 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -914,14 +914,25 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
       <div class="kpi-spark-wrap"><canvas class="kpi-spark" id="spark1"></canvas></div>
     </div>
 
-    <div class="kpi-card">
+    <div class="kpi-card" id="rc-kpi2">
       <div class="kpi-header">
         <div class="kpi-icon" style="background:#e8f0fb"><svg viewBox="0 0 24 24" fill="none" stroke="#3a72a8" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg></div>
         <span class="kpi-badge" id="kpi2-badge"></span>
       </div>
-      <div class="kpi-value" id="kpi2-val">—</div>
-      <div class="kpi-label">Ciclos del Periodo</div>
-      <div class="kpi-spark-wrap"><canvas class="kpi-spark" id="spark2"></canvas></div>
+      <div class="kpi-label" style="margin-bottom:4px">Ciclos del periodo</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:end">
+        <div style="border-right:1px solid var(--color-divider);padding-right:10px">
+          <div style="font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:3px">Hestia</div>
+          <div id="rc-cic-hestia-n" style="font-size:1.4rem;font-weight:700;line-height:1;font-variant-numeric:tabular-nums">—</div>
+          <div id="rc-cic-hestia-m" style="font-size:10.5px;color:var(--color-text-muted);margin-top:2px">—</div>
+        </div>
+        <div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#3a72a8;margin-bottom:3px">Externos</div>
+          <div id="rc-cic-ext-n" style="font-size:1.4rem;font-weight:700;line-height:1;font-variant-numeric:tabular-nums">—</div>
+          <div id="rc-cic-ext-m" style="font-size:10.5px;color:var(--color-text-muted);margin-top:2px">—</div>
+        </div>
+      </div>
+      <div style="font-size:9px;color:var(--color-text-muted);margin-top:auto;padding-top:4px">Hestia = ALTA (Estimulación Ovárica Controlada) · Externos = Capturas</div>
     </div>
 
     <div class="kpi-card">
@@ -2414,8 +2425,7 @@ function updateKPIs(d){
   document.getElementById('kpi1-val').textContent=avgM+'%';
   document.getElementById('kpi1-badge').textContent=(dm>=0?'+':'')+dm+'%';
   document.getElementById('kpi1-badge').className='kpi-badge '+(dm>=0?'badge-up':'badge-down');
-  // Ciclos totales del periodo
-  document.getElementById('kpi2-val').textContent=sumArr(d.ciclos);
+  // Ciclos del periodo → recuadro partido Hestia/Externos (se llena en _rgApplyCiclosBox)
   // CAC promedio del periodo (— si aún no hay fuente configurada)
   var _cac=Math.round(avgArr(d.cac));
   document.getElementById('kpi3-val').textContent = _cac>0 ? fmtMXN(_cac) : '—';
@@ -2424,6 +2434,7 @@ function updateKPIs(d){
 /* ── SPARKLINES ─── */
 function drawSpark(id,data,color){
   const el=document.getElementById(id);
+  if(!el) return;
   if(el._chart){el._chart.destroy();}
   const ctx=el.getContext('2d');
   el._chart=new Chart(ctx,{
@@ -2435,8 +2446,17 @@ function drawSpark(id,data,color){
 function initSparks(d){
   drawSpark('spark0',d.ingresos,'rgb(196,106,122)');
   drawSpark('spark1',d.margen,'rgb(77,140,90)');
-  drawSpark('spark2',d.ciclos,'rgb(58,114,168)');
   drawSpark('spark3',d.cac,'rgb(196,122,30)');
+}
+/* Recuadro de ciclos partido: Hestia (ALTA) vs Externos (Capturas), # + ingreso. */
+function _rgApplyCiclosBox(box){
+  box=box||{}; var H=box.hestia||{}, E=box.externos||{};
+  function set(id,v){ var el=document.getElementById(id); if(el) el.textContent=v; }
+  var hasH=(box.hestia!=null), hasE=(box.externos!=null);
+  set('rc-cic-hestia-n', hasH? fmtNum(H.n||0) : '—');
+  set('rc-cic-hestia-m', hasH? fmtMXN(H.monto||0) : '—');
+  set('rc-cic-ext-n', hasE? fmtNum(E.n||0) : '—');
+  set('rc-cic-ext-m', hasE? fmtMXN(E.monto||0) : '—');
 }
 
 /* ── INGRESO CHART ─── */
@@ -24860,6 +24880,7 @@ async function loadResumenGeneral(){
     if(j&&j.ok&&j.todos&&(j.todos.ingresos||[]).length){
       base.todos=j.todos; base.local=j.todos; base.internacional=j.todos;   // sin segmentar aún → mismo real
       if(j.donut&&j.donut.labels&&j.donut.labels.length) base.donut=j.donut;
+      if(j.ciclosBox) base.ciclosBox=j.ciclosBox;   // ciclos partidos Hestia/Externos
     }
   }catch(e){ /* si falla, queda el placeholder */ }
   renderResumen(base);
@@ -24871,6 +24892,7 @@ function renderResumen(data) {
   if (!data || !data.todos) return;
   var d = data[currentSegment] || data.todos;
   updateKPIs(d);
+  _rgApplyCiclosBox(data.ciclosBox);
   initSparks(d);
   buildIngresoChart(d);
   buildDonutChart(data.donut);
