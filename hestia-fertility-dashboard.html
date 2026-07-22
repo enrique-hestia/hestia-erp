@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.299 -->
+﻿<!-- app-build:2026.07.22.300 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -8505,13 +8505,43 @@ async function _ingSaveAndBank(payload, comisionMP) {
     }
     if (res.warn) alert('⚠️ ' + res.warn);
 
-    // 2. Auto-registrar movimiento bancario (solo operaciones nuevas, no ediciones)
     _swrDel('ingresos'); // invalidar caché para que recargue datos frescos
+    // Edición: el backend ya reconstruyó bancos → solo cerrar y refrescar.
     if (payload.action === 'updateIngreso' || payload.action === 'updateIngresoConBancos') {
       ingCloseDrawer(true);
       _ingRefreshSilent();   // sin pantalla en blanco
       return;
     }
+    // La factura adjunta es de ESTA operación; se captura antes de limpiar el form.
+    var _facFile = _ingPendingFacturaFile; _ingPendingFacturaFile = null;
+
+    if (_ingSaveNew) {
+      // ⚡ RÁPIDO: el ingreso YA se guardó (folio conocido) → se reinicia el
+      //   formulario de INMEDIATO para capturar la siguiente venta, y los
+      //   movimientos bancarios + la subida de la factura corren en SEGUNDO
+      //   PLANO. Antes se esperaban esos POST (varios segundos) antes de poder
+      //   seguir; ahora la pantalla queda lista en ~1 guardado.
+      _ingResetForNext(res.op || '');
+      _ingSideEffects(payload, res, comisionMP, _facFile);   // sin await → background
+      return;
+    }
+    // Guardar normal: espera los efectos y luego cierra/refresca.
+    await _ingSideEffects(payload, res, comisionMP, _facFile);
+    ingCloseDrawer(true);
+    _ingRefreshSilent();
+  } catch(e) {
+    // Falló la conexión: NO se limpia nada — la captura se conserva.
+    alert('Error de conexión: ' + e.message);
+    _ingSaveBtnsBusy(false);
+  }
+}
+
+/* Efectos secundarios de un ingreso NUEVO: movimiento(s) bancario(s) + subida de
+   factura + aviso de cuenta por cobrar. Se corren en SEGUNDO PLANO en "Guardar y
+   capturar otro" (para no frenar la captura) y con await en el guardado normal.
+   Los fallos de banco/factura son NO fatales (ya se logueaban antes). */
+async function _ingSideEffects(payload, res, comisionMP, facFile) {
+  try {
     var fecha  = payload.fecha;
     var pac    = payload.paciente;
     var obs    = (payload.observaciones ? payload.observaciones + ' · ' : '') + 'Px. ' + pac + (res.op ? ' [' + res.op + ']' : '');
@@ -8521,9 +8551,7 @@ async function _ingSaveAndBank(payload, comisionMP) {
       var pay = payload._payments[pi];
       var fp  = pay.formaPago;
       var amt = pay.monto;
-      var bankRow = null;
-      var banco   = '';
-
+      var bankRow = null, banco = '';
       // Decisión banco + comisión desde la config (fallback hardcode → byte-idéntico).
       var _rf = _ingRutaForma(fp, 'ingreso');
       banco = (_rf && _rf.banco) ? _rf.banco
@@ -8538,59 +8566,31 @@ async function _ingSaveAndBank(payload, comisionMP) {
         bankRow = _ingRowByTipoFront(_tp, fecha, amt, obs, com, mesStr);
         if (_tp==='tpv') comisionMP = 0; // la comisión MP se aplica una sola vez
       }
-
       if (banco && bankRow) {
         try {
-          var bankPayload = banco === 'cajachica'
-            ? bankRow
-            : { action: 'saveBankRow', banco: banco, row: bankRow };
-          await fetch(APPS_SCRIPT_URL, {
-            method: 'POST',
-            body: JSON.stringify(bankPayload)
-          });
-        } catch(bankErr) {
-          console.warn('Error registrando en ' + banco + ':', bankErr);
-        }
+          var bankPayload = banco === 'cajachica' ? bankRow : { action: 'saveBankRow', banco: banco, row: bankRow };
+          await fetch(APPS_SCRIPT_URL, { method: 'POST', body: JSON.stringify(bankPayload) });
+        } catch(bankErr) { console.warn('Error registrando en ' + banco + ':', bankErr); }
       }
     }
 
-    // 3. Subir factura pendiente si el usuario adjuntó un archivo
-    if (_ingPendingFacturaFile && (res.op || payload.id)) {
+    if (facFile && (res.op || payload.id)) {
       try {
-        var _pf = _ingPendingFacturaFile;
-        _ingPendingFacturaFile = null;
-        var _b64 = await _fileToBase64(_pf);
+        var _b64 = await _fileToBase64(facFile);
         var _sess = getSession()||{};
         var _ur = await fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({
           action:'uploadIngresoPDF', opId:res.op||payload.id, tipo:'factura',
-          fileName:_pf.name, base64:_b64, mimeType:_pf.type, usuario:_sess.email||'sistema'
+          fileName:facFile.name, base64:_b64, mimeType:facFile.type, usuario:_sess.email||'sistema'
         })});
         var _ures = await _ur.json();
         if (_ures.ok) console.log('[Ingreso] Factura subida:', _ures.url);
       } catch(_fe) { console.warn('[Ingreso] Error subiendo factura:', _fe); }
     }
-    _ingPendingFacturaFile = null;
 
-    // 4. Aviso: si el paciente no pagó completo, se le generó una cuenta por cobrar.
     if (res.saldoGenerado && res.saldoGenerado > 0.5) {
       _ingAvisoCxC(res.paciente || payload.paciente || '', res.op || '', res.saldoGenerado);
     }
-    // 5. "Guardar y capturar otro": quedarse en la captura, lista para la
-    //    siguiente venta. OJO: NO se llama loadIngresosERP() aquí — re-renderiza
-    //    #view-ingresos, que CONTIENE este drawer, y lo destruiría a media
-    //    captura. La lista se refresca sola al cerrar (ver ingCloseDrawer).
-    if (_ingSaveNew) {
-      _ingResetForNext(res.op || '');
-      return;
-    }
-    // 6. Cerrar y refrescar (sin blanquear la vista → se siente inmediato)
-    ingCloseDrawer(true);
-    _ingRefreshSilent();
-  } catch(e) {
-    // Falló la conexión: NO se limpia nada — la captura se conserva.
-    alert('Error de conexión: ' + e.message);
-    _ingSaveBtnsBusy(false);
-  }
+  } catch(e) { console.warn('[Ingreso] efectos secundarios:', e); }
 }
 
 /* Formato moneda corto para avisos de captura de ingreso. */
