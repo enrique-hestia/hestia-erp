@@ -4776,6 +4776,49 @@ function logAudit(usuario, modulo, accion, referencia, campo, anterior, nuevo) {
   } catch(e) { /* silencioso para no bloquear operaciones */ }
 }
 
+/* ── VISOR DE AUDITORÍA ──────────────────────────────────────────────────────
+   Lee BD_Auditoria (quién, cuándo, qué módulo/acción, referencia, campo,
+   antes→después). Gate: ver_auditoria (admin/director pasan siempre). Devuelve
+   los más recientes primero, con filtros por módulo/usuario/texto/fecha. */
+function readAuditoria(body){
+  body = body || {};
+  if (!_tokenHasPermission(body.token || '', 'ver_auditoria'))
+    return { ok:false, error:'Sin autorización para ver la auditoría (permiso «ver_auditoria»).' };
+  try {
+    var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+    var sh = ss.getSheetByName('BD_Auditoria');
+    if (!sh || sh.getLastRow() < 2) return { ok:true, rows:[], total:0, modulos:[] };
+    var lr = sh.getLastRow();
+    var start = Math.max(2, lr - 4000 + 1);                 // ventana de trabajo (últimos ~4000)
+    var vals = sh.getRange(start, 1, lr - start + 1, 8).getValues();
+    var qMod = String(body.modulo||'').trim().toLowerCase();
+    var qUsr = String(body.usuario||'').trim().toLowerCase();
+    var qBus = String(body.buscar||'').trim().toLowerCase();
+    var desde = String(body.desde||'').substring(0,10);
+    var hasta = String(body.hasta||'').substring(0,10);
+    var tz = Session.getScriptTimeZone(), out = [], modset = {};
+    for (var i = vals.length - 1; i >= 0; i--){              // reverse-cronológico
+      var v = vals[i];
+      var m0 = String(v[2]||'').trim(); if (m0) modset[m0] = 1;
+      var fecha = (v[0] instanceof Date) ? Utilities.formatDate(v[0], tz, 'yyyy-MM-dd HH:mm:ss') : String(v[0]||'');
+      var fday = fecha.substring(0,10);
+      if (desde && fday < desde) continue;
+      if (hasta && fday > hasta) continue;
+      var rec = { fecha:fecha, usuario:String(v[1]||''), modulo:String(v[2]||''), accion:String(v[3]||''),
+                  referencia:String(v[4]||''), campo:String(v[5]||''), anterior:String(v[6]||''), nuevo:String(v[7]||'') };
+      if (qMod && rec.modulo.toLowerCase().indexOf(qMod) < 0) continue;
+      if (qUsr && rec.usuario.toLowerCase().indexOf(qUsr) < 0) continue;
+      if (qBus){
+        var blob = (rec.usuario+' '+rec.modulo+' '+rec.accion+' '+rec.referencia+' '+rec.campo+' '+rec.anterior+' '+rec.nuevo).toLowerCase();
+        if (blob.indexOf(qBus) < 0) continue;
+      }
+      out.push(rec);
+      if (out.length >= 600) break;
+    }
+    return { ok:true, rows:out, total:(lr-1), modulos:Object.keys(modset).sort() };
+  } catch(ex){ return { ok:false, error:ex.message }; }
+}
+
 // Escanea el MÁXIMO real (ver _maxIdNum) — leer la última fila daba IDs duplicados.
 function _getNextProdID(sheet) {
   return 'PROD-' + String(_maxIdNum(sheet, /PROD-(\d+)/) + 1).padStart(5,'0');

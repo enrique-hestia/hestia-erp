@@ -869,6 +869,12 @@ function doGet(e) {
         return jsonResponse({ ok:false, error:'Agrega identificar.gs al proyecto de Apps Script y redespliega.' });
       return jsonResponse(reconciliarNombresIngresos({ token: (e && e.parameter.token) || '' }));
     }
+    if (action === 'auditoria') {
+      if (typeof readAuditoria !== 'function')
+        return jsonResponse({ ok:false, error:'Actualiza finance.gs en Apps Script y redespliega.' });
+      return jsonResponse(readAuditoria({ token:(e&&e.parameter.token)||'', modulo:(e&&e.parameter.modulo)||'',
+        usuario:(e&&e.parameter.usuario)||'', buscar:(e&&e.parameter.buscar)||'', desde:(e&&e.parameter.desde)||'', hasta:(e&&e.parameter.hasta)||'' }));
+    }
     if (action === 'noLocalizados') {
       if (typeof listarNoLocalizados !== 'function')
         return jsonResponse({ ok:false, error:'Agrega identificar.gs al proyecto de Apps Script y redespliega.' });
