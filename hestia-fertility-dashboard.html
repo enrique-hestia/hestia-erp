@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.321 -->
+﻿<!-- app-build:2026.07.22.322 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -40247,7 +40247,7 @@ function auditRender(d){
   var h='<div style="max-height:68vh;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">'
     +'<thead><tr>'+['Fecha','Usuario','Módulo','Acción','Referencia','Campo','Antes → Después'].map(function(x){return '<th style="text-align:left;padding:7px 10px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--color-text-muted);background:var(--color-surface-2,#fafafa);border-bottom:2px solid var(--color-divider);position:sticky;top:0">'+x+'</th>';}).join('')+'</tr></thead><tbody>';
   d.rows.forEach(function(r){
-    var cambio=(r.anterior||r.nuevo)?(_esc(r.anterior||'∅')+' <span style="color:#c46a7a">→</span> <b>'+_esc(r.nuevo||'∅')+'</b>'):'—';
+    var cambio=(r.anterior||r.nuevo)?(_audLinkify(r.anterior||'∅')+' <span style="color:#c46a7a">→</span> <b>'+_audLinkify(r.nuevo||'∅')+'</b>'):'—';
     var ref=_esc(r.referencia||'');
     h+='<tr onclick="_audDetalle(this.getAttribute(\'data-ref\'))" data-ref="'+ref+'" title="Ver la historia completa de esta operación" style="border-bottom:1px solid var(--color-divider,#f0f0f0);cursor:pointer" onmouseover="this.style.background=\'var(--color-surface-2,#faf6f4)\'" onmouseout="this.style.background=\'\'">'
       +'<td style="padding:6px 10px;white-space:nowrap;color:var(--color-text-muted);font-variant-numeric:tabular-nums">'+_esc(r.fecha)+'</td>'
@@ -40274,6 +40274,7 @@ function _audDetalle(ref){
   fetch(url,{redirect:'follow'}).then(function(r){return r.json();}).then(function(d){ _audDetalleRender(ref,d); })
     .catch(function(){ body.innerHTML='<div style="color:#b91c1c;padding:20px">Error de conexión.</div>'; });
 }
+function _audLinkify(s){ var e=_esc(String(s==null?'':s)); return e.replace(/(https?:\/\/[^\s<]+)/g,'<a href="$1" target="_blank" style="color:var(--color-primary,#c46a7a);font-weight:600;text-decoration:underline">📎 Ver comprobante</a>'); }
 function _audAccColor(a){
   a=String(a||'').toLowerCase();
   if(a.indexOf('crea')>-1||a.indexOf('captur')>-1||a.indexOf('alta')>-1) return '#16a34a';
@@ -40294,7 +40295,7 @@ function _audDetalleRender(ref,d){
   h+='<div style="max-height:60vh;overflow:auto;padding:0 20px 18px">';
   rows.forEach(function(r,i){
     var col=_audAccColor(r.accion);
-    var cambio=(r.anterior||r.nuevo)?('<div style="margin-top:5px;font-size:12px;line-height:1.5"><span style="color:var(--color-text-muted)">'+_esc(r.campo||'valor')+':</span> '+_esc(r.anterior||'∅')+' <span style="color:#c46a7a">→</span> <b>'+_esc(r.nuevo||'∅')+'</b></div>'):'';
+    var cambio=(r.anterior||r.nuevo)?('<div style="margin-top:5px;font-size:12px;line-height:1.5"><span style="color:var(--color-text-muted)">'+_esc(r.campo||'valor')+':</span> '+_audLinkify(r.anterior||'∅')+' <span style="color:#c46a7a">→</span> <b>'+_audLinkify(r.nuevo||'∅')+'</b></div>'):'';
     h+='<div style="display:flex;gap:12px">'
       +'<div style="flex:none;display:flex;flex-direction:column;align-items:center"><div style="width:12px;height:12px;border-radius:50%;background:'+col+';margin-top:4px"></div>'+(i<rows.length-1?'<div style="flex:1;width:2px;background:var(--color-divider,#e5e7eb);min-height:14px"></div>':'')+'</div>'
       +'<div style="flex:1;padding-bottom:16px">'

@@ -6655,7 +6655,7 @@ function abonarIngreso(body) {
 
       try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch (e) {}
       try { logAudit(usuario || 'sistema', 'Cobranza', 'Cobrar/Abonar', op, 'Saldo OP',
-              'Pagado ' + pagadoActual.toFixed(2), 'Pagado ' + nuevoPagado.toFixed(2) + ' (' + formaPago + (creditoAplicado>0.01?(' + crédito '+creditoAplicado.toFixed(2)):'') + ')'); } catch (ae) {}
+              'Pagado ' + pagadoActual.toFixed(2), 'Pagado ' + nuevoPagado.toFixed(2) + ' (' + formaPago + (creditoAplicado>0.01?(' + crédito '+creditoAplicado.toFixed(2)):'') + ')' + (body.comprobante ? ' · comprobante: ' + body.comprobante : '')); } catch (ae) {}
 
       return { ok: true, op: op, abonado: abonoTotal, efectivo: montoCobrado, creditoAplicado: creditoAplicado,
                pagado: nuevoPagado, total: totalOP, saldo: nuevoSaldo, formaPago: formaPago, banco: bancoInfo };
