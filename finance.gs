@@ -786,6 +786,13 @@ function doPost(e) {
       try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
       return jsonResponse(_cRes);
     }
+    // ── ALINEAR FOLIOS (arreglar drift de cargos) — preview/apply, gated ──
+    if (body.action === 'alinearFolios') {
+      if (typeof alinearFoliosCobranza !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza cobranza.gs en Apps Script y redespliega.'});
+      if (typeof _postEmail !== 'undefined' && _postEmail) body.usuario = _postEmail;   // actor verificado para la auditoría
+      return jsonResponse(alinearFoliosCobranza(body));
+    }
     // ── COBRANZA: registrar abono / cargar saldo inicial (escritura) ──
     if (body.action === 'registrarAbono') {
       if (typeof registrarAbono !== 'function')

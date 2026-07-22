@@ -235,6 +235,7 @@ function saveComisionesCfg(body) {
       return { id: String(r.id).trim(), nombre: String(r.nombre || '').trim(), activo: r.activo !== false,
                grupoId: String(r.grupoId).trim(),
                productos: (r.productos || []).map(function (p) { return String(p).trim(); }).filter(function (p) { return !!p; }),
+               productosSoloDescuento: (r.productosSoloDescuento || []).map(function (p) { return String(p).trim(); }).filter(function (p) { return !!p; }),
                escalones: (r.escalones || []).map(function (t) { return { desde: _comNum(t.desde) || 1, hasta: (t.hasta === '' || t.hasta == null) ? '' : _comNum(t.hasta), pct: _comNum(t.pct) }; }),
                beneficiarios: (r.beneficiarios || []).map(function (b) { return { tipo: String(b.tipo), origenId: String(b.origenId || '').trim(), parte: _comNum(b.parte), via: String(b.via) }; }),
                diferido: (r.diferido == null || r.diferido === '') ? 1 : (parseInt(r.diferido, 10) || 0),
@@ -389,6 +390,11 @@ function calcularComisiones(body) {
 
     var prodSet = {};
     (regla.productos || []).forEach(function (p) { prodSet[_comKeyProd(p)] = 1; });
+    // Set B: productos que RECIBEN la comisión pero NO cuentan para el escalón/tier.
+    // Elegibilidad para el beneficio = A∪B; conteo del escalón = SOLO A. Retrocompatible:
+    // una regla sin este campo trata B como [] → comportamiento idéntico al anterior.
+    var soloSet = {};
+    (regla.productosSoloDescuento || []).forEach(function (p) { soloSet[_comKeyProd(p)] = 1; });
 
     // ── 1) Ventas del GRUPO con producto elegible ──────────────────────────
     var elegibles = [], descartadas = { sinOrigen: 0, otroGrupo: 0, productoNoElegible: 0 };
@@ -402,20 +408,24 @@ function calcularComisiones(body) {
       try { res = _origResolver(v.origen); } catch (e) { res = null; }
       if (!res || !res.id) { descartadas.sinOrigen++; return; }
       if (String(res.grupoId) !== String(regla.grupoId)) { descartadas.otroGrupo++; return; }
-      if (!prodSet[_comKeyProd(v.producto)]) {
+      var pk = _comKeyProd(v.producto), enTier = !!prodSet[pk], enSolo = !!soloSet[pk];
+      if (!enTier && !enSolo) {
         descartadas.productoNoElegible++;
         descNoElegible.push({ op: v.op, paciente: v.paciente, producto: v.producto,
                               cantidad: v.cantidad, total: v.total, medicoNombre: res.nombre });
         return;
       }
       elegibles.push({ op: v.op, paciente: v.paciente, producto: v.producto, cantidad: v.cantidad,
-                       total: v.total, medicoId: res.id, medicoNombre: res.nombre, medicoTipo: res.tipo });
+                       total: v.total, medicoId: res.id, medicoNombre: res.nombre, medicoTipo: res.tipo,
+                       cuentaTier: enTier });
     });
 
     // ── 2) Conteo del grupo → escalón ───────────────────────────────────────
     // Se cuentan PROCEDIMIENTOS, no renglones: una venta con cantidad 2 son 2 procedimientos.
+    // SOLO los productos que cuentan para tier (Set A) empujan el escalón; los "solo
+    // descuento" (Set B) reciben el % alcanzado sin sumarlo.
     var conteo = 0;
-    elegibles.forEach(function (e) { conteo += e.cantidad; });
+    elegibles.forEach(function (e) { if (e.cuentaTier) conteo += e.cantidad; });
     var tiers = _comTiers(regla);
     var pct = _cobTierPct(tiers, conteo);
     var escalon = null;

@@ -537,6 +537,144 @@ function ajustarPagadoIngreso(body) {
  * captura un ingreso con pago parcial (saveIngreso lo registra), (b) se carga un
  * saldo inicial, o (c) se registra un cargo a crédito. Cada OP trae su desglose.
  */
+/* ── ALINEAR FOLIOS (arreglar el "drift" de folios) ───────────────────────────
+ * NO renumera BD_Ingresos (es la fuente de verdad). Detecta cargos auto-ingreso de
+ * Cuentas_Cobrar cuyo OP apunta a una venta que NO es de ese paciente (folio corrido,
+ * p.ej. cargo "Kaitlyn $50,500" apuntando a OP-01246 que en BD es de Claire) y propone
+ * RE-APUNTARLOS a la venta correcta cruzando por paciente + saldo (Total−Pagado) +
+ * concepto/producto. Modo preview (default) NO escribe; apply=true aplica solo las
+ * filas re-verificadas en la MISMA corrida. Gated por «reorganizar_folios». */
+function alinearFoliosCobranza(body){
+  try{
+    body = body || {};
+    if (typeof _tokenHasPermission==='function' && !_tokenHasPermission(body.token||'', 'reorganizar_folios'))
+      return { ok:false, error:'Sin autorización para reorganizar folios (permiso «reorganizar_folios»).' };
+    var apply = body.apply === true || body.apply === 'true';
+    var actor = body.usuario || 'sistema';
+    function num(v){ return _cobNum(v); }
+    function nkey(s){ return _cobKeyNom(String(s||'')); }
+
+    // Anti-TOCTOU: en modo APPLY tomamos el lock ANTES de leer, para que el cómputo
+    // (BD + cargos) y la escritura sean consistentes; en preview no hace falta.
+    var lock = null;
+    if(apply){ lock = LockService.getScriptLock(); if(!lock.tryLock(25000)) return { ok:false, error:'Sistema ocupado, reintenta en un momento.' }; }
+    try{
+
+    // 1) BD_Ingresos → mapa por OP (sumando líneas) + índice por paciente
+    var iss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+    var bd = iss.getSheetByName(BD_INGRESOS_TAB);
+    if (!bd) return { ok:false, error:'No se encontró BD_Ingresos' };
+    var dv = bd.getDataRange().getValues();
+    var H = dv[0].map(function(x){ return String(x||'').trim().toLowerCase(); });
+    function hc(){ for(var a=0;a<arguments.length;a++){ var k=H.indexOf(arguments[a]); if(k>-1) return k; } return -1; }
+    var iOp=hc('op'); if(iOp<0) iOp=0;
+    var iPac=hc('paciente'), iTot=hc('totalpagar','total a pagar','total'), iPag=hc('pagado'), iProd=hc('producto');
+    var byOp={};
+    for(var r=1;r<dv.length;r++){
+      var op=String(dv[r][iOp]||'').trim(); if(!op) continue;
+      if(!byOp[op]) byOp[op]={op:op, paciente:'', total:0, pagado:0, prods:[]};
+      var t=num(dv[r][iTot]);
+      var rawP=dv[r][iPag];
+      var p=(String(rawP==null?'':rawP).trim()==='')? t : num(rawP);   // vacío = pagado (histórico)
+      byOp[op].total+=t; byOp[op].pagado+=p;
+      if(!byOp[op].paciente && iPac>-1) byOp[op].paciente=String(dv[r][iPac]||'').trim();
+      if(iProd>-1 && dv[r][iProd]) byOp[op].prods.push(String(dv[r][iProd]));
+    }
+    var idxPac={};
+    Object.keys(byOp).forEach(function(op){
+      var o=byOp[op]; o.saldo=Math.round((o.total-o.pagado)*100)/100;
+      var k=nkey(o.paciente); if(!idxPac[k]) idxPac[k]=[]; idxPac[k].push(o);
+    });
+
+    // 2) Cargos auto-ingreso de Cuentas_Cobrar
+    var cc=_cobEnsureCargos();
+    var cv=cc.getDataRange().getValues();
+    var CH=cv[0].map(function(x){ return String(x||'').trim().toLowerCase(); });
+    function cch(){ for(var a=0;a<arguments.length;a++){ var k=CH.indexOf(arguments[a]); if(k>-1) return k; } return -1; }
+    var cOp=cch('op'); if(cOp<0)cOp=1;
+    var cPac=cch('paciente'); if(cPac<0)cPac=2;
+    var cConc=cch('concepto'); if(cConc<0)cConc=4;
+    var cMonto=cch('montocargo'); if(cMonto<0)cMonto=5;
+    var cEst=cch('estatus'); if(cEst<0)cEst=6;
+    var cNota=cch('nota'); if(cNota<0)cNota=7;
+
+    // folios BD que YA tienen un cargo alineado → no re-apuntar a uno ocupado.
+    // Salta pagados/cancelados: un cargo cerrado NO debe reservar la venta de otro vivo.
+    var ocupados={};
+    for(var q=1;q<cv.length;q++){
+      if(String(cv[q][cNota]||'').toLowerCase().indexOf('auto-ingreso')<0) continue;
+      var eq=String(cv[q][cEst]||'').toLowerCase();
+      if(eq==='pagado'||eq==='cancelado') continue;
+      var opq=String(cv[q][cOp]||'').trim(), o2=byOp[opq];
+      if(o2 && nkey(o2.paciente)===nkey(cv[q][cPac]) && Math.abs(o2.saldo-num(cv[q][cMonto]))<=0.02) ocupados[opq]=1;
+    }
+
+    var props=[];
+    for(var i=1;i<cv.length;i++){
+      if(String(cv[i][cNota]||'').toLowerCase().indexOf('auto-ingreso')<0) continue;
+      var est=String(cv[i][cEst]||'').toLowerCase();
+      if(est==='pagado'||est==='cancelado') continue;
+      var monto=num(cv[i][cMonto]); if(monto<=0.01) continue;
+      var op0=String(cv[i][cOp]||'').trim();
+      var pac0=String(cv[i][cPac]||'').trim();
+      var conc=String(cv[i][cConc]||'');
+      var bdo=byOp[op0];
+      // El OP apunta a una venta de ESTA MISMA persona → el folio es CORRECTO, NO
+      // es "folio corrido": jamás lo movemos a otra venta (eso sí rompería dinero).
+      // Si el saldo no cuadra, es "saldo desincronizado" (otro problema): se reporta.
+      if(bdo && nkey(bdo.paciente)===nkey(pac0)){
+        if(Math.abs(bdo.saldo-monto)>0.02)
+          props.push({ rowNum:i+1, paciente:pac0, monto:monto, concepto:conc, oldOP:op0, newOP:'', quienEsOldOP:bdo.paciente, status:'saldo-desync' });
+        continue;
+      }
+      // Folio corrido REAL: el OP no existe o pertenece a OTRO paciente.
+      var cands0=(idxPac[nkey(pac0)]||[]).filter(function(o){ return Math.abs(o.saldo-monto)<=0.02 && !ocupados[o.op] && o.op!==op0; });
+      var cands=cands0;
+      if(cands.length>1){
+        var cn=conc.toLowerCase();
+        var strong=cands.filter(function(o){ return o.prods.some(function(pr){ var pl=String(pr).toLowerCase(); return pl.length>3 && (cn.indexOf(pl)>-1 || pl.indexOf(cn)>-1); }); });
+        cands = (strong.length===1) ? strong : [];   // 2+ mismos saldos sin desempate claro → revisión humana, no adivinar
+      }
+      var quienEsOp = bdo ? bdo.paciente : '(no existe en BD)';
+      if(cands.length===1){
+        props.push({ rowNum:i+1, paciente:pac0, monto:monto, concepto:conc, oldOP:op0, newOP:cands[0].op, quienEsOldOP:quienEsOp, status:'realinear' });
+        ocupados[cands[0].op]=1;
+      } else {
+        props.push({ rowNum:i+1, paciente:pac0, monto:monto, concepto:conc, oldOP:op0, newOP:'', quienEsOldOP:quienEsOp, status: cands0.length? 'ambiguo':'sin-match' });
+      }
+    }
+
+    if(!apply){
+      return { ok:true, preview:true, total:props.length,
+               realinear:props.filter(function(p){return p.status==='realinear';}).length,
+               ambiguo:props.filter(function(p){return p.status==='ambiguo';}).length,
+               sinMatch:props.filter(function(p){return p.status==='sin-match';}).length,
+               saldoDesync:props.filter(function(p){return p.status==='saldo-desync';}).length,
+               props:props };
+    }
+
+    // 3) APLICAR — re-verifica contra los props recién calculados (anti-stale).
+    // El lock ya está tomado desde arriba (anti-TOCTOU): read+verify+write consistentes.
+    var confirmar = body.aplicar || props.filter(function(p){return p.status==='realinear';});
+    var byRow={}; props.forEach(function(p){ byRow[p.rowNum]=p; });
+    var hechos=[];
+    confirmar.forEach(function(c){
+      var rn=c.rowNum, newOP=String(c.newOP||'').trim();
+      var p=byRow[rn];
+      if(!p || p.status!=='realinear' || !newOP || newOP!==p.newOP) return;   // solo lo verificado en esta corrida
+      cc.getRange(rn, cOp+1).setValue(newOP);
+      var concAct=String(cc.getRange(rn, cConc+1).getValue()||'');
+      if(/saldo pendiente de op/i.test(concAct)) cc.getRange(rn, cConc+1).setValue('Saldo pendiente de OP '+newOP);
+      try{ logAudit(actor,'Cobranza','Alinear folio', p.oldOP, 'OP del cargo', p.oldOP+' (era de '+p.quienEsOldOP+')', newOP+' ('+p.paciente+')'); }catch(e){}
+      hechos.push({ oldOP:p.oldOP, newOP:newOP, paciente:p.paciente });
+    });
+    try{ CacheService.getScriptCache().remove('gas_ingresos_v1'); }catch(e){}
+    return { ok:true, aplicados:hechos.length, hechos:hechos };
+
+    } finally { if(lock) lock.releaseLock(); }
+  }catch(ex){ return { ok:false, error:ex.message }; }
+}
+
 function _cobBuildSaldos() {
   var cargos = _cobReadCargos();
   var abonos = _cobReadAbonos();

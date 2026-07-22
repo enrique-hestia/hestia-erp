@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.310 -->
+﻿<!-- app-build:2026.07.22.311 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12288,7 +12288,7 @@ function comCfgAddRegla() {
   if (!_comCfgW) _comCfgW = [];
   // Nace VÁLIDA salvo lo que solo el usuario sabe (grupo y productos): un escalón
   // y un reparto que ya suma 100 evitan que la primera pantalla salga en rojo.
-  _comCfgW.push({ id: comCfgNuevaId(), nombre: 'Nueva regla', activo: true, grupoId: '', productos: [],
+  _comCfgW.push({ id: comCfgNuevaId(), nombre: 'Nueva regla', activo: true, grupoId: '', productos: [], productosSoloDescuento: [],
                   escalones: [{ desde: 1, hasta: 2, pct: 0 }, { desde: 3, hasta: '', pct: 10 }],
                   beneficiarios: [{ tipo: 'medico_del_procedimiento', origenId: '', parte: 100, via: 'nota_credito' }],
                   diferido: 1, notas: '' });
@@ -12309,7 +12309,7 @@ function comCfgSeedEjemplo() {
   if (!_comCfgW) _comCfgW = [];
   _comCfgW.push({ id: comCfgNuevaId(), nombre: 'Grupo Médico — volumen mensual', activo: true,
                   grupoId: grupos.length ? String(grupos[0].id) : '',
-                  productos: ['Captura + Vitrificación'],
+                  productos: ['Captura + Vitrificación'], productosSoloDescuento: [],
                   escalones: [{ desde: 1, hasta: 2, pct: 0 }, { desde: 3, hasta: '', pct: 10 }],
                   beneficiarios: [{ tipo: 'medico_del_procedimiento', origenId: '', parte: 50, via: 'nota_credito' },
                                   { tipo: 'fijo', origenId: coord.length ? String(coord[0].id) : '', parte: 50, via: 'efectivo' }],
@@ -12319,12 +12319,27 @@ function comCfgSeedEjemplo() {
 function comCfgProdAdd() {
   var r = comCfgR(); if (!r) return;
   var inp = document.getElementById('com-cfg-prod'); var v = (inp && inp.value || '').trim(); if (!v) return;
+  // Si ya estaba en "solo comisión", pasarlo a "cuenta para tier" lo saca de allá
+  // (un producto nunca vive en ambas listas → evita ambigüedad en el motor).
+  var idxSolo = (r.productosSoloDescuento || []).map(function(p){return String(p).toLowerCase();}).indexOf(v.toLowerCase());
+  if (idxSolo > -1) r.productosSoloDescuento.splice(idxSolo, 1);
   var dup = false; (r.productos || []).forEach(function (p) { if (String(p).toLowerCase() === v.toLowerCase()) dup = true; });
   if (!dup) (r.productos = r.productos || []).push(v);
   if (inp) inp.value = '';
   comCfgRender();
 }
 function comCfgProdDel(j) { var r = comCfgR(); if (r) { r.productos.splice(j, 1); comCfgRender(); } }
+function comCfgProdSoloAdd() {
+  var r = comCfgR(); if (!r) return;
+  var inp = document.getElementById('com-cfg-prod-solo'); var v = (inp && inp.value || '').trim(); if (!v) return;
+  var dupTier = false; (r.productos || []).forEach(function (p) { if (String(p).toLowerCase() === v.toLowerCase()) dupTier = true; });
+  if (dupTier) { alert('«' + v + '» ya cuenta para el escalón; no puede estar también en solo-comisión. Quítalo de arriba primero si quieres que no empuje el tier.'); if (inp) inp.value = ''; return; }
+  var dup = false; (r.productosSoloDescuento || []).forEach(function (p) { if (String(p).toLowerCase() === v.toLowerCase()) dup = true; });
+  if (!dup) (r.productosSoloDescuento = r.productosSoloDescuento || []).push(v);
+  if (inp) inp.value = '';
+  comCfgRender();
+}
+function comCfgProdSoloDel(j) { var r = comCfgR(); if (r) { r.productosSoloDescuento.splice(j, 1); comCfgRender(); } }
 function comCfgEscAdd() { var r = comCfgR(); if (r) { (r.escalones = r.escalones || []).push({ desde: 1, hasta: '', pct: 0 }); comCfgRender(); } }
 function comCfgEscDel(j) { var r = comCfgR(); if (r) { r.escalones.splice(j, 1); comCfgRender(); } }
 function comCfgEscSet(j, k, v) {
@@ -13102,6 +13117,21 @@ function comCfgInnerHtml() {
     if (puede) {
       h += '<div style="display:flex;gap:8px;max-width:520px"><input id="com-cfg-prod" list="com-cfg-dl" placeholder="Escribe o elige un procedimiento del catálogo…" style="flex:1;padding:8px 11px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:12.5px;background:var(--color-surface-2);color:var(--color-text)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();comCfgProdAdd();}">'
         + '<button onclick="comCfgProdAdd()" style="padding:8px 14px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">Agregar</button></div>' + _comCfgProdDl();
+    }
+
+    // Productos SOLO descuento (reciben comisión pero NO empujan el escalón/tier)
+    h += '<span style="' + lab + ';margin-top:14px">Solo comisión — no cuentan para el escalón <span style="font-weight:400;text-transform:none;color:var(--color-text-muted)">· reciben la comisión del nivel alcanzado, pero no suman para subir de tier</span></span>';
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">';
+    if ((r.productosSoloDescuento || []).length) {
+      r.productosSoloDescuento.forEach(function (p, j) {
+        h += '<span style="display:inline-flex;align-items:center;gap:6px;background:var(--color-surface-2);border:1px dashed var(--color-primary);border-radius:20px;padding:5px 6px 5px 12px;font-size:12px;color:var(--color-text)">' + _comEsc(p)
+          + (puede ? '<button onclick="comCfgProdSoloDel(' + j + ')" title="Quitar" style="border:none;background:#fbeeec;color:#c83c3c;border-radius:50%;width:18px;height:18px;font-size:10px;cursor:pointer;line-height:1">✕</button>' : '') + '</span>';
+      });
+    } else h += '<span style="font-size:11.5px;color:var(--color-text-muted)">Opcional. Si un procedimiento debe cobrar comisión pero no debe empujar el tier, agrégalo aquí.</span>';
+    h += '</div>';
+    if (puede) {
+      h += '<div style="display:flex;gap:8px;max-width:520px"><input id="com-cfg-prod-solo" list="com-cfg-dl" placeholder="Procedimiento que solo recibe comisión…" style="flex:1;padding:8px 11px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:12.5px;background:var(--color-surface-2);color:var(--color-text)" onkeydown="if(event.key===\'Enter\'){event.preventDefault();comCfgProdSoloAdd();}">'
+        + '<button onclick="comCfgProdSoloAdd()" style="padding:8px 14px;background:transparent;color:var(--color-primary);border:1.5px solid var(--color-primary);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">Agregar</button></div>';
     }
 
     // Escalones
@@ -27826,6 +27856,7 @@ var OP_PERMS_CATALOG = [
   {key:'bank_liberado',    label:'Marcar liberado (MP)',             cat:'Conciliación Bancaria'},
   {key:'editar_ingresos',  label:'Editar operaciones de ingreso',    cat:'Ingresos'},
   {key:'ver_auditoria',    label:'Ver la auditoría (quién cambió qué y cuándo)', cat:'Administración'},
+  {key:'reorganizar_folios', label:'Alinear folios de cobranza (re-apuntar cargos con folio corrido)', cat:'Administración'},
   /* Permiso APARTE de editar_ingresos a propósito: cancelar una venta mueve
      dinero hacia afuera (dispara el reembolso a la paciente y el reverso en el
      banco) y la retira de todos los reportes. Editar corrige un dato; cancelar
@@ -37809,6 +37840,7 @@ function ccShell(){
         + (hasPermission('editar_egresos') ? '<button onclick="cobDescOpen()" title="Configura los descuentos por volumen de cada agencia: qué productos cuentan, escalones, y si aplica el mes actual o el anterior" style="padding:8px 14px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;margin-left:6px">🏷️ Descuentos agencia</button>' : '')
         + '<select id="cc-gen-seg" title="Segmento del reporte general" style="padding:8px 10px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;margin-left:6px"><option value="">Todos los segmentos</option><option value="Pacientes">Solo Pacientes</option><option value="Médicos">Solo Médicos</option><option value="Agencias">Solo Agencias</option></select>'
         + '<button onclick="ccImprimirGeneral()" title="Imprimir el reporte de TODOS los deudores (del segmento elegido) con montos, vencimientos y documentos vencidos" style="padding:8px 14px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;margin-left:6px">🖨️ Reporte general</button>'
+        + ((hasPermission('reorganizar_folios')||hasPermission('*')) ? '<button onclick="ccAlinearAbrir()" title="Detecta cargos cuyo folio quedó apuntando a la venta equivocada (folio corrido) y los re-apunta a la venta correcta del paciente. Con vista previa; no toca BD_Ingresos." style="padding:8px 14px;background:var(--color-surface-2);color:var(--color-text);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;margin-left:6px">🧭 Alinear folios</button>' : '')
         + '<button onclick="ccLoad(true)" id="cc-refresh" style="padding:8px 16px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">↻ Actualizar</button>'
       + '</div>'
     + '</div>'
@@ -37876,6 +37908,54 @@ function _ccGenVenc(o){
   var dias=parseInt(o.dias,10)||0;
   if(dias>0) return dias+' días'+(o.bucket?' ('+ccEsc(o.bucket)+')':'');
   return o.fecha?ccFch(o.fecha):'—';
+}
+/* ── ALINEAR FOLIOS: preview + aplicar (re-apunta cargos con folio corrido) ── */
+var _ccAlinData=null;
+function ccAlinearAbrir(){
+  var s=getSession()||{};
+  ccModal('🧭 Alinear folios','<div style="text-align:center;padding:30px;color:var(--color-text-muted)"><span class="ing-spinner ing-spinner-dark"></span> Analizando folios…</div>', function(){}, ' ');
+  var sv=document.getElementById('cc-modal-save'); if(sv) sv.style.display='none';
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'alinearFolios', token:s.token||getToken()})})
+    .then(function(r){return r.json();}).then(function(d){ _ccAlinData=d; ccAlinearRender(d); })
+    .catch(function(e){ var b=document.querySelector('#cc-modal [style*="overflow-y"]'); if(b) b.innerHTML='<div style="color:#c83c3c;padding:16px">Error: '+ccEsc(e.message)+'</div>'; });
+}
+function ccAlinearRender(d){
+  var m=document.getElementById('cc-modal'); if(!m) return;
+  var body=m.querySelector('[style*="overflow-y"]'); if(!body) return;
+  var sv=document.getElementById('cc-modal-save');
+  if(!d||!d.ok){ body.innerHTML='<div style="color:#c83c3c;padding:16px">'+ccEsc((d&&d.error)||'No disponible')+'</div>'; if(sv) sv.style.display='none'; return; }
+  var re=(d.props||[]).filter(function(p){return p.status==='realinear';});
+  var otros=(d.props||[]).filter(function(p){return p.status!=='realinear';});
+  if(!d.props.length){ body.innerHTML='<div style="padding:20px;text-align:center;color:#16a34a">✓ Todos los folios están alineados. Nada que corregir.</div>'; if(sv) sv.style.display='none'; return; }
+  var h='';
+  if(re.length){
+    h+='<div style="font-size:12px;color:var(--color-text-muted);margin-bottom:10px"><b>'+re.length+' cargo(s)</b> apuntan a la venta equivocada. Revisa y aplica:</div>';
+    h+='<div style="max-height:340px;overflow:auto">';
+    re.forEach(function(p){
+      h+='<label style="display:flex;gap:10px;align-items:flex-start;padding:9px 4px;border-bottom:1px solid var(--color-divider);font-size:12px;cursor:pointer">'
+        +'<input type="checkbox" class="cc-alin-chk" data-row="'+p.rowNum+'" data-new="'+ccEsc(p.newOP)+'" checked style="margin-top:3px">'
+        +'<div style="flex:1"><b>'+ccEsc(p.paciente)+'</b> · '+ccFmt(p.monto)+' <span style="color:var(--color-text-muted)">('+ccEsc(p.concepto)+')</span>'
+        +'<div style="color:var(--color-text-muted);margin-top:2px"><span style="color:#c83c3c">'+ccEsc(p.oldOP)+'</span> <span style="font-size:10px">(hoy es de '+ccEsc(p.quienEsOldOP)+')</span> <span style="color:var(--color-primary)">→ '+ccEsc(p.newOP)+'</span></div></div></label>';
+    });
+    h+='</div>';
+  } else h+='<div style="padding:14px;text-align:center;color:#16a34a">✓ No hay folios re-alineables automáticamente.</div>';
+  if(otros.length){
+    h+='<div style="margin-top:12px;font-size:11.5px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:9px 11px">⚠ '+otros.length+' cargo(s) necesitan revisión manual (sin match único / ambiguo):<br>'
+      +otros.map(function(p){return ccEsc(p.oldOP)+' · '+ccFmt(p.monto)+' · '+ccEsc(p.paciente)+' ('+p.status+')';}).join('<br>')+'</div>';
+  }
+  body.innerHTML=h;
+  if(sv){ sv.style.display = re.length?'':'none'; sv.textContent='Aplicar seleccionados'; sv.onclick=ccAlinearAplicar; }
+}
+async function ccAlinearAplicar(){
+  var chks=Array.prototype.slice.call(document.querySelectorAll('.cc-alin-chk:checked'));
+  if(!chks.length){ alert('Marca al menos un cargo para alinear.'); return; }
+  var aplicar=chks.map(function(c){ return {rowNum:parseInt(c.getAttribute('data-row'),10), newOP:c.getAttribute('data-new')}; });
+  var sv=document.getElementById('cc-modal-save'); if(sv){ sv.disabled=true; sv.textContent='Aplicando…'; }
+  var s=getSession()||{};
+  var res; try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'alinearFolios', apply:true, aplicar:aplicar, token:s.token||getToken()})}); res=await r.json(); }
+  catch(e){ res={ok:false,error:e.message}; }
+  if(res&&res.ok){ var mm=document.getElementById('cc-modal'); if(mm)mm.remove(); alert('✓ '+res.aplicados+' folio(s) alineados. La cobranza ya empata con las ventas.'); ccLoad(true); }
+  else { alert('⚠ '+((res&&res.error)||'No se pudo alinear.')); if(sv){ sv.disabled=false; sv.textContent='Aplicar seleccionados'; } }
 }
 function ccImprimirGeneral(seg){
   if(!_ccData || !_ccData.ops){ if(typeof setStatus==='function') setStatus('Aún cargando cobranza…','err'); else alert('Aún cargando cobranza…'); return; }
