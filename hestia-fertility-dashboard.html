@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.307 -->
+﻿<!-- app-build:2026.07.22.308 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -3867,6 +3867,7 @@ function _renderProductosView() {
       +'<button id="prod-import-btn" onclick="document.getElementById(\'prod-import-file\').click()" title="Subir el .xlsx editado para actualizar/crear productos en lote" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">'
       +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Importar Excel</button>'
       +'<input type="file" id="prod-import-file" accept=".xlsx" style="display:none" onchange="prodImportarExcel(this)">'
+      +'<button onclick="hfDescargarPlantilla(\'catalogo-productos\')" title="Descarga un CSV de ejemplo con las columnas exactas del catálogo, para no equivocarte de formato al importar" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:transparent;color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">⬇ Plantilla muestra</button>'
       +'<button onclick="listasAdminOpen()" title="Listas de precios: dar de alta, editar o borrar las listas (General, Grupo Médico, etc.)" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">💲 Listas de precios</button>'
       +'<button onclick="agenciasAdminOpen()" title="Administrar agencias (cada agencia = su lista de precios)" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🏢 Agencias</button>'
       +'<button onclick="navigateTo(\'origenes\')" title="Orígenes externos: agencias y médicos que refieren ingresos (para atribución)" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🏷️ Orígenes externos</button>'
@@ -14803,6 +14804,11 @@ function renderConciliacion(data) {
   hh.push('<div class="ec-drop-lbl">Arrastra o haz clic para cargar estado de cuenta</div>');
   hh.push('<div class="ec-drop-sub">PDF, CSV o TXT · El archivo se lee localmente, no se envía a ningún servidor</div>');
   hh.push('</div>');
+  hh.push('<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;font-size:11px;color:var(--text-secondary,#6b7280)"><span style="font-weight:600">⬇ Plantillas muestra:</span>'
+    +'<button onclick="hfDescargarPlantilla(\'banco-santander\')" style="padding:4px 10px;background:transparent;border:1px solid var(--color-primary,#c46a7a);color:var(--color-primary,#c46a7a);border-radius:7px;font-size:11px;font-weight:600;cursor:pointer">Santander</button>'
+    +'<button onclick="hfDescargarPlantilla(\'banco-amex\')" style="padding:4px 10px;background:transparent;border:1px solid var(--color-primary,#c46a7a);color:var(--color-primary,#c46a7a);border-radius:7px;font-size:11px;font-weight:600;cursor:pointer">AMEX</button>'
+    +'<button onclick="hfDescargarPlantilla(\'banco-mp\')" style="padding:4px 10px;background:transparent;border:1px solid var(--color-primary,#c46a7a);color:var(--color-primary,#c46a7a);border-radius:7px;font-size:11px;font-weight:600;cursor:pointer">Mercado Pago</button>'
+    +'<button onclick="hfDescargarPlantilla(\'caja-chica\')" style="padding:4px 10px;background:transparent;border:1px solid var(--color-primary,#c46a7a);color:var(--color-primary,#c46a7a);border-radius:7px;font-size:11px;font-weight:600;cursor:pointer">Caja Chica</button></div>');
   hh.push('<div id="ec-prev" style="display:none" class="ec-prev">');
   hh.push('<div id="ec-prev-hdr" class="ec-prev-hdr"></div>');
   hh.push('<div id="ec-prev-tbl"></div>');
@@ -38121,6 +38127,51 @@ var HF_PLANTILLAS = {
     ejemplo: [
       ['Egreso','2026-07-15','1234','A-5678','PROV EGR Laboratorios XYZ SA de CV','12500.00'],
       ['Ingreso','2026-07-16','1240','F-9012','PROV ING Paciente Ejemplo','23600.00']
+    ]
+  },
+  'catalogo-productos': {
+    archivo: 'plantilla_catalogo_productos.csv',
+    titulo: 'Catálogo de productos (importar en lote)',
+    cols: ['productoId','sku','descripcion','categoria','tipo','precio','unidad','activo','inventariable','stockMinimo','stockMaximo','costoUnitario','proveedorPreferido','notas'],
+    ejemplo: [
+      ['','FIV-001','Fertilización In Vitro','Tratamientos','Servicio','78200','servicio','SI','NO','','','','',''],
+      ['','MED-014','Gonal-F 450 UI','Medicamentos','Insumo','8500','pieza','SI','SI','5','40','6200','Farmacia XYZ','Refrigerar']
+    ]
+  },
+  'banco-santander': {
+    archivo: 'plantilla_banco_santander.csv',
+    titulo: 'Estado de cuenta Santander (conciliar vs egresos)',
+    cols: ['Fecha','Depósito','Retiro','Saldo','Descripción'],
+    ejemplo: [
+      ['2026-07-15','0','12500.00','845300.50','SPEI ENVIADO LABORATORIOS XYZ'],
+      ['2026-07-16','23600.00','0','868900.50','DEPOSITO PACIENTE EJEMPLO']
+    ]
+  },
+  'banco-amex': {
+    archivo: 'plantilla_banco_amex.csv',
+    titulo: 'Estado de cuenta AMEX (conciliar vs egresos)',
+    cols: ['Fecha','Movimiento','Referencia','Descripción'],
+    ejemplo: [
+      ['2026-07-15','12500.00','000123','LABORATORIOS XYZ SA DE CV'],
+      ['2026-07-20','-30000.00','PAGO','PAGO RECIBIDO - GRACIAS (negativo = pago a la tarjeta, no es gasto)']
+    ]
+  },
+  'banco-mp': {
+    archivo: 'plantilla_banco_mercadopago.csv',
+    titulo: 'Movimientos Mercado Pago (conciliar vs egresos)',
+    cols: ['Fecha','Descripción','Monto','Estado','Referencia'],
+    ejemplo: [
+      ['2026-07-15 14:32','Cobro paciente ejemplo','23600.00','approved','MP-987654'],
+      ['2026-07-16 09:10','Comisión Mercado Pago','-812.40','approved','MP-987655']
+    ]
+  },
+  'caja-chica': {
+    archivo: 'plantilla_caja_chica.csv',
+    titulo: 'Caja Chica (movimientos)',
+    cols: ['Fecha','Concepto','Salida','Entrada'],
+    ejemplo: [
+      ['2026-07-15','Compra papelería','450.00','0'],
+      ['2026-07-16','Reembolso remanente','0','1000.00']
     ]
   }
 };
