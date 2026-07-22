@@ -522,6 +522,13 @@ function doGet(e) {
         return jsonResponse({ok:false, error:'Actualiza comisiones.gs en Apps Script y redespliega.'});
       return jsonResponse(descuentoOrigen((e&&e.parameter.origen)||'', (e&&e.parameter.anio)||'', (e&&e.parameter.mes)||''));
     }
+    // Contexto de TARIFAS Grupo Médico para auto-precio en la captura de ingresos.
+    // Tier del MES ANTERIOR (estable, sin true-up) + tabla precio/comisión. Solo lectura.
+    if (action === 'tarifaGMContexto') {
+      if (typeof tarifaGMContexto !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza comisiones.gs en Apps Script y redespliega.'});
+      return jsonResponse(tarifaGMContexto((e&&e.parameter.anio)||'', (e&&e.parameter.mes)||''));
+    }
     // Comisiones pendientes de generar (aviso "hay comisiones por pagar"). Solo lectura.
     if (action === 'comisionesPendientes') {
       if (typeof comisionesPendientes !== 'function')

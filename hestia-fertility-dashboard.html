@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.323 -->
+﻿<!-- app-build:2026.07.22.324 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6067,6 +6067,14 @@ function ingOnProdSearch(lineNum) {
   // Auto-llenar PVP
   var pvpEl = document.getElementById('ing-pvp-'+lineNum);
   if (pvpEl) pvpEl.value = precio;
+  // Grupo Médico: si el producto es uno de los tratamientos de la tabla, se cobra el
+  // PRECIO DEL TIER (mes anterior, estable) en vez del de lista, y se muestra la comisión
+  // de Daniel — que la GENERA el corte mensual, no la captura.
+  _gmCtxLoad().then(function(){
+    var tr = _gmMatch(found);
+    if (tr){ var pel = document.getElementById('ing-pvp-'+lineNum); if (pel){ pel.value = tr.precioMedico; ingCalcTotal(); } }
+    _gmLineNote(lineNum, tr);
+  });
   // Auto-llenar Ciclo — desde el Tipo del producto, con caída a su categoría.
   // Este es el camino VIVO (el selector de producto es un <input list=…>).
   var cicloEl = document.getElementById('ing-ciclo');
@@ -6075,6 +6083,52 @@ function ingOnProdSearch(lineNum) {
     if (mapped && !cicloEl.dataset.manual) cicloEl.value = mapped;
   }
   ingCalcTotal();
+}
+
+/* ── AUTO-PRECIO Grupo Médico (tier del MES ANTERIOR, estable) ─────────────
+   Contexto (tier vigente + tabla precio/comisión) se lee UNA vez desde el backend
+   y se cachea. El tier no cambia a media captura: lo fijó el volumen del mes previo.
+   La comisión de Daniel se MUESTRA aquí pero la genera el corte mensual. */
+var _gmCtx = null, _gmCtxTS = 0, _gmCtxLoading = null;
+function _gmKey(s){ return String(s||'').trim().toLowerCase().replace(/\s+/g,' '); }
+function _gmCtxLoad(force){
+  var now = Date.now();
+  if (!force && _gmCtx && (now - _gmCtxTS) < 300000) return Promise.resolve(_gmCtx);
+  if (_gmCtxLoading) return _gmCtxLoading;
+  var d = new Date();
+  var url = APPS_SCRIPT_URL + '?action=tarifaGMContexto&anio=' + d.getFullYear() + '&mes=' + (d.getMonth()+1)
+    + '&token=' + encodeURIComponent(getToken()) + '&_t=' + now;
+  _gmCtxLoading = fetch(url, {redirect:'follow'}).then(function(r){ return r.json(); }).then(function(j){
+    _gmCtxLoading = null;
+    if (j && j.ok){
+      _gmCtx = j; _gmCtxTS = Date.now(); _gmCtx._idx = {};
+      (j.tratamientos||[]).forEach(function(t){
+        if (t.nombre) _gmCtx._idx[_gmKey(t.nombre)] = t;
+        if (t.sku)    _gmCtx._idx[_gmKey(t.sku)] = t;
+      });
+    }
+    return _gmCtx;
+  }).catch(function(){ _gmCtxLoading = null; return null; });
+  return _gmCtxLoading;
+}
+function _gmMatch(found){
+  if (!_gmCtx || !_gmCtx._idx || !found) return null;
+  return _gmCtx._idx[_gmKey(found.descripcion)] || (found.sku ? _gmCtx._idx[_gmKey(found.sku)] : null) || null;
+}
+function _gmLineNote(lineNum, tr){
+  var line = document.getElementById('ing-line-'+lineNum); if (!line) return;
+  var id = 'ing-gmnote-'+lineNum, el = document.getElementById(id);
+  if (!tr){ if (el) el.remove(); return; }
+  if (!el){
+    el = document.createElement('div'); el.id = id;
+    el.style.cssText = 'grid-column:1 / -1;font-size:11px;padding:5px 8px;margin-top:2px;border-radius:6px;background:rgba(13,148,136,.10);color:#0d9488;font-weight:600';
+    line.appendChild(el);
+  }
+  var pm = (tr.precioMedico||0).toLocaleString('es-MX'), dn = (tr.comisionDaniel||0).toLocaleString('es-MX');
+  el.innerHTML = '🏥 Grupo Médico · <b>' + _escH(_gmCtx.tierLabel||'') + '</b> '
+    + '<span style="opacity:.85">(por ' + (_gmCtx.conteo||0) + ' procedimiento' + ((_gmCtx.conteo===1)?'':'s') + ' de ' + _escH(_gmCtx.mesAnterior||'') + ')</span> · '
+    + 'Precio médico <b>$' + pm + '</b> · Comisión Daniel <b>$' + dn + '</b> '
+    + '<span style="opacity:.85">— se genera en el corte del mes</span>';
 }
 
 function ingAddLine() {

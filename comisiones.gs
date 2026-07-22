@@ -325,6 +325,46 @@ function _gmTarifa(nombreOSku, tierIdx){
            descuentoMedico:Math.max(0, tr.base-precio), percepcionHestia:precio-daniel };
 }
 
+/* Contexto de tarifas GM para AUTO-PRECIO en la captura de ingresos. SOLO LECTURA.
+ * El usuario decidió: tier del MES ANTERIOR, estable, sin true-up → el volumen de
+ * procedimientos GM del mes previo fija el tier con el que se cobra TODO el mes en curso.
+ * Se recalibra solo al cambiar de mes. Devuelve la tabla ya resuelta a ese tier para que
+ * el front ponga el precio del médico y muestre la comisión de Daniel (que la GENERA el
+ * corte mensual, no la captura). "Volumen del grupo" = procedimientos del mes anterior
+ * cuyo producto es uno de los tratamientos GM (los 9 de la tabla). */
+function tarifaGMContexto(anio, mes){
+  try{
+    var cfg = readTarifasGM().cfg;
+    var now = new Date();
+    anio = parseInt(anio,10) || now.getFullYear();
+    mes  = parseInt(mes,10)  || (now.getMonth()+1);
+    var pm = mes-1, pa = anio; if (pm < 1){ pm = 12; pa = anio-1; }
+    var mesPrevKey = pa + '-' + _comPad2(pm);
+    // Llaves de los tratamientos GM (nombre y sku) para contar y para matchear en el front.
+    var keys = {};
+    (cfg.tratamientos||[]).forEach(function(t){
+      if (t.nombre) keys[_comKeyProd(t.nombre)] = 1;
+      if (t.sku)    keys[_comKeyProd(t.sku)]    = 1;
+    });
+    var conteo = 0;
+    try{
+      if (typeof INGRESOS_IDS !== 'undefined' && INGRESOS_IDS[pa]){
+        var lect = _comReadVentas(pa, mesPrevKey);
+        if (lect.ok) lect.rows.forEach(function(v){ if (keys[_comKeyProd(v.producto)]) conteo += (_comNum(v.cantidad)||1); });
+      }
+    }catch(e){}
+    var tier = _gmTierPorVolumen(conteo);
+    var tl = (cfg.tiers && cfg.tiers[tier]) ? cfg.tiers[tier].label : ('Tier '+tier);
+    var pct = (cfg.tiers && cfg.tiers[tier]) ? cfg.tiers[tier].pct : 0;
+    return { ok:true, tier:tier, tierLabel:tl, pct:pct, conteo:conteo, mesAnterior:mesPrevKey,
+             tratamientos:(cfg.tratamientos||[]).map(function(t){
+               return { nombre:t.nombre, sku:t.sku, base:t.base,
+                        precioMedico:(t.precio&&t.precio[tier]!=null)?t.precio[tier]:t.base,
+                        comisionDaniel:(t.daniel&&t.daniel[tier]!=null)?t.daniel[tier]:0 };
+             }) };
+  }catch(ex){ return { ok:false, error:ex.message }; }
+}
+
 /* ═════════════════════════ HOJA DE CONTROL ═════════════════════════
  * Comisiones_Generadas es la MEMORIA de lo ya pagado — la única defensa contra
  * generar el mismo mes dos veces. Vive en INGRESOS_SS_ID junto a Creditos_Favor.
