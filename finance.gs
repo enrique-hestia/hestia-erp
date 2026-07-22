@@ -627,6 +627,27 @@ function doPost(e) {
     if (body.action === 'saveIngreso') {
       return jsonResponse(saveIngreso(body));
     }
+    // ── Órdenes de Venta (ventas.gs). El actor verificado va en body.usuario. ──
+    if (body.action === 'saveOrdenVenta') {
+      if (typeof saveOrdenVenta !== 'function') return jsonResponse({ok:false, error:'Actualiza ventas.gs en Apps Script y redespliega.'});
+      body.usuario = _postEmail || body.usuario || '';
+      return jsonResponse(saveOrdenVenta(body));
+    }
+    if (body.action === 'cambiarEstatusOV') {
+      if (typeof cambiarEstatusOV !== 'function') return jsonResponse({ok:false, error:'Actualiza ventas.gs en Apps Script y redespliega.'});
+      body.usuario = _postEmail || body.usuario || '';
+      return jsonResponse(cambiarEstatusOV(body));
+    }
+    if (body.action === 'cancelarOrdenVenta') {
+      if (typeof cancelarOrdenVenta !== 'function') return jsonResponse({ok:false, error:'Actualiza ventas.gs en Apps Script y redespliega.'});
+      body.usuario = _postEmail || body.usuario || '';
+      return jsonResponse(cancelarOrdenVenta(body));
+    }
+    if (body.action === 'generarIngresoDesdeOV') {
+      if (typeof generarIngresoDesdeOV !== 'function') return jsonResponse({ok:false, error:'Actualiza ventas.gs en Apps Script y redespliega.'});
+      body.usuario = _postEmail || body.usuario || '';
+      return jsonResponse(generarIngresoDesdeOV(body));
+    }
     if (body.action === 'uploadFile') {
       return jsonResponse(uploadFile(body));
     }

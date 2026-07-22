@@ -529,6 +529,15 @@ function doGet(e) {
         return jsonResponse({ok:false, error:'Actualiza comisiones.gs en Apps Script y redespliega.'});
       return jsonResponse(tarifaGMContexto((e&&e.parameter.anio)||'', (e&&e.parameter.mes)||''));
     }
+    // Órdenes de Venta (pipeline cotización→orden→facturada→pagada). Solo lectura.
+    if (action === 'ordenesVenta') {
+      if (typeof readOrdenesVenta !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza ventas.gs en Apps Script y redespliega.'});
+      return jsonResponse(readOrdenesVenta({
+        estatus: (e&&e.parameter.estatus)||'', tipo: (e&&e.parameter.tipo)||'',
+        paciente: (e&&e.parameter.paciente)||'', folio: (e&&e.parameter.folio)||''
+      }));
+    }
     // Comisiones pendientes de generar (aviso "hay comisiones por pagar"). Solo lectura.
     if (action === 'comisionesPendientes') {
       if (typeof comisionesPendientes !== 'function')
