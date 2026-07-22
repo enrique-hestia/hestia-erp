@@ -900,7 +900,7 @@ function _cobBuildSuscripciones() {
       plan: calc.plan, tipoPaciente: calc.esExterno ? 'Externo' : 'Hestia',
       crioInicio: calc.crioInicio, billStart: calc.billStart,
       ultimoPago: calc.ultimoPago, coberturaHasta: calc.coberturaHasta, proximoCobro: calc.proximoCobro,
-      estatus: calc.estatus, montoDebe: calc.montoDebe, mesesDebe: calc.mesesDebe,
+      estatus: calc.estatus, montoDebe: calc.montoDebe, mesesDebe: calc.mesesDebe, tarifa: calc.tarifa || 0,
       generado: genPend, generadoCount: genCount, porGenerar: Math.max(0, calc.montoDebe - genPend),
       oov: calc.oov, emb: calc.emb, incEmb: pac.incEmb || 0, tienePlan: calc.tienePlan,
       autopay: !!calc.autopay, mensual: !!pac.mensual
