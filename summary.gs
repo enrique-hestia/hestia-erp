@@ -1054,15 +1054,19 @@ function readResumenGeneral(fechaInicio, fechaFin){
     if(!fi||!ff){ var hoy=new Date(); ff=_sumFmtDate(hoy); fi=ff.substring(0,8)+'01'; }
     var months=_erEnumMonths(fi, ff); if(months.length>18) months=months.slice(months.length-18);
     var full=readSummary(fi, ff); if(!full.ok) return full;
-    var meses=[], ingresos=[], gastos=[], margen=[], ciclos=[], cac=[];
+    var _rgHTest=function(nom){ return (nom.indexOf('alta')>-1 && nom.indexOf('baja')<0) || nom.indexOf('estimulaci')>-1 || nom.indexOf('ciclos iniciad')>-1; };
+    var _rgETest=function(nom){ return nom.indexOf('extern')>-1; };
+    var meses=[], ingresos=[], gastos=[], margen=[], ciclos=[], cac=[], hSerie=[], eSerie=[];
     months.forEach(function(mo){
       var s=readSummary(mo.ini, mo.fin), mm=(s&&s.ok)?s.metricas:{};
       var rev=_erN(mm.revenue);
       var eg=(s&&s.ok&&s.reconc)?_erN(s.reconc.egresosPL):(_erN(mm.cogs)+_erN(mm.opex)+_erN(mm.ga)+_erN(mm.taxes));
+      var lin=(s&&s.ok)?s.lineas:[];
       meses.push((mo.label||'').split(' ')[0]);
       ingresos.push(Math.round(rev)); gastos.push(Math.round(eg));
       margen.push(rev? Math.round(_erN(mm.grossProfit)/rev*100):0);
-      ciclos.push(_rgCiclos(s&&s.ok?s.lineas:[])); cac.push(0);   // CAC sin fuente aún
+      ciclos.push(_rgCiclos(lin)); cac.push(0);   // CAC sin fuente aún
+      hSerie.push(_rgBoxLinea(lin, _rgHTest).n); eSerie.push(_rgBoxLinea(lin, _rgETest).n);
     });
     var totRev=_erN(full.metricas.revenue)||1;
     var lineasRev=(full.lineas||[]).filter(function(l){ return l.tipo==='dato'&&l.grupo==='REVENUE'&&Math.abs(_erN(l.actual))>0.5; })
@@ -1077,10 +1081,11 @@ function readResumenGeneral(fechaInicio, fechaFin){
       totalIngresos:_erN(full.metricas.revenue), totalCiclos:ciclos.reduce(function(a,b){return a+b;},0),
       // Ciclos del periodo partidos en Hestia (ALTA / Estimulación Ovárica Controlada)
       // vs Externos (Capturas): # de ciclos + ingreso de cada bloque.
-      ciclosBox:{
-        hestia:   _rgBoxLinea(full.lineas, function(nom){ return (nom.indexOf('alta')>-1 && nom.indexOf('baja')<0) || nom.indexOf('estimulaci')>-1 || nom.indexOf('ciclos iniciad')>-1; }),
-        externos: _rgBoxLinea(full.lineas, function(nom){ return nom.indexOf('extern')>-1; })
-      },
+      ciclosBox:(function(){
+        var H=_rgBoxLinea(full.lineas, _rgHTest), E=_rgBoxLinea(full.lineas, _rgETest);
+        H.serie=hSerie; E.serie=eSerie;
+        return { hestia:H, externos:E, meses:meses.length, labels:meses };
+      })(),
       margenBruto: totRev? Math.round(_erN(full.metricas.grossProfit)/totRev*100):0 };
   }catch(ex){ return {ok:false, error:ex.message+' (L:'+(ex.lineNumber||'?')+')'}; }
 }

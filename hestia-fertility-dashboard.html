@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.296 -->
+﻿<!-- app-build:2026.07.21.297 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -919,20 +919,23 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
         <div class="kpi-icon" style="background:#e8f0fb"><svg viewBox="0 0 24 24" fill="none" stroke="#3a72a8" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg></div>
         <span class="kpi-badge" id="kpi2-badge"></span>
       </div>
-      <div class="kpi-label" style="margin-bottom:4px">Ciclos del periodo</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:end">
-        <div style="border-right:1px solid var(--color-divider);padding-right:10px">
-          <div style="font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:3px">Hestia</div>
-          <div id="rc-cic-hestia-n" style="font-size:1.4rem;font-weight:700;line-height:1;font-variant-numeric:tabular-nums">—</div>
+      <div class="kpi-label" style="margin-bottom:6px">Ciclos del periodo</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div style="border-right:1px solid var(--color-divider);padding-right:12px">
+          <div style="font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--color-primary,#c46a7a);margin-bottom:3px" title="Ciclos ALTA (Estimulación Ovárica Controlada)">Hestia</div>
+          <div id="rc-cic-hestia-n" style="font-size:1.35rem;font-weight:700;line-height:1;font-variant-numeric:tabular-nums">—</div>
           <div id="rc-cic-hestia-m" style="font-size:10.5px;color:var(--color-text-muted);margin-top:2px">—</div>
+          <div id="rc-cic-hestia-spark" style="height:24px;margin-top:6px"></div>
+          <div id="rc-cic-hestia-mes" style="font-size:10px;color:var(--color-text-muted);margin-top:3px"></div>
         </div>
         <div>
-          <div style="font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#3a72a8;margin-bottom:3px">Externos</div>
-          <div id="rc-cic-ext-n" style="font-size:1.4rem;font-weight:700;line-height:1;font-variant-numeric:tabular-nums">—</div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#3a72a8;margin-bottom:3px" title="Capturas de ciclos externos">Externos</div>
+          <div id="rc-cic-ext-n" style="font-size:1.35rem;font-weight:700;line-height:1;font-variant-numeric:tabular-nums">—</div>
           <div id="rc-cic-ext-m" style="font-size:10.5px;color:var(--color-text-muted);margin-top:2px">—</div>
+          <div id="rc-cic-ext-spark" style="height:24px;margin-top:6px"></div>
+          <div id="rc-cic-ext-mes" style="font-size:10px;color:var(--color-text-muted);margin-top:3px"></div>
         </div>
       </div>
-      <div style="font-size:9px;color:var(--color-text-muted);margin-top:auto;padding-top:4px">Hestia = ALTA (Estimulación Ovárica Controlada) · Externos = Capturas</div>
     </div>
 
     <div class="kpi-card">
@@ -2448,15 +2451,40 @@ function initSparks(d){
   drawSpark('spark1',d.margen,'rgb(77,140,90)');
   drawSpark('spark3',d.cac,'rgb(196,122,30)');
 }
-/* Recuadro de ciclos partido: Hestia (ALTA) vs Externos (Capturas), # + ingreso. */
+/* Recuadro de ciclos partido: Hestia (ALTA) vs Externos (Capturas) — # ciclos,
+   ingreso, sparkline de tendencia mensual y ciclos/mes. */
+function _rgSparkSVG(serie, color){
+  serie=(serie||[]).map(function(x){return Number(x)||0;});
+  if(serie.length<2) return '';
+  var w=100,h=24,max=Math.max.apply(null,serie),min=Math.min.apply(null,serie),rng=(max-min)||1;
+  var pts=serie.map(function(v,i){ var x=(i/(serie.length-1))*(w-2)+1; var y=h-3-((v-min)/rng)*(h-6); return x.toFixed(1)+','+y.toFixed(1); }).join(' ');
+  var lx=(w-1), ly=h-3-((serie[serie.length-1]-min)/rng)*(h-6);
+  return '<svg width="100%" height="'+h+'" viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none" style="display:block;overflow:visible">'
+    +'<polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>'
+    +'<circle cx="'+lx.toFixed(1)+'" cy="'+ly.toFixed(1)+'" r="1.8" fill="'+color+'"/></svg>';
+}
+function _rgTrend(serie){
+  serie=(serie||[]).map(function(x){return Number(x)||0;});
+  if(serie.length<2) return '';
+  var a=serie[serie.length-2], b=serie[serie.length-1];
+  if(b>a) return ' <span style="color:#16a34a">↗</span>';
+  if(b<a) return ' <span style="color:#c0505c">↘</span>';
+  return ' <span style="color:#9ca3af">→</span>';
+}
 function _rgApplyCiclosBox(box){
-  box=box||{}; var H=box.hestia||{}, E=box.externos||{};
-  function set(id,v){ var el=document.getElementById(id); if(el) el.textContent=v; }
-  var hasH=(box.hestia!=null), hasE=(box.externos!=null);
-  set('rc-cic-hestia-n', hasH? fmtNum(H.n||0) : '—');
-  set('rc-cic-hestia-m', hasH? fmtMXN(H.monto||0) : '—');
-  set('rc-cic-ext-n', hasE? fmtNum(E.n||0) : '—');
-  set('rc-cic-ext-m', hasE? fmtMXN(E.monto||0) : '—');
+  box=box||{}; var nMes=box.meses||0;
+  function txt(id,v){ var el=document.getElementById(id); if(el) el.textContent=v; }
+  function html(id,v){ var el=document.getElementById(id); if(el) el.innerHTML=v; }
+  function fill(pfx, D, color){
+    if(D==null){ txt('rc-cic-'+pfx+'-n','—'); txt('rc-cic-'+pfx+'-m','—'); html('rc-cic-'+pfx+'-spark',''); html('rc-cic-'+pfx+'-mes',''); return; }
+    txt('rc-cic-'+pfx+'-n', fmtNum(D.n||0)+' ciclos');
+    txt('rc-cic-'+pfx+'-m', fmtMXN(D.monto||0));
+    html('rc-cic-'+pfx+'-spark', _rgSparkSVG(D.serie, color));
+    var perMes = nMes>0 ? (D.n/nMes) : 0;
+    html('rc-cic-'+pfx+'-mes', '~'+(Math.round(perMes*10)/10)+' /mes'+_rgTrend(D.serie));
+  }
+  fill('hestia', box.hestia||null, '#c46a7a');
+  fill('ext', box.externos||null, '#3a72a8');
 }
 
 /* ── INGRESO CHART ─── */
