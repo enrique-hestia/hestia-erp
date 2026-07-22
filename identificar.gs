@@ -730,6 +730,191 @@ function altaPacientesHistoricosFaltantes(body) {
   } finally { try { lock.releaseLock(); } catch (eR) {} }
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   RECONCILIACIÓN DE NOMBRES EN BD_Ingresos (Parte B)
+   Lista los nombres DISTINTOS de pacientes del libro de ingresos y los cruza
+   con el catálogo (exacto normalizado → difuso → iniciales). Clasifica:
+     · normalizar : el nombre del libro EMPATA a un paciente registrado pero
+                    está escrito distinto/abreviado ("Melina PA" ↔ "Melina Pérez
+                    Álvarez") → se ofrece SOBRESCRIBIR el libro al nombre completo.
+     · alta       : no está en el catálogo → dar de alta (nombre completo que da
+                    el usuario) + normalizar el libro.
+     · revisar    : médicos/labs/parejas/notas → no son pacientes.
+     · ok         : el libro ya coincide con el catálogo.
+   Solo LEE. PII: exige ver_datos_sensibles (los nombres NO se enmascaran aquí).
+   ══════════════════════════════════════════════════════════════════════ */
+function reconciliarNombresIngresos(body) {
+  body = body || {};
+  if (!_tokenHasPermission(body.token || '', 'editar_ingresos'))
+    return { ok:false, error:'Sin autorización (editar_ingresos).' };
+  if (typeof _privVer === 'function' && !_privVer())
+    return { ok:false, error:'Esta herramienta muestra nombres de pacientes; requiere el permiso «ver datos sensibles».' };
+
+  var lp = (typeof listaPacientesAll === 'function') ? listaPacientesAll() : null;
+  if (!lp || !lp.ok || !lp.pacientes) return { ok:false, error:'No se pudo leer el catálogo.' };
+  var cat = [];
+  for (var ci=0; ci<lp.pacientes.length; ci++){
+    var cn = String(lp.pacientes[ci].nombre||'').replace(/^\s+|\s+$/g,'');
+    if (cn) cat.push({ id:lp.pacientes[ci].id||'', nombre:cn, norm:_identNorm(cn) });
+  }
+
+  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+  var sh = ss.getSheetByName(BD_INGRESOS_TAB);
+  if (!sh) return { ok:false, error:'No se encontró '+BD_INGRESOS_TAB+'.' };
+  var data = sh.getDataRange().getValues();
+  var H = data[0].map(function(x){ return String(x||'').replace(/^\s+|\s+$/g,'').toLowerCase(); });
+  var iPac = H.indexOf('paciente'), iFecha = H.indexOf('fecha');
+  if (iPac < 0) return { ok:false, error:'BD_Ingresos sin columna Paciente.' };
+  function anioDe(v){ if (v instanceof Date && !isNaN(v)) return v.getFullYear(); var m=String(v||'').match(/(\d{4})/); return m?parseInt(m[1],10):0; }
+
+  var dist = {}, orden = [];
+  for (var r=1; r<data.length; r++){
+    var nom = String(data[r][iPac]||'').replace(/\s+/g,' ').replace(/^\s+|\s+$/g,'');
+    if (!nom) continue;
+    if (/^\d+$/.test(nom.replace(/\s/g,''))) continue;
+    if (_identEsNoLocalizado(nom)) continue;
+    var k = _identNorm(nom); if (!k) continue;
+    if (!dist[k]){ dist[k] = { nombre:nom, count:0, anios:{} }; orden.push(k); }
+    dist[k].count++;
+    if (iFecha>-1){ var y=anioDe(data[r][iFecha]); if (y) dist[k].anios[y]=1; }
+  }
+  function _noEsPaciente(n){ var t=' '+n.toLowerCase()+' '; return /\bdr\.?\b|\bdra\.?\b|\bpx\b|\bdonad|\bsubrogad|due[nñ]|vecin|referencia externa|life extension|prenatal\b|embrion/.test(t); }
+
+  var normalizar=[], alta=[], revisar=[], okCount=0;
+  for (var o=0; o<orden.length; o++){
+    var d = dist[orden[o]], nomh = d.nombre, anios = Object.keys(d.anios).sort();
+    if (/\s+y\s+|\s+e\s+|\s*\/\s*/.test(nomh.toLowerCase()) || _noEsPaciente(nomh)) { revisar.push({ ledger:nomh, count:d.count, anios:anios }); continue; }
+    var exact=null;
+    for (var c=0;c<cat.length;c++){ if (cat[c].norm === orden[o]) { exact = cat[c]; break; } }
+    if (exact){
+      if (exact.nombre.replace(/^\s+|\s+$/g,'') === nomh) okCount++;                                   // idéntico → nada
+      else normalizar.push({ ledger:nomh, target:{id:exact.id,nombre:exact.nombre}, count:d.count, anios:anios, score:100, abrev:false });  // difiere en acentos/espacios
+      continue;
+    }
+    var fuzzy=null, fscore=0;
+    for (var c2=0;c2<cat.length;c2++){
+      var ab = (typeof _ecMismoPaciente==='function') && _ecMismoPaciente(nomh, cat[c2].nombre);
+      var sc = _identSim(nomh, cat[c2].nombre);
+      if (ab && sc<90) sc=90;
+      if ((ab || sc>=85) && sc>fscore){ fscore=sc; fuzzy=cat[c2]; }
+    }
+    if (fuzzy){ normalizar.push({ ledger:nomh, target:{id:fuzzy.id,nombre:fuzzy.nombre}, count:d.count, anios:anios, score:fscore, abrev:!!(_ecMismoPaciente(nomh, fuzzy.nombre)) }); continue; }
+    alta.push({ ledger:nomh, count:d.count, anios:anios });
+  }
+  normalizar.sort(function(a,b){ return b.count-a.count; });
+  alta.sort(function(a,b){ return b.count-a.count; });
+  return { ok:true, resumen:{ distintos:orden.length, normalizar:normalizar.length, alta:alta.length, revisar:revisar.length, ok:okCount },
+    normalizar:normalizar, alta:alta, revisar:revisar };
+}
+
+function _reconStamp(){ return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss'); }
+
+/* Núcleo del OVERWRITE del libro (asume que el llamador YA tiene el lock).
+   Respaldo de la hoja + reescribe col D (Paciente) por match EXACTO (surgical,
+   NO delete+reinsert → sin riesgo de blanqueo) + audit por nombre. */
+function _reconNorm(s){ return String(s||'').replace(/\s+/g,' ').replace(/^\s+|\s+$/g,'').toLowerCase(); }
+function _reconTrim(s){ return String(s||'').replace(/\s+/g,' ').replace(/^\s+|\s+$/g,''); }
+function _reconOverwriteLedger(cambios, usuario) {
+  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+  var sh = ss.getSheetByName(BD_INGRESOS_TAB);
+  if (!sh) return { ok:false, error:'BD_Ingresos no encontrada.' };
+  // Clave = colapsa espacios internos + minúsculas (IGUAL que el preview), para no
+  // fallar en "Melina  PA" (doble espacio). Se aplica también un cambio solo-mayúsculas.
+  var map = {};
+  for (var i=0;i<(cambios||[]).length;i++){
+    var o=_reconTrim(cambios[i].old), n=_reconTrim(cambios[i]['new']);
+    if (o && n && o !== n) map[_reconNorm(o)]={old:o,nue:n,count:0};
+  }
+  if (!_reconKeys(map).length) return { ok:true, total:0, detalle:[] };
+  var data = sh.getDataRange().getValues(), PAC=4;
+  // 1) Localizar las filas que SÍ cambian (todavía sin escribir).
+  var pend = [];
+  for (var r=1;r<data.length;r++){
+    var cur = String(data[r][PAC-1]||''); var hit = map[_reconNorm(cur)];
+    if (hit && _reconTrim(cur) !== hit.nue) pend.push({ row:r+1, hit:hit });
+  }
+  if (!pend.length) return { ok:true, total:0, detalle:[] };   // nada REAL que cambiar → SIN respaldo (no deja tabs vacíos)
+  // 2) Respaldo una sola vez + poda de respaldos viejos (deja los últimos 5).
+  try { sh.copyTo(ss).setName('BD_Ingresos_BAK_'+_reconStamp()); _reconPodaBackups(ss, 5); } catch(eB){}
+  // 3) Escribir (surgical, solo col D).
+  var total=0;
+  for (var p=0;p<pend.length;p++){ sh.getRange(pend[p].row, PAC).setValue(pend[p].hit.nue); pend[p].hit.count++; total++; }
+  try { CacheService.getScriptCache().removeAll(['gas_ingresos_v1','gas_pacientes_v1']); } catch(e){}
+  var det=[], ks=_reconKeys(map);
+  for (var j=0;j<ks.length;j++){ var m=map[ks[j]]; if(m.count){ det.push({old:m.old,nue:m.nue,filas:m.count});
+    try{ logAudit(usuario||'sistema','Ingresos','ReconNormalizarNombre','—','Paciente',m.old,m.nue+' ('+m.count+' filas)'); }catch(eA){} } }
+  return { ok:true, total:total, detalle:det };
+}
+/* Poda de respaldos: deja solo los `keep` más recientes (el stamp yyyyMMdd_HHmmss ordena). */
+function _reconPodaBackups(ss, keep){
+  try {
+    var shs = ss.getSheets(), baks = [];
+    for (var i=0;i<shs.length;i++){ var nm=shs[i].getName(); if (nm.indexOf('BD_Ingresos_BAK_')===0) baks.push(nm); }
+    baks.sort();
+    for (var k=0; k<baks.length-keep; k++){ try { ss.deleteSheet(ss.getSheetByName(baks[k])); } catch(e){} }
+  } catch(e){}
+}
+function _reconKeys(o){ var a=[]; for (var k in o) if (o.hasOwnProperty(k)) a.push(k); return a; }
+
+/* Sobrescribe en BD_Ingresos los nombres del libro por el nombre completo.
+   body.cambios = [{old,new}]. Gate editar_ingresos + lock + respaldo + audit. */
+function reconAplicarNormalizar(body) {
+  body = body || {};
+  if (!_tokenHasPermission(body.token || '', 'editar_ingresos'))
+    return { ok:false, error:'Sin autorización (editar_ingresos).' };
+  var cambios = (body.cambios && body.cambios.length) ? body.cambios : [];
+  if (!cambios.length) return { ok:false, error:'Sin cambios que aplicar.' };
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(30000); } catch(e){ return { ok:false, error:'El sistema está ocupado, intenta de nuevo.' }; }
+  try { return _reconOverwriteLedger(cambios, body.usuario); }
+  catch(ex){ return { ok:false, error:ex.message }; }
+  finally { try { lock.releaseLock(); } catch(e){} }
+}
+
+/* Da de alta pacientes faltantes con su nombre COMPLETO y normaliza el libro.
+   body.altas = [{ledger, nombre}]. ledger = como está en el libro (abreviado);
+   nombre = nombre completo real (lo captura el usuario). Alta en catálogo (sin
+   duplicar) + overwrite del libro (ledger → nombre) en la MISMA transacción. */
+function reconAplicarAltas(body) {
+  body = body || {};
+  if (!_tokenHasPermission(body.token || '', 'editar_ingresos'))
+    return { ok:false, error:'Sin autorización (editar_ingresos).' };
+  var altas = (body.altas && body.altas.length) ? body.altas : [];
+  if (!altas.length) return { ok:false, error:'Sin altas.' };
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(30000); } catch(e){ return { ok:false, error:'El sistema está ocupado.' }; }
+  try {
+    var pss = SpreadsheetApp.openById(PACIENTES_SS_ID);
+    var psh = pss.getSheets()[0];
+    var hdrs = psh.getRange(1,1,1,psh.getLastColumn()).getValues()[0];
+    var ancho = Math.max(hdrs.length, PAC_COL_LISTA);
+    var iAlta = _pacColIdx(hdrs,'Fecha de Alta'); if (iAlta===-1) iAlta=_pacColIdx(hdrs,'Fecha Alta');
+    var lp = listaPacientesAll(); var catNorm = {};
+    if (lp && lp.ok) lp.pacientes.forEach(function(p){ catNorm[_identNorm(p.nombre)] = true; });
+    var creados = [], cambios = [];
+    for (var i=0;i<altas.length;i++){
+      var ledger = String(altas[i].ledger||'').replace(/^\s+|\s+$/g,'');
+      var full = String(altas[i].nombre||'').replace(/^\s+|\s+$/g,'') || ledger;
+      if (!full) continue;
+      if (!catNorm[_identNorm(full)]){
+        var nuevoId = _identNextPacId(psh);
+        var fila=[]; for (var z=0;z<ancho;z++) fila.push('');
+        fila[0]=nuevoId; fila[1]=full; fila[PAC_COL_LISTA-1]='General';
+        if (iAlta>-1 && iAlta<ancho) fila[iAlta]=new Date();
+        psh.appendRow(fila);
+        catNorm[_identNorm(full)] = true;
+        creados.push({ id:nuevoId, nombre:full });
+      }
+      if (ledger && ledger.toLowerCase() !== full.toLowerCase()) cambios.push({ old:ledger, 'new':full });
+    }
+    try { CacheService.getScriptCache().removeAll(['gas_pacientes_v1']); } catch(e){}
+    try { logAudit(body.usuario||'sistema','Identificar pacientes','ReconAltaLote','—','Pacientes','—', creados.length+' altas'); } catch(e){}
+    var norm = cambios.length ? _reconOverwriteLedger(cambios, body.usuario) : { ok:true, total:0, detalle:[] };
+    return { ok:true, creados:creados, normalizados:(norm && norm.total)||0, normDetalle:(norm&&norm.detalle)||[] };
+  } catch(ex){ return { ok:false, error:ex.message }; }
+  finally { try { lock.releaseLock(); } catch(e){} }
+}
+
 /* Siguiente ID del catálogo de pacientes.
    Usa el patrón de _maxIdNum (finance.gs): BARRE toda la columna buscando el
    MÁXIMO real. Leer la última fila daba folios duplicados en producción

@@ -864,6 +864,11 @@ function doGet(e) {
        Cobros "No localizado" pendientes de nombre. Va por GET porque la
        respuesta NO lleva datos personales (solo OP, fecha, monto y método);
        el nombre de la paciente viaja siempre por POST, nunca en la URL. */
+    if (action === 'reconciliarNombres') {
+      if (typeof reconciliarNombresIngresos !== 'function')
+        return jsonResponse({ ok:false, error:'Agrega identificar.gs al proyecto de Apps Script y redespliega.' });
+      return jsonResponse(reconciliarNombresIngresos({ token: (e && e.parameter.token) || '' }));
+    }
     if (action === 'noLocalizados') {
       if (typeof listarNoLocalizados !== 'function')
         return jsonResponse({ ok:false, error:'Agrega identificar.gs al proyecto de Apps Script y redespliega.' });

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.294 -->
+﻿<!-- app-build:2026.07.21.295 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -24676,6 +24676,16 @@ function _pacInjectSyncButton(viewId) {
   btn.innerHTML = '🔄 Sincronizar datos fiscales';
   btn.onclick = _pacSyncOpenModal;
   actions.insertBefore(btn, actions.firstChild);
+  // Reconciliar nombres del historial (Parte B) — solo con permiso de editar ingresos.
+  if (typeof hasPermission === 'function' && hasPermission('editar_ingresos') && !document.getElementById('pac-recon-btn')) {
+    var rb = document.createElement('button');
+    rb.id = 'pac-recon-btn'; rb.className = 'btn';
+    rb.style.cssText = 'font-size:var(--text-xs);padding:6px 14px;display:flex;align-items:center;gap:6px;border:1px solid #1f6feb;color:#1f6feb;background:transparent;border-radius:var(--radius-full);cursor:pointer';
+    rb.innerHTML = '🔗 Reconciliar historial';
+    rb.title = 'Da de alta los nombres del libro de ingresos que faltan y sobrescribe los abreviados por el nombre completo';
+    rb.onclick = reconAbrir;
+    actions.insertBefore(rb, actions.firstChild);
+  }
 }
 
 function _pacSyncOpenModal() {
@@ -39543,6 +39553,93 @@ function _pacRenderConfirmDup(tipo, cands, msg){
     +'style="border:1px solid #d97706;background:#fff;color:#b45309;border-radius:7px;padding:5px 11px;font-size:12px;font-weight:600;cursor:pointer">No es ninguno — crear de todos modos</button></div>';
   box.innerHTML=h; box.style.display='block';
   try{ box.scrollIntoView({block:'nearest'}); }catch(e){}
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   RECONCILIAR NOMBRES DEL HISTORIAL (Parte B) — overlay admin.
+   Lista nombres de BD_Ingresos abreviados/no registrados y deja (1) dar de
+   alta los faltantes con su nombre completo y (2) sobrescribir el abreviado
+   por el completo en el libro. Vista previa → confirmar (el backend respalda
+   la hoja, corre bajo lock y deja bitácora). Gate editar_ingresos.
+   ══════════════════════════════════════════════════════════════════════ */
+var _reconData = null;
+function reconAbrir(){
+  var ov = document.getElementById('recon-ovl'); if (ov) ov.remove();
+  ov = document.createElement('div'); ov.id='recon-ovl';
+  ov.style.cssText='position:fixed;inset:0;z-index:99998;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px';
+  ov.innerHTML='<div style="background:var(--color-surface,#fff);color:var(--color-text,#111);max-width:920px;width:100%;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.3);margin:auto">'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:16px 20px;border-bottom:1px solid var(--color-divider,#e5e7eb)">'
+    +'<div><div style="font-size:16px;font-weight:800">🔗 Reconciliar nombres del historial</div>'
+    +'<div style="font-size:11.5px;color:var(--color-text-muted,#6b7280);margin-top:2px">Nombres del libro de ingresos abreviados o sin registrar. <b>Nada se escribe hasta que confirmes</b> — se respalda la hoja antes de tocarla.</div></div>'
+    +'<button onclick="var o=document.getElementById(\'recon-ovl\');if(o)o.remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--color-text-muted,#9ca3af)">×</button></div>'
+    +'<div id="recon-body" style="padding:18px 20px"><div style="text-align:center;padding:40px;color:var(--color-text-muted,#6b7280)">Analizando el historial…</div></div></div>';
+  document.body.appendChild(ov);
+  fetch(APPS_SCRIPT_URL+'?action=reconciliarNombres&token='+encodeURIComponent(getToken())+'&_t='+Date.now(),{redirect:'follow'})
+    .then(function(r){return r.json();}).then(function(d){ _reconData=d; reconRender(d); })
+    .catch(function(){ var b=document.getElementById('recon-body'); if(b) b.innerHTML='<div style="color:#b91c1c;padding:20px">Error de conexión.</div>'; });
+}
+function _reconKpi(lbl,n,color){ return '<div style="flex:1;min-width:110px;background:var(--color-surface-2,#f9fafb);border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:10px 12px"><div style="font-size:20px;font-weight:800;color:'+color+'">'+n+'</div><div style="font-size:10.5px;color:var(--color-text-muted,#6b7280);text-transform:uppercase;letter-spacing:.4px">'+lbl+'</div></div>'; }
+function reconRender(d){
+  var b=document.getElementById('recon-body'); if(!b) return;
+  if(!d||!d.ok){ b.innerHTML='<div style="color:#b91c1c;padding:20px">'+_esc((d&&d.error)||'No se pudo analizar.')+'</div>'; return; }
+  var R=d.resumen||{};
+  var h='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">'
+    +_reconKpi('Por normalizar', R.normalizar||0, '#1f6feb')+_reconKpi('Sin registrar', R.alta||0, '#b45309')
+    +_reconKpi('Ya correctos', R.ok||0, '#16a34a')+_reconKpi('Revisar', R.revisar||0, '#6b7280')+'</div>';
+  if((d.normalizar||[]).length){
+    h+='<div style="font-weight:700;font-size:13px;margin:6px 0 4px">✏️ Sobrescribir por el nombre completo ('+d.normalizar.length+')</div>'
+      +'<div style="font-size:11.5px;color:var(--color-text-muted);margin-bottom:8px">El nombre del libro empata con un paciente registrado pero está escrito distinto/abreviado. Se reemplaza en el historial por el del catálogo.</div>';
+    d.normalizar.forEach(function(x,i){
+      var tag=x.abrev?'iniciales':(x.score>=100?'igual':x.score+'%');
+      h+='<label style="display:flex;align-items:center;gap:10px;padding:7px 6px;border-top:1px solid var(--color-divider);font-size:12.5px">'
+        +'<input type="checkbox" class="recon-n" data-i="'+i+'" checked>'
+        +'<span style="flex:1;min-width:0"><s style="color:#b91c1c">'+_esc(x.ledger)+'</s> → <b>'+_esc(x.target.nombre)+'</b> '
+        +'<span style="color:var(--color-text-muted)">'+(x.target.id?_esc(x.target.id)+' · ':'')+x.count+' mov · '+_esc((x.anios||[]).join('/'))+'</span></span>'
+        +'<span style="font-size:10px;font-weight:700;color:#1f6feb;background:#eff6ff;border-radius:20px;padding:2px 7px;white-space:nowrap">'+tag+'</span></label>';
+    });
+    h+='<div style="text-align:right;margin:8px 0 16px"><button onclick="reconAplicarNorm()" style="background:#1f6feb;color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:700;cursor:pointer">Sobrescribir seleccionados</button></div>';
+  }
+  if((d.alta||[]).length){
+    h+='<div style="font-weight:700;font-size:13px;margin:6px 0 4px">➕ Dar de alta (no registrados) ('+d.alta.length+')</div>'
+      +'<div style="font-size:11.5px;color:var(--color-text-muted);margin-bottom:8px">Escribe el nombre COMPLETO real. Se da de alta en el catálogo y se reemplaza en el historial.</div>';
+    d.alta.forEach(function(x,i){
+      h+='<div style="display:flex;align-items:center;gap:10px;padding:7px 6px;border-top:1px solid var(--color-divider);font-size:12.5px">'
+        +'<input type="checkbox" class="recon-a" data-i="'+i+'">'
+        +'<span style="flex:0 0 150px;min-width:0;color:var(--color-text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+_esc(x.ledger)+'">'+_esc(x.ledger)+' <span style="font-size:10px">('+x.count+')</span></span>'
+        +'<input class="recon-af" data-i="'+i+'" value="'+_esc(x.ledger)+'" placeholder="Nombre completo real" style="flex:1;padding:5px 8px;border:1px solid var(--color-divider);border-radius:6px;font-size:12px;background:var(--color-surface,#fff);color:var(--color-text,#111)"></div>';
+    });
+    h+='<div style="text-align:right;margin:8px 0 16px"><button onclick="reconAplicarAlta()" style="background:#b45309;color:#fff;border:none;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:700;cursor:pointer">Dar de alta seleccionados</button></div>';
+  }
+  if((d.revisar||[]).length){
+    h+='<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--color-text-muted)">👁 Revisar aparte — médicos/labs/parejas ('+d.revisar.length+')</summary>'
+      +'<div style="font-size:11.5px;color:var(--color-text-muted);margin-top:6px;line-height:1.6">'+d.revisar.map(function(x){return _esc(x.ledger)+' ('+x.count+')';}).join(' · ')+'</div></details>';
+  }
+  if(!(d.normalizar||[]).length && !(d.alta||[]).length){ h+='<div style="text-align:center;padding:30px;color:#16a34a;font-weight:600">✓ El historial ya está reconciliado — nada por corregir.</div>'; }
+  b.innerHTML=h;
+}
+function reconAplicarNorm(){
+  if(!_reconData) return;
+  var chks=document.querySelectorAll('.recon-n:checked'), cambios=[];
+  for(var i=0;i<chks.length;i++){ var x=_reconData.normalizar[+chks[i].getAttribute('data-i')]; if(x) cambios.push({old:x.ledger, 'new':x.target.nombre}); }
+  if(!cambios.length){ alert('Selecciona al menos uno.'); return; }
+  if(!confirm('Se reemplazará el nombre en '+cambios.length+' grupo(s) del historial de ingresos. Se guarda un respaldo de la hoja. ¿Continuar?')) return;
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'reconAplicarNormalizar',cambios:cambios})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d&&d.ok){ alert('✓ Listo. '+(d.total||0)+' movimientos actualizados.'); reconAbrir(); }
+      else alert('Error: '+((d&&d.error)||'no se pudo aplicar'));
+    }).catch(function(){ alert('Error de conexión.'); });
+}
+function reconAplicarAlta(){
+  if(!_reconData) return;
+  var chks=document.querySelectorAll('.recon-a:checked'), altas=[];
+  for(var i=0;i<chks.length;i++){ var idx=+chks[i].getAttribute('data-i'); var x=_reconData.alta[idx]; var inp=document.querySelector('.recon-af[data-i="'+idx+'"]'); var nombre=inp?inp.value.trim():''; if(x&&nombre) altas.push({ledger:x.ledger, nombre:nombre}); }
+  if(!altas.length){ alert('Selecciona al menos uno y escribe su nombre completo.'); return; }
+  if(!confirm('Se darán de alta '+altas.length+' paciente(s) y se corregirá su nombre en el historial. ¿Continuar?')) return;
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'reconAplicarAltas',altas:altas})})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d&&d.ok){ alert('✓ '+((d.creados||[]).length)+' altas · '+(d.normalizados||0)+' movimientos corregidos.'); reconAbrir(); }
+      else alert('Error: '+((d&&d.error)||'no se pudo aplicar'));
+    }).catch(function(){ alert('Error de conexión.'); });
 }
 function _ensurePacList(cb){
   if(_ecPacientesList && _ecPacientesList.length){ if(cb) cb(); return; }

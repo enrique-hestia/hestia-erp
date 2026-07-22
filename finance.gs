@@ -866,6 +866,18 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega identificar.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(buscarPacientesSimilares(body));
     }
+    if (body.action === 'reconAplicarNormalizar') {
+      if (typeof reconAplicarNormalizar !== 'function')
+        return jsonResponse({ ok:false, error:'Agrega identificar.gs al proyecto de Apps Script y redespliega.' });
+      body.usuario = _postEmail;
+      return jsonResponse(reconAplicarNormalizar(body));
+    }
+    if (body.action === 'reconAplicarAltas') {
+      if (typeof reconAplicarAltas !== 'function')
+        return jsonResponse({ ok:false, error:'Agrega identificar.gs al proyecto de Apps Script y redespliega.' });
+      body.usuario = _postEmail;
+      return jsonResponse(reconAplicarAltas(body));
+    }
     if (body.action === 'altaPacienteRapida') {
       if (typeof altaPacienteRapida !== 'function')
         return jsonResponse({ok:false, error:'Agrega identificar.gs al proyecto de Apps Script y redespliega.'});
