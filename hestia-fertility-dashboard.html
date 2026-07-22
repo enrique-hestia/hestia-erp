@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.309 -->
+﻿<!-- app-build:2026.07.22.310 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -37982,6 +37982,16 @@ function ccRenderSaldos(){
     h+='<button onclick="_ccSeg=\''+sg+'\';ccRenderBody()" style="padding:6px 12px;border:1px solid '+(on?'var(--color-primary)':'var(--color-divider)')+';background:'+(on?'var(--color-primary)':'transparent')+';color:'+(on?'#fff':'var(--color-text-muted)')+';border-radius:20px;font-size:11px;font-weight:600;cursor:pointer">'+sg+((d.porSegmento&&sg!=='Todos')?' ('+ccFmt0(d.porSegmento[sg]||0)+')':'')+'</button>';
   });
   h+='</div></div>';
+  // Barra de cobro consolidado (varias partidas de un paciente → 1 depósito).
+  var _selOps=Object.keys(_ccSel);
+  if(_selOps.length){
+    var _selTot=_selOps.reduce(function(s,op){return s+(_ccSel[op].saldo||0);},0);
+    var _selPac=_ccSel[_selOps[0]].paciente;
+    h+='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--color-primary-hl,#f7e9ec);border:1.5px solid var(--color-primary,#c46a7a);border-radius:11px;padding:11px 15px;margin-bottom:12px">'
+      +'<div style="flex:1;min-width:200px;font-size:12.5px;color:var(--color-text)"><b>'+_selOps.length+' partida(s)</b> de <b>'+ccEsc(_selPac)+'</b> seleccionada(s) · Total <b style="color:var(--color-primary)">'+ccFmt(_selTot)+'</b></div>'
+      +(_selOps.length>=2?'<button onclick="ccConsolAbrir()" style="padding:8px 15px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer">💰 Cobrar juntos (1 depósito)</button>':'<span style="font-size:11.5px;color:var(--color-text-muted)">Selecciona otra partida del mismo paciente para cobrarlas juntas.</span>')
+      +'<button onclick="ccSelClear()" style="padding:8px 12px;background:transparent;border:1px solid var(--color-divider);border-radius:8px;font-size:12px;cursor:pointer;color:var(--color-text-muted)">Limpiar</button></div>';
+  }
   if(!ops.length){
     h+='<div style="padding:44px;text-align:center;color:var(--color-text-muted);font-size:13px;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:12px">✓ Sin saldos por cobrar'+(_ccSeg!=='Todos'?' en «'+_ccSeg+'»':'')+'.<br><span style="font-size:11px">Los adeudos aparecen al capturar un pago parcial o cargar un saldo inicial.</span></div>';
     return h;
@@ -37994,8 +38004,11 @@ function ccRenderSaldos(){
     var bg=i%2?'background:var(--color-surface-2)':'';
     var rid='ccdet-'+i;
     var chev=(o.items&&o.items.length)?'<span onclick="ccToggleDetalle(\''+rid+'\',this)" title="Ver desglose" style="cursor:pointer;color:var(--color-primary);font-weight:800;margin-right:6px;display:inline-block;width:10px">▸</span>':'<span style="display:inline-block;width:16px"></span>';
+    var selBox=(o.auto && o.op && o.op!=='—' && (o.saldo||0)>0.5)
+      ? '<input type="checkbox" class="cc-sel" '+(_ccSel[o.op]?'checked':'')+' onchange="ccSelToggle('+ccQ(o.op)+','+ccQ(o.paciente)+','+(o.saldo||0)+','+ccQ(o.fecha||'')+',this.checked)" title="Seleccionar para cobro consolidado (1 depósito para varias partidas)" style="margin-right:8px;vertical-align:middle;cursor:pointer">'
+      : '<span style="display:inline-block;width:21px"></span>';
     h+='<tr style="border-bottom:1px solid var(--color-divider);'+bg+'">'
-      +'<td style="padding:9px 12px">'+chev+'<b>'+ccEsc(o.paciente)+'</b><div style="font-size:10px;color:var(--color-text-muted);margin-left:16px">'+ccEsc(o.op)+' · '+ccFch(o.fecha)+' · '+(o.origen==='ingreso'?'venta':'registro')+'</div><div style="margin-left:16px">'+_ccPlanBadge(o)+'</div></td>'
+      +'<td style="padding:9px 12px">'+selBox+chev+'<b>'+ccEsc(o.paciente)+'</b><div style="font-size:10px;color:var(--color-text-muted);margin-left:16px">'+ccEsc(o.op)+' · '+ccFch(o.fecha)+' · '+(o.origen==='ingreso'?'venta':'registro')+'</div><div style="margin-left:16px">'+_ccPlanBadge(o)+'</div></td>'
       +'<td style="padding:9px 12px;color:var(--color-text-muted)">'+ccEsc(o.segmento)+'</td>'
       +'<td style="padding:9px 12px;color:var(--color-text-muted);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+ccEsc(o.concepto)+'</td>'
       +'<td style="padding:9px 12px;text-align:right;color:var(--color-text-muted)">'+ccFmt(o.total)+'</td>'
@@ -38743,6 +38756,59 @@ function ccGuardarAbonoCargo(rowNum, paciente, saldo, concepto){
     }).catch(function(e){ alert('Error de red: '+e.message); if(btn){ btn.textContent='Reintentar'; btn.disabled=false; } });
 }
 /* ── Cobrar suscripción (registra pago que extiende cobertura) ── */
+/* ── COBRO CONSOLIDADO: varias partidas de un paciente → 1 depósito en banco ──
+   Selección por checkbox (solo saldos de venta con OP, mismo paciente). El backend
+   reparte el depósito viejas-primero, sube el Pagado de cada OP y escribe UN solo
+   movimiento de banco etiquetado [CONSOL folio] (intocable por edición de una OP). */
+var _ccSel = {};   // op -> {op, paciente, saldo, fecha}
+function _ccSelNorm(s){ return String(s||'').trim().toLowerCase(); }
+function ccSelToggle(op, paciente, saldo, fecha, checked){
+  op=String(op||''); if(!op) return;
+  if(checked){
+    var keys=Object.keys(_ccSel);
+    if(keys.length && _ccSelNorm(_ccSel[keys[0]].paciente)!==_ccSelNorm(paciente)){
+      _ccSel={}; if(typeof setStatus==='function') setStatus('Solo se cobran juntas partidas del MISMO paciente. Reinicié la selección.','err');
+    }
+    _ccSel[op]={op:op, paciente:paciente, saldo:saldo, fecha:fecha};
+  } else { delete _ccSel[op]; }
+  ccRenderBody();
+}
+function ccSelClear(){ _ccSel={}; ccRenderBody(); }
+function ccConsolAbrir(){
+  var ops=Object.keys(_ccSel); if(ops.length<2){ alert('Selecciona al menos dos partidas del mismo paciente.'); return; }
+  var pac=_ccSel[ops[0]].paciente;
+  var total=ops.reduce(function(s,op){ return s+(_ccSel[op].saldo||0); },0);
+  var lista=ops.map(function(op){ var o=_ccSel[op]; return '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dotted var(--color-divider);font-size:12px"><span style="color:var(--color-primary);font-weight:600">'+ccEsc(op)+'</span><span style="font-variant-numeric:tabular-nums">'+ccFmt(o.saldo)+'</span></div>'; }).join('');
+  var body=''
+    +'<div style="background:var(--color-surface-2);border-radius:8px;padding:10px 12px;margin-bottom:12px"><b>'+ccEsc(pac)+'</b><div style="margin-top:6px">'+lista+'</div><div style="display:flex;justify-content:space-between;padding:7px 0 0;font-weight:800"><span>Suma de partidas</span><span style="color:var(--color-primary)">'+ccFmt(total)+'</span></div></div>'
+    +_ccField('Monto del depósito (lo que cayó al banco)','<input id="cc-cs-monto" type="number" step="0.01" value="'+total.toFixed(2)+'" style="'+_ccInputStyle()+'"><div style="font-size:10.5px;color:var(--color-text-muted);margin-top:4px">Se reparte entre las partidas (las más viejas primero). Si es menor a la suma, las últimas quedan con saldo.</div>')
+    +'<div style="display:flex;gap:10px"><div style="flex:1">'+_ccField('Fecha de pago','<input id="cc-cs-fecha" type="date" value="'+new Date().toISOString().substring(0,10)+'" style="'+_ccInputStyle()+'">')+'</div>'
+    +'<div style="flex:1">'+_ccField('Forma de pago (banco)','<select id="cc-cs-fp" style="'+_ccInputStyle()+'"><option>Transferencia</option><option>Santander</option><option>Efectivo</option><option>TDC</option><option>TDD</option><option>AMEX</option></select>')+'</div></div>'
+    +_ccField('# de depósito / referencia (opcional)','<input id="cc-cs-ref" type="text" placeholder="Ej. folio del depósito o transferencia" style="'+_ccInputStyle()+'">')
+    +_ccField('Comisión MP (si aplica, opcional)','<input id="cc-cs-com" type="number" step="0.01" value="0" style="'+_ccInputStyle()+'">')
+    +'<div style="font-size:10.5px;color:var(--color-text-muted);margin-top:-4px">Un solo movimiento en el banco por el total; cada partida queda abonada en Ingresos con el mismo folio.</div>';
+  ccModal('💰 Cobro consolidado — '+ccEsc(pac), body, function(){ ccConsolGuardar(); }, 'Registrar depósito');
+}
+async function ccConsolGuardar(){
+  var ops=Object.keys(_ccSel); if(ops.length<2) return;
+  var monto=parseFloat((document.getElementById('cc-cs-monto')||{}).value)||0;
+  var fecha=(document.getElementById('cc-cs-fecha')||{}).value||'';
+  var fp=(document.getElementById('cc-cs-fp')||{}).value||'Transferencia';
+  var ref=(document.getElementById('cc-cs-ref')||{}).value||'';
+  var com=parseFloat((document.getElementById('cc-cs-com')||{}).value)||0;
+  if(monto<=0){ alert('El monto del depósito debe ser mayor a cero.'); return; }
+  var btn=document.getElementById('cc-modal-save'); if(btn){ btn.disabled=true; btn.textContent='Registrando…'; }
+  var s=getSession()||{};
+  var payload={ action:'cobrarConsolidado', token:s.token||getToken(), usuario:s.email||'',
+    ops:ops.map(function(op){ return {op:op, saldoEsperado:_ccSel[op].saldo}; }),
+    montoTotal:monto, formaPago:fp, fecha:fecha, referencia:ref, comisionMP:com };
+  var res; try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(payload)}); res=await r.json(); }
+  catch(e){ res={ok:false,error:e.message}; }
+  if(res&&res.ok){ var m=document.getElementById('cc-modal'); if(m)m.remove(); _ccSel={};
+    alert('✓ Depósito registrado: '+res.folio+' · '+ccFmt(res.deposito)+'.\nUn movimiento en el banco · '+res.partidas+' partidas abonadas en Ingresos.'); ccLoad(true); }
+  else { alert('⚠ '+((res&&res.error)||'No se pudo registrar el cobro.')); if(btn){ btn.disabled=false; btn.textContent='Registrar depósito'; } }
+}
+
 function ccCobrarSus(nombre, monto, plan){
   var body=''
     +'<div style="background:var(--color-surface-2);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--color-text-muted)">'

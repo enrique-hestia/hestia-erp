@@ -778,6 +778,14 @@ function doPost(e) {
       try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
       return jsonResponse(_abRes);
     }
+    // ── COBRO CONSOLIDADO: varias partidas de un paciente → 1 depósito en banco ──
+    if (body.action === 'cobrarConsolidado') {
+      if (typeof cobrarConsolidado !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza finance.gs en Apps Script y redespliega.'});
+      var _cRes = cobrarConsolidado(body);
+      try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch(e) {}
+      return jsonResponse(_cRes);
+    }
     // ── COBRANZA: registrar abono / cargar saldo inicial (escritura) ──
     if (body.action === 'registrarAbono') {
       if (typeof registrarAbono !== 'function')
@@ -6642,6 +6650,116 @@ function _abonoRutearABanco(op, paciente, monto, formaPago, fecha, comisionMP, o
     saveBankRow(banco, _ingRowByTipo(_tipo, fecha, monto, obs, com, mesStr));
     return { banco: banco, monto: monto, comision: com };
   } catch (e) { return { error: e.message }; }
+}
+
+/* ── COBRO CONSOLIDADO ────────────────────────────────────────────────────────
+ * Varias partidas (OPs) de UN MISMO paciente se saldan con UN SOLO depósito real.
+ * Regla ERP: en el banco se ve UN movimiento por el total; en Ingresos cada OP
+ * queda con su Pagado subido y su cargo cerrado, todo referido al mismo folio
+ * PAGO-000N + el # de depósito. Reparto viejas-primero (parcial permitido).
+ * Seguridad: el movimiento de banco se etiqueta [CONSOL <folio>] (NO [OP #..]),
+ * así editar una sola OP jamás borra el depósito compartido (_bankDeleteByOp
+ * busca el tag exacto de la OP). */
+function _consolNextFolio() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var n = parseInt(props.getProperty('CONSOL_SEQ') || '0', 10) + 1;
+    props.setProperty('CONSOL_SEQ', String(n));
+    return 'PAGO-' + String(n).padStart(4, '0');
+  } catch (e) { return 'PAGO-' + String(Math.floor(new Date().getTime() / 1000)); }
+}
+function cobrarConsolidado(body) {
+  try {
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'editar_ingresos'))
+      return { ok: false, error: 'Sin autorización para cobrar/abonar (requiere el permiso editar_ingresos).' };
+    function num(v){ var n = parseFloat(String(v||'').replace(/[$,\s]/g,'')); return isNaN(n)?0:n; }
+    var lista = (body.ops && body.ops.length) ? body.ops : [];
+    if (lista.length < 2) return { ok: false, error: 'Selecciona al menos dos partidas del mismo paciente para un cobro consolidado.' };
+    var deposito = Math.max(0, num(body.montoTotal));
+    if (deposito <= 0.01) return { ok: false, error: 'El monto del depósito debe ser mayor a cero.' };
+    var formaPago = String(body.formaPago || 'Transferencia').trim();
+    var comisionMP = Math.max(0, num(body.comisionMP));
+    var refDep = String(body.referencia || '').trim();
+    var fecha = body.fecha ? String(body.fecha) : Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'America/Mexico_City', 'yyyy-MM-dd');
+    var usuario = body.usuario || '';
+
+    var lock = LockService.getScriptLock();
+    if (!lock.tryLock(25000)) return { ok: false, error: 'Sistema ocupado, reintenta en un momento.' };
+    try {
+      var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+      var sheet = ss.getSheetByName(BD_INGRESOS_TAB);
+      if (!sheet) return { ok: false, error: 'No se encontró BD_Ingresos' };
+      var data = sheet.getDataRange().getValues();
+      var H = data[0].map(function(x){ return String(x||'').trim().toLowerCase(); });
+      function hc(){ for (var a=0;a<arguments.length;a++){ var k=H.indexOf(arguments[a]); if(k>-1) return k; } return -1; }
+      var iOp = hc('op'); if (iOp < 0) iOp = 0;
+      var iPac = hc('paciente'), iCat = hc('categoria','categoría');
+      var iTotal = hc('totalpagar','total a pagar','total'), iPag = hc('pagado');
+      if (iPag < 0) return { ok: false, error: 'No se encontró la columna Pagado en BD_Ingresos' };
+
+      // Índice OP → líneas + totales
+      var byOp = {};
+      for (var r=1; r<data.length; r++){
+        var opc = String(data[r][iOp]||'').trim(); if(!opc) continue;
+        if (!byOp[opc]) byOp[opc] = { rows:[], paciente:'', cat:'', total:0, pagado:0 };
+        var t = num(data[r][iTotal]);
+        var _rawP = data[r][iPag];
+        var p = (String(_rawP==null?'':_rawP).trim()==='') ? t : num(_rawP);   // vacío = pagado (histórico)
+        byOp[opc].rows.push({ rowNum:r+1, total:t, pagado:p });
+        byOp[opc].total += t; byOp[opc].pagado += p;
+        if (!byOp[opc].paciente && iPac>-1) byOp[opc].paciente = String(data[r][iPac]||'');
+        if (!byOp[opc].cat && iCat>-1) byOp[opc].cat = String(data[r][iCat]||'');
+      }
+
+      var pacienteRef = '', prep = [];
+      for (var qi=0; qi<lista.length; qi++){
+        var op = String(lista[qi].op||'').trim(); if(!op) continue;
+        var info = byOp[op];
+        if (!info) return { ok:false, error:'OP '+op+' no encontrada en BD_Ingresos.' };
+        if (typeof _ingOPCancelada === 'function' && _ingOPCancelada(sheet, op))
+          return { ok:false, error:'La OP '+op+' está cancelada: no se puede cobrar ni abonar.' };
+        var saldo = Math.max(0, info.total - info.pagado);
+        if (lista[qi].saldoEsperado != null && String(lista[qi].saldoEsperado) !== '' &&
+            Math.abs(num(lista[qi].saldoEsperado) - saldo) > 0.01)
+          return { ok:false, saldoCambio:true, error:'El saldo de la OP '+op+' cambió (ahora '+saldo.toFixed(2)+'). Recarga la lista y reintenta.' };
+        var pac = String(info.paciente||'').trim();
+        if (!pacienteRef) pacienteRef = pac;
+        else if (pac.toLowerCase() !== pacienteRef.toLowerCase())
+          return { ok:false, error:'Todas las partidas deben ser del mismo paciente (un depósito = un pagador).' };
+        prep.push({ op:op, info:info, saldo:saldo });
+      }
+      if (!prep.length) return { ok:false, error:'Nada que cobrar.' };
+      prep.sort(function(a,b){ return a.op<b.op?-1:(a.op>b.op?1:0); });   // viejas primero (folio asc)
+      var sumaSaldos = 0; prep.forEach(function(x){ sumaSaldos += x.saldo; });
+      if (deposito > sumaSaldos + 0.01)
+        return { ok:false, error:'El depósito ('+deposito.toFixed(2)+') supera la suma de las partidas ('+sumaSaldos.toFixed(2)+'). Ajusta el monto.' };
+
+      var folio = _consolNextFolio();
+      var rem = deposito, aplicados = [];
+      prep.forEach(function(x){
+        var apply = Math.min(rem, x.saldo); if (apply < 0) apply = 0;
+        if (apply <= 0.001) { aplicados.push({ op:x.op, aplicado:0, saldo:x.saldo }); return; }
+        var nuevoPagado = x.info.pagado + apply; if (nuevoPagado > x.info.total) nuevoPagado = x.info.total;
+        var acc = nuevoPagado;
+        for (var k=0; k<x.info.rows.length; k++){ var ap = Math.min(acc, x.info.rows[k].total); if(ap<0)ap=0; sheet.getRange(x.info.rows[k].rowNum, iPag+1).setValue(ap); acc -= ap; }
+        var nuevoSaldo = Math.max(0, x.info.total - nuevoPagado);
+        if (typeof _cobRegistrarSaldoIngreso === 'function') { try { _cobRegistrarSaldoIngreso(x.op, x.info.paciente, x.info.cat, nuevoSaldo, fecha); } catch (e) {} }
+        if (typeof registrarAbono === 'function') { try { registrarAbono({ op:x.op, paciente:x.info.paciente, monto:apply, tipo:'abono-op', formaPago:formaPago, fecha:fecha, nota:'Cobro consolidado '+folio+(refDep?(' · ref '+refDep):''), usuario:usuario }); } catch (e) {} }
+        try { logAudit(usuario||'sistema', 'Cobranza', 'Cobrar/Abonar (consolidado)', x.op, 'Saldo OP', 'Pagado '+x.info.pagado.toFixed(2), 'Pagado '+nuevoPagado.toFixed(2)+' ('+folio+')'); } catch (e) {}
+        aplicados.push({ op:x.op, aplicado:apply, saldo:nuevoSaldo });
+        rem -= apply;
+      });
+      try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch (e) {}
+
+      // UN SOLO movimiento de banco por el total del depósito (tag [CONSOL folio]).
+      var obs = 'Cobro consolidado ' + folio + (refDep ? (' · ref ' + refDep) : '') + ' · Px. ' + pacienteRef + ' [CONSOL ' + folio + ']';
+      var banco = _abonoRutearABanco('', pacienteRef, deposito, formaPago, fecha, comisionMP, obs);
+      try { CacheService.getScriptCache().remove('erp_banks_v1'); } catch (e) {}
+      try { logAudit(usuario||'sistema', 'Cobranza', 'Cobro consolidado', folio, 'Depósito', '', '$'+deposito.toFixed(2)+' · '+prep.length+' partidas · '+formaPago+(refDep?(' · ref '+refDep):'')); } catch (e) {}
+
+      return { ok:true, folio:folio, paciente:pacienteRef, deposito:deposito, partidas:prep.length, aplicados:aplicados, banco:banco };
+    } finally { lock.releaseLock(); }
+  } catch (ex) { return { ok:false, error:ex.message }; }
 }
 
 function renamePacienteIngresos(oldNombre, newNombre, usuario) {
