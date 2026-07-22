@@ -836,9 +836,13 @@ function _reconOverwriteLedger(cambios, usuario) {
   if (!pend.length) return { ok:true, total:0, detalle:[] };   // nada REAL que cambiar → SIN respaldo (no deja tabs vacíos)
   // 2) Respaldo una sola vez + poda de respaldos viejos (deja los últimos 5).
   try { sh.copyTo(ss).setName('BD_Ingresos_BAK_'+_reconStamp()); _reconPodaBackups(ss, 5); } catch(eB){}
-  // 3) Escribir (surgical, solo col D).
-  var total=0;
-  for (var p=0;p<pend.length;p++){ sh.getRange(pend[p].row, PAC).setValue(pend[p].hit.nue); pend[p].hit.count++; total++; }
+  // 3) Escribir (surgical, solo col D) + juntar las OPs para sincronizar banco.
+  var total=0, _opsBanco=[];
+  for (var p=0;p<pend.length;p++){ sh.getRange(pend[p].row, PAC).setValue(pend[p].hit.nue); pend[p].hit.count++; total++;
+    var _opR=String((data[pend[p].row-1]||[])[0]||'').trim(); if(_opR) _opsBanco.push({op:_opR, nue:pend[p].hit.nue}); }
+  // Sincroniza el nombre en la obs de los depósitos (EN SITIO, sin borrar/recrear
+  // → no duplica ni mueve saldos), para que el banco no quede con el nombre viejo.
+  for (var _ob=0; _ob<_opsBanco.length; _ob++){ try{ if(typeof _bankRenameByOp==='function') _bankRenameByOp(_opsBanco[_ob].op, _opsBanco[_ob].nue); }catch(e){} }
   try { CacheService.getScriptCache().removeAll(['gas_ingresos_v1','gas_pacientes_v1']); } catch(e){}
   var det=[], ks=_reconKeys(map);
   for (var j=0;j<ks.length;j++){ var m=map[ks[j]]; if(m.count){ det.push({old:m.old,nue:m.nue,filas:m.count});

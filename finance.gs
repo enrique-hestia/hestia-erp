@@ -1314,7 +1314,7 @@ function doPost(e) {
       return jsonResponse(deleteIngreso(body));
     }
     if (body.action === 'renamePacienteIngresos') {
-      return jsonResponse(renamePacienteIngresos(body.oldNombre, body.newNombre));
+      return jsonResponse(renamePacienteIngresos(body.oldNombre, body.newNombre, body.usuario || _postEmail));
     }
     // Orígenes externos (atribución del dueño de un ingreso externo)
     if (body.action === 'saveOrigen') {
@@ -6601,7 +6601,7 @@ function _abonoRutearABanco(op, paciente, monto, formaPago, fecha, comisionMP, o
   } catch (e) { return { error: e.message }; }
 }
 
-function renamePacienteIngresos(oldNombre, newNombre) {
+function renamePacienteIngresos(oldNombre, newNombre, usuario) {
   try {
     if (!oldNombre || !newNombre || String(oldNombre).trim() === String(newNombre).trim())
       return {ok:true, updated:0, msg:'Sin cambios'};
@@ -6616,16 +6616,23 @@ function renamePacienteIngresos(oldNombre, newNombre) {
     if (!sheet) return {ok:false, error:'BD_Ingresos no encontrada'};
     var data = sheet.getDataRange().getValues();
     var PAC_COL = 4; // columna D (1-indexed) = Paciente
-    var updated = 0;
+    var updated = 0, opsTocadas = {};
     for (var r = 1; r < data.length; r++) {
       var current = String(data[r][PAC_COL - 1] || '').trim();
       if (current.toLowerCase() === oldTrim.toLowerCase()) {
         sheet.getRange(r + 1, PAC_COL).setValue(newTrim);
+        var _op = String(data[r][0] || '').trim(); if (_op) opsTocadas[_op] = 1;
         updated++;
       }
     }
+    // Sincroniza el nombre en la obs de los depósitos de esas OPs (EN SITIO, sin
+    // borrar/recrear) para que el banco no quede con el nombre viejo (desajuste
+    // banco≠ingreso). No mueve saldos.
+    var _bankSync = 0;
+    for (var _op2 in opsTocadas) { if (opsTocadas.hasOwnProperty(_op2)) { try { _bankSync += _bankRenameByOp(_op2, newTrim); } catch(e){} } }
     try { CacheService.getScriptCache().removeAll(['gas_ingresos_v1', 'gas_pacientes_v1']); } catch(e) {}
-    return {ok:true, updated:updated, oldNombre:oldTrim, newNombre:newTrim};
+    if (updated > 0) { try { logAudit(usuario || 'sistema', 'Ingresos', 'RenombrarPaciente', Object.keys(opsTocadas).join(','), 'Paciente', oldTrim, newTrim + ' (' + updated + ' filas, ' + _bankSync + ' banco)'); } catch(eA){} }
+    return {ok:true, updated:updated, bancoSync:_bankSync, oldNombre:oldTrim, newNombre:newTrim};
   } catch(ex) {
     return {ok:false, error:ex.message};
   }
@@ -7341,6 +7348,66 @@ function _bankDeleteByOp(key, opId) {
     return del.length;
   } catch (e) { Logger.log('_bankDeleteByOp ' + key + ': ' + e.message); return 0; }
 }
+/* Columnas por banco: fecha / depósito / obs. */
+function _bankColMap(key){ return (key === 'santander') ? {fecha:0, dep:1, obs:4} : {fecha:1, dep:2, obs:8}; }
+/* Fallback ANTI-DUPLICADO: borra el depósito viejo de una OP cuando NO tiene la
+   etiqueta [OP-…] (fila LEGACY previa al tag). Empata por FIRMA: mismo "Px.
+   <origPac>" + misma fecha + mismo monto, y SOLO filas SIN etiqueta → nunca toca
+   el depósito de otra OP. Sin esto, editar un ingreso viejo dejaba el depósito
+   original vivo y creaba uno nuevo = movimiento duplicado en bancos. */
+function _bankDeleteBySignature(key, origPac, origFecha, montos){
+  try {
+    if (!origPac) return 0;
+    var sheet = _bankSheetByKey(key); if (!sheet) return 0;
+    var lr = sheet.getLastRow(); if (lr < 2) return 0;
+    var cm = _bankColMap(key);
+    var vals = sheet.getRange(2, 1, lr - 1, sheet.getLastColumn()).getValues();
+    var pacKey = ('px. ' + String(origPac).trim()).toLowerCase();
+    var fkey = String(origFecha || '').substring(0, 10);
+    var amtSet = {}, hasAmt = false;
+    (montos || []).forEach(function(a){ var k = Math.round(Math.abs(parseFloat(a) || 0) * 100); if (k) { amtSet[k] = 1; hasAmt = true; } });
+    var del = [];
+    for (var r = 0; r < vals.length; r++){
+      var obs = String(vals[r][cm.obs] || '');
+      if (obs.indexOf('[OP-') > -1) continue;                    // jamás una fila ya etiquetada
+      if (obs.toLowerCase().indexOf(pacKey) < 0) continue;        // mismo nombre viejo
+      var fc = vals[r][cm.fecha];
+      var fs = (fc instanceof Date) ? Utilities.formatDate(fc, Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(fc || '').substring(0, 10);
+      if (fkey && fs !== fkey) continue;                          // misma fecha
+      if (hasAmt){ var dk = Math.round(Math.abs(parseFloat(vals[r][cm.dep]) || 0) * 100); if (!amtSet[dk]) continue; }  // mismo monto
+      del.push(r + 2);
+    }
+    for (var d = del.length - 1; d >= 0; d--) sheet.deleteRow(del[d]);
+    return del.length;
+  } catch (e) { Logger.log('_bankDeleteBySignature ' + key + ': ' + e.message); return 0; }
+}
+/* Renombra EN SITIO "Px. <nombre>" en la obs de los depósitos de una OP (ambos
+   bancos), SIN borrar/recrear → no duplica ni mueve saldos. Se usa al renombrar
+   un paciente FUERA del editor de ingresos, para que el banco no quede con el
+   nombre viejo (evita el desajuste banco≠ingreso). Devuelve # de filas tocadas. */
+function _bankRenameByOp(opId, newPac){
+  if (!opId || !newPac) return 0;
+  var tag = '[' + String(opId).trim() + ']';
+  var nuevo = 'Px. ' + String(newPac).trim();
+  var total = 0;
+  ['santander','mercadopago'].forEach(function(key){
+    try {
+      var sheet = _bankSheetByKey(key); if (!sheet) return;
+      var lr = sheet.getLastRow(); if (lr < 2) return;
+      var obsCol = _bankObsIdx(key);
+      var rng = sheet.getRange(2, obsCol + 1, lr - 1, 1);
+      var vals = rng.getValues(); var changed = false;
+      for (var r = 0; r < vals.length; r++){
+        var obs = String(vals[r][0] || '');
+        if (obs.indexOf(tag) < 0) continue;
+        var nueva = obs.replace(/Px\.\s.*?(\s\[OP-)/, nuevo + '$1');
+        if (nueva !== obs){ vals[r][0] = nueva; changed = true; total++; }
+      }
+      if (changed) rng.setValues(vals);
+    } catch(e){ Logger.log('_bankRenameByOp ' + key + ': ' + e.message); }
+  });
+  return total;
+}
 /* Saldo de apertura ANTES de la primera fila de datos (para no perderlo al
    recalcular). Santander lleva saldo inicial; MP es cumsum puro (apertura 0).
    DEBE llamarse ANTES de borrar filas. */
@@ -7414,6 +7481,16 @@ function updateIngresoConBancos(payload) {
     }
     if (!origRows.length) return {ok:false, error:'OP ' + opId + ' no encontrada'};
 
+    // Guard FOLIO DUPLICADO: si esta OP tiene filas de DOS pacientes distintos
+    // (folio compartido por el generador viejo), editar corrompería la otra
+    // operación (se reconstruiría bajo el paciente de la fila 0). Se rechaza.
+    var _pacsOp = {};
+    origRows.forEach(function(rw){ var p = String(rw[3] || '').trim().toLowerCase(); if (p) _pacsOp[p] = 1; });
+    var _pacKeys = []; for (var _pk in _pacsOp) if (_pacsOp.hasOwnProperty(_pk)) _pacKeys.push(_pk);
+    if (_pacKeys.length > 1) {
+      return {ok:false, error:'La operación ' + opId + ' tiene filas de DOS pacientes distintos (folio compartido). No se puede editar sin corromper la otra operación. Corre «detectarOPsDuplicados» en el editor de Apps Script y sepáralos primero.'};
+    }
+
     var origFP      = String(origRows[0][12] || '');
     var origFecha   = String(origRows[0][2]  || '');
     var origPac     = String(origRows[0][3]  || '');
@@ -7453,8 +7530,13 @@ function updateIngresoConBancos(payload) {
     } else {
       _mpCom = _bankMpComisionDeOp(opId);
     }
-    _bankDeleteByOp('santander', opId);
-    _bankDeleteByOp('mercadopago', opId);
+    var _delSan = _bankDeleteByOp('santander', opId);
+    var _delMp  = _bankDeleteByOp('mercadopago', opId);
+    // Fallback ANTI-DUPLICADO: si el tag [OP-…] no encontró la fila (depósito
+    // LEGACY sin etiqueta), bórralo por firma (nombre viejo + fecha + monto) para
+    // NO dejarlo vivo y crear uno nuevo = movimiento duplicado en bancos.
+    if (_delSan === 0) _bankDeleteBySignature('santander', origPac, origFecha, [origPagado]);
+    if (_delMp  === 0) _bankDeleteBySignature('mercadopago', origPac, origFecha, [origPagado]);
     _reverseEfectivoOnly(opId, data[0], origRows, origFP, origFecha, origPagado, origObsBank);
 
     var updateResult = updateIngreso(payload);
