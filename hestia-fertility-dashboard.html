@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.314 -->
+﻿<!-- app-build:2026.07.22.315 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -48285,6 +48285,60 @@ try {
     return h + '</div>';
   }
 
+  /* ── AUTOCOMPLETAR: sugerencias en vivo mientras el usuario escribe ──
+     Pantallas (permiso-filtradas) + plantillas de comando por el verbo que empieza
+     a teclear. Las pantallas se EJECUTAN al pulsar; las plantillas solo RELLENAN
+     el input para que complete el nombre. Es cosmético/descubridor: no ejecuta nada. */
+  function _asisTokMatch(a,b){
+    var ta=a.split(/\s+/).filter(Boolean), tb=b.split(/\s+/).filter(Boolean); if(!tb.length) return false;
+    var hit=0; tb.forEach(function(w){ if(w.length>2 && ta.some(function(x){ return x.indexOf(w)>-1 || w.indexOf(x)>-1; })) hit++; });
+    return hit>0;
+  }
+  function _asisSugerencias(q){
+    q=String(q||'').trim(); var nq=_asisNorm(q); if(!nq) return [];
+    var out=[];
+    var mi=(typeof menuItems!=='undefined'&&menuItems)?menuItems:[];
+    var nav=mi.filter(function(i){ return i && i.id && i.tipo!=='grupo'; });
+    var nqv=nq.replace(/^(ve(te)?|ir|abre(me)?|llevame|muestrame|abreme|vamos|entra(r)?|quiero ver|ver)\s+(a(l)?\s+)?/,'');
+    if(nqv){
+      nav.forEach(function(i){ var nl=_asisNorm(i.label); if(nl===nqv||nl.indexOf(nqv)>-1||nqv.indexOf(nl)>-1||_asisTokMatch(nl,nqv)) out.push({txt:'📂 Ir a '+i.label, ej:'ve a '+i.label, run:true}); });
+    }
+    var tpls=[
+      { re:/^(cu|cua|cuan|cuant|cuanto|saldo|deuda|adeud|debe|le debe|me debe)/, txt:'💰 ¿Cuánto debe …?', ej:'¿cuánto debe ' },
+      { re:/^(impr|dame|genera|generar|saca|estado)/, txt:'🧾 Imprime el estado de cuenta de …', ej:'imprime el estado de cuenta de ' },
+      { re:/^(busc|encuentr|localiz)/, txt:'🔎 Busca a …', ej:'busca a ' },
+      { re:/^(crea|cre|registr|nuev|alta|agrega|da de alta)/, txt:'📌 Crea una cuenta por pagar de …', ej:'crea una cuenta por pagar de ' },
+      { re:/^(ve|ir|abre|llev|muestr|vamos|entra)/, txt:'📂 Ve a … (una pantalla)', ej:'ve a ' }
+    ];
+    tpls.forEach(function(t){ if(t.re.test(nq)) out.push({txt:t.txt, ej:t.ej, run:false}); });
+    var seen={}, res=[]; out.forEach(function(o){ var k=o.ej.trim(); if(!seen[k]){ seen[k]=1; res.push(o); } });
+    return res.slice(0,7);
+  }
+  function _asisSugHTML(q){
+    var sug=_asisSugerencias(q);
+    if(!sug.length) return '<div class="asis-hint" style="margin-top:12px">Pulsa <b>Enter</b> para ejecutar, o sigue escribiendo.</div>';
+    var h='<div class="asis-ejs"><div class="asis-ejg"><div class="asis-ejt">💡 Sugerencias</div>';
+    sug.forEach(function(o){ h+='<button class="asis-ej asis-sug" data-ej="'+_asisEsc(o.ej)+'" data-run="'+(o.run?'1':'0')+'">'+_asisEsc(o.txt)+'</button>'; });
+    return h+'</div></div>';
+  }
+  function _asisBindSug(){
+    var c=document.getElementById('asis-resp'); if(!c) return;
+    Array.prototype.forEach.call(c.querySelectorAll('.asis-sug'), function(b){
+      b.onclick=function(){
+        var inp=document.getElementById('asis-input'); if(!inp) return;
+        var ej=b.getAttribute('data-ej');
+        if(b.getAttribute('data-run')==='1'){ inp.value=ej; _asisRun(); }
+        else { inp.value=ej; inp.focus(); c.innerHTML=_asisSugHTML(inp.value); _asisBindSug(); }
+      };
+    });
+  }
+  function _asisOnInput(){
+    var c=document.getElementById('asis-resp'); var inp=document.getElementById('asis-input'); if(!c||!inp) return;
+    var q=inp.value.trim();
+    if(!q){ c.innerHTML=_asisEjemplosHTML(); _asisBindEjemplos(); return; }
+    c.innerHTML=_asisSugHTML(q); _asisBindSug();
+  }
+
   function _asisRun(){
     var inp = document.getElementById('asis-input');
     if (!inp || _asisBusy) return;
@@ -48348,6 +48402,7 @@ try {
       if (k === 'Enter'){ e.preventDefault(); _asisRun(); }
       else if (k === 'Escape'){ _asisClose(); }
     });
+    inp.addEventListener('input', _asisOnInput);
     document.getElementById('asis-resp').innerHTML = _asisEjemplosHTML();
     _asisBindEjemplos();
     _asisVozBtnSync();
