@@ -117,6 +117,24 @@ function _consumirCredito(creditoId, monto) {
   }
   return { ok: false, error: 'Crédito no encontrado' };
 }
+/* Consume saldo a favor SIN generar pago — para cuando el descuento ya se aplicó
+ * "por fuera" (el usuario puso el monto NETO directo al pagar el egreso, sin pasar
+ * por Aplicar). Evita el doble conteo del crédito. Gated + auditado. */
+function consumirSaldoFavorProveedor(body){
+  try{
+    body = body || {};
+    if (typeof _tokenHasPermission==='function' && !_tokenHasPermission(body.token||'', 'editar_egresos'))
+      return { ok:false, error:'Sin autorización para editar egresos (permiso editar_egresos).' };
+    var creditoId = body.creditoId;
+    var monto = Math.max(0, Number(String(body.monto||'').replace(/[$,\s]/g,'')) || 0);
+    if(!creditoId) return { ok:false, error:'Falta indicar el crédito.' };
+    if(monto <= 0.01) return { ok:false, error:'El monto a consumir debe ser mayor a cero.' };
+    var res = _consumirCredito(creditoId, monto);
+    if(!res.ok) return res;
+    try{ logAudit(body.usuario||'', 'CxP', 'Consumir saldo a favor (aplicado por fuera)', String(creditoId), 'MontoDisponible', '-$'+monto.toFixed(2), String(body.nota||'descuento ya reflejado en el pago')); }catch(e){}
+    return { ok:true, proveedor:res.proveedor, consumido:monto };
+  }catch(ex){ return { ok:false, error:ex.message }; }
+}
 function _cxpNormProv(s) { return String(s || '').trim().toLowerCase().replace(/\s+/g, ' '); }
 
 /* ── Reparación: reversa abonos de crédito CRUZADOS (crédito de un proveedor

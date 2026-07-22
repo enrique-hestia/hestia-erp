@@ -1108,6 +1108,12 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega cxp_creditos.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(aplicarAbonoCxP(body));
     }
+    if (body.action === 'consumirSaldoFavorProveedor') {
+      if (typeof consumirSaldoFavorProveedor !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza cxp_creditos.gs en Apps Script y redespliega.'});
+      if (typeof _postEmail !== 'undefined' && _postEmail) body.usuario = _postEmail;
+      return jsonResponse(consumirSaldoFavorProveedor(body));
+    }
     if (body.action === 'cancelarOrdenCxP') {
       if (!_tokenHasPermission(body.token || '', 'editar_egresos')) {
         return jsonResponse({ok:false, error:'Sin autorización para cancelar ordenes de pago (editar_egresos). Pídeselo al administrador.'});

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.313 -->
+﻿<!-- app-build:2026.07.22.314 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -35065,7 +35065,9 @@ window.cxpOpenPay = async function(rowNum, proveedor, monto, divisa, cotizUrl) {
         + '<div style="display:flex;gap:8px;align-items:center">'
           + '<input type="number" id="cxp-pay-credito-monto" step="0.01" min="0" max="'+Math.min(totalCredito,monto)+'" value="'+Math.min(totalCredito,monto).toFixed(2)+'" style="flex:1;padding:6px 8px;border:1.5px solid #ca8a04;border-radius:6px;font-size:12px">'
           + '<button onclick="cxpAplicarCredito()" id="cxp-pay-credito-btn" style="padding:6px 12px;background:#854d0e;color:#fff;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer">Aplicar</button>'
-        + '</div></div>';
+        + '</div>'
+        + '<div style="margin-top:7px;border-top:1px dashed #ca8a04;padding-top:6px"><a href="javascript:void(0)" onclick="cxpConsumirPorFuera()" style="font-size:10.5px;color:#854d0e;text-decoration:underline;cursor:pointer">¿Ya descontaste el saldo directo al pagar (pusiste el monto neto)? Consúmelo aquí — sin pagar de nuevo.</a></div>'
+        + '</div>';
     }
   } catch(eCred){}
 
@@ -35201,6 +35203,32 @@ window.cxpAplicarCredito = async function(){
     alert('Crédito aplicado. Saldo restante a pagar: $'+window._cxpPaySaldoPendiente.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}));
   } catch(e) { alert('Error de conexión: '+e.message); }
   finally { if(btn){ btn.disabled=false; btn.textContent='Aplicar'; } }
+};
+
+// Consume el saldo a favor SIN pagar de nuevo — para cuando ya se descontó "por
+// fuera" (se puso el monto NETO directo). Evita el doble conteo del crédito.
+window.cxpConsumirPorFuera = async function(){
+  var creds = (window._cxpPayCreditos||[]).slice(); if(!creds.length){ alert('No hay saldo a favor que consumir.'); return; }
+  var tot = creds.reduce(function(a,c){ return a+(c.montoDisponible||0); },0);
+  var def = ((document.getElementById('cxp-pay-credito-monto')||{}).value)||tot.toFixed(2);
+  var v = prompt('¿Cuánto saldo a favor YA descontaste directo al pagar (pusiste el monto neto en el egreso)?\n\nDisponible: $'+tot.toFixed(2)+'\n\nSe descontará del saldo a favor SIN generar un pago nuevo, para que no se cuente doble.', def);
+  if(v==null) return;
+  var monto=parseFloat(String(v).replace(/[$,\s]/g,''))||0;
+  if(monto<=0){ alert('Monto inválido.'); return; }
+  if(monto>tot+0.01){ alert('No puedes consumir más de $'+tot.toFixed(2)+' disponibles.'); return; }
+  if(!confirm('Vas a CONSUMIR $'+monto.toLocaleString('en-US',{minimumFractionDigits:2})+' del saldo a favor, SIN registrar un pago nuevo (porque ya lo descontaste al pagar el egreso).\n\n¿Confirmas?')) return;
+  var s=getSession()||{};
+  var creditos=creds.sort(function(a,b){ return String(a.fecha||'').localeCompare(String(b.fecha||'')); });
+  var restante=monto;
+  try{
+    for(var i=0;i<creditos.length && restante>0.01;i++){
+      var c=creditos[i]; var ap=Math.min(c.montoDisponible||0, restante); if(ap<=0.01) continue;
+      var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'consumirSaldoFavorProveedor', creditoId:c.id, monto:ap, nota:'Descuento ya aplicado directo en el pago', token:s.token||getToken(), usuario:s.email||''})});
+      var res=await r.json(); if(!res.ok){ alert('Error: '+(res.error||'No se pudo consumir.')); return; } restante-=ap;
+    }
+    alert('✓ Se consumió $'+monto.toLocaleString('en-US',{minimumFractionDigits:2})+' del saldo a favor. Ya no se contará doble.');
+    cxpClosePay(); if(typeof loadCxPData==='function') loadCxPData();
+  }catch(e){ alert('Error de conexión: '+e.message); }
 };
 
 // Muestra divisa/tipo de cambio solo para Santander y AMEX
