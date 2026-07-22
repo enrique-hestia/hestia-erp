@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.306 -->
+﻿<!-- app-build:2026.07.22.307 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1207,6 +1207,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
           style="font-size:var(--text-sm);padding:6px 4px;color:var(--color-text)">
       </div>
       <button class="btn btn-primary" onclick="pcnReconcile()" style="font-size:var(--text-xs);padding:8px 16px">Conciliar</button>
+      <button onclick="hfDescargarPlantilla('poliza-cd')" title="Descarga un CSV de ejemplo con las columnas Tipo/Fecha/Folio/Factura/Concepto/Total que espera el sistema" style="font-size:var(--text-xs);padding:8px 14px;background:transparent;border:1px solid var(--color-primary,#c46a7a);color:var(--color-primary,#c46a7a);border-radius:8px;font-weight:600;cursor:pointer">⬇ Plantilla muestra</button>
     </div>
   </div>
   <div id="pcn-status" style="font-size:var(--text-sm);color:var(--color-text-muted,#9ca3af);margin-bottom:12px"></div>
@@ -38098,6 +38099,44 @@ function _ccMPNorm(row){
     payer_email:g('payeremail','email','correo'), billing_status:g('billingstatus')
   };
 }
+/* ── PLANTILLAS MUESTRA descargables para las conciliaciones ──────────────────
+   Evita que el usuario suba un archivo con formato equivocado y pierda tiempo.
+   Cada plantilla declara sus columnas EXACTAS + una fila de ejemplo. Se baja como
+   CSV (lo abre Excel/Sheets) con BOM UTF-8 para acentos. Registro central: agregar
+   una plantilla = 1 entrada. Los headers deben empatar con lo que parsea el sistema. */
+var HF_PLANTILLAS = {
+  'mp-crio': {
+    archivo: 'plantilla_suscriptores_mp.csv',
+    titulo: 'Suscriptores de Mercado Pago (conciliar crío)',
+    cols: ['id','payer_id','payer_first_name','payer_last_name','status','external_reference','transaction_amount','currency_id','next_payment_date','last_charge_date','last_charge_amount','charged_quantity','payer_email','billing_status'],
+    ejemplo: [
+      ['2312345678','111222333','Ana','García López','authorized','','1200','MXN','2026-08-01','2026-07-01','1200','12','ana.garcia@correo.com','active'],
+      ['2312345679','444555666','Luis','Hernández Ruiz','paused','','1200','MXN','','2026-06-01','1200','5','luis.h@correo.com','paused']
+    ]
+  },
+  'poliza-cd': {
+    archivo: 'plantilla_polizas_contadigital.csv',
+    titulo: 'Export de pólizas ContaDigital (conciliar)',
+    cols: ['Tipo','Fecha','Folio','Factura','Concepto','Total'],
+    ejemplo: [
+      ['Egreso','2026-07-15','1234','A-5678','PROV EGR Laboratorios XYZ SA de CV','12500.00'],
+      ['Ingreso','2026-07-16','1240','F-9012','PROV ING Paciente Ejemplo','23600.00']
+    ]
+  }
+};
+function _hfCsvCampo(v){ v=String(v==null?'':v); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }
+function hfDescargarPlantilla(key){
+  var p=HF_PLANTILLAS[key]; if(!p){ alert('Plantilla no encontrada.'); return; }
+  var lineas=[ p.cols.map(_hfCsvCampo).join(',') ];
+  (p.ejemplo||[]).forEach(function(r){ lineas.push(r.map(_hfCsvCampo).join(',')); });
+  var csv='﻿'+lineas.join('\r\n');
+  var blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  var url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download=p.archivo; document.body.appendChild(a); a.click();
+  setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },100);
+  if(typeof setStatus==='function') setStatus('Plantilla descargada: '+p.archivo,'ok');
+}
+
 // Lee el archivo (CSV/xlsx) con SheetJS y lo manda a conciliar.
 function ccMPUpload(inputEl){
   var file=inputEl.files&&inputEl.files[0]; if(!file){ return; }
@@ -38178,6 +38217,7 @@ function ccRenderMP(){
     h+='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">';
     h+='<label style="padding:9px 16px;background:var(--color-primary);color:#fff;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;display:inline-block">⬆ Subir archivo MP<input type="file" accept=".csv,.xlsx,.xls" onchange="ccMPUpload(this)" style="display:none"></label>';
     h+='<button onclick="ccMPLoadEstado()" style="padding:9px 14px;background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:8px;font-size:12px;cursor:pointer;color:var(--color-text)">↻ Estado actual</button>';
+    h+='<button onclick="hfDescargarPlantilla(\'mp-crio\')" title="Descarga un CSV de ejemplo con las columnas exactas que espera el sistema, para no equivocarte de formato" style="padding:9px 14px;background:transparent;border:1px solid var(--color-primary);color:var(--color-primary);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">⬇ Plantilla muestra</button>';
     h+='<span id="cc-mp-status" style="font-size:12px;color:var(--color-text-muted)"></span>';
     h+='</div>';
   }
