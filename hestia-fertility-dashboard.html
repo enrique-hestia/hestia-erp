@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.308 -->
+﻿<!-- app-build:2026.07.22.309 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -39926,16 +39926,64 @@ function auditRender(d){
     +'<thead><tr>'+['Fecha','Usuario','Módulo','Acción','Referencia','Campo','Antes → Después'].map(function(x){return '<th style="text-align:left;padding:7px 10px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--color-text-muted);background:var(--color-surface-2,#fafafa);border-bottom:2px solid var(--color-divider);position:sticky;top:0">'+x+'</th>';}).join('')+'</tr></thead><tbody>';
   d.rows.forEach(function(r){
     var cambio=(r.anterior||r.nuevo)?(_esc(r.anterior||'∅')+' <span style="color:#c46a7a">→</span> <b>'+_esc(r.nuevo||'∅')+'</b>'):'—';
-    h+='<tr style="border-bottom:1px solid var(--color-divider,#f0f0f0)">'
+    var ref=_esc(r.referencia||'');
+    h+='<tr onclick="_audDetalle(this.getAttribute(\'data-ref\'))" data-ref="'+ref+'" title="Ver la historia completa de esta operación" style="border-bottom:1px solid var(--color-divider,#f0f0f0);cursor:pointer" onmouseover="this.style.background=\'var(--color-surface-2,#faf6f4)\'" onmouseout="this.style.background=\'\'">'
       +'<td style="padding:6px 10px;white-space:nowrap;color:var(--color-text-muted);font-variant-numeric:tabular-nums">'+_esc(r.fecha)+'</td>'
       +'<td style="padding:6px 10px;white-space:nowrap">'+_esc(r.usuario)+'</td>'
       +'<td style="padding:6px 10px;white-space:nowrap"><span style="font-size:10px;font-weight:700;background:var(--color-surface-2,#f3f4f6);border-radius:20px;padding:2px 8px">'+_esc(r.modulo)+'</span></td>'
       +'<td style="padding:6px 10px;white-space:nowrap;font-weight:600">'+_esc(r.accion)+'</td>'
-      +'<td style="padding:6px 10px;white-space:nowrap;color:var(--color-primary,#c46a7a);font-weight:600">'+_esc(r.referencia)+'</td>'
+      +'<td style="padding:6px 10px;white-space:nowrap;color:var(--color-primary,#c46a7a);font-weight:600">'+ref+' <span style="color:var(--color-text-muted);font-weight:400">›</span></td>'
       +'<td style="padding:6px 10px;white-space:nowrap;color:var(--color-text-muted)">'+_esc(r.campo)+'</td>'
       +'<td style="padding:6px 10px">'+cambio+'</td></tr>';
   });
-  h+='</tbody></table></div><div style="padding:9px 20px;font-size:11px;color:var(--color-text-muted)">Mostrando '+d.rows.length+' de '+d.total+' registros.</div>';
+  h+='</tbody></table></div><div style="padding:9px 20px;font-size:11px;color:var(--color-text-muted)">Mostrando '+d.rows.length+' de '+d.total+' registros · <b>pulsa un renglón</b> para ver toda la historia de esa operación.</div>';
+  body.innerHTML=h;
+}
+/* ── Drill-down: historia COMPLETA de una referencia (OP/CxP/…) ─────────────
+   Trae todos los registros de auditoría de esa referencia y los pinta como
+   línea de tiempo (creación → ediciones → pagos → cambios directos en BD). Es
+   la herramienta para rastrear un error de punta a punta. */
+function _audDetalle(ref){
+  ref=String(ref||'').trim(); if(!ref) return;
+  var body=document.getElementById('aud-body'); if(!body) return;
+  body.innerHTML='<div style="text-align:center;padding:40px;color:var(--color-text-muted)">Cargando la historia de <b>'+_esc(ref)+'</b>…</div>';
+  var tok=encodeURIComponent(getToken());
+  var url=APPS_SCRIPT_URL+'?action=auditoria&token='+tok+'&buscar='+encodeURIComponent(ref)+'&_t='+Date.now();
+  fetch(url,{redirect:'follow'}).then(function(r){return r.json();}).then(function(d){ _audDetalleRender(ref,d); })
+    .catch(function(){ body.innerHTML='<div style="color:#b91c1c;padding:20px">Error de conexión.</div>'; });
+}
+function _audAccColor(a){
+  a=String(a||'').toLowerCase();
+  if(a.indexOf('crea')>-1||a.indexOf('captur')>-1||a.indexOf('alta')>-1) return '#16a34a';
+  if(a.indexOf('borr')>-1||a.indexOf('cancel')>-1||a.indexOf('elimin')>-1) return '#c83c3c';
+  if(a.indexOf('pag')>-1||a.indexOf('cobr')>-1||a.indexOf('abon')>-1) return '#2d6070';
+  if(a.indexOf('edit')>-1||a.indexOf('modif')>-1||a.indexOf('cambi')>-1) return '#c47a1e';
+  return '#c46a7a';
+}
+function _audDetalleRender(ref,d){
+  var body=document.getElementById('aud-body'); if(!body) return;
+  var rows=(d&&d.ok&&d.rows)?d.rows.filter(function(r){ return String(r.referencia||'').trim()===ref; }):[];
+  // Orden cronológico ascendente (lo más viejo primero = la historia real).
+  rows=rows.slice().reverse();
+  var h='<div style="padding:12px 20px 0"><button onclick="auditCargar()" style="background:none;border:1px solid var(--color-divider);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;color:var(--color-text)">← Volver a la lista</button>'
+    +'<div style="font-size:15px;font-weight:800;margin:12px 0 2px">Historia de <span style="color:var(--color-primary)">'+_esc(ref)+'</span></div>'
+    +'<div style="font-size:11.5px;color:var(--color-text-muted);margin-bottom:14px">'+rows.length+' evento(s) · de la creación al último cambio</div></div>';
+  if(!rows.length){ h+='<div style="text-align:center;padding:36px;color:var(--color-text-muted)">Sin eventos registrados para esta referencia. Los movimientos anteriores a la auditoría en tiempo real no quedaron registrados.</div>'; body.innerHTML=h; return; }
+  h+='<div style="max-height:60vh;overflow:auto;padding:0 20px 18px">';
+  rows.forEach(function(r,i){
+    var col=_audAccColor(r.accion);
+    var cambio=(r.anterior||r.nuevo)?('<div style="margin-top:5px;font-size:12px;line-height:1.5"><span style="color:var(--color-text-muted)">'+_esc(r.campo||'valor')+':</span> '+_esc(r.anterior||'∅')+' <span style="color:#c46a7a">→</span> <b>'+_esc(r.nuevo||'∅')+'</b></div>'):'';
+    h+='<div style="display:flex;gap:12px">'
+      +'<div style="flex:none;display:flex;flex-direction:column;align-items:center"><div style="width:12px;height:12px;border-radius:50%;background:'+col+';margin-top:4px"></div>'+(i<rows.length-1?'<div style="flex:1;width:2px;background:var(--color-divider,#e5e7eb);min-height:14px"></div>':'')+'</div>'
+      +'<div style="flex:1;padding-bottom:16px">'
+        +'<div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap"><b style="font-size:13px;color:'+col+'">'+_esc(r.accion)+'</b>'
+        +'<span style="font-size:10px;font-weight:700;background:var(--color-surface-2,#f3f4f6);border-radius:20px;padding:2px 8px">'+_esc(r.modulo)+'</span>'
+        +'<span style="font-size:11px;color:var(--color-text-muted);font-variant-numeric:tabular-nums">'+_esc(r.fecha)+'</span>'
+        +'<span style="font-size:11px;color:var(--color-text-muted)">· '+_esc(r.usuario)+'</span></div>'
+        +cambio
+      +'</div></div>';
+  });
+  h+='</div>';
   body.innerHTML=h;
 }
 function _ensurePacList(cb){

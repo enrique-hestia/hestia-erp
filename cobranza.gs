@@ -329,8 +329,18 @@ function _cobRegistrarSaldoIngreso(op, paciente, categoria, monto, fecha) {
         return { ok: true, accion: 'actualizado', row: foundRow };
       }
       // Sin saldo → cerrar (no borrar): sale de Cuentas por Cobrar, queda traza.
+      // Se AUDITA el cierre: si un saldo real (>0) se cierra, tiene que poder
+      // rastrearse quién/cuándo/desde qué monto (para detectar el error tipo
+      // OP-01243: un editar que mandó pagado≥total y borró un adeudo vigente).
+      var _prevMonto = _cobNum(raw[foundRow - 1][iMonto]);
       sh.getRange(foundRow, iMonto + 1).setValue(0);
       sh.getRange(foundRow, iEst + 1).setValue('Pagado');
+      try {
+        if (_prevMonto > 0.01 && typeof logAudit === 'function') {
+          var _actor = (typeof _postEmail !== 'undefined' && _postEmail) ? _postEmail : 'sistema';
+          logAudit(_actor, 'Cobranza', 'Cerrar saldo (auto)', op, 'MontoCargo', '$' + _prevMonto.toFixed(2) + ' pendiente', 'Pagado ($0)');
+        }
+      } catch (eLg) {}
       return { ok: true, accion: 'cerrado', row: foundRow };
     }
     // No existe todavía → solo se crea si de verdad hay saldo.
