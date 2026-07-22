@@ -142,9 +142,9 @@ function readExpedienteMedico(body) {
 
 /* Carpeta de Drive del médico (bajo la raíz EXPEDIENTE_DRIVE_ID). */
 function _expCarpetaMedico(medico) {
-  var rootId = PropertiesService.getScriptProperties().getProperty(EXPEDIENTE_DRIVE_KEY);
-  var root = rootId ? DriveApp.getFolderById(rootId) : DriveApp.createFolder('Expedientes Médicos');
-  if (!rootId) PropertiesService.getScriptProperties().setProperty(EXPEDIENTE_DRIVE_KEY, root.getId());
+  // Raíz DENTRO de la carpeta origen del ERP → los documentos nuevos no se dispersan.
+  var root = _erpDocRoot('Expedientes Médicos');
+  PropertiesService.getScriptProperties().setProperty(EXPEDIENTE_DRIVE_KEY, root.getId());
   var name = String(medico).trim() || 'Sin nombre';
   var it = root.getFoldersByName(name);
   return it.hasNext() ? it.next() : root.createFolder(name);
@@ -308,7 +308,7 @@ function setupExpediente() {
   try {
     _expEnsureCfg(); _expEnsure();
     var rootId = PropertiesService.getScriptProperties().getProperty(EXPEDIENTE_DRIVE_KEY);
-    if (!rootId) { var f = DriveApp.createFolder('Expedientes Médicos'); PropertiesService.getScriptProperties().setProperty(EXPEDIENTE_DRIVE_KEY, f.getId()); rootId = f.getId(); }
+    if (!rootId) { var f = _erpDocRoot('Expedientes Médicos'); PropertiesService.getScriptProperties().setProperty(EXPEDIENTE_DRIVE_KEY, f.getId()); rootId = f.getId(); }
     return { ok:true, version:EXPEDIENTE_VER, cfgTab:EXPEDIENTE_CFG_TAB, tab:EXPEDIENTE_TAB, driveRoot:rootId, docs:EXPEDIENTE_DEFAULTS.length };
   } catch(ex){ return { ok:false, error:ex.message }; }
 }

@@ -1082,9 +1082,15 @@ function readResumenGeneral(fechaInicio, fechaFin){
       // Ciclos del periodo partidos en Hestia (ALTA / Estimulación Ovárica Controlada)
       // vs Externos (Capturas): # de ciclos + ingreso de cada bloque.
       ciclosBox:(function(){
-        var H=_rgBoxLinea(full.lineas, _rgHTest), E=_rgBoxLinea(full.lineas, _rgETest);
-        H.serie=hSerie; E.serie=eSerie;
-        return { hestia:H, externos:E, meses:meses.length, labels:meses };
+        try {
+          var H=_rgBoxLinea(full.lineas, _rgHTest), E=_rgBoxLinea(full.lineas, _rgETest);
+          H.serie=hSerie; E.serie=eSerie;
+          var box={ hestia:H, externos:E, meses:meses.length, labels:meses };
+          // Si NINGÚN bloque encontró ciclos, expone las líneas de revenue reales
+          // (etiqueta=monto) para diagnosticar el match sin adivinar.
+          if(!H.n && !E.n){ box._lineas=(full.lineas||[]).filter(function(l){ return l.tipo==='dato'&&l.grupo==='REVENUE'; }).map(function(l){ return (l.linea||l.label)+'='+Math.round(_erN(l.actual)); }); }
+          return box;
+        } catch(eCB){ return { error:String((eCB&&eCB.message)||eCB) }; }
       })(),
       margenBruto: totRev? Math.round(_erN(full.metricas.grossProfit)/totRev*100):0 };
   }catch(ex){ return {ok:false, error:ex.message+' (L:'+(ex.lineNumber||'?')+')'}; }

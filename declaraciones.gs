@@ -75,8 +75,7 @@ function _declFolderRoot() {
   try { pid = PropertiesService.getScriptProperties().getProperty('DECL_FOLDER_ID') || ''; } catch (e) {}
   if (!pid) pid = DECL_DEFAULT_FOLDER_ID;
   if (pid) { try { return DriveApp.getFolderById(pid); } catch (e) {} }
-  var it = DriveApp.getFoldersByName('Declaraciones ERP');
-  return it.hasNext() ? it.next() : DriveApp.createFolder('Declaraciones ERP');
+  return _erpDocRoot('Declaraciones ERP');   // dentro de la carpeta origen del ERP
 }
 
 // Nombre COHERENTE del PDF conforme al impuesto declarado (ignora el nombre

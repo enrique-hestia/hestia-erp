@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.298 -->
+﻿<!-- app-build:2026.07.22.299 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2471,8 +2471,14 @@ function _rgTrend(serie){
   if(b<a) return ' <span style="color:#c0505c">↘</span>';
   return ' <span style="color:#9ca3af">→</span>';
 }
+var _rgCiclosBoxLast=null;
 function _rgApplyCiclosBox(box){
-  box=box||{}; var nMes=box.meses||0;
+  // Si un re-render llega sin ciclosBox, usa el último que trajo la API (no pierde datos).
+  if(box && (box.hestia||box.externos)) _rgCiclosBoxLast=box;
+  box = box || _rgCiclosBoxLast || {};
+  if(box && box.error){ try{ console.warn('[ciclos] backend:', box.error); }catch(e){} }
+  else if(box && box._lineas){ try{ console.warn('[ciclos] sin match; líneas de revenue:', box._lineas); }catch(e){} }
+  var nMes=box.meses||0;
   function txt(id,v){ var el=document.getElementById(id); if(el) el.textContent=v; }
   function html(id,v){ var el=document.getElementById(id); if(el) el.innerHTML=v; }
   function fill(pfx, D, color){
@@ -24908,7 +24914,7 @@ async function loadResumenGeneral(){
     if(j&&j.ok&&j.todos&&(j.todos.ingresos||[]).length){
       base.todos=j.todos; base.local=j.todos; base.internacional=j.todos;   // sin segmentar aún → mismo real
       if(j.donut&&j.donut.labels&&j.donut.labels.length) base.donut=j.donut;
-      if(j.ciclosBox) base.ciclosBox=j.ciclosBox;   // ciclos partidos Hestia/Externos
+      if(j.ciclosBox){ base.ciclosBox=j.ciclosBox; _rgCiclosBoxLast=j.ciclosBox; try{ console.log('[ciclos]', j.ciclosBox); }catch(e){} }   // ciclos partidos Hestia/Externos
     }
   }catch(e){ /* si falla, queda el placeholder */ }
   renderResumen(base);

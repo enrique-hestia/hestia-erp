@@ -118,8 +118,7 @@ function chatUpload(body) {
     var bytes = Utilities.base64Decode(data);
     if (bytes.length > 9 * 1024 * 1024) return { ok: false, error: 'Archivo muy grande (máx 9 MB).' };
     var blob = Utilities.newBlob(bytes, mime, name);
-    var it = DriveApp.getFoldersByName('Chat_Adjuntos');
-    var folder = it.hasNext() ? it.next() : DriveApp.createFolder('Chat_Adjuntos');
+    var folder = _erpDocRoot('Chat_Adjuntos');   // dentro de la carpeta origen del ERP
     var f = folder.createFile(blob);
     try { f.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
     var url = f.getUrl();

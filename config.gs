@@ -38,6 +38,17 @@ var CXP_SS_ID        = '1iRjpYtkcqx-3NRwlVK-UYx09I0gVyiTDRtIA9X9RAQw'; // Cuenta
 var CXP_GID          = 1448371071;
 var MED_INV_SS_ID    = '1DG3esX5MVUZzj3FzuVyH2_gz1jyPclzYLN8fftkaUNU'; // Inventario de Medicamentos — llenar tras correr setupInventarioMedicamentos()
 
+/* Carpeta ORIGEN del ERP en Drive. TEMPORAL: todo DOCUMENTO NUEVO que hoy se
+   guardaba suelto (raíz auto-creada en "Mi unidad") va aquí, para no dispersarlos
+   — luego se reordena todo a una estructura centralizada. Los ya guardados NO se
+   mueven. Helper _erpDocRoot(name) = subcarpeta 'name' dentro de esta carpeta. */
+var ERP_DOCS_ROOT_ID = '1tPG5cDukDxRZpqd57jUU6j9YKk1YDIpD';
+function _erpDocRoot(name){
+  var parent = DriveApp.getFolderById(ERP_DOCS_ROOT_ID);
+  var it = parent.getFoldersByName(name);
+  return it.hasNext() ? it.next() : parent.createFolder(name);
+}
+
 /* ── GIDs (pestañas individuales por ID numérico) ─────────── */
 var ER_GID     = 1953492149; // Estado de Resultados
 var BUDGET_GID = 2097864117; // Budget
