@@ -113,22 +113,34 @@ function insertRow(ss, e) {
         if (emailIdx < 0 && (hl.indexOf('mail') > -1 || hl === 'correo')) emailIdx = hi;
         if (idIdx < 0 && hl === 'id') idIdx = hi;
       }
-      var nombreNuevo = nombreIdx > -1 ? String(e.parameter[hdrs[nombreIdx]] || '').trim().toLowerCase() : '';
+      var _fzP = String((e.parameter.forzar) || '').toLowerCase();
+      var forzarPac = (_fzP === '1' || _fzP === 'true' || _fzP === 'si');
+      var nombreRaw   = nombreIdx > -1 ? String(e.parameter[hdrs[nombreIdx]] || '').trim() : '';
       var emailNuevo  = emailIdx  > -1 ? String(e.parameter[hdrs[emailIdx]]  || '').trim().toLowerCase() : '';
-      if (nombreNuevo || emailNuevo) {
+      if (nombreRaw || emailNuevo) {
         var allData = shIns.getDataRange().getValues();
-        for (var ri = hdrInfo.dataStart; ri < allData.length; ri++) {
-          if (nombreNuevo && String(allData[ri][nombreIdx] || '').trim().toLowerCase() === nombreNuevo) {
-            return { error: 'Ya existe un paciente registrado con el nombre "' + e.parameter[hdrs[nombreIdx]] + '".', duplicado: true };
+        // 1) Correo EXACTO → bloqueo fuerte (mismo correo = casi seguro la misma persona).
+        if (emailNuevo) {
+          for (var ri = hdrInfo.dataStart; ri < allData.length; ri++) {
+            if (String(allData[ri][emailIdx] || '').trim().toLowerCase() === emailNuevo) {
+              var quienId  = idIdx     > -1 ? String(allData[ri][idIdx] || '')     : '';
+              var quienNom = nombreIdx > -1 ? String(allData[ri][nombreIdx] || '') : '';
+              return {
+                error: 'El correo "' + e.parameter[hdrs[emailIdx]] + '" ya está registrado' +
+                       ((quienId || quienNom) ? ' en el paciente ' + (quienId ? quienId + ' — ' : '') + quienNom : '') + '.',
+                duplicado: true, duplicadoCorreo: true, pacienteId: quienId, pacienteNombre: quienNom
+              };
+            }
           }
-          if (emailNuevo && String(allData[ri][emailIdx] || '').trim().toLowerCase() === emailNuevo) {
-            var quienId  = idIdx     > -1 ? String(allData[ri][idIdx] || '')     : '';
-            var quienNom = nombreIdx > -1 ? String(allData[ri][nombreIdx] || '') : '';
-            return {
-              error: 'El correo "' + e.parameter[hdrs[emailIdx]] + '" ya está registrado' +
-                     ((quienId || quienNom) ? ' en el paciente ' + (quienId ? quienId + ' — ' : '') + quienNom : '') + '.',
-              duplicado: true, duplicadoCorreo: true, pacienteId: quienId, pacienteNombre: quienNom
-            };
+        }
+        // 2) NOMBRE → candado DIFUSO (acentos / apellidos invertidos / espacios /
+        //    erratas / iniciales "Melina PA"). Si hay candidatos y no se forzó, se
+        //    pide confirmar — NO bloquea homónimos reales (el usuario puede forzar).
+        if (!forzarPac && nombreRaw) {
+          var cands = _pacDupCandidatos(nombreRaw, allData, hdrInfo.dataStart, nombreIdx, idIdx, emailIdx, null, 85);
+          if (cands.length) {
+            return { needConfirm: true, duplicado: true, candidatos: cands,
+              error: 'Hay ' + cands.length + ' paciente(s) muy parecido(s) a "' + nombreRaw + '". Revisa si es la misma persona antes de crear otro.' };
           }
         }
       }
@@ -144,6 +156,37 @@ function insertRow(ss, e) {
   } catch(ex) {
     return { error: ex.message };
   }
+}
+
+/* Candidatos de posible duplicado por NOMBRE (difuso). Reusa el motor de
+   identificar.gs (_identSim: acentos + apellidos invertidos + erratas) y el
+   matcher de iniciales de analisis.gs (_ecMismoPaciente: "Melina PA" ↔ "Melina
+   Pérez Álvarez"). Opera sobre los datos YA leídos de la hoja Pacientes. El
+   correo se enmascara si el rol no puede ver datos sensibles (_privVer).
+   Devuelve top-6 con score >= min. */
+function _pacDupCandidatos(nombreRaw, allData, dataStart, nombreIdx, idIdx, emailIdx, excludeRow, min) {
+  var out = [];
+  if (!nombreRaw || nombreIdx < 0 || typeof _identSim !== 'function') return out;
+  var minSc = (min == null) ? 85 : min;
+  var _ver = (typeof _privVer !== 'function') || _privVer();
+  for (var ri = dataStart; ri < allData.length; ri++) {
+    if (excludeRow != null && ri === excludeRow) continue;
+    var nomCat = String(allData[ri][nombreIdx] || '').trim();
+    if (!nomCat) continue;
+    var sc = _identSim(nombreRaw, nomCat);
+    var ab = (typeof _ecMismoPaciente === 'function') && _ecMismoPaciente(nombreRaw, nomCat);
+    if (ab && sc < 90) sc = 90;   // iniciales = match fuerte aunque el score textual sea bajo
+    if (sc >= minSc) {
+      out.push({
+        id: (idIdx > -1 ? String(allData[ri][idIdx] || '') : ''),
+        nombre: nomCat,
+        email: (_ver && emailIdx > -1 ? String(allData[ri][emailIdx] || '') : ''),
+        score: sc, abrev: !!ab
+      });
+    }
+  }
+  out.sort(function(a, b){ return b.score - a.score; });
+  return out.slice(0, 6);
 }
 
 /* ══════════════════════════════════════════════════════════════

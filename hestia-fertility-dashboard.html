@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.291 -->
+﻿<!-- app-build:2026.07.21.292 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -28576,7 +28576,8 @@ function idpForzarAlta() {
       </div>
       <div class="form-group full">
         <label class="form-label">Nombre Completo <span style="color:var(--color-primary)">*</span></label>
-        <input class="form-input" id="pac-f-nombre" placeholder="Nombre completo del paciente">
+        <input class="form-input" id="pac-f-nombre" placeholder="Nombre completo del paciente" autocomplete="off" oninput="_pacNombreInput(this)">
+        <div id="pac-dup-suggest" style="display:none;margin-top:6px;border:1px solid #fcd34d;background:#fffbeb;border-radius:9px;padding:8px 10px;font-size:12px;line-height:1.5"></div>
       </div>
       <div class="form-group full">
         <label class="form-label">Fecha de Nacimiento</label>
@@ -29124,6 +29125,8 @@ function openModal(tipo) {
       .catch(function(){ if (idEl) idEl.value = 'HEC-001'; });
     _pacIdiomaTocado = false;   // alta nueva: el país vuelve a poder autocompletar
     loadPacientesOptions();
+    if (typeof ingLoadPacientes === 'function') ingLoadPacientes();   // caché para las sugerencias de duplicados en vivo
+    var _dsBox = document.getElementById('pac-dup-suggest'); if (_dsBox) { _dsBox.style.display = 'none'; _dsBox.innerHTML = ''; }
     _pacIdiomaHint();
     if (!_pacFiscalMigrated) {
       _pacFiscalMigrated = true;
@@ -35654,7 +35657,7 @@ function _pacCheckEmailDup(){
   return owner;
 }
 
-function submitCaptura(tipo) {
+function submitCaptura(tipo, forzar) {
   var cfg = CAPTURA_CONFIG[tipo];
   // Validar requeridos
   for (var i = 0; i < cfg.required.length; i++) {
@@ -35665,19 +35668,10 @@ function submitCaptura(tipo) {
       return;
     }
   }
-  // Validación de duplicados (solo Pacientes): mismo nombre ya registrado
-  if (tipo === 'cap-pacientes') {
-    var nombreEl = document.getElementById('pac-f-nombre');
-    var nombreNuevo = (nombreEl ? nombreEl.value : '').trim().toLowerCase();
-    var yaExiste = (_capturaRows[tipo] || []).some(function(row) {
-      var n = String(row['Nombre Completo del Paciente'] || row['nombre completo del paciente'] || '').trim().toLowerCase();
-      return n && n === nombreNuevo;
-    });
-    if (yaExiste) {
-      showModalMsg(cfg.msgEl, 'err', 'Ya existe un paciente registrado con ese nombre.');
-      return;
-    }
-    // Duplicado por correo: si ese correo ya lo tiene OTRO paciente, avisar cuál.
+  // Duplicados (solo Pacientes). El NOMBRE lo valida el backend con el motor
+  // DIFUSO (acentos / apellidos invertidos / espacios / erratas / iniciales) y
+  // devuelve needConfirm + candidatos; aquí solo se corta el correo exacto.
+  if (tipo === 'cap-pacientes' && !forzar) {
     var owner = _pacFindEmailOwner((document.getElementById('pac-f-email') || {}).value || '');
     if (owner) {
       _pacCheckEmailDup();
@@ -35694,7 +35688,8 @@ function submitCaptura(tipo) {
   var periodoRef = currentFechaInicio ? currentFechaInicio.slice(0, 7) : (currentPeriodo || '');
   var params = 'action=insert&sheet=' + encodeURIComponent(cfg.sheet) +
                '&periodo=' + encodeURIComponent(periodoRef) +
-               '&token='   + encodeURIComponent(getToken());
+               '&token='   + encodeURIComponent(getToken()) +
+               (forzar ? '&forzar=1' : '');
   cfg.fields.forEach(function(id, i) {
     var el = document.getElementById(id);
     params += '&' + encodeURIComponent(cfg.keys[i]) + '=' + encodeURIComponent(el ? el.value : '');
@@ -35705,6 +35700,7 @@ function submitCaptura(tipo) {
     .then(function(res) {
       if (res.success) {
         showModalMsg(cfg.msgEl, 'ok', '✓ Registro guardado en Google Sheets.');
+        var _dsOk = document.getElementById('pac-dup-suggest'); if (_dsOk) { _dsOk.style.display = 'none'; _dsOk.innerHTML = ''; }
         // Si se guardó un paciente desde el formulario de ingreso, inyectar nombre
         if (tipo === 'cap-pacientes' && typeof _ingPacienteCallback === 'function') {
           var nombreGuardado = (document.getElementById('pac-f-nombre') || {}).value || '';
@@ -35729,6 +35725,9 @@ function submitCaptura(tipo) {
           closeModal(tipo);
           loadView(currentView, currentFechaInicio, currentFechaFin, true);
         }, 1500);
+      } else if (res.needConfirm && res.candidatos && res.candidatos.length) {
+        // Candado difuso del backend: posibles duplicados → confirmar o forzar.
+        _pacRenderConfirmDup(tipo, res.candidatos, res.error);
       } else {
         showModalMsg(cfg.msgEl, 'err', 'Error: ' + (res.error || 'No se pudo guardar.'));
       }
@@ -39376,6 +39375,166 @@ function _pacFuzzy(list, query, limit){
   }
   fz.sort(function(a,b){return a.s-b.s;});
   return subs.concat(fz.map(function(x){return x.name;})).slice(0, limit||10);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   MOTOR DE POSIBLES DUPLICADOS (gemelo JS del backend: identificar.gs
+   _identSim + analisis.gs _ecMismoPaciente). Detecta acentos, MAYÚSCULAS,
+   espacios, APELLIDOS INVERTIDOS (ordena tokens), ERRATAS (Levenshtein) e
+   INICIALES ("Melina PA" ↔ "Melina Pérez Álvarez"). Alimenta las sugerencias
+   en vivo del alta; el candado autoritativo vive en el backend (mismo algo).
+   ══════════════════════════════════════════════════════════════════════ */
+function _pdupNorm(s){
+  var t=String(s==null?'':s).toLowerCase();
+  t=t.replace(/[áàäâãå]/g,'a').replace(/[éèëê]/g,'e').replace(/[íìïî]/g,'i')
+     .replace(/[óòöôõ]/g,'o').replace(/[úùüû]/g,'u').replace(/ñ/g,'n').replace(/ç/g,'c');
+  t=t.replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ');
+  return t.replace(/^\s+|\s+$/g,'');
+}
+function _dupTokensSorted(s){ var t=_pdupNorm(s); if(!t) return ''; var p=t.split(' '); p.sort(); return p.join(' '); }
+function _dupBigrams(s){ var m={}; for(var i=0;i<s.length-1;i++){ var g=s.substr(i,2); m[g]=(m[g]||0)+1; } return m; }
+function _dupDice(a,b){
+  var x=_dupTokensSorted(a), y=_dupTokensSorted(b);
+  if(!x||!y) return 0; if(x===y) return 100; if(x.length<2||y.length<2) return 0;
+  var bx=_dupBigrams(x), by=_dupBigrams(y), inter=0, tx=0, ty=0, k;
+  for(k in bx){ if(bx.hasOwnProperty(k)) tx+=bx[k]; }
+  for(k in by){ if(!by.hasOwnProperty(k)) continue; ty+=by[k]; if(bx[k]) inter+=Math.min(bx[k],by[k]); }
+  if(tx+ty===0) return 0;
+  return Math.round((2*inter/(tx+ty))*100);
+}
+function _dupLevSim(a,b){ var mx=Math.max(a.length,b.length); if(!mx) return 100; var s=Math.round((1-_fzLev(a,b)/mx)*100); return s<0?0:s; }
+function _dupTokenSim(a,b){
+  var ta=_pdupNorm(a).split(' '), tb=_pdupNorm(b).split(' '), la=[], lb=[], i, j;
+  for(i=0;i<ta.length;i++) if(ta[i]) la.push(ta[i]);
+  for(i=0;i<tb.length;i++) if(tb[i]) lb.push(tb[i]);
+  if(!la.length||!lb.length) return 0;
+  var corto=(la.length<=lb.length)?la:lb, largo=(la.length<=lb.length)?lb:la, usado=[], num=0, den=0;
+  for(i=0;i<corto.length;i++){
+    var best=-1, bestSc=-1;
+    for(j=0;j<largo.length;j++){ if(usado[j]) continue; var sc=_dupLevSim(corto[i],largo[j]); if(sc>bestSc){ bestSc=sc; best=j; } }
+    if(best===-1){ den+=corto[i].length; continue; }
+    usado[best]=true; var w=Math.max(corto[i].length,largo[best].length); num+=bestSc*w; den+=w;
+  }
+  for(j=0;j<largo.length;j++) if(!usado[j]) den+=largo[j].length;
+  if(!den) return 0; return Math.round(num/den);
+}
+function _dupSim(a,b){ var d=_dupDice(a,b), t=_dupTokenSim(a,b); return d>t?d:t; }
+/* Matcher de iniciales (gemelo de analisis.gs _ecMismoPaciente): "melina pa" ↔ "melina piña amaros" */
+function _dupEcTokens(s){ return _pdupNorm(String(s||'').replace(/\([^)]*\)/g,' ')).split(' ').filter(Boolean); }
+function _dupEcPiezas(tokens, refLargo){
+  var refSet={}; for(var i=0;i<refLargo.length;i++) refSet[refLargo[i]]=1;
+  var out=[];
+  for(var t=0;t<tokens.length;t++){
+    var w=tokens[t];
+    if(t===0){ out.push({ini:false,v:w}); continue; }
+    if(refSet[w]){ out.push({ini:false,v:w}); continue; }
+    if(w.length<=3 && !/[aeiou]{2}/.test(w)){ for(var c=0;c<w.length;c++) out.push({ini:true,v:w.charAt(c)}); }
+    else { out.push({ini:false,v:w}); }
+  }
+  return out;
+}
+function _dupEcMismo(filaNom, buscadoNom){
+  var a=_dupEcTokens(filaNom), b=_dupEcTokens(buscadoNom);
+  if(!a.length||!b.length) return false;
+  if(a.join(' ')===b.join(' ')) return true;
+  if(a[0]!==b[0]) return false;
+  var lenA=a.join('').length, lenB=b.join('').length;
+  var corto=lenA<=lenB?a:b, largo=lenA<=lenB?b:a;
+  var piezas=_dupEcPiezas(corto,largo), li=1;
+  for(var pi=1;pi<piezas.length;pi++){
+    var p=piezas[pi], ok=false;
+    for(;li<largo.length;li++){
+      var lw=largo[li];
+      if(p.ini){ if(lw.charAt(0)===p.v){ ok=true; li++; break; } }
+      else { if(lw===p.v || lw.indexOf(p.v)===0){ ok=true; li++; break; } }
+    }
+    if(!ok) return false;
+  }
+  return true;
+}
+/* Candidatos de posible duplicado sobre el caché local _ingPacientesDB. */
+function _pacDupCandidates(nombre, limit, minScore){
+  var q=String(nombre||'').trim(); if(q.length<3) return [];
+  var min=(minScore==null)?60:minScore;
+  var db=_ingPacientesDB||[], out=[];
+  for(var i=0;i<db.length;i++){
+    var p=db[i]; var nom=(p&&p.nombre)?p.nombre:''; if(!nom) continue;
+    var sc=_dupSim(q, nom);
+    var ab=_dupEcMismo(q, nom);
+    if(ab && sc<90) sc=90;
+    if(sc>=min) out.push({ id:(p.id||''), nombre:nom, email:(p.email||''), score:sc, abrev:ab });
+  }
+  out.sort(function(a,b){ return b.score-a.score; });
+  return out.slice(0, limit||6);
+}
+
+/* ── Sugerencias en vivo bajo el campo Nombre del alta ── */
+var _pacDupTimer=null;
+function _pacNombreInput(el){
+  if(_pacDupTimer) clearTimeout(_pacDupTimer);
+  var val=(el&&el.value)||'';
+  _pacDupTimer=setTimeout(function(){ _pacRenderDupSuggest(val); }, 220);
+}
+function _pacRenderDupSuggest(nombre){
+  var box=document.getElementById('pac-dup-suggest'); if(!box) return;
+  // No sugerir contra la propia ficha cuando se está EDITANDO
+  var editRow=(typeof _pacEditRowNum!=='undefined')?_pacEditRowNum:null;
+  var cands=_pacDupCandidates(nombre, 6, 60).filter(function(c){
+    return !(editRow!=null && _pdupNorm(c.nombre)===_pdupNorm(nombre) && _fzNorm(c.nombre)===_fzNorm((document.getElementById('pac-f-nombre')||{}).value||''));
+  });
+  if(!cands.length){ box.style.display='none'; box.innerHTML=''; return; }
+  var h='<div style="font-weight:700;color:#92400e;margin-bottom:5px">⚠ Posibles pacientes ya registrados — ¿es alguno de estos?</div>';
+  cands.forEach(function(c){
+    var pct=Math.min(100,Math.max(0,c.score));
+    var tag=c.abrev?'iniciales':(pct>=95?'igual':pct+'%');
+    var sub=[c.id, c.email].filter(Boolean).map(_esc).join(' · ');
+    h+='<div style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-top:1px dotted #f0d68a">'
+      +'<div style="flex:1;min-width:0"><div style="font-weight:600;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+_esc(c.nombre)+'</div>'
+      +(sub?'<div style="font-size:11px;color:#78716c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sub+'</div>':'')+'</div>'
+      +'<span style="font-size:10px;font-weight:700;color:#b45309;background:#fef3c7;border-radius:20px;padding:2px 7px;white-space:nowrap">'+tag+'</span>'
+      +'<button type="button" onclick="pacUsarExistente('+JSON.stringify(c.id||'').replace(/"/g,'&quot;')+','+JSON.stringify(c.nombre).replace(/"/g,'&quot;')+')" '
+      +'style="border:1px solid #c46a7a;background:#c46a7a;color:#fff;border-radius:7px;padding:4px 9px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">Usar este</button></div>';
+  });
+  box.innerHTML=h; box.style.display='block';
+}
+function pacUsarExistente(id, nombre){
+  // (A) Alta lanzada desde un ingreso → devuelve el paciente existente al ingreso
+  if(typeof _ingPacienteCallback==='function'){
+    var cb=_ingPacienteCallback; _ingPacienteCallback=null;
+    try{ closeModal('cap-pacientes'); }catch(e){}
+    cb(String(nombre||'').trim());
+    return;
+  }
+  // (B) Alta desde Registro de Pacientes → abre la ficha existente para revisar/editar (no duplica)
+  var rows=(typeof _capturaRows!=='undefined' && _capturaRows['cap-pacientes'])||[], idx=-1;
+  for(var i=0;i<rows.length;i++){
+    var rn=String(rows[i]['Nombre Completo del Paciente']||rows[i]['nombre completo del paciente']||rows[i].nombre||'');
+    if(rn && _pdupNorm(rn)===_pdupNorm(nombre)){ idx=i; break; }
+  }
+  try{ closeModal('cap-pacientes'); }catch(e){}
+  if(idx>=0 && typeof openEditModal==='function'){ setTimeout(function(){ openEditModal('cap-pacientes', idx); }, 150); return; }
+  alert('Ese paciente ya existe: '+(id?id+' — ':'')+nombre+'. Búscalo en el Registro de Pacientes para editarlo (evita duplicarlo).');
+}
+/* Tarjeta de confirmación cuando el backend detecta posibles duplicados al guardar. */
+function _pacRenderConfirmDup(tipo, cands, msg){
+  var box=document.getElementById('pac-dup-suggest');
+  if(!box){ if(confirm((msg||'Posible paciente duplicado.')+'\n\n¿Crear de todos modos?')) submitCaptura(tipo,true); return; }
+  var h='<div style="font-weight:700;color:#92400e;margin-bottom:5px">⚠ '+_esc(msg||'Ya hay pacientes muy parecidos. Revisa si es la misma persona antes de crear otro.')+'</div>';
+  (cands||[]).forEach(function(c){
+    var pct=Math.min(100,Math.max(0,c.score||0)), tag=c.abrev?'iniciales':(pct>=95?'igual':pct+'%');
+    var sub=[c.id,c.email].filter(Boolean).map(_esc).join(' · ');
+    h+='<div style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-top:1px dotted #f0d68a">'
+      +'<div style="flex:1;min-width:0"><div style="font-weight:600;color:#111;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+_esc(c.nombre)+'</div>'
+      +(sub?'<div style="font-size:11px;color:#78716c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sub+'</div>':'')+'</div>'
+      +'<span style="font-size:10px;font-weight:700;color:#b45309;background:#fef3c7;border-radius:20px;padding:2px 7px;white-space:nowrap">'+tag+'</span>'
+      +'<button type="button" onclick="pacUsarExistente('+JSON.stringify(c.id||'').replace(/"/g,'&quot;')+','+JSON.stringify(c.nombre).replace(/"/g,'&quot;')+')" '
+      +'style="border:1px solid #c46a7a;background:#c46a7a;color:#fff;border-radius:7px;padding:4px 9px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">Usar este</button></div>';
+  });
+  h+='<div style="margin-top:8px;display:flex;justify-content:flex-end">'
+    +'<button type="button" onclick="submitCaptura('+JSON.stringify(tipo).replace(/"/g,'&quot;')+',true)" '
+    +'style="border:1px solid #d97706;background:#fff;color:#b45309;border-radius:7px;padding:5px 11px;font-size:12px;font-weight:600;cursor:pointer">No es ninguno — crear de todos modos</button></div>';
+  box.innerHTML=h; box.style.display='block';
+  try{ box.scrollIntoView({block:'nearest'}); }catch(e){}
 }
 function _ensurePacList(cb){
   if(_ecPacientesList && _ecPacientesList.length){ if(cb) cb(); return; }
