@@ -630,6 +630,11 @@ function doPost(e) {
     if (body.action === 'uploadFile') {
       return jsonResponse(uploadFile(body));
     }
+    if (body.action === 'subirComprobanteCxC') {
+      if (typeof subirComprobanteCxC !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza finance.gs en Apps Script y redespliega.'});
+      return jsonResponse(subirComprobanteCxC(body));
+    }
     if (body.action === 'uploadIngresoPDF') {
       return jsonResponse(uploadIngresoPDF(body.opId, body.tipo||'factura', body.fileName, body.base64, body.mimeType));
     }
@@ -6627,7 +6632,7 @@ function abonarIngreso(body) {
 
       // 3) Registra el abono en Abonos_Cobrar (tipo 'abono-op' → no doble conteo).
       if (typeof registrarAbono === 'function') {
-        if (montoCobrado > 0.01) { try { registrarAbono({ op: op, paciente: paciente, monto: montoCobrado, tipo: 'abono-op', formaPago: formaPago, fecha: fecha, nota: 'Cobro/abono OP ' + op, usuario: usuario }); } catch (eA) {} }
+        if (montoCobrado > 0.01) { try { registrarAbono({ op: op, paciente: paciente, monto: montoCobrado, tipo: 'abono-op', formaPago: formaPago, fecha: fecha, nota: 'Cobro/abono OP ' + op + (body.comprobante ? ' · comprobante: ' + body.comprobante : ''), usuario: usuario }); } catch (eA) {} }
         if (creditoAplicado > 0.01) { try { registrarAbono({ op: op, paciente: paciente, monto: creditoAplicado, tipo: 'abono-op', formaPago: 'Crédito a favor', fecha: fecha, nota: 'Crédito a favor aplicado a OP ' + op, usuario: usuario }); } catch (eA2) {} }
       }
 
@@ -6822,6 +6827,26 @@ function renamePacienteIngresos(oldNombre, newNombre, usuario) {
   }
 }
 
+/* Sube el COMPROBANTE de un cobro/abono de Cuentas por Cobrar a Drive (carpeta
+ * origen del ERP → «Comprobantes CxC»/año/mes) y devuelve el link. No toca egresos.
+ * El link se guarda en la nota del abono (Abonos_Cobrar) desde abonarIngreso. */
+function subirComprobanteCxC(body){
+  try{
+    body = body || {};
+    if (typeof _tokenHasPermission==='function' && !_tokenHasPermission(body.token||'', 'editar_ingresos'))
+      return { ok:false, error:'Sin autorización para cobrar/abonar (permiso editar_ingresos).' };
+    if(!body.base64) return { ok:false, error:'Falta el archivo del comprobante.' };
+    var root = (typeof _erpDocRoot==='function') ? _erpDocRoot('Comprobantes CxC') : null;
+    if(!root) return { ok:false, error:'No se pudo crear la carpeta de comprobantes.' };
+    var hoy = new Date();
+    var folder = _getOrCreateMonthFolder(root.getId(), hoy.getFullYear(), hoy.getMonth());
+    var fn = (body.op ? String(body.op).replace(/[^\w-]/g,'')+'_' : '') + (body.fileName || ('comprobante_'+hoy.getTime()+'.pdf'));
+    var blob = Utilities.newBlob(Utilities.base64Decode(body.base64), body.mimeType || 'application/pdf', fn);
+    var file = folder.createFile(blob);
+    try{ file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); }catch(e){}
+    return { ok:true, url:file.getUrl() };
+  }catch(ex){ return { ok:false, error:ex.message }; }
+}
 function uploadFile(body) {
   try {
     var tipo = body.tipo || 'factura'; // factura | pago | cotizacion

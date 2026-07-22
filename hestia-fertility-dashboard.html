@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.317 -->
+﻿<!-- app-build:2026.07.22.318 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -37671,7 +37671,8 @@ function ecAbonarOP(op, saldo, paciente, credito, ctx){
     + _ccField('Fecha','<input id="ec-ab-fecha" type="date" value="'+new Date().toISOString().substring(0,10)+'" style="'+_ccInputStyle()+'">')
     + _ccField('Forma de pago (define el banco, igual que en Ingresos)', fpSel)
     + '<div style="font-size:10.5px;color:var(--color-text-muted);margin:-6px 0 12px">Efectivo → Caja · Santander → Santander · Transferencia/TDC/TDD/AMEX/Mercado Pago → Mercado Pago.</div>'
-    + _ccField('Comisión Mercado Pago (solo TDC/TDD/AMEX, opcional)','<input id="ec-ab-com" type="number" step="0.01" value="0" style="'+_ccInputStyle()+'">');
+    + _ccField('Comisión Mercado Pago (solo TDC/TDD/AMEX, opcional)','<input id="ec-ab-com" type="number" step="0.01" value="0" style="'+_ccInputStyle()+'">')
+    + _ccField('📎 Comprobante de pago (opcional)','<input id="ec-ab-file" type="file" accept=".pdf,.jpg,.jpeg,.png" style="font-size:12px;width:100%;color:var(--color-text)"><div style="font-size:10px;color:var(--color-text-muted);margin-top:3px">Se guarda en Drive (Comprobantes CxC/año/mes) y queda ligado al cobro.</div>');
   ccModal('Cobrar / Abonar — OP '+ecEsc(op), body, function(){ ecGuardarAbonoOP(op, paciente, saldo, credAplicable, ctx); }, 'Cobrar / Abonar');
 }
 function ecAbonToggleCred(saldo, credAplicable){
@@ -37681,7 +37682,7 @@ function ecAbonToggleCred(saldo, credAplicable){
   inp.value = (chk && chk.checked) ? Math.max(0, (saldo - credAplicable)).toFixed(2) : (saldo||0);
 }
 function ecEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function ecGuardarAbonoOP(op, paciente, saldo, credAplicable, ctx){
+async function ecGuardarAbonoOP(op, paciente, saldo, credAplicable, ctx){
   var efectivo = parseFloat((document.getElementById('ec-ab-monto')||{}).value||'0')||0;
   var usecred  = !!(document.getElementById('ec-ab-usecred')||{}).checked;
   var aplicarCredito = usecred ? credAplicable : 0;
@@ -37692,11 +37693,26 @@ function ecGuardarAbonoOP(op, paciente, saldo, credAplicable, ctx){
   var comisionMP = parseFloat((document.getElementById('ec-ab-com')||{}).value||'0')||0;
   var btn = document.getElementById('cc-modal-save'); if(btn){ btn.textContent='Cobrando…'; btn.disabled=true; }
   var s = getSession()||{};
+  // Comprobante (opcional): se sube a Drive ANTES de cobrar; si falla, no se cobra.
+  var comprobante = '';
+  var fileEl = document.getElementById('ec-ab-file');
+  var _cfile = fileEl && fileEl.files && fileEl.files[0];
+  if (_cfile) {
+    try {
+      if (btn) btn.textContent = 'Subiendo comprobante…';
+      var _b64 = await _fileToBase64(_cfile);
+      var _ru = await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'subirComprobanteCxC', op:op, fileName:_cfile.name, base64:_b64, mimeType:_cfile.type, token:s.token||getToken()})});
+      var _ju = await _ru.json();
+      if (_ju && _ju.ok && _ju.url) comprobante = _ju.url;
+      else { alert('No se pudo subir el comprobante: '+((_ju&&_ju.error)||'error')+'.\nEl cobro NO se registró; reintenta.'); if(btn){ btn.textContent='Cobrar / Abonar'; btn.disabled=false; } return; }
+      if (btn) btn.textContent = 'Cobrando…';
+    } catch(eU){ alert('Error subiendo el comprobante: '+eU.message+'.\nEl cobro NO se registró.'); if(btn){ btn.textContent='Cobrar / Abonar'; btn.disabled=false; } return; }
+  }
   // saldoEsperado: el saldo que el usuario tiene EN PANTALLA. El backend lo re-valida
   // dentro de su lock contra el Pagado real y rechaza si ya cambió → un doble clic no
   // manda el dinero al banco dos veces (mismo candado que el cargo explícito).
   var payload = { action:'abonarIngreso', op:op, paciente:paciente, monto:efectivo,
-    aplicarCredito:aplicarCredito, formaPago:formaPago, comisionMP:comisionMP,
+    aplicarCredito:aplicarCredito, formaPago:formaPago, comisionMP:comisionMP, comprobante:comprobante,
     saldoEsperado:saldo, fecha:fecha, token:s.token||getToken(), usuario:s.email||'' };
   fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify(payload)})
     .then(function(r){return r.json();}).then(function(d){
