@@ -247,6 +247,84 @@ function saveComisionesCfg(body) {
   } catch (ex) { return { ok: false, error: ex.message, version: COMISIONES_VER }; }
 }
 
+/* ═══════════ TARIFAS GRUPO MÉDICO — listas de precio por TIER (exactas) ═══════════
+ * Reproduce EXACTO las tablas del usuario: por tratamiento×tier, el Precio a Médico
+ * Externo (lo que paga el médico) + la Comisión de Daniel (efectivo). Hestia se queda
+ * con precioMedico − comisionDaniel. El tier lo da el volumen del grupo en el mes.
+ * Es una LISTA DE PRECIOS (lookup), no un %: da los montos exactos, no aproximados. */
+var GM_TARIFAS_KEY = 'GRUPO_MEDICO_TARIFAS';
+function _gmTarifasSeed(){
+  // Índices 0..5 = Tier 0..5. Verificado: Percepción Hestia = precioMedico − comisionDaniel.
+  return {
+    tiers: [
+      { n:0, label:'Tier 0', desde:1,  hasta:2,  pct:0  },
+      { n:1, label:'Tier 1', desde:3,  hasta:7,  pct:10 },
+      { n:2, label:'Tier 2', desde:8,  hasta:12, pct:15 },
+      { n:3, label:'Tier 3', desde:13, hasta:15, pct:18 },
+      { n:4, label:'Tier 4', desde:16, hasta:18, pct:22 },
+      { n:5, label:'Tier 5', desde:19, hasta:'', pct:25 }
+    ],
+    tratamientos: [
+      { nombre:'Captura + Vitrificación',                sku:'', base:23600, precio:[23600,22302,21665,21094,20249,20001], daniel:[0,1062,1605,1742,1841,2301] },
+      { nombre:'Captura, Fert. y Vitrificación',         sku:'', base:40250, precio:[40250,38036,36950,35975,34535,34112], daniel:[0,1811,2737,2970,3140,3924] },
+      { nombre:'Captura, Fert. y Transf. Fresco',        sku:'', base:46700, precio:[46700,44132,42871,41740,40069,39578], daniel:[0,2102,3176,3446,3643,4553] },
+      { nombre:'Captura, Fert. y Transf. Diferida',      sku:'', base:53000, precio:[53000,50085,48654,47371,45474,44918], daniel:[0,2385,3604,3911,4134,5167] },
+      { nombre:'Desvitrificación + Transferencia',       sku:'', base:19250, precio:[19250,18191,17672,17206,16517,16314], daniel:[0,866,1309,1421,1502,1877] },
+      { nombre:'Desvit., Fert., Transf. y Vitrif.',      sku:'', base:26700, precio:[26700,25232,24511,23864,22909,22628], daniel:[0,1202,1816,1970,2083,2603] },
+      { nombre:'Histeroscopia Con',                      sku:'', base:23000, precio:[23000,21850,20700,20010,19090,18400], daniel:[0,1150,1750,2070,2530,2875] },
+      { nombre:'Histeroscopia Sin',                      sku:'', base:20000, precio:[20000,19000,18000,17400,16600,16000], daniel:[0,1000,1500,1800,2200,2500] },
+      { nombre:'Recepción de Células',                   sku:'', base:5400,  precio:[5400,5103,4957,4827,4633,4577],       daniel:[0,243,367,399,421,527] }
+    ]
+  };
+}
+function readTarifasGM(){
+  try{
+    var raw = PropertiesService.getScriptProperties().getProperty(GM_TARIFAS_KEY);
+    var cfg = raw ? JSON.parse(raw) : _gmTarifasSeed();
+    return { ok:true, cfg:cfg, seeded:!raw };
+  }catch(ex){ return { ok:false, error:ex.message, cfg:_gmTarifasSeed() }; }
+}
+function saveTarifasGM(body){
+  try{
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token, COMISIONES_PERM))
+      return { ok:false, error:'Sin permiso para configurar comisiones ('+COMISIONES_PERM+').' };
+    var cfg = body.cfg || {};
+    if (!cfg.tratamientos || !cfg.tiers) return { ok:false, error:'Config incompleta (faltan tiers o tratamientos).' };
+    // Sanitiza: números limpios, arreglos de 6 tiers.
+    var limpio = {
+      tiers: (cfg.tiers||[]).map(function(t,i){ return { n:i, label:String(t.label||('Tier '+i)), desde:_comNum(t.desde)||1, hasta:(t.hasta===''||t.hasta==null)?'':_comNum(t.hasta), pct:_comNum(t.pct) }; }),
+      tratamientos: (cfg.tratamientos||[]).map(function(tr){
+        function arr6(a){ a=a||[]; var o=[]; for(var k=0;k<6;k++) o.push(_comNum(a[k])||0); return o; }
+        return { nombre:String(tr.nombre||'').trim(), sku:String(tr.sku||'').trim(), base:_comNum(tr.base)||0, precio:arr6(tr.precio), daniel:arr6(tr.daniel) };
+      }).filter(function(tr){ return !!tr.nombre; })
+    };
+    PropertiesService.getScriptProperties().setProperty(GM_TARIFAS_KEY, JSON.stringify(limpio));
+    try{ logAudit(body.usuario||'', 'Comisiones', 'Guardar tarifas Grupo Médico', '', '', '', limpio.tratamientos.length+' tratamiento(s)'); }catch(e){}
+    return { ok:true, guardados:limpio.tratamientos.length };
+  }catch(ex){ return { ok:false, error:ex.message }; }
+}
+// Tier (0..5) según el volumen de procedimientos del grupo en el mes.
+function _gmTierPorVolumen(qty){
+  var cfg = readTarifasGM().cfg; var q = Number(qty)||0;
+  var ts = cfg.tiers||[];
+  for (var i=0;i<ts.length;i++){ var d=Number(ts[i].desde)||1, h=(ts[i].hasta===''||ts[i].hasta==null)?1e9:Number(ts[i].hasta); if(q>=d && q<=h) return ts[i].n; }
+  return 0;
+}
+// Lookup exacto: {precioMedico, comisionDaniel, base, descuentoMedico} para un tratamiento en un tier.
+function _gmTarifa(nombreOSku, tierIdx){
+  var cfg = readTarifasGM().cfg; var ti = Math.max(0, Math.min(5, Number(tierIdx)||0));
+  var key = String(nombreOSku||'').trim().toLowerCase();
+  var tr = null, list = cfg.tratamientos||[];
+  for (var i=0;i<list.length;i++){
+    if (String(list[i].nombre||'').toLowerCase()===key || (list[i].sku && String(list[i].sku).toLowerCase()===key)) { tr=list[i]; break; }
+  }
+  if(!tr) return null;
+  var precio = (tr.precio&&tr.precio[ti]!=null)?tr.precio[ti]:tr.base;
+  var daniel = (tr.daniel&&tr.daniel[ti]!=null)?tr.daniel[ti]:0;
+  return { tratamiento:tr.nombre, tier:ti, base:tr.base, precioMedico:precio, comisionDaniel:daniel,
+           descuentoMedico:Math.max(0, tr.base-precio), percepcionHestia:precio-daniel };
+}
+
 /* ═════════════════════════ HOJA DE CONTROL ═════════════════════════
  * Comisiones_Generadas es la MEMORIA de lo ya pagado — la única defensa contra
  * generar el mismo mes dos veces. Vive en INGRESOS_SS_ID junto a Creditos_Favor.

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.320 -->
+﻿<!-- app-build:2026.07.22.321 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12284,6 +12284,57 @@ function comCfgNuevaId() {
   while (usados['R' + n]) n++;
   return 'R' + n;
 }
+/* ── Tarifas por tier (Grupo Médico): editor de las listas de precio EXACTAS ── */
+var _gmTarifas=null;
+function _gmInp(){ return 'padding:3px 5px;border:1px solid var(--color-divider);border-radius:5px;font-size:11px;background:var(--color-surface,#fff);color:var(--color-text,#111);text-align:right'; }
+function _gmModal(inner){
+  var old=document.getElementById('gm-ovl'); if(old)old.remove();
+  var ovl=document.createElement('div'); ovl.id='gm-ovl';
+  ovl.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:6000;display:flex;align-items:center;justify-content:center;padding:16px';
+  ovl.innerHTML='<div style="background:var(--color-surface,#fff);color:var(--color-text,#111);border-radius:14px;max-width:980px;width:100%;max-height:90vh;box-shadow:0 20px 60px rgba(0,0,0,.3);display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:15px 20px;border-bottom:1px solid var(--color-divider,#eee);font-weight:800;font-size:15px">💵 Tarifas por tier — Grupo Médico</div>'
+    +'<div id="gm-body" style="flex:1;overflow:auto;padding:16px 20px">'+inner+'</div>'
+    +'<div style="padding:12px 20px;border-top:1px solid var(--color-divider,#eee);display:flex;gap:10px;justify-content:flex-end"><button onclick="var o=document.getElementById(\'gm-ovl\');if(o)o.remove()" style="padding:8px 16px;border:1px solid var(--color-divider);border-radius:8px;background:none;cursor:pointer;color:var(--color-text)">Cerrar</button><button id="gm-save" onclick="gmTarifasGuardar()" style="padding:8px 18px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Guardar tarifas</button></div>'
+    +'</div>';
+  document.body.appendChild(ovl);
+}
+async function gmTarifasAbrir(){
+  _gmModal('<div style="text-align:center;padding:30px;color:#888"><span class="ing-spinner ing-spinner-dark"></span> Cargando tarifas…</div>');
+  var s=getSession()||{};
+  try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'tarifasGMLeer',token:s.token||getToken()})}); var d=await r.json(); _gmTarifas=(d&&d.ok)?d.cfg:null; }catch(e){ _gmTarifas=null; }
+  _gmRender();
+}
+function _gmRender(){
+  var body=document.getElementById('gm-body'); if(!body) return;
+  if(!_gmTarifas){ body.innerHTML='<div style="color:#c83c3c;padding:16px">No se pudieron cargar las tarifas.</div>'; return; }
+  var tiers=_gmTarifas.tiers||[];
+  var h='<div style="font-size:12px;color:#888;margin-bottom:10px">Por tratamiento×tier: <b>Precio a Médico</b> (lo que paga) y <b>Comisión Daniel</b> (efectivo). Hestia se queda con Precio − Daniel. El tier lo da el volumen del grupo en el mes (rangos abajo).</div>';
+  h+='<div style="overflow:auto"><table style="border-collapse:collapse;font-size:11.5px;min-width:760px"><thead>'
+    +'<tr><th style="text-align:left;position:sticky;left:0;background:var(--color-surface,#fff);padding:4px 6px">Tratamiento</th><th style="padding:4px 6px">Base</th>'
+    +tiers.map(function(t){return '<th colspan="2" style="text-align:center;padding:4px 6px;border-left:1px solid var(--color-divider)">'+_esc(t.label)+' <span style="color:var(--color-primary)">'+t.pct+'%</span><div style="font-size:9px;font-weight:400;color:#999">'+t.desde+'-'+(t.hasta||'∞')+' proc</div></th>';}).join('')+'</tr>'
+    +'<tr><th style="position:sticky;left:0;background:var(--color-surface,#fff)"></th><th></th>'+tiers.map(function(){return '<th style="font-size:9px;color:#999;border-left:1px solid var(--color-divider)">Precio</th><th style="font-size:9px;color:#166534">Daniel</th>';}).join('')+'</tr></thead><tbody>';
+  (_gmTarifas.tratamientos||[]).forEach(function(tr,ti){
+    h+='<tr><td style="white-space:nowrap;font-weight:600;position:sticky;left:0;background:var(--color-surface,#fff);padding:3px 6px">'+_esc(tr.nombre)+'</td>'
+      +'<td style="padding:2px"><input type="number" value="'+(tr.base||0)+'" onchange="_gmSet('+ti+',\'base\',-1,this.value)" style="width:66px;'+_gmInp()+'"></td>';
+    for(var k=0;k<6;k++){
+      h+='<td style="padding:2px;border-left:1px solid var(--color-divider)"><input type="number" value="'+((tr.precio&&tr.precio[k])||0)+'" onchange="_gmSet('+ti+',\'precio\','+k+',this.value)" style="width:62px;'+_gmInp()+'"></td>'
+        +'<td style="padding:2px"><input type="number" value="'+((tr.daniel&&tr.daniel[k])||0)+'" onchange="_gmSet('+ti+',\'daniel\','+k+',this.value)" style="width:56px;'+_gmInp()+';color:#166534"></td>';
+    }
+    h+='</tr>';
+  });
+  h+='</tbody></table></div>';
+  body.innerHTML=h;
+}
+function _gmSet(ti,campo,idx,val){ var tr=_gmTarifas&&_gmTarifas.tratamientos[ti]; if(!tr)return; var n=parseFloat(val)||0; if(campo==='base') tr.base=n; else { tr[campo]=tr[campo]||[0,0,0,0,0,0]; tr[campo][idx]=n; } }
+async function gmTarifasGuardar(){
+  if(!_gmTarifas) return;
+  var btn=document.getElementById('gm-save'); if(btn){btn.disabled=true;btn.textContent='Guardando…';}
+  var s=getSession()||{};
+  var d; try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'tarifasGMGuardar',cfg:_gmTarifas,token:s.token||getToken()})}); d=await r.json(); }catch(e){ d={ok:false,error:e.message}; }
+  if(d&&d.ok){ var o=document.getElementById('gm-ovl'); if(o)o.remove(); alert('✓ Tarifas guardadas ('+d.guardados+' tratamientos).'); }
+  else{ alert('⚠ '+((d&&d.error)||'No se pudo guardar.')); if(btn){btn.disabled=false;btn.textContent='Guardar tarifas';} }
+}
+
 function comCfgAddRegla() {
   if (!_comCfgW) _comCfgW = [];
   // Nace VÁLIDA salvo lo que solo el usuario sabe (grupo y productos): un escalón
@@ -13072,6 +13123,7 @@ function comCfgInnerHtml() {
     + (W.length ? W.map(function (x, i) { return '<option value="' + i + '"' + (i === _comCfgSel ? ' selected' : '') + '>' + _comEsc(x.nombre || x.id) + (x.activo === false ? ' (inactiva)' : '') + '</option>'; }).join('') : '<option value="0">— sin reglas —</option>')
     + '</select>'
     + (puede ? '<button onclick="comCfgAddRegla()" style="padding:8px 12px;background:none;border:1.5px dashed var(--color-primary);color:var(--color-primary);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">＋ Nueva regla</button>' : '')
+    + (puede ? '<button onclick="gmTarifasAbrir()" title="Listas de precio EXACTAS por tier: Precio a Médico Externo + Comisión Daniel por tratamiento×tier (da los montos exactos de tu tabla)" style="padding:8px 12px;background:var(--color-surface-2);border:1px solid var(--color-divider);color:var(--color-text);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">💵 Tarifas por tier</button>' : '')
     + (puede && r ? '<button onclick="comCfgDelRegla()" style="padding:8px 10px;background:none;border:1px solid #e3b3b3;color:#c83c3c;border-radius:8px;font-size:11px;cursor:pointer">✕ Quitar regla</button>' : '')
     + '</div>';
 

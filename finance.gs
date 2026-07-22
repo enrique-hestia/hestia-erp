@@ -718,6 +718,15 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega comisiones.gs al proyecto de Apps Script y redespliega.'});
       return jsonResponse(saveComisionesCfg(body));
     }
+    if (body.action === 'tarifasGMLeer') {
+      if (typeof readTarifasGM !== 'function') return jsonResponse({ok:false, error:'Actualiza comisiones.gs y redespliega.'});
+      return jsonResponse(readTarifasGM());
+    }
+    if (body.action === 'tarifasGMGuardar') {
+      if (typeof saveTarifasGM !== 'function') return jsonResponse({ok:false, error:'Actualiza comisiones.gs y redespliega.'});
+      if (typeof _postEmail !== 'undefined' && _postEmail) body.usuario = _postEmail;
+      return jsonResponse(saveTarifasGM(body));
+    }
     if (body.action === 'comisionesSetup') {
       if (typeof setupComisionesConfig !== 'function')
         return jsonResponse({ok:false, error:'Agrega comisiones.gs al proyecto de Apps Script y redespliega.'});
