@@ -6,12 +6,83 @@
    NO es tiempo real: los mensajes llegan en el siguiente sondeo (~7s).
    ══════════════════════════════════════════════════════════════════════ */
 var CHAT_TAB = 'Chat';
+var CHAT_LECT_TAB = 'Chat_Lecturas';   // estado de LEÍDO por usuario (sincroniza entre navegadores)
 
 function _chatSheet() {
   var ss = SpreadsheetApp.openById(SHEET_ID);
   var sh = ss.getSheetByName(CHAT_TAB);
   if (!sh) { sh = ss.insertSheet(CHAT_TAB); sh.getRange(1, 1, 1, 5).setValues([['Fecha', 'Canal', 'DeEmail', 'DeNombre', 'Mensaje']]); }
   return sh;
+}
+
+/* ── Estado de LEÍDO por usuario (persistente/servidor) ─────────────────────
+   El "hasta cuándo leyó" vivía SOLO en localStorage del navegador → al abrir en
+   otra máquina/incógnito todo salía como NO leído. Ahora se guarda por usuario
+   en la hoja Chat_Lecturas (Email | MapaJSON {canal:ts} | ActualizadoEn) y viaja
+   en chatPoll, así el estado de leído sincroniza entre navegadores. */
+function _chatLecturasSheet() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sh = ss.getSheetByName(CHAT_LECT_TAB);
+  if (!sh) { sh = ss.insertSheet(CHAT_LECT_TAB); sh.getRange(1, 1, 1, 3).setValues([['Email', 'Mapa', 'ActualizadoEn']]); }
+  return sh;
+}
+function _chatGetLecturas(email) {
+  email = String(email || '').trim().toLowerCase();
+  if (!email) return {};
+  try {
+    var sh = _chatLecturasSheet(); var lr = sh.getLastRow();
+    if (lr < 2) return {};
+    var vals = sh.getRange(2, 1, lr - 1, 2).getValues();
+    for (var i = 0; i < vals.length; i++) {
+      if (String(vals[i][0] || '').trim().toLowerCase() === email) {
+        try { return JSON.parse(vals[i][1] || '{}') || {}; } catch(e) { return {}; }
+      }
+    }
+  } catch(e) {}
+  return {};
+}
+/* Marca canal(es) como leídos hasta cierto ts. body: {email, canal, ts} o {email, mapa:{canal:ts}}.
+   Nunca RETROCEDE un ts. Si nada avanza, NO toma el lock ni escribe (evita
+   amplificar el candado global en cada sondeo con la vista abierta). */
+function chatMarkRead(body) {
+  try {
+    body = body || {};
+    var email = String(body.email || '').trim().toLowerCase();
+    if (!email) return { ok: false, error: 'email requerido' };
+    var updates = (body.mapa && typeof body.mapa === 'object') ? body.mapa : {};
+    if (body.canal) updates[String(body.canal)] = Number(body.ts) || 0;   // sin fallback a "ahora": un 0 no marca de más
+    // Estado actual (lectura barata, sin lock) para decidir si hay algo que avanzar.
+    var actual = _chatGetLecturas(email), cambia = false, c;
+    for (c in updates) { if (updates.hasOwnProperty(c) && (Number(updates[c]) || 0) > (Number(actual[c]) || 0)) { cambia = true; break; } }
+    if (!cambia) return { ok: true, lecturas: actual, sinCambio: true };   // nada que persistir → sin lock ni escritura
+    var lock = LockService.getScriptLock();
+    try { lock.waitLock(8000); } catch(e) { return { ok: false, error: 'lock' }; }
+    try {
+      var sh = _chatLecturasSheet(); var lr = sh.getLastRow();
+      var rowIdx = -1, mapa = {};
+      if (lr >= 2) {
+        var vals = sh.getRange(2, 1, lr - 1, 2).getValues();
+        for (var i = 0; i < vals.length; i++) {
+          if (String(vals[i][0] || '').trim().toLowerCase() === email) {
+            rowIdx = i + 2; try { mapa = JSON.parse(vals[i][1] || '{}') || {}; } catch(e) { mapa = {}; }
+            break;
+          }
+        }
+      }
+      var toco = false;
+      for (c in updates) {
+        if (!updates.hasOwnProperty(c)) continue;
+        var t = Number(updates[c]) || 0;
+        if (t > (Number(mapa[c]) || 0)) { mapa[c] = t; toco = true; }
+      }
+      if (toco) {
+        var payload = [email, JSON.stringify(mapa), new Date()];
+        if (rowIdx > -1) sh.getRange(rowIdx, 1, 1, 3).setValues([payload]);
+        else sh.appendRow(payload);
+      }
+      return { ok: true, lecturas: mapa };
+    } finally { try { lock.releaseLock(); } catch(e) {} }
+  } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
 // Enviar un mensaje (canal 'general' o 'dm:emailA|emailB' ordenado).
@@ -125,6 +196,11 @@ function chatPoll(body) {
     // Avisos generales a caballo del mismo sondeo (cero timers nuevos en el
     // cliente). Si avisos.gs no está desplegado, el chat sigue como si nada.
     try { if (typeof avisosListActivos === 'function') { var _av = avisosListActivos(); if (_av && _av.ok) res.avisos = _av.avisos; } } catch(e){}
+    // Estado de LEÍDO sincronizado entre navegadores: el poll persiste el canal
+    // que el usuario tiene abierto y devuelve su mapa completo para sembrar el
+    // "hasta cuándo leyó" en cualquier navegador (no depende de localStorage).
+    if (body.leerCanal) { try { chatMarkRead({ email: email, canal: body.leerCanal, ts: Number(body.leerTs) || Date.now() }); } catch(e){} }
+    res.lecturas = _chatGetLecturas(email);
     return res;
   } catch (ex) { return { ok: false, error: ex.message }; }
 }

@@ -1235,6 +1235,11 @@ function doPost(e) {
         return jsonResponse({ok:false, error:'Agrega chat.gs en Apps Script y redespliega.'});
       return jsonResponse(chatUpload(body));
     }
+    if (body.action === 'chatMarkRead') {
+      if (typeof chatMarkRead !== 'function')
+        return jsonResponse({ok:false, error:'Agrega chat.gs en Apps Script y redespliega.'});
+      return jsonResponse(chatMarkRead(body));
+    }
     if (body.action === 'presSetPeriodoAbierto') {
       if (typeof presSetPeriodoAbierto !== 'function')
         return jsonResponse({ok:false, error:'Actualiza presupuesto.gs en Apps Script y redespliega.'});

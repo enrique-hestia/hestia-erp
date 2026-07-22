@@ -1113,13 +1113,27 @@ function doGet(e) {
         if (!shNid || shNid.getLastRow() < 2) {
           return jsonResponse({ nextId: prefix + '-001' });
         }
-        var ids = shNid.getRange(2, 1, shNid.getLastRow() - 1, 1).getValues()
-          .map(function(r) { return String(r[0]); });
-        var maxNum = 0;
-        ids.forEach(function(id) {
-          var m = id.match(/(\d+)$/);
+        // Reutilizar un folio LIBRE: si una fila quedó con el NOMBRE en blanco
+        // (paciente borrado por duplicado u otra razón), se reocupa ese folio en
+        // vez de dejarlo hueco. Seguro para ingresos: se ligan por NOMBRE, y una
+        // fila sin nombre no tiene operaciones asociadas.
+        var lastColNid = shNid.getLastColumn();
+        var hdrNid = shNid.getRange(1, 1, 1, lastColNid).getValues()[0];
+        var nomCNid = -1;
+        for (var hcn = 0; hcn < hdrNid.length; hcn++) {
+          if (String(hdrNid[hcn]).toLowerCase().indexOf('nombre') > -1) { nomCNid = hcn; break; }
+        }
+        var dataNid = shNid.getRange(2, 1, shNid.getLastRow() - 1, lastColNid).getValues();
+        var maxNum = 0, reuseId = null;
+        for (var iNid = 0; iNid < dataNid.length; iNid++) {
+          var idv = String(dataNid[iNid][0] || '').trim();
+          var m = idv.match(/(\d+)$/);
           if (m) maxNum = Math.max(maxNum, parseInt(m[1]));
-        });
+          var nomv = (nomCNid > -1) ? String(dataNid[iNid][nomCNid] || '').trim()
+                                    : String(dataNid[iNid][1] || '').trim();
+          if (!nomv && reuseId === null && idv) reuseId = idv;   // primer folio libre
+        }
+        if (reuseId) return jsonResponse({ nextId: reuseId, reutilizado: true });
         return jsonResponse({ nextId: prefix + '-' + String(maxNum + 1).padStart(3, '0') });
       } catch(ex) {
         return jsonResponse({ nextId: prefix + '-001', error: ex.message });

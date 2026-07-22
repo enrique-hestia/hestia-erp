@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.21.292 -->
+﻿<!-- app-build:2026.07.21.294 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -20184,7 +20184,7 @@ function _presApplyProjAllGrouped(){
 })();
 
 /* ══ CHAT INTERNO — canal general + mensajes directos, botón flotante, sondeo ══ */
-var _chat = { mounted:false, open:false, canal:'general', byCanal:{}, online:[], dir:[], sinceTs:0, me:'', meNombre:'', meAlias:'', timer:null, peerName:{}, aliasByEmail:{} };
+var _chat = { mounted:false, open:false, canal:'general', byCanal:{}, online:[], dir:[], sinceTs:0, me:'', meNombre:'', meAlias:'', timer:null, peerName:{}, aliasByEmail:{}, lecturas:{} };
 function _chatEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 /* Alias del autor para PINTAR. Los mensajes ya guardados traen el nombre completo
    en `deNombre`: se resuelven aquí por email contra el directorio (no se reescribe
@@ -20198,8 +20198,12 @@ function _chatAliasFor(email, nombreFallback){
 }
 function _chatDM(a,b){ return 'dm:'+[String(a||'').toLowerCase(),String(b||'').toLowerCase()].sort().join('|'); }
 function _chatSeenKey(c){ return 'chat_seen_'+_chat.me+'_'+c; }
-function _chatSeen(c){ try{ return Number(localStorage.getItem(_chatSeenKey(c)))||0; }catch(e){ return 0; } }
-function _chatSetSeen(c,ts){ try{ localStorage.setItem(_chatSeenKey(c), String(ts||Date.now())); }catch(e){} }
+function _chatSeen(c){ var l=0; try{ l=Number(localStorage.getItem(_chatSeenKey(c)))||0; }catch(e){} var s=Number((_chat.lecturas||{})[c])||0; return l>s?l:s; }
+function _chatSetSeen(c,ts){ ts=ts||Date.now(); try{ var _cur=Number(localStorage.getItem(_chatSeenKey(c)))||0; if(ts>_cur) localStorage.setItem(_chatSeenKey(c), String(ts)); }catch(e){} _chat.lecturas=_chat.lecturas||{}; if(ts>(Number(_chat.lecturas[c])||0)) _chat.lecturas[c]=ts; _chatSyncRead(c,ts); }
+// Persistir "leído" en el servidor (sincroniza entre navegadores) — batch + debounce.
+var _chatReadPend={}, _chatReadTimer=null;
+function _chatSyncRead(c,ts){ _chatReadPend[c]=Math.max(ts||0,_chatReadPend[c]||0); if(_chatReadTimer||!_chat.me) return; _chatReadTimer=setTimeout(function(){ var mapa=_chatReadPend; _chatReadPend={}; _chatReadTimer=null; try{ fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'chatMarkRead',email:_chat.me,mapa:mapa})}); }catch(e){} }, 1200); }
+function _chatLastTs(c){ var a=_chat.byCanal[c]||[]; return a.length?a[a.length-1].ts:0; }
 function _chatMount(){
   if(_chat.mounted) return; var s=(typeof getSession==='function')?getSession():null; if(!s||!s.email) return;
   _chat.mounted=true; _chat.me=String(s.email).toLowerCase(); _chat.meNombre=s.nombre||s.email;
@@ -20239,7 +20243,7 @@ function chatToggle(){ var pnl=document.getElementById('chat-panel'); if(!pnl) r
   if(_chat.open){ _chatMarkSeen(_chat.canal); chatRender(); var inp=document.getElementById('chat-input'); if(inp) setTimeout(function(){inp.focus();},50); }
   _chatUpdateBadge(); }
 function chatSwitch(canal){ _chat.canal=canal; _chatMarkSeen(canal); chatRender(); _chatUpdateBadge(); var inp=document.getElementById('chat-input'); if(inp) inp.focus(); }
-function _chatMarkSeen(canal){ var arr=_chat.byCanal[canal]||[]; var last=arr.length?arr[arr.length-1].ts:Date.now(); _chatSetSeen(canal,last); }
+function _chatMarkSeen(canal){ var arr=_chat.byCanal[canal]||[]; if(!arr.length) return; _chatSetSeen(canal, arr[arr.length-1].ts); }
 /* Lista de contactos para DM. `nombre` aquí ya es el ALIAS (es lo que se pinta);
    el nombre completo no se usa en esta superficie. */
 function _chatPeers(){
@@ -20279,7 +20283,7 @@ function chatRender(){
       +'<div style="background:'+(mine?'var(--color-primary,#c46a7a)':'var(--card-bg,#fff)')+';color:'+(mine?'#fff':'var(--text-primary,#111)')+';border:1px solid '+(mine?'transparent':'var(--color-divider,#e5e7eb)')+';border-radius:12px;padding:6px 10px;font-size:12.5px;line-height:1.4;word-break:break-word">'+_chatMsgHtml(m.mensaje)+'</div>'
       +'<div style="font-size:9px;color:#c9c9c9;text-align:'+(mine?'right':'left')+';margin-top:1px">'+hora+'</div></div>';
   });
-  box.innerHTML=h; box.scrollTop=box.scrollHeight;
+  var _atBottom=(box.scrollHeight-box.scrollTop-box.clientHeight)<60; box.innerHTML=h; if(_atBottom) box.scrollTop=box.scrollHeight;
 }
 function chatSendMsg(){
   var inp=document.getElementById('chat-input'); if(!inp) return; var msg=(inp.value||'').trim(); if(!msg) return;
@@ -20290,10 +20294,12 @@ function chatSendMsg(){
 }
 function chatPollOnce(first){
   var s=(typeof getSession==='function')?getSession():null; if(!s||!s.email) return;
-  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'chatPoll',email:_chat.me,nombre:_chat.meNombre,sinceTs:_chat.sinceTs,wantDir:!!first})})
+  fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'chatPoll',email:_chat.me,nombre:_chat.meNombre,sinceTs:_chat.sinceTs,wantDir:!!first,leerCanal:(_chat.open?_chat.canal:''),leerTs:(_chat.open?_chatLastTs(_chat.canal):0)})})
     .then(function(r){return r.json();}).then(function(res){
       if(!res||!res.ok) return;
       _chat.online=res.online||[]; if(res.dir) _chat.dir=res.dir; if(res.serverTs) _chat.sinceTs=res.serverTs;
+      // Sembrar el estado de LEÍDO del servidor (para que un navegador nuevo no muestre como no-leído lo ya leído).
+      if(res.lecturas){ _chat.lecturas=_chat.lecturas||{}; for(var _lc in res.lecturas){ if(res.lecturas.hasOwnProperty(_lc)){ var _lt=Number(res.lecturas[_lc])||0; if(_lt>(Number(_chat.lecturas[_lc])||0)) _chat.lecturas[_lc]=_lt; } } }
       // Avisos generales a caballo del mismo sondeo (banner + vista)
       if(res.avisos && typeof hfAvisosRecibidos==='function'){ try{ hfAvisosRecibidos(res.avisos); }catch(e){} }
       // Mapa email → alias (del directorio): con esto se pinta el autor de cada
@@ -37282,7 +37288,7 @@ function _ecPlanPrintRows(){
     (pl.calendario||[]).forEach(function(c){
       acum = Math.round((acum + c.monto)*100)/100;
       var cubierto = (_ecPlanAbonado + 0.01) >= acum;
-      var estado = cubierto ? 'Cubierto' : (c.fecha < hoy ? 'VENCIDO' : 'Pendiente');
+      var estado = c.fecha > hoy ? 'A tiempo' : (cubierto ? 'Cubierto' : 'VENCIDO');
       rows.push({ n:c.n, fecha:c.fecha, monto:c.monto, estado:estado, frecuencia:pl.frecuencia });
     });
   });
@@ -37293,19 +37299,21 @@ function _ecPlanCard(pl, abonado){
   var filas = (pl.calendario||[]).map(function(c){
     acum = Math.round((acum + c.monto)*100)/100;
     var cubierto = (abonado + 0.01) >= acum;
-    var venc = !cubierto && c.fecha < hoy;
-    var estado = cubierto ? '<span style="color:#1a7f37;font-weight:700">✓ Cubierto</span>'
-      : venc ? '<span style="color:#b3261e;font-weight:700">Vencido</span>'
-      : '<span style="color:var(--color-text-muted)">Pendiente</span>';
+    var futura = c.fecha > hoy;   // aún no vence → "A tiempo" (NO implica que ya pagó)
+    var estado = futura ? '<span style="color:#1f6feb;font-weight:700">A tiempo</span>'
+      : cubierto ? '<span style="color:#1a7f37;font-weight:700">✓ Cubierto</span>'
+      : '<span style="color:#b3261e;font-weight:700">Vencido</span>';
     return '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--color-divider);font-size:12px">'
       + '<span style="color:var(--color-text)">Pago ' + c.n + ' · ' + ecFmtFecha(c.fecha) + '</span>'
       + '<span style="display:flex;gap:14px;align-items:center"><span style="font-weight:700;font-variant-numeric:tabular-nums">' + ecFmt(c.monto) + '</span>' + estado + '</span></div>';
   }).join('');
   var canDel = (typeof hasPermission==='function') && hasPermission('editar_ingresos');
   return '<div style="background:var(--color-surface-2);border:1px solid var(--color-divider);border-radius:10px;padding:14px 16px;margin-top:14px">'
-    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
-    + '<div style="font-size:13px;font-weight:700;color:var(--color-primary)">📅 Plan de pagos (' + pl.numPagos + ' ' + ecEsc(pl.frecuencia) + ')</div>'
-    + (canDel ? '<button onclick="ecPlanQuitar(' + ccQ(pl.id) + ')" title="Quitar el plan (no afecta saldos ni cobros)" style="padding:3px 9px;background:none;border:1px solid var(--color-divider);border-radius:6px;font-size:10.5px;cursor:pointer;color:var(--color-text-muted)">Quitar</button>' : '')
+    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:4px">'
+    + '<div><div style="font-size:13px;font-weight:700;color:var(--color-primary)">📅 Plan de pagos (' + pl.numPagos + ' ' + ecEsc(pl.frecuencia) + ')</div>'
+    + (pl.paciente ? '<div style="font-size:11.5px;color:var(--color-text);font-weight:600;margin-top:2px">👤 ' + ecEsc(pl.paciente) + (pl.op ? ' <span style="color:var(--color-text-muted);font-weight:500">· OP ' + ecEsc(pl.op) + '</span>' : '') + '</div>' : '')
+    + '</div>'
+    + (canDel ? '<button onclick="ecPlanQuitar(' + ccQ(pl.id) + ')" title="Quitar el plan (no afecta saldos ni cobros)" style="padding:3px 9px;background:none;border:1px solid var(--color-divider);border-radius:6px;font-size:10.5px;cursor:pointer;color:var(--color-text-muted);white-space:nowrap">Quitar</button>' : '')
     + '</div>'
     + '<div style="font-size:10.5px;color:var(--color-text-muted);margin-bottom:6px">Total ' + ecFmt(pl.montoTotal) + ' · calendario informativo. El cobro se hace con «Cobrar / Abonar».</div>'
     + filas + '</div>';
@@ -37319,10 +37327,10 @@ function _planPrintTableHTML(rows, lang){
   if (!rows || !rows.length) return '';
   lang = String(lang || 'es').toLowerCase().substring(0, 2);
   var L = {
-    es:{t:'Plan de pagos · vencimientos', p:'Pago', f:'Fecha de pago', m:'Monto', e:'Estado', cub:'Cubierto', ven:'VENCIDO', pen:'Pendiente', hasta:'Puede pagar hasta', al:'Todos los pagos están cubiertos.', freq:{quincenal:'quincenal', mensual:'mensual'}},
-    en:{t:'Payment plan · due dates', p:'Payment', f:'Due date', m:'Amount', e:'Status', cub:'Paid', ven:'OVERDUE', pen:'Pending', hasta:'You can pay until', al:'All installments are covered.', freq:{quincenal:'biweekly', mensual:'monthly'}},
-    fr:{t:'Plan de paiement · échéances', p:'Paiement', f:'Échéance', m:'Montant', e:'Statut', cub:'Payé', ven:'EN RETARD', pen:'À venir', hasta:'Vous pouvez payer jusqu’au', al:'Tous les paiements sont couverts.', freq:{quincenal:'bimensuel', mensual:'mensuel'}},
-    pt:{t:'Plano de pagamento · vencimentos', p:'Parcela', f:'Vencimento', m:'Valor', e:'Situação', cub:'Pago', ven:'VENCIDO', pen:'Pendente', hasta:'Pode pagar até', al:'Todas as parcelas estão cobertas.', freq:{quincenal:'quinzenal', mensual:'mensal'}}
+    es:{t:'Plan de pagos · vencimientos', p:'Pago', f:'Fecha de pago', m:'Monto', e:'Estado', cub:'Cubierto', ven:'VENCIDO', pen:'Pendiente', tiempo:'A tiempo', hasta:'Puede pagar hasta', al:'Todos los pagos están cubiertos.', freq:{quincenal:'quincenal', mensual:'mensual'}},
+    en:{t:'Payment plan · due dates', p:'Payment', f:'Due date', m:'Amount', e:'Status', cub:'Paid', ven:'OVERDUE', pen:'Pending', tiempo:'On time', hasta:'You can pay until', al:'All installments are covered.', freq:{quincenal:'biweekly', mensual:'monthly'}},
+    fr:{t:'Plan de paiement · échéances', p:'Paiement', f:'Échéance', m:'Montant', e:'Statut', cub:'Payé', ven:'EN RETARD', pen:'À venir', tiempo:'À jour', hasta:'Vous pouvez payer jusqu’au', al:'Tous les paiements sont couverts.', freq:{quincenal:'bimensuel', mensual:'mensuel'}},
+    pt:{t:'Plano de pagamento · vencimentos', p:'Parcela', f:'Vencimento', m:'Valor', e:'Situação', cub:'Pago', ven:'VENCIDO', pen:'Pendente', tiempo:'Em dia', hasta:'Pode pagar até', al:'Todas as parcelas estão cobertas.', freq:{quincenal:'quinzenal', mensual:'mensal'}}
   };
   var t = L[lang] || L.es;
   var fMoney = (lang==='es' && typeof ecFmt==='function') ? ecFmt : function(n){ return (typeof hfFmtMoney==='function') ? hfFmtMoney(n, lang) : ('$' + Number(n||0).toLocaleString()); };
@@ -37330,8 +37338,8 @@ function _planPrintTableHTML(rows, lang){
   var freqRaw = String(rows[0].frecuencia || '').toLowerCase();
   var freqTxt = t.freq[freqRaw] || rows[0].frecuencia || '';
   var body = rows.map(function(r){
-    var color = r.estado==='VENCIDO' ? '#c83c3c' : (r.estado==='Cubierto' ? '#16a34a' : '#8a8a8a');
-    var lbl   = r.estado==='VENCIDO' ? t.ven : (r.estado==='Cubierto' ? t.cub : t.pen);
+    var color = r.estado==='VENCIDO' ? '#c83c3c' : (r.estado==='Cubierto' ? '#16a34a' : (r.estado==='A tiempo' ? '#1f6feb' : '#8a8a8a'));
+    var lbl   = r.estado==='VENCIDO' ? t.ven : (r.estado==='Cubierto' ? t.cub : (r.estado==='A tiempo' ? t.tiempo : t.pen));
     var wt    = r.estado==='VENCIDO' ? '700' : '600';
     return '<tr><td style="padding:4px 10px;color:#444;border-top:1px solid #eee">' + t.p + ' ' + r.n + '</td>'
       + '<td style="padding:4px 10px;color:#444;border-top:1px solid #eee">' + fDate(r.fecha) + '</td>'

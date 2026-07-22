@@ -95,6 +95,12 @@ function insertRow(ss, e) {
   if (SHEET_ALIASES[sheetName]) sheetName = SHEET_ALIASES[sheetName];
   if (!sheetName) return { error: 'sheet es requerido' };
   var capturaId = getCapturaId(sheetName);
+  // Lock: hace ATÓMICO "revisar duplicado + calcular folio + escribir" — evita
+  // folios HEC duplicados y que dos altas simultáneas pisen la misma fila libre
+  // (mismo patrón que nomina/gastosfijos/cobranza). Los inserts son poco
+  // frecuentes, así que serializarlos no afecta el uso.
+  var _insLock = LockService.getScriptLock();
+  try { _insLock.waitLock(10000); } catch(eLk) { return { error: 'El sistema está ocupado, intenta de nuevo en unos segundos.' }; }
   try {
     var ssIns = SpreadsheetApp.openById(capturaId);
     var shIns = findSheet(ssIns, sheetName);
@@ -149,12 +155,43 @@ function insertRow(ss, e) {
     var newRow = hdrs.map(function(h) {
       return (h && e.parameter[h] !== undefined) ? e.parameter[h] : '';
     });
+    // PACIENTES (bajo el lock): se (re)lee la hoja, se calcula el folio
+    // AUTORITATIVO en el servidor — NO se confía en el ID del cliente, así dos
+    // altas simultáneas nunca generan el mismo HEC — y se reutiliza una fila con
+    // el NOMBRE en blanco (folio liberado por un borrado) en vez de dejar el hueco
+    // al final. Seguro para ingresos: se ligan por NOMBRE, y una fila sin nombre
+    // no tiene operaciones asociadas.
+    if (sheetName.trim().toLowerCase() === 'pacientes' && typeof nombreIdx !== 'undefined' && nombreIdx > -1) {
+      var allR = shIns.getDataRange().getValues();
+      var maxN = 0, prefFolio = 'HEC';
+      for (var mr = hdrInfo.dataStart; mr < allR.length; mr++) {
+        var idc = (idIdx > -1) ? String(allR[mr][idIdx] || '').trim() : '';
+        var mm = idc.match(/^([A-Za-z]+)?\D*?(\d+)\s*$/);
+        if (mm && mm[2]) { var nn = parseInt(mm[2], 10); if (nn > maxN) maxN = nn; if (mm[1]) prefFolio = mm[1]; }
+      }
+      var folioNuevo = prefFolio + '-' + String(maxN + 1).padStart(3, '0');
+      // Reutilizar la primera fila SIN nombre (folio liberado).
+      for (var rr = hdrInfo.dataStart; rr < allR.length; rr++) {
+        if (String(allR[rr][nombreIdx] || '').trim()) continue;
+        if (idIdx > -1) {
+          var idExist = String(allR[rr][idIdx] || '').trim();
+          newRow[idIdx] = idExist || folioNuevo;   // conserva su folio; si no tiene, uno nuevo
+        }
+        shIns.getRange(rr + 1, 1, 1, newRow.length).setValues([newRow]);
+        invalidateViewCache(sheetName);
+        return { success: true, rowNum: rr + 1, reutilizado: true, id: (idIdx > -1 ? newRow[idIdx] : '') };
+      }
+      // Sin fila libre → append con folio autoritativo (ignora el ID del cliente).
+      if (idIdx > -1) newRow[idIdx] = folioNuevo;
+    }
     shIns.appendRow(newRow);
     var rowNum = shIns.getLastRow();
     invalidateViewCache(sheetName);
     return { success: true, rowNum: rowNum };
   } catch(ex) {
     return { error: ex.message };
+  } finally {
+    try { _insLock.releaseLock(); } catch(eR) {}
   }
 }
 
