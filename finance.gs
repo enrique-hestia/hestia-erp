@@ -5378,6 +5378,61 @@ function leerXmlFactura(fileId) {
   } catch(ex) { return {ok:false, error:ex.message}; }
 }
 
+/* Propaga el RENOMBRE de un producto a todo lo que lo referencia POR NOMBRE, para que
+ * su historia no se parta en dos. ⚠ MONEY-SAFE: toca ÚNICAMENTE la columna «Producto»
+ * (nombre) de BD_Ingresos — jamás PVP/Total/Pagado ni ningún costo. El precio de una
+ * partida ya capturada es de su momento y no se mueve; el precio nuevo del catálogo solo
+ * aplica a capturas futuras. Además renombra en las reglas de comisión y en las tarifas
+ * GM (que casan por nombre) para no desincronizar el cálculo. Devuelve conteos. */
+function _prodPropagarRename(oldDesc, newDesc, usuario) {
+  var res = { partidas: 0, libros: [], reglas: 0, tarifas: 0 };
+  var oldT = String(oldDesc || '').trim(), newT = String(newDesc || '').trim();
+  if (!oldT || !newT || oldT === newT) return res;
+  // 1) BD_Ingresos de TODOS los años — solo la columna Producto (por lote: 1 lectura +
+  //    1 escritura de esa columna por libro; nunca se leen ni tocan los montos).
+  try {
+    var ids = (typeof INGRESOS_IDS !== 'undefined') ? INGRESOS_IDS : {};
+    Object.keys(ids).forEach(function (anio) {
+      try {
+        var ssI = SpreadsheetApp.openById(ids[anio]);
+        var sh = ssI.getSheetByName(typeof BD_INGRESOS_TAB !== 'undefined' ? BD_INGRESOS_TAB : 'BD_Ingresos');
+        if (!sh) return;
+        var lastRow = sh.getLastRow(); if (lastRow < 2) return;
+        var hdr = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (c) { return String(c).trim().toLowerCase(); });
+        var pc = hdr.indexOf('producto'); if (pc < 0) pc = 5; // layout de saveIngreso: idx5
+        var rng = sh.getRange(2, pc + 1, lastRow - 1, 1);
+        var vals = rng.getValues(), changed = 0;
+        for (var i = 0; i < vals.length; i++) {
+          if (String(vals[i][0] || '').trim() === oldT) { vals[i][0] = newT; changed++; }
+        }
+        if (changed) { rng.setValues(vals); res.partidas += changed; res.libros.push(anio + ':' + changed); }
+      } catch (eB) {}
+    });
+  } catch (e) {}
+  // 2) Reglas de comisión (COMISIONES_CFG) — renombra en productos[] y productosSoloDescuento[].
+  try {
+    if (typeof _comCfg === 'function' && typeof COMISIONES_CFG_KEY !== 'undefined') {
+      var cfg = _comCfg(), toco = false;
+      (cfg.reglas || []).forEach(function (r) {
+        ['productos', 'productosSoloDescuento'].forEach(function (campo) {
+          (r[campo] || []).forEach(function (p, j) { if (String(p).trim() === oldT) { r[campo][j] = newT; toco = true; res.reglas++; } });
+        });
+      });
+      if (toco) PropertiesService.getScriptProperties().setProperty(COMISIONES_CFG_KEY, JSON.stringify({ reglas: cfg.reglas }));
+    }
+  } catch (e) {}
+  // 3) Tarifas GM — renombra el tratamiento (casa con el ingreso por nombre).
+  try {
+    if (typeof readTarifasGM === 'function' && typeof GM_TARIFAS_KEY !== 'undefined') {
+      var tg = readTarifasGM().cfg, tocoT = false;
+      (tg.tratamientos || []).forEach(function (t) { if (String(t.nombre || '').trim() === oldT) { t.nombre = newT; tocoT = true; res.tarifas++; } });
+      if (tocoT) PropertiesService.getScriptProperties().setProperty(GM_TARIFAS_KEY, JSON.stringify(tg));
+    }
+  } catch (e) {}
+  try { logAudit(usuario || 'sistema', 'Productos', 'Renombrar (propagar)', '', 'Producto', oldT, newT + ' · ' + res.partidas + ' partidas, ' + res.reglas + ' regla(s), ' + res.tarifas + ' tarifa(s)'); } catch (e) {}
+  return res;
+}
+
 function updateProducto(body) {
   try {
     var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
@@ -5458,7 +5513,16 @@ function updateProducto(body) {
       }
     }
     logAudit(body.usuario||'sistema','Productos','Editar',prodId,'Descripcion',oldDesc,body.descripcion||oldDesc);
-    return {ok:true, productoId:prodId};
+    // RENOMBRE → propagar el nombre a todas las partidas históricas (sin tocar costos)
+    // y a las configs que casan por nombre. Solo si de verdad cambió el nombre y el
+    // llamador no lo desactivó explícitamente (propagarRename:false).
+    var _rename = null;
+    if (body.descripcion !== undefined && String(body.descripcion).trim()
+        && String(body.descripcion).trim() !== String(oldDesc).trim()
+        && body.propagarRename !== false) {
+      _rename = _prodPropagarRename(oldDesc, body.descripcion, body.usuario);
+    }
+    return {ok:true, productoId:prodId, rename:_rename};
   } catch(ex) { return {ok:false, error:ex.message}; }
 }
 

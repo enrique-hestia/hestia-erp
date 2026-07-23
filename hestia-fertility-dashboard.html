@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.331 -->
+﻿<!-- app-build:2026.07.22.332 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4661,6 +4661,7 @@ function prodEditForm(jsonStr) {
   // prodOpenForm usa innerHTML síncrono — el DOM ya existe al regresar.
   // Sobreescribir botón y título de inmediato, sin setTimeout.
   var _el = function(id){ return document.getElementById(id); };
+  window._prodEditOrigDesc = p.descripcion || '';   // nombre original, para detectar rename
   if(_el('prod-f-desc')) _el('prod-f-desc').value = p.descripcion||'';
   // Categoría/Tipo: si el registro trae un valor que no está en la lista
   // administrada (dato antiguo), se inyecta como opción para no perderlo.
@@ -4748,6 +4749,11 @@ function _prodFiscalPayload(){
 async function prodSubmitEdit(productoId) {
   var desc = (document.getElementById('prod-f-desc')||{}).value||'';
   if (!desc) { alert('Ingresa la descripción'); return; }
+  // Renombre: avisar que se propagará a TODAS las partidas históricas (sin tocar costos).
+  var _origDesc = String(window._prodEditOrigDesc||'').trim();
+  if (_origDesc && _origDesc !== desc.trim()) {
+    if (!confirm('Vas a RENOMBRAR el producto:\n\n«'+_origDesc+'»\n→ «'+desc.trim()+'»\n\nSe actualizará el nombre en TODAS las partidas históricas de este producto y en las reglas de comisión / tarifas, para que su historia no se parta en dos.\n\nNO cambia precios ni costos (esos siguen congelados por partida; el precio nuevo solo aplica a capturas futuras).\n\n¿Continuar?')) return;
+  }
   var btn = document.getElementById('prod-save-btn');
   var stEl = document.getElementById('prod-save-status');
   function setSt(msg, color){ if(stEl){ stEl.textContent=msg; stEl.style.color=color||'#374151'; } }
@@ -4790,7 +4796,9 @@ async function prodSubmitEdit(productoId) {
     console.log('[prodSubmitEdit] respuesta raw=', text);
     var res; try{ res=JSON.parse(text); }catch(pe){ setSt('Error: respuesta no es JSON — '+text.substring(0,120),'#dc2626'); if(btn){btn.disabled=false;btn.textContent='Actualizar producto';} return; }
     if(res.ok) {
-      setSt('✓ Guardado','#166534');
+      setSt('✓ Guardado' + (res.rename && res.rename.partidas ? ' · '+res.rename.partidas+' partida(s) renombrada(s)' : ''),'#166534');
+      if (res.rename && (res.rename.partidas || res.rename.reglas || res.rename.tarifas))
+        alert('✓ Renombrado propagado:\n· '+res.rename.partidas+' partida(s) en el histórico\n· '+res.rename.reglas+' regla(s) de comisión\n· '+res.rename.tarifas+' tarifa(s)\n\nLos costos NO se tocaron.');
       // Actualizar precio en cache local para reflejar el cambio inmediatamente
       // sin depender de que el servidor devuelva el valor correcto
       var newPrecio = parseFloat(String(payload.precio).replace(/[$,]/g,''))||0;
