@@ -5388,6 +5388,11 @@ function _prodPropagarRename(oldDesc, newDesc, usuario) {
   var res = { partidas: 0, libros: [], reglas: 0, tarifas: 0 };
   var oldT = String(oldDesc || '').trim(), newT = String(newDesc || '').trim();
   if (!oldT || !newT || oldT === newT) return res;
+  // Normalizador: empata SIN acentos + minúsculas + espacios colapsados, porque las
+  // partidas históricas tienen variantes de escritura del mismo nombre ('cryotops' vs
+  // 'Cryotops', 'ICSI' vs 'Icsi', 'y' vs 'Y'). Un match exacto se las saltaba en silencio.
+  function _keyP(s){ return (typeof _comKeyProd === 'function') ? _comKeyProd(s) : String(s || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+  var oldKey = _keyP(oldT);
   // 1) BD_Ingresos de TODOS los años — solo la columna Producto (por lote: 1 lectura +
   //    1 escritura de esa columna por libro; nunca se leen ni tocan los montos).
   try {
@@ -5403,7 +5408,8 @@ function _prodPropagarRename(oldDesc, newDesc, usuario) {
         var rng = sh.getRange(2, pc + 1, lastRow - 1, 1);
         var vals = rng.getValues(), changed = 0;
         for (var i = 0; i < vals.length; i++) {
-          if (String(vals[i][0] || '').trim() === oldT) { vals[i][0] = newT; changed++; }
+          var cur = String(vals[i][0] || '');
+          if (cur.trim() && _keyP(cur) === oldKey && cur.trim() !== newT) { vals[i][0] = newT; changed++; }
         }
         if (changed) { rng.setValues(vals); res.partidas += changed; res.libros.push(anio + ':' + changed); }
       } catch (eB) {}
