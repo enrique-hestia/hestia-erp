@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.333 -->
+﻿<!-- app-build:2026.07.22.334 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12612,22 +12612,28 @@ async function gmTarifasAbrir(){
   var s=getSession()||{};
   try{ if(typeof ingLoadProductos==='function') await ingLoadProductos(false); }catch(e){}
   try{ var r=await fetch(APPS_SCRIPT_URL,{method:'POST',redirect:'follow',body:JSON.stringify({action:'tarifasGMLeer',token:s.token||getToken()})}); var d=await r.json(); _gmTarifas=(d&&d.ok)?d.cfg:null; }catch(e){ _gmTarifas=null; }
-  // Auto-reflejar los procedimientos ya dados de alta en las reglas de comisión
-  // (Procedimientos que aplican + Solo comisión) para no capturarlos doble aquí.
-  try{ var ctx=await _gmCtxLoad(true); if(ctx&&ctx.procedimientos) _gmMergeProcs(ctx.procedimientos); }catch(e){}
+  // La tabla se SINCRONIZA a los procedimientos de las reglas (Procedimientos que aplican
+  // + Solo comisión): exactamente esos, ni más (se quitan filas viejas/semilla) ni menos.
+  try{ var ctx=await _gmCtxLoad(true); if(ctx&&ctx.procedimientos) _gmReconcileProcs(ctx.procedimientos); }catch(e){}
   _gmRender();
 }
-/* Añade a la tabla de tarifas los procedimientos de las reglas que aún no estén
-   (por nombre). Preserva las filas existentes y sus precios; solo agrega faltantes. */
-function _gmMergeProcs(procs){
+/* Deja la tabla de tarifas EXACTAMENTE con los procedimientos de las reglas: preserva
+   los precios de los que siguen, agrega los nuevos (vacíos) y QUITA los que ya no están
+   (semilla vieja). Así no se acumula basura ni se ven descripciones que no existen. */
+function _gmReconcileProcs(procs){
   if(!_gmTarifas) return;
-  _gmTarifas.tratamientos=_gmTarifas.tratamientos||[];
-  var have={}; _gmTarifas.tratamientos.forEach(function(t){ have[_gmKey(t.nombre)]=1; });
-  (procs||[]).forEach(function(nm){
-    var k=_gmKey(nm); if(!nm||have[k]) return; have[k]=1;
-    var p=(_ingTodosProductos||_ingProductos||[]).filter(function(x){return String(x.descripcion||'')===nm;})[0];
-    _gmTarifas.tratamientos.push({nombre:nm, sku:p?String(p.sku||''):'', base:0, precio:[0,0,0,0,0,0], daniel:[0,0,0,0,0,0]});
+  procs = procs||[];
+  var byKey={}; (_gmTarifas.tratamientos||[]).forEach(function(t){ byKey[_gmKey(t.nombre)]=t; });
+  var seen={}, out=[];
+  procs.forEach(function(nm){
+    var k=_gmKey(nm); if(!nm||seen[k]) return; seen[k]=1;
+    if(byKey[k]){ var t=byKey[k]; t.nombre=nm; out.push(t); }   // preserva precios, nombre canónico
+    else {
+      var p=(_ingTodosProductos||_ingProductos||[]).filter(function(x){return _gmKey(x.descripcion)===k;})[0];
+      out.push({nombre:nm, sku:p?String(p.sku||''):'', base:0, precio:[0,0,0,0,0,0], daniel:[0,0,0,0,0,0]});
+    }
   });
+  _gmTarifas.tratamientos = out;
 }
 function _gmProdDatalist(){
   return '<datalist id="gm-prodlist">'+((_ingTodosProductos||_ingProductos||[]).map(function(p){ return '<option value="'+String(p.descripcion||'').replace(/"/g,'&quot;')+'" data-sku="'+String(p.sku||'').replace(/"/g,'&quot;')+'">'; }).join(''))+'</datalist>';
@@ -12636,16 +12642,20 @@ function _gmRender(){
   var body=document.getElementById('gm-body'); if(!body) return;
   if(!_gmTarifas){ body.innerHTML='<div style="color:#c83c3c;padding:16px">No se pudieron cargar las tarifas.</div>'; return; }
   var tiers=_gmTarifas.tiers||[];
-  var h=_gmProdDatalist();
-  h+='<div style="font-size:12px;color:#888;margin-bottom:10px">El <b>Tratamiento</b> debe ser un producto del <b>catálogo</b> (escríbelo o elígelo del desplegable). Por tratamiento×tier: <b>Precio a Médico</b> (lo que paga) y <b>Comisión Daniel</b> (efectivo). Hestia se queda con Precio − Daniel. El tier lo da el volumen del grupo en el mes (rangos abajo).</div>';
-  h+='<div style="overflow:auto"><table style="border-collapse:collapse;font-size:11.5px;min-width:760px"><thead>'
-    +'<tr><th style="text-align:left;position:sticky;left:0;background:var(--color-surface,#fff);padding:4px 6px">Tratamiento</th><th style="padding:4px 6px">Base</th>'
+  var trs=_gmTarifas.tratamientos||[];
+  var h='<div style="font-size:12px;color:#888;margin-bottom:10px">Los <b>tratamientos</b> se toman automáticamente de «<b>Procedimientos que aplican</b>» + «Solo comisión» de tus reglas — para agregar o quitar uno, hazlo en la regla. Aquí capturas, por tratamiento×tier, el <b>Precio a Médico</b> (lo que paga) y la <b>Comisión Daniel</b> (efectivo). Hestia se queda con Precio − Daniel. El tier lo da el volumen del grupo en el mes.</div>';
+  if(!trs.length){
+    h+='<div style="padding:22px;text-align:center;color:#b45309;font-size:12.5px;background:#fffbeb;border:1px solid #fde68a;border-radius:9px">No hay procedimientos en tus reglas de comisión. Agrégalos en «Procedimientos que aplican» y vuelve a abrir esta tabla.</div>';
+    body.innerHTML=h; return;
+  }
+  h+='<div style="overflow:auto"><table style="border-collapse:collapse;font-size:11.5px"><thead>'
+    +'<tr><th style="text-align:left;position:sticky;left:0;background:var(--color-surface,#fff);padding:4px 8px;min-width:260px">Tratamiento</th><th style="padding:4px 6px">Base</th>'
     +tiers.map(function(t){return '<th colspan="2" style="text-align:center;padding:4px 6px;border-left:1px solid var(--color-divider)">'+_esc(t.label)+' <span style="color:var(--color-primary)">'+t.pct+'%</span><div style="font-size:9px;font-weight:400;color:#999">'+t.desde+'-'+(t.hasta||'∞')+' proc</div></th>';}).join('')+'</tr>'
     +'<tr><th style="position:sticky;left:0;background:var(--color-surface,#fff)"></th><th></th>'+tiers.map(function(){return '<th style="font-size:9px;color:#999;border-left:1px solid var(--color-divider)">Precio</th><th style="font-size:9px;color:#166534">Daniel</th>';}).join('')+'</tr></thead><tbody>';
-  (_gmTarifas.tratamientos||[]).forEach(function(tr,ti){
-    h+='<tr><td style="white-space:nowrap;position:sticky;left:0;background:var(--color-surface,#fff);padding:3px 6px">'
-      +'<span onclick="_gmDelTrat('+ti+')" title="Quitar tratamiento" style="cursor:pointer;color:#c83c3c;font-weight:700;margin-right:5px">×</span>'
-      +'<input list="gm-prodlist" value="'+_esc(tr.nombre||'')+'" onchange="_gmSetNombre('+ti+',this.value)" placeholder="Producto del catálogo…" style="width:200px;'+_gmInp()+';font-weight:600"></td>'
+  trs.forEach(function(tr,ti){
+    // Tratamiento READ-ONLY con la descripción COMPLETA (se ve todo, no se corta).
+    h+='<tr><td style="position:sticky;left:0;background:var(--color-surface,#fff);padding:6px 8px;min-width:260px;max-width:360px;white-space:normal;line-height:1.3;font-weight:600">'
+      +_esc(tr.nombre||'')+(tr.sku?' <span style="color:#aaa;font-weight:400;font-size:10px">['+_esc(tr.sku)+']</span>':'')+'</td>'
       +'<td style="padding:2px"><input type="number" value="'+(tr.base||0)+'" onchange="_gmSet('+ti+',\'base\',-1,this.value)" style="width:66px;'+_gmInp()+'"></td>';
     for(var k=0;k<6;k++){
       h+='<td style="padding:2px;border-left:1px solid var(--color-divider)"><input type="number" value="'+((tr.precio&&tr.precio[k])||0)+'" onchange="_gmSet('+ti+',\'precio\','+k+',this.value)" style="width:62px;'+_gmInp()+'"></td>'
@@ -12654,27 +12664,8 @@ function _gmRender(){
     h+='</tr>';
   });
   h+='</tbody></table></div>';
-  h+='<button onclick="_gmAddTrat()" style="margin-top:10px;padding:6px 12px;background:var(--color-surface-2,#f3f4f6);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">＋ Agregar tratamiento</button>';
+  h+='<div style="margin-top:8px;font-size:11px;color:#999">'+trs.length+' tratamiento(s) · tomados de las reglas de comisión.</div>';
   body.innerHTML=h;
-}
-/* Tratamiento = producto del catálogo. Guarda nombre + sku (para casar con ingresos). */
-function _gmSetNombre(ti,val){
-  var tr=_gmTarifas&&_gmTarifas.tratamientos[ti]; if(!tr) return;
-  tr.nombre=String(val||'').trim();
-  var p=(_ingTodosProductos||_ingProductos||[]).filter(function(x){ return String(x.descripcion||'')===tr.nombre; })[0];
-  tr.sku = p ? String(p.sku||'') : (tr.sku||'');
-}
-function _gmAddTrat(){
-  if(!_gmTarifas) return;
-  _gmTarifas.tratamientos=_gmTarifas.tratamientos||[];
-  _gmTarifas.tratamientos.push({nombre:'',sku:'',base:0,precio:[0,0,0,0,0,0],daniel:[0,0,0,0,0,0]});
-  _gmRender();
-}
-function _gmDelTrat(ti){
-  if(!_gmTarifas||!_gmTarifas.tratamientos[ti]) return;
-  var nm=_gmTarifas.tratamientos[ti].nombre||'este tratamiento';
-  if(!confirm('¿Quitar "'+nm+'" de las tarifas?')) return;
-  _gmTarifas.tratamientos.splice(ti,1); _gmRender();
 }
 function _gmSet(ti,campo,idx,val){ var tr=_gmTarifas&&_gmTarifas.tratamientos[ti]; if(!tr)return; var n=parseFloat(val)||0; if(campo==='base') tr.base=n; else { tr[campo]=tr[campo]||[0,0,0,0,0,0]; tr[campo][idx]=n; } }
 async function gmTarifasGuardar(){
@@ -13474,7 +13465,6 @@ function comCfgInnerHtml() {
     + (W.length ? W.map(function (x, i) { return '<option value="' + i + '"' + (i === _comCfgSel ? ' selected' : '') + '>' + _comEsc(x.nombre || x.id) + (x.activo === false ? ' (inactiva)' : '') + '</option>'; }).join('') : '<option value="0">— sin reglas —</option>')
     + '</select>'
     + (puede ? '<button onclick="comCfgAddRegla()" style="padding:8px 12px;background:none;border:1.5px dashed var(--color-primary);color:var(--color-primary);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">＋ Nueva regla</button>' : '')
-    + (puede ? '<button onclick="gmTarifasAbrir()" title="Listas de precio EXACTAS por tier: Precio a Médico Externo + Comisión Daniel por tratamiento×tier (da los montos exactos de tu tabla)" style="padding:8px 12px;background:var(--color-surface-2);border:1px solid var(--color-divider);color:var(--color-text);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">💵 Tarifas por tier</button>' : '')
     + (puede && r ? '<button onclick="comCfgDelRegla()" style="padding:8px 10px;background:none;border:1px solid #e3b3b3;color:#c83c3c;border-radius:8px;font-size:11px;cursor:pointer">✕ Quitar regla</button>' : '')
     + '</div>';
 
