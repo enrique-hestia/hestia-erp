@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.329 -->
+﻿<!-- app-build:2026.07.22.330 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -3870,6 +3870,7 @@ function _renderProductosView() {
       +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Importar Excel</button>'
       +'<input type="file" id="prod-import-file" accept=".xlsx" style="display:none" onchange="prodImportarExcel(this)">'
       +'<button onclick="hfDescargarPlantilla(\'catalogo-productos\')" title="Descarga un CSV de ejemplo con las columnas exactas del catálogo, para no equivocarte de formato al importar" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:transparent;color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">⬇ Plantilla muestra</button>'
+      +'<button onclick="mpConciliarAbrir()" title="Cruzar los productos de Mercado Pago/Mercado Libre (por SKU) con el catálogo y crear los que falten" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🔗 Conciliar Mercado Pago</button>'
       +'<button onclick="listasAdminOpen()" title="Listas de precios: dar de alta, editar o borrar las listas (General, Grupo Médico, etc.)" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">💲 Listas de precios</button>'
       +'<button onclick="agenciasAdminOpen()" title="Administrar agencias (cada agencia = su lista de precios)" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🏢 Agencias</button>'
       +'<button onclick="navigateTo(\'origenes\')" title="Orígenes externos: agencias y médicos que refieren ingresos (para atribución)" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🏷️ Orígenes externos</button>'
@@ -4479,6 +4480,169 @@ async function prodImportarExcel(inputEl) {
     if (btn) btn.disabled = false;
     inputEl.value = '';
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CONCILIAR PRODUCTOS DE MERCADO PAGO / MERCADO LIBRE
+   Cruza el export de productos de MP (por SKU) contra el catálogo de VestaOS y
+   crea/vincula los que falten, para UNIFICAR ambos catálogos. Todo el cruce corre
+   en el navegador (SheetJS); crear/actualizar reusa importarCatalogoProductosBatch.
+   ⚠ Esto NO importa ventas ni pagos (el ERP escribe sus propias filas de MP —
+   importar el reporte de ventas duplicaría). Solo unifica el CATÁLOGO de productos.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var _mpConcItems = null;
+function _mpNorm(s){ return String(s||'').trim().toLowerCase().replace(/\s+/g,' '); }
+function _mpNormSku(s){ return String(s||'').trim().toUpperCase().replace(/\s+/g,''); }
+function _mpModal(inner){
+  var old=document.getElementById('mp-ovl'); if(old) old.remove();
+  var ovl=document.createElement('div'); ovl.id='mp-ovl';
+  ovl.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:6200;display:flex;align-items:center;justify-content:center;padding:16px';
+  ovl.innerHTML='<div style="background:var(--color-surface,#fff);color:var(--color-text,#111);border-radius:14px;max-width:920px;width:100%;max-height:90vh;box-shadow:0 20px 60px rgba(0,0,0,.3);display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:15px 20px;border-bottom:1px solid var(--color-divider,#eee);font-weight:800;font-size:15px;display:flex;justify-content:space-between;align-items:center"><span>🔗 Conciliar productos — Mercado Pago</span><button onclick="var o=document.getElementById(\'mp-ovl\');if(o)o.remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#9ca3af;line-height:1">×</button></div>'
+    +'<div id="mp-body" style="flex:1;overflow:auto;padding:16px 20px">'+inner+'</div></div>';
+  document.body.appendChild(ovl);
+}
+function mpConciliarAbrir(){
+  _mpConcItems=null;
+  _mpModal(
+    '<div style="font-size:12.5px;color:var(--color-text-muted,#6b7280);margin-bottom:14px;line-height:1.6">Sube el archivo de productos exportado de <b>Mercado Libre / Mercado Pago</b> (hoja «Tus productos»). Se cruzan por <b>SKU</b> contra tu catálogo y te digo cuáles ya existen y cuáles faltan por crear. <br><span style="color:#b45309">Esto solo unifica el catálogo de productos — no importa ventas ni pagos.</span></div>'
+    +'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">'
+    +'<button onclick="document.getElementById(\'mp-file\').click()" style="padding:9px 16px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer">📄 Subir archivo de MP (.xlsx)</button>'
+    +'<input type="file" id="mp-file" accept=".xlsx,.xls" style="display:none" onchange="mpConciliarFile(this)">'
+    +'<button onclick="mpDescargarPlantilla()" style="padding:9px 14px;background:transparent;color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer">⬇ Plantilla muestra</button>'
+    +'</div><div id="mp-result"></div>'
+  );
+}
+function mpDescargarPlantilla(){
+  _loadSheetJS().then(function(){
+    var aoa=[
+      ['Plantilla de ejemplo — Productos Mercado Libre / Mercado Pago'],
+      ['Los encabezados reales van en la fila de abajo; los datos empiezan enseguida.'],
+      [],
+      ['Código interno','—','Nombre','Precio','—','—','—','SKU','—','—','Sección'],
+      [],
+      ['MLM123456789','','Fertilización In Vitro','45000','','','','IVF+T','','','Tratamientos'],
+      ['MLM987654321','','Congelación de Gametos','9000','','','','CGIN','','','Criopreservación']
+    ];
+    var ws=XLSX.utils.aoa_to_sheet(aoa);
+    var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Tus productos');
+    XLSX.writeFile(wb,'Plantilla_Productos_MercadoPago.xlsx');
+  }).catch(function(){ alert('No se pudo cargar el generador de Excel.'); });
+}
+/* Parser robusto: el export de MP trae filas de metadatos antes del encabezado real.
+   Se lee como matriz y se busca la fila de encabezados (la que tiene SKU + Nombre). */
+function _mpParse(rows){
+  var hRow=-1, cols=null;
+  for(var i=0;i<Math.min(rows.length,15);i++){
+    var r=(rows[i]||[]).map(function(c){ return String(c||'').trim().toLowerCase(); });
+    var iSku=-1,iNom=-1,iPre=-1,iCod=-1,iSec=-1;
+    r.forEach(function(c,ci){
+      if(iSku<0 && /\bsku\b/.test(c)) iSku=ci;
+      if(iNom<0 && /(nombre|t[ií]tulo|publicaci)/.test(c)) iNom=ci;
+      if(iPre<0 && /precio/.test(c)) iPre=ci;
+      if(iCod<0 && /(c[oó]digo interno|c[oó]digo|identificaci)/.test(c)) iCod=ci;
+      if(iSec<0 && /(secci[oó]n|categor)/.test(c)) iSec=ci;
+    });
+    if(iSku>=0 && iNom>=0){ hRow=i; cols={sku:iSku,nom:iNom,pre:iPre,cod:iCod,sec:iSec}; break; }
+  }
+  if(hRow<0) return null;
+  var out=[];
+  for(var j=hRow+1;j<rows.length;j++){
+    var r=rows[j]||[];
+    var nombre=String(r[cols.nom]||'').trim();
+    var sku=cols.sku>=0?String(r[cols.sku]||'').trim():'';
+    if(!nombre && !sku) continue;
+    out.push({ nombre:nombre, sku:sku,
+      precio: cols.pre>=0 ? (parseFloat(String(r[cols.pre]||'').replace(/[$,]/g,''))||0) : 0,
+      codigo: cols.cod>=0 ? String(r[cols.cod]||'').trim() : '',
+      seccion: cols.sec>=0 ? String(r[cols.sec]||'').trim() : '' });
+  }
+  return { headerRow:hRow, items:out };
+}
+async function mpConciliarFile(inputEl){
+  var file=inputEl.files&&inputEl.files[0]; if(!file) return;
+  var out=document.getElementById('mp-result');
+  if(out) out.innerHTML='<div style="font-size:12px;color:var(--color-text-muted,#6b7280)"><span class="ing-spinner ing-spinner-dark"></span> Leyendo archivo…</div>';
+  try{
+    await _loadSheetJS();
+    if(typeof ingLoadProductos==='function'){ try{ await ingLoadProductos(false); }catch(e){} }
+    var buf=await file.arrayBuffer();
+    var wb=XLSX.read(buf,{type:'array'});
+    // Prefiere la hoja "Tus productos"; si no, la primera.
+    var shName=wb.SheetNames.filter(function(n){ return /tus productos|productos/i.test(n); })[0]||wb.SheetNames[0];
+    var rows=XLSX.utils.sheet_to_json(wb.Sheets[shName],{header:1,defval:''});
+    var parsed=_mpParse(rows);
+    if(!parsed||!parsed.items.length){ if(out) out.innerHTML='<div style="color:#c83c3c;font-size:12.5px">No encontré una tabla con columnas <b>SKU</b> y <b>Nombre</b>. Usa el export de Mercado Libre (hoja «Tus productos») o la plantilla muestra.</div>'; return; }
+    _mpConcItems=_mpMatchItems(parsed.items);
+    _mpRender();
+  }catch(e){ if(out) out.innerHTML='<div style="color:#c83c3c;font-size:12.5px">Error leyendo el archivo: '+_escH(e.message||String(e))+'</div>'; }
+  finally{ inputEl.value=''; }
+}
+function _mpMatchItems(items){
+  var skuIdx={}, nameIdx={};
+  (_ingTodosProductos||_ingProductos||[]).forEach(function(p){
+    if(p.sku) skuIdx[_mpNormSku(p.sku)]=p;
+    if(p.descripcion) nameIdx[_mpNorm(p.descripcion)]=p;
+  });
+  return items.map(function(m){
+    var bySku=m.sku?skuIdx[_mpNormSku(m.sku)]:null;
+    var byName=nameIdx[_mpNorm(m.nombre)];
+    var match=bySku||byName;
+    var estado = bySku ? 'ok' : (byName ? 'vincular' : 'falta');
+    return { mp:m, match:match, estado:estado, sel:(estado!=='ok') };
+  });
+}
+function _mpRender(){
+  var out=document.getElementById('mp-result'); if(!out||!_mpConcItems) return;
+  var nOk=0,nVinc=0,nFalta=0;
+  _mpConcItems.forEach(function(x){ if(x.estado==='ok')nOk++; else if(x.estado==='vincular')nVinc++; else nFalta++; });
+  var badge=function(txt,c){ return '<span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:10.5px;font-weight:700;color:#fff;background:'+c+'">'+txt+'</span>'; };
+  var h='<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px;font-size:12.5px">'
+    +'<div>'+badge('✓ Ya en catálogo','#047857')+' <b>'+nOk+'</b></div>'
+    +'<div>'+badge('⚠ Vincular SKU','#b45309')+' <b>'+nVinc+'</b></div>'
+    +'<div>'+badge('✗ Falta crear','#b91c1c')+' <b>'+nFalta+'</b></div></div>';
+  h+='<div style="max-height:48vh;overflow:auto;border:1px solid var(--color-divider,#eee);border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+    +'<thead><tr style="position:sticky;top:0;background:var(--color-surface,#fff);text-align:left;color:var(--color-text-muted,#6b7280)"><th style="padding:7px 9px"><input type="checkbox" onchange="_mpToggleAll(this.checked)"></th><th style="padding:7px 9px">Producto MP</th><th style="padding:7px 9px">SKU</th><th style="padding:7px 9px;text-align:right">Precio</th><th style="padding:7px 9px">Estado</th><th style="padding:7px 9px">En catálogo</th></tr></thead><tbody>';
+  _mpConcItems.forEach(function(x,i){
+    var est = x.estado==='ok' ? badge('✓','#047857') : (x.estado==='vincular'?badge('⚠ vincular','#b45309'):badge('✗ crear','#b91c1c'));
+    var enCat = x.match ? _escH(x.match.descripcion||'')+(x.match.sku?' <span style="color:#999">['+_escH(x.match.sku)+']</span>':'') : '—';
+    var chk = x.estado==='ok' ? '' : '<input type="checkbox" '+(x.sel?'checked':'')+' onchange="_mpConcItems['+i+'].sel=this.checked">';
+    h+='<tr style="border-top:1px solid var(--color-divider,#f0f0f0)">'
+      +'<td style="padding:6px 9px">'+chk+'</td>'
+      +'<td style="padding:6px 9px">'+_escH(x.mp.nombre||'')+'</td>'
+      +'<td style="padding:6px 9px;font-family:monospace">'+_escH(x.mp.sku||'—')+'</td>'
+      +'<td style="padding:6px 9px;text-align:right">'+_ovMoney(x.mp.precio)+'</td>'
+      +'<td style="padding:6px 9px">'+est+'</td>'
+      +'<td style="padding:6px 9px">'+enCat+'</td></tr>';
+  });
+  h+='</tbody></table></div>';
+  h+='<div style="margin-top:14px;display:flex;justify-content:flex-end;gap:10px">'
+    +'<button onclick="mpAplicarConciliacion()" style="padding:9px 20px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:12.5px">Crear / vincular seleccionados</button></div>';
+  out.innerHTML=h;
+}
+function _mpToggleAll(v){ (_mpConcItems||[]).forEach(function(x){ if(x.estado!=='ok') x.sel=v; }); _mpRender(); }
+async function mpAplicarConciliacion(){
+  var sel=(_mpConcItems||[]).filter(function(x){ return x.sel && x.estado!=='ok'; });
+  if(!sel.length){ alert('No hay productos seleccionados para crear o vincular.'); return; }
+  // Reusa el batch del catálogo: descripción es la llave (crea si no existe, actualiza SKU si sí).
+  var productos=sel.map(function(x){
+    var p={ descripcion:x.mp.nombre, sku:x.mp.sku, precio:x.mp.precio,
+            categoria:x.match?(x.match.categoria||''):(x.mp.seccion||'Externos') };
+    return p;
+  });
+  var out=document.getElementById('mp-result');
+  if(out) out.insertAdjacentHTML('beforeend','<div id="mp-apply-status" style="margin-top:10px;font-size:12px;color:var(--color-text-muted,#6b7280)"><span class="ing-spinner ing-spinner-dark"></span> Aplicando '+productos.length+'…</div>');
+  try{
+    var s=getSession()||{};
+    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'importarCatalogoProductosBatch',productos:productos,usuario:s.email||'sistema'})});
+    var res=await r.json();
+    if(!res.ok){ alert('Error: '+(res.error||'No se pudo aplicar.')); return; }
+    _prodData=null; if(typeof _ingProductosLoaded!=='undefined') _ingProductosLoaded=false;
+    try{ await ingLoadProductos(true); }catch(e){}
+    alert('✓ '+(res.creados||0)+' creados, '+(res.actualizados||0)+' vinculados/actualizados en el catálogo.');
+    var o=document.getElementById('mp-ovl'); if(o) o.remove();
+    if(typeof loadProductosView==='function'){ try{ loadProductosView(_prodFilterCat,_prodIsCatalog); }catch(e){} }
+  }catch(e){ alert('Error de red: '+e); }
 }
 
 function prodEditForm(jsonStr) {
