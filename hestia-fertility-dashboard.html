@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.345 -->
+﻿<!-- app-build:2026.07.22.346 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -28823,16 +28823,30 @@ function getToken() { var s = getSession(); return s ? s.token : ''; }
     return esBackend && typeof _hfWorkTrack === 'function' ? _hfWorkTrack(_p) : _p;
   };
 })();
-/* Indicador global "Trabajando…": aparece si alguna petición al backend lleva >2s en
- * curso; desaparece cuando ya no hay ninguna pendiente. Regla general de toda la app. */
-var _hfWorkN = 0, _hfWorkTimer = null;
+/* Indicador global "Trabajando…": aparece SOLO cuando una petición del USUARIO lleva >2s
+ * en curso; desaparece cuando ya no hay ninguna. NO se muestra para peticiones de fondo
+ * (sondeo de chat, auto-refresh) ni cuando la vista ya tiene su propia animación de carga. */
+var _hfWorkN = 0, _hfWorkTimer = null, _hfLastInteraction = 0;
+// Marca la última interacción real del usuario (clic/tecla/cambio) para distinguir una
+// petición que él disparó de un sondeo de fondo.
+(function(){
+  ['pointerdown','keydown','change','submit'].forEach(function(ev){
+    document.addEventListener(ev, function(){ _hfLastInteraction = Date.now(); }, true);
+  });
+})();
 function _hfWorkTrack(p) {
+  // Solo cuenta si la disparó el usuario hace poco, o si ya hay una cadena suya en curso.
+  var userDriven = (Date.now() - _hfLastInteraction) < 2000 || _hfWorkN > 0;
+  if (!userDriven) return p;   // sondeo/auto-refresh de fondo → sin indicador
   _hfWorkN++;
   if (!_hfWorkTimer) _hfWorkTimer = setTimeout(function(){ _hfWorkTimer = null; if (_hfWorkN > 0) _hfWorkShow(); }, 2000);
   function done(){ _hfWorkN = Math.max(0, _hfWorkN - 1); if (_hfWorkN === 0) { if (_hfWorkTimer) { clearTimeout(_hfWorkTimer); _hfWorkTimer = null; } _hfWorkHide(); } }
   return p.then(function(r){ done(); return r; }, function(e){ done(); throw e; });
 }
 function _hfWorkShow() {
+  // Si la vista ya tiene su propia animación de carga (hestiaLoader deja _hfRAF activo),
+  // NO duplicar con la píldora — donde ya hay animación, se omite "Trabajando…".
+  if (window._hfRAF) return;
   var el = document.getElementById('hf-working');
   if (!el) {
     el = document.createElement('div'); el.id = 'hf-working';
