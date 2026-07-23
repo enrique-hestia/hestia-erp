@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.336 -->
+﻿<!-- app-build:2026.07.22.337 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -17736,6 +17736,16 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     var _idpEl = document.getElementById('view-identificar');
     if (_idpEl) _idpEl.style.display = '';
     if (typeof idpInit === 'function') idpInit();
+    return;
+  }
+  // Ventas / Órdenes — vista propia (renderOrdenesVenta). Se reconoce por id o por la
+  // fuente del menú ('OrdenVenta', que NO es una hoja real → evita el fetch genérico
+  // que daba "Hoja OrdenVenta no encontrada").
+  if (viewId === 'ordenes-venta' || (_foundViewItem && /orden.?venta|^ventas$/i.test(String(_foundViewItem.fuente||'')))) {
+    document.querySelectorAll('.view').forEach(function(v){ v.style.display='none'; });
+    var _ovEl2 = document.getElementById('view-ordenes-venta');
+    if (_ovEl2) _ovEl2.style.display = '';
+    if (typeof renderOrdenesVenta === 'function') renderOrdenesVenta();
     return;
   }
   // Manual ilustrado (guía de uso) — vista propia, sin fetch al API
