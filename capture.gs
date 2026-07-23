@@ -375,6 +375,10 @@ function readCajaChicaData(cajaId) {
     var gastoHoy = 0, gastoSemana = 0, gastoMes = 0, ingresoMes = 0;
     rows.forEach(function(m) {
       if (m.esRemanente) return;
+      // Movimientos INTERNOS (traspaso entre cajas, reverso de una venta, ajuste por
+      // arqueo) SÍ mueven el saldo pero NO son gasto/ingreso operativo → no cuentan en
+      // los KPIs de gasto (si no, un traspaso o un reverso de $50k inflaría "Gasto del Mes").
+      if (/traspaso|reverso|ajuste por arqueo/i.test(String(m.concepto || ''))) return;
       var d = parseFechaMx(m.fecha);
       if (!d) return;
       if (d >= inicioMes) { gastoMes += m.salida; ingresoMes += m.entrada; }
