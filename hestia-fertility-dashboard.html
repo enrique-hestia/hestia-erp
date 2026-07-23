@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.335 -->
+﻿<!-- app-build:2026.07.22.336 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2679,10 +2679,6 @@ var _ingData=null;
 // el historial 2024/2025 desde el libro correcto. Al ver un año anterior la vista
 // es de SOLO LECTURA (los escritores de ingresos apuntan al libro del año en curso).
 var _ingAnioSel=null;
-// «Todo el historial»: ignora el rango de fechas global y muestra TODAS las partidas del
-// libro consolidado (útil ahora que todos los años viven en el BD_Ingresos en curso).
-var _ingVerTodo=false;
-function ingVerTodoToggle(){ _ingVerTodo=!_ingVerTodo; if(_ingVerTodo) _ingAnioSel=null; _ingPage=1; _ingData=null; if(typeof loadIngresosERP==='function') loadIngresosERP(); }
 function _ingReadOnly(){ return !!_ingAnioSel && parseInt(_ingAnioSel,10)!==new Date().getFullYear(); }
 function _ingSwrKey(){ return _ingAnioSel ? ('ingresos_'+_ingAnioSel) : 'ingresos'; }
 // Guarda para escrituras: bloquea editar/pagar/borrar cuando se ve un año histórico.
@@ -2713,9 +2709,10 @@ async function _fetchIngresosRaw() {
 }
 
 function _ingApplyDateFilter(data) {
-  // Año histórico elegido a mano, o «Todo el historial»: no filtres por el periodo
-  // global (que apunta al año en curso y ocultaría partidas de otros meses/años).
-  if (_ingAnioSel || _ingVerTodo) return data;
+  // La vista de Ingresos muestra TODO el libro consolidado; se acota con los filtros de
+  // Año/Mes/categoría/búsqueda, NO con el rango de fechas global (que apunta al periodo
+  // actual y ocultaba el histórico —p.ej. OP-00078 de 2024). Por eso ya no se filtra aquí.
+  return data;
   var fi = currentFechaInicio || '', ff = currentFechaFin || '';
   if (!fi && !ff) return data;
   var origRows = data.rows || [];
@@ -2837,6 +2834,7 @@ function _ingFilterRows() {
     });
   }
   return _ingData.rows.filter(function(r) {
+    if (!_ingInSel(f.anio, (r.fecha||'').substring(0,4))) return false;
     if (!_ingInSel(f.mes, r.mes)) return false;
     if (!_ingInSel(f.categoria, r.categoria)) return false;
     if (!_ingInSel(f.formaPago, r.formaPago)) return false;
@@ -2887,7 +2885,12 @@ function _ingSetFilter(key, val) {
 
 // ── Filtros multi-selección (checkboxes dentro del dropdown) ──
 var _ingOpenFilter = null, _ingFilterTimer = null;
-var _ingAllLabels = {mes:'Todos', categoria:'Todas', formaPago:'Todas', sucursal:'Todas'};
+var _ingAllLabels = {anio:'Todos', mes:'Todos', categoria:'Todas', formaPago:'Todas', sucursal:'Todas'};
+// Años presentes en la data cargada (histórico completo), de más reciente a más viejo.
+function _ingAniosDeData(){
+  var s={}; ((_ingData&&_ingData.rows)||[]).forEach(function(r){ var y=(r.fecha||'').substring(0,4); if(y) s[y]=1; });
+  return Object.keys(s).sort().reverse();
+}
 function _ingMSelSummary(key) {
   var sel = _ingFilters[key] || [];
   if (!sel.length) return _ingAllLabels[key] || 'Todas';
@@ -3129,8 +3132,7 @@ function _renderIngresosERP() {
   var _ingYNow=new Date().getFullYear(), _ingYears=[]; for(var _iy=2024; _iy<=Math.max(_ingYNow,2026); _iy++) _ingYears.push(_iy);
   var _ingYSelStr=String(_ingAnioSel||'');
   h.push('<div class="ing-filters">'
-    +'<div class="ing-fg"><div class="ing-fl">Año</div><select class="ing-sel" onchange="ingSetAnio(this.value)"><option value="">Año en curso</option>'+_ingYears.map(function(y){return '<option value="'+y+'"'+(String(y)===_ingYSelStr?' selected':'')+'>'+y+'</option>';}).join('')+'</select></div>'
-    +'<div class="ing-fg"><div class="ing-fl">&nbsp;</div><button onclick="ingVerTodoToggle()" title="Muestra TODAS las partidas del historial completo, ignorando el rango de fechas" style="padding:7px 12px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid '+(_ingVerTodo?'#0d9488':'var(--color-divider,#e5e7eb)')+';background:'+(_ingVerTodo?'#0d9488':'var(--card-bg,#fff)')+';color:'+(_ingVerTodo?'#fff':'var(--text-primary,#111)')+'">🗂️ '+(_ingVerTodo?'Viendo TODO ✓':'Todo el historial')+'</button></div>'
+    +_ingMSelHTML('anio','Año',_ingAniosDeData())
     +_ingMSelHTML('mes','Mes',meses)
     +_ingMSelHTML('categoria','Categoría',cats)
     +_ingMSelHTML('formaPago','Forma de pago',fps)

@@ -4515,7 +4515,9 @@ function _readFromBDIngresos(sheet) {
   return {
     view:'ingresos', fuente:'BD_Ingresos',
     anio: allRows.length>0 ? allRows[0].fecha.substring(0,4) : String(new Date().getFullYear()),
-    rows: allRows.slice(-500).reverse(),
+    // Se devuelven TODAS las filas (antes topaba a 500 → el histórico viejo no llegaba
+    // al frontend, p.ej. OP-00078 de 2024). El front pagina el despliegue.
+    rows: allRows.slice().reverse(),
     totalRows: allRows.length,
     resumenMensual: rmArr,
     totalAnual: totalAnual,
@@ -4528,10 +4530,52 @@ function _readFromBDIngresos(sheet) {
   };
 }
 
+/* Lee y UNE los ingresos de TODOS los libros de año (INGRESOS_IDS) en un solo resultado.
+ * Forward-proof: cuando al cierre de año se cree un libro nuevo, esta vista sigue mostrando
+ * el histórico completo sin depender de un selector de año. Dedup por OP+Línea+Fecha (los
+ * libros vacíos no aportan). Recalcula los KPIs sobre el conjunto unido. */
+function readIngresosDataAll() {
+  try {
+    var ids = (typeof INGRESOS_IDS !== 'undefined') ? INGRESOS_IDS : {};
+    var merged = [], seen = {};
+    Object.keys(ids).forEach(function (anio) {
+      try {
+        var ss = SpreadsheetApp.openById(ids[anio]);
+        var sh = null, all = ss.getSheets();
+        for (var i = 0; i < all.length; i++) if (all[i].getName() === BD_INGRESOS_TAB) { sh = all[i]; break; }
+        if (!sh) return;
+        var res = _readFromBDIngresos(sh);
+        (res.rows || []).forEach(function (r) { var k = r.id + '|' + r.linea + '|' + r.fecha; if (seen[k]) return; seen[k] = 1; merged.push(r); });
+      } catch (eB) {}
+    });
+    merged.sort(function (a, b) { return String(b.fecha).localeCompare(String(a.fecha)) || String(b.id).localeCompare(String(a.id)); });
+    // KPIs sobre el conjunto unido (las canceladas no suman).
+    var MI = {Enero:0,Febrero:1,Marzo:2,Abril:3,Mayo:4,Junio:5,Julio:6,Agosto:7,Septiembre:8,Octubre:9,Noviembre:10,Diciembre:11};
+    var totalAnual=0,totalPagado=0,catMap={},fpMap={},mesMap={},uniqueOps={};
+    merged.forEach(function (ar) {
+      if (ar.cancelada) return;
+      totalAnual+=ar.totalPagar; totalPagado+=ar.pagado; uniqueOps[ar.id]=true;
+      var c=ar.categoria||'Sin categoría'; if(!catMap[c])catMap[c]={nombre:c,total:0,count:0}; catMap[c].total+=ar.totalPagar; catMap[c].count++;
+      var f=ar.formaPago||'Sin especificar'; if(!fpMap[f])fpMap[f]={nombre:f,total:0,count:0}; fpMap[f].total+=ar.totalPagar; fpMap[f].count++;
+      var mn=ar.mes; if(mn){ if(!mesMap[mn])mesMap[mn]={mes:mn,mesIdx:(ar.mesIdx!=null?ar.mesIdx:(MI[mn]||0)),totalIngresos:0,totalPagado:0,numOperaciones:0}; mesMap[mn].totalIngresos+=ar.totalPagar; mesMap[mn].totalPagado+=ar.pagado; mesMap[mn].numOperaciones++; }
+    });
+    function sortTop(map,limit){ var arr=[]; for(var k in map)arr.push(map[k]); arr.sort(function(a,b){return b.total-a.total;}); arr.forEach(function(x){x.pct=totalAnual>0?(x.total/totalAnual)*100:0;}); return arr.slice(0,limit); }
+    var rmArr=[]; for(var mk in mesMap)rmArr.push(mesMap[mk]); rmArr.sort(function(a,b){return a.mesIdx-b.mesIdx;});
+    var numOps=Object.keys(uniqueOps).length;
+    return { view:'ingresos', fuente:'BD_Ingresos', anio:'Todos',
+      rows: merged, totalRows: merged.length, resumenMensual: rmArr,
+      totalAnual:totalAnual, totalPagado:totalPagado, numOperaciones:numOps,
+      ticketPromedio: numOps>0?totalAnual/numOps:0,
+      topCategorias: sortTop(catMap,10), topFormasPago: sortTop(fpMap,10),
+      headers:['OP','Fecha','Paciente','Categoría','Producto','P.V.P.','Cant.','Total','F.Pago','Sucursal'] };
+  } catch (ex) { return { view:'ingresos', rows:[], error: ex.message }; }
+}
+
 function readIngresosData(anio) {
   try {
-    // year-aware: lee del LIBRO de ingresos del año pedido (historial 2024/2025);
-    // sin año = año en curso. El anio se propaga al payload para que el frontend lo muestre.
+    // Sin año → TODO el historial unido (todos los libros). El front ya no manda año.
+    if (anio === undefined || anio === null || String(anio).trim() === '') return readIngresosDataAll();
+    // year-aware: lee del LIBRO de ingresos del año pedido (compatibilidad).
     anio = parseInt(anio, 10) || new Date().getFullYear();
     var ss = SpreadsheetApp.openById(_ingIdDeAnio(anio));
 
