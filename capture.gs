@@ -397,13 +397,46 @@ function readCajaChicaData(cajaId) {
   }
 }
 
-/* Escribe un movimiento en una caja: reusa placeholder (con su fórmula) o AGREGA fila y
- * siembra la fórmula corrida de TOTAL. Sirve para cualquier caja (principal o extra). */
+/* Parser robusto de montos de caja: "$ 4,853.44", "$ (3,000.00)", "$ - ", "#REF!". */
+function _ccNum(v) {
+  if (typeof v === 'number') return v;
+  var s = String(v == null ? '' : v).trim();
+  if (!s || /#REF|#ERROR|#N\/A|#VALUE|#DIV/i.test(s)) return 0;
+  var neg = /^\(.*\)$/.test(s);
+  s = s.replace(/[$\s,()]/g, '');
+  if (s === '-' || s === '') return 0;
+  var num = parseFloat(s);
+  if (isNaN(num)) return 0;
+  return neg ? -Math.abs(num) : num;
+}
+/* Recalcula TODA la columna TOTAL como VALOR corrido desde el REMANENTE. Auto-repara
+ * fórmulas rotas (#REF!) o vacías. Devuelve el saldo final. Las filas placeholder vacías
+ * (sin FECHA ni CONCEPTO) quedan con TOTAL vacío. */
+function _cajaRecomputeTotal(sh) {
+  var data = sh.getDataRange().getValues();
+  if (data.length < 2) return 0;
+  var h = data[0].map(function(x){ return String(x).trim().toUpperCase(); });
+  var iF=h.indexOf('FECHA'), iC=h.indexOf('CONCEPTO'), iS=h.indexOf('SALIDA'), iE=h.indexOf('ENTRADA'), iT=h.indexOf('TOTAL');
+  if (iT<0) return 0;
+  var saldo=0, out=[];
+  for (var r=1;r<data.length;r++){
+    var fecha=String(data[r][iF]||'').trim(), concepto=String(data[r][iC]||'').trim();
+    if (/^REMANENTE/i.test(fecha)) { saldo=_ccNum(data[r][iT]); out.push([saldo]); continue; }
+    if (!fecha && !concepto) { out.push(['']); continue; }
+    saldo = Math.round((saldo - _ccNum(data[r][iS]) + _ccNum(data[r][iE]))*100)/100;
+    out.push([saldo]);
+  }
+  if (out.length) sh.getRange(2, iT+1, out.length, 1).setValues(out);
+  return saldo;
+}
+
+/* Escribe un movimiento en una caja: reusa placeholder o AGREGA fila, y luego RECALCULA
+ * toda la columna TOTAL como valor corrido (robusto a fórmulas rotas). Cualquier caja. */
 function _cajaEscribirMov(sh, mov) {
   var data = sh.getDataRange().getValues();
   var headers = data[0].map(function(h) { return String(h).trim().toUpperCase(); });
   var iFecha=headers.indexOf('FECHA'), iConcepto=headers.indexOf('CONCEPTO'),
-      iSalida=headers.indexOf('SALIDA'), iEntrada=headers.indexOf('ENTRADA'), iTotal=headers.indexOf('TOTAL');
+      iSalida=headers.indexOf('SALIDA'), iEntrada=headers.indexOf('ENTRADA');
   var targetRow = -1;
   for (var r=1;r<data.length;r++){ if(!String(data[r][iFecha]||'').trim() && !String(data[r][iConcepto]||'').trim()){ targetRow=r+1; break; } }
   if (targetRow===-1) targetRow = sh.getLastRow()+1;
@@ -411,18 +444,21 @@ function _cajaEscribirMov(sh, mov) {
   sh.getRange(targetRow, iConcepto+1).setValue(mov.concepto);
   sh.getRange(targetRow, iSalida+1).setValue(mov.salida||0);
   sh.getRange(targetRow, iEntrada+1).setValue(mov.entrada||0);
-  // Si la celda TOTAL no trae fórmula (fila agregada en una caja sin placeholders),
-  // sembrar la fórmula corrida: TOTAL = TOTAL(anterior) − SALIDA + ENTRADA → cascadea al editar.
-  if (iTotal>-1) {
-    var tc = sh.getRange(targetRow, iTotal+1);
-    if (!tc.getFormula() && targetRow>2) {
-      var tC=_cajaCol(iTotal+1), sC=_cajaCol(iSalida+1), eC=_cajaCol(iEntrada+1);
-      tc.setFormula('='+tC+(targetRow-1)+'-'+sC+targetRow+'+'+eC+targetRow);
-    }
-  }
   SpreadsheetApp.flush();
-  var nuevoTotal = iTotal>-1 ? (sh.getRange(targetRow, iTotal+1).getValue()||0) : 0;
-  return { targetRow: targetRow, saldoFinal: Number(nuevoTotal)||0 };
+  var saldoFinal = _cajaRecomputeTotal(sh);
+  return { targetRow: targetRow, saldoFinal: saldoFinal };
+}
+
+/* Reparar saldos de una caja (recalcula la columna TOTAL). Gated ver_datos_sensibles. */
+function repararCajaChica(body) {
+  try {
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'ver_datos_sensibles'))
+      return { ok:false, error:'Sin permiso para reparar la caja.' };
+    var sh = getCajaChicaSheet(body.caja || 'principal');
+    var saldo = _cajaRecomputeTotal(sh);
+    try{ logAudit(body.usuario||'', 'CajaChica', 'Reparar saldos', body.caja||'principal', 'saldoFinal', '', String(saldo)); }catch(e){}
+    return { ok:true, saldoFinal:saldo };
+  } catch(ex){ return { ok:false, error:ex.message }; }
 }
 
 function insertCajaChicaRow(e) {
@@ -460,7 +496,7 @@ function updateCajaChicaRow(body) {
     sh.getRange(rowNum, iSalida + 1).setValue(parseFloat(body.salida) || 0);
     sh.getRange(rowNum, iEntrada + 1).setValue(parseFloat(body.entrada) || 0);
     SpreadsheetApp.flush();
-    var nuevoTotal = sh.getRange(rowNum, iTotal + 1).getValue();
+    var nuevoTotal = _cajaRecomputeTotal(sh);   // recalcula toda la columna (robusto a fórmulas rotas)
     return { ok: true, rowNum: rowNum, saldoFinal: Number(nuevoTotal) || 0 };
   } catch(ex) {
     return { error: ex.message };

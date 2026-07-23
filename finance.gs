@@ -1432,6 +1432,11 @@ function doPost(e) {
       body.usuario = _postEmail || body.usuario || '';
       return jsonResponse(traspasoCaja(body));
     }
+    if (body.action === 'repararCajaChica') {
+      if (typeof repararCajaChica !== 'function') return jsonResponse({ok:false, error:'Actualiza capture.gs y redespliega.'});
+      body.usuario = _postEmail || body.usuario || '';
+      return jsonResponse(repararCajaChica(body));
+    }
     if (body.action === 'saveuser') {
       var ss      = SpreadsheetApp.openById(SHEET_ID);
       var tkEmail = verifyToken(body.token || '');

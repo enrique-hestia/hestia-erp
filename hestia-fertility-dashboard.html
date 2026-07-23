@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.338 -->
+﻿<!-- app-build:2026.07.22.339 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -36523,6 +36523,7 @@ function _ccRenderCajaBar() {
     + (puede ? '<button onclick="ccNuevaCaja()" title="Crear una nueva caja (ej. recepción)" style="'+bs+'">＋ Nueva caja</button>' : '')
     + (puede ? '<button onclick="ccCorteAbrir()" title="Corte / arqueo de esta caja" style="'+bs+';border-color:#0d9488;color:#0d9488">🧮 Corte / Arqueo</button>' : '')
     + (puede && _ccCajas.length>1 ? '<button onclick="ccTraspasoAbrir()" title="Traspaso entre cajas" style="'+bs+'">🔁 Traspaso</button>' : '')
+    + (puede ? '<button onclick="ccReparar()" title="Recalcular la columna de saldos (repara fórmulas rotas #REF! o vacías, sin tocar montos)" style="'+bs+'">🔧 Reparar saldos</button>' : '')
     + '</div>';
 }
 function ccRenombrar() {
@@ -36538,6 +36539,13 @@ function ccNuevaCaja() {
   var saldo = prompt('Saldo inicial en efectivo (0 si empieza vacía):', '0'); if (saldo===null) return;
   fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'crearCaja', label:nombre, saldoInicial:parseFloat(saldo)||0, token:getToken()})})
     .then(function(r){return r.json();}).then(function(d){ if(!d||!d.ok){ alert((d&&d.error)||'No se pudo crear.'); return; } _ccCaja=d.caja.id; loadCajaChicaData(); });
+}
+function ccReparar() {
+  var cur = _ccCajas.filter(function(c){ return c.id===_ccCaja; })[0] || {label:'Caja'};
+  if (!confirm('Recalcular los saldos de «'+cur.label+'».\n\nEsto repara la columna de TOTAL (fórmulas rotas #REF! o vacías) recalculando desde el remanente. NO cambia ningún monto de salida/entrada.\n\n¿Continuar?')) return;
+  fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'repararCajaChica', caja:_ccCaja, token:getToken()})})
+    .then(function(r){return r.json();}).then(function(d){ if(!d||!d.ok){ alert((d&&d.error)||'No se pudo reparar.'); return; }
+      alert('✓ Saldos recalculados. Saldo actual de «'+cur.label+'»: '+fmtMXN(d.saldoFinal)); loadCajaChicaData(); });
 }
 function ccCorteAbrir() {
   var esperado = (_ccData && _ccData.saldoFinal) || 0;
