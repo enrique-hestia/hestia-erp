@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.342 -->
+﻿<!-- app-build:2026.07.22.343 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6803,7 +6803,12 @@ function _ingAvisoDescuento(){
     // Con diferido>0 el % que aplica AHORA se ganó el mes anterior: se nombra ese mes.
     var _mesG = (d.diferido > 0 && d.mesGanado) ? (typeof _comMesNombre==='function' ? _comMesNombre(d.mesGanado) : d.mesGanado) : '';
     var difFrase = _mesG ? ('por su volumen de ' + _mesG) : 'este mes';
-    if (d.tipo === 'medico' && (d.pct||0) > 0){
+    if (d.tipo === 'medico' && d.modo === 'lista'){
+      // Regla en modo LISTA: el beneficio es el PRECIO DE TABLA del tier (no un %).
+      html = '🏥 <b>' + nom + '</b> — Grupo Médico por <b>lista de tarifas</b>: se cobra el precio de tabla del <b>Tier ' + (d.tier||0) + '</b> '
+        + '<span style="color:var(--color-text-muted,#6b7280)">(' + difFrase + ': ' + (d.conteo||0) + ' procedimiento' + ((d.conteo===1)?'':'s') + ' del grupo). El descuento del médico ya va EN el precio; no hay % adicional.</span>';
+      bg = 'rgba(13,148,136,.10)'; col = '#0d9488';
+    } else if (d.tipo === 'medico' && (d.pct||0) > 0){
       html = '🎯 <b>' + nom + '</b> tiene <b>' + d.pct + '%</b> de comisión '
         + '<span style="color:var(--color-text-muted,#6b7280)">(' + difFrase + ': ' + (d.conteo||0) + ' procedimiento' + ((d.conteo===1)?'':'s') + ' del grupo). Es rebate al médico, no rebaja el precio de la paciente.</span>';
     } else if (d.tipo === 'medico'){
@@ -18171,6 +18176,28 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
   var PRE_RENDER_VIEWS = ['rep-ejecutivo','qx-resumen','med-resumen','lab-resumen','labo-resumen'];
   if (PRE_RENDER_VIEWS.indexOf(viewId) >= 0) { try { renderViewData(viewId, {}); } catch(e){} }
 
+  // ── P&L (OperatingPL): SWR + animación de "pensando" ────────────────────
+  // 1) Si hay una copia reciente en localStorage (lsSet de la carga anterior, TTL 5 min),
+  //    se PINTA AL INSTANTE y el fetch fresco de abajo la reemplaza al llegar.
+  // 2) Sin copia: animación Hestia (hestiaLoader) en lugar del "Cargando…" plano,
+  //    para que se vea que está trabajando y no parezca trabado.
+  var _esPL = viewId === 'pl' || !!(_foundViewItem && /operatingpl/i.test(String(_foundViewItem.fuente||'')));
+  var _plPintado = false;
+  if (_esPL && !force) {
+    try {
+      var _plLs = lsGet('view_' + cacheKey);
+      if (_plLs) { renderViewData(viewId, _plLs); _plPintado = true; setStatus('Datos recientes · actualizando…'); }
+    } catch(ePl){}
+  }
+  if (_esPL && !_plPintado) {
+    try {
+      var _plHtml = hestiaLoader('Armando el P&L — leyendo ingresos y egresos del periodo…');
+      var _plCont = document.getElementById('view-' + viewId);
+      if (_plCont && _plCont.style.display !== 'none') _plCont.innerHTML = _plHtml;
+      else { var _plV = document.getElementById('view-pl'); if (_plV) { _plV.innerHTML = _plHtml; _plV.style.display=''; } }
+    } catch(eLd){}
+  }
+
   setStatus('Actualizando…');
   try {
     var url = APPS_SCRIPT_URL +
@@ -18191,6 +18218,8 @@ async function loadView(viewId, fechaInicio, fechaFin, force) {
     data._ts = now;
     viewCache[cacheKey] = data;
     lsSet('view_' + cacheKey, data, LS_VIEW_TTL_MS);
+    // Detener la animación del loader (si estaba activa) antes de pintar los datos.
+    try { if (window._hfRAF) { cancelAnimationFrame(window._hfRAF); window._hfRAF = null; } } catch(eRaf){}
     renderViewData(viewId, data);
     var hora = new Date().toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'});
     setStatus('Actualizado ' + hora);

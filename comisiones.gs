@@ -862,6 +862,16 @@ function descuentoOrigen(origen, anio, mes) {
         var eAnio = parseInt(String(earnKey).substring(0, 4), 10), eMes = parseInt(String(earnKey).substring(5, 7), 10);
         var calc = calcularComisiones({ anio: eAnio, mes: eMes, reglaId: reglas[0].id });
         if (calc && calc.ok) {
+          // MODO LISTA: el beneficio del médico NO es un % — es el PRECIO DE TABLA del
+          // tier alcanzado (el descuento ya va en el precio). Devolver el tier, no el
+          // pct del escalón, para que el aviso de captura no diga "10%" cuando es tabla.
+          if (calc.modo === 'lista' || String(reglas[0].modo || '') === 'lista') {
+            return { ok: true, tipo: 'medico', modo: 'lista', nombre: res.nombre || origen,
+                     regla: reglas[0].nombre || reglas[0].id,
+                     pct: 0, tier: (calc.tier != null ? calc.tier : 0), conteo: calc.conteo || 0,
+                     escalones: calc.escalones || [],
+                     diferido: difer, mesGanado: calc.mes, mesAplica: _comMesKey(anio, mes) };
+          }
           return { ok: true, tipo: 'medico', nombre: res.nombre || origen,
                    regla: reglas[0].nombre || reglas[0].id,
                    pct: calc.pct || 0, conteo: calc.conteo || 0,
