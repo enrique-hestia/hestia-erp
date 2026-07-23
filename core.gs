@@ -403,11 +403,18 @@ function doGet(e) {
 
     // Caja Chica: dashboard con saldo y resumen de gasto
     if (action === 'cajachica') {
-      return jsonResponse(readCajaChicaData((e&&e.parameter.caja)||'principal'));
+      var _ccId = (e&&e.parameter.caja)||'principal';
+      var _ccTk = (e&&e.parameter.token)||'';
+      var _ccEm = (typeof verifyToken==='function') ? verifyToken(_ccTk) : '';
+      if (typeof _cajaGate === 'function' && !_cajaGate(_ccId, _ccEm, _ccTk))
+        return jsonResponse({error:'No tienes acceso a esta caja.'});
+      return jsonResponse(readCajaChicaData(_ccId));
     }
     if (action === 'readCajas') {
       if (typeof readCajas !== 'function') return jsonResponse({ok:false, error:'Actualiza capture.gs y redespliega.'});
-      return jsonResponse(readCajas());
+      var _rcTk = (e&&e.parameter.token)||'';
+      var _rcEm = (typeof verifyToken==='function') ? verifyToken(_rcTk) : '';
+      return jsonResponse(readCajas(_rcEm, _rcTk));
     }
     if (action === 'readCortesCaja') {
       if (typeof readCortesCaja !== 'function') return jsonResponse({ok:false, error:'Actualiza capture.gs y redespliega.'});

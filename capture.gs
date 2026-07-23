@@ -254,8 +254,47 @@ function _cajasCfg() {
 function _cajasSave(arr) { PropertiesService.getScriptProperties().setProperty(CAJAS_CFG_KEY, JSON.stringify(arr)); }
 function _cajaCol(n){ var s=''; while(n>0){ var m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=(n-m-1)/26; } return s; }
 
-/* Lista de cajas para el frontend (id + label editable). */
-function readCajas() { try { return { ok:true, cajas:_cajasCfg() }; } catch(ex){ return { ok:false, error:ex.message }; } }
+/* ¿Este actor puede acceder/mover en esta caja?
+ *  · Sin email (llamada interna del sistema, ej. banco→caja) → SÍ.
+ *  · Con ver_datos_sensibles (admin/finanzas) → SÍ a todas.
+ *  · Caja con lista `usuarios` vacía → abierta (SÍ). Con lista → solo esos correos. */
+function _cajaGate(cajaId, email, token) {
+  if (!email) return true;
+  try { if (token && typeof _tokenHasPermission === 'function' && _tokenHasPermission(token, 'ver_datos_sensibles')) return true; } catch (e) {}
+  var caja = _cajasCfg().filter(function(c){ return c.id === cajaId; })[0];
+  if (!caja) return false;
+  var us = (caja.usuarios || []).map(function(x){ return String(x).toLowerCase().trim(); });
+  if (!us.length) return true;
+  return us.indexOf(String(email).toLowerCase().trim()) > -1;
+}
+/* Lista de cajas VISIBLES para el actor (filtradas por acceso). Si es admin
+ * (ver_datos_sensibles) también devuelve `all` con las listas de usuarios para el panel
+ * de accesos. */
+function readCajas(email, token) {
+  try {
+    var all = _cajasCfg();
+    var esAdmin = false;
+    try { esAdmin = !!(token && _tokenHasPermission(token, 'ver_datos_sensibles')); } catch(e){}
+    var vis = all.filter(function(c){ return _cajaGate(c.id, email, token); })
+                 .map(function(c){ return { id:c.id, label:c.label, tab:c.tab }; });
+    return { ok:true, cajas:vis, admin:esAdmin, all: esAdmin ? all : undefined };
+  } catch(ex){ return { ok:false, error:ex.message }; }
+}
+/* Asignar los correos con acceso a una caja (lista vacía = abierta). Gated. */
+function asignarUsuariosCaja(body) {
+  try {
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'ver_datos_sensibles'))
+      return { ok:false, error:'Sin permiso para configurar accesos de caja.' };
+    var arr = _cajasCfg(), id = String(body.id||'').trim();
+    var us = Array.isArray(body.usuarios) ? body.usuarios.map(function(x){ return String(x).trim(); }).filter(Boolean) : [];
+    var found = false;
+    arr.forEach(function(c){ if(c.id===id){ c.usuarios = us; found=true; } });
+    if (!found) return { ok:false, error:'No existe la caja '+id+'.' };
+    _cajasSave(arr);
+    try{ logAudit(body.usuario||'', 'CajaChica', 'Asignar accesos', id, 'usuarios', '', us.join(', ')||'(abierta)'); }catch(e){}
+    return { ok:true, cajas:arr };
+  } catch(ex){ return { ok:false, error:ex.message }; }
+}
 
 /* Renombrar una caja (nombre EDITABLE). Gated ver_datos_sensibles. */
 function renombrarCaja(body) {
@@ -468,6 +507,9 @@ function repararCajaChica(body) {
 function insertCajaChicaRow(e) {
   try {
     var cajaId = (e && e.parameter && e.parameter.caja) || 'principal';
+    var _tk = (e && e.parameter && e.parameter.token) || '';
+    var _em = (typeof verifyToken === 'function') ? verifyToken(_tk) : '';
+    if (!_cajaGate(cajaId, _em, _tk)) return { error: 'No tienes acceso a esta caja.' };
     var sh = getCajaChicaSheet(cajaId);
     var concepto = String(e.parameter['CONCEPTO'] || '').trim();
     var fecha    = String(e.parameter['FECHA']    || '').trim();
@@ -485,6 +527,7 @@ function insertCajaChicaRow(e) {
 
 function updateCajaChicaRow(body) {
   try {
+    if (!_cajaGate(body.caja || 'principal', body.usuario, body.token)) return { error:'No tienes acceso a esta caja.' };
     var sh      = getCajaChicaSheet(body.caja || 'principal');
     var rowNum  = parseInt(body.rowNum);
     if (!rowNum || rowNum < 2) return { error: 'Número de fila inválido.' };
@@ -660,6 +703,7 @@ function readMensual(ss, sheetName, fechaInicio, fechaFin, sucursal) {
    ────────────────────────────────────────────────────────────────────────── */
 function saveCajaChicaIngreso(body) {
   try {
+    if (!_cajaGate(body.caja || 'principal', body.usuario, body.token)) return { ok:false, error:'No tienes acceso a esta caja.' };
     var sh = getCajaChicaSheet(body.caja || 'principal');
     var fecha    = String(body.fecha    || '').trim();
     var concepto = String(body.concepto || '').trim();

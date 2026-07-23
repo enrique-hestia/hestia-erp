@@ -1437,6 +1437,11 @@ function doPost(e) {
       body.usuario = _postEmail || body.usuario || '';
       return jsonResponse(repararCajaChica(body));
     }
+    if (body.action === 'asignarUsuariosCaja') {
+      if (typeof asignarUsuariosCaja !== 'function') return jsonResponse({ok:false, error:'Actualiza capture.gs y redespliega.'});
+      body.usuario = _postEmail || body.usuario || '';
+      return jsonResponse(asignarUsuariosCaja(body));
+    }
     if (body.action === 'saveuser') {
       var ss      = SpreadsheetApp.openById(SHEET_ID);
       var tkEmail = verifyToken(body.token || '');
