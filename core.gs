@@ -420,6 +420,10 @@ function doGet(e) {
       if (typeof readCortesCaja !== 'function') return jsonResponse({ok:false, error:'Actualiza capture.gs y redespliega.'});
       return jsonResponse(readCortesCaja((e&&e.parameter.caja)||''));
     }
+    if (action === 'cajasSaldos') {
+      if (typeof readCajasSaldos !== 'function') return jsonResponse({ok:false, error:'Actualiza capture.gs y redespliega.'});
+      return jsonResponse(readCajasSaldos());
+    }
 
     // Cuentas por Pagar: reporte de vencimientos
     if (action === 'cxp') {

@@ -280,6 +280,22 @@ function readCajas(email, token) {
     return { ok:true, cajas:vis, admin:esAdmin, all: esAdmin ? all : undefined };
   } catch(ex){ return { ok:false, error:ex.message }; }
 }
+/* Saldos de TODAS las cajas (para el Flujo de Efectivo: Total Disponible = bancos + Σ cajas).
+ * Devuelve el saldo de cada caja + el total. No filtra por acceso: es un AGREGADO para el
+ * flujo (los montos por caja los ve quien ve el Flujo; el detalle de movimientos sí se gatea). */
+function readCajasSaldos() {
+  try {
+    var out = [], total = 0;
+    _cajasCfg().forEach(function(c){
+      var saldo = 0;
+      try { saldo = Number(readCajaChicaData(c.id).saldoFinal) || 0; } catch(e){}
+      out.push({ id:c.id, label:c.label, saldo:saldo });
+      total += saldo;
+    });
+    return { ok:true, cajas:out, total: Math.round(total*100)/100 };
+  } catch(ex){ return { ok:false, error:ex.message, cajas:[], total:0 }; }
+}
+
 /* Asignar los correos con acceso a una caja (lista vacía = abierta). Gated. */
 function asignarUsuariosCaja(body) {
   try {

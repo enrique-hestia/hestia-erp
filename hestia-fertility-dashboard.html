@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.340 -->
+﻿<!-- app-build:2026.07.22.341 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12460,7 +12460,7 @@ async function loadCashFlowData() {
     var bFf = encodeURIComponent(currentFechaFin||'');
     var [resp, ccResp, cxpResp, cxcResp, susResp] = await Promise.all([
       fetch(APPS_SCRIPT_URL + '?action=banks&token=' + tok + '&fechaInicio=' + bFi + '&fechaFin=' + bFf + '&_t=' + _t, {redirect:'follow'}),
-      fetch(APPS_SCRIPT_URL + '?action=cajachica&token='+ tok + '&_t=' + _t, {redirect:'follow'}),
+      fetch(APPS_SCRIPT_URL + '?action=cajasSaldos&token='+ tok + '&_t=' + _t, {redirect:'follow'}),
       fetch(APPS_SCRIPT_URL + '?action=cxp&token='     + tok + '&_t=' + _t, {redirect:'follow'}),
       fetch(APPS_SCRIPT_URL + '?action=cuentasCobrar&token='   + tok + '&_t=' + _t, {redirect:'follow'}).catch(function(){return null;}),
       fetch(APPS_SCRIPT_URL + '?action=suscripcionesCrio&token='+ tok + '&_t=' + _t, {redirect:'follow'}).catch(function(){return null;})
@@ -12480,8 +12480,17 @@ async function loadCashFlowData() {
     } catch(eCxc) { data.cxc = {ok:false, total:0, top:[]}; }
     try {
       var ccData = await ccResp.json();
-      data.cajachicaSaldo = (ccData && ccData.saldoFinal != null) ? ccData.saldoFinal : 0;
-    } catch(e2) { data.cajachicaSaldo = 0; }
+      // cajasSaldos: TODAS las cajas (general + recepción + …). El Total Disponible
+      // cuenta la suma; el desglose por caja va en cajasDetalle para el render.
+      if (ccData && ccData.ok && ccData.cajas) {
+        data.cajachicaSaldo = ccData.total || 0;
+        data.cajasDetalle = ccData.cajas;
+      } else {
+        // compat: backend viejo (action=cajachica) devolvía {saldoFinal}
+        data.cajachicaSaldo = (ccData && ccData.saldoFinal != null) ? ccData.saldoFinal : 0;
+        data.cajasDetalle = null;
+      }
+    } catch(e2) { data.cajachicaSaldo = 0; data.cajasDetalle = null; }
     try {
       var cxpData = await cxpResp.json();
       // Filtrar solo los compromisos del mes corriente + vencidos
@@ -15653,18 +15662,23 @@ function renderCashFlow(data) {
         +(pl>0?'<span style="background:#fef3c7;color:#92400e;font-size:9.5px;font-weight:700;padding:1px 5px;border-radius:4px">⏳ '+fS(pl)+' por liberar</span>':'')
       +'</div></div>');
   })();
+  // Efectivo en cajas: si hay varias, la tarjeta muestra la SUMA y el desglose por caja.
+  var _cajasDet = (data && data.cajasDetalle) || null;
+  var _cajasMeta = (_cajasDet && _cajasDet.length > 1)
+    ? _cajasDet.map(function(c){ return _escH(c.label)+': '+fS(c.saldo); }).join(' \u00b7 ')
+    : 'Saldo disponible';
   hh.push('<div class="cf-k" style="--kc:#059669;cursor:default">'
     +'<div class="cf-kstr" style="background:#059669"></div>'
     +'<div class="cf-klogo" style="background:#059669;font-size:13px">CC</div>'
-    +'<div class="cf-klbl">Caja Chica</div>'
+    +'<div class="cf-klbl">'+((_cajasDet && _cajasDet.length > 1) ? 'Efectivo en cajas ('+_cajasDet.length+')' : 'Caja Chica')+'</div>'
     +'<div class="cf-kval">'+fS(ccSaldo)+'</div>'
-    +'<div class="cf-kmeta">Saldo disponible</div></div>');
+    +'<div class="cf-kmeta">'+_cajasMeta+'</div></div>');
   hh.push('<div class="cf-k cf-k-total" style="--kc:#c46a7a;cursor:default">'
     +'<div class="cf-kstr" style="background:#c46a7a"></div>'
     +'<div class="cf-klogo" style="background:#c46a7a;font-size:16px">\u03a3</div>'
     +'<div class="cf-klbl">Total Disponible</div>'
     +'<div class="cf-kval cf-kval-total" style="color:#c46a7a">'+fS(tot)+'</div>'
-    +'<div class="cf-kmeta">Santander + MP + Caja Chica</div></div>');
+    +'<div class="cf-kmeta">Santander + MP + '+((_cajasDet && _cajasDet.length > 1) ? 'Cajas de efectivo' : 'Caja Chica')+'</div></div>');
   hh.push('</div>');
   // Row 2: AMEX Deuda \u00b7 CxP del Mes \u00b7 Posici\u00f3n Neta Real
   hh.push('<div class="cf-kg cf-kg-bot">');
@@ -15872,7 +15886,14 @@ function renderCashFlow(data) {
   hh.push('<div class="cf-br"><div class="cf-bn"><div class="cf-bdot" style="background:#009ee3"></div><div><div>Mercado Pago</div>'
     +((mp.porLiberar||0)>0?'<div style="font-size:9.5px;color:#92400e;font-weight:600">⏳ '+fS(mp.porLiberar||0)+' por liberar</div>':'')
     +'</div></div><div class="cf-bv">$'+Math.round(mp.saldo).toLocaleString('en-US')+'</div></div>');
-  hh.push('<div class="cf-br"><div class="cf-bn"><div class="cf-bdot" style="background:#059669"></div>Caja Chica</div><div class="cf-bv">$'+Math.round(ccSaldo).toLocaleString('en-US')+'</div></div>');
+  // Una fila por caja de efectivo (o una sola "Caja Chica" si no hay desglose)
+  if (_cajasDet && _cajasDet.length > 1) {
+    _cajasDet.forEach(function(c){
+      hh.push('<div class="cf-br"><div class="cf-bn"><div class="cf-bdot" style="background:#059669"></div>'+_escH(c.label)+'</div><div class="cf-bv">$'+Math.round(c.saldo).toLocaleString('en-US')+'</div></div>');
+    });
+  } else {
+    hh.push('<div class="cf-br"><div class="cf-bn"><div class="cf-bdot" style="background:#059669"></div>Caja Chica</div><div class="cf-bv">$'+Math.round(ccSaldo).toLocaleString('en-US')+'</div></div>');
+  }
   hh.push('<div class="cf-br cf-bt"><div class="cf-bn">Total Disponible</div><div class="cf-bv">$'+Math.round(tot).toLocaleString('en-US')+'</div></div>');
   // CxP del mes: resta al neto
   if (cxpTotal > 0) {
@@ -36529,17 +36550,58 @@ function _ccRenderCajaBar() {
     + (adm ? '<button onclick="ccReparar()" title="Recalcular la columna de saldos (repara fórmulas rotas #REF! o vacías, sin tocar montos)" style="'+bs+'">🔧 Reparar saldos</button>' : '')
     + '</div>';
 }
-/* Asignar qué correos pueden acceder/mover en la caja actual (solo admin). */
-function ccAccesos() {
+/* Asignar qué correos pueden acceder/mover en la caja actual (solo admin).
+   Panel con CHECKBOXES de los usuarios del sistema; si la lista de usuarios no se puede
+   leer (rol sin admin de usuarios), cae al prompt de correos. */
+async function ccAccesos() {
   var caja = (_ccAll||[]).filter(function(c){ return c.id===_ccCaja; })[0];
   if (!caja) { alert('Solo un administrador puede configurar accesos.'); return; }
+  var usuarios = [];
+  try {
+    var r = await fetch(APPS_SCRIPT_URL + '?action=usuarios&token=' + encodeURIComponent(getToken()) + '&_t=' + Date.now(), {redirect:'follow'});
+    var d = await r.json();
+    usuarios = (d && d.usuarios) || [];
+  } catch(e){}
+  if (!usuarios.length) { _ccAccesosPrompt(caja); return; }   // fallback texto
+  var sel = {}; (caja.usuarios||[]).forEach(function(u){ sel[String(u).toLowerCase().trim()] = true; });
+  var old = document.getElementById('cc-acc-ovl'); if (old) old.remove();
+  var ovl = document.createElement('div'); ovl.id = 'cc-acc-ovl';
+  ovl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:6400;display:flex;align-items:center;justify-content:center;padding:16px';
+  var rows = usuarios.map(function(u){
+    var em = String(u['Email']||u['email']||'').trim(); if (!em) return '';
+    var nom = String(u['Alias']||u['Nombre']||u['nombre']||em);
+    var rol = String(u['Rol']||u['rol']||'');
+    var ck = sel[em.toLowerCase()] ? ' checked' : '';
+    return '<label style="display:flex;gap:10px;align-items:center;padding:7px 10px;border-bottom:1px solid var(--color-divider,#f0f0f0);font-size:12.5px;cursor:pointer">'
+      +'<input type="checkbox" class="cc-acc-chk" value="'+_escH(em)+'"'+ck+' style="width:15px;height:15px;accent-color:#7c3aed">'
+      +'<span style="flex:1"><b>'+_escH(nom)+'</b> <span style="color:#999">'+_escH(em)+'</span></span>'
+      +'<span style="font-size:10px;color:#7c3aed;font-weight:700">'+_escH(rol)+'</span></label>';
+  }).join('');
+  ovl.innerHTML = '<div style="background:var(--color-surface,#fff);color:var(--color-text,#111);border-radius:14px;max-width:520px;width:100%;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3)">'
+    +'<div style="padding:15px 20px;border-bottom:1px solid var(--color-divider,#eee)"><div style="font-weight:800;font-size:15px">👥 Accesos — '+_escH(caja.label)+'</div>'
+    +'<div style="font-size:11.5px;color:var(--color-text-muted,#6b7280);margin-top:3px">Marca quién puede ver y mover en esta caja. <b>Nadie marcado = caja abierta</b> (cualquiera con acceso a Caja Chica). Los administradores siempre pueden.</div></div>'
+    +'<div style="flex:1;overflow:auto">'+rows+'</div>'
+    +'<div style="padding:12px 20px;border-top:1px solid var(--color-divider,#eee);display:flex;gap:10px;justify-content:flex-end">'
+    +'<button onclick="var o=document.getElementById(\'cc-acc-ovl\');if(o)o.remove()" style="padding:8px 16px;border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;background:none;cursor:pointer;color:var(--color-text,#111)">Cancelar</button>'
+    +'<button onclick="ccAccesosGuardar()" style="padding:8px 18px;background:#7c3aed;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer">Guardar accesos</button></div></div>';
+  document.body.appendChild(ovl);
+}
+function ccAccesosGuardar() {
+  var us = Array.prototype.map.call(document.querySelectorAll('.cc-acc-chk:checked'), function(c){ return c.value; });
+  var caja = (_ccAll||[]).filter(function(c){ return c.id===_ccCaja; })[0] || {label:'Caja'};
+  fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'asignarUsuariosCaja', id:_ccCaja, usuarios:us, token:getToken()})})
+    .then(function(r){return r.json();}).then(function(d){ if(!d||!d.ok){ alert((d&&d.error)||'No se pudo guardar.'); return; }
+      var o=document.getElementById('cc-acc-ovl'); if(o)o.remove();
+      alert('✓ Accesos de «'+caja.label+'» actualizados'+(us.length?' ('+us.length+' usuario(s)).':' (abierta).')); loadCajaChicaData(); });
+}
+function _ccAccesosPrompt(caja) {
   var actual = (caja.usuarios||[]).join(', ');
-  var nuevo = prompt('Correos con acceso a «'+caja.label+'» (separados por coma):\n\n· Vacío = caja ABIERTA (cualquiera que vea Caja Chica).\n· Con lista = solo esos correos podrán verla y mover en ella (los administradores siempre pueden).', actual);
+  var nuevo = prompt('Correos con acceso a «'+caja.label+'» (separados por coma):\n\n· Vacío = caja ABIERTA.\n· Con lista = solo esos correos (los administradores siempre pueden).', actual);
   if (nuevo===null) return;
   var us = nuevo.split(',').map(function(x){ return x.trim(); }).filter(Boolean);
   fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'asignarUsuariosCaja', id:_ccCaja, usuarios:us, token:getToken()})})
     .then(function(r){return r.json();}).then(function(d){ if(!d||!d.ok){ alert((d&&d.error)||'No se pudo guardar.'); return; }
-      alert('✓ Accesos de «'+caja.label+'» actualizados'+(us.length?' ('+us.length+' usuario(s)).':' (abierta).')); loadCajaChicaData(); });
+      alert('✓ Accesos actualizados.'); loadCajaChicaData(); });
 }
 function ccRenombrar() {
   var cur = _ccCajas.filter(function(c){ return c.id===_ccCaja; })[0]; if (!cur) return;
