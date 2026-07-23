@@ -317,10 +317,13 @@ function _gmTierPorVolumen(qty){
 // Lookup exacto: {precioMedico, comisionDaniel, base, descuentoMedico} para un tratamiento en un tier.
 function _gmTarifa(nombreOSku, tierIdx){
   var cfg = readTarifasGM().cfg; var ti = Math.max(0, Math.min(5, Number(tierIdx)||0));
-  var key = String(nombreOSku||'').trim().toLowerCase();
+  // Match con la MISMA normalización que la elegibilidad (_comKeyProd: sin acentos +
+  // minúsculas + espacios colapsados). Un lowercase pelón fallaba con "Vitrificación"
+  // vs "Vitrificacion" → tf=null → comisión $0 en silencio. Ahora empata igual que el %.
+  var key = _comKeyProd(nombreOSku);
   var tr = null, list = cfg.tratamientos||[];
   for (var i=0;i<list.length;i++){
-    if (String(list[i].nombre||'').toLowerCase()===key || (list[i].sku && String(list[i].sku).toLowerCase()===key)) { tr=list[i]; break; }
+    if (_comKeyProd(list[i].nombre)===key || (list[i].sku && _comKeyProd(list[i].sku)===key)) { tr=list[i]; break; }
   }
   if(!tr) return null;
   var precio = (tr.precio&&tr.precio[ti]!=null)?tr.precio[ti]:tr.base;
@@ -584,10 +587,12 @@ function calcularComisiones(body) {
     // SOLO se genera la comisión de Daniel en efectivo: Σ comisionDaniel[tier] × cantidad
     // de cada procedimiento del grupo. Los beneficiarios en nota de crédito se ignoran.
     if (String(regla.modo || 'escalon') === 'lista') {
-      // Tier = posición del escalón que alcanza el volumen (misma fuente de verdad que
-      // el %); se indexa la tabla de tarifas por esa posición (ambas tienen 6 tiers).
-      var tierIdx = 0;
-      for (var _ti = 0; _ti < tiers.length; _ti++) { if (conteo >= tiers[_ti].desde && conteo <= tiers[_ti].hasta) { tierIdx = _ti; break; } }
+      // Tier con la MISMA fuente que fija el PRECIO al capturar (_gmTierPorVolumen lee
+      // los rangos desde/hasta de la propia tabla de tarifas y devuelve el n=0..5 que
+      // indexa daniel[]/precio[]). NO se usa la posición del escalón de la regla: esa es
+      // otra config y podría no coincidir → pagaría a Daniel en un tier y cobraría al
+      // médico en otro. Así ambos (precio y comisión) salen del mismo tier.
+      var tierIdx = _gmTierPorVolumen(conteo);
       var benEf = (regla.beneficiarios || []).filter(function (b) { return String(b.via) === 'efectivo'; })[0];
       var danId = '', danNombre = '';
       if (benEf && String(benEf.tipo) === 'fijo') {
