@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.341 -->
+﻿<!-- app-build:2026.07.22.342 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -12895,6 +12895,7 @@ function comRender() {
       +  '<input type="month" id="com-rango-hasta" style="padding:6px 10px;border:1px solid var(--color-border);border-radius:var(--radius-md,8px);background:var(--color-surface);color:var(--color-text)"></div>'
       +  '<label style="font-size:11.5px;color:var(--color-text-muted,#6b7280);display:flex;align-items:center;gap:5px;align-self:center"><input type="checkbox" id="com-rango-todas" checked> todas las reglas</label>'
       +  '<button onclick="comReporteRango()" style="padding:8px 16px;background:var(--color-surface-2,#f3f4f6);border:1px solid var(--color-border,#e5e7eb);border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">📊 Ver / imprimir</button>'
+      +  '<button onclick="comReconciliar()" title="Cruza el ledger contra el dinero VIVO (créditos y CxP) del mes elegido arriba: lo de Daniel debe cuadrar con lo de los médicos" style="padding:8px 16px;background:var(--color-surface-2,#f3f4f6);border:1px solid #0d9488;color:#0d9488;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer">🧾 Reconciliar</button>'
       +  '<span id="com-rango-status" style="font-size:12px;color:var(--color-text-muted,#9ca3af)"></span>'
       +  '</div>';
   }
@@ -12975,6 +12976,56 @@ function _comImprimirRango(res){
   });
 }
 
+/* Reconciliación del periodo: ledger vs dinero VIVO (créditos/CxP). Solo lectura. */
+async function comReconciliar() {
+  var anio = (document.getElementById('com-anio')||{}).value || new Date().getFullYear();
+  var mes  = (document.getElementById('com-mes')||{}).value || (new Date().getMonth()+1);
+  var st = document.getElementById('com-rango-status');
+  if (st) st.textContent = 'Reconciliando…';
+  try {
+    var r = await fetch(APPS_SCRIPT_URL + '?action=reconciliarComisiones&anio=' + encodeURIComponent(anio)
+      + '&mes=' + encodeURIComponent(mes) + '&token=' + encodeURIComponent(getToken()) + '&_t=' + Date.now(), {redirect:'follow'});
+    var d = await r.json();
+    if (st) st.textContent = '';
+    if (!d || !d.ok) { alert((d && d.error) || 'No se pudo reconciliar.'); return; }
+    var money = function(n){ return '$' + (Number(n)||0).toLocaleString('es-MX', {minimumFractionDigits:2}); };
+    var h = '<div style="font-size:12px;color:var(--color-text-muted,#6b7280);margin-bottom:12px">'+_escH(d.nota||'')+'</div>';
+    (d.reglas||[]).forEach(function(g){
+      var okD = Math.abs(g.driftDaniel||0) < 0.02, okC = Math.abs(g.driftDescuento||0) < 0.02;
+      h += '<div style="border:1px solid var(--color-divider,#e5e7eb);border-radius:10px;padding:12px 14px;margin-bottom:12px">'
+        + '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:8px">'
+        +   '<b style="font-size:13.5px">'+_escH(g.regla)+' <span style="font-weight:400;color:#999">('+_escH(g.modo)+')</span></b>'
+        +   '<span style="font-size:11px;font-weight:800;padding:2px 10px;border-radius:999px;color:#fff;background:'+((okD&&okC)?'#047857':'#b91c1c')+'">'+((okD&&okC)?'✓ CUADRA':'⚠ DRIFT')+'</span></div>';
+      if (!g.generado) { h += '<div style="font-size:12px;color:#b45309">Este mes aún no se ha generado.</div></div>'; return; }
+      h += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px">'
+        + '<thead><tr style="text-align:left;color:#888"><th style="padding:4px 6px">Médico</th><th style="padding:4px 6px;text-align:center">Tier</th><th style="padding:4px 6px;text-align:right">Descuento</th><th style="padding:4px 6px;text-align:right">Comisión Daniel</th></tr></thead><tbody>';
+      (g.medicos||[]).forEach(function(m){
+        h += '<tr style="border-top:1px solid var(--color-divider,#f0f0f0)"><td style="padding:4px 6px">'+_escH(m.medico)+'</td>'
+          + '<td style="padding:4px 6px;text-align:center">'+_escH(String(m.tier))+'</td>'
+          + '<td style="padding:4px 6px;text-align:right">'+money(m.descuento)+'</td>'
+          + '<td style="padding:4px 6px;text-align:right;font-weight:700">'+money(m.daniel)+'</td></tr>';
+      });
+      h += '</tbody></table>'
+        + '<div style="display:flex;flex-wrap:wrap;gap:14px;font-size:12px">'
+        +   '<span>Daniel (ledger): <b>'+money(g.totalDanielLedger)+'</b></span>'
+        +   '<span>Daniel (generado): <b>'+money(g.totalDanielGenerado)+'</b> '+(okD?'✓':'<b style="color:#b91c1c">drift '+money(g.driftDaniel)+'</b>')+'</span>'
+        +   (g.modo!=='lista' ? '<span>Créditos médicos: <b>'+money(g.totalCreditosGenerados)+'</b> '+(okC?'✓':'<b style="color:#b91c1c">drift '+money(g.driftDescuento)+'</b>')+'</span>'
+                              : '<span>Descuento (en precio): <b>'+money(g.totalDescuentoLedger)+'</b></span>')
+        + '</div>';
+      var vivas = (g.piezas||[]).map(function(p){ return _escH(p.beneficiario)+' '+money(p.monto)+' ('+_escH(p.via)+', '+_escH(p.estado)+(p.saldoVivo!=null?', saldo vivo '+money(p.saldoVivo):'')+')'; }).join(' · ');
+      if (vivas) h += '<div style="font-size:11px;color:#888;margin-top:6px">Dinero escrito: '+vivas+'</div>';
+      h += '</div>';
+    });
+    var old = document.getElementById('com-recon-ovl'); if (old) old.remove();
+    var ovl = document.createElement('div'); ovl.id = 'com-recon-ovl';
+    ovl.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:6500;display:flex;align-items:center;justify-content:center;padding:16px';
+    ovl.innerHTML = '<div style="background:var(--color-surface,#fff);color:var(--color-text,#111);border-radius:14px;max-width:760px;width:100%;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3)">'
+      + '<div style="padding:15px 20px;border-bottom:1px solid var(--color-divider,#eee);display:flex;justify-content:space-between;align-items:center"><b style="font-size:15px">🧾 Reconciliación · '+_escH(d.mes)+'</b>'
+      + '<button onclick="var o=document.getElementById(\'com-recon-ovl\');if(o)o.remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#9ca3af;line-height:1">×</button></div>'
+      + '<div style="flex:1;overflow:auto;padding:16px 20px">' + h + '</div></div>';
+    document.body.appendChild(ovl);
+  } catch(e) { if (st) st.textContent=''; alert('Error de red: ' + e); }
+}
 async function comCalcular() {
   var st = document.getElementById('com-status');
   if (st) st.textContent = 'Calculando…';

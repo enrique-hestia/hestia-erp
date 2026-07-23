@@ -6521,6 +6521,39 @@ function saveIngreso(payload) {
       sheet.getRange(startRow, _ocSave, rows.length, 1).setValues(_ovsSave);
     } catch (eOrig) {}
 
+    // ── TierCobrado: CONGELAR el tier con el que se cobró cada línea de Grupo Médico ──
+    // Es el cimiento de "reportes que cuadran": el descuento del médico y la comisión de
+    // Daniel se calculan después desde ESTE tier congelado en la fila (no se re-adivina).
+    // Solo se escribe en líneas cuyo producto está en la tabla de tarifas GM; se deriva en
+    // el BACKEND (tier del MES ANTERIOR, misma fuente que el auto-precio) → también cubre
+    // ventas generadas desde una Orden de Venta. Columna APPENDED, jamás desplaza.
+    try {
+      if (typeof tarifaGMContexto === 'function' && typeof _comKeyProd === 'function') {
+        var _tgc = null;
+        var _tgKeys = {};
+        // Chequeo barato primero: ¿alguna línea es un tratamiento GM? (tarifas = Script Property)
+        try {
+          var _tgCfg = readTarifasGM().cfg;
+          (_tgCfg.tratamientos || []).forEach(function (t) {
+            if (t.nombre) _tgKeys[_comKeyProd(t.nombre)] = 1;
+            if (t.sku) _tgKeys[_comKeyProd(t.sku)] = 1;
+          });
+        } catch (eTk) {}
+        var _hayGM = lineas.some(function (l) { return _tgKeys[_comKeyProd(l.producto || '')]; });
+        if (_hayGM) {
+          _tgc = tarifaGMContexto();   // tier del mes anterior (cuenta volumen 1 vez)
+          if (_tgc && _tgc.ok) {
+            var _tcCol = _ingColEnsure(sheet, 'tiercobrado', 'TierCobrado');
+            var _tcVals = [];
+            for (var _ti2 = 0; _ti2 < lineas.length; _ti2++) {
+              _tcVals.push([_tgKeys[_comKeyProd(lineas[_ti2].producto || '')] ? _tgc.tier : '']);
+            }
+            sheet.getRange(startRow, _tcCol, _tcVals.length, 1).setValues(_tcVals);
+          }
+        }
+      }
+    } catch (eTier) {}
+
     try { CacheService.getScriptCache().remove('gas_ingresos_v1'); } catch(e) {}
 
     // Descuenta inventario si alguno de los productos vendidos tiene un combo

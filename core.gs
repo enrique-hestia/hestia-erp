@@ -557,6 +557,12 @@ function doGet(e) {
         paciente: (e&&e.parameter.paciente)||'', folio: (e&&e.parameter.folio)||''
       }));
     }
+    // Reconciliación de comisiones del periodo (ledger vs dinero vivo). Solo lectura.
+    if (action === 'reconciliarComisiones') {
+      if (typeof reconciliarComisionesPeriodo !== 'function')
+        return jsonResponse({ok:false, error:'Actualiza comisiones.gs en Apps Script y redespliega.'});
+      return jsonResponse(reconciliarComisionesPeriodo((e&&e.parameter.anio)||'', (e&&e.parameter.mes)||''));
+    }
     // Comisiones pendientes de generar (aviso "hay comisiones por pagar"). Solo lectura.
     if (action === 'comisionesPendientes') {
       if (typeof comisionesPendientes !== 'function')

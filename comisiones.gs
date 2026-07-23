@@ -451,6 +451,123 @@ function _comMarca(mes, reglaId) {
    hace UPSERT POR OP, así que esta llave es lo que impide que regenerar apile créditos. */
 function _comOpCredito(reglaId, mes, origenId) { return 'COM-' + reglaId + '-' + mes + '-' + origenId; }
 
+/* ═════════════ COMISIONES_LEDGER — la fila que TODOS leen ═════════════
+ * UNA fila por (mes, regla, médico) con el tier, la base, el DESCUENTO del médico y la
+ * comisión de Daniel + las referencias del dinero escrito. El reporte de Daniel y el
+ * futuro portal del médico leen ESTA fila (no recomputan) → no pueden divergir.
+ * Esquema: Mes | ReglaId | Modo | MedicoId | Medico | Tier | Base | Pct |
+ *          DescuentoMedico | ComisionDaniel | RefDaniel | RefCredito | Estado | Timestamp */
+var COMISIONES_LEDGER_TAB = 'Comisiones_Ledger';
+function _comLedgerSheet() {
+  var ss = SpreadsheetApp.openById(INGRESOS_SS_ID);
+  var sh = ss.getSheetByName(COMISIONES_LEDGER_TAB);
+  if (!sh) {
+    sh = ss.insertSheet(COMISIONES_LEDGER_TAB);
+    sh.appendRow(['Mes','ReglaId','Modo','MedicoId','Medico','Tier','Base','Pct','DescuentoMedico','ComisionDaniel','RefDaniel','RefCredito','Estado','Timestamp']);
+    sh.setFrozenRows(1); sh.getRange(1,1,1,14).setFontWeight('bold').setBackground('#f3f4f6');
+  }
+  return sh;
+}
+/* Escribe el ledger de un (mes, regla) desde el cálculo YA verificado. Idempotente:
+   borra las filas previas de ese mes+regla y escribe las nuevas (regenerar no apila). */
+function _comLedgerWrite(mesKey, reglaId, calc, creados) {
+  try {
+    var sh = _comLedgerSheet();
+    var raw = sh.getDataRange().getValues();
+    for (var i = raw.length - 1; i >= 1; i--) {
+      if (String(raw[i][0]).trim() === String(mesKey) && String(raw[i][1]).trim() === String(reglaId)) sh.deleteRow(i + 1);
+    }
+    // Referencias del dinero real escrito (creados): CxP de Daniel + crédito por médico.
+    var refDaniel = '', refCred = {};
+    (creados || []).forEach(function (c) {
+      if (c.via === 'efectivo') refDaniel = String(c.refId || '');
+      if (c.via === 'nota_credito') refCred[String(c.beneficiario || '').trim()] = String(c.refId || '');
+    });
+    var porMed = {};   // medicoId → acumulado
+    if (calc.modo === 'lista') {
+      (calc.detalle || []).forEach(function (l) {
+        var k = String(l.medicoId || l.medicoNombre || '?');
+        if (!porMed[k]) porMed[k] = { id: l.medicoId || '', nombre: l.medicoNombre || '', tier: l.tier, base: 0, pct: '', desc: 0, daniel: 0 };
+        porMed[k].desc = _comRedondea(porMed[k].desc + (l.descuento || 0));
+        porMed[k].daniel = _comRedondea(porMed[k].daniel + (l.monto || 0));
+      });
+    } else {
+      (calc.detalle || []).forEach(function (d) {
+        var k = String(d.medicoId || d.medicoNombre || '?');
+        if (!porMed[k]) porMed[k] = { id: d.medicoId || '', nombre: d.medicoNombre || '', tier: (calc.escalon ? calc.escalon.desde + '-' + calc.escalon.hasta : ''), base: d.base || 0, pct: d.pct || calc.pct, desc: 0, daniel: 0 };
+        // via nota_credito al médico = su "descuento"; via efectivo = parte de Daniel.
+        if (d.via === 'nota_credito') porMed[k].desc = _comRedondea(porMed[k].desc + (d.monto || 0));
+        if (d.via === 'efectivo') porMed[k].daniel = _comRedondea(porMed[k].daniel + (d.monto || 0));
+      });
+    }
+    var out = [], stamp = new Date();
+    Object.keys(porMed).forEach(function (k) {
+      var m = porMed[k];
+      out.push([mesKey, reglaId, calc.modo || 'escalon', m.id, m.nombre, m.tier, m.base, m.pct,
+                m.desc, m.daniel, refDaniel, refCred[m.nombre] || '', 'activa', stamp]);
+    });
+    if (out.length) sh.getRange(sh.getLastRow() + 1, 1, out.length, 14).setValues(out);
+    return out.length;
+  } catch (e) { return 0; }
+}
+
+/* ═════════ RECONCILIACIÓN — "lo de Daniel" == "lo de los médicos", mismo periodo ═════════
+ * Cruza 4 fuentes YA existentes y AFIRMA la identidad por médico:
+ *   (i) el ledger (lo que se dijo que se generó), (ii) Comisiones_Generadas 'activa',
+ *   (iii) el saldo VIVO del crédito del médico en Creditos_Favor, (iv) el estado real de
+ *   la CxP de Daniel. Si algo no cuadra → drift, marcado. SOLO LECTURA. */
+function reconciliarComisionesPeriodo(anio, mes) {
+  try {
+    anio = parseInt(anio, 10); mes = parseInt(mes, 10);
+    if (!anio || !mes) return { ok: false, error: 'Indica año y mes.' };
+    var mesKey = _comMesKey(anio, mes);
+    var reglas = (_comCfg().reglas || []).filter(function (r) { return r.activo !== false; });
+    var out = [];
+    reglas.forEach(function (regla) {
+      var ya = _comYaGenerado(mesKey, regla.id);
+      // Ledger del periodo
+      var ledRows = [];
+      try {
+        var raw = _comLedgerSheet().getDataRange().getValues();
+        for (var i = 1; i < raw.length; i++) {
+          if (String(raw[i][0]).trim() !== mesKey || String(raw[i][1]).trim() !== String(regla.id)) continue;
+          if (String(raw[i][12]).trim().toLowerCase() !== 'activa') continue;
+          ledRows.push({ medicoId: String(raw[i][3]||''), medico: String(raw[i][4]||''), modo: String(raw[i][2]||''),
+                         tier: raw[i][5], base: _comNum(raw[i][6]), pct: raw[i][7],
+                         descuento: _comNum(raw[i][8]), daniel: _comNum(raw[i][9]),
+                         refDaniel: String(raw[i][10]||''), refCredito: String(raw[i][11]||'') });
+        }
+      } catch (eL) {}
+      // Estado real del dinero de cada pieza generada
+      var piezas = ya.map(function (it) {
+        var est = null; try { est = _comEstadoRef(it); } catch (e) { est = null; }
+        var saldoVivo = null;
+        if (it.via === 'nota_credito' && typeof _cobCreditoFavorPaciente === 'function') {
+          try { var cf = _cobCreditoFavorPaciente(it.beneficiario); saldoVivo = cf ? (cf.total != null ? cf.total : cf.disponible) : null; } catch (e2) {}
+        }
+        return { beneficiario: it.beneficiario, via: it.via, monto: it.monto, refId: it.refId,
+                 estado: est ? (est.tocado ? 'usada/cobrada' : 'viva') : '?', saldoVivo: saldoVivo };
+      });
+      // Drift: Σ daniel del ledger vs lo generado en efectivo; descuentos vs créditos
+      var ledDaniel = _comRedondea(ledRows.reduce(function (s, r) { return s + r.daniel; }, 0));
+      var genDaniel = _comRedondea(ya.filter(function (i) { return i.via === 'efectivo'; }).reduce(function (s, i) { return s + i.monto; }, 0));
+      var ledDesc = _comRedondea(ledRows.reduce(function (s, r) { return s + r.descuento; }, 0));
+      var genCred = _comRedondea(ya.filter(function (i) { return i.via === 'nota_credito'; }).reduce(function (s, i) { return s + i.monto; }, 0));
+      var modoL = ledRows.length ? ledRows[0].modo : '';
+      out.push({ reglaId: regla.id, regla: regla.nombre || regla.id, modo: modoL || (regla.modo || 'escalon'),
+                 generado: ya.length > 0, medicos: ledRows, piezas: piezas,
+                 totalDanielLedger: ledDaniel, totalDanielGenerado: genDaniel,
+                 totalDescuentoLedger: ledDesc, totalCreditosGenerados: genCred,
+                 driftDaniel: _comRedondea(ledDaniel - genDaniel),
+                 // en modo lista el descuento vive en el precio (no genera crédito) → no es drift
+                 driftDescuento: (modoL === 'lista') ? 0 : _comRedondea(ledDesc - genCred),
+                 marca: _comMarca(mesKey, regla.id) });
+    });
+    return { ok: true, mes: mesKey, reglas: out,
+             nota: 'El ledger es lo que se declaró al generar; se cruza contra el dinero VIVO (créditos y CxP). drift≠0 = investigar antes de pagar.' };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
 /* ═════════════════════════ MOTOR (SOLO LECTURA) ═════════════════════════ */
 
 /* Lee BD_Ingresos del año pedido. Columnas SIEMPRE por encabezado: OrigenExterno es
@@ -606,12 +723,17 @@ function calcularComisiones(body) {
       elegibles.forEach(function (e) {
         var tf = null; try { tf = _gmTarifa(e.producto, tierIdx); } catch (ex) { tf = null; }
         var unit = tf ? _comNum(tf.comisionDaniel) : 0;
+        // Descuento del médico (base − precio del tier) POR LÍNEA: en modo lista vive en el
+        // precio de venta y no se persistía en ningún lado → el ledger lo registra.
+        var descUnit = tf ? _comRedondea(Math.max(0, _comNum(tf.base) - _comNum(tf.precioMedico))) : 0;
         var monto = _comRedondea(unit * e.cantidad);
         if (!tf || unit <= 0) sinTarifa.push(e.producto);
-        if (monto > 0.01) {
+        if (monto > 0.01 || descUnit > 0.01) {
           totalDaniel = _comRedondea(totalDaniel + monto);
           lineasD.push({ op: e.op, paciente: e.paciente, producto: e.producto, cantidad: e.cantidad,
-                         medicoNombre: e.medicoNombre, comisionUnit: unit, monto: monto, tier: tierIdx });
+                         medicoId: e.medicoId, medicoNombre: e.medicoNombre,
+                         comisionUnit: unit, monto: monto, tier: tierIdx,
+                         descuentoUnit: descUnit, descuento: _comRedondea(descUnit * e.cantidad) });
         }
       });
       if (sinTarifa.length) {
@@ -1143,6 +1265,9 @@ function generarComisiones(body) {
         shCtl.getRange(shCtl.getLastRow() + 1, 1, creados.length, 9).setValues(creados.map(function (c) {
           return [mesKey, reglaId, c.beneficiario, c.via, c.monto, c.refId, 'activa', body.usuario || 'sistema', stamp];
         }));
+        // LEDGER por médico (tier + descuento + comisión Daniel + refs): la fila única que
+        // el reporte de Daniel y el portal del médico leerán. Idempotente por mes+regla.
+        try { _comLedgerWrite(mesKey, reglaId, calc, creados); } catch (eLed) {}
       }
       try {
         logAudit(body.usuario || 'sistema', 'Comisiones', body.regenerar ? 'Regenerar' : 'Generar',
