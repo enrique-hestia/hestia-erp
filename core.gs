@@ -403,7 +403,15 @@ function doGet(e) {
 
     // Caja Chica: dashboard con saldo y resumen de gasto
     if (action === 'cajachica') {
-      return jsonResponse(readCajaChicaData());
+      return jsonResponse(readCajaChicaData((e&&e.parameter.caja)||'principal'));
+    }
+    if (action === 'readCajas') {
+      if (typeof readCajas !== 'function') return jsonResponse({ok:false, error:'Actualiza capture.gs y redespliega.'});
+      return jsonResponse(readCajas());
+    }
+    if (action === 'readCortesCaja') {
+      if (typeof readCortesCaja !== 'function') return jsonResponse({ok:false, error:'Actualiza capture.gs y redespliega.'});
+      return jsonResponse(readCortesCaja((e&&e.parameter.caja)||''));
     }
 
     // Cuentas por Pagar: reporte de vencimientos

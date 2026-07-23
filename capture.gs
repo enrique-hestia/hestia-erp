@@ -235,8 +235,75 @@ function _pacDupCandidatos(nombreRaw, allData, dataStart, nombreIdx, idIdx, emai
    por eso nunca usamos appendRow() aquí, sino que buscamos la
    primera fila con FECHA y CONCEPTO vacíos para no romper el orden.
    ══════════════════════════════════════════════════════════════ */
-function getCajaChicaSheet() {
+/* ═══════════════════════ CONFIG DE CAJAS (multi-caja) ═══════════════════════
+ * Varias cajas de efectivo en el MISMO libro CAJA_CHICA_SS_ID, una PESTAÑA por caja.
+ * La 'principal' es la histórica (hoja 'Caja Chica') — NO se toca. Las demás (ej. la de
+ * recepción) tienen nombre EDITABLE. Config en Script Property CAJAS_CFG = [{id,label,tab}].
+ * tab vacío en 'principal' = usa la resolución histórica (Caja Chica / año). */
+var CAJAS_CFG_KEY = 'CAJAS_CFG';
+function _cajasCfg() {
+  try {
+    var raw = PropertiesService.getScriptProperties().getProperty(CAJAS_CFG_KEY);
+    var arr = raw ? JSON.parse(raw) : null;
+    if (!arr || !arr.length) arr = [{ id: 'principal', label: 'Caja Chica General', tab: '' }];
+    if (!arr.some(function(c){ return c.id === 'principal'; }))
+      arr.unshift({ id: 'principal', label: 'Caja Chica General', tab: '' });
+    return arr;
+  } catch (e) { return [{ id: 'principal', label: 'Caja Chica General', tab: '' }]; }
+}
+function _cajasSave(arr) { PropertiesService.getScriptProperties().setProperty(CAJAS_CFG_KEY, JSON.stringify(arr)); }
+function _cajaCol(n){ var s=''; while(n>0){ var m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=(n-m-1)/26; } return s; }
+
+/* Lista de cajas para el frontend (id + label editable). */
+function readCajas() { try { return { ok:true, cajas:_cajasCfg() }; } catch(ex){ return { ok:false, error:ex.message }; } }
+
+/* Renombrar una caja (nombre EDITABLE). Gated ver_datos_sensibles. */
+function renombrarCaja(body) {
+  try {
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'ver_datos_sensibles'))
+      return { ok:false, error:'Sin permiso para configurar cajas.' };
+    var arr = _cajasCfg(), id = String(body.id||'').trim(), label = String(body.label||'').trim();
+    if (!label) return { ok:false, error:'El nombre no puede ir vacío.' };
+    var found = false;
+    arr.forEach(function(c){ if(c.id===id){ c.label=label; found=true; } });
+    if (!found) return { ok:false, error:'No existe la caja '+id+'.' };
+    _cajasSave(arr);
+    try{ logAudit(body.usuario||'', 'CajaChica', 'Renombrar caja', id, 'label', '', label); }catch(e){}
+    return { ok:true, cajas:arr };
+  } catch(ex){ return { ok:false, error:ex.message }; }
+}
+
+/* Crear una caja NUEVA (ej. "Caja Extra" de recepción) con su pestaña. Gated. */
+function crearCaja(body) {
+  try {
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'ver_datos_sensibles'))
+      return { ok:false, error:'Sin permiso para crear cajas.' };
+    var arr = _cajasCfg(), label = String(body.label||'').trim() || 'Caja Extra';
+    // id estable derivado; tab estable (no cambia al renombrar).
+    var n = arr.length; var id = 'caja' + (n); var tab = 'Caja_' + id;
+    while (arr.some(function(c){ return c.id===id || c.tab===tab; })) { n++; id='caja'+n; tab='Caja_'+id; }
+    var ss = SpreadsheetApp.openById(CAJA_CHICA_SS_ID);
+    var sh = ss.getSheetByName(tab) || ss.insertSheet(tab);
+    sh.clear();
+    sh.getRange(1,1,1,5).setValues([['FECHA','CONCEPTO','SALIDA','ENTRADA','TOTAL']]).setFontWeight('bold').setBackground('#f3f4f6');
+    var saldoIni = parseFloat(body.saldoInicial)||0;
+    sh.getRange(2,1,1,5).setValues([['REMANENTE INICIAL','', '', '', saldoIni]]);
+    sh.setFrozenRows(1);
+    arr.push({ id:id, label:label, tab:tab });
+    _cajasSave(arr);
+    try{ logAudit(body.usuario||'', 'CajaChica', 'Crear caja', id, 'label', '', label+' · saldo '+saldoIni); }catch(e){}
+    return { ok:true, caja:{id:id,label:label,tab:tab}, cajas:arr };
+  } catch(ex){ return { ok:false, error:ex.message }; }
+}
+
+/* Resuelve la HOJA de una caja. cajaId falsy/'principal' → histórico (Caja Chica/año). */
+function getCajaChicaSheet(cajaId) {
   var ss = SpreadsheetApp.openById(CAJA_CHICA_SS_ID);
+  cajaId = String(cajaId || 'principal');
+  if (cajaId !== 'principal') {
+    var caja = _cajasCfg().filter(function(c){ return c.id===cajaId; })[0];
+    if (caja && caja.tab) { var s = ss.getSheetByName(caja.tab); if (s) return s; }
+  }
   var sh = ss.getSheetByName('Caja Chica');
   if (sh) return sh;
   var anioActual = String(new Date().getFullYear());
@@ -245,9 +312,9 @@ function getCajaChicaSheet() {
   return ss.getSheets()[0]; // pestaña más reciente como último recurso
 }
 
-function readCajaChicaData() {
+function readCajaChicaData(cajaId) {
   try {
-    var sh = getCajaChicaSheet();
+    var sh = getCajaChicaSheet(cajaId);
     var data = sh.getDataRange().getValues();
     if (data.length < 2) return { movimientos: [], saldoInicial: 0, saldoFinal: 0 };
     var headers = data[0].map(function(h) { return String(h).trim().toUpperCase(); });
@@ -330,44 +397,47 @@ function readCajaChicaData() {
   }
 }
 
+/* Escribe un movimiento en una caja: reusa placeholder (con su fórmula) o AGREGA fila y
+ * siembra la fórmula corrida de TOTAL. Sirve para cualquier caja (principal o extra). */
+function _cajaEscribirMov(sh, mov) {
+  var data = sh.getDataRange().getValues();
+  var headers = data[0].map(function(h) { return String(h).trim().toUpperCase(); });
+  var iFecha=headers.indexOf('FECHA'), iConcepto=headers.indexOf('CONCEPTO'),
+      iSalida=headers.indexOf('SALIDA'), iEntrada=headers.indexOf('ENTRADA'), iTotal=headers.indexOf('TOTAL');
+  var targetRow = -1;
+  for (var r=1;r<data.length;r++){ if(!String(data[r][iFecha]||'').trim() && !String(data[r][iConcepto]||'').trim()){ targetRow=r+1; break; } }
+  if (targetRow===-1) targetRow = sh.getLastRow()+1;
+  sh.getRange(targetRow, iFecha+1).setValue(mov.fecha);
+  sh.getRange(targetRow, iConcepto+1).setValue(mov.concepto);
+  sh.getRange(targetRow, iSalida+1).setValue(mov.salida||0);
+  sh.getRange(targetRow, iEntrada+1).setValue(mov.entrada||0);
+  // Si la celda TOTAL no trae fórmula (fila agregada en una caja sin placeholders),
+  // sembrar la fórmula corrida: TOTAL = TOTAL(anterior) − SALIDA + ENTRADA → cascadea al editar.
+  if (iTotal>-1) {
+    var tc = sh.getRange(targetRow, iTotal+1);
+    if (!tc.getFormula() && targetRow>2) {
+      var tC=_cajaCol(iTotal+1), sC=_cajaCol(iSalida+1), eC=_cajaCol(iEntrada+1);
+      tc.setFormula('='+tC+(targetRow-1)+'-'+sC+targetRow+'+'+eC+targetRow);
+    }
+  }
+  SpreadsheetApp.flush();
+  var nuevoTotal = iTotal>-1 ? (sh.getRange(targetRow, iTotal+1).getValue()||0) : 0;
+  return { targetRow: targetRow, saldoFinal: Number(nuevoTotal)||0 };
+}
+
 function insertCajaChicaRow(e) {
   try {
-    var sh = getCajaChicaSheet();
-    var data = sh.getDataRange().getValues();
-    var headers = data[0].map(function(h) { return String(h).trim().toUpperCase(); });
-    var iFecha    = headers.indexOf('FECHA');
-    var iConcepto = headers.indexOf('CONCEPTO');
-    var iSalida   = headers.indexOf('SALIDA');
-    var iEntrada  = headers.indexOf('ENTRADA');
-    var iTotal    = headers.indexOf('TOTAL');
-
+    var cajaId = (e && e.parameter && e.parameter.caja) || 'principal';
+    var sh = getCajaChicaSheet(cajaId);
     var concepto = String(e.parameter['CONCEPTO'] || '').trim();
     var fecha    = String(e.parameter['FECHA']    || '').trim();
     var salida   = parseFloat(e.parameter['SALIDA'])  || 0;
     var entrada  = parseFloat(e.parameter['ENTRADA']) || 0;
-
     if (!concepto)            return { error: 'El concepto es requerido.' };
     if (!fecha)               return { error: 'La fecha es requerida.' };
     if (!salida && !entrada)  return { error: 'Captura un monto de salida o entrada.' };
-
-    // Primera fila reservada (placeholder con fórmula de TOTAL) con FECHA y CONCEPTO vacíos
-    var targetRow = -1;
-    for (var r = 1; r < data.length; r++) {
-      if (!String(data[r][iFecha] || '').trim() && !String(data[r][iConcepto] || '').trim()) {
-        targetRow = r + 1; // fila 1-indexada en la hoja
-        break;
-      }
-    }
-    if (targetRow === -1) targetRow = sh.getLastRow() + 1;
-
-    sh.getRange(targetRow, iFecha + 1).setValue(fecha);
-    sh.getRange(targetRow, iConcepto + 1).setValue(concepto);
-    if (salida)  sh.getRange(targetRow, iSalida + 1).setValue(salida);
-    if (entrada) sh.getRange(targetRow, iEntrada + 1).setValue(entrada);
-    SpreadsheetApp.flush();
-
-    var nuevoTotal = sh.getRange(targetRow, iTotal + 1).getValue();
-    return { success: true, rowNum: targetRow, saldoFinal: Number(nuevoTotal) || 0 };
+    var res = _cajaEscribirMov(sh, { fecha:fecha, concepto:concepto, salida:salida, entrada:entrada });
+    return { success: true, rowNum: res.targetRow, saldoFinal: res.saldoFinal };
   } catch(ex) {
     return { error: ex.message };
   }
@@ -375,7 +445,7 @@ function insertCajaChicaRow(e) {
 
 function updateCajaChicaRow(body) {
   try {
-    var sh      = getCajaChicaSheet();
+    var sh      = getCajaChicaSheet(body.caja || 'principal');
     var rowNum  = parseInt(body.rowNum);
     if (!rowNum || rowNum < 2) return { error: 'Número de fila inválido.' };
     var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function(h){ return String(h).trim().toUpperCase(); });
@@ -550,40 +620,90 @@ function readMensual(ss, sheetName, fechaInicio, fechaFin, sucursal) {
    ────────────────────────────────────────────────────────────────────────── */
 function saveCajaChicaIngreso(body) {
   try {
-    var sh = getCajaChicaSheet();
-    var data = sh.getDataRange().getValues();
-    var headers = data[0].map(function(h) { return String(h).trim().toUpperCase(); });
-    var iFecha    = headers.indexOf('FECHA');
-    var iConcepto = headers.indexOf('CONCEPTO');
-    var iEntrada  = headers.indexOf('ENTRADA');
-    var iTotal    = headers.indexOf('TOTAL');
-
+    var sh = getCajaChicaSheet(body.caja || 'principal');
     var fecha    = String(body.fecha    || '').trim();
     var concepto = String(body.concepto || '').trim();
     var entrada  = parseFloat(body.entrada) || 0;
-
-    if (!fecha || !concepto || !entrada) {
-      return { ok: false, error: 'fecha, concepto y entrada son requeridos' };
+    var salida   = parseFloat(body.salida) || 0;   // permite también salida (traspaso/egreso)
+    if (!fecha || !concepto || (!entrada && !salida)) {
+      return { ok: false, error: 'fecha, concepto y monto son requeridos' };
     }
-
-    // Buscar primera fila vacía (placeholder) o agregar al final
-    var targetRow = -1;
-    for (var r = 1; r < data.length; r++) {
-      if (!String(data[r][iFecha] || '').trim() && !String(data[r][iConcepto] || '').trim()) {
-        targetRow = r + 1;
-        break;
-      }
-    }
-    if (targetRow === -1) targetRow = sh.getLastRow() + 1;
-
-    sh.getRange(targetRow, iFecha + 1).setValue(fecha);
-    sh.getRange(targetRow, iConcepto + 1).setValue(concepto);
-    sh.getRange(targetRow, iEntrada + 1).setValue(entrada);
-    SpreadsheetApp.flush();
-
-    var nuevoTotal = iTotal >= 0 ? (sh.getRange(targetRow, iTotal + 1).getValue() || 0) : 0;
-    return { ok: true, rowNum: targetRow, saldoFinal: Number(nuevoTotal) };
+    var res = _cajaEscribirMov(sh, { fecha:fecha, concepto:concepto, salida:salida, entrada:entrada });
+    return { ok: true, rowNum: res.targetRow, saldoFinal: res.saldoFinal };
   } catch(ex) {
     return { ok: false, error: ex.message };
   }
+}
+
+/* ─────────── CORTE / ARQUEO por caja + TRASPASO entre cajas ─────────── */
+function _cortesSheet() {
+  var ss = SpreadsheetApp.openById(CAJA_CHICA_SS_ID);
+  var sh = ss.getSheetByName('Cortes_Caja');
+  if (!sh) {
+    sh = ss.insertSheet('Cortes_Caja');
+    sh.appendRow(['Fecha','Caja','Usuario','SaldoEsperado','EfectivoContado','Diferencia','Observaciones','Timestamp']);
+    sh.setFrozenRows(1); sh.getRange(1,1,1,8).setFontWeight('bold').setBackground('#f3f4f6');
+  }
+  return sh;
+}
+/* Corte/arqueo: compara el saldo esperado (libro) vs el efectivo contado. Si difiere y
+ * ajustar=true, siembra un movimiento "Ajuste por arqueo" para que libros = realidad. */
+function saveCorteCaja(body) {
+  try {
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'ver_datos_sensibles'))
+      return { ok:false, error:'Sin permiso para hacer cortes de caja.' };
+    var cajaId = String(body.caja||'principal');
+    var caja = _cajasCfg().filter(function(c){ return c.id===cajaId; })[0] || {id:cajaId,label:cajaId};
+    var esperado = Number(readCajaChicaData(cajaId).saldoFinal)||0;
+    var contado = parseFloat(body.contado);
+    if (isNaN(contado)) return { ok:false, error:'Captura el efectivo contado.' };
+    var dif = Math.round((contado - esperado)*100)/100;
+    var fecha = body.fecha || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy');
+    _cortesSheet().appendRow([fecha, caja.label, body.usuario||'', esperado, contado, dif, String(body.observaciones||''), new Date()]);
+    var ajustado = false;
+    if (dif !== 0 && (body.ajustar === true || body.ajustar === 'true')) {
+      var sh = getCajaChicaSheet(cajaId);
+      _cajaEscribirMov(sh, { fecha:fecha, concepto:'Ajuste por arqueo ('+(dif>0?'sobrante':'faltante')+')',
+        salida: dif<0 ? Math.abs(dif) : 0, entrada: dif>0 ? dif : 0 });
+      ajustado = true;
+    }
+    try{ logAudit(body.usuario||'', 'CajaChica', 'Corte/arqueo', caja.label, 'diferencia', String(esperado), String(contado)+' (dif '+dif+(ajustado?', ajustado':'')+')'); }catch(e){}
+    return { ok:true, esperado:esperado, contado:contado, diferencia:dif, ajustado:ajustado };
+  } catch(ex){ return { ok:false, error:ex.message }; }
+}
+function readCortesCaja(cajaId) {
+  try {
+    var sh = _cortesSheet(); var raw = sh.getDataRange().getValues();
+    var caja = _cajasCfg().filter(function(c){ return c.id===cajaId; })[0];
+    var lbl = caja ? caja.label : '';
+    var rows = [];
+    for (var i=1;i<raw.length;i++){
+      if (cajaId && lbl && String(raw[i][1]).trim()!==lbl) continue;
+      rows.push({ fecha:String(raw[i][0]), caja:String(raw[i][1]), usuario:String(raw[i][2]),
+        esperado:Number(raw[i][3])||0, contado:Number(raw[i][4])||0, diferencia:Number(raw[i][5])||0,
+        observaciones:String(raw[i][6]||'') });
+    }
+    return { ok:true, cortes:rows.reverse() };
+  } catch(ex){ return { ok:false, error:ex.message }; }
+}
+/* Traspaso entre cajas: SALIDA en origen + ENTRADA en destino, ligadas por referencia. */
+function traspasoCaja(body) {
+  try {
+    if (typeof _tokenHasPermission === 'function' && !_tokenHasPermission(body.token || '', 'ver_datos_sensibles'))
+      return { ok:false, error:'Sin permiso para traspasos de caja.' };
+    var origen=String(body.origen||''), destino=String(body.destino||''), monto=parseFloat(body.monto)||0;
+    if (!origen || !destino || origen===destino) return { ok:false, error:'Elige caja origen y destino distintas.' };
+    if (monto<=0) return { ok:false, error:'Monto inválido.' };
+    var cfg=_cajasCfg();
+    var lo=(cfg.filter(function(c){return c.id===origen;})[0]||{}).label||origen;
+    var ld=(cfg.filter(function(c){return c.id===destino;})[0]||{}).label||destino;
+    var saldoO = Number(readCajaChicaData(origen).saldoFinal)||0;
+    if (monto > saldoO + 0.001) return { ok:false, error:'La caja "'+lo+'" solo tiene '+saldoO.toFixed(2)+'.' };
+    var fecha = body.fecha || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy');
+    var ref = 'TRASPASO ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMddHHmmss');
+    _cajaEscribirMov(getCajaChicaSheet(origen),  { fecha:fecha, concepto:'Traspaso → '+ld+' ['+ref+']', salida:monto, entrada:0 });
+    _cajaEscribirMov(getCajaChicaSheet(destino), { fecha:fecha, concepto:'Traspaso ← '+lo+' ['+ref+']', salida:0, entrada:monto });
+    try{ logAudit(body.usuario||'', 'CajaChica', 'Traspaso', ref, lo+'→'+ld, '', String(monto)); }catch(e){}
+    return { ok:true, ref:ref, origen:lo, destino:ld, monto:monto };
+  } catch(ex){ return { ok:false, error:ex.message }; }
 }

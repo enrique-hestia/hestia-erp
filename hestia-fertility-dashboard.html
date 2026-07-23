@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.337 -->
+﻿<!-- app-build:2026.07.22.338 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -1127,6 +1127,7 @@ a,button,[role="button"]{transition:color var(--transition),background var(--tra
 
 <!-- ══ VISTA: CAJA CHICA ══ -->
 <div id="view-caja-chica" class="view" style="display:none">
+  <div id="cc-caja-bar" style="margin-bottom:12px"></div>
   <div class="kpi-grid">
     <div class="kpi-card"><div class="kpi-header"><div class="kpi-icon" style="background:#fce8f0"><svg viewBox="0 0 24 24" fill="none" stroke="#c46a7a" stroke-width="2"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></div></div><div class="kpi-value" id="cc-kpi-saldo">—</div><div class="kpi-label">Saldo Actual</div></div>
     <div class="kpi-card"><div class="kpi-header"><div class="kpi-icon" style="background:#fde8ea"><svg viewBox="0 0 24 24" fill="none" stroke="#a02020" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div></div><div class="kpi-value" id="cc-kpi-hoy">—</div><div class="kpi-label">Gasto de Hoy</div></div>
@@ -36482,14 +36483,22 @@ window.cxpSubmitEdit = async function(rowNum) {
 /* ══ CAJA CHICA ══ */
 var _ccData = null;
 
-async function loadCajaChicaData() {
+var _ccCaja = 'principal';     // caja seleccionada
+var _ccCajas = [];             // lista de cajas [{id,label,tab}]
+async function loadCajaChicaData(cajaId) {
+  if (cajaId) _ccCaja = cajaId;
   setStatus('Actualizando…');
   try {
-    var url = APPS_SCRIPT_URL + '?action=cajachica&token=' + encodeURIComponent(getToken());
+    var tok = encodeURIComponent(getToken());
+    // Lista de cajas (para el selector + nombre editable).
+    try { var rc = await (await fetch(APPS_SCRIPT_URL + '?action=readCajas&token=' + tok)).json(); if (rc && rc.ok) _ccCajas = rc.cajas || []; } catch(e){}
+    if (!_ccCajas.some(function(c){ return c.id === _ccCaja; })) _ccCaja = 'principal';
+    var url = APPS_SCRIPT_URL + '?action=cajachica&caja=' + encodeURIComponent(_ccCaja) + '&token=' + tok + '&_t=' + Date.now();
     var res  = await fetch(url);
     var data = await res.json();
     if (handleApiError(data)) return;
     if (data.error) throw new Error(data.error);
+    _ccRenderCajaBar();
     renderCajaChica(data);
     var hora = new Date().toLocaleTimeString('es-MX', {hour:'2-digit', minute:'2-digit'});
     setStatus('Actualizado ' + hora);
@@ -36497,6 +36506,66 @@ async function loadCajaChicaData() {
     console.error('loadCajaChicaData error:', e);
     setStatus('Error: ' + e.message, 'err');
   }
+}
+/* Barra de cajas: selector + renombrar + nueva caja + corte + traspaso. */
+function _ccRenderCajaBar() {
+  var bar = document.getElementById('cc-caja-bar'); if (!bar) return;
+  var puede = canEdit();
+  var opts = (_ccCajas.length ? _ccCajas : [{id:'principal',label:'Caja Chica General'}]).map(function(c){
+    return '<option value="'+_escH(c.id)+'"'+(c.id===_ccCaja?' selected':'')+'>'+_escH(c.label)+'</option>';
+  }).join('');
+  var cur = _ccCajas.filter(function(c){ return c.id===_ccCaja; })[0] || {label:'Caja Chica General'};
+  var bs = 'padding:7px 12px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid var(--color-divider,#e5e7eb);background:var(--card-bg,#fff);color:var(--text-primary,#111)';
+  bar.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">'
+    + '<span style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted,#9ca3af)">Caja</span>'
+    + '<select onchange="loadCajaChicaData(this.value)" style="'+bs+';min-width:200px">'+opts+'</select>'
+    + (puede ? '<button onclick="ccRenombrar()" title="Renombrar esta caja" style="'+bs+'">✎ Renombrar</button>' : '')
+    + (puede ? '<button onclick="ccNuevaCaja()" title="Crear una nueva caja (ej. recepción)" style="'+bs+'">＋ Nueva caja</button>' : '')
+    + (puede ? '<button onclick="ccCorteAbrir()" title="Corte / arqueo de esta caja" style="'+bs+';border-color:#0d9488;color:#0d9488">🧮 Corte / Arqueo</button>' : '')
+    + (puede && _ccCajas.length>1 ? '<button onclick="ccTraspasoAbrir()" title="Traspaso entre cajas" style="'+bs+'">🔁 Traspaso</button>' : '')
+    + '</div>';
+}
+function ccRenombrar() {
+  var cur = _ccCajas.filter(function(c){ return c.id===_ccCaja; })[0]; if (!cur) return;
+  var nombre = prompt('Nuevo nombre para la caja:', cur.label); if (nombre===null) return;
+  nombre = nombre.trim(); if (!nombre) return;
+  fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'renombrarCaja', id:_ccCaja, label:nombre, token:getToken()})})
+    .then(function(r){return r.json();}).then(function(d){ if(!d||!d.ok){ alert((d&&d.error)||'No se pudo renombrar.'); return; } loadCajaChicaData(); });
+}
+function ccNuevaCaja() {
+  var nombre = prompt('Nombre de la nueva caja (ej. "Caja Recepción"):', 'Caja Extra'); if (nombre===null) return;
+  nombre = nombre.trim() || 'Caja Extra';
+  var saldo = prompt('Saldo inicial en efectivo (0 si empieza vacía):', '0'); if (saldo===null) return;
+  fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'crearCaja', label:nombre, saldoInicial:parseFloat(saldo)||0, token:getToken()})})
+    .then(function(r){return r.json();}).then(function(d){ if(!d||!d.ok){ alert((d&&d.error)||'No se pudo crear.'); return; } _ccCaja=d.caja.id; loadCajaChicaData(); });
+}
+function ccCorteAbrir() {
+  var esperado = (_ccData && _ccData.saldoFinal) || 0;
+  var cur = _ccCajas.filter(function(c){ return c.id===_ccCaja; })[0] || {label:'Caja'};
+  var contadoStr = prompt('Corte / arqueo de «'+cur.label+'».\n\nSaldo esperado (libro): '+fmtMXN(esperado)+'\n\n¿Cuánto efectivo contaste físicamente?', String(esperado));
+  if (contadoStr===null) return;
+  var contado = parseFloat(contadoStr); if (isNaN(contado)) { alert('Monto inválido.'); return; }
+  var dif = Math.round((contado-esperado)*100)/100;
+  var ajustar = false;
+  if (dif !== 0) ajustar = confirm('Diferencia: '+fmtMXN(dif)+' ('+(dif>0?'sobrante':'faltante')+').\n\n¿Sembrar un "Ajuste por arqueo" para que el libro cuadre con lo contado?\n\nAceptar = ajustar · Cancelar = solo registrar el corte sin ajustar.');
+  fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'saveCorteCaja', caja:_ccCaja, contado:contado, ajustar:ajustar, token:getToken()})})
+    .then(function(r){return r.json();}).then(function(d){ if(!d||!d.ok){ alert((d&&d.error)||'No se pudo hacer el corte.'); return; }
+      alert('✓ Corte registrado.\nEsperado: '+fmtMXN(d.esperado)+'\nContado: '+fmtMXN(d.contado)+'\nDiferencia: '+fmtMXN(d.diferencia)+(d.ajustado?'\n(ajuste sembrado)':'')); loadCajaChicaData(); });
+}
+function ccTraspasoAbrir() {
+  var otras = _ccCajas.filter(function(c){ return c.id!==_ccCaja; });
+  if (!otras.length) { alert('Crea otra caja primero.'); return; }
+  var destino = otras[0].id;
+  if (otras.length>1) {
+    var lista = otras.map(function(c,i){ return (i+1)+') '+c.label; }).join('\n');
+    var pick = prompt('Traspaso desde «'+((_ccCajas.filter(function(c){return c.id===_ccCaja;})[0]||{}).label)+'» hacia:\n'+lista+'\n\nEscribe el número:', '1');
+    if (pick===null) return; var idx=(parseInt(pick,10)||1)-1; if(otras[idx]) destino=otras[idx].id;
+  }
+  var montoStr = prompt('Monto a traspasar:', ''); if (montoStr===null) return;
+  var monto = parseFloat(montoStr); if (!monto || monto<=0) { alert('Monto inválido.'); return; }
+  fetch(APPS_SCRIPT_URL, {method:'POST', body:JSON.stringify({action:'traspasoCaja', origen:_ccCaja, destino:destino, monto:monto, token:getToken()})})
+    .then(function(r){return r.json();}).then(function(d){ if(!d||!d.ok){ alert((d&&d.error)||'No se pudo traspasar.'); return; }
+      alert('✓ Traspaso: '+fmtMXN(d.monto)+' de «'+d.origen+'» a «'+d.destino+'».'); loadCajaChicaData(); });
 }
 
 function renderCajaChica(data) {
@@ -36634,6 +36703,7 @@ function submitCajaChica() {
     // ── Editar movimiento existente via POST ──
     var body = {
       action:   'updateCajaChica',
+      caja:     _ccCaja,
       rowNum:   _ccEditRowNum,
       fecha:    fechaSheet,
       concepto: concepto,
@@ -36656,6 +36726,7 @@ function submitCajaChica() {
   } else {
     // ── Nuevo movimiento via GET ──
     var params = 'action=insert&sheet=' + encodeURIComponent('Caja Chica') +
+                 '&caja='     + encodeURIComponent(_ccCaja) +
                  '&FECHA='    + encodeURIComponent(fechaSheet) +
                  '&CONCEPTO=' + encodeURIComponent(concepto) +
                  '&' + (tipo === 'entrada' ? 'ENTRADA' : 'SALIDA') + '=' + encodeURIComponent(monto) +

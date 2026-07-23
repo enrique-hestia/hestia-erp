@@ -1411,6 +1411,27 @@ function doPost(e) {
     if (body.action === 'saveCajaChicaIngreso') {
       return jsonResponse(saveCajaChicaIngreso(body));
     }
+    // ── Multi-caja: renombrar / crear caja, corte/arqueo, traspaso (capture.gs) ──
+    if (body.action === 'renombrarCaja') {
+      if (typeof renombrarCaja !== 'function') return jsonResponse({ok:false, error:'Actualiza capture.gs y redespliega.'});
+      body.usuario = _postEmail || body.usuario || '';
+      return jsonResponse(renombrarCaja(body));
+    }
+    if (body.action === 'crearCaja') {
+      if (typeof crearCaja !== 'function') return jsonResponse({ok:false, error:'Actualiza capture.gs y redespliega.'});
+      body.usuario = _postEmail || body.usuario || '';
+      return jsonResponse(crearCaja(body));
+    }
+    if (body.action === 'saveCorteCaja') {
+      if (typeof saveCorteCaja !== 'function') return jsonResponse({ok:false, error:'Actualiza capture.gs y redespliega.'});
+      body.usuario = _postEmail || body.usuario || '';
+      return jsonResponse(saveCorteCaja(body));
+    }
+    if (body.action === 'traspasoCaja') {
+      if (typeof traspasoCaja !== 'function') return jsonResponse({ok:false, error:'Actualiza capture.gs y redespliega.'});
+      body.usuario = _postEmail || body.usuario || '';
+      return jsonResponse(traspasoCaja(body));
+    }
     if (body.action === 'saveuser') {
       var ss      = SpreadsheetApp.openById(SHEET_ID);
       var tkEmail = verifyToken(body.token || '');
