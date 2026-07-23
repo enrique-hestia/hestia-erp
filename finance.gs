@@ -176,12 +176,79 @@ function readEstadoResultados(fechaInicio, fechaFin) {
 /* ══════════════════════════════════════════════════════════════
    OPERATING P&L STATEMENT — 100% stateless, multi-usuario
    ══════════════════════════════════════════════════════════════ */
-function readOperatingPL(viewType, plMonth, plYear, plPrevYear) {
+/* ═══════════ CACHÉ PERSISTENTE DEL P&L (agregados) ═══════════
+ * El P&L recorre ingresos+egresos consolidados (~10-20s). Se cachea el RESULTADO en una
+ * hoja (PL_Cache en SHEET_ID) por (vista×mes×año). Lazy: la 1ª carga computa y guarda; las
+ * siguientes leen el resultado ya hecho (~200ms). El job nocturno _plPrecalcNightly
+ * precalienta las vistas comunes → hasta la 1ª visita del día es instantánea. `fresh` (o el
+ * botón Actualizar) recomputa en vivo y re-cachea. Válido ~30h (cubre el día entre corridas). */
+var PL_CACHE_TAB = 'PL_Cache';
+var PL_CACHE_TTL_MS = 30 * 3600 * 1000;
+function _plCacheSheet() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sh = ss.getSheetByName(PL_CACHE_TAB);
+  if (!sh) { sh = ss.insertSheet(PL_CACHE_TAB); sh.appendRow(['Key','JSON','Timestamp']); sh.setFrozenRows(1); sh.hideSheet(); }
+  return sh;
+}
+function _plCacheKey(vt, pm, yr, prv) { return String(vt) + '|' + String(pm) + '|' + String(yr) + '|' + String(prv); }
+function _plCacheGet(key) {
+  try {
+    var data = _plCacheSheet().getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === key) {
+        var ts = (data[i][2] instanceof Date) ? data[i][2].getTime() : (parseInt(data[i][2], 10) || 0);
+        if (Date.now() - ts > PL_CACHE_TTL_MS) return null;
+        var obj = JSON.parse(String(data[i][1] || ''));
+        if (obj) obj._cache = { at: new Date(ts).toISOString() };
+        return obj;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+function _plCacheSet(key, obj) {
+  try {
+    if (!obj || !obj.rows || !obj.rows.length) return;   // no cachear errores/vacíos
+    var json = JSON.stringify(obj);
+    if (json.length > 45000) return;                      // demasiado para una celda
+    var sh = _plCacheSheet(), data = sh.getDataRange().getValues(), row = -1;
+    for (var i = 1; i < data.length; i++) { if (String(data[i][0]) === key) { row = i + 1; break; } }
+    if (row < 0) row = sh.getLastRow() + 1;
+    sh.getRange(row, 1, 1, 3).setValues([[key, json, new Date()]]);
+  } catch (e) {}
+}
+/* Job NOCTURNO: precalienta el P&L de los 4 trimestres + el mes/trimestre en curso del año
+   actual, para que la 1ª visita del día ya lo tenga cacheado. Correr vía trigger diario
+   (setupPLNightlyTrigger). Seguro de correr a mano. */
+function _plPrecalcNightly() {
+  try {
+    var yr = new Date().getFullYear(), prv = yr - 1, n = 0;
+    ['Q1', 'Q2', 'Q3', 'Q4'].forEach(function (vt) { try { readOperatingPL(vt, '', yr, prv, true); n++; } catch (e) {} });
+    var MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    var m = new Date().getMonth();
+    try { readOperatingPL('Q' + (Math.floor(m/3)+1), MESES[m], yr, prv, true); n++; } catch (e) {}
+    return { ok: true, precalentadas: n };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+/* Crea el trigger diario (~2am). Correr UNA vez en el editor. Idempotente (borra el viejo). */
+function setupPLNightlyTrigger() {
+  try {
+    ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === '_plPrecalcNightly') ScriptApp.deleteTrigger(t); });
+    ScriptApp.newTrigger('_plPrecalcNightly').timeBased().everyDays(1).atHour(2).create();
+    return { ok: true, msg: 'Trigger nocturno creado (~2am): _plPrecalcNightly precalienta el P&L.' };
+  } catch (ex) { return { ok: false, error: ex.message }; }
+}
+
+function readOperatingPL(viewType, plMonth, plYear, plPrevYear, fresh) {
   viewType = (viewType || 'Q1').trim();
   plMonth  = (plMonth  || '').trim();
   var thisYear = new Date().getFullYear();
   var yr  = parseInt(plYear     || thisYear, 10) || thisYear;
   var prv = parseInt(plPrevYear || (yr - 1),  10) || (yr - 1);
+
+  // Caché: si no piden fresco y hay un resultado reciente, devolverlo YA (instantáneo).
+  var _pk = _plCacheKey(viewType, plMonth, yr, prv);
+  if (!fresh) { var _hit = _plCacheGet(_pk); if (_hit) return _hit; }
 
   var VIEW_OPTIONS = [
     {value:'Q1',label:'Q1 — Primer trimestre'},{value:'Q2',label:'Q2 — Segundo trimestre'},
@@ -201,7 +268,7 @@ function readOperatingPL(viewType, plMonth, plYear, plPrevYear) {
   try {
     if (typeof _plReportLive === 'function') {
       var _live = _plReportLive(viewType, plMonth, yr, prv, VIEW_OPTIONS, MONTH_OPTIONS, yearRange);
-      if (_live && _live.ok !== false && _live.rows && _live.rows.length) return _live;
+      if (_live && _live.ok !== false && _live.rows && _live.rows.length) { try { _plCacheSet(_pk, _live); } catch (eC) {} return _live; }
     }
   } catch (eLive) { /* cae al fallback del libro viejo */ }
 
@@ -215,8 +282,10 @@ function readOperatingPL(viewType, plMonth, plYear, plPrevYear) {
       if (gid===ER_GID)     erSheet=sheets[i];
       if (gid===BUDGET_GID) bgSheet=sheets[i];
     }
-    return _buildPLReport(plSheet, erSheet, bgSheet,
+    var _rep = _buildPLReport(plSheet, erSheet, bgSheet,
       viewType, plMonth, yr, prv, VIEW_OPTIONS, MONTH_OPTIONS, yearRange);
+    try { _plCacheSet(_pk, _rep); } catch (eC2) {}
+    return _rep;
   } catch(ex) {
     return { view:'p-l', fuente:'OperatingPL', error:ex.message+' L:'+ex.lineNumber,
              rows:[], colHeaders:[], viewOptions:VIEW_OPTIONS, monthOptions:MONTH_OPTIONS };

@@ -1426,7 +1426,8 @@ function readViewData(ss, viewId, fechaInicio, fechaFin, sucursal, viewType, plM
 
   // P&L check ANTES del fallback mensual — el fuente puede estar vacío en el menú
   if (_plMatch(fuente) || _plMatch(viewId)) {
-    var _pl = readOperatingPL(viewType, plMonth, plYear, plPrevYear);
+    var _plFresh = (e && e.parameter.plFresh === '1');
+    var _pl = readOperatingPL(viewType, plMonth, plYear, plPrevYear, _plFresh);
     // Conecta el módulo Presupuesto como fuente del Budget (reemplaza la pestaña manual)
     if (typeof _presInyectaBudgetEnPL === 'function') { try { _pl = _presInyectaBudgetEnPL(_pl, viewType, plMonth, plYear); } catch(e){} }
     return _pl;
