@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.332 -->
+﻿<!-- app-build:2026.07.22.333 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -3871,6 +3871,7 @@ function _renderProductosView() {
       +'<input type="file" id="prod-import-file" accept=".xlsx" style="display:none" onchange="prodImportarExcel(this)">'
       +'<button onclick="hfDescargarPlantilla(\'catalogo-productos\')" title="Descarga un CSV de ejemplo con las columnas exactas del catálogo, para no equivocarte de formato al importar" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:transparent;color:var(--color-primary,#c46a7a);border:1.5px solid var(--color-primary,#c46a7a);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">⬇ Plantilla muestra</button>'
       +'<button onclick="mpConciliarAbrir()" title="Cruzar los productos de Mercado Pago/Mercado Libre (por SKU) con el catálogo y crear los que falten" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🔗 Conciliar Mercado Pago</button>'
+      +'<button onclick="fusionAbrir()" title="Fusionar productos duplicados (mismo tratamiento en varias entradas): reasigna sus partidas al canónico sin tocar costos y desactiva los duplicados" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🧬 Fusionar duplicados</button>'
       +'<button onclick="listasAdminOpen()" title="Listas de precios: dar de alta, editar o borrar las listas (General, Grupo Médico, etc.)" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">💲 Listas de precios</button>'
       +'<button onclick="agenciasAdminOpen()" title="Administrar agencias (cada agencia = su lista de precios)" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🏢 Agencias</button>'
       +'<button onclick="navigateTo(\'origenes\')" title="Orígenes externos: agencias y médicos que refieren ingresos (para atribución)" style="display:flex;align-items:center;gap:6px;padding:8px 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🏷️ Orígenes externos</button>'
@@ -4653,6 +4654,76 @@ async function mpAplicarConciliacion(){
     var o=document.getElementById('mp-ovl'); if(o) o.remove();
     if(typeof loadProductosView==='function'){ try{ loadProductosView(_prodFilterCat,_prodIsCatalog); }catch(e){} }
   }catch(e){ alert('Error de red: '+e); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FUSIONAR PRODUCTOS DUPLICADOS — reasigna las partidas de los duplicados al
+   producto canónico (solo el nombre, sin tocar costos) y desactiva los duplicados.
+   ═══════════════════════════════════════════════════════════════════════════ */
+var _fusionCanon = '', _fusionDups = {};
+function _fusionProds(){ return (_ingTodosProductos||_ingProductos||[]).filter(function(p){ return p && p.descripcion; }); }
+function _fusionModal(inner){
+  var old=document.getElementById('fusion-ovl'); if(old) old.remove();
+  var ovl=document.createElement('div'); ovl.id='fusion-ovl';
+  ovl.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:6300;display:flex;align-items:center;justify-content:center;padding:16px';
+  ovl.innerHTML='<div style="background:var(--color-surface,#fff);color:var(--color-text,#111);border-radius:14px;max-width:760px;width:100%;max-height:90vh;box-shadow:0 20px 60px rgba(0,0,0,.3);display:flex;flex-direction:column;overflow:hidden">'
+    +'<div style="padding:15px 20px;border-bottom:1px solid var(--color-divider,#eee);font-weight:800;font-size:15px;display:flex;justify-content:space-between;align-items:center"><span>🧬 Fusionar productos duplicados</span><button onclick="var o=document.getElementById(\'fusion-ovl\');if(o)o.remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:#9ca3af;line-height:1">×</button></div>'
+    +'<div id="fusion-body" style="flex:1;overflow:auto;padding:16px 20px">'+inner+'</div></div>';
+  document.body.appendChild(ovl);
+}
+function fusionAbrir(){
+  _fusionCanon=''; _fusionDups={};
+  _fusionModal('<div style="padding:24px;color:var(--color-text-muted,#888);font-size:13px"><span class="ing-spinner ing-spinner-dark"></span> Cargando catálogo…</div>');
+  var go=function(){ _fusionRender(); };
+  if(typeof ingLoadProductos==='function'){ try{ ingLoadProductos(false).then(go).catch(go); }catch(e){ go(); } } else go();
+}
+function _fusionRender(){
+  var body=document.getElementById('fusion-body'); if(!body) return;
+  var prods=_fusionProds().slice().sort(function(a,b){ return String(a.categoria||'').localeCompare(String(b.categoria||''))||String(a.descripcion).localeCompare(String(b.descripcion)); });
+  var canonOpts='<option value="">— Elige el producto que se queda —</option>'+prods.map(function(p){ return '<option value="'+_escH(p.id)+'"'+(p.id===_fusionCanon?' selected':'')+'>'+_escH(p.descripcion)+' ['+_escH(p.sku||'')+']'+(p.activo===false?' (inactivo)':'')+'</option>'; }).join('');
+  var h='<div style="font-size:12.5px;color:var(--color-text-muted,#6b7280);margin-bottom:12px;line-height:1.55">Elige el producto <b>canónico</b> (el que se queda) y marca los <b>duplicados</b>. Se reasignan TODAS las partidas de los duplicados al nombre canónico <b>sin tocar costos</b>, y los duplicados se desactivan. También se actualizan reglas de comisión y tarifas.</div>';
+  h+='<label style="font-size:11px;font-weight:700;color:var(--color-primary)">PRODUCTO CANÓNICO (se queda)</label>';
+  h+='<select id="fusion-canon" onchange="_fusionCanon=this.value;_fusionRender()" style="width:100%;padding:8px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;margin:4px 0 14px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">'+canonOpts+'</select>';
+  h+='<label style="font-size:11px;font-weight:700;color:var(--color-primary)">DUPLICADOS A FUSIONAR</label>';
+  h+='<input id="fusion-q" oninput="_fusionFiltrar(this.value)" placeholder="Buscar producto…" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1.5px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12px;margin:4px 0 8px;background:var(--card-bg,#fff);color:var(--text-primary,#111)">';
+  h+='<div id="fusion-list" style="max-height:38vh;overflow:auto;border:1px solid var(--color-divider,#eee);border-radius:8px">';
+  prods.forEach(function(p){
+    if(p.id===_fusionCanon) return;
+    h+='<label class="fusion-row" data-t="'+_escH(String(p.descripcion+' '+(p.sku||'')).toLowerCase())+'" style="display:flex;gap:8px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--color-divider,#f0f0f0);font-size:12px;cursor:pointer">'
+      +'<input type="checkbox"'+(_fusionDups[p.id]?' checked':'')+' onchange="_fusionDups[\''+p.id+'\']=this.checked">'
+      +'<span style="flex:1">'+_escH(p.descripcion)+' <span style="color:#999">['+_escH(p.sku||'')+']</span> <span style="color:#aaa;font-size:10px">'+_escH(p.categoria||'')+'</span>'+(p.activo===false?' <span style="color:#b91c1c;font-size:10px">inactivo</span>':'')+'</span></label>';
+  });
+  h+='</div><div id="fusion-preview" style="margin-top:10px;font-size:12px"></div>';
+  h+='<div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px">'
+    +'<button onclick="fusionPreview()" style="padding:9px 14px;background:var(--color-surface-2,#f3f4f6);border:1px solid var(--color-divider,#e5e7eb);border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer">Ver preview</button>'
+    +'<button onclick="fusionAplicar()" style="padding:9px 18px;background:var(--color-primary,#c46a7a);color:#fff;border:none;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer">Fusionar</button></div>';
+  body.innerHTML=h;
+}
+function _fusionFiltrar(q){ q=(q||'').toLowerCase(); Array.prototype.forEach.call(document.querySelectorAll('#fusion-list .fusion-row'),function(el){ el.style.display=el.getAttribute('data-t').indexOf(q)>=0?'flex':'none'; }); }
+function _fusionSel(){ return Object.keys(_fusionDups).filter(function(k){ return _fusionDups[k]; }); }
+function fusionPreview(){
+  if(!_fusionCanon){ alert('Elige el producto canónico.'); return; }
+  var dups=_fusionSel(); if(!dups.length){ alert('Marca al menos un duplicado.'); return; }
+  var pv=document.getElementById('fusion-preview'); if(pv) pv.innerHTML='<span class="ing-spinner ing-spinner-dark"></span> Contando partidas…';
+  fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'fusionarProductos',canonicalId:_fusionCanon,duplicateIds:dups,preview:true,token:getToken()})}).then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.ok){ if(pv)pv.innerHTML='<span style="color:#b91c1c">'+_escH((d&&d.error)||'Error')+'</span>'; return; }
+    var rows=(d.resultados||[]).map(function(x){ return '· '+_escH(x.desc||x.id)+' → '+(x.partidas||0)+' partida(s)'; }).join('<br>');
+    if(pv) pv.innerHTML='<div style="padding:8px 10px;background:rgba(13,148,136,.08);border-radius:8px;color:#0d9488">Se moverían <b>'+(d.totalPartidas||0)+'</b> partida(s) a «'+_escH(d.canonical.desc)+'»:<br>'+rows+'</div>';
+  }).catch(function(e){ if(pv)pv.innerHTML='<span style="color:#b91c1c">Error: '+_escH(String(e))+'</span>'; });
+}
+function fusionAplicar(){
+  if(!_fusionCanon){ alert('Elige el producto canónico.'); return; }
+  var dups=_fusionSel(); if(!dups.length){ alert('Marca al menos un duplicado.'); return; }
+  var canonP=_fusionProds().filter(function(p){return p.id===_fusionCanon;})[0];
+  if(!confirm('Vas a FUSIONAR '+dups.length+' producto(s) en:\n\n«'+(canonP?canonP.descripcion:_fusionCanon)+'»\n\nTodas las partidas de los duplicados se reasignarán a ese nombre (SIN tocar costos) y los duplicados se desactivarán.\n\n¿Continuar?')) return;
+  fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'fusionarProductos',canonicalId:_fusionCanon,duplicateIds:dups,token:getToken()})}).then(function(r){return r.json();}).then(function(d){
+    if(!d||!d.ok){ alert((d&&d.error)||'No se pudo fusionar.'); return; }
+    alert('✓ Fusión aplicada: '+(d.totalPartidas||0)+' partida(s) reasignadas a «'+d.canonical.desc+'». '+(d.resultados||[]).length+' duplicado(s) desactivado(s).\n\nLos costos NO se tocaron.');
+    _prodData=null; if(typeof _ingProductosLoaded!=='undefined') _ingProductosLoaded=false;
+    if(typeof ingLoadProductos==='function'){ try{ ingLoadProductos(true); }catch(e){} }
+    var o=document.getElementById('fusion-ovl'); if(o)o.remove();
+    if(typeof loadProductosView==='function'){ try{ loadProductosView(_prodFilterCat,_prodIsCatalog); }catch(e){} }
+  }).catch(function(e){ alert('Error de red: '+e); });
 }
 
 function prodEditForm(jsonStr) {

@@ -1042,6 +1042,13 @@ function doPost(e) {
       }
       return jsonResponse(updateProducto(body));
     }
+    if (body.action === 'fusionarProductos') {
+      if (!_tokenHasPermission(body.token || '', 'editar_productos'))
+        return jsonResponse({ok:false, error:'Sin autorización para fusionar productos (editar_productos).'});
+      if (typeof fusionarProductos !== 'function') return jsonResponse({ok:false, error:'Actualiza finance.gs en Apps Script y redespliega.'});
+      body.usuario = _postEmail || body.usuario || '';
+      return jsonResponse(fusionarProductos(body));
+    }
     if (body.action === 'createProducto') {
       return jsonResponse(createProducto(body));
     }
@@ -5437,6 +5444,63 @@ function _prodPropagarRename(oldDesc, newDesc, usuario) {
   } catch (e) {}
   try { logAudit(usuario || 'sistema', 'Productos', 'Renombrar (propagar)', '', 'Producto', oldT, newT + ' · ' + res.partidas + ' partidas, ' + res.reglas + ' regla(s), ' + res.tarifas + ' tarifa(s)'); } catch (e) {}
   return res;
+}
+
+/* Cuenta cuántas partidas de BD_Ingresos (todos los años) empatan un nombre de producto
+ * (normalizado). Para el PREVIEW de la fusión, sin escribir nada. */
+function _prodContarPartidas(desc) {
+  function _keyP(s){ return (typeof _comKeyProd === 'function') ? _comKeyProd(s) : String(s || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+  var key = _keyP(desc), total = 0;
+  if (!key) return 0;
+  var ids = (typeof INGRESOS_IDS !== 'undefined') ? INGRESOS_IDS : {};
+  Object.keys(ids).forEach(function (anio) {
+    try {
+      var sh = SpreadsheetApp.openById(ids[anio]).getSheetByName(typeof BD_INGRESOS_TAB !== 'undefined' ? BD_INGRESOS_TAB : 'BD_Ingresos');
+      if (!sh) return; var lastRow = sh.getLastRow(); if (lastRow < 2) return;
+      var hdr = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (c) { return String(c).trim().toLowerCase(); });
+      var pc = hdr.indexOf('producto'); if (pc < 0) pc = 5;
+      var vals = sh.getRange(2, pc + 1, lastRow - 1, 1).getValues();
+      for (var i = 0; i < vals.length; i++) { var cur = String(vals[i][0] || ''); if (cur.trim() && _keyP(cur) === key) total++; }
+    } catch (e) {}
+  });
+  return total;
+}
+
+/* FUSIONAR productos: reasigna todas las partidas de los duplicados al producto CANÓNICO
+ * (solo la columna nombre, MONEY-SAFE) + los desactiva + renombra en reglas/tarifas. Con
+ * preview:true solo cuenta. Es el limpiador del desorden de "mismo tratamiento, 3 productos". */
+function fusionarProductos(body) {
+  try {
+    var ss = SpreadsheetApp.openById(PRODUCTOS_SS_ID);
+    var sh = ss.getSheetByName('BD_Productos');
+    if (!sh) return { ok: false, error: 'BD_Productos no encontrada' };
+    var data = sh.getDataRange().getValues();
+    var canonId = String(body.canonicalId || '').trim();
+    var canonDesc = '', canonRow = -1;
+    for (var i = 1; i < data.length; i++) { if (String(data[i][0]).trim() === canonId) { canonDesc = String(data[i][2] || ''); canonRow = i + 1; break; } }
+    if (!canonDesc) return { ok: false, error: 'No se encontró el producto canónico (' + canonId + ').' };
+    var dups = (body.duplicateIds || []).map(function (x) { return String(x).trim(); }).filter(function (x) { return x && x !== canonId; });
+    if (!dups.length) return { ok: false, error: 'No hay productos duplicados seleccionados para fusionar.' };
+    var preview = (body.preview === true || body.preview === 'true');
+    var out = [], totalPartidas = 0;
+    dups.forEach(function (did) {
+      var dDesc = '', dRow = -1;
+      for (var i = 1; i < data.length; i++) { if (String(data[i][0]).trim() === did) { dDesc = String(data[i][2] || ''); dRow = i + 1; break; } }
+      if (!dDesc) { out.push({ id: did, error: 'no encontrado' }); return; }
+      if (preview) {
+        var cnt = _prodContarPartidas(dDesc);
+        totalPartidas += cnt;
+        out.push({ id: did, desc: dDesc, partidas: cnt });
+      } else {
+        var r = _prodPropagarRename(dDesc, canonDesc, body.usuario);  // reasigna partidas + reglas + tarifas
+        if (dRow > 0) sh.getRange(dRow, 7).setValue(false);           // desactivar el duplicado
+        totalPartidas += r.partidas;
+        out.push({ id: did, desc: dDesc, partidas: r.partidas, reglas: r.reglas, tarifas: r.tarifas, desactivado: true });
+      }
+    });
+    if (!preview) { try { logAudit(body.usuario || 'sistema', 'Productos', 'Fusionar', canonId, 'canonico', dups.join(','), canonDesc + ' · ' + totalPartidas + ' partidas'); } catch (e) {} }
+    return { ok: true, preview: preview, canonical: { id: canonId, desc: canonDesc }, resultados: out, totalPartidas: totalPartidas };
+  } catch (ex) { return { ok: false, error: ex.message }; }
 }
 
 function updateProducto(body) {
