@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.334 -->
+﻿<!-- app-build:2026.07.22.335 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2679,6 +2679,10 @@ var _ingData=null;
 // el historial 2024/2025 desde el libro correcto. Al ver un año anterior la vista
 // es de SOLO LECTURA (los escritores de ingresos apuntan al libro del año en curso).
 var _ingAnioSel=null;
+// «Todo el historial»: ignora el rango de fechas global y muestra TODAS las partidas del
+// libro consolidado (útil ahora que todos los años viven en el BD_Ingresos en curso).
+var _ingVerTodo=false;
+function ingVerTodoToggle(){ _ingVerTodo=!_ingVerTodo; if(_ingVerTodo) _ingAnioSel=null; _ingPage=1; _ingData=null; if(typeof loadIngresosERP==='function') loadIngresosERP(); }
 function _ingReadOnly(){ return !!_ingAnioSel && parseInt(_ingAnioSel,10)!==new Date().getFullYear(); }
 function _ingSwrKey(){ return _ingAnioSel ? ('ingresos_'+_ingAnioSel) : 'ingresos'; }
 // Guarda para escrituras: bloquea editar/pagar/borrar cuando se ve un año histórico.
@@ -2709,9 +2713,9 @@ async function _fetchIngresosRaw() {
 }
 
 function _ingApplyDateFilter(data) {
-  // Año histórico elegido a mano: el libro ya es solo ese año, no filtres por el
-  // periodo global (que apunta al año en curso y borraría todas las filas).
-  if (_ingAnioSel) return data;
+  // Año histórico elegido a mano, o «Todo el historial»: no filtres por el periodo
+  // global (que apunta al año en curso y ocultaría partidas de otros meses/años).
+  if (_ingAnioSel || _ingVerTodo) return data;
   var fi = currentFechaInicio || '', ff = currentFechaFin || '';
   if (!fi && !ff) return data;
   var origRows = data.rows || [];
@@ -3126,6 +3130,7 @@ function _renderIngresosERP() {
   var _ingYSelStr=String(_ingAnioSel||'');
   h.push('<div class="ing-filters">'
     +'<div class="ing-fg"><div class="ing-fl">Año</div><select class="ing-sel" onchange="ingSetAnio(this.value)"><option value="">Año en curso</option>'+_ingYears.map(function(y){return '<option value="'+y+'"'+(String(y)===_ingYSelStr?' selected':'')+'>'+y+'</option>';}).join('')+'</select></div>'
+    +'<div class="ing-fg"><div class="ing-fl">&nbsp;</div><button onclick="ingVerTodoToggle()" title="Muestra TODAS las partidas del historial completo, ignorando el rango de fechas" style="padding:7px 12px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:1.5px solid '+(_ingVerTodo?'#0d9488':'var(--color-divider,#e5e7eb)')+';background:'+(_ingVerTodo?'#0d9488':'var(--card-bg,#fff)')+';color:'+(_ingVerTodo?'#fff':'var(--text-primary,#111)')+'">🗂️ '+(_ingVerTodo?'Viendo TODO ✓':'Todo el historial')+'</button></div>'
     +_ingMSelHTML('mes','Mes',meses)
     +_ingMSelHTML('categoria','Categoría',cats)
     +_ingMSelHTML('formaPago','Forma de pago',fps)
