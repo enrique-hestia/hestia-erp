@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.343 -->
+﻿<!-- app-build:2026.07.22.344 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -13244,6 +13244,89 @@ async function comDesmarcar(){
   comChequeaPendientes();
   await comCalcular();
 }
+/* Preview del cálculo en MODO LISTA DE TARIFAS: el beneficio del médico es el PRECIO DE
+   TABLA del tier (su descuento = base − precio, ya va en el precio de venta); a Daniel se
+   le paga la comisión EXACTA de la tabla. Nada de %. */
+function comRenderResultLista(c, box) {
+  var tier = (c.tier != null ? c.tier : 0);
+  var h = '<div class="card" style="margin-bottom:16px">';
+  h += '<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:14px 16px;border-radius:10px;margin-bottom:12px;background:rgba(13,148,136,.08);border:1px solid rgba(13,148,136,.35)">'
+    + '<div style="font-size:14px;color:var(--color-text,#1a252f)">El grupo hizo <b style="font-size:20px">' + c.conteo + '</b> procedimiento' + (c.conteo===1?'':'s')
+    + ' en ' + _comEsc(_comMesNombre(c.mes)) + ' → <b style="font-size:20px;color:#0d9488">Tier ' + tier + '</b> <span style="color:var(--color-text-muted,#6b7280)">(precio de tabla)</span></div>'
+    + '<div style="font-size:12px;color:var(--color-text-muted,#6b7280)">Se paga a Daniel en ' + _comEsc(String(c.mesAplica)) + '. El médico ya pagó el precio del tier — su descuento va EN el precio, no hay % adicional.</div></div>';
+  // Escalera de tiers (para ver por qué cayó en ese tier).
+  if ((c.escalones||[]).length) {
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">';
+    c.escalones.forEach(function (t, i) {
+      var act = (i === tier);
+      h += '<span style="font-size:11px;padding:3px 9px;border-radius:20px;border:1px solid ' + (act ? '#0d9488' : 'var(--color-border,#e5e7eb)') + ';'
+        + (act ? 'background:#0d9488;color:#fff;font-weight:700' : 'color:var(--color-text-muted,#9ca3af)') + '">Tier ' + i + ' · ' + t.desde + (t.hasta===''?'+':'–'+t.hasta) + ' proc.</span>';
+    });
+    h += '</div>';
+  }
+  if ((c.avisos||[]).length) {
+    h += '<div style="padding:12px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:9px;color:#92400e;font-size:12.5px;margin-bottom:12px">'
+      + '<b>⚠ Revisa esto antes de generar:</b><ul style="margin:6px 0 0 18px;padding:0">'
+      + c.avisos.map(function (a){ return '<li style="margin:3px 0">' + _comEsc(a) + '</li>'; }).join('') + '</ul></div>';
+  }
+  // Agrupar el detalle por médico (descuento al médico + comisión Daniel de la tabla).
+  var porMed = {};
+  (c.detalle||[]).forEach(function (l) {
+    var k = String(l.medicoId || l.medicoNombre || '?');
+    if (!porMed[k]) porMed[k] = { nombre: l.medicoNombre, cantidad: 0, descuento: 0, daniel: 0, ventas: [] };
+    porMed[k].cantidad += (l.cantidad||0);
+    porMed[k].descuento += (l.descuento||0);
+    porMed[k].daniel += (l.monto||0);
+    porMed[k].ventas.push(l);
+  });
+  var meds = Object.keys(porMed).map(function(k){ return porMed[k]; });
+  if (meds.length) {
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin:6px 0 8px">'
+      + '<div style="font-size:13px;font-weight:700">Actividad de los médicos en ' + _comEsc(_comMesNombre(c.mes)) + ' · Tier ' + tier + '</div>'
+      + '<button onclick="comImprimirActividad()" style="padding:6px 12px;background:var(--color-surface-2,#f3f4f6);border:1px solid var(--color-border,#e5e7eb);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">🖨️ Imprimir reporte</button></div>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:10px"><thead><tr>'
+      + ['MÉDICO','PROC.','DESCUENTO AL MÉDICO','COMISIÓN DANIEL'].map(function(x,i){ return '<th style="text-align:' + (i===0?'left':'right') + ';padding:6px 8px;border-bottom:2px solid var(--color-border,#e5e7eb);font-size:10px;color:var(--color-text-muted,#9ca3af)">' + x + '</th>'; }).join('')
+      + '</tr></thead><tbody>';
+    meds.forEach(function(m){
+      h += '<tr><td style="padding:6px 8px;border-bottom:1px solid var(--color-border,#f3f4f6);font-weight:600">' + _comEsc(m.nombre) + '</td>'
+        + '<td style="padding:6px 8px;border-bottom:1px solid var(--color-border,#f3f4f6);text-align:right">' + m.cantidad + '</td>'
+        + '<td style="padding:6px 8px;border-bottom:1px solid var(--color-border,#f3f4f6);text-align:right;color:#0d9488">' + _comMoney(m.descuento) + '</td>'
+        + '<td style="padding:6px 8px;border-bottom:1px solid var(--color-border,#f3f4f6);text-align:right;font-weight:700">' + _comMoney(m.daniel) + '</td></tr>';
+      h += '<tr><td colspan="4" style="padding:0 8px 7px 18px;border-bottom:1px solid var(--color-border,#f3f4f6);font-size:11px;color:var(--color-text-muted,#6b7280)">'
+        + m.ventas.map(function(v){ return _comEsc(v.op) + ' · ' + _comEsc(v.paciente) + ' · ' + _comEsc(v.producto) + ' ×' + v.cantidad + ' → Daniel ' + _comMoney(v.comisionUnit) + '/u'; }).join(' &nbsp;|&nbsp; ')
+        + '</td></tr>';
+    });
+    h += '</tbody></table>';
+  }
+  // Lo que se genera: SOLO la comisión de Daniel (efectivo).
+  var totalDaniel = (c.totales||[]).reduce(function(s,t){ return s + (t.monto||0); }, 0);
+  var totalDesc = meds.reduce(function(s,m){ return s + m.descuento; }, 0);
+  h += '<div style="border-top:1px solid var(--color-border,#f3f4f6);padding-top:12px;margin-top:4px">'
+    + '<div style="font-size:13px;font-weight:700;margin-bottom:8px">Se va a generar</div>';
+  if (c.generado) {
+    h += '<div style="padding:10px 14px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);border-radius:9px;font-size:12.5px;color:#047857;margin-bottom:8px">✓ Este mes ya se generó.</div>';
+  }
+  if ((c.totales||[]).length) {
+    (c.totales||[]).forEach(function(t){
+      h += '<div style="display:flex;justify-content:space-between;padding:8px 12px;border:1px solid var(--color-border,#e5e7eb);border-radius:9px;margin-bottom:6px">'
+        + '<span><b>' + _comEsc(t.beneficiario) + '</b> <span style="font-size:11px;color:#166534">(efectivo)</span></span>'
+        + '<b style="color:#166534">' + _comMoney(t.monto) + '</b></div>';
+    });
+  } else {
+    h += '<div style="padding:14px;text-align:center;color:var(--color-text-muted,#6b7280);font-size:12.5px">No hay comisión de Daniel que generar (llena la tabla «💵 Tarifas por tier»).</div>';
+  }
+  h += '<div style="font-size:11.5px;color:var(--color-text-muted,#6b7280);margin-top:4px">Descuento total ya aplicado a los médicos (en el precio): <b>' + _comMoney(totalDesc) + '</b> · Comisión Daniel a pagar: <b>' + _comMoney(totalDaniel) + '</b></div>';
+  // Botones de generar / reportes (reusa los del flujo normal).
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">'
+    + '<button onclick="comImprimirPagar()" style="padding:6px 11px;background:var(--color-surface-2,#f3f4f6);border:1px solid var(--color-border,#e5e7eb);border-radius:8px;font-size:11.5px;font-weight:600;cursor:pointer">🖨️ Reporte a pagar</button>';
+  if ((c.totales||[]).length && !c.generado && !c.marca) {
+    h += '<button onclick="comGenerar()" style="padding:8px 18px;background:#0d9488;color:#fff;border:none;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer">Generar comisión de Daniel</button>';
+  } else if (c.generado) {
+    h += '<button onclick="comGenerar(true)" style="padding:8px 16px;background:transparent;border:1px solid #b45309;color:#b45309;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">Regenerar</button>';
+  }
+  h += '</div></div></div>';
+  box.innerHTML = h;
+}
 function comRenderResult() {
   var box = document.getElementById('com-result');
   if (!box) return;
@@ -13254,6 +13337,8 @@ function comRenderResult() {
       + _comEsc(c.error || 'Error') + '</div></div>';
     return;
   }
+  // ══════════ MODO LISTA DE TARIFAS — precio de tabla por tier (no %) ══════════
+  if (c.modo === 'lista') { comRenderResultLista(c, box); return; }
   var h = '<div class="card" style="margin-bottom:16px">';
 
   // ── Conteo del grupo + escalón, bien visibles: es LA condición de todo el cálculo.
@@ -28712,9 +28797,10 @@ function getToken() { var s = getSession(); return s ? s.token : ''; }
   window.__hfTokenWrap = true;
   var _fetchOriginal = window.fetch;
   window.fetch = function(url, opts){
+    var esBackend = (typeof url === 'string') && (typeof APPS_SCRIPT_URL === 'string') &&
+                    url.indexOf(APPS_SCRIPT_URL) === 0;
+    var _args = arguments;
     try {
-      var esBackend = (typeof url === 'string') && (typeof APPS_SCRIPT_URL === 'string') &&
-                      url.indexOf(APPS_SCRIPT_URL) === 0;
       var esPost = opts && String(opts.method || '').toUpperCase() === 'POST';
       if (esBackend && esPost && typeof opts.body === 'string' && opts.body.charAt(0) === '{') {
         var b = JSON.parse(opts.body);
@@ -28725,16 +28811,51 @@ function getToken() { var s = getSession(); return s ? s.token : ''; }
             // Copia: no se muta el objeto del que llama.
             var o2 = {}; for (var k in opts) if (Object.prototype.hasOwnProperty.call(opts, k)) o2[k] = opts[k];
             o2.body = JSON.stringify(b);
-            // OJO: hay que pasar `o2`, no `arguments` — `arguments` sigue trayendo
-            // el opts viejo y el token se perdería en silencio.
-            return _fetchOriginal.call(this, url, o2);
+            _args = [url, o2];
           }
         }
       }
     } catch (e) { /* jamás romper la petición por culpa del envoltorio */ }
-    return _fetchOriginal.apply(this, arguments);
+    var _p = _fetchOriginal.apply(this, _args);
+    // REGLA GENERAL: si una petición al backend tarda >2s, mostrar "Trabajando…"
+    // para que nunca parezca que se trabó. Se oculta cuando todo termina.
+    return esBackend && typeof _hfWorkTrack === 'function' ? _hfWorkTrack(_p) : _p;
   };
 })();
+/* Indicador global "Trabajando…": aparece si alguna petición al backend lleva >2s en
+ * curso; desaparece cuando ya no hay ninguna pendiente. Regla general de toda la app. */
+var _hfWorkN = 0, _hfWorkTimer = null;
+function _hfWorkTrack(p) {
+  _hfWorkN++;
+  if (!_hfWorkTimer) _hfWorkTimer = setTimeout(function(){ _hfWorkTimer = null; if (_hfWorkN > 0) _hfWorkShow(); }, 2000);
+  function done(){ _hfWorkN = Math.max(0, _hfWorkN - 1); if (_hfWorkN === 0) { if (_hfWorkTimer) { clearTimeout(_hfWorkTimer); _hfWorkTimer = null; } _hfWorkHide(); } }
+  return p.then(function(r){ done(); return r; }, function(e){ done(); throw e; });
+}
+function _hfWorkShow() {
+  var el = document.getElementById('hf-working');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'hf-working';
+    el.style.cssText = 'position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(10px);z-index:99998;'
+      + 'display:flex;align-items:center;gap:10px;padding:10px 18px;border-radius:999px;'
+      + 'background:rgba(30,30,35,.92);color:#fff;font-size:12.5px;font-weight:600;box-shadow:0 8px 30px rgba(0,0,0,.28);'
+      + 'opacity:0;transition:opacity .2s,transform .2s;backdrop-filter:blur(4px)';
+    el.innerHTML = '<span style="width:15px;height:15px;border:2.5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;display:inline-block;animation:hfWorkSpin .7s linear infinite"></span>'
+      + '<span>Trabajando…</span>';
+    if (!document.getElementById('hf-work-kf')) {
+      var st = document.createElement('style'); st.id = 'hf-work-kf';
+      st.textContent = '@keyframes hfWorkSpin{to{transform:rotate(360deg)}}';
+      document.head.appendChild(st);
+    }
+    document.body.appendChild(el);
+  }
+  requestAnimationFrame(function(){ el.style.opacity = '1'; el.style.transform = 'translateX(-50%) translateY(0)'; });
+}
+function _hfWorkHide() {
+  var el = document.getElementById('hf-working');
+  if (!el) return;
+  el.style.opacity = '0'; el.style.transform = 'translateX(-50%) translateY(10px)';
+  setTimeout(function(){ if (el && el.parentNode && _hfWorkN === 0) el.parentNode.removeChild(el); }, 220);
+}
 function canEdit()  { var s = getSession(); return s ? !s.soloLectura : true; }
 function isAdmin()  { var s = getSession(); return s ? s.rol === 'admin' : false; }
 function getUserRole() { var s = getSession(); return s ? (s.rol||'').toLowerCase() : 'viewer'; }
