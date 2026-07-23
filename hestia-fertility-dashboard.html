@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.346 -->
+﻿<!-- app-build:2026.07.23.347 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6823,6 +6823,10 @@ function _ingAvisoDescuento(){
     } else {
       box.style.display = 'none'; box.innerHTML = ''; return;   // sin descuento → silencio
     }
+    // Saldo A FAVOR del médico (nota de crédito / true-up): se muestra para aplicarlo al cobrar.
+    if (d.tipo === 'medico' && (d.saldoFavor||0) > 0.01) {
+      html += ' <span style="display:inline-block;margin-top:5px;padding:2px 9px;border-radius:999px;background:rgba(16,185,129,.16);color:#047857;font-weight:700;font-size:11px">💰 Tiene ' + _ingMoney(d.saldoFavor) + ' a favor — se puede aplicar al cobrar para que pague menos</span>';
+    }
     box.style.background = bg; box.style.color = col; box.innerHTML = html;
   }).catch(function(){ if (seq === _ingDescSeq){ box.style.display = 'none'; box.innerHTML = ''; } });
 }
@@ -13069,8 +13073,53 @@ function _comSiguienteEscalon(c){
   for (var i=0;i<tiers.length;i++){ if ((c.conteo||0) < tiers[i].desde) return tiers[i]; }
   return null;
 }
+/* Agrupa el detalle de MODO LISTA por médico: descuento (base−precio del tier, ya en el
+   precio de venta) + comisión Daniel (efectivo, de la tabla). */
+function _comPorMedicoLista(c){
+  var by = {};
+  (c.detalle||[]).forEach(function(l){
+    var k = String(l.medicoId || l.medicoNombre || '?');
+    if(!by[k]) by[k] = { nombre:l.medicoNombre, cantidad:0, descuento:0, daniel:0, ventas:[] };
+    by[k].cantidad += (l.cantidad||0);
+    by[k].descuento += (l.descuento||0);
+    by[k].daniel += (l.monto||0);
+    by[k].ventas.push(l);
+  });
+  return Object.keys(by).map(function(k){ return by[k]; });
+}
 function comImprimirActividad(){
   var c = _comCalc; if (!c || !c.ok){ if(typeof setStatus==='function') setStatus('Primero pulsa «Calcular».','err'); return; }
+  // ── MODO LISTA: reporte con desglose médico tratante (descuento) + Daniel (efectivo) ──
+  if (c.modo === 'lista') {
+    var meds = _comPorMedicoLista(c), tier = (c.tier!=null?c.tier:0);
+    var rowsL = [], kindsL = [], consL = [];
+    meds.forEach(function(m){
+      rowsL.push([ m.nombre, String(m.cantidad), _comMoney(m.descuento), _comMoney(m.daniel) ]);
+      kindsL.push('header'); consL.push(null);
+      (m.ventas||[]).forEach(function(v){
+        rowsL.push([ (v.op?v.op+' · ':'')+(v.paciente||'')+' · '+(v.producto||''), String(v.cantidad||1), '—', _comMoney(v.comisionUnit)+'/u' ]);
+        kindsL.push('item'); consL.push(v.producto||'');
+      });
+    });
+    var totDescL = meds.reduce(function(a,m){ return a+m.descuento; },0);
+    var totDanielL = meds.reduce(function(a,m){ return a+m.daniel; },0);
+    hfReportPrint('comisiones-actividad', {
+      title:'Comisiones Grupo Médico — desglose por médico', subject:(c.regla&&c.regla.nombre)||'',
+      period:_comMesNombre(c.mes)+' '+String(c.mes).substring(0,4)+' · Tier '+tier, generado:hfSello(),
+      kpis:[
+        { value:String(c.conteo||0), label:'Procedimientos del grupo' },
+        { value:'Tier '+tier, label:'Tier alcanzado' },
+        { value:_comMoney(totDescL), label:'Descuento a médicos (en precio)' },
+        { value:_comMoney(totDanielL), label:'Comisión Daniel a pagar' }
+      ],
+      cols:['Médico / procedimiento', {label:'Cant.',r:true}, {label:'Descuento al médico',r:true}, {label:'Comisión Daniel',r:true}],
+      rows:rowsL, rowKinds:kindsL, conceptCol:0, rowConcepts:consL,
+      totalLabel:'Comisión Daniel a pagar', totalValue:_comMoney(totDanielL), totalCol:3, lineCol:3,
+      notaHtml:'<div style="margin:16px 22px;padding:10px 14px;border:1px dashed #bbb;border-radius:8px;font-size:11px;color:#333;page-break-inside:avoid">El <b>descuento al médico</b> ya va incluido en el precio del tier que se le cobró (no se paga aparte). Lo que se <b>PAGA en efectivo</b> es la <b>comisión de Daniel</b>. Tier alcanzado por el volumen del grupo del mes.</div>',
+      lang:'es'
+    });
+    return;
+  }
   var act = _comPorMedico(c), sig = _comSiguienteEscalon(c);
   var reglaNom = (c.regla && c.regla.nombre) || '';
   var rows = [], kinds = [], cons = [];
@@ -13108,6 +13157,32 @@ function comImprimirActividad(){
    que se GENERARÍA (c.totales). */
 function comImprimirPagar(){
   var c = _comCalc; if (!c || !c.ok){ if(typeof setStatus==='function') setStatus('Primero pulsa «Calcular».','err'); return; }
+  // ── MODO LISTA: lo que se PAGA es la comisión de Daniel; se muestra amarrada al
+  // desglose por médico (su descuento ya cobrado en el precio + su aporte a Daniel). ──
+  if (c.modo === 'lista') {
+    var medsP = _comPorMedicoLista(c), tierP = (c.tier!=null?c.tier:0);
+    var benef = ((c.totales||[])[0] && c.totales[0].beneficiario) || 'Daniel';
+    var rowsP = [], consP = [];
+    medsP.forEach(function(m){ rowsP.push([ m.nombre, String(m.cantidad), _comMoney(m.descuento), _comMoney(m.daniel) ]); consP.push(null); });
+    var totDescP = medsP.reduce(function(a,m){ return a+m.descuento; },0);
+    var totDanielP = medsP.reduce(function(a,m){ return a+m.daniel; },0);
+    hfReportPrint('comisiones-pagar', {
+      title:'A pagar a '+benef+' (efectivo) — Grupo Médico', subject:(c.regla&&c.regla.nombre)||'',
+      period:_comMesNombre(c.mes)+' · Tier '+tierP+' · se paga '+_comMesNombre(String(c.mesAplica)), generado:hfSello(),
+      kpis:[
+        { value:_comMoney(totDanielP), label:'A pagar a '+benef+' (efectivo)' },
+        { value:'Tier '+tierP, label:'Tier del mes' },
+        { value:_comMoney(totDescP), label:'Descuento a médicos (en precio)' },
+        { value:String(c.conteo||0), label:'Procedimientos' }
+      ],
+      cols:['Médico', {label:'Proc.',r:true}, {label:'Su descuento (en precio)',r:true}, {label:'Comisión Daniel',r:true}],
+      rows:rowsP, conceptCol:0, rowConcepts:consP,
+      totalLabel:'A pagar a '+benef+' en efectivo', totalValue:_comMoney(totDanielP), totalCol:3, lineCol:3,
+      notaHtml:'<div style="margin:16px 22px;padding:10px 14px;border:1px dashed #bbb;border-radius:8px;font-size:11px;color:#333;page-break-inside:avoid">El <b>descuento del médico</b> ya fue cobrado dentro del precio del tier (no se paga aparte, es su beneficio). Lo único que se paga en <b>efectivo</b> es la <b>comisión de '+_escH(benef)+'</b>, que se paga los primeros días de '+_comMesNombre(String(c.mesAplica))+'.</div>',
+      lang:'es'
+    });
+    return;
+  }
   if (!(c.totales||[]).length){ if(typeof setStatus==='function') setStatus('No hay nada por pagar (el grupo no llegó al escalón).','err'); return; }
   var rows = [], cons = [];
   (c.totales||[]).forEach(function(t){
@@ -25311,7 +25386,7 @@ function _ovOpenEditor(ov, ro){
     +     '<div style="display:flex;gap:6px"><input id="ov-e-paciente" list="ov-paclist" '+dis+' value="'+_escH(ov?ov.paciente:'')+'" placeholder="Buscar paciente…" style="'+IS+'">'
     +     (ro?'':'<button type="button" onclick="ovNuevoPaciente()" title="Dar de alta un paciente nuevo" style="flex:0 0 auto;padding:0 12px;background:var(--color-surface-2,#f3f4f6);border:1.5px solid var(--color-divider,#e5e7eb);border-radius:7px;font-size:16px;font-weight:700;cursor:pointer;color:var(--color-primary,#c46a7a)">＋</button>')
     +     '</div><datalist id="ov-paclist"></datalist></label>'
-    +   '<label style="font-size:11px;color:var(--color-text-muted,#6b7280)">Origen / Médico<select id="ov-e-origen" '+dis+' style="'+IS+'"><option value="'+_escH(ov?ov.origen:'')+'">'+_escH(ov?(ov.origen||'— Sin origen —'):'— Sin origen —')+'</option></select></label>'
+    +   '<label style="font-size:11px;color:var(--color-text-muted,#6b7280)">Origen / Médico<select id="ov-e-origen" '+dis+' onchange="ovOrigenAviso()" style="'+IS+'"><option value="'+_escH(ov?ov.origen:'')+'">'+_escH(ov?(ov.origen||'— Sin origen —'):'— Sin origen —')+'</option></select><div id="ov-e-medaviso" style="display:none;font-size:11px;margin-top:5px;padding:6px 9px;border-radius:7px"></div></label>'
     +   '<label style="font-size:11px;color:var(--color-text-muted,#6b7280)">Fecha<input type="date" id="ov-e-fecha" '+dis+' value="'+_escH(ov?ov.fecha:'')+'" style="'+IS+'"></label>'
     +   '<label style="font-size:11px;color:var(--color-text-muted,#6b7280)">Vigencia<input type="date" id="ov-e-vigencia" '+dis+' value="'+_escH(ov?ov.vigencia:'')+'" style="'+IS+'"></label>'
     + '</div>'
@@ -25358,7 +25433,43 @@ async function _ovSetupOrigenes(ov){
     var actives = list.filter(function(o){ return o.activo !== false; });
     sel.innerHTML = '<option value="">— Sin origen —</option>' + _origOptionsHTML(actives, ov?ov.origen:'');
     if (ov && ov.origen) sel.value = ov.origen;
+    if (ov && ov.origen) ovOrigenAviso();   // OV existente: muestra tier/saldo del médico al abrir
   }catch(e){}
+}
+/* Aviso del médico en la cotización: tier vigente + saldo a favor (mismo endpoint
+   descuentoOrigen que usa la captura de ingresos). */
+var _ovAvisoSeq = 0;
+function ovOrigenAviso(){
+  var sel = document.getElementById('ov-e-origen');
+  var box = document.getElementById('ov-e-medaviso');
+  if (!sel || !box) return;
+  var origen = String(sel.value||'').trim();
+  if (!origen){ box.style.display='none'; box.innerHTML=''; return; }
+  var seq = ++_ovAvisoSeq;
+  box.style.display='block'; box.style.background='var(--color-surface-2,#f3f4f6)'; box.style.color='var(--color-text-muted,#6b7280)';
+  box.innerHTML = 'Revisando descuento del médico…';
+  var now = new Date();
+  var url = APPS_SCRIPT_URL + '?action=descuentoOrigen&origen=' + encodeURIComponent(origen)
+    + '&anio=' + now.getFullYear() + '&mes=' + (now.getMonth()+1) + '&token=' + encodeURIComponent(getToken()) + '&_t=' + Date.now();
+  fetch(url, {redirect:'follow'}).then(function(r){ return r.json(); }).then(function(d){
+    if (seq !== _ovAvisoSeq) return;
+    if (!d || !d.ok || d.tipo !== 'medico'){ box.style.display='none'; box.innerHTML=''; return; }
+    var nom = _escH(d.nombre||origen); var html = '';
+    if (d.modo === 'lista' && (d.tier||0) > 0){
+      html = '🏥 <b>'+nom+'</b> — Grupo Médico: cotiza con el precio de tabla del <b>Tier '+(d.tier||0)+'</b> ('+(d.conteo||0)+' procedimiento'+((d.conteo===1)?'':'s')+' este mes). El descuento ya va EN el precio.';
+      box.style.background='rgba(13,148,136,.10)'; box.style.color='#0d9488';
+    } else if ((d.pct||0) > 0){
+      html = '🎯 <b>'+nom+'</b> tiene <b>'+d.pct+'%</b> de comisión este mes ('+(d.conteo||0)+' procedimiento'+((d.conteo===1)?'':'s')+').';
+      box.style.background='rgba(13,148,136,.10)'; box.style.color='#0d9488';
+    } else if ((d.saldoFavor||0) > 0.01){
+      html = '🏥 <b>'+nom+'</b> (Grupo Médico)';
+      box.style.background='rgba(13,148,136,.10)'; box.style.color='#0d9488';
+    } else { box.style.display='none'; box.innerHTML=''; return; }
+    if ((d.saldoFavor||0) > 0.01){
+      html += ' <span style="display:inline-block;margin-top:4px;padding:2px 9px;border-radius:999px;background:rgba(16,185,129,.16);color:#047857;font-weight:700;font-size:11px">💰 Tiene ' + _ovMoney(d.saldoFavor) + ' a favor — se puede aplicar al cobrar</span>';
+    }
+    box.innerHTML = html;
+  }).catch(function(){ if (seq === _ovAvisoSeq){ box.style.display='none'; box.innerHTML=''; } });
 }
 /* Datalist de productos = catálogo de productos (los tiers son internos y no se
    muestran en la cotización). Carga el catálogo si aún no está en memoria. */

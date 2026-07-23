@@ -848,6 +848,10 @@ function descuentoOrigen(origen, anio, mes) {
     var res = null;
     try { if (typeof _origResolver === 'function') res = _origResolver(origen); } catch (e) {}
     if (res && res.id) {
+      // Saldo A FAVOR del médico (nota de crédito acumulada / true-up): se muestra al
+      // capturar para poder aplicarlo. Llaveado por nombre del médico en Creditos_Favor.
+      var saldoFavor = 0;
+      try { if (typeof _cobCreditoFavorPaciente === 'function') { var _cfM = _cobCreditoFavorPaciente(res.nombre || origen); saldoFavor = _cfM ? (_comNum(_cfM.total) || 0) : 0; } } catch (eSF) {}
       var grupoId = String(res.grupoId || res.id);
       var reglas = (_comCfg().reglas || []).filter(function (r) {
         return r.activo !== false && String(r.grupoId) === grupoId;
@@ -867,17 +871,22 @@ function descuentoOrigen(origen, anio, mes) {
           // pct del escalón, para que el aviso de captura no diga "10%" cuando es tabla.
           if (calc.modo === 'lista' || String(reglas[0].modo || '') === 'lista') {
             return { ok: true, tipo: 'medico', modo: 'lista', nombre: res.nombre || origen,
-                     regla: reglas[0].nombre || reglas[0].id,
+                     regla: reglas[0].nombre || reglas[0].id, saldoFavor: saldoFavor,
                      pct: 0, tier: (calc.tier != null ? calc.tier : 0), conteo: calc.conteo || 0,
                      escalones: calc.escalones || [],
                      diferido: difer, mesGanado: calc.mes, mesAplica: _comMesKey(anio, mes) };
           }
           return { ok: true, tipo: 'medico', nombre: res.nombre || origen,
-                   regla: reglas[0].nombre || reglas[0].id,
+                   regla: reglas[0].nombre || reglas[0].id, saldoFavor: saldoFavor,
                    pct: calc.pct || 0, conteo: calc.conteo || 0,
                    escalon: calc.escalon || null, escalones: calc.escalones || [],
                    diferido: difer, mesGanado: calc.mes, mesAplica: _comMesKey(anio, mes) };
         }
+      }
+      // Médico SIN regla activa (o cálculo fallido) pero CON saldo a favor: se
+      // devuelve igual, para que la captura/cotización avisen que puede aplicarlo.
+      if (saldoFavor > 0.01) {
+        return { ok: true, tipo: 'medico', nombre: res.nombre || origen, pct: 0, saldoFavor: saldoFavor };
       }
     }
     // (B) AGENCIA → descuento por volumen del mes.
