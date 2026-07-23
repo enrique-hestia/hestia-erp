@@ -1268,6 +1268,11 @@ function generarComisiones(body) {
         // LEDGER por médico (tier + descuento + comisión Daniel + refs): la fila única que
         // el reporte de Daniel y el portal del médico leerán. Idempotente por mes+regla.
         try { _comLedgerWrite(mesKey, reglaId, calc, creados); } catch (eLed) {}
+      } else if (calc.modo === 'lista' && (calc.detalle || []).length && !errores.length) {
+        // Mes SOLO-DESCUENTO en modo lista (comisión Daniel $0 en la tabla, pero descuento
+        // en precio > 0): no hay dinero que escribir, pero el DESCUENTO del médico SÍ debe
+        // quedar en el ledger — es lo que el reporte y el portal leen. Sin esto se perdía.
+        try { _comLedgerWrite(mesKey, reglaId, calc, []); } catch (eLed2) {}
       }
       try {
         logAudit(body.usuario || 'sistema', 'Comisiones', body.regenerar ? 'Regenerar' : 'Generar',
