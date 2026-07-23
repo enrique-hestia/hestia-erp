@@ -234,6 +234,10 @@ function saveComisionesCfg(body) {
     var limpio = list.map(function (r) {
       return { id: String(r.id).trim(), nombre: String(r.nombre || '').trim(), activo: r.activo !== false,
                grupoId: String(r.grupoId).trim(),
+               // Modo de cálculo: 'escalon' (base × % del escalón, reparto a beneficiarios)
+               // o 'lista' (montos EXACTOS de la tabla «Tarifas por tier»: solo comisión
+               // de Daniel en efectivo; el médico ya pagó descontado el precio del tier).
+               modo: (String(r.modo || 'escalon') === 'lista') ? 'lista' : 'escalon',
                productos: (r.productos || []).map(function (p) { return String(p).trim(); }).filter(function (p) { return !!p; }),
                productosSoloDescuento: (r.productosSoloDescuento || []).map(function (p) { return String(p).trim(); }).filter(function (p) { return !!p; }),
                escalones: (r.escalones || []).map(function (t) { return { desde: _comNum(t.desde) || 1, hasta: (t.hasta === '' || t.hasta == null) ? '' : _comNum(t.hasta), pct: _comNum(t.pct) }; }),
@@ -573,6 +577,56 @@ function calcularComisiones(body) {
     // ── 4) Reparto entre beneficiarios ──────────────────────────────────────
     var mesAplica = _comMesSuma(mesKey, (regla.diferido == null ? 1 : parseInt(regla.diferido, 10) || 0));
     var detalle = [], totales = {}, avisos = [];
+
+    // ════════════════════ MODO LISTA DE TARIFAS ════════════════════
+    // Comisión por la TABLA «Tarifas por tier» (montos EXACTOS), no por %. El médico ya
+    // pagó el precio del tier al capturar (su descuento va en el precio), así que aquí
+    // SOLO se genera la comisión de Daniel en efectivo: Σ comisionDaniel[tier] × cantidad
+    // de cada procedimiento del grupo. Los beneficiarios en nota de crédito se ignoran.
+    if (String(regla.modo || 'escalon') === 'lista') {
+      // Tier = posición del escalón que alcanza el volumen (misma fuente de verdad que
+      // el %); se indexa la tabla de tarifas por esa posición (ambas tienen 6 tiers).
+      var tierIdx = 0;
+      for (var _ti = 0; _ti < tiers.length; _ti++) { if (conteo >= tiers[_ti].desde && conteo <= tiers[_ti].hasta) { tierIdx = _ti; break; } }
+      var benEf = (regla.beneficiarios || []).filter(function (b) { return String(b.via) === 'efectivo'; })[0];
+      var danId = '', danNombre = '';
+      if (benEf && String(benEf.tipo) === 'fijo') {
+        var rfD = null; try { rfD = _origResolver(benEf.origenId); } catch (e) {}
+        if (rfD && rfD.id) { danId = rfD.id; danNombre = rfD.nombre; }
+      }
+      var avisosL = [];
+      if (!benEf) avisosL.push('No hay beneficiario en EFECTIVO (Daniel) en el reparto de la regla: no se generará nada. Agrégalo.');
+      else if (!danId) avisosL.push('El beneficiario en efectivo no se pudo resolver en el catálogo de orígenes (revisa su origenId).');
+      var totalDaniel = 0, lineasD = [], sinTarifa = [];
+      elegibles.forEach(function (e) {
+        var tf = null; try { tf = _gmTarifa(e.producto, tierIdx); } catch (ex) { tf = null; }
+        var unit = tf ? _comNum(tf.comisionDaniel) : 0;
+        var monto = _comRedondea(unit * e.cantidad);
+        if (!tf || unit <= 0) sinTarifa.push(e.producto);
+        if (monto > 0.01) {
+          totalDaniel = _comRedondea(totalDaniel + monto);
+          lineasD.push({ op: e.op, paciente: e.paciente, producto: e.producto, cantidad: e.cantidad,
+                         medicoNombre: e.medicoNombre, comisionUnit: unit, monto: monto, tier: tierIdx });
+        }
+      });
+      if (sinTarifa.length) {
+        var uniqST = sinTarifa.filter(function (v, i, a) { return a.indexOf(v) === i; });
+        avisosL.push('Sin comisión Daniel en la tabla (tier ' + tierIdx + ') para: ' + uniqST.join(', ') + '. Llénalas en «💵 Tarifas por tier» o no generan comisión.');
+      }
+      var totalesL = [];
+      if (danId && totalDaniel > 0.01) totalesL.push({ beneficiarioId: danId, beneficiario: danNombre, via: 'efectivo', monto: totalDaniel, mesAplica: mesAplica, lineas: lineasD });
+      var yaL = _comYaGenerado(mesKey, regla.id);
+      return { ok: true, version: COMISIONES_VER, modo: 'lista',
+               mes: mesKey, mesAplica: mesAplica, anio: anio,
+               regla: { id: regla.id, nombre: regla.nombre, diferido: regla.diferido == null ? 1 : regla.diferido, productos: regla.productos, modo: 'lista' },
+               conteo: conteo, tier: tierIdx,
+               escalon: escalon ? { desde: escalon.desde, hasta: escalon.hasta === 1e9 ? '' : escalon.hasta, pct: escalon.pct } : null,
+               pct: pct, escalones: tiers.map(function (t) { return { desde: t.desde, hasta: t.hasta === 1e9 ? '' : t.hasta, pct: t.pct }; }),
+               detalle: lineasD, totales: totalesL, totalGeneral: totalDaniel,
+               elegibles: elegibles, descartadas: descartadas, descartadasDetalle: descNoElegible,
+               avisos: avisosL, bloqueo: '',
+               yaGenerado: yaL, generado: yaL.length > 0, marca: _comMarca(mesKey, regla.id) };
+    }
 
     if (pct > 0) {
       Object.keys(porMedico).forEach(function (mid) {
@@ -1044,10 +1098,18 @@ function generarComisiones(body) {
       // los médicos, no un pago suelto por cada uno.
       var creados = [], errores = [];
       calc.totales.forEach(function (T) {
-        var desglose = T.lineas.map(function (l) { return l.medicoNombre + ' $' + l.base.toLocaleString('es-MX') + ' → $' + l.monto.toLocaleString('es-MX'); }).join('; ');
-        var pctTxt = T.lineas.length ? (T.lineas[0].pct + '% × ' + T.lineas[0].parte + '% = ' + T.lineas[0].efectivoPct + '%') : '';
-        var concepto = 'Comisión ' + (calc.regla.nombre || reglaId) + ' ' + mesKey +
-                       ' · escalón ' + pctTxt + ' · ' + desglose;
+        var concepto;
+        if (calc.modo === 'lista') {
+          // Montos exactos de la tabla por tier: no hay % ni base.
+          concepto = 'Comisión ' + (calc.regla.nombre || reglaId) + ' ' + mesKey +
+                     ' · lista de tarifas (tier ' + (calc.tier != null ? calc.tier : '?') + ') · ' +
+                     T.lineas.length + ' procedimiento(s)';
+        } else {
+          var desglose = T.lineas.map(function (l) { return l.medicoNombre + ' $' + l.base.toLocaleString('es-MX') + ' → $' + l.monto.toLocaleString('es-MX'); }).join('; ');
+          var pctTxt = T.lineas.length ? (T.lineas[0].pct + '% × ' + T.lineas[0].parte + '% = ' + T.lineas[0].efectivoPct + '%') : '';
+          concepto = 'Comisión ' + (calc.regla.nombre || reglaId) + ' ' + mesKey +
+                     ' · escalón ' + pctTxt + ' · ' + desglose;
+        }
         if (T.via === 'efectivo') {
           var venc = _comFinDeMes(T.mesAplica);
           var res = saveCxP({ mes: T.mesAplica, proveedor: T.beneficiario,

@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.22.330 -->
+﻿<!-- app-build:2026.07.22.331 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -4624,22 +4624,32 @@ function _mpToggleAll(v){ (_mpConcItems||[]).forEach(function(x){ if(x.estado!==
 async function mpAplicarConciliacion(){
   var sel=(_mpConcItems||[]).filter(function(x){ return x.sel && x.estado!=='ok'; });
   if(!sel.length){ alert('No hay productos seleccionados para crear o vincular.'); return; }
-  // Reusa el batch del catálogo: descripción es la llave (crea si no existe, actualiza SKU si sí).
-  var productos=sel.map(function(x){
-    var p={ descripcion:x.mp.nombre, sku:x.mp.sku, precio:x.mp.precio,
-            categoria:x.match?(x.match.categoria||''):(x.mp.seccion||'Externos') };
-    return p;
-  });
+  // VINCULAR (match por nombre, SKU distinto) → updateProductoSKU: quirúrgico, solo el
+  // SKU, por productoId. NO se usa el batch aquí porque el batch empata SOLO por
+  // productoId y crearía DUPLICADOS (bug corregido). CREAR (sin match) → batch.
+  var vincular=sel.filter(function(x){ return x.match && x.match.id && x.mp.sku; });
+  var crear=sel.filter(function(x){ return !x.match; });
   var out=document.getElementById('mp-result');
-  if(out) out.insertAdjacentHTML('beforeend','<div id="mp-apply-status" style="margin-top:10px;font-size:12px;color:var(--color-text-muted,#6b7280)"><span class="ing-spinner ing-spinner-dark"></span> Aplicando '+productos.length+'…</div>');
+  if(out) out.insertAdjacentHTML('beforeend','<div id="mp-apply-status" style="margin-top:10px;font-size:12px;color:var(--color-text-muted,#6b7280)"><span class="ing-spinner ing-spinner-dark"></span> Aplicando…</div>');
+  var s=getSession()||{}; var nVinc=0, nCrea=0, errs=[];
   try{
-    var s=getSession()||{};
-    var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'importarCatalogoProductosBatch',productos:productos,usuario:s.email||'sistema'})});
-    var res=await r.json();
-    if(!res.ok){ alert('Error: '+(res.error||'No se pudo aplicar.')); return; }
+    for(var i=0;i<vincular.length;i++){
+      var x=vincular[i];
+      try{
+        var r=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'updateProductoSKU',productoId:x.match.id,sku:x.mp.sku,usuario:s.email||'sistema'})});
+        var d=await r.json();
+        if(d&&d.ok) nVinc++; else errs.push((x.mp.nombre||x.match.id)+': '+((d&&d.error)||'no se pudo vincular'));
+      }catch(e){ errs.push((x.mp.nombre||'')+': '+e); }
+    }
+    if(crear.length){
+      var productos=crear.map(function(x){ return { descripcion:x.mp.nombre, sku:x.mp.sku, precio:x.mp.precio, categoria:(x.mp.seccion||'Externos') }; });
+      var r2=await fetch(APPS_SCRIPT_URL,{method:'POST',body:JSON.stringify({action:'importarCatalogoProductosBatch',productos:productos,usuario:s.email||'sistema'})});
+      var d2=await r2.json();
+      if(d2&&d2.ok) nCrea=d2.creados||0; else errs.push('Crear: '+((d2&&d2.error)||'falló'));
+    }
     _prodData=null; if(typeof _ingProductosLoaded!=='undefined') _ingProductosLoaded=false;
     try{ await ingLoadProductos(true); }catch(e){}
-    alert('✓ '+(res.creados||0)+' creados, '+(res.actualizados||0)+' vinculados/actualizados en el catálogo.');
+    alert('✓ '+nCrea+' creados, '+nVinc+' vinculados (SKU).'+(errs.length?('\n\n⚠ '+errs.length+' con problema:\n'+errs.slice(0,6).join('\n')):''));
     var o=document.getElementById('mp-ovl'); if(o) o.remove();
     if(typeof loadProductosView==='function'){ try{ loadProductosView(_prodFilterCat,_prodIsCatalog); }catch(e){} }
   }catch(e){ alert('Error de red: '+e); }
@@ -12601,7 +12611,7 @@ function comCfgAddRegla() {
   if (!_comCfgW) _comCfgW = [];
   // Nace VÁLIDA salvo lo que solo el usuario sabe (grupo y productos): un escalón
   // y un reparto que ya suma 100 evitan que la primera pantalla salga en rojo.
-  _comCfgW.push({ id: comCfgNuevaId(), nombre: 'Nueva regla', activo: true, grupoId: '', productos: [], productosSoloDescuento: [],
+  _comCfgW.push({ id: comCfgNuevaId(), nombre: 'Nueva regla', activo: true, grupoId: '', modo: 'escalon', productos: [], productosSoloDescuento: [],
                   escalones: [{ desde: 1, hasta: 2, pct: 0 }, { desde: 3, hasta: '', pct: 10 }],
                   beneficiarios: [{ tipo: 'medico_del_procedimiento', origenId: '', parte: 100, via: 'nota_credito' }],
                   diferido: 1, notas: '' });
@@ -13402,6 +13412,22 @@ function comCfgInnerHtml() {
 
     h += '<span style="' + lab + '">Nombre de la regla</span>'
       + '<input value="' + _comEsc(r.nombre || '').replace(/"/g, '&quot;') + '" oninput="comCfgSetQuiet(\'nombre\',this.value)" placeholder="Ej. Grupo Médico — volumen mensual" style="width:100%;max-width:420px;padding:8px 11px;border:1.5px solid var(--color-divider);border-radius:8px;font-size:12.5px;background:var(--color-surface-2);color:var(--color-text)"' + (puede ? '' : ' disabled') + '>';
+
+    // Modo de cálculo: escalón (%) vs lista de tarifas (montos exactos por tier)
+    var _esLista = String(r.modo || '') === 'lista';
+    h += '<span style="' + lab + '">Cómo se calcula la comisión</span>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+      + '<select onchange="comCfgSet(\'modo\',this.value)" style="' + selS + ';min-width:340px"' + (puede ? '' : ' disabled') + '>'
+      + '<option value="escalon"' + (!_esLista ? ' selected' : '') + '>Por escalón (%) — base × % del escalón, repartido a los beneficiarios</option>'
+      + '<option value="lista"' + (_esLista ? ' selected' : '') + '>Por lista de tarifas — montos EXACTOS de la tabla por tier (solo comisión de Daniel)</option>'
+      + '</select>'
+      + (_esLista ? '<button onclick="gmTarifasAbrir()" style="padding:7px 11px;background:var(--color-surface-2);border:1px solid var(--color-divider);color:var(--color-text);border-radius:8px;font-size:11.5px;font-weight:700;cursor:pointer">💵 Editar tarifas</button>' : '')
+      + '</div>'
+      + '<div style="font-size:11.5px;color:var(--color-text-muted);margin:5px 0 2px;line-height:1.55;max-width:640px">'
+      + (_esLista
+          ? '📋 <b>Lista de tarifas:</b> en el corte mensual se genera <b>solo la comisión de Daniel</b> (efectivo), con el monto exacto de «💵 Tarifas por tier» según el <b>tier</b> alcanzado por el volumen del grupo. El médico ya pagó descontado el precio del tier al capturar, así que <b>no</b> recibe nota de crédito. Los escalones de abajo solo definen en qué tier cae el volumen; el reparto (%) se ignora salvo para identificar a Daniel (el beneficiario en <b>efectivo</b>).'
+          : '📊 <b>Escalón (%):</b> en el corte mensual se genera <b>base × % del escalón</b> y se reparte entre los beneficiarios de abajo (nota de crédito / efectivo).')
+      + '</div>';
 
     // Grupo — SIEMPRE del catálogo
     h += '<span style="' + lab + '">Grupo cuyo volumen cuenta <span style="font-weight:400;text-transform:none;color:var(--color-text-muted)">· del catálogo de Orígenes externos; un médico independiente es su propio grupo</span></span>'

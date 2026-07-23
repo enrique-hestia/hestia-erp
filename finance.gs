@@ -5769,13 +5769,17 @@ function importarCatalogoProductosBatch(body) {
 
       if (pid && idxById[pid] !== undefined && idxById[pid] !== null) {
         var rIdx = idxById[pid];
-        if (row.sku !== undefined) data[rIdx][1] = row.sku;
+        // Anti-blanqueo: un valor PRESENTE-pero-vacío ('') NO debe borrar la celda
+        // poblada (un Excel reimportado con la columna en blanco = "no la llené", no
+        // "bórrala"). Solo se escribe si trae contenido real. Ver pilar de blanqueo.
+        function _set(col, v){ if (v !== undefined && String(v).trim() !== '') data[rIdx][col] = v; }
+        _set(1, row.sku);
         data[rIdx][2] = desc;
-        if (row.categoria !== undefined) data[rIdx][3] = row.categoria;
-        if (row.tipo !== undefined) data[rIdx][4] = row.tipo;
+        _set(3, row.categoria);
+        _set(4, row.tipo);
         if (row.notas !== undefined) data[rIdx][5] = row.notas;
         if (row.activo !== undefined) data[rIdx][6] = boolIn(row.activo);
-        var categoriaFinal = row.categoria !== undefined ? row.categoria : data[rIdx][3];
+        var categoriaFinal = (row.categoria !== undefined && String(row.categoria).trim() !== '') ? row.categoria : data[rIdx][3];
         var inventariableFinal = _bdProdEsInventariable({ categoria: categoriaFinal, inventariable: boolIn(row.inventariable) });
         data[rIdx][invCols.Inventariable - 1] = inventariableFinal;
         if (row.unidad !== undefined) data[rIdx][invCols.Unidad - 1] = row.unidad;
