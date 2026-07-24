@@ -733,6 +733,7 @@ function calcularComisiones(body) {
           lineasD.push({ op: e.op, paciente: e.paciente, producto: e.producto, cantidad: e.cantidad,
                          medicoId: e.medicoId, medicoNombre: e.medicoNombre,
                          comisionUnit: unit, monto: monto, tier: tierIdx,
+                         base: tf ? _comNum(tf.base) : 0, precioMedico: tf ? _comNum(tf.precioMedico) : 0,
                          descuentoUnit: descUnit, descuento: _comRedondea(descUnit * e.cantidad) });
         }
       });

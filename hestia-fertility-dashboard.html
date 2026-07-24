@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.23.348 -->
+﻿<!-- app-build:2026.07.24.349 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6387,11 +6387,10 @@ function _gmLineNote(lineNum, tr){
     el.style.cssText = 'grid-column:1 / -1;font-size:11px;padding:5px 8px;margin-top:2px;border-radius:6px;background:rgba(13,148,136,.10);color:#0d9488;font-weight:600';
     line.appendChild(el);
   }
-  var pm = (tr.precioMedico||0).toLocaleString('es-MX'), dn = (tr.comisionDaniel||0).toLocaleString('es-MX');
-  el.innerHTML = '🏥 Grupo Médico · <b>' + _escH(_gmCtx.tierLabel||'') + '</b> '
-    + '<span style="opacity:.85">(por ' + (_gmCtx.conteo||0) + ' procedimiento' + ((_gmCtx.conteo===1)?'':'s') + ' de ' + _escH(_gmCtx.mesAnterior||'') + ')</span> · '
-    + 'Precio médico <b>$' + pm + '</b> · Comisión Daniel <b>$' + dn + '</b> '
-    + '<span style="opacity:.85">— se genera en el corte del mes</span>';
+  var pm = (tr.precioMedico||0).toLocaleString('es-MX');
+  el.innerHTML = '🏥 Grupo Médico · <b>' + _escH(_gmCtx.tierLabel||('Tier '+(_gmCtx.tier||0))) + '</b> '
+    + '<span style="opacity:.85">(periodo ' + _escH(_gmCtx.mesAnterior||'') + ')</span> · '
+    + 'Precio médico <b>$' + pm + '</b>';
 }
 
 function ingAddLine() {
@@ -13087,6 +13086,17 @@ function _comPorMedicoLista(c){
   });
   return Object.keys(by).map(function(k){ return by[k]; });
 }
+/* Detalle del cálculo de UNA línea en modo lista (para reportes imprimibles): cómo se
+   llega al descuento del médico (base − precio del tier) y a la comisión de Daniel. */
+function _comDerivLista(v){
+  var p = [];
+  if ((v.base||0) > 0)          p.push('base ' + _comMoney(v.base));
+  if ((v.precioMedico||0) > 0)  p.push('precio tier ' + _comMoney(v.precioMedico));
+  if ((v.descuentoUnit||0) > 0) p.push('desc médico ' + _comMoney(v.descuentoUnit) + '/u');
+  if ((v.comisionUnit||0) > 0)  p.push('Daniel ' + _comMoney(v.comisionUnit) + '/u × ' + (v.cantidad||1));
+  if (!p.length) return '';
+  return '<div style="font-size:9px;color:#8a8a8a;margin-top:1px">' + p.join(' · ') + '</div>';
+}
 function comImprimirActividad(){
   var c = _comCalc; if (!c || !c.ok){ if(typeof setStatus==='function') setStatus('Primero pulsa «Calcular».','err'); return; }
   // ── MODO LISTA: reporte con desglose médico tratante (descuento) + Daniel (efectivo) ──
@@ -13097,7 +13107,8 @@ function comImprimirActividad(){
       rowsL.push([ m.nombre, String(m.cantidad), _comMoney(m.descuento), _comMoney(m.daniel) ]);
       kindsL.push('header'); consL.push(null);
       (m.ventas||[]).forEach(function(v){
-        rowsL.push([ (v.op?v.op+' · ':'')+(v.paciente||'')+' · '+(v.producto||''), String(v.cantidad||1), '—', _comMoney(v.comisionUnit)+'/u' ]);
+        rowsL.push([ (v.op?v.op+' · ':'')+(v.paciente||'')+' · '+(v.producto||'')+_comDerivLista(v),
+                     String(v.cantidad||1), _comMoney(v.descuento||0), _comMoney(v.monto||0) ]);
         kindsL.push('item'); consL.push(v.producto||'');
       });
     });
@@ -13162,8 +13173,16 @@ function comImprimirPagar(){
   if (c.modo === 'lista') {
     var medsP = _comPorMedicoLista(c), tierP = (c.tier!=null?c.tier:0);
     var benef = ((c.totales||[])[0] && c.totales[0].beneficiario) || 'Daniel';
-    var rowsP = [], consP = [];
-    medsP.forEach(function(m){ rowsP.push([ m.nombre, String(m.cantidad), _comMoney(m.descuento), _comMoney(m.daniel) ]); consP.push(null); });
+    var rowsP = [], consP = [], kindsP = [];
+    medsP.forEach(function(m){
+      rowsP.push([ m.nombre, String(m.cantidad), _comMoney(m.descuento), _comMoney(m.daniel) ]);
+      kindsP.push('header'); consP.push(null);
+      (m.ventas||[]).forEach(function(v){
+        rowsP.push([ (v.op?v.op+' · ':'')+(v.paciente||'')+' · '+(v.producto||'')+_comDerivLista(v),
+                     String(v.cantidad||1), _comMoney(v.descuento||0), _comMoney(v.monto||0) ]);
+        kindsP.push('item'); consP.push(v.producto||'');
+      });
+    });
     var totDescP = medsP.reduce(function(a,m){ return a+m.descuento; },0);
     var totDanielP = medsP.reduce(function(a,m){ return a+m.daniel; },0);
     hfReportPrint('comisiones-pagar', {
@@ -25506,7 +25525,34 @@ function ovOnProd(n){
     if (pvp && !pvp.value) pvp.value = opt.getAttribute('data-precio') || '';
     inp.setAttribute('data-sku', opt.getAttribute('data-sku') || '');
   }
+  // Grupo Médico: cobra el PRECIO DEL TIER (mismo criterio que la captura de ingresos),
+  // no el precio base. Y muestra el mismo aviso de tier bajo la línea.
+  if (typeof _gmCtxLoad === 'function'){
+    _gmCtxLoad().then(function(){
+      var tr = (typeof _gmMatch === 'function') ? _gmMatch({ descripcion: inp.value, sku: inp.getAttribute('data-sku')||'' }) : null;
+      if (tr){ var pel = document.getElementById('ov-l-pvp-'+n); if (pel){ pel.value = tr.precioMedico; } }
+      _ovLineNote(n, tr);
+      ovRecalc();
+    }).catch(function(){});
+  }
   ovRecalc();
+}
+/* Aviso de tier bajo una línea de la cotización (espejo de _gmLineNote de la captura):
+   solo tier + precio médico; la comisión de Daniel es interna y no se muestra. */
+function _ovLineNote(n, tr){
+  var row = document.getElementById('ov-linea-'+n); if (!row) return;
+  var id = 'ov-gmnote-'+n, el = document.getElementById(id);
+  if (!tr){ if (el) el.remove(); return; }
+  if (!el){
+    el = document.createElement('div'); el.id = id;
+    el.style.cssText = 'grid-column:1 / -1;font-size:11px;padding:5px 8px;margin-top:3px;border-radius:6px;background:rgba(13,148,136,.10);color:#0d9488;font-weight:600';
+    row.appendChild(el);
+  }
+  var pm = (tr.precioMedico||0).toLocaleString('es-MX');
+  var ctx = (typeof _gmCtx!=='undefined') ? _gmCtx : null;
+  el.innerHTML = '🏥 Grupo Médico · <b>' + _escH((ctx&&ctx.tierLabel)||('Tier '+((ctx&&ctx.tier)||0))) + '</b>'
+    + ' <span style="opacity:.85">(periodo ' + _escH((ctx&&ctx.mesAnterior)||'') + ')</span>'
+    + ' · Precio médico <b>$' + pm + '</b>';
 }
 function ovRecalc(){
   var host = document.getElementById('ov-lineas'); if (!host) return;
