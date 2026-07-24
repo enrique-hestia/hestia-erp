@@ -6482,6 +6482,11 @@ function saveIngreso(payload) {
     // ── Nota de Crédito: VALIDAR ANTES de escribir nada (si no alcanza el crédito
     // se aborta la venta entera; así no hay que revertir filas ya guardadas). ──
     var _ncMonto = _ingSumaNC(payload.pagos, formaPago, pagadoOp);
+    // TITULAR del crédito de la Nota de Crédito: por defecto el paciente. Pero si la venta
+    // aplica el SALDO A FAVOR de un MÉDICO del grupo, el crédito se consume del MÉDICO
+    // (mismo motor idempotente por OP). El pago con NC ya cuenta como 'pagado' → baja lo
+    // que debe el paciente y NO se puede doblar (el ledger Creditos_Consumo es por OP).
+    var _ncTitular = String(payload.ncTitular || '').trim() || String(paciente || '').trim();
     var _ncAutoriza = false;
     // Estas validaciones ABORTAN la venta y ocurren DENTRO de la ventana del lock
     // del folio (_opLock, tomado antes de _getNextOP). Hay que liberarlo en CADA
@@ -6492,13 +6497,13 @@ function saveIngreso(payload) {
       if (typeof _cobAplicarNCIngreso !== 'function') {
         return _abortNC({ok:false, error:'No se puede cobrar con Nota de Crédito: falta desplegar cobranza.gs (crédito a favor). Avisa al administrador.'});
       }
-      if (!paciente || !String(paciente).trim()) {
-        return _abortNC({ok:false, error:'Para pagar con Nota de Crédito hay que indicar el paciente (el crédito es de un paciente en particular).'});
+      if (!_ncTitular) {
+        return _abortNC({ok:false, error:'Para pagar con Nota de Crédito hay que indicar de quién es el crédito (paciente o médico).'});
       }
       // El excedente solo pasa si el usuario lo pidió EXPLÍCITAMENTE y su rol lo permite.
       _ncAutoriza = (payload.autorizarExcedente === true || payload.autorizarExcedente === 'true')
                     && _tokenHasPermission(payload.token || '', 'autorizar_credito_excedido');
-      var _ncChk = _cobAplicarNCIngreso(opId, paciente, _ncMonto,
+      var _ncChk = _cobAplicarNCIngreso(opId, _ncTitular, _ncMonto,
         { validarSolo: true, autorizarExcedente: _ncAutoriza, usuario: payload.usuario || '', fecha: fecha });
       if (!_ncChk.ok) return _abortNC({ok:false, error:_ncChk.error, creditoDisponible:_ncChk.disponible, ncRequerida:_ncChk.requerido, requiereAutorizacion:true});
     }
@@ -6561,7 +6566,7 @@ function saveIngreso(payload) {
     var _ncRes = null, _ncWarn = '';
     if (_ncMonto > 0.01) {
       try {
-        _ncRes = _cobAplicarNCIngreso(opId, paciente, _ncMonto,
+        _ncRes = _cobAplicarNCIngreso(opId, _ncTitular, _ncMonto,
           { autorizarExcedente: _ncAutoriza, usuario: payload.usuario || '', autorizadoPor: payload.usuario || '', fecha: fecha });
         if (_ncRes && _ncRes.ok) {
           logAudit(payload.usuario || 'sistema', 'Ingresos', 'NotaCredito', opId, 'CreditoAplicado',
@@ -8061,14 +8066,15 @@ function updateIngresoConBancos(payload) {
     // así editar N veces la misma OP no vuelve a gastar el crédito, y bajar la NC
     // se lo devuelve al paciente. ──
     var _ncMontoU = _ingSumaNC(payload.pagos || payload._payments, payload.formaPago, payload.pagado);
-    var _ncPacU   = payload.paciente || origPac;
+    // Titular del crédito NC: médico (si se aplica su saldo) o paciente. Idempotente por OP.
+    var _ncPacU   = String(payload.ncTitular || '').trim() || payload.paciente || origPac;
     var _ncAutorizaU = false;
     if (_ncMontoU > 0.01 || (typeof _cobOPTieneConsumoNC === 'function' && _cobOPTieneConsumoNC(opId))) {
       if (typeof _cobAplicarNCIngreso !== 'function') {
         return {ok:false, error:'No se puede editar una operación con Nota de Crédito: falta desplegar cobranza.gs (crédito a favor). Avisa al administrador.'};
       }
       if (_ncMontoU > 0.01 && !String(_ncPacU).trim()) {
-        return {ok:false, error:'Para pagar con Nota de Crédito hay que indicar el paciente (el crédito es de un paciente en particular).'};
+        return {ok:false, error:'Para pagar con Nota de Crédito hay que indicar de quién es el crédito (paciente o médico).'};
       }
       _ncAutorizaU = (payload.autorizarExcedente === true || payload.autorizarExcedente === 'true')
                      && _tokenHasPermission(payload.token || '', 'autorizar_credito_excedido');

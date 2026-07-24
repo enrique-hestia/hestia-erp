@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.24.350 -->
+﻿<!-- app-build:2026.07.24.351 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -6807,9 +6807,11 @@ function _ingOrigenFuente(txt){
    el backend no responde o no hay regla, no muestra nada y la captura sigue igual.
    Es un REBATE al médico (crédito), no una rebaja al precio del paciente. */
 var _ingDescSeq = 0;
+var _ingSaldoMedInfo = null;   // {medico, saldo} del médico elegido, para aplicar su saldo a favor
 function _ingAvisoDescuento(){
   var box = document.getElementById('ing-f-origen-desc'); if (!box) return;
   var origen = (typeof _ingCollectOrigen === 'function') ? _ingCollectOrigen() : '';
+  _ingSaldoMedInfo = null;   // se re-arma solo si el médico tiene saldo a favor
   if (!origen){ box.style.display = 'none'; box.innerHTML = ''; return; }
   var seq = ++_ingDescSeq;
   box.style.display = 'block'; box.style.background = 'var(--color-surface-2,#f3f4f6)'; box.style.color = 'var(--color-text-muted,#6b7280)';
@@ -6825,9 +6827,10 @@ function _ingAvisoDescuento(){
     var _mesG = (d.diferido > 0 && d.mesGanado) ? (typeof _comMesNombre==='function' ? _comMesNombre(d.mesGanado) : d.mesGanado) : '';
     var difFrase = _mesG ? ('por su volumen de ' + _mesG) : 'este mes';
     if (d.tipo === 'medico' && d.modo === 'lista'){
-      // Regla en modo LISTA: el beneficio es el PRECIO DE TABLA del tier (no un %).
-      html = '🏥 <b>' + nom + '</b> — Grupo Médico por <b>lista de tarifas</b>: se cobra el precio de tabla del <b>Tier ' + (d.tier||0) + '</b> '
-        + '<span style="color:var(--color-text-muted,#6b7280)">(' + difFrase + ': ' + (d.conteo||0) + ' procedimiento' + ((d.conteo===1)?'':'s') + ' del grupo). El descuento del médico ya va EN el precio; no hay % adicional.</span>';
+      // Regla en modo LISTA: el beneficio es el PRECIO DE TABLA del tier. Aviso CORTO:
+      // solo médico + tier; el precio ya lo muestra el recuadro de cada producto.
+      html = '🏥 <b>' + nom + '</b> — Grupo Médico · <b>Tier ' + (d.tier||0) + '</b>. '
+        + '<span style="color:var(--color-text-muted,#6b7280)">El descuento del médico ya va en el precio de cada producto.</span>';
       bg = 'rgba(13,148,136,.10)'; col = '#0d9488';
     } else if (d.tipo === 'medico' && (d.pct||0) > 0){
       html = '🎯 <b>' + nom + '</b> tiene <b>' + d.pct + '%</b> de comisión '
@@ -6844,9 +6847,19 @@ function _ingAvisoDescuento(){
     } else {
       box.style.display = 'none'; box.innerHTML = ''; return;   // sin descuento → silencio
     }
-    // Saldo A FAVOR del médico (nota de crédito / true-up): se muestra para aplicarlo al cobrar.
+    // Saldo A FAVOR del médico (nota de crédito acumulada / true-up): apartado con la
+    // opción de aplicarlo a ESTA venta. Al guardar, si se marca, baja lo que paga el
+    // paciente y se descuenta del acumulado del médico (idempotente: no se duplica al
+    // editar). Si NO se marca, el saldo se conserva para la próxima.
+    _ingSaldoMedInfo = null;
     if (d.tipo === 'medico' && (d.saldoFavor||0) > 0.01) {
-      html += ' <span style="display:inline-block;margin-top:5px;padding:2px 9px;border-radius:999px;background:rgba(16,185,129,.16);color:#047857;font-weight:700;font-size:11px">💰 Tiene ' + _ingMoney(d.saldoFavor) + ' a favor — se puede aplicar al cobrar para que pague menos</span>';
+      _ingSaldoMedInfo = { medico: (d.nombre || origen), saldo: (d.saldoFavor||0) };
+      html += '<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:rgba(16,185,129,.10);border:1px solid rgba(16,185,129,.4)">'
+        + '<label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;color:#047857;font-weight:700">'
+        + '<input type="checkbox" id="ing-aplicar-saldo-med" style="margin-top:2px;flex-shrink:0">'
+        + '<span>💰 Este médico tiene <b>' + _ingMoney(d.saldoFavor) + '</b> a favor. Aplicarlo a esta venta.'
+        + '<div style="font-weight:400;font-size:10.5px;color:#059669;margin-top:2px">Baja lo que paga el paciente y se descuenta del acumulado del médico. Si no lo marcas, se conserva. Se aplica una sola vez (no se duplica aunque edites).</div>'
+        + '</span></label></div>';
     }
     box.style.background = bg; box.style.color = col; box.innerHTML = html;
   }).catch(function(){ if (seq === _ingDescSeq){ box.style.display = 'none'; box.innerHTML = ''; } });
@@ -8692,6 +8705,21 @@ function _ingCollectPayload() {
   });
 
   var payments = _ingCollectPayments();
+  // ── Saldo a favor del MÉDICO aplicado a esta venta (opcional, casilla del aviso de
+  // origen). Se agrega como Nota de Crédito (baja lo que paga el paciente) con el crédito
+  // consumido del MÉDICO (payload.ncTitular). El backend lo descuenta una sola vez (ledger
+  // por OP) — nunca duplica el abono. Solo se aplica hasta el saldo pendiente de la venta.
+  var _ncTitularMed = '';
+  var _aplSaldoChk = document.getElementById('ing-aplicar-saldo-med');
+  if (_aplSaldoChk && _aplSaldoChk.checked && _ingSaldoMedInfo && (_ingSaldoMedInfo.saldo||0) > 0.01) {
+    var _pagOtros = payments.reduce(function(s,p){ return s + p.monto; }, 0);
+    var _pendVenta = Math.max(0, totalOp - _pagOtros);
+    var _aplicar = Math.min(_ingSaldoMedInfo.saldo, _pendVenta);
+    if (_aplicar > 0.01) {
+      payments.push({ formaPago:'Nota de Crédito', monto: _aplicar });
+      _ncTitularMed = _ingSaldoMedInfo.medico;
+    }
+  }
   var totalPagado = payments.reduce(function(s,p){ return s + p.monto; }, 0);
   // VENTA A CRÉDITO (cuenta por cobrar): $0 pagado es VÁLIDO — la paciente queda
   // debiendo. Antes se bloqueaba con "Agrega al menos una forma de pago con monto", lo
@@ -8750,6 +8778,7 @@ function _ingCollectPayload() {
     contabilidad:   !!(document.getElementById('ing-chk-cont')||{}).checked,
     lineas: lineas,
     pagos: payments, // desglose completo — se persiste en PagosDetalle si hay más de uno
+    ncTitular: _ncTitularMed || undefined, // si se aplicó saldo del médico, el crédito es SUYO
     _totalOp: totalOp,
     _payments: payments
   };

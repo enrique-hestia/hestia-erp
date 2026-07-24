@@ -2101,15 +2101,16 @@ function _cobEnsureConsumoNC() {
   }
   return sh;
 }
-// Lo ya consumido por una OP → { rowNum, montoNC, aplicado, excedente } (ceros si no existe).
+// Lo ya consumido por una OP → { rowNum, titular, montoNC, aplicado, excedente } (ceros si no existe).
+// 'titular' = de QUIÉN se consumió el crédito (paciente o médico) — se respeta al editar.
 function _cobConsumoNCPorOP(op) {
-  var out = { rowNum: -1, montoNC: 0, aplicado: 0, excedente: 0 };
+  var out = { rowNum: -1, titular: '', montoNC: 0, aplicado: 0, excedente: 0 };
   op = String(op || '').trim(); if (!op) return out;
   var sh = _cobEnsureConsumoNC();
   var raw = sh.getDataRange().getValues();
   for (var i = 1; i < raw.length; i++) {
     if (String(raw[i][1] || '').trim() !== op) continue;
-    out.rowNum = i + 1; out.montoNC = _cobNum(raw[i][3]);
+    out.rowNum = i + 1; out.titular = String(raw[i][2] || ''); out.montoNC = _cobNum(raw[i][3]);
     out.aplicado = _cobNum(raw[i][4]); out.excedente = _cobNum(raw[i][5]);
     return out;
   }
@@ -2164,43 +2165,48 @@ function _cobAplicarNCIngreso(op, paciente, montoNC, opts) {
   opts = opts || {};
   var nc = _cobNum(montoNC); if (nc < 0) nc = 0;
   var prev = _cobConsumoNCPorOP(op);
+  // TITULAR EFECTIVO del crédito de esta OP: si ya se registró un consumo, se RESPETA el
+  // titular guardado (paciente o médico). Así, al editar una venta cuya NC salió del saldo
+  // de un MÉDICO, la devolución/ajuste va al MÉDICO — nunca al paciente por error (evita
+  // regalar un crédito a quien no le corresponde). En una OP nueva es el titular recibido.
+  var titular = (prev.rowNum > 0 && prev.titular) ? prev.titular : String(paciente || '').trim();
   var delta = nc - prev.aplicado - prev.excedente;   // lo que falta consumir (o devolver)
 
-  if (Math.abs(delta) <= 0.01) return { ok: true, aplicado: prev.aplicado, excedente: prev.excedente, disponible: _cobCreditoFavorPaciente(paciente).total, sinCambio: true };
+  if (Math.abs(delta) <= 0.01) return { ok: true, aplicado: prev.aplicado, excedente: prev.excedente, disponible: _cobCreditoFavorPaciente(titular).total, sinCambio: true };
 
-  // Baja de NC → devolver crédito al paciente.
+  // Baja de NC → devolver crédito al titular (de quien salió).
   if (delta < 0) {
-    if (opts.validarSolo) return { ok: true, aplicado: prev.aplicado, excedente: prev.excedente, disponible: _cobCreditoFavorPaciente(paciente).total, devolver: -delta };
+    if (opts.validarSolo) return { ok: true, aplicado: prev.aplicado, excedente: prev.excedente, disponible: _cobCreditoFavorPaciente(titular).total, devolver: -delta };
     var devolver = -delta;
     // Primero se cancela el excedente autorizado (nunca salió de un crédito real),
-    // y solo el resto se repone como crédito del paciente.
+    // y solo el resto se repone como crédito del titular.
     var quitaExc = Math.min(prev.excedente, devolver);
     var quitaApl = devolver - quitaExc;
-    if (quitaApl > 0.01) _cobRestituirCreditoFavor(op, paciente, quitaApl);
-    _cobRegistrarConsumoNC(op, paciente, nc, prev.aplicado - quitaApl, prev.excedente - quitaExc, '', opts.usuario, opts.fecha);
-    return { ok: true, aplicado: prev.aplicado - quitaApl, excedente: prev.excedente - quitaExc, devuelto: quitaApl, disponible: _cobCreditoFavorPaciente(paciente).total };
+    if (quitaApl > 0.01) _cobRestituirCreditoFavor(op, titular, quitaApl);
+    _cobRegistrarConsumoNC(op, titular, nc, prev.aplicado - quitaApl, prev.excedente - quitaExc, '', opts.usuario, opts.fecha);
+    return { ok: true, aplicado: prev.aplicado - quitaApl, excedente: prev.excedente - quitaExc, devuelto: quitaApl, disponible: _cobCreditoFavorPaciente(titular).total };
   }
 
-  // Alza de NC → consumir 'delta' del crédito disponible.
-  var disp = _cobCreditoFavorPaciente(paciente).total;
+  // Alza de NC → consumir 'delta' del crédito disponible del titular.
+  var disp = _cobCreditoFavorPaciente(titular).total;
   if (delta > disp + 0.01) {
     if (!opts.autorizarExcedente) {
       return { ok: false, disponible: disp, requerido: delta,
-        error: 'El paciente "' + String(paciente || '').trim() + '" solo tiene $' + disp.toFixed(2) +
+        error: '"' + String(titular || '').trim() + '" solo tiene $' + disp.toFixed(2) +
                ' de crédito a favor y esta Nota de Crédito requiere $' + delta.toFixed(2) + '. Faltan $' + (delta - disp).toFixed(2) +
                '. Corrige el monto o pide a un autorizado que lo apruebe (permiso autorizar_credito_excedido).' };
     }
     if (opts.validarSolo) return { ok: true, aplicado: prev.aplicado + disp, excedente: prev.excedente + (delta - disp), disponible: disp, autorizado: true };
-    var apl = _cobAplicarCreditoFavor(paciente, disp);
+    var apl = _cobAplicarCreditoFavor(titular, disp);
     var exc = delta - apl;
-    _cobRegistrarConsumoNC(op, paciente, nc, prev.aplicado + apl, prev.excedente + exc, opts.autorizadoPor || opts.usuario || '', opts.usuario, opts.fecha);
+    _cobRegistrarConsumoNC(op, titular, nc, prev.aplicado + apl, prev.excedente + exc, opts.autorizadoPor || opts.usuario || '', opts.usuario, opts.fecha);
     return { ok: true, aplicado: prev.aplicado + apl, excedente: prev.excedente + exc, disponible: 0, autorizado: true, excedido: exc };
   }
 
   if (opts.validarSolo) return { ok: true, aplicado: prev.aplicado + delta, excedente: prev.excedente, disponible: disp };
-  var aplicado = _cobAplicarCreditoFavor(paciente, delta);
+  var aplicado = _cobAplicarCreditoFavor(titular, delta);
   var faltante = delta - aplicado;   // carrera/redondeo: lo no aplicado queda como excedente
-  _cobRegistrarConsumoNC(op, paciente, nc, prev.aplicado + aplicado, prev.excedente + faltante, faltante > 0.01 ? (opts.autorizadoPor || opts.usuario || '') : '', opts.usuario, opts.fecha);
+  _cobRegistrarConsumoNC(op, titular, nc, prev.aplicado + aplicado, prev.excedente + faltante, faltante > 0.01 ? (opts.autorizadoPor || opts.usuario || '') : '', opts.usuario, opts.fecha);
   return { ok: true, aplicado: prev.aplicado + aplicado, excedente: prev.excedente + faltante, disponible: Math.max(0, disp - aplicado) };
 }
 
