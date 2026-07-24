@@ -1,4 +1,4 @@
-﻿<!-- app-build:2026.07.24.349 -->
+﻿<!-- app-build:2026.07.24.350 -->
 <!DOCTYPE html>
 <html lang="es" data-theme="light">
 <head>
@@ -2685,7 +2685,22 @@ function _ingSwrKey(){ return _ingAnioSel ? ('ingresos_'+_ingAnioSel) : 'ingreso
 // Guarda para escrituras: bloquea editar/pagar/borrar cuando se ve un año histórico.
 function _ingHistBlock(){ if(_ingReadOnly()){ alert('Estás viendo el histórico '+_ingAnioSel+' (solo lectura). Cambia el año a «Periodo actual» para capturar o editar.'); return true; } return false; }
 // Cambia el año de la vista Ingresos (para ver histórico). '' = volver al año en curso.
-function ingSetAnio(y){ _ingAnioSel = y ? parseInt(y,10) : null; _ingPage=1; _ingData=null; if(typeof loadIngresosERP==='function') loadIngresosERP(); }
+function ingSetAnio(y){
+  _ingAnioSel = y ? parseInt(y,10) : null;
+  // El filtro de fechas es la ÚNICA autoridad de los números. Al cambiar de año, se
+  // ajusta el rango Del/al a ese año completo para que los KPIs cuadren con lo que se
+  // consulta (si no, pedir 2024 con el rango en julio-2026 dejaría los KPIs en cero).
+  var _y = _ingAnioSel || new Date().getFullYear();
+  currentFechaInicio = _y + '-01-01';
+  currentFechaFin    = _y + '-12-31';
+  try {
+    var _di=document.getElementById('fechaInicioInput'), _df=document.getElementById('fechaFinInput');
+    if(_di) _di.value=currentFechaInicio; if(_df) _df.value=currentFechaFin;
+    var _dim=document.getElementById('fechaInicioInput-mob'), _dfm=document.getElementById('fechaFinInput-mob');
+    if(_dim) _dim.value=currentFechaInicio; if(_dfm) _dfm.value=currentFechaFin;
+  } catch(e){}
+  _ingPage=1; _ingData=null; if(typeof loadIngresosERP==='function') loadIngresosERP();
+}
 var _ingActiveTab='lista';
 var _ingFacResult=null;
 var _ingFacLoteResult=null;
@@ -2709,14 +2724,21 @@ async function _fetchIngresosRaw() {
   return await resp.json();
 }
 
+function _ingFmtFechaCorta(s){
+  s = String(s||''); if(!s) return '—';
+  var p = s.substring(0,10).split('-'); if(p.length!==3) return s;
+  return p[2]+'/'+p[1]+'/'+p[0];
+}
 function _ingApplyDateFilter(data) {
-  // La vista de Ingresos muestra TODO el libro consolidado; se acota con los filtros de
-  // Año/Mes/categoría/búsqueda, NO con el rango de fechas global (que apunta al periodo
-  // actual y ocultaba el histórico —p.ej. OP-00078 de 2024). Por eso ya no se filtra aquí.
-  return data;
+  // REGLA (definida por el usuario): el filtro de fechas Del/al es la ÚNICA autoridad.
+  // TODOS los números, KPIs, sumas y desgloses se calculan sobre el periodo filtrado.
+  // ÚNICA excepción: la tabla RESUMEN POR MES se conserva completa (es anualizada por
+  // diseño). Sin filtro de fechas → se ve todo el libro (histórico consolidado).
+  if (!data) return data;
   var fi = currentFechaInicio || '', ff = currentFechaFin || '';
   if (!fi && !ff) return data;
   var origRows = data.rows || [];
+  var fullResumenMensual = data.resumenMensual;   // ← tabla por mes: NO se filtra (anualizada)
   data = Object.assign({}, data);
   data.rows = origRows.filter(function(r) {
     var fd = (r.fecha||'').substring(0,10);
@@ -2725,7 +2747,7 @@ function _ingApplyDateFilter(data) {
     return true;
   });
   var tA=0,tP=0,cP=0,sP=0;
-  var catM={},fpM={},mesM={};
+  var catM={},fpM={};
   data.rows.forEach(function(r){
     tA+=r.totalPagar||0; tP+=r.pagado||0;
     if(r.totalPagar>0){cP++;sP+=r.totalPagar;}
@@ -2733,9 +2755,6 @@ function _ingApplyDateFilter(data) {
     if(!catM[c])catM[c]={nombre:c,total:0,count:0};catM[c].total+=r.totalPagar;catM[c].count++;
     var f=r.formaPago||'Sin especificar';
     if(!fpM[f])fpM[f]={nombre:f,total:0,count:0};fpM[f].total+=r.totalPagar;fpM[f].count++;
-    var m=r.mes;
-    if(!mesM[m])mesM[m]={mes:m,mesIdx:r.mesIdx,totalIngresos:0,totalPagado:0,numOperaciones:0};
-    mesM[m].totalIngresos+=r.totalPagar;mesM[m].totalPagado+=r.pagado;mesM[m].numOperaciones++;
   });
   data.totalAnual=tA; data.totalPagado=tP; data.numOperaciones=data.rows.length;
   data.ticketPromedio=cP>0?sP/cP:0; data.totalRows=data.rows.length;
@@ -2746,9 +2765,8 @@ function _ingApplyDateFilter(data) {
   var fpArr=[];for(var fk in fpM)fpArr.push(fpM[fk]);
   fpArr.sort(function(a,b){return b.total-a.total;});
   data.topFormasPago=fpArr.slice(0,10);
-  var rmArr=[];for(var mk in mesM)rmArr.push(mesM[mk]);
-  rmArr.sort(function(a,b){return a.mesIdx-b.mesIdx;});
-  data.resumenMensual=rmArr;
+  data.resumenMensual = fullResumenMensual;   // tabla por mes = completa (anualizada)
+  data.periodoFiltrado = { desde: fi, hasta: ff };   // para rotular los KPIs con el periodo
   return data;
 }
 
@@ -3113,12 +3131,16 @@ function _renderIngresosERP() {
 
   h.push('<div id="ing-tab-lista" style="display:'+(_ingActiveTab==='facturacion'?'none':'block')+'">');
 
-  // ── KPI strip ──
+  // ── KPI strip ── (TODO refleja el periodo del filtro Del/al; ver _ingApplyDateFilter)
   var tAnual=data.totalAnual||0, tPagado=data.totalPagado||0, nOps=data.numOperaciones||0, tktProm=data.ticketPromedio||0;
+  var _pf = data.periodoFiltrado;
+  var _periodoLbl = (_pf && (_pf.desde || _pf.hasta))
+    ? ('Del ' + _ingFmtFechaCorta(_pf.desde) + ' al ' + _ingFmtFechaCorta(_pf.hasta))
+    : 'Todo el historial';
   h.push('<div class="ing-kstrip">'
-    +'<div class="ing-ks"><div class="ing-ks-lbl">Ingresos totales</div><div class="ing-ks-val" style="color:#0c4a6e">'+fK(tAnual)+'</div><div class="ing-ks-sub">Facturado en el año</div><div class="ing-ks-bar" style="background:#0c4a6e"></div></div>'
+    +'<div class="ing-ks"><div class="ing-ks-lbl">Ingresos totales</div><div class="ing-ks-val" style="color:#0c4a6e">'+fK(tAnual)+'</div><div class="ing-ks-sub" title="Los KPIs corresponden al periodo del filtro de fechas">'+_periodoLbl+'</div><div class="ing-ks-bar" style="background:#0c4a6e"></div></div>'
     +'<div class="ing-ks"><div class="ing-ks-lbl">Total cobrado</div><div class="ing-ks-val" style="color:#166534">'+fK(tPagado)+'</div><div class="ing-ks-sub">'+(tAnual>0?((tPagado/tAnual)*100).toFixed(1):'0')+'% cobrado</div><div class="ing-ks-bar" style="background:#166534"></div></div>'
-    +'<div class="ing-ks"><div class="ing-ks-lbl">Operaciones</div><div class="ing-ks-val" style="color:var(--text-primary,#111)">'+nOps.toLocaleString('en-US')+'</div><div class="ing-ks-sub">Servicios registrados</div><div class="ing-ks-bar" style="background:var(--color-primary,#c46a7a)"></div></div>'
+    +'<div class="ing-ks"><div class="ing-ks-lbl">Operaciones</div><div class="ing-ks-val" style="color:var(--text-primary,#111)">'+nOps.toLocaleString('en-US')+'</div><div class="ing-ks-sub">En el periodo</div><div class="ing-ks-bar" style="background:var(--color-primary,#c46a7a)"></div></div>'
     +'<div class="ing-ks"><div class="ing-ks-lbl">Ticket promedio</div><div class="ing-ks-val" style="color:#7c3aed">'+fC(tktProm)+'</div><div class="ing-ks-sub">Por operación</div><div class="ing-ks-bar" style="background:#7c3aed"></div></div>'
     +'</div>');
 
